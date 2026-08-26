@@ -11,6 +11,8 @@ services:
       API_HOST: ${API_HOST:-api.itembagrouptz.com}
       WEBSITE_HOST: ${WEBSITE_HOST:-itembagrouptz.com}
       WEBSITE_WWW_HOST: ${WEBSITE_WWW_HOST:-www.itembagrouptz.com}
+      FUELGRID_APP_HOST: ${FUELGRID_APP_HOST:-fuelgrid.itembagrouptz.com}
+      FUELGRID_API_HOST: ${FUELGRID_API_HOST:-api.fuelgrid.itembagrouptz.com}
     ports:
       - '80:80'
       - '443:443'
@@ -28,6 +30,7 @@ services:
         condition: service_healthy
     networks:
       - itemba_network
+      - shared_edge
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:2019/config/ >/dev/null']
       interval: 30s
@@ -236,6 +239,10 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       # Public website URL shown from login/signup as the permanent group address.
       NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
+      # Fuel Grid stays separately deployed and authenticated; these values only
+      # configure the Itemba-R launcher and its server-side availability check.
+      FUELGRID_APP_URL: ${FUELGRID_APP_URL:-}
+      FUELGRID_HEALTH_URL: ${FUELGRID_HEALTH_URL:-}
       # Canonical origins used by the Next.js backend proxy CSRF origin guard.
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       APP_URL: ${APP_URL:?APP_URL is required}
@@ -311,3 +318,6 @@ volumes:
 networks:
   itemba_network:
     driver: bridge
+  shared_edge:
+    name: ${SHARED_EDGE_NETWORK:-itemba_shared_edge}
+    external: true

@@ -36,6 +36,8 @@ const target = useStaging
       postgresUser: 'itemba_smoke',
     };
 
+const sharedEdgeNetwork = `itemba-shared-edge-smoke-${process.pid}`;
+
 const sampleEnv = {
   POSTGRES_DB: target.postgresDb,
   POSTGRES_USER: target.postgresUser,
@@ -57,6 +59,7 @@ const sampleEnv = {
   NEXT_PUBLIC_API_URL: 'http://127.0.0.1:3001/api/v1',
   NEXT_PUBLIC_WEBSITE_URL: 'http://127.0.0.1:3000',
   BACKEND_INTERNAL_URL: 'http://backend:3001/api/v1',
+  SHARED_EDGE_NETWORK: sharedEdgeNetwork,
 };
 
 const tempDir = mkdtempSync(join(tmpdir(), 'itemba-compose-smoke-'));
@@ -84,6 +87,7 @@ try {
   exitCode = 1;
 } finally {
   compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
+  runDocker(['network', 'rm', sharedEdgeNetwork], { allowFailure: true });
   rmSync(tempDir, { recursive: true, force: true });
 }
 
@@ -94,6 +98,7 @@ if (exitCode !== 0) {
 async function runSmoke() {
   console.log(`Starting ${target.name} deployment compose smoke...`);
   compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
+  runDocker(['network', 'create', sharedEdgeNetwork]);
   compose(['up', '--build', '-d']);
 
   await waitForContainerCommand(

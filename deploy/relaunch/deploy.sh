@@ -6,15 +6,17 @@
 #   - adds swap so the two Next.js builds don't OOM on a small droplet
 #   - generates fresh production secrets ON THIS HOST and writes ./.env.production
 #     (secrets never leave the droplet; ./.env.production is gitignored)
+#   - verifies the persistent production database volume
+#   - takes and validates a pre-migration pg_dump backup
 #   - builds + starts the full production stack (migrations run automatically)
-#   - runs the idempotent seed (group/companies/roles/admin user)
-#   - installs a nightly pg_dump backup cron + takes one backup now
+#   - optionally runs the base seed when RUN_PRODUCTION_SEED=true
+#   - installs a nightly pg_dump backup cron
 #
 # Usage (from the repo root, as root or a sudo user):
 #   DOMAIN=itembagrouptz.com bash deploy/relaunch/deploy.sh
 #
-# Re-running is safe: existing .env.production + secrets are preserved, the stack is
-# rebuilt/updated, and the seed upserts.
+# Re-running is safe: existing .env.production, secrets, and named data volumes
+# are preserved. Fresh empty-database bootstrap must be explicitly authorized.
 
 set -euo pipefail
 
@@ -26,12 +28,23 @@ ACME_EMAIL="${ACME_EMAIL:-info@${DOMAIN}}"
 COMPOSE_FILE="docker-compose.production.yml"
 ENV_FILE=".env.production"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ALLOW_EMPTY_DATABASE="${ALLOW_EMPTY_DATABASE:-false}"
+RUN_PRODUCTION_SEED="${RUN_PRODUCTION_SEED:-false}"
+CONFIRM_ROLE_PERMISSION_RESEED="${CONFIRM_ROLE_PERMISSION_RESEED:-false}"
+BACKUP_DIR="${BACKUP_DIR:-/opt/itemba-backups}"
 cd "$REPO_DIR"
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
 gen_secret() { openssl rand -base64 48 | tr -d '\n/+=' | cut -c1-48; }
 gen_password() { openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-28; }
+ensure_env_default() {
+  local key="$1"
+  local value="$2"
+  if ! grep -q "^${key}=" "$ENV_FILE"; then
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
 
 # ----------------------------------------------------------------------------
 # 1. Docker + compose plugin
@@ -108,6 +121,9 @@ APP_HOST=app.${DOMAIN}
 API_HOST=api.${DOMAIN}
 WEBSITE_HOST=${DOMAIN}
 WEBSITE_WWW_HOST=www.${DOMAIN}
+FUELGRID_APP_HOST=fuelgrid.${DOMAIN}
+FUELGRID_API_HOST=api.fuelgrid.${DOMAIN}
+SHARED_EDGE_NETWORK=itemba_shared_edge
 
 # --- App URLs ---
 FRONTEND_URL=https://app.${DOMAIN}
@@ -116,6 +132,8 @@ CORS_ORIGIN=https://app.${DOMAIN}
 NEXT_PUBLIC_API_URL=https://api.${DOMAIN}/api/v1
 NEXT_PUBLIC_WEBSITE_URL=https://${DOMAIN}
 BACKEND_INTERNAL_URL=http://backend:3001/api/v1
+FUELGRID_APP_URL=https://fuelgrid.${DOMAIN}
+FUELGRID_HEALTH_URL=https://api.fuelgrid.${DOMAIN}/readyz
 
 # --- Misc ---
 JOB_WORKER_ENABLED=true
@@ -140,21 +158,113 @@ else
   log "${ENV_FILE} already exists — leaving it untouched"
 fi
 
+# These are non-secret topology defaults added after the original production
+# bootstrap. Preserve any operator override while making old .env files ready
+# for the shared ITEMBA-R/FuelGrid droplet layout.
+ensure_env_default SHARED_EDGE_NETWORK itemba_shared_edge
+ensure_env_default FUELGRID_APP_HOST "fuelgrid.${DOMAIN}"
+ensure_env_default FUELGRID_API_HOST "api.fuelgrid.${DOMAIN}"
+ensure_env_default FUELGRID_APP_URL "https://fuelgrid.${DOMAIN}"
+ensure_env_default FUELGRID_HEALTH_URL "https://api.fuelgrid.${DOMAIN}/readyz"
+
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
+
+# Refuse to silently replace a missing production database with a new empty
+# volume. The opt-in is intended only for a deliberate first installation.
+POSTGRES_VOLUME="$(
+  docker inspect itemba_r_postgres_prod \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' \
+    2>/dev/null || true
+)"
+if [ -z "$POSTGRES_VOLUME" ]; then
+  POSTGRES_VOLUME="$(
+    docker volume ls \
+      --filter label=com.docker.compose.project=itemba-r-prod \
+      --filter label=com.docker.compose.volume=postgres_data \
+      --format '{{.Name}}' | head -n1
+  )"
+fi
+
+if [ -z "$POSTGRES_VOLUME" ] && [ "$ALLOW_EMPTY_DATABASE" != 'true' ]; then
+  echo 'ERROR: the ITEMBA-R production Postgres volume is missing.' >&2
+  echo 'Refusing to create an empty database during an ordinary deployment.' >&2
+  echo 'For a deliberate first installation only, rerun with ALLOW_EMPTY_DATABASE=true.' >&2
+  exit 1
+fi
+
+if [ -n "$POSTGRES_VOLUME" ]; then
+  log "Found persistent database volume: ${POSTGRES_VOLUME}"
+else
+  log 'Fresh empty database bootstrap explicitly authorized'
+fi
+
+SHARED_EDGE_NETWORK="$(sed -n 's/^SHARED_EDGE_NETWORK=//p' "$ENV_FILE" | tail -n1)"
+SHARED_EDGE_NETWORK="${SHARED_EDGE_NETWORK:-itemba_shared_edge}"
+log "Ensuring shared application edge network: ${SHARED_EDGE_NETWORK}"
+docker network inspect "$SHARED_EDGE_NETWORK" >/dev/null 2>&1 \
+  || docker network create "$SHARED_EDGE_NETWORK"
+
 # ----------------------------------------------------------------------------
-# 4. Build + start the stack (migrations run via the backend-migrate one-shot)
+# 4. Start data services and back up the live database before migrations
+# ----------------------------------------------------------------------------
+log 'Starting persistent data services'
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres redis
+
+log 'Waiting for PostgreSQL to become healthy'
+for i in $(seq 1 30); do
+  state=$(docker inspect -f '{{.State.Health.Status}}' itemba_r_postgres_prod 2>/dev/null || echo starting)
+  [ "$state" = 'healthy' ] && break
+  sleep 2
+done
+if [ "$(docker inspect -f '{{.State.Health.Status}}' itemba_r_postgres_prod 2>/dev/null)" != 'healthy' ]; then
+  echo 'ERROR: PostgreSQL did not become healthy; deployment stopped before migration.' >&2
+  exit 1
+fi
+
+HAS_PRISMA_HISTORY="$(
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
+    sh -ec 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT to_regclass('\''public._prisma_migrations'\'') IS NOT NULL"' \
+    | tr -d '[:space:]'
+)"
+
+if [ "$HAS_PRISMA_HISTORY" = 't' ]; then
+  log 'Taking mandatory pre-migration database backup'
+  DEPLOY_DIR="$REPO_DIR" COMPOSE_FILE="$REPO_DIR/$COMPOSE_FILE" \
+    ENV_FILE="$REPO_DIR/$ENV_FILE" BACKUP_DIR="$BACKUP_DIR" \
+    bash "$REPO_DIR/deploy/relaunch/backup-db.sh"
+elif [ "$ALLOW_EMPTY_DATABASE" != 'true' ]; then
+  echo 'ERROR: the database has no Prisma migration history.' >&2
+  echo 'Refusing to migrate a potentially wrong or empty production volume.' >&2
+  exit 1
+else
+  log 'No existing schema found; continuing with authorized first installation'
+fi
+
+if [ "$RUN_PRODUCTION_SEED" = 'true' ] \
+  && [ "$HAS_PRISMA_HISTORY" = 't' ] \
+  && [ "$CONFIRM_ROLE_PERMISSION_RESEED" != 'true' ]; then
+  echo 'ERROR: RUN_PRODUCTION_SEED=true would replace system role permissions.' >&2
+  echo 'For intentional maintenance only, also set CONFIRM_ROLE_PERMISSION_RESEED=true.' >&2
+  exit 1
+fi
+
+# ----------------------------------------------------------------------------
+# 5. Build + start the stack (migrations run via the backend-migrate one-shot)
 # ----------------------------------------------------------------------------
 export DOCKER_BUILDKIT=1
 log "Building images one at a time (limits peak memory)"
 for svc in backend-migrate backend frontend website; do
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build "$svc"
 done
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile seed build backend-seed
+if [ "$RUN_PRODUCTION_SEED" = 'true' ]; then
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile seed build backend-seed
+fi
 
 log "Starting the stack"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d
 
 # ----------------------------------------------------------------------------
-# 5. Wait for the backend to become healthy
+# 6. Wait for the backend to become healthy
 # ----------------------------------------------------------------------------
 log "Waiting for the backend to report healthy (migrations apply first)"
 for i in $(seq 1 60); do
@@ -170,28 +280,28 @@ if [ "$(docker inspect -f '{{.State.Health.Status}}' itemba_r_backend_prod 2>/de
 fi
 
 # ----------------------------------------------------------------------------
-# 6. Seed (idempotent: group, 3 companies, roles, admin user)
+# 7. Seed only on an explicitly authorized bootstrap/maintenance run
 # ----------------------------------------------------------------------------
-log "Seeding base data (admin + org structure)"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile seed run --rm backend-seed
+if [ "$RUN_PRODUCTION_SEED" = 'true' ]; then
+  log 'RUN_PRODUCTION_SEED=true: seeding base data and replacing system role permissions'
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile seed run --rm backend-seed
+else
+  log 'Skipping production seed (enable explicitly with RUN_PRODUCTION_SEED=true)'
+fi
 
 # ----------------------------------------------------------------------------
-# 7. Nightly backup cron + one backup now
+# 8. Install the nightly verified backup cron
 # ----------------------------------------------------------------------------
 log "Installing nightly database backup (02:30) -> /opt/itemba-backups"
 mkdir -p /opt/itemba-backups
-# Unquoted heredoc so ${REPO_DIR} is baked in now; runtime vars are escaped (\$).
 cat > /usr/local/bin/itemba-backup.sh <<BKEOF
 #!/usr/bin/env bash
 set -euo pipefail
-cd "${REPO_DIR}"
-STAMP=\$(date -u +%Y%m%d-%H%M%S)
-OUT="/opt/itemba-backups/itemba_r-\${STAMP}.sql.gz"
-docker compose --env-file .env.production -f docker-compose.production.yml exec -T postgres \\
-  pg_dump -U itemba_user itemba_r | gzip > "\$OUT"
-# keep the last 14 days
-find /opt/itemba-backups -name 'itemba_r-*.sql.gz' -mtime +14 -delete
-echo "backup -> \$OUT"
+DEPLOY_DIR="${REPO_DIR}" \\
+COMPOSE_FILE="${REPO_DIR}/${COMPOSE_FILE}" \\
+ENV_FILE="${REPO_DIR}/${ENV_FILE}" \\
+BACKUP_DIR="${BACKUP_DIR}" \\
+bash "${REPO_DIR}/deploy/relaunch/backup-db.sh"
 BKEOF
 chmod +x /usr/local/bin/itemba-backup.sh
 CRON_TMP="$(mktemp)"
@@ -199,7 +309,6 @@ crontab -l 2>/dev/null | grep -v 'itemba-backup.sh' > "$CRON_TMP" || true
 echo "30 2 * * * /usr/local/bin/itemba-backup.sh >> /var/log/itemba-backup.log 2>&1" >> "$CRON_TMP"
 crontab "$CRON_TMP"
 rm -f "$CRON_TMP"
-/usr/local/bin/itemba-backup.sh || log "first backup will run on the next cron tick"
 
 # ----------------------------------------------------------------------------
 # Done
@@ -216,5 +325,6 @@ cat <<DONE
     CHANGE THIS PASSWORD IMMEDIATELY.
 
   Secrets are in ${REPO_DIR}/${ENV_FILE}  — back that file up now.
-  Nightly DB backups -> /opt/itemba-backups (02:30 UTC, 14-day retention).
+  Existing databases are backed up and verified in ${BACKUP_DIR} before migration.
+  Nightly DB backups -> ${BACKUP_DIR} (02:30 UTC, 14-day retention).
 DONE

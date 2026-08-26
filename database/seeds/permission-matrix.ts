@@ -54,6 +54,13 @@ export const ALL_PERMISSIONS: PermDef[] = [
   // own: the agent acts under whatever else the holder is granted, so this only
   // decides who may talk to it, never what it can reach on their behalf.
   ...perms('msaidizi', ['use']),
+  {
+    code: 'fuel_grid.access',
+    description: 'Open the independent Fuel Grid application',
+    module: 'fuel_grid',
+    action: 'access',
+    isGroupControl: true,
+  },
   // Saved procedures. `approve` is separate from `manage` on purpose: the whole
   // point of a saved procedure is that somebody other than its author looked at
   // the capability list before it could run.
@@ -1928,6 +1935,12 @@ const isMsaidiziPerm = (p: PermDef): boolean =>
  */
 const MSAIDIZI_SEEDED_ROLES = ['GROUP_SUPER_ADMIN'];
 
+// Stage one exposes Fuel Grid as a separately authenticated application. Keep
+// its launcher admin-only until the external rollout has its own access policy.
+const FUEL_GRID_SEEDED_ROLES = ['GROUP_SUPER_ADMIN'];
+
+const isFuelGridPerm = (p: PermDef): boolean => p.module === 'fuel_grid';
+
 /**
  * Remove Msaidizi from every other role's grant, whatever that role's own
  * filter says.
@@ -1951,8 +1964,15 @@ const MSAIDIZI_SEEDED_ROLES = ['GROUP_SUPER_ADMIN'];
  * through `POST /roles` (`MSAIDIZI_USER`), which the seed does not manage and
  * therefore does not overwrite — see the integration plan §5.4.
  */
-export const ROLES: RoleDef[] = BASE_ROLES.map((role) =>
-  MSAIDIZI_SEEDED_ROLES.includes(role.name)
-    ? role
-    : { ...role, filter: (p) => !isMsaidiziPerm(p) && role.filter(p) },
-);
+export const ROLES: RoleDef[] = BASE_ROLES.map((role) => {
+  const mayUseMsaidizi = MSAIDIZI_SEEDED_ROLES.includes(role.name);
+  const mayAccessFuelGrid = FUEL_GRID_SEEDED_ROLES.includes(role.name);
+
+  return {
+    ...role,
+    filter: (permission) =>
+      (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
+      (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
+      role.filter(permission),
+  };
+});

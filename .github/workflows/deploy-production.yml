@@ -139,7 +139,9 @@ jobs:
         # own assertions and still pass is worse than no verification at all.
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes             -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes             "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<'EOF'
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" bash -se <<'EOF'
           set -euo pipefail
           cd /opt/itemba-r
           COMPOSE="docker compose --env-file .env.production -f docker-compose.production.yml"

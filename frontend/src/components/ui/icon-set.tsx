@@ -18,6 +18,7 @@ import {
   CreditCard,
   FileSpreadsheet,
   FileText,
+  Fuel,
   HandCoins,
   Hash,
   Home,
@@ -50,6 +51,7 @@ import {
   Users,
   Wallet,
   Warehouse,
+  ExternalLink,
   X,
   Zap,
 } from 'lucide-react';
@@ -77,6 +79,7 @@ const ICONS = {
   document: FileText,
   delivery: Truck,
   pos: CreditCard,
+  fuel: Fuel,
   sale: ShoppingCart,
   // Finance
   finance: Wallet,
@@ -113,6 +116,7 @@ const ICONS = {
   login: LogIn,
   signup: UserPlus,
   automation: Zap,
+  external: ExternalLink,
   // The assistant. Sparkles rather than a robot face: Msaidizi acts as the
   // person using it, under their own badge, and a robot icon says the opposite.
   assistant: Sparkles,
