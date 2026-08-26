@@ -34,13 +34,14 @@ function acceptedQuotation(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeService() {
-  const quotationRow = acceptedQuotation();
+function makeService(quotationOverrides: Record<string, unknown> = {}) {
+  const quotationRow = acceptedQuotation(quotationOverrides);
 
   const prisma: any = {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     quotation: {
       findFirst: jest.fn(async () => quotationRow),
+      create: jest.fn(async ({ data }: any) => ({ id: 'quote-1', ...data })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       update: jest.fn(async ({ data }: any) => ({
         id: 'quote-1',
@@ -54,6 +55,10 @@ function makeService() {
     },
     salesOrderLine: {
       createMany: jest.fn(),
+    },
+    quotationLine: {
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
     },
   };
 
@@ -209,5 +214,198 @@ describe('QuotationsService.convertToSalesOrder', () => {
 
       await expect(service.convertToSalesOrder('quote-1', user)).rejects.toBe(boom);
     });
+  });
+});
+
+// ─── Ad-hoc (manual) lines ────────────────────────────────────────────────────
+//
+// A quotation may price something the catalogue does not carry yet. These tests
+// pin both halves of that: what the line editor is allowed to send, and the
+// boundary at conversion where "not in the catalogue" stops being acceptable.
+
+const baseDto: any = {
+  companyId: 'company-1',
+  quotationType: 'GENERAL',
+  quotationDate: '2026-08-20',
+  currency: 'TZS',
+  lines: [],
+};
+
+describe('QuotationsService.create - ad-hoc lines', () => {
+  it('stores a line that has only free text, with no product or unit', async () => {
+    const { service, prisma } = makeService();
+
+    await service.create(
+      {
+        ...baseDto,
+        lines: [{ itemName: 'Site clearing', unitLabel: 'trip', quantity: 2, unitPrice: 50000 }],
+      },
+      user,
+    );
+
+    const [line] = prisma.quotationLine.createMany.mock.calls[0][0].data;
+    expect(line.productId).toBeNull();
+    expect(line.unitId).toBeNull();
+    expect(line.itemName).toBe('Site clearing');
+    expect(line.unitLabel).toBe('trip');
+    // It still prices like any other line.
+    expect(Number(line.lineTotal)).toBe(100000);
+  });
+
+  it('drops itemName/unitLabel on a catalogue line so the two cannot drift apart', async () => {
+    const { service, prisma } = makeService();
+
+    await service.create(
+      {
+        ...baseDto,
+        lines: [
+          {
+            productId: '11111111-1111-1111-1111-111111111111',
+            unitId: 'unit-1',
+            itemName: 'stale name typed before picking the product',
+            unitLabel: 'stale unit',
+            quantity: 1,
+            unitPrice: 1000,
+          },
+        ],
+      },
+      user,
+    );
+
+    const [line] = prisma.quotationLine.createMany.mock.calls[0][0].data;
+    expect(line.productId).toBe('11111111-1111-1111-1111-111111111111');
+    expect(line.itemName).toBeNull();
+    expect(line.unitLabel).toBeNull();
+  });
+
+  it('treats an empty-string productId as absent rather than storing it', async () => {
+    const { service, prisma } = makeService();
+
+    // The line editor sends '' for an untouched <select>. '' satisfies no foreign
+    // key and reads as neither set nor unset, so it must normalise to NULL.
+    await service.create(
+      {
+        ...baseDto,
+        lines: [{ productId: '', unitId: '', itemName: 'Transport', quantity: 1, unitPrice: 5000 }],
+      },
+      user,
+    );
+
+    const [line] = prisma.quotationLine.createMany.mock.calls[0][0].data;
+    expect(line.productId).toBeNull();
+    expect(line.unitId).toBeNull();
+  });
+
+  it('rejects a line that names neither a product nor an item, and says which line', async () => {
+    const { service, prisma } = makeService();
+
+    await expect(
+      service.create(
+        {
+          ...baseDto,
+          lines: [
+            { itemName: 'Fine', quantity: 1, unitPrice: 1 },
+            { quantity: 1, unitPrice: 1 },
+          ],
+        },
+        user,
+      ),
+    ).rejects.toThrow(/Line 2/);
+    expect(prisma.quotationLine.createMany).not.toHaveBeenCalled();
+  });
+
+  it('still requires a unit on a catalogue line', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create(
+        {
+          ...baseDto,
+          lines: [{ productId: '11111111-1111-1111-1111-111111111111', quantity: 1, unitPrice: 1 }],
+        },
+        user,
+      ),
+    ).rejects.toThrow(/Line 1: a product line needs a unit/);
+  });
+
+  it('rejects a non-positive quantity', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create(
+        { ...baseDto, lines: [{ itemName: 'Ghost', quantity: 0, unitPrice: 10 }] },
+        user,
+      ),
+    ).rejects.toThrow(/quantity must be greater than zero/);
+  });
+});
+
+describe('QuotationsService.convertToSalesOrder - ad-hoc lines', () => {
+  function withAdHocLine() {
+    return makeService({
+      lines: [
+        {
+          id: 'qline-1',
+          productId: 'product-1',
+          description: 'Widget',
+          quantity: 10,
+          unitId: 'unit-1',
+          unitPrice: 10000,
+          discountAmount: 0,
+          taxAmount: 18000,
+          lineTotal: 118000,
+        },
+        {
+          id: 'qline-2',
+          productId: null,
+          itemName: 'Site clearing',
+          quantity: 2,
+          unitId: null,
+          unitLabel: 'trip',
+          unitPrice: 50000,
+          discountAmount: 0,
+          taxAmount: 0,
+          lineTotal: 100000,
+        },
+      ],
+    });
+  }
+
+  it('refuses to convert while any line is not in the catalogue', async () => {
+    const { service } = withAdHocLine();
+
+    // sales_order_lines.productId is NOT NULL and confirm() issues stock and posts
+    // COGS against a real product. An item that does not exist has neither.
+    await expect(service.convertToSalesOrder('quote-1', user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('names the offending items so the user knows what to add to the catalogue', async () => {
+    const { service } = withAdHocLine();
+
+    await expect(service.convertToSalesOrder('quote-1', user)).rejects.toThrow(/Site clearing/);
+  });
+
+  it('refuses BEFORE claiming the quotation, leaving it convertible after the fix', async () => {
+    const { service, prisma, salesOrders } = withAdHocLine();
+
+    await expect(service.convertToSalesOrder('quote-1', user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+
+    // Nothing was claimed, created or confirmed: the quotation is still ACCEPTED
+    // and the user can add the products and convert for real.
+    expect(prisma.quotation.updateMany).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+    expect(salesOrders.confirm).not.toHaveBeenCalled();
+  });
+
+  it('converts normally when every line resolves to a product', async () => {
+    const { service, salesOrders } = makeService();
+
+    await service.convertToSalesOrder('quote-1', user);
+
+    expect(salesOrders.confirm).toHaveBeenCalledTimes(1);
   });
 });

@@ -14,13 +14,7 @@ import {
   StatusBadge,
   showToast,
 } from '@/components/ui';
-import {
-  backendGet,
-  backendList,
-  backendPage,
-  backendPatch,
-  backendPost,
-} from '@/lib/api-client';
+import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
 import {
   OrderLineEditor,
   mergeOrderProductOptions,
@@ -79,6 +73,11 @@ interface Unit {
 interface QuotationLine {
   id?: string;
   productId: string;
+  // A quotation may price something the catalogue does not carry yet. Such a
+  // line is identified by itemName/unitLabel instead of productId/unitId.
+  isManual?: boolean;
+  itemName?: string;
+  unitLabel?: string;
   description: string;
   qty: number;
   unitId: string;
@@ -110,6 +109,8 @@ interface Quotation {
   lines?: Array<{
     id?: string;
     productId?: string | null;
+    itemName?: string | null;
+    unitLabel?: string | null;
     description?: string | null;
     quantity?: number | string | null;
     unitId?: string | null;
@@ -145,6 +146,9 @@ const QUOTATION_TYPES: { value: string; label: string }[] = [
 function blankLine(): QuotationLine {
   return {
     productId: '',
+    isManual: false,
+    itemName: '',
+    unitLabel: '',
     description: '',
     qty: 1,
     unitId: '',
@@ -194,6 +198,11 @@ function formFromRecord(record: Quotation) {
       ? record.lines.map((line) => ({
           id: line.id,
           productId: line.productId ?? '',
+          // The absence of a productId is what makes a stored line manual; there
+          // is no separate flag on the record to trust.
+          isManual: !line.productId,
+          itemName: line.itemName ?? '',
+          unitLabel: line.unitLabel ?? '',
           description: line.description ?? '',
           qty: Number(line.quantity ?? 1),
           unitId: line.unitId ?? '',
@@ -401,8 +410,12 @@ function QuotationModal({
     }
     if (!form.quotationDate) return setError('Quotation date is required');
     if (!form.lines.length) return setError('Add at least one line item');
-    if (form.lines.some((line) => !line.productId || !line.unitId)) {
-      return setError('Each line needs a product and unit');
+    if (
+      form.lines.some((line) =>
+        line.isManual ? !line.itemName?.trim() : !line.productId || !line.unitId,
+      )
+    ) {
+      return setError('Each line needs either a catalogue product and unit, or a typed item name');
     }
     if (form.lines.some((line) => Number(line.qty) <= 0)) {
       return setError('Each line quantity must be greater than zero');
@@ -413,10 +426,15 @@ function QuotationModal({
     try {
       const selectedCustomer = customers.find((customer) => customer.id === form.customerId);
       const lines = form.lines.map((line) => ({
-        productId: line.productId,
+        // Send the catalogue pair or the free-text pair, never both: the backend
+        // treats a present productId as authoritative and drops itemName, so a
+        // half-cleared line would silently lose the name the user typed.
+        productId: line.isManual ? undefined : line.productId,
+        itemName: line.isManual ? line.itemName?.trim() : undefined,
         description: line.description || undefined,
         quantity: Number(line.qty) || 0,
-        unitId: line.unitId,
+        unitId: line.isManual ? undefined : line.unitId,
+        unitLabel: line.isManual ? line.unitLabel?.trim() || undefined : undefined,
         unitPrice: Number(line.unitPrice) || 0,
         // Backend expects a FLAT per-line discountAmount; the editor's per-line
         // `discount` field carries that flat amount for quotations.
@@ -564,7 +582,9 @@ function QuotationModal({
             label="Customer"
             value={form.customerId}
             onChange={(event) => setField('customerId', event.target.value)}
-            placeholder={form.branchId ? 'Select customer (or enter name below)' : 'Select branch first'}
+            placeholder={
+              form.branchId ? 'Select customer (or enter name below)' : 'Select branch first'
+            }
             disabled={!form.branchId}
           >
             {customers.map((customer) => (
@@ -633,6 +653,7 @@ function QuotationModal({
 
         <OrderLineEditor
           variant="sales"
+          allowManualItems
           lines={form.lines}
           products={products}
           units={units}
@@ -654,7 +675,11 @@ type QuotationAction = 'send' | 'accept' | 'reject' | 'convert';
 
 const STATUS_ACTIONS: Record<
   string,
-  { action: QuotationAction; label: string; variant: 'primary' | 'secondary' | 'ghost' | 'danger' }[]
+  {
+    action: QuotationAction;
+    label: string;
+    variant: 'primary' | 'secondary' | 'ghost' | 'danger';
+  }[]
 > = {
   DRAFT: [{ action: 'send', label: 'Send', variant: 'primary' }],
   SENT: [

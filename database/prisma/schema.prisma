@@ -5097,10 +5097,21 @@ model Quotation {
 model QuotationLine {
   id             String   @id @default(uuid())
   quotationId    String
-  productId      String
+  /// NULL on an ad-hoc line. A quotation is a pre-sale document, so it may name
+  /// something the catalogue does not carry yet; `itemName` carries the label in
+  /// that case. Conversion is what re-tightens this: convertToSalesOrder refuses
+  /// while any line is still ad-hoc, because a sales order issues stock and posts
+  /// COGS and neither is possible for an item that does not exist.
+  productId      String?
+  /// Free-text item name. Set only when productId is NULL — a catalogue line
+  /// takes its name from the product so the two cannot drift apart.
+  itemName       String?
   description    String?
   quantity       Decimal  @db.Decimal(18, 4)
-  unitId         String
+  /// NULL on an ad-hoc line, same as productId; `unitLabel` carries the label.
+  unitId         String?
+  /// Free-text unit ("bag", "roll", "trip"). Set only when unitId is NULL.
+  unitLabel      String?
   unitPrice      Decimal  @db.Decimal(18, 4)
   discountAmount Decimal  @default(0) @db.Decimal(18, 2)
   taxAmount      Decimal  @default(0) @db.Decimal(18, 2)
@@ -5108,9 +5119,9 @@ model QuotationLine {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  quotation Quotation     @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  product   Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
-  unit      UnitOfMeasure @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  quotation Quotation      @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product   Product?       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  unit      UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@index([quotationId])
   @@index([productId])

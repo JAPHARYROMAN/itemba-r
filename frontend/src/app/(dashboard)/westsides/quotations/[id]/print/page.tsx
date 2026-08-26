@@ -27,6 +27,9 @@ import { Card, PageSpinner } from '@/components/ui';
 interface QuotationLine {
   id: string;
   description?: string | null;
+  // Present only on ad-hoc lines, where they stand in for product/unit.
+  itemName?: string | null;
+  unitLabel?: string | null;
   quantity?: number | string | null;
   unitPrice?: number | string | null;
   discountAmount?: number | string | null;
@@ -159,12 +162,16 @@ export default function QuotationPrintPage() {
               <tbody>
                 {lines.map((line) => (
                   <tr key={line.id}>
-                    <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
+                    <DocumentTd>
+                      {line.itemName || line.description || line.product?.name || 'N/A'}
+                    </DocumentTd>
                     <DocumentTd mono>
                       {line.product?.sku ?? line.product?.productCode ?? 'N/A'}
                     </DocumentTd>
                     <DocumentTd align="right">{formatQty(line.quantity)}</DocumentTd>
-                    <DocumentTd>{line.unit?.symbol ?? line.unit?.name ?? 'N/A'}</DocumentTd>
+                    <DocumentTd>
+                      {line.unit?.symbol ?? line.unit?.name ?? line.unitLabel ?? 'N/A'}
+                    </DocumentTd>
                     <DocumentTd align="right">
                       {formatDocumentMoney(line.unitPrice, record.currency)}
                     </DocumentTd>
