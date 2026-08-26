@@ -1229,6 +1229,27 @@ html.motion-reduced *::after {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }
+
+  /* Quotation sheets are laid out in absolute mm/pt, so print must not re-apply
+     the generic .document-page padding reset on top of the @page 12mm margin -
+     that would double the inset and shrink the row budget the page is built on.
+     Each sheet is its own page, and no row may straddle a break. */
+  .quotation-sheet {
+    padding: 0 !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .quotation-sheet:last-of-type {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .quotation-table tr,
+  .quotation-table thead {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
 }
 
 /* ─── Kaunta (Itemba POS) — Phase 1 identity ─────────────────────────────────
