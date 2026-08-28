@@ -757,6 +757,48 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
       new PrivilegedCommandExecuteCapabilityAdapter(policy, runner, recovery));
   }
 
+
+  [Fact]
+  public async Task ReservationCommitFailureSurvivesAFailingPreBindRelease()
+  {
+    // The real shape of the bug, and deliberately not a timing test: when the
+    // reservation never reached the ledger, the pre-bind release that cleans up
+    // after it CANNOT succeed either - there is nothing recorded to release. So
+    // the cleanup always threw, and because it rethrows rather than swallowing,
+    // its exception replaced the one that explained the failure. An operator
+    // asking why a workstation fenced itself was told the release was invalid,
+    // which is a consequence, not a cause.
+    var replayStore = new InMemoryPrivilegedCommandIsolationReplayStore { IsAvailable = false };
+    var latch = new PrivilegedCommandIsolationDispatchLatch();
+    var fixture = CreateFixture(replayStore: replayStore, isolationDispatchLatch: latch);
+    var specification = fixture.Policy.Resolve(
+      "cmd",
+      ["/d", "/s", "/c", "echo hello"],
+      5,
+      4_096);
+
+    var failure = await Assert.ThrowsAsync<PrivilegedCommandIsolationUnsafeException>(
+      () => fixture.Runner.RunAsync(
+        specification,
+        CommandContext(),
+        CancellationToken.None).AsTask());
+
+    Assert.Equal("trusted_root_isolation_reservation_replay_invalid", failure.ErrorCode);
+    Assert.Equal("reservation-commit", failure.Phase);
+    Assert.False(failure.MayHaveExecuted);
+
+    // The release's own failure is carried rather than discarded: losing it
+    // would trade one blind spot for another.
+    var carried = Assert.IsType<string>(failure.Data["PreBindReleaseFailure"]);
+    Assert.Contains(
+      "trusted_root_isolation_pre_bind_release_replay_invalid",
+      carried,
+      StringComparison.Ordinal);
+
+    // Safety is unchanged by which exception surfaces: the release path trips
+    // the latch on its way out, so dispatch stays fenced either way.
+    Assert.True(latch.IsTripped);
+  }
   private static ActionExecutionContext CommandContext(
     long maxWallTimeSeconds = 60,
     long maxLocalBytes = 1_048_576)

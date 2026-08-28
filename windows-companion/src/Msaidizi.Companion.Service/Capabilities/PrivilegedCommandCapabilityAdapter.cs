@@ -536,12 +536,14 @@ public sealed partial class PrivilegedOwnedCommandRunner
         mayHaveExecuted: false).ConfigureAwait(false);
       cancellationToken.ThrowIfCancellationRequested();
     }
-    catch
+    catch (Exception primary)
     {
-      await ReleaseBeforeBindAsync(
+      await ReleaseBeforeBindPreservingAsync(
         isolationSession,
-        PrivilegedCommandIsolationPreBindReleaseOutcomes.AbortedBeforeProcess)
+        PrivilegedCommandIsolationPreBindReleaseOutcomes.AbortedBeforeProcess,
+        primary)
         .ConfigureAwait(false);
+      throw;
       throw;
     }
 
@@ -571,12 +573,14 @@ public sealed partial class PrivilegedOwnedCommandRunner
         }
       }
     }
-    catch
+    catch (Exception primary)
     {
-      await ReleaseBeforeBindAsync(
+      await ReleaseBeforeBindPreservingAsync(
         isolationSession,
-        PrivilegedCommandIsolationPreBindReleaseOutcomes.AbortedBeforeProcess)
+        PrivilegedCommandIsolationPreBindReleaseOutcomes.AbortedBeforeProcess,
+        primary)
         .ConfigureAwait(false);
+      throw;
       throw;
     }
 
@@ -757,6 +761,55 @@ public sealed partial class PrivilegedOwnedCommandRunner
     {
       _ = TerminateJobObject(job, 0xE0002003);
       _ = TerminateProcess(process, 0xE0002004);
+    }
+  }
+
+  /// Key under which the losing exception is carried on the surviving one.
+  private const string PreBindReleaseFailureKey = "PreBindReleaseFailure";
+
+  /// <summary>
+  /// Releases a reservation that never reached a bind, without letting the
+  /// release's own failure erase the reason the run failed.
+  ///
+  /// The cleanup used to sit directly under <c>catch { ...; throw; }</c>. But
+  /// <see cref="ReleaseBeforeBindAsync"/> rethrows rather than swallowing, so
+  /// whenever the release failed the <c>throw;</c> was dead code and the first
+  /// failure was replaced. That is not an edge case: when the reservation commit
+  /// is what failed, there is no reservation in the ledger, the pre-bind release
+  /// conflicts on <c>state is null</c> every time, and the operator is told the
+  /// release was invalid instead of what actually went wrong.
+  ///
+  /// Which exception survives is decided on more than age. The first failure is
+  /// the diagnosis and normally wins - except when it is not itself an isolation
+  /// failure and the release's is. The coordinator fences on the exception TYPE,
+  /// so letting a cancellation surface over an isolation-unsafe release would
+  /// fence on the weaker signal. There the stricter outcome wins instead, and
+  /// the original is carried on it.
+  ///
+  /// Either way the dispatch latch has already tripped inside the release path,
+  /// so the device stays fenced no matter which of the two is raised. Only the
+  /// diagnosis is at stake here - which is the whole point, because this runs
+  /// when someone is trying to find out why a workstation fenced itself.
+  /// </summary>
+  private async ValueTask ReleaseBeforeBindPreservingAsync(
+    IPrivilegedCommandTrustedRootIsolationSession isolationSession,
+    string outcome,
+    Exception primary)
+  {
+    try
+    {
+      await ReleaseBeforeBindAsync(isolationSession, outcome).ConfigureAwait(false);
+    }
+    catch (Exception releaseFailure)
+    {
+      if (primary is PrivilegedCommandIsolationUnsafeException)
+      {
+        primary.Data[PreBindReleaseFailureKey] = releaseFailure.ToString();
+        return;
+      }
+
+      releaseFailure.Data[PreBindReleaseFailureKey] = primary.ToString();
+      throw;
     }
   }
 
