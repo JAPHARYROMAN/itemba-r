@@ -132,7 +132,75 @@ export class AnthropicModelClient extends ModelClient {
     return this.client;
   }
 
+  /**
+   * One provider turn, retried a bounded number of times on failures that
+   * carry no information about the turn.
+   *
+   * The retry lives here rather than in the SDK, and `maxRetries: 0` above must
+   * stay pinned at zero. An SDK-internal retry re-sends the prompt without
+   * re-entering this method, so a second disclosure would ride on a contract
+   * verified before the first — possibly minutes and one revocation ago. Every
+   * attempt here re-reads and re-verifies the contract, so the invariant that no
+   * disclosure happens under an unverified contract survives the retry.
+   *
+   * Retrying is safe from the loop's side because nothing observable has
+   * happened yet: `finalMessage()` either returns a whole turn or throws, tool
+   * dispatch is downstream of that, and no content has been streamed to the
+   * user. What a retry cannot undo is provider-side cost — a turn that
+   * generated tokens before failing was billed, and the error carries no usage
+   * to add, so `ModelUsage` under-reports a retried turn by whatever the failed
+   * attempts produced.
+   */
   async createMessage(request: ModelRequest): Promise<ModelResponse> {
+    // Coerced rather than trusted: an unset or malformed value must collapse to
+    // "attempt once", never to a loop with no terminating attempt number.
+    const maxAttempts = Math.max(1, Math.trunc(Number(this.config.modelMaxAttempts)) || 1);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.attemptMessage(request);
+      } catch (error) {
+        const lastAttempt = attempt >= maxAttempts;
+        if (lastAttempt || !isRetryableProviderError(error) || request.signal?.aborted) {
+          throw error;
+        }
+        const delayMs = this.retryDelayMs(attempt, error);
+        this.logger.warn(
+          `Provider turn failed on attempt ${attempt}/${maxAttempts} ` +
+            `(${describeProviderError(error)}); retrying in ${delayMs}ms.`,
+        );
+        await this.waitBeforeRetry(delayMs, request.signal);
+      }
+    }
+  }
+
+  /**
+   * How long to wait before the next attempt: the provider's own `retry-after`
+   * when it names one, otherwise exponential backoff. Jittered so a fleet of
+   * backends that all hit the same rate limit do not return in lockstep.
+   */
+  private retryDelayMs(attempt: number, error: unknown): number {
+    const ceiling = this.config.modelRetryMaxDelayMs;
+    const requested = retryAfterMsFromError(error);
+    if (requested !== null) return Math.min(ceiling, requested);
+    const backoff = this.config.modelRetryBaseDelayMs * 2 ** (attempt - 1);
+    return Math.min(ceiling, Math.round(backoff * (0.5 + Math.random() * 0.5)));
+  }
+
+  /** Overridable so specs can exercise the retry policy without real delay. */
+  protected async waitBeforeRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+    if (delayMs <= 0) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(finish, delayMs);
+      function finish(): void {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', finish);
+        resolve();
+      }
+      signal?.addEventListener('abort', finish, { once: true });
+    });
+  }
+
+  private async attemptMessage(request: ModelRequest): Promise<ModelResponse> {
     // The contract can expire or be revoked while this process is running. It
     // is therefore re-read and cryptographically verified immediately before
     // every disclosure, before the provider SDK is even obtained.
@@ -187,6 +255,69 @@ export class AnthropicModelClient extends ModelClient {
       },
     };
   }
+}
+
+/**
+ * Whether a failure says nothing about the turn and so may be attempted again.
+ *
+ * Deliberately a short allowlist rather than "anything that is not a 4xx". A
+ * refusal, a validation error, an expired contract, a rotated credential and a
+ * forbidden environment override are all settled answers: retrying them burns a
+ * user's time to arrive at the same place. Only a request that did not get a
+ * decision out of the model is worth repeating.
+ */
+function isRetryableProviderError(error: unknown): boolean {
+  // A caller-cancelled request — a lease that ended, a timeout, a disconnected
+  // client. The one thing a retry must never do is outlive its own cancellation.
+  if (error instanceof Anthropic.APIUserAbortError) return false;
+  // No status at all: the request never completed a round trip, so the model
+  // never saw it. Connection resets and timeouts land here.
+  if (error instanceof Anthropic.APIConnectionError) return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status !== 'number') return false;
+  // 408 timeout, 409 conflict, 429 rate limit, and the 5xx family (529 included,
+  // which is the provider's own "overloaded").
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/** A provider-requested delay in milliseconds, if the response named one. */
+function retryAfterMsFromError(error: unknown): number | null {
+  const headers = (error as { headers?: { get?: unknown } } | null)?.headers;
+  if (typeof headers?.get !== 'function') return null;
+  const read = (name: string): string | null => {
+    try {
+      return (headers as Headers).get(name);
+    } catch {
+      return null;
+    }
+  };
+
+  // Read before coercing: `Number(null)` is 0, so an absent header would
+  // otherwise read as "retry immediately".
+  const retryAfterMs = read('retry-after-ms');
+  if (retryAfterMs !== null) {
+    const milliseconds = Number(retryAfterMs);
+    if (Number.isFinite(milliseconds) && milliseconds >= 0) return milliseconds;
+  }
+
+  const retryAfter = read('retry-after');
+  if (!retryAfter) return null;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  // The header may also be an HTTP date rather than a delay.
+  const deadline = Date.parse(retryAfter);
+  return Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : null;
+}
+
+/** A log-safe description: status and provider error type, never the body. */
+function describeProviderError(error: unknown): string {
+  const status = (error as { status?: unknown } | null)?.status;
+  const type = (error as { type?: unknown } | null)?.type;
+  const parts = [
+    typeof status === 'number' ? `status ${status}` : 'no status',
+    typeof type === 'string' && type ? type : null,
+  ].filter(Boolean);
+  return parts.join(', ');
 }
 
 function assertNoAnthropicSdkEnvironmentOverrides(): void {

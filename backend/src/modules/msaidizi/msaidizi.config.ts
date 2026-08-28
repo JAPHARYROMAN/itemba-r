@@ -194,6 +194,42 @@ export class MsaidiziConfig {
   }
 
   /**
+   * Total attempts for ONE provider turn, retries included. `1` disables retry.
+   *
+   * The loop treats a throw from the provider as terminal, so before this
+   * existed a single 429 or 529 ended a run that may already have committed
+   * writes — the actions stood, and the user got "could not complete" with no
+   * account of them. The provider failure that motivates a retry is exactly the
+   * one that carries no information: the turn never reached the model, so
+   * nothing was decided and nothing was dispatched.
+   *
+   * Kept small deliberately. A run holds a request open, and a generous retry
+   * budget converts a provider outage into a pile of hung requests rather than
+   * a prompt failure.
+   */
+  get modelMaxAttempts(): number {
+    const configured = Number(this.config.get<string>('MSAIDIZI_MODEL_MAX_ATTEMPTS', '3'));
+    if (!Number.isFinite(configured)) return 3;
+    return Math.min(5, Math.max(1, Math.trunc(configured)));
+  }
+
+  /** First retry delay; each further attempt doubles it up to `modelRetryMaxDelayMs`. */
+  get modelRetryBaseDelayMs(): number {
+    const configured = Number(this.config.get<string>('MSAIDIZI_MODEL_RETRY_BASE_DELAY_MS', '500'));
+    return Number.isFinite(configured) && configured >= 0 ? configured : 500;
+  }
+
+  /**
+   * Ceiling on any single wait, including one the provider asks for by
+   * `retry-after`. A provider may name a delay longer than a user will hold a
+   * page open for; past this we fail honestly instead of hanging.
+   */
+  get modelRetryMaxDelayMs(): number {
+    const configured = Number(this.config.get<string>('MSAIDIZI_MODEL_RETRY_MAX_DELAY_MS', '8000'));
+    return Number.isFinite(configured) && configured >= 0 ? configured : 8000;
+  }
+
+  /**
    * Base URL the loopback invoker calls. The agent reaches the API the same way
    * any other client does, so it is subject to the same guards, pipes and
    * interceptors rather than a parallel in-process path that could skip them.
