@@ -181,7 +181,10 @@ export class PriceListsService {
   }
 
   async removeItem(itemId: string, userId: string) {
-    const existing = await this.prisma.priceListItem.findUnique({ where: { id: itemId } });
+    const existing = await this.prisma.priceListItem.findUnique({
+      where: { id: itemId },
+      include: { priceList: { select: { companyId: true } } },
+    });
     if (!existing) throw new NotFoundException('Price list item not found');
     await this.prisma.priceListItem.delete({ where: { id: itemId } });
     await this.auditLogs.log({
@@ -189,6 +192,8 @@ export class PriceListsService {
       entityType: 'PriceListItem',
       entityId: itemId,
       userId,
+      companyId: existing.priceList.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
     });
     return { success: true };
   }

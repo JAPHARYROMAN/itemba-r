@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { MyTasksQueryDto, TasksQueryDto } from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -17,13 +28,13 @@ export class TasksController {
 
   @Get('my-tasks')
   @RequirePermissions('tasks.view')
-  myTasks(@CurrentUser() user: AuthUser, @Query() query: any) {
+  myTasks(@CurrentUser() user: AuthUser, @Query() query: MyTasksQueryDto) {
     return this.service.findMyTasks(user, query);
   }
 
   @Get()
   @RequirePermissions('tasks.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: TasksQueryDto) {
     return this.service.findAll(user, query);
   }
 

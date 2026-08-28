@@ -51,6 +51,7 @@ export class ComplianceCalendarService {
     const where: any = {
       deletedAt: null,
       dueDate: { gte: today, lte: in90Days },
+      status: { notIn: ['COMPLETED', 'CANCELLED', 'WAIVED'] },
       ...this.companyFilter(user),
     };
     applyCompanyScopeWhere(where, user, companyId);

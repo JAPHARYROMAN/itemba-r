@@ -1,3 +1,4 @@
+import { SalesCommissionsQueryDto } from '../../common/dto/resource-query.dto';
 import {
   Body,
   Controller,
@@ -17,6 +18,7 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { SalesCommissionsService } from './sales-commissions.service';
 import { CreateSalesCommissionDto } from './dto/create-sales-commission.dto';
 import { UpdateSalesCommissionDto } from './dto/update-sales-commission.dto';
+import { CancelSalesCommissionDto } from './dto/cancel-sales-commission.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('sales-commissions')
@@ -25,7 +27,7 @@ export class SalesCommissionsController {
 
   @Get()
   @RequirePermissions('sales_orders.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: SalesCommissionsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -61,7 +63,7 @@ export class SalesCommissionsController {
   @RequirePermissions('sales_orders.create')
   cancel(
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: CancelSalesCommissionDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.cancel(id, body.reason, user);

@@ -1,3 +1,4 @@
+import { DisciplinaryActionsQueryDto } from '../../../common/dto/resource-query.dto';
 import {
   Body,
   Controller,
@@ -24,7 +25,7 @@ export class DisciplinaryActionsController {
 
   @Get()
   @RequirePermissions('disciplinary_actions.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() q: Record<string, string>) {
+  findAll(@CurrentUser() user: AuthUser, @Query() q: DisciplinaryActionsQueryDto) {
     return this.service.findAll({
       user,
       page: q.page ? Number(q.page) : undefined,

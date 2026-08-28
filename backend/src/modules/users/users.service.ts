@@ -7,7 +7,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
-import { AccessLevel, AuditSeverity, RoleScope, UserStatus } from '@prisma/client';
+import {
+  AccessLevel,
+  AuditScopeKind,
+  AuditSeverity,
+  RoleScope,
+  UserStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService, PermissionCacheService } from '../../common/services';
@@ -56,11 +62,33 @@ export class UsersService {
   // ─── Read ──────────────────────────────────────────────────────────────
 
   async findAll(actor: AuthUser, query: any = {}) {
-    const accessibleCompanyIds = await this.companyScope.accessibleCompanyIds(actor);
-    return this.prisma.user.findMany({
-      where: await this.userWhereFor(actor, query.companyId),
-      select: this.userSelect(accessibleCompanyIds),
+    const groupScoped = this.companyScope.isGroupScoped(actor);
+    const accessibleCompanyIds = groupScoped
+      ? null
+      : await this.companyScope.accessibleCompanyIds(actor);
+    const where = await this.userWhereFor(actor, query.companyId);
+    // A requested company is both a row filter and a response-projection
+    // boundary. Group administrators may otherwise receive another tenant's
+    // companyAccess grants nested inside a user who also belongs to the
+    // requested company.
+    const projectedCompanyIds = query.companyId ? [query.companyId] : accessibleCompanyIds;
+    const users = await this.prisma.user.findMany({
+      where,
+      select: this.userSelect(projectedCompanyIds),
       orderBy: { createdAt: 'desc' },
+    });
+    if (!query.companyId) return users;
+    return users.map((user) => {
+      if (!user.companyId || user.companyId === query.companyId) return user;
+      // The row matched through a grant into the requested company. Do not
+      // disclose its foreign primary tenant or cross-scope role assignments in
+      // a company-filtered projection.
+      return {
+        ...user,
+        companyId: null,
+        userRoles: [],
+        primaryCompanyRestricted: true,
+      };
     });
   }
 
@@ -326,11 +354,27 @@ export class UsersService {
       }
     });
 
+    const affectedCompanyIds = Array.from(
+      new Set([
+        ...previous.map((entry) => entry.companyId),
+        ...dto.access.map((entry) => entry.companyId),
+      ]),
+    ).sort();
+    const scopeKind =
+      affectedCompanyIds.length === 0
+        ? AuditScopeKind.GLOBAL
+        : affectedCompanyIds.length === 1
+          ? AuditScopeKind.COMPANY
+          : AuditScopeKind.MULTI_COMPANY;
+
     await this.auditLogs.log({
       action: 'USER_COMPANY_ACCESS_GRANTED',
       entityType: 'User',
       entityId: userId,
       userId: actor.id,
+      companyId: affectedCompanyIds.length === 1 ? affectedCompanyIds[0] : null,
+      scopeKind,
+      companyScopeIds: affectedCompanyIds,
       oldValue: { access: previous } as any,
       newValue: { access: dto.access } as any,
       severity: AuditSeverity.HIGH,

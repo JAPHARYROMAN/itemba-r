@@ -203,13 +203,40 @@ export class SupplierInvoicesService {
       });
     }
     const totals = dto.lines ? this.buildInvoiceLines(dto.lines, dto.totalAmount) : undefined;
+    const invalidatesMatch =
+      dto.lines !== undefined ||
+      dto.supplierId !== undefined ||
+      dto.purchaseOrderId !== undefined ||
+      dto.goodsReceivedNoteId !== undefined ||
+      dto.currency !== undefined ||
+      dto.totalAmount !== undefined;
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Claim the exact version read by findOne before rewriting children or
+      // match inputs. This serializes update() against runMatch() and other
+      // editors; losing the CAS leaves every child and match row untouched.
+      const claim = await tx.supplierInvoice.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          status: existing.status,
+          updatedAt: existing.updatedAt,
+        },
+        data: { updatedAt: new Date() },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException(
+          'Supplier invoice was changed by another action; refresh before updating',
+        );
+      }
+
       if (totals) {
         await tx.supplierInvoiceLine.deleteMany({ where: { supplierInvoiceId: id } });
-        // Rewriting the lines resets the invoice to DRAFT (below), which invalidates
-        // any prior three-way match computed against the old lines. Soft-delete those
-        // matches so a stale MATCHED/VARIANCE result can't survive an edit-back-to-draft.
+      }
+      if (invalidatesMatch) {
+        // Supplier, PO, GRN, currency, totals, and lines all feed matching or its
+        // ownership invariants. Retire the active result and reset to DRAFT so a
+        // later run recomputes instead of returning stale MATCHED/DISPUTED data.
         await tx.threeWayMatch.updateMany({
           where: { supplierInvoiceId: id, deletedAt: null },
           data: { deletedAt: new Date() },
@@ -237,13 +264,13 @@ export class SupplierInvoicesService {
           }),
           ...(dto.currency !== undefined && { currency: dto.currency }),
           ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
+          ...(invalidatesMatch && { status: 'DRAFT' }),
           ...(totals && {
             subtotal: totals.subtotal,
             taxAmount: totals.taxAmount,
             discountAmount: totals.discountAmount,
             totalAmount: totals.totalAmount,
             outstandingAmount: totals.totalAmount,
-            status: 'DRAFT',
             lines: { create: totals.lines },
           }),
         },
@@ -266,23 +293,30 @@ export class SupplierInvoicesService {
 
   async runMatch(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    // createThreeWayMatch writes the invoice status to MATCHED/DISPUTED, so without
-    // this guard re-matching an already-APPROVED (or paid/cancelled) invoice would
-    // silently revert it out of APPROVED. Only the pre-approval statuses — the same
-    // set the approve() atomic claim accepts — may be (re)matched.
+    // MATCHED/DISPUTED are accepted as idempotent replays. The guarded claim in
+    // createThreeWayMatch returns the existing active match instead of allocating
+    // another sequence number or row. An invoice edit resets status to DRAFT and
+    // retires the prior match, which is the only path that performs a fresh match.
     if (!['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'].includes(existing.status as string)) {
       throw new BadRequestException(`A ${existing.status} supplier invoice cannot be re-matched`);
     }
-    const match = await this.createThreeWayMatch(existing, user.id);
-    await this.auditLogs.log({
-      action: 'SUPPLIER_INVOICE_MATCH',
-      entityType: 'SupplierInvoice',
-      entityId: id,
-      userId: user.id,
-      companyId: existing.companyId,
-      newValue: match as any,
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      const result = (await this.createThreeWayMatch(existing, user.id, tx, {
+        claimStandalone: true,
+      })) as { match: any; created: boolean };
+      if (result.created) {
+        await this.auditLogs.logStrictInTransaction(tx, {
+          action: 'SUPPLIER_INVOICE_MATCH',
+          entityType: 'SupplierInvoice',
+          entityId: id,
+          userId: user.id,
+          companyId: existing.companyId,
+          newValue: result.match as any,
+        });
+      }
+      return result;
     });
-    return match;
+    return outcome.match;
   }
 
   async approve(id: string, dto: ApproveSupplierInvoiceDto | undefined, user: AuthUser) {
@@ -302,14 +336,15 @@ export class SupplierInvoicesService {
 
     let match: any = null;
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Atomic claim: transition the invoice out of its pre-approval status under
-      // a row lock so two concurrent approvals can't both create a payable and
-      // post AP (the JS status check above is not race-safe on its own).
+      // Claim the exact invoice version evaluated above. Matching and editing both
+      // advance updatedAt, so neither a runMatch() nor an update() that wins after
+      // findOne() can be silently posted from this stale snapshot.
       const claim = await tx.supplierInvoice.updateMany({
         where: {
           id,
           deletedAt: null,
-          status: { in: ['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'] },
+          status: existing.status,
+          updatedAt: existing.updatedAt,
         },
         data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
       });
@@ -320,7 +355,27 @@ export class SupplierInvoicesService {
       }
 
       if (existing.purchaseOrderId) {
-        match = await this.createThreeWayMatch(existing, user.id, tx);
+        if (['MATCHED', 'DISPUTED'].includes(existing.status as string)) {
+          // runMatch() already committed the governed result represented by this
+          // status. Reuse that sole active row instead of allocating another match
+          // number and duplicating the result during approval.
+          match = await tx.threeWayMatch.findFirst({
+            where: {
+              supplierInvoiceId: id,
+              companyId: existing.companyId,
+              purchaseOrderId: existing.purchaseOrderId,
+              deletedAt: null,
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (!match) {
+            throw new ConflictException(
+              'Supplier invoice is marked as matched but has no active three-way match',
+            );
+          }
+        } else {
+          match = await this.createThreeWayMatch(existing, user.id, tx);
+        }
         if (match.matchStatus === 'VARIANCE' && !dto?.allowVariance) {
           throw new BadRequestException(
             'Supplier invoice has PO/GRN variance. Review the match or approve with variance.',
@@ -412,21 +467,22 @@ export class SupplierInvoicesService {
       // (b) stay inside the atomic claim's re-claimable set, so a second approve()
       // would create duplicate three-way-match rows. approvedAt/approvedById were
       // set by the claim and are intentionally left intact.
-      return tx.supplierInvoice.update({
+      const invoice = await tx.supplierInvoice.update({
         where: { id },
         data: { status: 'APPROVED', payableId: payable.id },
         include: { lines: true },
       });
-    });
 
-    await this.auditLogs.log({
-      action: 'SUPPLIER_INVOICE_APPROVE',
-      entityType: 'SupplierInvoice',
-      entityId: id,
-      userId: user.id,
-      companyId: existing.companyId,
-      oldValue: existing as any,
-      newValue: { invoice: updated, match } as any,
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'SUPPLIER_INVOICE_APPROVE',
+        entityType: 'SupplierInvoice',
+        entityId: id,
+        userId: user.id,
+        companyId: existing.companyId,
+        oldValue: existing as any,
+        newValue: { invoice, match } as any,
+      });
+      return invoice;
     });
 
     return updated;
@@ -876,7 +932,12 @@ export class SupplierInvoicesService {
     return { purchaseOrderId, divisionId, branchId };
   }
 
-  private async createThreeWayMatch(invoice: any, userId: string, tx?: Prisma.TransactionClient) {
+  private async createThreeWayMatch(
+    invoice: any,
+    userId: string,
+    tx?: Prisma.TransactionClient,
+    options?: { claimStandalone?: boolean },
+  ) {
     if (!invoice.purchaseOrderId) {
       throw new BadRequestException('Purchase order is required for three-way matching');
     }
@@ -920,6 +981,47 @@ export class SupplierInvoicesService {
       grnLines: grn?.lines ?? null,
     });
 
+    const nextInvoiceStatus = matchStatus === 'MATCHED' ? 'MATCHED' : 'DISPUTED';
+    if (options?.claimStandalone) {
+      // Serialize standalone runs on the invoice row. Once a caller changes the
+      // pre-match status, concurrent/replayed calls cannot create another match.
+      const claim = await db.supplierInvoice.updateMany({
+        where: {
+          id: invoice.id,
+          companyId: invoice.companyId,
+          deletedAt: null,
+          status: { in: ['DRAFT', 'RECEIVED'] },
+          updatedAt: invoice.updatedAt,
+        },
+        data: { status: nextInvoiceStatus },
+      });
+      if (claim.count !== 1) {
+        const [current, activeMatch] = await Promise.all([
+          db.supplierInvoice.findUnique({
+            where: { id: invoice.id },
+            select: { status: true },
+          }),
+          db.threeWayMatch.findFirst({
+            where: { supplierInvoiceId: invoice.id, deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+          }),
+        ]);
+        if (current && ['MATCHED', 'DISPUTED'].includes(current.status as string) && activeMatch) {
+          return { match: activeMatch, created: false };
+        }
+        throw new ConflictException(
+          'Supplier invoice match state changed or has no active match; refresh before retrying',
+        );
+      }
+
+      // A DRAFT/RECEIVED invoice should not retain an active match, but retire
+      // any stale row defensively before creating the sole current result.
+      await db.threeWayMatch.updateMany({
+        where: { supplierInvoiceId: invoice.id, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+    }
+
     const match = await db.threeWayMatch.create({
       data: {
         matchNumber: await this.codes.next({
@@ -942,12 +1044,14 @@ export class SupplierInvoicesService {
       },
     });
 
-    await db.supplierInvoice.update({
-      where: { id: invoice.id },
-      data: { status: matchStatus === 'MATCHED' ? 'MATCHED' : 'DISPUTED' },
-    });
+    if (!options?.claimStandalone) {
+      await db.supplierInvoice.update({
+        where: { id: invoice.id },
+        data: { status: nextInvoiceStatus },
+      });
+    }
 
-    return match;
+    return options?.claimStandalone ? { match, created: true } : match;
   }
 
   private withinTolerance(

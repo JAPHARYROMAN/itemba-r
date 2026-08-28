@@ -1,9 +1,19 @@
+import { MedicalExamRecordsQueryDto } from '../../../common/dto/resource-query.dto';
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { MedicalExamRecordsService } from './medical-exam-records.service';
 import { CreateMedicalExamRecordDto } from './dto/create-medical-exam-record.dto';
@@ -16,7 +26,7 @@ export class MedicalExamRecordsController {
 
   @Get()
   @RequirePermissions('employees.view')
-  findAll(@Query() query: Record<string, string>) {
+  findAll(@Query() query: MedicalExamRecordsQueryDto) {
     return this.service.findAll({
       page: query.page ? Number(query.page) : undefined,
       limit: query.limit ? Number(query.limit) : undefined,
@@ -29,6 +39,7 @@ export class MedicalExamRecordsController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('employees.view')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
@@ -42,7 +53,11 @@ export class MedicalExamRecordsController {
 
   @Patch(':id')
   @RequirePermissions('employees.update')
-  update(@Param('id') id: string, @Body() dto: UpdateMedicalExamRecordDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateMedicalExamRecordDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 

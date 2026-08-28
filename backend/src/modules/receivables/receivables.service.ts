@@ -346,8 +346,13 @@ export class ReceivablesService {
           ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
         },
       });
-      await this.syncCustomerBalance(tx, existing.companyId, existing.customerId);
-      await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+      // Notes/date/scope-only edits do not affect customer exposure. Avoid
+      // rewriting the same denormalized balance (and updatedAt) when the
+      // customer is unchanged; reassignment refreshes old and new exactly once.
+      if (existing.customerId !== updated.customerId) {
+        await this.syncCustomerBalance(tx, existing.companyId, existing.customerId);
+        await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+      }
       return updated;
     });
 
@@ -609,17 +614,21 @@ export class ReceivablesService {
         },
       });
       await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
-      return updated;
-    });
 
-    await this.auditLogs.log({
-      action: 'RECEIVABLE_WRITE_OFF',
-      entityType: 'Receivable',
-      entityId: id,
-      userId,
-      companyId: record.companyId,
-      oldValue: { status: existing.status } as any,
-      newValue: { status: 'WRITTEN_OFF', reason: dto.reason } as any,
+      // The bad-debt journal, AR subledger transition, customer projection,
+      // and audit fact are one financial operation. Fail the transaction when
+      // the immutable audit row cannot be appended.
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'RECEIVABLE_WRITE_OFF',
+        entityType: 'Receivable',
+        entityId: id,
+        userId,
+        companyId: updated.companyId,
+        oldValue: { status: locked.status } as any,
+        newValue: { status: 'WRITTEN_OFF', reason: dto.reason } as any,
+      });
+
+      return updated;
     });
 
     return record;

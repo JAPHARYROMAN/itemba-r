@@ -37,11 +37,14 @@ export class TaxAnomalyDetectionService {
    * Run the cheap-tier anomaly scan. Pass `companyId` to scope the scan to
    * one company (recommended); omit to scan the whole group.
    */
-  async scan(query: {
-    companyId?: string;
-    severities?: Severity[];
-    categories?: string[];
-  } = {}, user: any = undefined as unknown as AuthUser): Promise<AnomalyScanResult> {
+  async scan(
+    query: {
+      companyId?: string;
+      severities?: Severity[];
+      categories?: string[];
+    },
+    user: AuthUser,
+  ): Promise<AnomalyScanResult> {
     const checks = await Promise.all([
       this.checkPartyHygiene(query.companyId, user),
       this.checkOverdueFilings(query.companyId, user),
@@ -177,15 +180,22 @@ export class TaxAnomalyDetectionService {
       entityType: 'TaxFilingPeriod',
       entityId: p.id,
       companyId: p.companyId,
-      suggestedAction: 'Run the filing engine to draft the return; review and submit before due date.',
+      suggestedAction:
+        'Run the filing engine to draft the return; review and submit before due date.',
     }));
   }
 
   // ── A4 — Posted payroll with no statutory lines ──────────────────────────
   // A POSTED payroll run that produced zero PayrollStatutoryLine entries is
   // almost always a misconfiguration — at least PAYE/NSSF should have fired.
-  private async checkPostedPayrollWithoutStatutoryLines(companyId?: string, user?: any): Promise<Anomaly[]> {
-    const where: any = { deletedAt: null, status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.PAID] } };
+  private async checkPostedPayrollWithoutStatutoryLines(
+    companyId?: string,
+    user?: any,
+  ): Promise<Anomaly[]> {
+    const where: any = {
+      deletedAt: null,
+      status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.PAID] },
+    };
     applyCompanyScopeWhere(where, user, companyId);
 
     const runs = await this.prisma.payrollRun.findMany({
@@ -229,7 +239,10 @@ export class TaxAnomalyDetectionService {
   // Heuristic: any confirmed sales order this month whose total `taxAmount`
   // is zero. Flagged MEDIUM because zero tax is sometimes legitimate
   // (zero-rated exports, exempt supplies). Operator should confirm.
-  private async checkConfirmedOrdersWithZeroTax(companyId?: string, user?: any): Promise<Anomaly[]> {
+  private async checkConfirmedOrdersWithZeroTax(
+    companyId?: string,
+    user?: any,
+  ): Promise<Anomaly[]> {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const where: any = {
       deletedAt: null,
@@ -342,7 +355,8 @@ export class TaxAnomalyDetectionService {
       entityType: 'TaxReturn',
       entityId: r.id,
       companyId: r.companyId,
-      suggestedAction: 'Review, approve, and submit the return. Penalties accrue from the original due date.',
+      suggestedAction:
+        'Review, approve, and submit the return. Penalties accrue from the original due date.',
     }));
   }
 }

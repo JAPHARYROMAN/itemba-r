@@ -5,6 +5,7 @@ import { CompanyScopeService } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 export interface FindAllBranchesArgs {
   divisionId?: string;
@@ -19,6 +20,7 @@ export class BranchesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(user: AuthUser, args: FindAllBranchesArgs = {}) {
@@ -74,7 +76,16 @@ export class BranchesService {
     });
     if (!division) throw new NotFoundException(`Division ${dto.divisionId} not found`);
     await this.companyScope.assertCanAccessCompany(user, division.companyId, AccessLevel.WRITE);
-    return this.prisma.branch.create({ data: dto });
+    const branch = await this.prisma.branch.create({ data: dto });
+    await this.auditLogs.log({
+      action: 'BRANCH_CREATE',
+      entityType: 'Branch',
+      entityId: branch.id,
+      userId: user.id,
+      companyId: division.companyId,
+      newValue: branch as unknown as Record<string, unknown>,
+    });
+    return branch;
   }
 
   async update(id: string, dto: UpdateBranchDto, user: AuthUser) {
@@ -82,14 +93,34 @@ export class BranchesService {
     if (dto.isActive === true && !existing.division.isActive) {
       throw new BadRequestException('Cannot activate a branch whose parent division is inactive');
     }
-    return this.prisma.branch.update({ where: { id }, data: dto });
+    const branch = await this.prisma.branch.update({ where: { id }, data: dto });
+    await this.auditLogs.log({
+      action: 'BRANCH_UPDATE',
+      entityType: 'Branch',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.division.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
+      newValue: branch as unknown as Record<string, unknown>,
+    });
+    return branch;
   }
 
   async remove(id: string, user: AuthUser) {
-    await this.findOne(id, user, AccessLevel.WRITE);
-    return this.prisma.branch.update({
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    const branch = await this.prisma.branch.update({
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
     });
+    await this.auditLogs.log({
+      action: 'BRANCH_DELETE',
+      entityType: 'Branch',
+      entityId: id,
+      userId: user.id,
+      companyId: existing.division.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
+      newValue: branch as unknown as Record<string, unknown>,
+    });
+    return branch;
   }
 }

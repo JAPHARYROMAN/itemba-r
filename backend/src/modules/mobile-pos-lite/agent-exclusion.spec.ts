@@ -1,14 +1,16 @@
 /**
- * The POS write path is invisible to Msaidizi (integration plan §10.6, and a
- * Phase 3 gate that must land while the deployment is still read-only).
+ * The terminal-authenticated POS surface is invisible to Msaidizi (integration
+ * plan §10.6, and a Phase 3 gate that must land while deployment is read-only).
  *
  * Two settled positions this encodes:
  *   • The agent stays out of ringing up sales and activating terminals. Both
  *     move business-day state and till custody — invariants the POS reform
  *     established by hand and that an agent has no way to reason about.
- *   • POS *reads* stay available to office roles, because "how much did Kaunta
- *     take today?" is the single most useful thing a manager would ask. A blanket
- *     controller-level exclusion would have been easier and is the wrong answer.
+ *   • Routes requiring x-mobile-pos-terminal plus x-mobile-pos-device remain
+ *     excluded until those credentials are represented by a typed, ephemeral
+ *     transport. The { path, query, body } envelope must never fabricate them.
+ *   • Desktop office reads stay available, so managers retain the safe terminal
+ *     and submitted-day-report views without crossing the device boundary.
  *
  * Asserted against the real controller class rather than a fixture: the point is
  * that the decorators are on those handlers, so a fixture would prove nothing.
@@ -70,23 +72,36 @@ describe('the POS write path is excluded from the agent', () => {
     }
   });
 
-  it('leaves the POS reads reachable', () => {
-    // The exclusion must be two handlers wide. If someone moves @AgentExcluded
-    // up to the controller, this fails — and the agent quietly stops being able
-    // to answer the question managers most want to ask.
+  it('leaves the desktop office reads reachable', () => {
+    // A blanket controller exclusion would also hide reads which require no
+    // terminal secret. Keep those governed by the caller's ordinary permission.
     const permitted = capabilitiesFor(MANIFEST, ALL_POS_PERMISSIONS).map((c) => c.handler);
-    expect(permitted).toEqual(
-      expect.arrayContaining(['session', 'products', 'stock', 'mySalesToday']),
-    );
+    expect(permitted).toEqual(expect.arrayContaining(['findTerminals', 'dayReports']));
   });
 
-  it('excludes nothing else in the module', () => {
-    // Keeps the blast radius of this change visible: if a later edit excludes
-    // another POS route, that is a decision someone should make deliberately,
-    // and this test makes them come here and say so.
+  it('excludes exactly the terminal-bound routes and the two explicit unsafe entry points', () => {
+    // Keeps the boundary inventory visible. Any addition or removal must be an
+    // explicit transport/security decision rather than manifest drift.
     const excluded = MANIFEST.filter((c) => c.agentExcluded)
       .map((c) => c.handler)
       .sort();
-    expect(excluded).toEqual(['activate', 'createSale']);
+    expect(excluded).toEqual([
+      'activate',
+      'catalog',
+      'createDayReport',
+      'createPurchase',
+      'createSale',
+      'createStockCount',
+      'customers',
+      'dayReportPdf',
+      'mySalesToday',
+      'products',
+      'purchaseHistory',
+      'saleReceipt',
+      'salesHistory',
+      'session',
+      'stock',
+      'suppliers',
+    ]);
   });
 });

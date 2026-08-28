@@ -10,7 +10,10 @@ import { AuditChannel } from '@prisma/client';
 import {
   ambientAgentSessionId,
   ambientChannel,
+  ambientExecutionAttribution,
+  ambientValidatedCompanyScope,
   currentRequestContext,
+  recordValidatedCompanyScope,
   runWithRequestContext,
 } from './request-context';
 import { AuditLogsService } from '../../modules/audit-logs/audit-logs.service';
@@ -29,9 +32,54 @@ describe('request context', () => {
     });
   });
 
+  it('carries durable task attribution without turning it into authority', () => {
+    runWithRequestContext(
+      {
+        channel: AuditChannel.AGENT,
+        agentSessionId: 'ms_task_1',
+        principalType: 'SERVICE',
+        principalId: 'principal-global',
+        mandateId: 'mandate-1',
+        initiatedByUserId: 'user-1',
+        taskId: 'task-1',
+        stepId: 'step-2',
+        deviceId: 'device-3',
+      },
+      () => {
+        expect(ambientExecutionAttribution()).toEqual({
+          principalType: 'SERVICE',
+          principalId: 'principal-global',
+          mandateId: 'mandate-1',
+          initiatedByUserId: 'user-1',
+          taskId: 'task-1',
+          stepId: 'step-2',
+          deviceId: 'device-3',
+        });
+      },
+    );
+  });
+
   it('does not leak out of the request that established it', () => {
     runWithRequestContext({ channel: AuditChannel.AGENT, agentSessionId: 'ms_1' }, () => undefined);
     expect(ambientChannel()).toBe(AuditChannel.WEB);
+  });
+
+  it('merges validated tenant scopes while preserving global/group semantics', () => {
+    runWithRequestContext({ channel: AuditChannel.WEB }, () => {
+      recordValidatedCompanyScope('COMPANY', ['company-2']);
+      recordValidatedCompanyScope('COMPANY', ['company-1']);
+      expect(ambientValidatedCompanyScope()).toEqual({
+        kind: 'MULTI_COMPANY',
+        companyIds: ['company-1', 'company-2'],
+      });
+
+      recordValidatedCompanyScope('GLOBAL');
+      expect(ambientValidatedCompanyScope()).toEqual({
+        kind: 'GROUP',
+        companyIds: ['company-1', 'company-2'],
+      });
+    });
+    expect(ambientValidatedCompanyScope()).toBeUndefined();
   });
 
   it('survives an await boundary, as a real request does', async () => {
@@ -80,6 +128,37 @@ describe('audit writes pick up ambient attribution', () => {
     expect(dataOf().channel).toBe(AuditChannel.SYSTEM);
     // The session id belongs to the agent path only, so it is dropped.
     expect(dataOf().agentSessionId).toBeUndefined();
+  });
+
+  it('copies the global principal, mandate, task, step and device onto audit rows', async () => {
+    const { service, dataOf } = makeService();
+
+    await runWithRequestContext(
+      {
+        channel: AuditChannel.AGENT,
+        agentSessionId: 'ms_task_1',
+        principalType: 'SERVICE',
+        principalId: 'principal-global',
+        mandateId: 'mandate-1',
+        initiatedByUserId: 'user-1',
+        taskId: 'task-1',
+        stepId: 'step-2',
+        deviceId: 'device-3',
+      },
+      () => service.log({ action: 'HOST_FILE_WRITE', entityType: 'MsaidiziHostAction' }),
+    );
+
+    expect(dataOf()).toEqual(
+      expect.objectContaining({
+        principalType: 'SERVICE',
+        principalId: 'principal-global',
+        mandateId: 'mandate-1',
+        initiatedByUserId: 'user-1',
+        taskId: 'task-1',
+        stepId: 'step-2',
+        deviceId: 'device-3',
+      }),
+    );
   });
 
   it('still records WEB for an ordinary request', async () => {

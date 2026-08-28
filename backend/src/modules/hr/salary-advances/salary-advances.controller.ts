@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Patch } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Patch,
+} from '@nestjs/common';
+import { EmployeeStatusQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -6,6 +18,7 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { SalaryAdvancesService } from './salary-advances.service';
 import { CreateSalaryAdvanceDto } from './dto/create-salary-advance.dto';
 import { UpdateSalaryAdvanceDto } from './dto/update-salary-advance.dto';
+import { ApproveSalaryAdvanceDto } from './dto/approve-salary-advance.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/salary-advances')
@@ -14,7 +27,7 @@ export class SalaryAdvancesController {
 
   @Get()
   @RequirePermissions('salary_advances.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: EmployeeStatusQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -32,13 +45,21 @@ export class SalaryAdvancesController {
 
   @Put(':id')
   @RequirePermissions('salary_advances.create')
-  update(@Param('id') id: string, @Body() dto: UpdateSalaryAdvanceDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSalaryAdvanceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
   @Patch(':id/approve')
   @RequirePermissions('salary_advances.approve')
-  approve(@Param('id') id: string, @Body() body: { approvedAmount?: number }, @CurrentUser() user: AuthUser) {
+  approve(
+    @Param('id') id: string,
+    @Body() body: ApproveSalaryAdvanceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.approve(id, body.approvedAmount, user);
   }
 

@@ -1,13 +1,37 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { LeaveBalancesQueryDto } from '../../../common/dto/resource-query.dto';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
-import {
-  LeaveBalanceAllocationInput,
-  LeaveBalanceQuery,
-  LeaveBalancesService,
-} from './leave-balances.service';
+import { LeaveBalancesService } from './leave-balances.service';
+import { IsInt, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
+
+class LeaveBalanceAllocationDto {
+  @IsUUID()
+  companyId!: string;
+
+  @IsUUID()
+  employeeId!: string;
+
+  @IsUUID()
+  leaveTypeId!: string;
+
+  @IsInt()
+  year!: number;
+
+  @IsOptional()
+  @IsNumber()
+  allocatedDays?: number;
+
+  @IsOptional()
+  @IsNumber()
+  carriedForwardDays?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/leave-balances')
@@ -16,7 +40,7 @@ export class LeaveBalancesController {
 
   @Get()
   @RequirePermissions('leave_balances.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: LeaveBalanceQuery) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: LeaveBalancesQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -28,7 +52,7 @@ export class LeaveBalancesController {
 
   @Post()
   @RequirePermissions('leave_balances.manage')
-  upsertAllocation(@Body() body: LeaveBalanceAllocationInput, @CurrentUser() user: AuthUser) {
+  upsertAllocation(@Body() body: LeaveBalanceAllocationDto, @CurrentUser() user: AuthUser) {
     return this.service.upsertAllocation(body, user);
   }
 }

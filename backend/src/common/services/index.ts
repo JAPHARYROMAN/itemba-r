@@ -21,3 +21,8 @@ export { ObservabilityBudgetService } from './observability-budget.service';
 export { WebhookSignatureService } from './webhook-signature.service';
 export { AccountResolverService } from './account-resolver.service';
 export type { AccountRole } from './account-resolver.service';
+export { EphemeralSecretFingerprintRegistry } from './ephemeral-secret-fingerprint-registry.service';
+export type { EphemeralSecretRedaction } from './ephemeral-secret-fingerprint-registry.service';
+export { PersistenceSecretGuard } from './persistence-secret-guard.service';
+export type { SanitizedValue } from './persistence-secret-guard.service';
+export { PersistenceSafeLoggerService } from './persistence-safe-logger.service';

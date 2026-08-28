@@ -5,6 +5,7 @@ import { CreateSalesChannelDto } from './dto/create-sales-channel.dto';
 import { UpdateSalesChannelDto } from './dto/update-sales-channel.dto';
 import { QuerySalesChannelDto } from './dto/query-sales-channel.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('westsides/sales-channels')
@@ -27,6 +28,7 @@ export class SalesChannelsController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('sales_channels.view')
   @ApiOperation({ summary: 'Get sales channel by ID' })
   findOne(@Param('id') id: string) {
@@ -36,7 +38,11 @@ export class SalesChannelsController {
   @Patch(':id')
   @RequirePermissions('sales_channels.manage')
   @ApiOperation({ summary: 'Update sales channel' })
-  update(@Param('id') id: string, @Body() dto: UpdateSalesChannelDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSalesChannelDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 

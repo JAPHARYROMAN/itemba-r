@@ -1,5 +1,6 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { EphemeralSecretsModule } from '../../common/ephemeral-secrets.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { CompanyScopeService, EncryptionService } from '../../common/services';
@@ -13,6 +14,11 @@ import { MsaidiziController } from './msaidizi.controller';
 import { APPROVAL_GRANT_STORE, ApprovalGrantStore, MsaidiziService } from './msaidizi.service';
 import { ProceduresController } from './procedures.controller';
 import { ProceduresService } from './procedures.service';
+import { CrudCoverageController } from './crud-coverage.controller';
+import { CrudCoverageService } from './crud-coverage.service';
+import { CrudEvidenceStore } from './crud-evidence.store';
+import { ProviderContractAttestationService } from './provider-contract-attestation.service';
+import { ProductionReleaseGateService } from './production-release-gate.service';
 
 /**
  * The approval ledger, as the agent loop reaches it — one instance, typed.
@@ -109,8 +115,13 @@ export const approvalGrantStoreProvider: Provider = {
  * load-bearing and why the loop is given a port rather than the class.
  */
 @Module({
-  imports: [ConfigModule, PrismaModule, AuditLogsModule],
-  controllers: [MsaidiziController, MsaidiziConversationsController, ProceduresController],
+  imports: [ConfigModule, PrismaModule, AuditLogsModule, EphemeralSecretsModule],
+  controllers: [
+    MsaidiziController,
+    MsaidiziConversationsController,
+    ProceduresController,
+    CrudCoverageController,
+  ],
   providers: [
     MsaidiziConfig,
     ManifestProvider,
@@ -119,6 +130,10 @@ export const approvalGrantStoreProvider: Provider = {
     MsaidiziConversationsService,
     approvalGrantStoreProvider,
     ProceduresService,
+    CrudEvidenceStore,
+    CrudCoverageService,
+    ProviderContractAttestationService,
+    ProductionReleaseGateService,
     CompanyScopeService,
     // Conversation transcripts and resume state are AES-256-GCM ciphertext at
     // rest, following the integration-connections precedent. APP_ENCRYPTION_KEY
@@ -126,6 +141,13 @@ export const approvalGrantStoreProvider: Provider = {
     EncryptionService,
     { provide: ModelClient, useClass: AnthropicModelClient },
   ],
-  exports: [MsaidiziConfig],
+  exports: [
+    MsaidiziConfig,
+    ManifestProvider,
+    CapabilityInvoker,
+    CrudCoverageService,
+    ProviderContractAttestationService,
+    ModelClient,
+  ],
 })
 export class MsaidiziModule {}

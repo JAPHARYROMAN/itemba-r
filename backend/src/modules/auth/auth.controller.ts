@@ -32,6 +32,7 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { RecentAuth } from '../../common/decorators/recent-auth.decorator';
 import { RecentAuthGuard } from '../../common/guards/recent-auth.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -236,6 +237,7 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(RecentAuthGuard)
   @RecentAuth(15)
+  @AgentExcluded('recent_human_auth_required')
   @RequirePermissions('users.assign_roles')
   @Throttle({ default: { ttl: 3600000, limit: 1 } })
   @HttpCode(HttpStatus.OK)

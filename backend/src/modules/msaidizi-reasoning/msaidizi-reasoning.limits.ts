@@ -1,0 +1,20 @@
+/** Hard process limits for one non-persisting proposal request. */
+export const MSAIDIZI_REASONING_LIMITS = Object.freeze({
+  maxModelTurns: 2,
+  maxOutputTokensPerTurn: 6_000,
+  maxPlanSteps: 50,
+  maxErpCapabilities: 80,
+  maxHostCapabilities: 80,
+  maxErpCapabilityContextBytes: 160_000,
+  maxHostCapabilityContextBytes: 160_000,
+  maxStructuredInputBytes: 65_536,
+  maxAuthorityModelInputBytes: 400_000,
+  maxMemories: 12,
+  maxMemoryCandidates: 30,
+  maxMemoryCharsEach: 4_000,
+  maxUntrustedMemoryCharsTotal: 24_000,
+  maxArtifacts: 5,
+  maxArtifactBytesTotal: 12 * 1024 * 1024,
+  maxTextArtifactBytesEach: 128 * 1024,
+  maxTextArtifactBytesTotal: 256 * 1024,
+});

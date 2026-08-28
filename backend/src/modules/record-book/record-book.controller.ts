@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@
 import type { Response } from 'express';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { RecordBookService } from './record-book.service';
 import { RecordBookReportsService } from './record-book-reports.service';
 import {
@@ -40,6 +41,7 @@ export class RecordBookController {
   }
 
   @Get('export')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('record_book.export')
   export(@Query() query: ExportRecordBookDto, @CurrentUser() user: AuthUser, @Res() res: Response) {
     return this.service.export(query, user, res);
@@ -52,6 +54,7 @@ export class RecordBookController {
   }
 
   @Get('reports/:reportKey/export')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('record_book.export')
   exportReport(
     @Param('reportKey') reportKey: string,
@@ -63,6 +66,7 @@ export class RecordBookController {
   }
 
   @Get('reports/:reportKey')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('record_book.view')
   runReport(
     @Param('reportKey') reportKey: string,
@@ -85,6 +89,7 @@ export class RecordBookController {
   }
 
   @Get('daily-sales/:id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('record_book.view')
   findDailySale(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findDailySale(id, user);
@@ -151,6 +156,7 @@ export class RecordBookController {
   }
 
   @Get('expenses/:id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('record_book.view')
   findExpense(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findExpense(id, user);
@@ -211,6 +217,7 @@ export class RecordBookController {
   }
 
   @Get('expense-categories/:id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('record_book.view')
   findCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findCategory(id, user);

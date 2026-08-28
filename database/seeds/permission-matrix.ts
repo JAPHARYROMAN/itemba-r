@@ -53,7 +53,10 @@ export const ALL_PERMISSIONS: PermDef[] = [
   // Msaidizi — permission to *use* the agent. It confers no data access of its
   // own: the agent acts under whatever else the holder is granted, so this only
   // decides who may talk to it, never what it can reach on their behalf.
-  ...perms('msaidizi', ['use']),
+  // `oversight` gates cross-conversation review, device enrollment and
+  // emergency kill controls. It is intentionally assigned to no baseline role;
+  // an operator must grant it explicitly.
+  ...perms('msaidizi', ['use', 'oversight']),
   {
     code: 'fuel_grid.access',
     description: 'Open the independent Fuel Grid application',
@@ -70,9 +73,9 @@ export const ALL_PERMISSIONS: PermDef[] = [
 
   // Operational
   ...perms('inventory', ['read', 'create', 'update', 'delete']),
-  ...perms('sales', ['read', 'create', 'update']),
+  ...perms('sales', ['read', 'update']),
   ...perms('expenses', ['read', 'create', 'update', 'delete']),
-  ...perms('employees', ['read', 'create', 'update']),
+  ...perms('employees', ['read']),
 
   // Group Control — sensitive financial records (restricted to GROUP-scoped roles)
   ...perms('group-control', ['view', 'manage'], true),
@@ -81,6 +84,27 @@ export const ALL_PERMISSIONS: PermDef[] = [
   ...perms('debts', ['read', 'create', 'update', 'delete'], true),
   ...perms('contracts', ['read', 'create', 'update', 'delete', 'approve', 'view', 'manage'], true),
   ...perms('fixed-assets', ['read', 'create', 'update', 'delete'], true),
+
+  // Guard vocabulary used by company-/actor-scoped operational controllers.
+  // These services authorize a tenant, owner, recipient, or requested record;
+  // none of these permissions is itself restricted to a GROUP role.
+  ...perms('alert_events', ['view', 'acknowledge', 'resolve', 'dismiss']),
+  ...perms('alert_rules', ['view', 'manage']),
+  ...perms('approval_delegations', ['view', 'manage']),
+  ...perms('approval_requests', ['view', 'create', 'approve', 'reject', 'cancel']),
+  ...perms('approval_steps', ['view', 'manage']),
+  ...perms('approval_workflows', ['view', 'manage']),
+  ...perms('approvals', ['dashboard.view']),
+  ...perms('dashboard_preferences', ['manage']),
+  ...perms('internal_controls', ['view', 'manage']),
+  ...perms('notifications', ['view', 'manage']),
+  ...perms('refunds', ['view', 'manage']),
+  ...perms('sales_orders', ['view', 'create', 'confirm']),
+  ...perms('saved_report_views', ['view', 'manage', 'share']),
+  ...perms('scheduled_reports', ['view', 'manage', 'run']),
+  ...perms('security.policies', ['view', 'manage']),
+  ...perms('statutory_deduction_rules', ['view', 'manage']),
+  ...perms('tasks', ['view', 'create', 'update', 'complete', 'cancel']),
 
   // ── Finance Foundation (Milestone 3) ────────────────────────────────────
   ...perms('finance', ['view', 'manage']),
@@ -531,7 +555,7 @@ export const ALL_PERMISSIONS: PermDef[] = [
     isGroupControl: false,
   },
   ...perms('audit_evidence_packs', ['view', 'create', 'manage', 'review', 'export']),
-  ...perms('data_exports', ['view', 'create', 'download']),
+  ...perms('data_exports', ['view', 'create', 'download', 'manage']),
   {
     code: 'sensitive_exports.create',
     description: 'Create sensitive data exports',
@@ -591,7 +615,7 @@ export const ALL_PERMISSIONS: PermDef[] = [
     description: 'View security dashboard',
     module: 'security',
     action: 'dashboard.view',
-    isGroupControl: false,
+    isGroupControl: true,
   },
   ...perms('security_policies', ['view', 'manage']),
   ...perms('user_security_profiles', ['view', 'manage']),
@@ -602,8 +626,8 @@ export const ALL_PERMISSIONS: PermDef[] = [
     action: 'sensitive.view',
     isGroupControl: false,
   },
-  ...perms('security_events', ['view', 'review', 'resolve']),
-  ...perms('active_sessions', ['view', 'revoke']),
+  ...perms('security_events', ['view', 'review', 'resolve', 'manage']),
+  ...perms('active_sessions', ['view', 'revoke', 'manage']),
   ...perms('two_factor', ['manage']),
   ...perms('account_locks', ['manage']),
 
@@ -613,7 +637,7 @@ export const ALL_PERMISSIONS: PermDef[] = [
     description: 'View backups dashboard',
     module: 'backups',
     action: 'dashboard.view',
-    isGroupControl: false,
+    isGroupControl: true,
   },
   ...perms('backup_jobs', ['view', 'manage']),
   ...perms('backup_runs', ['view', 'create', 'download']),
@@ -696,9 +720,16 @@ export const ALL_PERMISSIONS: PermDef[] = [
   ...perms('background_jobs', ['view', 'manage', 'retry', 'cancel']),
   ...perms('job_queue_configs', ['view', 'manage']),
   ...perms('cache', ['view', 'manage', 'invalidate']),
+  {
+    code: 'cache.stats.view',
+    description: 'View group-wide cache statistics',
+    module: 'cache',
+    action: 'stats.view',
+    isGroupControl: true,
+  },
   ...perms('scalability', ['dashboard.view']),
   ...perms('load_tests', ['view', 'manage', 'run']),
-  ...perms('data_isolation', ['view', 'run_tests', 'resolve_issues', 'sensitive.view']),
+  ...perms('data_isolation', ['view', 'run_tests', 'resolve_issues', 'sensitive.view'], true),
   ...perms('deployment', [
     'dashboard.view',
     'releases.view',
@@ -1121,7 +1152,7 @@ const M15_SCALABILITY_MODULES = [
 ];
 
 const M15_ISOLATION_MODULES = [
-  ...perms('data_isolation', ['view', 'run_tests', 'resolve_issues', 'sensitive.view']),
+  ...perms('data_isolation', ['view', 'run_tests', 'resolve_issues', 'sensitive.view'], true),
 ];
 
 const M15_DEPLOYMENT_MODULES = [
@@ -1403,43 +1434,44 @@ const BASE_ROLES: RoleDef[] = [
     description: 'Full operational control within an assigned company. No Group Control access.',
     scope: RoleScope.COMPANY,
     filter: combine(
-      inModules(
-        'companies',
-        'divisions',
-        'branches',
-        'users',
-        'documents',
-        'inventory',
-        'sales',
-        'expenses',
-        'employees',
-        'reports',
-        'audit-logs',
-        ...FINANCE_MODULES,
-        ...OPERATIONS_MODULES,
-        ...PETROLEUM_MODULES,
-        ...WESTSIDES_MODULES,
-        ...ALL_ITEMBA_MODULES,
-        ...ALL_M8_MODULES,
-        ...ALL_M9_MODULES,
-        ...ALL_M10_MODULES,
-        ...ALL_M13_MODULES,
-        ...ALL_M14_MODULES,
-        ...ACCOUNTING_ENGINE_MODULES,
-        ...PROCUREMENT_MODULES,
-        ...CRM_MODULES,
-        ...DOC_TEMPLATE_MODULES,
-        'qa',
-        'launch',
-        'documentation',
-        'help_center',
-        'help_articles',
-        'training',
-        'guided_walkthroughs',
-        'training_environment',
-        'support',
-        'final_qa',
-      ),
+      (p) =>
+        inModules(
+          'companies',
+          'divisions',
+          'branches',
+          'users',
+          'documents',
+          'inventory',
+          'sales',
+          'expenses',
+          'employees',
+          'reports',
+          'audit-logs',
+          ...FINANCE_MODULES,
+          ...OPERATIONS_MODULES,
+          ...PETROLEUM_MODULES,
+          ...WESTSIDES_MODULES,
+          ...ALL_ITEMBA_MODULES,
+          ...ALL_M8_MODULES,
+          ...ALL_M9_MODULES,
+          ...ALL_M10_MODULES,
+          ...ALL_M13_MODULES,
+          ...ALL_M14_MODULES,
+          ...ACCOUNTING_ENGINE_MODULES,
+          ...PROCUREMENT_MODULES,
+          ...CRM_MODULES,
+          ...DOC_TEMPLATE_MODULES,
+          'qa',
+          'launch',
+          'documentation',
+          'help_center',
+          'help_articles',
+          'training',
+          'guided_walkthroughs',
+          'training_environment',
+          'support',
+          'final_qa',
+        )(p) && notGroupCtrl(p),
       notGroupCtrl,
       // Mobile POS Lite stock-in purchases + stock counts (manager-level; not
       // granted to cashiers/salespeople by default).
@@ -1856,7 +1888,7 @@ const BASE_ROLES: RoleDef[] = [
       'Manages compliance obligations, tax registrations, filing periods, document requirements, and evidence packs.',
     scope: RoleScope.COMPANY,
     filter: combine(
-      inModules(...ALL_M10_MODULES),
+      (p) => inModules(...ALL_M10_MODULES)(p) && notGroupCtrl(p),
       (p) => inModules(...FINANCE_MODULES)(p) && readExport(p),
       (p) => inModules(...HR_PAYROLL_MODULES)(p) && readExport(p),
       (p) =>
@@ -1884,8 +1916,6 @@ const BASE_ROLES: RoleDef[] = [
       (p) =>
         inModules(...BACKUP_DR_MODULES, ...PRODUCTION_MODULES, ...MONITORING_MODULES)(p) &&
         readExport(p),
-      // M15: Data isolation visibility for compliance
-      (p) => ['data_isolation.view', 'data_isolation.sensitive.view'].includes(p.code),
     ),
   },
 

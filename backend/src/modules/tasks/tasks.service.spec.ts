@@ -10,6 +10,8 @@ function makeService(overrides: { status?: string } = {}) {
   };
   const prisma = {
     task: {
+      findMany: jest.fn().mockResolvedValue([task]),
+      count: jest.fn().mockResolvedValue(1),
       findFirst: jest.fn().mockResolvedValue(task),
       update: jest.fn(async ({ data }: any) => ({ ...task, ...data })),
     },
@@ -20,6 +22,38 @@ function makeService(overrides: { status?: string } = {}) {
 }
 
 const user = { id: 'user-1' } as any;
+
+describe('TasksService actor-scoped reads', () => {
+  it('pins both data and count queries to the authenticated assignee', async () => {
+    const { service, prisma, task } = makeService();
+
+    const result = await service.findMyTasks(user, {
+      page: 2,
+      limit: 5,
+      status: 'IN_PROGRESS',
+      taskType: 'CUSTOM',
+      priority: 'HIGH',
+      assignedToId: 'attacker-selected-user',
+      companyId: 'attacker-selected-company',
+    });
+
+    const where = {
+      assignedToId: user.id,
+      deletedAt: null,
+      status: 'IN_PROGRESS',
+      taskType: 'CUSTOM',
+      priority: 'HIGH',
+    };
+    expect(prisma.task.findMany).toHaveBeenCalledWith({
+      where,
+      skip: 5,
+      take: 5,
+      orderBy: { dueDate: 'asc' },
+    });
+    expect(prisma.task.count).toHaveBeenCalledWith({ where });
+    expect(result).toEqual({ data: [task], total: 1, page: 2, limit: 5 });
+  });
+});
 
 describe('TasksService status guards', () => {
   describe('complete', () => {

@@ -1,22 +1,36 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateProformaInvoiceDto } from './dto/create-proforma-invoice.dto';
 import { UpdateProformaInvoiceDto } from './dto/update-proforma-invoice.dto';
 import { QueryProformaInvoiceDto } from './dto/query-proforma-invoice.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 function calcLines(lines: any[]) {
-  let subtotal = 0, totalDiscount = 0, totalTax = 0;
+  let subtotal = 0,
+    totalDiscount = 0,
+    totalTax = 0;
   const computed = lines.map((l) => {
-    const qty = Number(l.quantity), price = Number(l.unitPrice);
-    const discount = Number(l.discountAmount ?? 0), tax = Number(l.taxAmount ?? 0);
+    const qty = Number(l.quantity),
+      price = Number(l.unitPrice);
+    const discount = Number(l.discountAmount ?? 0),
+      tax = Number(l.taxAmount ?? 0);
     const lineTotal = qty * price - discount + tax;
-    subtotal += qty * price; totalDiscount += discount; totalTax += tax;
+    subtotal += qty * price;
+    totalDiscount += discount;
+    totalTax += tax;
     return { ...l, lineTotal };
   });
-  return { computed, subtotal, totalDiscount, totalTax, totalAmount: subtotal - totalDiscount + totalTax };
+  return {
+    computed,
+    subtotal,
+    totalDiscount,
+    totalTax,
+    totalAmount: subtotal - totalDiscount + totalTax,
+  };
 }
 
 @Injectable()
@@ -32,12 +46,13 @@ export class ProformaInvoicesService {
   ): Promise<string> {
     const year = new Date().getFullYear();
     const count = await db.proformaInvoice.count({
-      where: { companyId, proformaNumber: { startsWith: `PRF-${year}` } },
+      where: { companyId, proformaNumber: { startsWith: `PRF-${year}-` } },
     });
     return `PRF-${year}-${String(count + 1).padStart(5, '0')}`;
   }
 
-  async create(dto: CreateProformaInvoiceDto, userId: string) {
+  async create(dto: CreateProformaInvoiceDto, user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
     const { computed, subtotal, totalDiscount, totalTax, totalAmount } = calcLines(dto.lines);
 
     // Generate the per-company proforma number and create the row inside one
@@ -65,7 +80,7 @@ export class ProformaInvoicesService {
               totalAmount,
               status: 'DRAFT' as any,
               quotationId: dto.quotationId,
-              createdById: userId,
+              createdById: user.id,
               notes: dto.notes,
             },
           });
@@ -102,11 +117,11 @@ export class ProformaInvoicesService {
       action: 'PROFORMA_INVOICE_CREATE',
       entityType: 'ProformaInvoice',
       entityId: record.id,
-      userId,
+      userId: user.id,
       companyId: record.companyId,
       newValue: record as any,
     });
-    return this.findOne(record.id);
+    return this.findOne(record.id, user);
   }
 
   async findAll(query: QueryProformaInvoiceDto, user?: any) {
@@ -147,7 +162,16 @@ export class ProformaInvoicesService {
             email: true,
             website: true,
             logoUrl: true,
-            group: { select: { name: true, code: true, address: true, phone: true, email: true, website: true } },
+            group: {
+              select: {
+                name: true,
+                code: true,
+                address: true,
+                phone: true,
+                email: true,
+                website: true,
+              },
+            },
             profile: {
               select: {
                 registeredName: true,
@@ -162,7 +186,17 @@ export class ProformaInvoicesService {
           },
         },
         branch: { select: { id: true, name: true, code: true, address: true, phone: true } },
-        customer: { select: { id: true, name: true, customerCode: true, phone: true, email: true, address: true, contactPerson: true } },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            customerCode: true,
+            phone: true,
+            email: true,
+            address: true,
+            contactPerson: true,
+          },
+        },
         quotation: { select: { id: true, quotationNumber: true } },
         lines: {
           include: {
@@ -178,7 +212,8 @@ export class ProformaInvoicesService {
 
   async update(id: string, dto: UpdateProformaInvoiceDto, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Can only update DRAFT proforma invoices');
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Can only update DRAFT proforma invoices');
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.lines?.length) {
@@ -213,7 +248,9 @@ export class ProformaInvoicesService {
           ...(dto.customerId && { customerId: dto.customerId }),
           ...(dto.customerName !== undefined && { customerName: dto.customerName }),
           ...(dto.proformaDate && { proformaDate: new Date(dto.proformaDate) }),
-          ...(dto.validUntil !== undefined && { validUntil: dto.validUntil ? new Date(dto.validUntil) : null }),
+          ...(dto.validUntil !== undefined && {
+            validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+          }),
           ...(dto.currency && { currency: dto.currency as any }),
           ...(dto.notes !== undefined && { notes: dto.notes }),
         } as any,
@@ -232,8 +269,12 @@ export class ProformaInvoicesService {
 
   async send(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT proforma invoices can be sent');
-    const record = await this.prisma.proformaInvoice.update({ where: { id }, data: { status: 'SENT' as any } });
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT proforma invoices can be sent');
+    const record = await this.prisma.proformaInvoice.update({
+      where: { id },
+      data: { status: 'SENT' as any },
+    });
     await this.auditLogs.log({
       action: 'PROFORMA_INVOICE_SENT',
       entityType: 'ProformaInvoice',
@@ -244,66 +285,113 @@ export class ProformaInvoicesService {
     return record;
   }
 
-  async convertToSalesOrder(id: string, userId: string) {
-    const proforma = await this.findOne(id);
-    if (proforma.status !== 'ACCEPTED') throw new BadRequestException('Only ACCEPTED proformas can be converted');
+  async convertToSalesOrder(id: string, user: AuthUser) {
+    const proforma = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, proforma.companyId, AccessLevel.WRITE);
+    if (proforma.status === 'CONVERTED' && proforma.convertedSalesOrderId) {
+      return proforma;
+    }
+    if (proforma.status !== 'ACCEPTED') {
+      throw new BadRequestException('Only ACCEPTED proformas can be converted');
+    }
 
-    const so = await this.prisma.salesOrder.create({
-      data: {
-        salesOrderNumber: `SO-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`,
+    const salesOrderId = randomUUID();
+    const conversionTime = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      // Claim the conversion with one conditional write. PostgreSQL rechecks
+      // the predicate after a competing transaction releases the row lock, so
+      // at most one caller can own the ACCEPTED -> CONVERTED transition.
+      const claim = await tx.proformaInvoice.updateMany({
+        where: {
+          id,
+          companyId: proforma.companyId,
+          status: 'ACCEPTED' as any,
+          convertedSalesOrderId: null,
+          deletedAt: null,
+        },
+        // Do not write convertedSalesOrderId until the referenced order exists.
+        // The FK is immediate in PostgreSQL, while this status transition still
+        // owns the row lock for the remainder of the transaction.
+        data: { status: 'CONVERTED' as any },
+      });
+
+      if (claim.count !== 1) {
+        const current = await tx.proformaInvoice.findUnique({
+          where: { id },
+          select: { status: true, convertedSalesOrderId: true },
+        });
+        if (current?.status === 'CONVERTED' && current.convertedSalesOrderId) return;
+        throw new BadRequestException('Proforma conversion state changed; refresh and retry');
+      }
+
+      await tx.salesOrder.create({
+        data: {
+          id: salesOrderId,
+          salesOrderNumber: `SO-${conversionTime.getFullYear()}-${conversionTime.getTime().toString(36).toUpperCase()}`,
+          companyId: proforma.companyId,
+          customerId: proforma.customerId,
+          divisionId: proforma.divisionId,
+          branchId: proforma.branchId,
+          // A proforma carries neither payment settlement nor posting authority.
+          // Conversion therefore creates a governed credit DRAFT; the separate
+          // SalesOrders confirm action owns AR/GL/inventory posting atomically.
+          salesType: 'CREDIT_SALE' as any,
+          paymentMethod: 'CREDIT' as any,
+          orderDate: conversionTime,
+          currency: proforma.currency as any,
+          subtotal: proforma.subtotal,
+          discountAmount: proforma.discountAmount,
+          taxAmount: proforma.taxAmount,
+          totalAmount: proforma.totalAmount,
+          paidAmount: 0,
+          outstandingAmount: proforma.totalAmount,
+          status: 'DRAFT' as any,
+          paymentStatus: 'UNPAID' as any,
+          createdById: user.id,
+          idempotencyKey: `proforma:${id}`,
+          notes: `Converted from proforma ${proforma.proformaNumber}`,
+        },
+      });
+
+      await tx.salesOrderLine.createMany({
+        data: (proforma.lines as any[]).map((l) => ({
+          salesOrderId,
+          productId: l.productId,
+          description: l.description,
+          quantity: l.quantity,
+          unitId: l.unitId,
+          unitPrice: l.unitPrice,
+          discountAmount: l.discountAmount,
+          taxAmount: l.taxAmount,
+          lineTotal: l.lineTotal,
+        })),
+      });
+
+      await tx.proformaInvoice.update({
+        where: { id },
+        data: { convertedSalesOrderId: salesOrderId },
+      });
+
+      // Conversion success and its audit attribution commit together. A failed
+      // append rolls back the claim, order, and lines instead of reporting an
+      // unaudited business mutation as successful.
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'PROFORMA_INVOICE_CONVERTED',
+        entityType: 'ProformaInvoice',
+        entityId: id,
+        userId: user.id,
         companyId: proforma.companyId,
-        customerId: proforma.customerId,
-        divisionId: proforma.divisionId,
-        branchId: proforma.branchId,
-        salesType: 'CASH_SALE' as any,
-        orderDate: new Date(),
-        currency: proforma.currency as any,
-        subtotal: proforma.subtotal,
-        discountAmount: proforma.discountAmount,
-        taxAmount: proforma.taxAmount,
-        totalAmount: proforma.totalAmount,
-        paidAmount: 0,
-        outstandingAmount: proforma.totalAmount,
-        status: 'CONFIRMED' as any,
-        paymentStatus: 'UNPAID' as any,
-        createdById: userId,
-        notes: `Converted from proforma ${proforma.proformaNumber}`,
-      },
+        newValue: { convertedSalesOrderId: salesOrderId } as any,
+      });
     });
 
-    await this.prisma.salesOrderLine.createMany({
-      data: (proforma.lines as any[]).map((l) => ({
-        salesOrderId: so.id,
-        productId: l.productId,
-        description: l.description,
-        quantity: l.quantity,
-        unitId: l.unitId,
-        unitPrice: l.unitPrice,
-        discountAmount: l.discountAmount,
-        taxAmount: l.taxAmount,
-        lineTotal: l.lineTotal,
-      })),
-    });
-
-    await this.prisma.proformaInvoice.update({
-      where: { id },
-      data: { status: 'CONVERTED' as any, convertedSalesOrderId: so.id },
-    });
-
-    await this.auditLogs.log({
-      action: 'PROFORMA_INVOICE_CONVERTED',
-      entityType: 'ProformaInvoice',
-      entityId: id,
-      userId,
-      companyId: proforma.companyId,
-      newValue: { convertedSalesOrderId: so.id } as any,
-    });
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
   async remove(id: string, userId: string) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT proformas can be deleted');
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT proformas can be deleted');
     await this.prisma.proformaInvoice.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.auditLogs.log({
       action: 'PROFORMA_INVOICE_DELETE',

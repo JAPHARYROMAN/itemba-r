@@ -339,8 +339,14 @@ export class PayablesService {
           ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
         },
       });
-      await this.syncSupplierBalance(tx, existing.companyId, existing.supplierId);
-      await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
+      // The editable non-supplier fields do not affect the supplier exposure.
+      // Avoid rewriting the same denormalized balance (and churning updatedAt)
+      // for notes/date/scope-only edits. A reassignment must refresh both the
+      // old and new supplier exactly once inside the transaction.
+      if (existing.supplierId !== updated.supplierId) {
+        await this.syncSupplierBalance(tx, existing.companyId, existing.supplierId);
+        await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
+      }
       return updated;
     });
 
@@ -563,17 +569,21 @@ export class PayablesService {
         },
       });
       await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
-      return updated;
-    });
 
-    await this.auditLogs.log({
-      action: 'PAYABLE_WRITE_OFF',
-      entityType: 'Payable',
-      entityId: id,
-      userId,
-      companyId: record.companyId,
-      oldValue: { status: existing.status } as any,
-      newValue: { status: 'WRITTEN_OFF', reason: dto.reason } as any,
+      // The write-off journal, AP subledger transition, supplier projection,
+      // and immutable audit fact must commit as one unit. A best-effort append
+      // after this transaction could otherwise leave an unaudited forgiveness.
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'PAYABLE_WRITE_OFF',
+        entityType: 'Payable',
+        entityId: id,
+        userId,
+        companyId: updated.companyId,
+        oldValue: { status: locked.status } as any,
+        newValue: { status: 'WRITTEN_OFF', reason: dto.reason } as any,
+      });
+
+      return updated;
     });
 
     return record;

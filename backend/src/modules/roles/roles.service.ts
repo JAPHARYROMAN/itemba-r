@@ -6,12 +6,14 @@ import { UpdateRoleDto } from './dto/update-role.dto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { isGroupScopedUser } from '../../common/services/company-scope.service';
 import { PermissionCacheService } from '../../common/services';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 @Injectable()
 export class RolesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissionCache: PermissionCacheService,
+    private readonly audit: AuditLogsService,
   ) {}
 
   /**
@@ -66,26 +68,39 @@ export class RolesService {
       );
     }
 
-    // A group-scoped actor (group control layer) may assign any permission.
-    if (actorIsGroup) {
+    if (!permissionIds || permissionIds.length === 0) {
       return;
     }
 
-    if (!permissionIds || permissionIds.length === 0) {
+    const requested = await this.prisma.permission.findMany({
+      where: { id: { in: permissionIds } },
+      select: { code: true, isGroupControl: true },
+    });
+
+    // Permission.isGroupControl is an authority boundary, not just seed-time
+    // role curation. Even a GROUP administrator must not attach one of these
+    // permissions to a role whose effective scope is COMPANY/DIVISION/BRANCH.
+    const groupControlPermissions = requested
+      .filter((permission) => permission.isGroupControl)
+      .map((permission) => permission.code)
+      .sort();
+    if (effectiveScope !== RoleScope.GROUP && groupControlPermissions.length > 0) {
+      throw new ForbiddenException(
+        `Group-control permissions require a GROUP-scoped role: ${groupControlPermissions.join(', ')}`,
+      );
+    }
+
+    // A group-scoped actor (group control layer) may assign any permission to
+    // a GROUP role after the target-scope invariant above has been proven.
+    if (actorIsGroup) {
       return;
     }
 
     // The actor may only grant permissions they currently possess.
     const actorPerms = new Set(user.permissions ?? []);
-    const requested = await this.prisma.permission.findMany({
-      where: { id: { in: permissionIds } },
-      select: { code: true },
-    });
     for (const perm of requested) {
       if (!actorPerms.has(perm.code)) {
-        throw new ForbiddenException(
-          `Cannot grant a permission you do not hold: ${perm.code}`,
-        );
+        throw new ForbiddenException(`Cannot grant a permission you do not hold: ${perm.code}`);
       }
     }
   }
@@ -117,7 +132,7 @@ export class RolesService {
 
   async create(dto: CreateRoleDto, user?: AuthUser) {
     await this.assertRoleMutationAllowed(user, dto.scope, dto.permissionIds);
-    return this.prisma.role.create({
+    const role = await this.prisma.role.create({
       data: {
         name: dto.name,
         displayName: dto.displayName,
@@ -128,6 +143,15 @@ export class RolesService {
           : undefined,
       },
     });
+    await this.audit.log({
+      action: 'ROLE_CREATE',
+      entityType: 'Role',
+      entityId: role.id,
+      userId: user?.id,
+      companyId: null,
+      newValue: role as unknown as Record<string, unknown>,
+    });
+    return role;
   }
 
   /**
@@ -144,7 +168,19 @@ export class RolesService {
       select: { scope: true },
     });
     const effectiveScope = dto.scope ?? current.scope;
-    await this.assertRoleMutationAllowed(user, effectiveScope, dto.permissionIds);
+    let effectivePermissionIds = dto.permissionIds;
+    if (
+      effectivePermissionIds === undefined &&
+      dto.scope !== undefined &&
+      effectiveScope !== RoleScope.GROUP
+    ) {
+      const existingGrants = await this.prisma.rolePermission.findMany({
+        where: { roleId: id },
+        select: { permissionId: true },
+      });
+      effectivePermissionIds = existingGrants.map((grant) => grant.permissionId);
+    }
+    await this.assertRoleMutationAllowed(user, effectiveScope, effectivePermissionIds);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (dto.permissionIds) {
@@ -171,6 +207,16 @@ export class RolesService {
     // immediately instead of lagging up to the cache TTL.
     await this.invalidateCacheForRole(id);
 
+    await this.audit.log({
+      action: 'ROLE_UPDATE',
+      entityType: 'Role',
+      entityId: id,
+      userId: user?.id,
+      companyId: null,
+      oldValue: current as unknown as Record<string, unknown>,
+      newValue: updated as unknown as Record<string, unknown>,
+    });
+
     return updated;
   }
 
@@ -182,15 +228,13 @@ export class RolesService {
    *    UserRole rows and silently strip people of access. Force the caller to
    *    reassign first.
    */
-  async remove(id: string) {
+  async remove(id: string, user?: AuthUser) {
     const role = await this.prisma.role.findUniqueOrThrow({
       where: { id },
       include: { _count: { select: { userRoles: true } } },
     });
     if (role.isSystem) {
-      throw new BadRequestException(
-        `Role "${role.name}" is a system role and cannot be deleted.`,
-      );
+      throw new BadRequestException(`Role "${role.name}" is a system role and cannot be deleted.`);
     }
     if (role._count.userRoles > 0) {
       throw new BadRequestException(
@@ -209,6 +253,14 @@ export class RolesService {
     });
     const deleted = await this.prisma.role.delete({ where: { id } });
     await this.invalidateCacheForUsers(holders.map((h) => h.userId));
+    await this.audit.log({
+      action: 'ROLE_DELETE',
+      entityType: 'Role',
+      entityId: id,
+      userId: user?.id,
+      companyId: null,
+      oldValue: deleted as unknown as Record<string, unknown>,
+    });
     return deleted;
   }
 }

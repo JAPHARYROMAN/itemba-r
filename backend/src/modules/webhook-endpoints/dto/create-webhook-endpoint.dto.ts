@@ -32,5 +32,6 @@ export class CreateWebhookEndpointDto {
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
   allowedEvents?: string[];
 }

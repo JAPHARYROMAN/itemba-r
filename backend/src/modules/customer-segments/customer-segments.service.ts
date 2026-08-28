@@ -149,15 +149,27 @@ export class CustomerSegmentsService {
       create: { customerSegmentId: segmentId, customerId, assignedById: user.id },
       update: {},
     });
-    await this.auditLogs.log({ action: 'ADD_MEMBER', entityType: 'CustomerSegment', entityId: segmentId, userId: user.id });
+    await this.auditLogs.log({
+      action: 'ADD_MEMBER',
+      entityType: 'CustomerSegment',
+      entityId: segmentId,
+      userId: user.id,
+      companyId: segment.companyId,
+    });
     return membership;
   }
 
   async removeMember(segmentId: string, customerId: string, user: AuthUser) {
     // Assert WRITE on the segment's company before mutating memberships.
-    await this.findOneScoped(segmentId, user, AccessLevel.WRITE);
+    const segment = await this.findOneScoped(segmentId, user, AccessLevel.WRITE);
     await this.prisma.customerSegmentMembership.deleteMany({ where: { customerSegmentId: segmentId, customerId } });
-    await this.auditLogs.log({ action: 'REMOVE_MEMBER', entityType: 'CustomerSegment', entityId: segmentId, userId: user.id });
+    await this.auditLogs.log({
+      action: 'REMOVE_MEMBER',
+      entityType: 'CustomerSegment',
+      entityId: segmentId,
+      userId: user.id,
+      companyId: segment.companyId,
+    });
     return { success: true };
   }
 

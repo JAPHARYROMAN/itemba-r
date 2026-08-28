@@ -1,3 +1,4 @@
+import { ScheduledReportsQueryDto } from '../../common/dto/resource-query.dto';
 import {
   Controller,
   Get,
@@ -17,8 +18,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { ScheduledReportsService } from './scheduled-reports.service';
 import { CreateScheduledReportDto } from './dto/create-scheduled-report.dto';
+import { UpdateScheduledReportDto } from './dto/update-scheduled-report.dto';
 
 @ApiTags('Scheduled Reports')
 @ApiBearerAuth()
@@ -35,7 +38,7 @@ export class ScheduledReportsController {
 
   @Get()
   @RequirePermissions('scheduled_reports.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: ScheduledReportsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -45,6 +48,7 @@ export class ScheduledReportsController {
    * 'runs' segment can never be captured as a schedule id.
    */
   @Get('runs/:runId/download')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('scheduled_reports.view')
   async downloadRun(
     @Param('runId') runId: string,
@@ -62,6 +66,7 @@ export class ScheduledReportsController {
   }
 
   @Get(':id/runs')
+  @AgentExcluded('query_schema_not_strict')
   @RequirePermissions('scheduled_reports.view')
   listRuns(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query() query: any) {
     return this.service.listRuns(id, user, query);
@@ -75,7 +80,11 @@ export class ScheduledReportsController {
 
   @Patch(':id')
   @RequirePermissions('scheduled_reports.manage')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateScheduledReportDto>, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateScheduledReportDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

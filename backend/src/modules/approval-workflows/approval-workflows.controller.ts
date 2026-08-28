@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { ApprovalWorkflowsQueryDto } from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -17,7 +28,7 @@ export class ApprovalWorkflowsController {
 
   @Get()
   @RequirePermissions('approval_workflows.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: ApprovalWorkflowsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -35,7 +46,11 @@ export class ApprovalWorkflowsController {
 
   @Patch(':id')
   @RequirePermissions('approval_workflows.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateApprovalWorkflowDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateApprovalWorkflowDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateComplianceDocumentStatusDto } from './dto/create-compliance-document-status.dto';
 import { UpdateComplianceDocumentStatusDto } from './dto/update-compliance-document-status.dto';
-import { applyCompanyScopeWhere } from '../../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class ComplianceDocumentStatusService {
@@ -48,10 +50,18 @@ export class ComplianceDocumentStatusService {
     return record;
   }
 
-  async remove(id: string, user: any) {
-    await this.findOne(id, user);
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     await this.prisma.complianceDocumentStatus.delete({ where: { id } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'ComplianceDocumentStatus', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'ComplianceDocumentStatus',
+      entityId: id,
+      companyId: existing.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
+    });
     return { message: 'Compliance document status deleted' };
   }
 }

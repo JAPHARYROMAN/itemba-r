@@ -14,6 +14,7 @@ import * as argon2 from 'argon2';
 import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createE2eApp } from './e2e-app';
+import { deleteAuditLogsForTest } from './audit-log-maintenance';
 
 jest.setTimeout(30000);
 
@@ -690,7 +691,7 @@ describe('Company Isolation (e2e)', () => {
       await prisma.userSecurityProfile.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.userCompanyAccess.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
-      await prisma.auditLog.deleteMany({ where: { userId: { in: userIds } } });
+      await deleteAuditLogsForTest(prisma, { userId: { in: userIds } });
       await prisma.securityEvent.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     }

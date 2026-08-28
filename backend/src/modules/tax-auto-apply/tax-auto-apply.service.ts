@@ -3,6 +3,7 @@ import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 /**
  * TaxAutoApplyService — Sprint C2.
@@ -48,6 +49,7 @@ export class TaxAutoApplyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   private isEnabled(): boolean {
@@ -69,16 +71,21 @@ export class TaxAutoApplyService {
     tx?: Prisma.TransactionClient,
     user?: AuthUser,
   ): Promise<TaxApplyResult> {
-    if (!this.isEnabled()) return { skipped: 0, booked: 0, total: 0, disabled: true };
-    return this.apply({
-      sourceType: 'SALES_ORDER',
-      direction: 'OUTPUT',
-      appliesTo: 'SALES',
-      sourceId: salesOrderId,
-      userId,
-      tx,
-      user,
-    });
+    const result = !this.isEnabled()
+      ? { skipped: 0, booked: 0, total: 0, disabled: true }
+      : await this.apply({
+          sourceType: 'SALES_ORDER',
+          direction: 'OUTPUT',
+          appliesTo: 'SALES',
+          sourceId: salesOrderId,
+          userId,
+          tx,
+          user,
+        });
+    if (user) {
+      await this.auditManualApply('SALES_ORDER', salesOrderId, user, result);
+    }
+    return result;
   }
 
   /**
@@ -92,15 +99,61 @@ export class TaxAutoApplyService {
     tx?: Prisma.TransactionClient,
     user?: AuthUser,
   ): Promise<TaxApplyResult> {
-    if (!this.isEnabled()) return { skipped: 0, booked: 0, total: 0, disabled: true };
-    return this.apply({
-      sourceType: 'PURCHASE_ORDER',
-      direction: 'INPUT',
-      appliesTo: 'PURCHASES',
-      sourceId: purchaseOrderId,
-      userId,
-      tx,
-      user,
+    const result = !this.isEnabled()
+      ? { skipped: 0, booked: 0, total: 0, disabled: true }
+      : await this.apply({
+          sourceType: 'PURCHASE_ORDER',
+          direction: 'INPUT',
+          appliesTo: 'PURCHASES',
+          sourceId: purchaseOrderId,
+          userId,
+          tx,
+          user,
+        });
+    if (user) {
+      await this.auditManualApply('PURCHASE_ORDER', purchaseOrderId, user, result);
+    }
+    return result;
+  }
+
+  /**
+   * Manual agent/API invocations are first-class governed mutations even when
+   * the rollout flag makes them a no-op. Internal order-confirm callers omit
+   * `user`, so they retain their parent workflow's single audit boundary.
+   */
+  private async auditManualApply(
+    sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER',
+    sourceId: string,
+    user: AuthUser,
+    result: TaxApplyResult,
+  ): Promise<void> {
+    const source =
+      sourceType === 'SALES_ORDER'
+        ? await this.prisma.salesOrder.findUnique({
+            where: { id: sourceId },
+            select: { companyId: true },
+          })
+        : await this.prisma.purchaseOrder.findUnique({
+            where: { id: sourceId },
+            select: { companyId: true },
+          });
+    if (!source) return;
+    await this.auditLogs.logStrict({
+      action:
+        sourceType === 'SALES_ORDER'
+          ? 'TAX_AUTO_APPLY_SALES_ORDER'
+          : 'TAX_AUTO_APPLY_PURCHASE_ORDER',
+      entityType: sourceType === 'SALES_ORDER' ? 'SalesOrder' : 'PurchaseOrder',
+      entityId: sourceId,
+      userId: user.id,
+      companyId: source.companyId,
+      newValue: {
+        booked: result.booked,
+        skipped: result.skipped,
+        total: result.total,
+        disabled: result.disabled ?? false,
+        failed: result.failed ?? false,
+      },
     });
   }
 

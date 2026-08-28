@@ -17,6 +17,7 @@ import * as crypto from 'crypto';
 import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createE2eApp } from './e2e-app';
+import { deleteAuditLogsForTest } from './audit-log-maintenance';
 
 jest.setTimeout(60000);
 
@@ -365,14 +366,12 @@ describe('Critical Business Workflows (e2e)', () => {
         ],
       },
     });
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { userId: { in: userIds } },
-          { companyId: { in: companyIds } },
-          { entityId: { in: [...journalEntryIds, ...stockAdjustmentIds, ...externalPaymentIds] } },
-        ],
-      },
+    await deleteAuditLogsForTest(prisma, {
+      OR: [
+        { userId: { in: userIds } },
+        { companyId: { in: companyIds } },
+        { entityId: { in: [...journalEntryIds, ...stockAdjustmentIds, ...externalPaymentIds] } },
+      ],
     });
     await prisma.externalPayment.deleteMany({ where: { id: { in: externalPaymentIds } } });
     await prisma.journalEntryLine.deleteMany({

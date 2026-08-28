@@ -16,7 +16,7 @@ export class ProformaInvoicesController {
   @RequirePermissions('proformas.create')
   @ApiOperation({ summary: 'Create proforma invoice with lines' })
   create(@Body() dto: CreateProformaInvoiceDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Get()
@@ -44,7 +44,7 @@ export class ProformaInvoicesController {
   @RequirePermissions('proformas.convert')
   @ApiOperation({ summary: 'Convert proforma to sales order (ACCEPTED → CONVERTED)' })
   convertToSalesOrder(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.convertToSalesOrder(id, user.id);
+    return this.service.convertToSalesOrder(id, user);
   }
 
   @Patch(':id')

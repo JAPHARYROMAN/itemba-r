@@ -5,6 +5,7 @@ import { CreateReturnablePackageDto } from './dto/create-returnable-package.dto'
 import { UpdateReturnablePackageDto } from './dto/update-returnable-package.dto';
 import { QueryReturnablePackageDto } from './dto/query-returnable-package.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('westsides/returnable-packages')
@@ -34,6 +35,7 @@ export class ReturnablePackagesController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('returnable_packages.view')
   @ApiOperation({ summary: 'Get returnable package by ID' })
   findOne(@Param('id') id: string) {
@@ -43,7 +45,11 @@ export class ReturnablePackagesController {
   @Patch(':id')
   @RequirePermissions('returnable_packages.manage')
   @ApiOperation({ summary: 'Update returnable package' })
-  update(@Param('id') id: string, @Body() dto: UpdateReturnablePackageDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateReturnablePackageDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 

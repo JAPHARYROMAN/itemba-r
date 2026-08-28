@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../../common/services';
 
 /**
  * WCF (Workers Compensation Fund) audit / exposure register.
@@ -36,12 +38,20 @@ export interface BranchExposureRow {
 
 @Injectable()
 export class WcfAuditService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
-  async exposureRegister(filter: WcfFilter) {
-    if (filter.fromMonth < 1 || filter.fromMonth > 12) throw new BadRequestException('fromMonth must be 1-12');
-    if (filter.toMonth < 1 || filter.toMonth > 12) throw new BadRequestException('toMonth must be 1-12');
-    if (filter.fromMonth > filter.toMonth) throw new BadRequestException('fromMonth must be <= toMonth');
+  async exposureRegister(filter: WcfFilter, user: AuthUser) {
+    if (filter.fromMonth < 1 || filter.fromMonth > 12)
+      throw new BadRequestException('fromMonth must be 1-12');
+    if (filter.toMonth < 1 || filter.toMonth > 12)
+      throw new BadRequestException('toMonth must be 1-12');
+    if (filter.fromMonth > filter.toMonth)
+      throw new BadRequestException('fromMonth must be <= toMonth');
+
+    await this.companyScope.assertCanAccessCompany(user, filter.companyId);
 
     const company = await this.prisma.company.findUnique({
       where: { id: filter.companyId },
@@ -63,7 +73,9 @@ export class WcfAuditService {
             payrollPeriod: {
               OR: [
                 { paymentDate: { gte: periodStart, lt: periodEnd } },
-                { AND: [{ paymentDate: null }, { startDate: { gte: periodStart, lt: periodEnd } }] },
+                {
+                  AND: [{ paymentDate: null }, { startDate: { gte: periodStart, lt: periodEnd } }],
+                },
               ],
             },
           },
@@ -135,10 +147,12 @@ export class WcfAuditService {
       const month = new Date(dt).getUTCMonth() + 1;
       const monthKey = `${branchKey}:${month}`;
 
-      if (!employeeIdsByBranchMonth.has(monthKey)) employeeIdsByBranchMonth.set(monthKey, new Set());
+      if (!employeeIdsByBranchMonth.has(monthKey))
+        employeeIdsByBranchMonth.set(monthKey, new Set());
       employeeIdsByBranchMonth.get(monthKey)!.add(l.payrollEntry.employee.id);
 
-      if (!employeeIdsByBranchTotal.has(branchKey)) employeeIdsByBranchTotal.set(branchKey, new Set());
+      if (!employeeIdsByBranchTotal.has(branchKey))
+        employeeIdsByBranchTotal.set(branchKey, new Set());
       employeeIdsByBranchTotal.get(branchKey)!.add(l.payrollEntry.employee.id);
     }
     for (const [branchKey, row] of byBranch) {
@@ -149,7 +163,9 @@ export class WcfAuditService {
     }
 
     // Sort by branch name; sort each branch's months ascending.
-    const branches = Array.from(byBranch.values()).sort((a, b) => a.branchName.localeCompare(b.branchName));
+    const branches = Array.from(byBranch.values()).sort((a, b) =>
+      a.branchName.localeCompare(b.branchName),
+    );
     for (const b of branches) b.monthlyExposure.sort((a, b) => a.month - b.month);
 
     const grandGross = branches.reduce((s, b) => s + b.totalGross, 0);

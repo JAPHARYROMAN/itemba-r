@@ -1,4 +1,6 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ApprovalStepsService } from './approval-steps.service';
 
 function makeService(prismaOverrides: any = {}) {
@@ -13,6 +15,7 @@ function makeService(prismaOverrides: any = {}) {
     },
     approvalWorkflow: {
       findFirst: jest.fn().mockResolvedValue(null),
+      findUniqueOrThrow: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
     },
     ...prismaOverrides,
   } as any;
@@ -26,6 +29,18 @@ const normalUser: any = {
   roleScopes: [],
   companyAccess: [{ companyId: 'company-1', accessLevel: 'MANAGE' }],
 };
+
+function scopedUser(accessLevel: AccessLevel): AuthUser {
+  return {
+    id: `user-${accessLevel.toLowerCase()}`,
+    email: `${accessLevel.toLowerCase()}@itemba.local`,
+    roles: ['GROUP_APPROVAL_ADMIN'],
+    roleScopes: ['GROUP'],
+    permissions: ['approval_steps.manage'],
+    companyId: null,
+    companyAccess: [{ companyId: 'company-1', accessLevel }],
+  };
+}
 
 describe('ApprovalStepsService company scoping (via parent workflow)', () => {
   it('findOne scopes through the workflow relation, never a top-level companyId (ApprovalStep has no companyId)', async () => {
@@ -67,20 +82,48 @@ describe('ApprovalStepsService company scoping (via parent workflow)', () => {
     });
   });
 
-  it('remove no longer crashes and deletes after a workflow-scoped lookup', async () => {
-    const { service, prisma } = makeService({
+  it('remove captures the parent company before deleting and binds it to the audit row', async () => {
+    const { service, prisma, audit } = makeService({
       approvalStep: {
         findFirst: jest.fn().mockResolvedValue({ id: 'step-1', workflowId: 'wf-1' }),
         delete: jest.fn().mockResolvedValue({ id: 'step-1' }),
       },
     });
 
-    const result = await service.remove('step-1', normalUser);
+    const result = await service.remove('step-1', scopedUser(AccessLevel.WRITE));
 
     expect(result).toEqual({ message: 'Approval step deleted' });
     const findWhere = prisma.approvalStep.findFirst.mock.calls[0][0].where;
     expect(findWhere).not.toHaveProperty('companyId');
+    expect(prisma.approvalWorkflow.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'wf-1' },
+      select: { companyId: true },
+    });
     expect(prisma.approvalStep.delete).toHaveBeenCalledWith({ where: { id: 'step-1' } });
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'DELETE',
+        entityType: 'ApprovalStep',
+        entityId: 'step-1',
+        companyId: 'company-1',
+      }),
+    );
+  });
+
+  it('rejects delete for a GROUP user whose company grant is READ-only', async () => {
+    const { service, prisma, audit } = makeService({
+      approvalStep: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'step-1', workflowId: 'wf-1' }),
+        delete: jest.fn(),
+      },
+    });
+
+    await expect(service.remove('step-1', scopedUser(AccessLevel.READ))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+
+    expect(prisma.approvalStep.delete).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
   });
 
   it('findOne throws NotFound when the step belongs to another company (relation filter excludes it)', async () => {

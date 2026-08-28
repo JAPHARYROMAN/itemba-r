@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { InternalControlsQueryDto } from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -6,6 +17,9 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { InternalControlsService } from './internal-controls.service';
 import { CreateInternalControlDto } from './dto/create-internal-control.dto';
+import { PartialType } from '@nestjs/mapped-types';
+
+class UpdateInternalControlDto extends PartialType(CreateInternalControlDto) {}
 
 @ApiTags('Internal Controls')
 @ApiBearerAuth()
@@ -16,7 +30,7 @@ export class InternalControlsController {
 
   @Get()
   @RequirePermissions('internal_controls.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: InternalControlsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -34,7 +48,11 @@ export class InternalControlsController {
 
   @Patch(':id')
   @RequirePermissions('internal_controls.manage')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateInternalControlDto>, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateInternalControlDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AuditSeverity } from '@prisma/client';
+import { AuditScopeKind, AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateIntegrationProviderDto } from './dto/create-integration-provider.dto';
@@ -49,7 +49,8 @@ export class IntegrationProvidersService {
     const existing = await this.prisma.integrationProvider.findFirst({
       where: { providerCode: dto.providerCode, deletedAt: null },
     });
-    if (existing) throw new BadRequestException(`Provider code "${dto.providerCode}" already exists`);
+    if (existing)
+      throw new BadRequestException(`Provider code "${dto.providerCode}" already exists`);
 
     const record = await this.prisma.integrationProvider.create({ data: { ...dto } });
 
@@ -58,6 +59,8 @@ export class IntegrationProvidersService {
       entityType: 'IntegrationProvider',
       entityId: record.id,
       userId,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       newValue: record as any,
       severity: AuditSeverity.LOW,
     });
@@ -67,13 +70,18 @@ export class IntegrationProvidersService {
 
   async update(id: string, dto: UpdateIntegrationProviderDto, userId: string) {
     const existing = await this.findOneRaw(id);
-    const record = await this.prisma.integrationProvider.update({ where: { id }, data: { ...dto } });
+    const record = await this.prisma.integrationProvider.update({
+      where: { id },
+      data: { ...dto },
+    });
 
     await this.auditLogs.log({
       action: 'INTEGRATION_PROVIDER_UPDATED',
       entityType: 'IntegrationProvider',
       entityId: id,
       userId,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       oldValue: existing as any,
       newValue: record as any,
       severity: AuditSeverity.LOW,
@@ -84,13 +92,18 @@ export class IntegrationProvidersService {
 
   async remove(id: string, userId: string) {
     const existing = await this.findOneRaw(id);
-    await this.prisma.integrationProvider.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.prisma.integrationProvider.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
 
     await this.auditLogs.log({
       action: 'INTEGRATION_PROVIDER_DELETED',
       entityType: 'IntegrationProvider',
       entityId: id,
       userId,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       oldValue: existing as any,
       severity: AuditSeverity.MEDIUM,
     });
@@ -99,7 +112,9 @@ export class IntegrationProvidersService {
   }
 
   private async findOneRaw(id: string) {
-    const record = await this.prisma.integrationProvider.findFirst({ where: { id, deletedAt: null } });
+    const record = await this.prisma.integrationProvider.findFirst({
+      where: { id, deletedAt: null },
+    });
     if (!record) throw new NotFoundException('Integration provider not found');
     return record;
   }

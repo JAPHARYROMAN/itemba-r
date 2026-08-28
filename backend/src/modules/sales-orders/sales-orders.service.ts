@@ -1291,23 +1291,12 @@ export class SalesOrdersService {
 
     const max = Math.min(Math.max(Number(query.limit ?? 500), 1), 1000);
     const accounts = await this.findReceiptAccountRows(query.companyId, allowedTypes);
-    let filtered = this.filterReceiptAccountRows(accounts, query);
+    const filtered = this.filterReceiptAccountRows(accounts, query);
 
-    if (
-      filtered.length === 0 &&
-      paymentMethod === SalesPaymentMethod.CASH &&
-      query.divisionId &&
-      query.branchId
-    ) {
-      const provisioned = await this.ensureBranchCashReceiptAccount(
-        query.companyId,
-        query.divisionId,
-        query.branchId,
-        user,
-      );
-      filtered = [provisioned];
-    }
-
+    // This method backs GET /sales-orders/receipt-accounts and is deliberately
+    // query-only. Missing receipt accounts must be provisioned through the
+    // explicit POST /cash-accounts write path, which retains cash_accounts.manage
+    // permission and WRITE company-scope enforcement.
     return filtered.slice(0, max);
   }
 
@@ -1350,103 +1339,6 @@ export class SalesOrdersService {
         account.branchId === query.branchId
       );
     });
-  }
-
-  private async ensureBranchCashReceiptAccount(
-    companyId: string,
-    divisionId: string,
-    branchId: string,
-    user: AuthUser,
-  ) {
-    const branch = await this.prisma.branch.findFirst({
-      where: {
-        id: branchId,
-        divisionId,
-        division: { companyId },
-        deletedAt: null,
-        isActive: true,
-      },
-      select: { id: true, name: true, code: true, divisionId: true },
-    });
-    if (!branch) {
-      throw new BadRequestException('Branch/location does not belong to the selected division');
-    }
-
-    const existing = await this.prisma.cashAccount.findFirst({
-      where: {
-        companyId,
-        divisionId,
-        branchId,
-        deletedAt: null,
-        accountType: { in: [CashAccountType.CASH_ON_HAND, CashAccountType.PETTY_CASH] },
-      },
-      include: {
-        division: { select: { id: true, name: true, code: true } },
-        branch: { select: { id: true, name: true, code: true } },
-        linkedBank: {
-          select: { id: true, bankName: true, accountName: true, accountNumber: true },
-        },
-      },
-      orderBy: { accountName: 'asc' },
-    });
-
-    if (existing?.isActive) return existing;
-
-    if (existing) {
-      const reactivated = await this.prisma.cashAccount.update({
-        where: { id: existing.id },
-        data: { isActive: true },
-        include: {
-          division: { select: { id: true, name: true, code: true } },
-          branch: { select: { id: true, name: true, code: true } },
-          linkedBank: {
-            select: { id: true, bankName: true, accountName: true, accountNumber: true },
-          },
-        },
-      });
-      await this.auditLogs.log({
-        action: 'CASH_ACCOUNT_REACTIVATE',
-        entityType: 'CashAccount',
-        entityId: reactivated.id,
-        userId: user.id,
-        companyId,
-        oldValue: existing as any,
-        newValue: reactivated as any,
-      });
-      return reactivated;
-    }
-
-    const accountName = `${branch.code || branch.name} Cash Account`;
-    const created = await this.prisma.cashAccount.create({
-      data: {
-        companyId,
-        divisionId,
-        branchId,
-        accountName,
-        accountType: CashAccountType.CASH_ON_HAND,
-        currency: CurrencyCode.TZS,
-        openingBalance: 0,
-        currentBalance: 0,
-        isActive: true,
-        notes: 'Auto-created for Operations Mobile POS cash receipt posting.',
-      },
-      include: {
-        division: { select: { id: true, name: true, code: true } },
-        branch: { select: { id: true, name: true, code: true } },
-        linkedBank: {
-          select: { id: true, bankName: true, accountName: true, accountNumber: true },
-        },
-      },
-    });
-    await this.auditLogs.log({
-      action: 'CASH_ACCOUNT_CREATE',
-      entityType: 'CashAccount',
-      entityId: created.id,
-      userId: user.id,
-      companyId,
-      newValue: created as any,
-    });
-    return created;
   }
 
   async mobilePosBootstrap(user: AuthUser, requestedCompanyId?: string) {

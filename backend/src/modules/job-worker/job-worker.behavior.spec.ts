@@ -124,13 +124,41 @@ describe('JobWorker activation gate (P0-06 regression)', () => {
 });
 
 describe('JobWorkerService queue policy and scheduled backups', () => {
-  function serviceFor(prisma: any, registry = new JobHandlerRegistry()) {
+  function serviceFor(
+    prisma: any,
+    registry = new JobHandlerRegistry(),
+    config: Record<string, string> = {},
+  ) {
     return new JobWorkerService(
       prisma as PrismaService,
       registry,
-      new ConfigService({ JOB_WORKER_ENABLED: 'false' }),
+      new ConfigService({ JOB_WORKER_ENABLED: 'false', ...config }),
     ) as any;
   }
+
+  it('uses a collision-resistant process-specific owner for every worker instance', () => {
+    const first = serviceFor({});
+    const second = serviceFor({});
+
+    expect(first.workerId).toMatch(new RegExp(`^worker-${process.pid}-`));
+    expect(second.workerId).toMatch(new RegExp(`^worker-${process.pid}-`));
+    expect(first.workerId).not.toBe(second.workerId);
+  });
+
+  it('never lets queue retry policy widen a mutation job one-attempt ceiling', () => {
+    const service = serviceFor({});
+    expect(service.maxAttemptsFor({ maxAttempts: 1 }, { retryAttempts: 9 })).toBe(1);
+    expect(service.maxAttemptsFor({ maxAttempts: 5 }, { retryAttempts: 2 })).toBe(2);
+    expect(service.maxAttemptsFor({ maxAttempts: 3 }, null)).toBe(3);
+  });
+
+  it('uses the stale window as a finite handler timeout when no timeout is configured', () => {
+    const service = serviceFor({}, new JobHandlerRegistry(), {
+      JOB_WORKER_STALE_AFTER_SECONDS: '123',
+    });
+
+    expect(service.handlerTimeoutMs(null)).toBe(123_000);
+  });
 
   it('uses queue retryAttempts to dead-letter a failed job deterministically', async () => {
     const registry = new JobHandlerRegistry();
@@ -146,7 +174,7 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
           retryBackoffSeconds: 5,
         }),
       },
-      backgroundJob: { update: jest.fn().mockResolvedValue({}) },
+      backgroundJob: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const service = serviceFor(prisma, registry);
 
@@ -161,9 +189,9 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
       maxAttempts: 5,
     });
 
-    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'job-A' },
+        where: { id: 'job-A', status: 'RUNNING', leaseOwner: expect.any(String) },
         data: expect.objectContaining({
           status: 'DEAD_LETTER',
           attempts: 2,
@@ -185,7 +213,7 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
           isActive: false,
         }),
       },
-      backgroundJob: { update: jest.fn().mockResolvedValue({}) },
+      backgroundJob: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const service = serviceFor(prisma, registry);
 
@@ -201,15 +229,21 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
     });
 
     expect(handler).not.toHaveBeenCalled();
-    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'job-A' },
-        data: { status: 'QUEUED' },
+        where: { id: 'job-A', status: 'RUNNING', leaseOwner: expect.any(String) },
+        data: expect.objectContaining({
+          status: 'QUEUED',
+          leaseOwner: null,
+          leaseHeartbeatAt: null,
+        }),
       }),
     );
   });
 
   it('moves stale running jobs to retrying and increments attempts', async () => {
+    const startedAt = new Date('2026-08-25T00:00:00.000Z');
+    const leaseHeartbeatAt = new Date('2026-08-25T00:05:00.000Z');
     const staleJob = {
       id: 'job-stale-A',
       jobType: 'DATA_EXPORT',
@@ -219,11 +253,14 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
       correlationId: 'export-A',
       attempts: 0,
       maxAttempts: 3,
+      startedAt,
+      leaseOwner: 'worker-dead-A',
+      leaseHeartbeatAt,
     };
     const prisma = {
       backgroundJob: {
         findMany: jest.fn().mockResolvedValue([staleJob]),
-        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       jobQueueConfig: {
         findMany: jest
@@ -238,13 +275,31 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
 
     await expect(service.recoverStale()).resolves.toBe(1);
 
-    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+    expect(prisma.backgroundJob.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'job-stale-A' },
+        where: {
+          status: 'RUNNING',
+          OR: [
+            { leaseHeartbeatAt: { lt: expect.any(Date) } },
+            { leaseHeartbeatAt: null, startedAt: { lt: expect.any(Date) } },
+          ],
+        },
+      }),
+    );
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'job-stale-A',
+          status: 'RUNNING',
+          leaseOwner: 'worker-dead-A',
+          leaseHeartbeatAt,
+        },
         data: expect.objectContaining({
           status: 'RETRYING',
           attempts: 1,
           startedAt: null,
+          leaseOwner: null,
+          leaseHeartbeatAt: null,
           errorMessage: 'Worker lease expired before completion',
         }),
       }),
@@ -253,6 +308,8 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
   });
 
   it('dead-letters stale jobs on their final attempt and marks related exports failed', async () => {
+    const startedAt = new Date('2026-08-25T00:00:00.000Z');
+    const leaseHeartbeatAt = new Date('2026-08-25T00:05:00.000Z');
     const staleJob = {
       id: 'job-stale-final',
       jobType: 'DATA_EXPORT',
@@ -262,11 +319,14 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
       correlationId: 'export-A',
       attempts: 2,
       maxAttempts: 3,
+      startedAt,
+      leaseOwner: 'worker-dead-final',
+      leaseHeartbeatAt,
     };
     const prisma = {
       backgroundJob: {
         findMany: jest.fn().mockResolvedValue([staleJob]),
-        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       jobQueueConfig: {
         findMany: jest
@@ -281,13 +341,20 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
 
     await expect(service.recoverStale()).resolves.toBe(1);
 
-    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'job-stale-final' },
+        where: {
+          id: 'job-stale-final',
+          status: 'RUNNING',
+          leaseOwner: 'worker-dead-final',
+          leaseHeartbeatAt,
+        },
         data: expect.objectContaining({
           status: 'DEAD_LETTER',
           attempts: 3,
           scheduledAt: null,
+          leaseOwner: null,
+          leaseHeartbeatAt: null,
         }),
       }),
     );
@@ -300,6 +367,50 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
         }),
       }),
     );
+  });
+
+  it('does not recover or finalize related work after losing the stale-lease CAS', async () => {
+    const leaseHeartbeatAt = new Date('2026-08-25T00:05:00.000Z');
+    const prisma = {
+      backgroundJob: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'job-stale-cancelled',
+            jobType: 'DATA_EXPORT',
+            queueName: 'data-exports',
+            companyId: 'company-A',
+            payload: { exportLogId: 'export-A' },
+            correlationId: 'export-A',
+            attempts: 2,
+            maxAttempts: 3,
+            startedAt: new Date('2026-08-25T00:00:00.000Z'),
+            leaseOwner: 'worker-dead-cancelled',
+            leaseHeartbeatAt,
+          },
+        ]),
+        // Cancellation or a concurrent heartbeat won before stale recovery.
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      jobQueueConfig: {
+        findMany: jest.fn().mockResolvedValue([{ queueName: 'data-exports', retryAttempts: 3 }]),
+      },
+      dataExportLog: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = serviceFor(prisma);
+
+    await expect(service.recoverStale()).resolves.toBe(0);
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'job-stale-cancelled',
+          status: 'RUNNING',
+          leaseOwner: 'worker-dead-cancelled',
+          leaseHeartbeatAt,
+        }),
+      }),
+    );
+    expect(prisma.dataExportLog.update).not.toHaveBeenCalled();
   });
 
   it('enforces configured queue concurrency while leasing candidates', async () => {
@@ -339,9 +450,152 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
 
     expect(tx.backgroundJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { in: ['job-A'] } },
+        where: {
+          id: { in: ['job-A'] },
+          status: { in: ['QUEUED', 'RETRYING'] },
+        },
+        data: expect.objectContaining({
+          status: 'RUNNING',
+          leaseOwner: expect.any(String),
+          leaseHeartbeatAt: expect.any(Date),
+        }),
       }),
     );
+  });
+
+  it('renews the persisted lease at an explicit handler checkpoint', async () => {
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', async (context) => {
+      await context.checkpoint?.();
+      return { data: { ok: true } };
+    });
+    const prisma = {
+      jobQueueConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      backgroundJob: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-checkpoint',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+      leaseOwner: 'worker-checkpoint',
+    });
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'job-checkpoint',
+        status: 'RUNNING',
+        leaseOwner: 'worker-checkpoint',
+      },
+      data: { leaseHeartbeatAt: expect.any(Date) },
+    });
+  });
+
+  it('does not start a handler when cancellation wins before dispatch', async () => {
+    const handler = jest.fn().mockResolvedValue({});
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', handler);
+    const prisma = {
+      jobQueueConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      backgroundJob: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-cancelled-before-dispatch',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+      leaseOwner: 'worker-original',
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'job-cancelled-before-dispatch',
+        status: 'RUNNING',
+        leaseOwner: 'worker-original',
+      },
+      data: { leaseHeartbeatAt: expect.any(Date) },
+    });
+  });
+
+  it('aborts a running handler when its periodic heartbeat loses the lease', async () => {
+    jest.useFakeTimers();
+    try {
+      const started = deferred();
+      let observedSignal: AbortSignal | undefined;
+      const registry = new JobHandlerRegistry();
+      registry.register(
+        'DATA_EXPORT',
+        (context) =>
+          new Promise((_resolve, reject) => {
+            observedSignal = context.signal;
+            started.resolve();
+            context.signal?.addEventListener(
+              'abort',
+              () => reject(Object.assign(new Error('provider aborted'), { name: 'AbortError' })),
+              { once: true },
+            );
+          }),
+      );
+      const prisma = {
+        jobQueueConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+        backgroundJob: {
+          updateMany: jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 }),
+        },
+      };
+      const service = serviceFor(prisma, registry, {
+        JOB_WORKER_STALE_AFTER_SECONDS: '0.03',
+      });
+
+      const running = service.runJob({
+        id: 'job-lease-lost',
+        jobType: 'DATA_EXPORT',
+        queueName: 'data-exports',
+        companyId: null,
+        payload: {},
+        correlationId: null,
+        attempts: 0,
+        maxAttempts: 3,
+        leaseOwner: 'worker-original',
+      });
+      await started.promise;
+      await jest.advanceTimersByTimeAsync(11);
+      await running;
+
+      expect(observedSignal?.aborted).toBe(true);
+      expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'job-lease-lost',
+          status: 'RUNNING',
+          leaseOwner: 'worker-original',
+        },
+        data: { leaseHeartbeatAt: expect.any(Date) },
+      });
+      expect(prisma.backgroundJob.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'job-lease-lost',
+            status: 'RUNNING',
+            leaseOwner: 'worker-original',
+          },
+          data: expect.objectContaining({ status: 'RETRYING' }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('fails a timed-out handler through the retry path', async () => {
@@ -357,7 +611,7 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
           timeoutSeconds: 0.001,
         }),
       },
-      backgroundJob: { update: jest.fn().mockResolvedValue({}) },
+      backgroundJob: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const service = serviceFor(prisma, registry);
 
@@ -372,14 +626,84 @@ describe('JobWorkerService queue policy and scheduled backups', () => {
       maxAttempts: 3,
     });
 
-    expect(prisma.backgroundJob.update).toHaveBeenCalledWith(
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'job-timeout' },
+        where: { id: 'job-timeout', status: 'RUNNING', leaseOwner: expect.any(String) },
         data: expect.objectContaining({
           status: 'RETRYING',
           attempts: 1,
           errorMessage: expect.stringContaining('exceeded timeout'),
         }),
+      }),
+    );
+  });
+
+  it('does not overwrite cancellation with a late handler completion', async () => {
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', async () => ({ data: { finished: true } }));
+    const prisma = {
+      jobQueueConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      backgroundJob: {
+        updateMany: jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 }),
+      },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-cancelled',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+    });
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'job-cancelled',
+          status: 'RUNNING',
+          leaseOwner: expect.any(String),
+        },
+        data: expect.objectContaining({ status: 'COMPLETED' }),
+      }),
+    );
+  });
+
+  it('does not overwrite cancellation with a late handler failure', async () => {
+    const registry = new JobHandlerRegistry();
+    registry.register('DATA_EXPORT', async () => {
+      throw new Error('late failure');
+    });
+    const prisma = {
+      jobQueueConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      backgroundJob: {
+        updateMany: jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 }),
+      },
+    };
+    const service = serviceFor(prisma, registry);
+
+    await service.runJob({
+      id: 'job-cancelled-after-failure',
+      jobType: 'DATA_EXPORT',
+      queueName: 'data-exports',
+      companyId: null,
+      payload: {},
+      correlationId: null,
+      attempts: 0,
+      maxAttempts: 3,
+    });
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'job-cancelled-after-failure',
+          status: 'RUNNING',
+          leaseOwner: expect.any(String),
+        },
+        data: expect.objectContaining({ status: 'RETRYING', errorMessage: 'late failure' }),
       }),
     );
   });
@@ -519,3 +843,11 @@ describe('BackupRunJobHandler artifact safety', () => {
     ).toBe('postgresql://user:pass@postgres:5432/itemba_r?sslmode=require');
   });
 });
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}

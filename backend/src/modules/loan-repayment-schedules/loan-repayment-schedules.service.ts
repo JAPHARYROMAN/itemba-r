@@ -87,13 +87,18 @@ export class LoanRepaymentSchedulesService {
     await this.companyScope.assertCanAccessCompany(user, loan.companyId, AccessLevel.WRITE);
 
     // Strip client-controlled scoping fields; derive them from the loan.
-    const { companyId: _companyId, loanDebtId: _loanDebtId, loanId: _loanId, createdById: _createdById, ...rest } = dto ?? {};
+    const {
+      companyId: _companyId,
+      loanDebtId: _loanDebtId,
+      loanId: _loanId,
+      createdById: _createdById,
+      ...rest
+    } = dto ?? {};
     const item = await this.prisma.loanRepaymentSchedule.create({
       data: {
         ...rest,
         companyId: loan.companyId,
         loanDebtId: loan.id,
-        createdById: user.id,
       },
     });
     await this.auditLogs.log({
@@ -118,8 +123,11 @@ export class LoanRepaymentSchedulesService {
     });
     if (!loan) throw new NotFoundException('Loan not found');
     if (!loan.companyId) {
-      throw new BadRequestException('Loans without a companyId cannot have an auto-generated schedule');
+      throw new BadRequestException(
+        'Loans without a companyId cannot have an auto-generated schedule',
+      );
     }
+    await this.companyScope.assertCanAccessCompany(user, loan.companyId, AccessLevel.WRITE);
 
     const existing = await this.prisma.loanRepaymentSchedule.count({
       where: { loanDebtId: loanId, deletedAt: null },
@@ -136,11 +144,7 @@ export class LoanRepaymentSchedulesService {
     // periodic interest rate and the due-date step must all follow
     // repaymentFrequency, not a hard-coded month.
     const profile = this.frequencyProfile(loan.repaymentFrequency);
-    const periodCount = this.computePeriodCount(
-      loan.disbursementDate,
-      loan.maturityDate,
-      profile,
-    );
+    const periodCount = this.computePeriodCount(loan.disbursementDate, loan.maturityDate, profile);
     if (periodCount <= 0) {
       throw new BadRequestException('Loan maturityDate must be after disbursementDate');
     }
@@ -150,8 +154,7 @@ export class LoanRepaymentSchedulesService {
     const periodicRate =
       profile.monthsPerPeriod > 0
         ? annualRate / profile.periodsPerYear
-        : annualRate *
-          (this.tenureMonths(loan.disbursementDate, loan.maturityDate) / 12);
+        : annualRate * (this.tenureMonths(loan.disbursementDate, loan.maturityDate) / 12);
     const installments = this.amortize(principal, periodicRate, periodCount);
 
     const companyId = loan.companyId;
@@ -196,7 +199,11 @@ export class LoanRepaymentSchedulesService {
       },
     });
 
-    return { installments: created.length };
+    // Return the exact created identities as well as the legacy count. The IDs
+    // let governed callers bind every additive row to recovery/audit evidence
+    // without a racy follow-up query; existing clients that only read
+    // `installments` remain compatible.
+    return { installments: created.length, scheduleIds: created.map((row) => row.id) };
   }
 
   async getPayments(scheduleId: string) {
@@ -214,11 +221,7 @@ export class LoanRepaymentSchedulesService {
   async recordPayment(scheduleId: string, dto: any, user: AuthUser) {
     // ITMB-026: load the schedule and assert the caller can write to its company.
     const scheduleMeta = await this.findOne(scheduleId);
-    await this.companyScope.assertCanAccessCompany(
-      user,
-      scheduleMeta.companyId,
-      AccessLevel.WRITE,
-    );
+    await this.companyScope.assertCanAccessCompany(user, scheduleMeta.companyId, AccessLevel.WRITE);
 
     const amount = Number(dto.amount);
     if (!(amount > 0)) throw new BadRequestException('amount must be positive');
@@ -379,7 +382,11 @@ export class LoanRepaymentSchedulesService {
    * Uses `EMI = P × r × (1+r)^n / ((1+r)^n - 1)`. Falls back to flat principal
    * split when r ≈ 0 to avoid divide-by-zero.
    */
-  private amortize(principal: number, periodicRate: number, n: number): Array<{ principal: number; interest: number }> {
+  private amortize(
+    principal: number,
+    periodicRate: number,
+    n: number,
+  ): Array<{ principal: number; interest: number }> {
     const rounded = (x: number) => Math.round(x * 100) / 100;
     if (periodicRate < 1e-9) {
       const equal = rounded(principal / n);
@@ -465,11 +472,7 @@ export class LoanRepaymentSchedulesService {
    * Number of whole repayment periods between disbursement and maturity for the
    * given cadence. BULLET/OTHER (monthsPerPeriod=0) collapse to a single period.
    */
-  private computePeriodCount(
-    start: Date,
-    end: Date,
-    profile: { monthsPerPeriod: number },
-  ): number {
+  private computePeriodCount(start: Date, end: Date, profile: { monthsPerPeriod: number }): number {
     const months = this.tenureMonths(start, end);
     if (months <= 0) return 0;
     if (profile.monthsPerPeriod <= 0) return 1; // BULLET / OTHER → single balloon

@@ -3,10 +3,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { MsaidiziTaskScopeGuard } from './common/guards/msaidizi-task-scope.guard';
 
 import { envValidate } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
-import { redisConfig } from '@common/config/redis.config';
+import { redisConfig } from './common/config/redis.config';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -134,6 +135,13 @@ import { MobileSessionsModule } from './modules/mobile-sessions/mobile-sessions.
 import { OfflineSyncModule } from './modules/offline-sync/offline-sync.module';
 import { MobilePosLiteModule } from './modules/mobile-pos-lite/mobile-pos-lite.module';
 import { MsaidiziModule } from './modules/msaidizi/msaidizi.module';
+import { MsaidiziTaskRuntimeModule } from './modules/msaidizi-task-runtime/msaidizi-task-runtime.module';
+import { MsaidiziArtifactsModule } from './modules/msaidizi-artifacts/msaidizi-artifacts.module';
+import { MsaidiziDevicesModule } from './modules/msaidizi-devices/msaidizi-devices.module';
+import { MsaidiziControlPlaneModule } from './modules/msaidizi-control-plane/msaidizi-control-plane.module';
+import { MsaidiziUpdatesModule } from './modules/msaidizi-updates/msaidizi-updates.module';
+import { MsaidiziRecoveryModule } from './modules/msaidizi-recovery/msaidizi-recovery.module';
+import { MsaidiziAuditSignerModule } from './modules/msaidizi-audit-signer/msaidizi-audit-signer.module';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { ExternalPaymentsModule } from './modules/external-payments/external-payments.module';
 import { ExternalMessagesModule } from './modules/external-messages/external-messages.module';
@@ -420,15 +428,23 @@ import { RolesGuard } from './common/guards/roles.guard';
     RefundsModule,
     // ── UX Backend Wave 2b — Customer Payments ─────────────────────────────────
     CustomerPaymentsModule,
-    // ── Msaidizi — agent layer (inert unless MSAIDIZI_ENABLED=true) ────────────
+    // ── Msaidizi — chat and autonomy each remain independently gated ──────────
     MsaidiziModule,
+    MsaidiziTaskRuntimeModule,
+    MsaidiziArtifactsModule,
+    MsaidiziDevicesModule,
+    MsaidiziControlPlaneModule,
+    MsaidiziUpdatesModule,
+    MsaidiziRecoveryModule,
+    MsaidiziAuditSignerModule,
     // M16 - QA, Launch Readiness, Documentation, Training, Support
   ],
   controllers: [HealthController],
   providers: [
-    // Guard execution order: Throttler → JWT → Roles → Permissions
+    // Guard execution order: Throttler → JWT → exact task scope → Roles → Permissions
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: MsaidiziTaskScopeGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],

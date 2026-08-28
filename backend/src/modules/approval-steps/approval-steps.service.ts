@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { companyWhereForUser } from '../../common/services';
+import { assertCanAccessCompanyFromUser, companyWhereForUser } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalStepDto } from './dto/create-approval-step.dto';
@@ -60,9 +61,21 @@ export class ApprovalStepsService {
   }
 
   async remove(id: string, user: AuthUser) {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
+    const workflow = await this.prisma.approvalWorkflow.findUniqueOrThrow({
+      where: { id: existing.workflowId },
+      select: { companyId: true },
+    });
+    assertCanAccessCompanyFromUser(user, workflow.companyId, AccessLevel.WRITE);
     await this.prisma.approvalStep.delete({ where: { id } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'ApprovalStep', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'ApprovalStep',
+      entityId: id,
+      companyId: workflow.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
+    });
     return { message: 'Approval step deleted' };
   }
 }

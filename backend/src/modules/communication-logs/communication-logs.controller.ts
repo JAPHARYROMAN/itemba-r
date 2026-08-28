@@ -1,5 +1,7 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { CommunicationLogsQueryDto } from '../../common/dto/resource-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { CommunicationLogsService } from './communication-logs.service';
 import { CreateCommunicationLogDto } from './dto/create-communication-log.dto';
@@ -11,11 +13,12 @@ export class CommunicationLogsController {
 
   @Get()
   @RequirePermissions('communication_logs.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: CommunicationLogsQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('communication_logs.view')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
@@ -29,7 +32,11 @@ export class CommunicationLogsController {
 
   @Put(':id')
   @RequirePermissions('communication_logs.update')
-  update(@Param('id') id: string, @Body() dto: UpdateCommunicationLogDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCommunicationLogDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

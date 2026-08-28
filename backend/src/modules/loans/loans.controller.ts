@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UseInterceptors,
+} from '@nestjs/common';
 import { LoansService } from './loans.service';
 import { CreateLoanDto } from './dto/create-loan.dto';
 import { UpdateLoanDto } from './dto/update-loan.dto';
@@ -7,16 +18,21 @@ import { RecordRepaymentDto } from './dto/record-repayment.dto';
 import { MarkLoanStatusDto } from './dto/mark-loan-status.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
+import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
 
 @Controller('loans')
+@SensitiveAccess('Loans')
 @UseInterceptors(SensitiveAccessInterceptor)
 export class LoansController {
   constructor(private readonly service: LoansService) {}
 
   @Get('summary')
   @RequirePermissions('loans.read')
-  getSummary(@CurrentUser() user: AuthUser) { return this.service.getSummary(user); }
+  getSummary(@CurrentUser() user: AuthUser) {
+    return this.service.getSummary(user);
+  }
 
   @Get('upcoming-repayments')
   @RequirePermissions('loans.read')
@@ -26,7 +42,9 @@ export class LoansController {
 
   @Get('overdue')
   @RequirePermissions('loans.read')
-  getOverdue(@CurrentUser() user: AuthUser) { return this.service.getOverdue(user); }
+  getOverdue(@CurrentUser() user: AuthUser) {
+    return this.service.getOverdue(user);
+  }
 
   @Get()
   @RequirePermissions('loans.read')
@@ -35,12 +53,14 @@ export class LoansController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('loans.read')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
   }
 
   @Get(':id/audit-history')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('loans.read')
   getAuditHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.getAuditHistory(id, user);
@@ -60,13 +80,21 @@ export class LoansController {
 
   @Post(':id/repayments')
   @RequirePermissions('loans.manage')
-  recordRepayment(@Param('id') id: string, @Body() dto: RecordRepaymentDto, @CurrentUser() user: AuthUser) {
+  recordRepayment(
+    @Param('id') id: string,
+    @Body() dto: RecordRepaymentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.recordRepayment(id, dto, user);
   }
 
   @Patch(':id/status')
   @RequirePermissions('loans.manage')
-  markStatus(@Param('id') id: string, @Body() dto: MarkLoanStatusDto, @CurrentUser() user: AuthUser) {
+  markStatus(
+    @Param('id') id: string,
+    @Body() dto: MarkLoanStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.markStatus(id, dto, user);
   }
 

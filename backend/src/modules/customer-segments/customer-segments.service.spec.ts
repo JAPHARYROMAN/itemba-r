@@ -257,7 +257,7 @@ describe('CustomerSegmentsService company scoping', () => {
 
   describe('addMember', () => {
     it('asserts WRITE and keeps the customer-belongs-to-company guard', async () => {
-      const { service, prisma, companyScope } = makeService();
+      const { service, prisma, companyScope, auditLogs } = makeService();
       prisma.customerSegment.findFirst.mockResolvedValue({ id: 'seg1', companyId: 'c1' });
       prisma.customer.findFirst.mockResolvedValue({ id: 'cust1', companyId: 'c1' });
 
@@ -269,6 +269,14 @@ describe('CustomerSegmentsService company scoping', () => {
         AccessLevel.WRITE,
       );
       expect(prisma.customerSegmentMembership.upsert).toHaveBeenCalled();
+      expect(auditLogs.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'ADD_MEMBER',
+          entityType: 'CustomerSegment',
+          entityId: 'seg1',
+          companyId: 'c1',
+        }),
+      );
     });
 
     it('rejects a customer from a different company', async () => {
@@ -296,7 +304,7 @@ describe('CustomerSegmentsService company scoping', () => {
 
   describe('removeMember', () => {
     it('asserts WRITE before deleting the membership', async () => {
-      const { service, prisma, companyScope } = makeService();
+      const { service, prisma, companyScope, auditLogs } = makeService();
       prisma.customerSegment.findFirst.mockResolvedValue({ id: 'seg1', companyId: 'c1' });
 
       await service.removeMember('seg1', 'cust1', user);
@@ -309,6 +317,14 @@ describe('CustomerSegmentsService company scoping', () => {
       expect(prisma.customerSegmentMembership.deleteMany).toHaveBeenCalledWith({
         where: { customerSegmentId: 'seg1', customerId: 'cust1' },
       });
+      expect(auditLogs.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'REMOVE_MEMBER',
+          entityType: 'CustomerSegment',
+          entityId: 'seg1',
+          companyId: 'c1',
+        }),
+      );
     });
 
     it('throws NotFound for a foreign-tenant segment before deleting', async () => {

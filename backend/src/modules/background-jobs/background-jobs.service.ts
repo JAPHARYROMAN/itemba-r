@@ -1,9 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, AuditSeverity, BackgroundJobStatus, Prisma } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  AccessLevel,
+  AuditSeverity,
+  BackgroundJobStatus,
+  BackgroundJobType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService, ObservabilityBudgetService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+
+const MSAIDIZI_RUNTIME_JOB_TYPES = new Set<BackgroundJobType>([
+  BackgroundJobType.MSAIDIZI_TASK_STEP,
+  BackgroundJobType.MSAIDIZI_REASONING_CHECKPOINT,
+]);
 
 @Injectable()
 export class BackgroundJobsService {
@@ -44,6 +55,7 @@ export class BackgroundJobsService {
   }
 
   async enqueue(dto: any, user: AuthUser) {
+    this.assertExternallyMutableJobType(dto.jobType);
     const companyId = await this.resolveTargetCompanyId(user, dto.companyId);
 
     if (dto.idempotencyKey) {
@@ -51,6 +63,7 @@ export class BackgroundJobsService {
         where: { idempotencyKey: dto.idempotencyKey },
       });
       if (existing) {
+        this.assertExternallyMutableJobType(existing.jobType);
         await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
         if (!this.isTerminal(existing.status)) {
           return existing;
@@ -116,6 +129,7 @@ export class BackgroundJobsService {
 
   async retry(id: string, user: AuthUser) {
     const job = await this.findOne(id, user);
+    this.assertExternallyMutableJobType(job.jobType);
     this.observabilityBudget.assertRetryAllowed(job);
     const record = await this.prisma.backgroundJob.update({
       where: { id },
@@ -142,6 +156,7 @@ export class BackgroundJobsService {
 
   async cancel(id: string, user: AuthUser) {
     const job = await this.findOne(id, user);
+    this.assertExternallyMutableJobType(job.jobType);
     this.observabilityBudget.assertCancelAllowed(job);
     const record = await this.prisma.backgroundJob.update({
       where: { id },
@@ -159,7 +174,8 @@ export class BackgroundJobsService {
   }
 
   async deadLetter(id: string, user: AuthUser) {
-    await this.findOne(id, user);
+    const job = await this.findOne(id, user);
+    this.assertExternallyMutableJobType(job.jobType);
     const record = await this.prisma.backgroundJob.update({
       where: { id },
       data: { status: 'DEAD_LETTER' },
@@ -217,5 +233,13 @@ export class BackgroundJobsService {
       BackgroundJobStatus.DEAD_LETTER,
     ];
     return terminalStatuses.includes(status);
+  }
+
+  private assertExternallyMutableJobType(jobType: BackgroundJobType | undefined): void {
+    if (jobType && MSAIDIZI_RUNTIME_JOB_TYPES.has(jobType)) {
+      throw new BadRequestException(
+        'Durable Msaidizi runtime jobs are governed by the task state machine and cannot be enqueued, retried, cancelled, or dead-lettered directly',
+      );
+    }
   }
 }

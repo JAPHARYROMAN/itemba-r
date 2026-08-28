@@ -1,4 +1,5 @@
 import { IsArray, IsIn, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
+import { PickType } from '@nestjs/swagger';
 
 /**
  * Validated payload for the print-engine render endpoints (render / render-pdf /
@@ -41,3 +42,12 @@ export class RenderDocumentDto {
   @IsString()
   sheetName?: string;
 }
+
+/** Strict subset consumed by the non-binary `/render` operation. */
+export class RenderInlineDocumentDto extends PickType(RenderDocumentDto, [
+  'templateId',
+  'entityType',
+  'entityId',
+  'data',
+  'outputFormat',
+] as const) {}

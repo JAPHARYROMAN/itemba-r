@@ -1271,7 +1271,7 @@ export class PurchaseOrdersService {
         }
       }
 
-      return tx.purchaseOrder.update({
+      const updated = await tx.purchaseOrder.update({
         where: { id },
         data: {
           status: 'RECEIVED',
@@ -1286,17 +1286,22 @@ export class PurchaseOrdersService {
           }),
         },
       });
-    });
 
-    await this.auditLogs.log({
-      action: 'PURCHASE_ORDER_RECEIVE',
-      entityType: 'PurchaseOrder',
-      entityId: id,
-      userId,
-      companyId: record.companyId,
-      oldValue: { status: existing.status } as any,
-      newValue: { status: 'RECEIVED' } as any,
-      severity: AuditSeverity.MEDIUM,
+      // Receiving can move stock, fuel, cash/AP, and the PO lifecycle. Bind the
+      // immutable audit row to that exact transaction so an audit-store failure
+      // cannot leave any of those effects committed without attribution.
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'PURCHASE_ORDER_RECEIVE',
+        entityType: 'PurchaseOrder',
+        entityId: id,
+        userId,
+        companyId: updated.companyId,
+        oldValue: { status: existing.status } as any,
+        newValue: { status: 'RECEIVED' } as any,
+        severity: AuditSeverity.MEDIUM,
+      });
+
+      return updated;
     });
 
     return record;

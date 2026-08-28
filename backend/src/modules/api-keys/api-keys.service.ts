@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessLevel, AuditSeverity, ApiKeyStatus } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -75,6 +75,7 @@ export class ApiKeysService {
 
   async create(dto: CreateApiKeyDto, user: AuthUser) {
     const client = await this.getApiClientForAccess(dto.apiClientId, user, AccessLevel.MANAGE);
+    this.assertScopesAllowed(dto.scopes, client.allowedScopes);
     const rawKey = crypto.randomBytes(32).toString('hex');
     const keyPrefix = rawKey.substring(0, 8);
     const keyHash = hashApiKey(rawKey, this.config.getOrThrow<string>('APP_ENCRYPTION_KEY'));
@@ -143,10 +144,34 @@ export class ApiKeysService {
   private async getApiClientForAccess(apiClientId: string, user: AuthUser, minimum: AccessLevel) {
     const client = await this.prisma.apiClient.findFirst({
       where: { id: apiClientId, deletedAt: null },
-      select: { id: true, companyId: true },
+      select: { id: true, companyId: true, allowedScopes: true },
     });
     if (!client) throw new NotFoundException('API client not found');
     await this.companyScope.assertCanAccessCompany(user, client.companyId, minimum);
     return client;
+  }
+
+  private assertScopesAllowed(requestedScopes: string[], allowedScopes: unknown): void {
+    if (
+      !Array.isArray(requestedScopes) ||
+      !requestedScopes.every((scope) => typeof scope === 'string')
+    ) {
+      throw new BadRequestException('Requested API key scopes are invalid');
+    }
+
+    // allowedScopes is stored as JSON, so treat malformed persisted policy as
+    // deny-all rather than accidentally minting a more privileged key.
+    if (
+      !Array.isArray(allowedScopes) ||
+      !allowedScopes.every((scope) => typeof scope === 'string')
+    ) {
+      throw new BadRequestException('API client allowed scopes are invalid');
+    }
+
+    const allowed = new Set(allowedScopes);
+    const disallowed = requestedScopes.filter((scope) => !allowed.has(scope));
+    if (disallowed.length > 0) {
+      throw new BadRequestException('Requested API key scopes exceed the API client allowance');
+    }
   }
 }

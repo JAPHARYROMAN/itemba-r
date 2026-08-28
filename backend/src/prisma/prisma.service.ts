@@ -1,5 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { PersistenceSecretGuard } from '../common/services/persistence-secret-guard.service';
+import { sanitizeMsaidiziPersistenceWrite } from './msaidizi-persistence-secret-boundary';
 
 const SOFT_DELETE_MODELS = new Set(
   Prisma.dmmf.datamodel.models
@@ -31,8 +33,12 @@ function withLiveRecordFilter(where: unknown) {
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
-  constructor() {
+  constructor(private readonly persistenceSecrets: PersistenceSecretGuard) {
     super();
+    this.$use(async (params, next) => {
+      sanitizeMsaidiziPersistenceWrite(params, this.persistenceSecrets);
+      return next(params);
+    });
     this.$use(async (params, next) => {
       if (!params.model || !SOFT_DELETE_MODELS.has(params.model)) return next(params);
 

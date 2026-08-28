@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { AlertRulesQueryDto } from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -6,6 +17,9 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { AlertRulesService } from './alert-rules.service';
 import { CreateAlertRuleDto } from './dto/create-alert-rule.dto';
+import { PartialType } from '@nestjs/mapped-types';
+
+class UpdateAlertRuleDto extends PartialType(CreateAlertRuleDto) {}
 
 @ApiTags('Alert Rules')
 @ApiBearerAuth()
@@ -16,7 +30,7 @@ export class AlertRulesController {
 
   @Get()
   @RequirePermissions('alert_rules.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: AlertRulesQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -34,7 +48,7 @@ export class AlertRulesController {
 
   @Patch(':id')
   @RequirePermissions('alert_rules.manage')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateAlertRuleDto>, @CurrentUser() user: AuthUser) {
+  update(@Param('id') id: string, @Body() dto: UpdateAlertRuleDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 

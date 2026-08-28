@@ -43,12 +43,20 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { actionArgumentDigest, canonicaliseActionValue } from '../../common/utils/canonical-digest';
 import { ReversibilityTier } from '../../common/capabilities/reversibility';
 import { CapabilityInvoker } from './capability-invoker';
 import { narrowCapabilities } from './domain-filter';
 import { mintGrantId } from './dto/approval-grants';
 import { ManifestProvider } from './manifest.provider';
-import { ModelClient, ModelMessage, ModelToolUseBlock, ModelUsage } from './model-client';
+import { resolveMeasuredFastPath } from './measured-fast-path';
+import {
+  ModelClient,
+  ModelMessage,
+  ModelTextBlock,
+  ModelToolUseBlock,
+  ModelUsage,
+} from './model-client';
 import { MsaidiziConfig, WriteMode } from './msaidizi.config';
 import { buildSystemPrompt, fenceToolResult } from './prompts';
 import {
@@ -448,6 +456,12 @@ export class MsaidiziService {
 
     const registry = this.registryFor(request);
     const byName = indexByToolName(registry);
+    const fastPath =
+      this.config.searchEnabled &&
+      request.restrictTo === undefined &&
+      (request.confirmed?.length ?? 0) === 0
+        ? resolveMeasuredFastPath(latestUserTurnText(request.messages), registry)
+        : undefined;
 
     /**
      * The grants this request offers, and which of them are still in hand.
@@ -495,9 +509,25 @@ export class MsaidiziService {
       userName: request.user.fullName,
       today: new Date().toISOString().slice(0, 10),
     });
+    if (fastPath) {
+      // This block is intentionally after the cache breakpoint in
+      // `buildSystemPrompt`. The declared tools and stable system prefix remain
+      // identical across the caller's turns; only the volatile routing decision
+      // varies with the current request.
+      system.push({
+        type: 'text',
+        text:
+          `Measured routing selected ${fastPath.toolName} for this request. ` +
+          `Use that source only. One successful read is sufficient; if it fails, ` +
+          `you may adjust its arguments and retry it once, then answer honestly from the result.`,
+      });
+    }
 
     let toolCalls = 0;
     let writeCalls = 0;
+    let fastPathAttempts = 0;
+    let fastPathComplete = false;
+    let fastPathProtocolViolations = 0;
     const usage: RunUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -518,6 +548,11 @@ export class MsaidiziService {
       : registry.map((entry) => entry.tool);
 
     for (;;) {
+      // Captured at the start of the provider turn. `fastPathComplete` can become
+      // true while processing a parallel first response, but only a tool_use
+      // emitted in a turn that was explicitly declared answer-only is a terminal
+      // violation of `tool_choice: none`.
+      const answerOnlyFastPathTurn = Boolean(fastPath && fastPathComplete);
       let response;
       try {
         response = await this.model.createMessage({
@@ -525,6 +560,15 @@ export class MsaidiziService {
           messages,
           tools: declaredTools,
           maxTokens: this.config.maxTokens,
+          toolChoice: fastPath
+            ? answerOnlyFastPathTurn
+              ? { type: 'none' }
+              : {
+                  type: 'tool',
+                  name: fastPath.toolName,
+                  disableParallelToolUse: true,
+                }
+            : undefined,
         });
       } catch (err) {
         this.logger.error(`Model request failed: ${(err as Error)?.message}`);
@@ -543,8 +587,14 @@ export class MsaidiziService {
         usage.cacheCreationInputTokens += response.usage.cacheCreationInputTokens;
       }
 
+      // During an exact-tool turn, prose has not been grounded in the required
+      // read yet. Keep it in the provider transcript when a tool call follows,
+      // but do not stream it to the user. The answer-only turn is where grounded
+      // prose becomes visible.
+      const exposeResponseText =
+        !fastPath || answerOnlyFastPathTurn || response.stopReason === 'refusal';
       for (const block of response.content) {
-        if (block.type === 'text' && block.text.trim()) {
+        if (exposeResponseText && isModelTextBlock(block) && block.text.trim()) {
           record({ type: 'text', text: block.text });
         }
       }
@@ -579,18 +629,34 @@ export class MsaidiziService {
         return this.finish(sessionId, events, 'truncated', messages, usage, record);
       }
 
-      const toolUses = response.content.filter(
-        (block): block is ModelToolUseBlock => block.type === 'tool_use',
-      );
-
-      messages.push({ role: 'assistant', content: response.content });
+      const toolUses = response.content.filter(isModelToolUseBlock);
 
       if (toolUses.length === 0) {
+        if (fastPath && !fastPathComplete) {
+          // Exact-tool selection is part of the measured dispatch contract. A
+          // provider that ignores it must not be allowed to present an answer as
+          // though current Itemba data had been read.
+          record({
+            type: 'error',
+            message: 'The assistant could not retrieve the requested expense data.',
+          });
+          return this.finish(sessionId, events, 'failed', messages, usage, record);
+        }
+        messages.push({ role: 'assistant', content: response.content });
         return this.finish(sessionId, events, 'end_turn', messages, usage, record);
       }
 
+      // Preserve the complete provider turn, including opaque signed-thinking
+      // and server-tool blocks. Dropping them makes a following tool_result an
+      // invalid continuation for models that emit adaptive/extended thinking.
+      messages.push({ role: 'assistant', content: response.content });
+
       const results: unknown[] = [];
       let suspended = false;
+      let terminalFastPathProtocolViolation = false;
+      let exhaustedReason:
+        | Extract<DoneReason, 'tool_budget_exhausted' | 'write_budget_exhausted'>
+        | undefined;
       /**
        * A red-tier action met the gate and the grant ledger could not be reached
        * — so it was neither dispatched nor offered for approval.
@@ -604,6 +670,32 @@ export class MsaidiziService {
       let ledgerUnavailable = false;
 
       for (const toolUse of toolUses) {
+        if (exhaustedReason) {
+          results.push(errorResult(toolUse.id, budgetExhaustionMessage(exhaustedReason)));
+          continue;
+        }
+
+        if (fastPath && (fastPathComplete || toolUse.name !== fastPath.toolName)) {
+          // The provider is asked to emit exactly one use of the selected tool,
+          // but the registry remains the authority if it violates that request.
+          // This check intentionally precedes registry lookup so even invented
+          // names consume the bounded protocol-violation allowance. Pair every
+          // rejected tool_use, never dispatch it, and terminate if the provider
+          // ignores `none` or repeatedly ignores the exact-tool instruction.
+          fastPathProtocolViolations += 1;
+          terminalFastPathProtocolViolation =
+            answerOnlyFastPathTurn || fastPathProtocolViolations >= fastPath.maxAttempts;
+          results.push(
+            errorResult(
+              toolUse.id,
+              fastPathComplete
+                ? 'The measured read is complete. Answer from the result already retrieved; do not call another tool.'
+                : `This request is routed to ${fastPath.toolName}. Use that tool only.`,
+            ),
+          );
+          continue;
+        }
+
         const entry = byName.get(toolUse.name);
 
         if (!entry) {
@@ -627,31 +719,15 @@ export class MsaidiziService {
 
         if (toolCalls >= this.config.maxToolCallsPerRun) {
           results.push(errorResult(toolUse.id, 'Tool call budget for this run is exhausted.'));
-          record({ type: 'done', reason: 'tool_budget_exhausted' });
-          return this.finish(
-            sessionId,
-            events,
-            'tool_budget_exhausted',
-            messages,
-            usage,
-            record,
-            true,
-          );
+          exhaustedReason = 'tool_budget_exhausted';
+          continue;
         }
 
         const isWrite = entry.capability.tier !== 'green';
         if (isWrite && writeCalls >= this.config.maxWritesPerRun) {
           results.push(errorResult(toolUse.id, 'Write budget for this run is exhausted.'));
-          record({ type: 'done', reason: 'write_budget_exhausted' });
-          return this.finish(
-            sessionId,
-            events,
-            'write_budget_exhausted',
-            messages,
-            usage,
-            record,
-            true,
-          );
+          exhaustedReason = 'write_budget_exhausted';
+          continue;
         }
 
         const args = (toolUse.input ?? {}) as Record<string, unknown>;
@@ -811,6 +887,7 @@ export class MsaidiziService {
 
         toolCalls += 1;
         if (isWrite) writeCalls += 1;
+        if (fastPath) fastPathAttempts += 1;
 
         const result = await this.invoker.invoke({
           capability: entry.capability,
@@ -818,6 +895,21 @@ export class MsaidiziService {
           authorization: request.authorization,
           agentSessionId: sessionId,
         });
+
+        if (
+          fastPath &&
+          (result.ok ||
+            result.status === 401 ||
+            result.status === 403 ||
+            fastPathAttempts >= fastPath.maxAttempts)
+        ) {
+          // A successful primary read is the measured terminal condition. On a
+          // failure the model gets one argument-adjusted retry, never a tour of
+          // adjacent finance endpoints. The next provider turn is `tool_choice:
+          // none`, which guarantees the dispatch bound rather than merely asking
+          // the model to respect it.
+          fastPathComplete = true;
+        }
 
         record({
           type: 'tool_result',
@@ -836,6 +928,22 @@ export class MsaidiziService {
       }
 
       messages.push({ role: 'user', content: results });
+
+      // A provider turn can contain several parallel tool_use blocks. Once a
+      // budget is exhausted none of the rest may dispatch, but every block must
+      // still receive a paired tool_result before this transcript is persisted.
+      if (exhaustedReason) {
+        return this.finish(sessionId, events, exhaustedReason, messages, usage, record);
+      }
+
+      if (terminalFastPathProtocolViolation) {
+        record({
+          type: 'error',
+          message:
+            'The model did not follow the bounded expense-read protocol, so the run stopped.',
+        });
+        return this.finish(sessionId, events, 'failed', messages, usage, record);
+      }
 
       // Checked BEFORE `suspended`, and after the results have been paired onto
       // the conversation. A turn can both propose one action successfully and
@@ -1158,6 +1266,58 @@ export class MsaidiziService {
   }
 }
 
+/**
+ * The newest user message only. Never fall back to an older user turn when the
+ * latest one contains only tool results: doing so could reactivate a fast path
+ * while resuming an approval or another multi-turn flow.
+ */
+function latestUserTurnText(messages: readonly ModelMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'user') continue;
+    if (typeof message.content === 'string') return message.content;
+    if (!Array.isArray(message.content)) return '';
+    return message.content
+      .filter(
+        (block): block is { type: 'text'; text: string } =>
+          typeof block === 'object' &&
+          block !== null &&
+          (block as { type?: unknown }).type === 'text' &&
+          typeof (block as { text?: unknown }).text === 'string',
+      )
+      .map((block) => block.text)
+      .join(' ');
+  }
+  return '';
+}
+
+function isModelTextBlock(block: unknown): block is ModelTextBlock {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as { type?: unknown }).type === 'text' &&
+    typeof (block as { text?: unknown }).text === 'string'
+  );
+}
+
+function isModelToolUseBlock(block: unknown): block is ModelToolUseBlock {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as { type?: unknown }).type === 'tool_use' &&
+    typeof (block as { id?: unknown }).id === 'string' &&
+    typeof (block as { name?: unknown }).name === 'string'
+  );
+}
+
+function budgetExhaustionMessage(
+  reason: Extract<DoneReason, 'tool_budget_exhausted' | 'write_budget_exhausted'>,
+): string {
+  return reason === 'tool_budget_exhausted'
+    ? 'Tool call budget for this run is exhausted.'
+    : 'Write budget for this run is exhausted.';
+}
+
 /** A content block carrying a `type` we can test, without trusting its shape. */
 function blockType(block: unknown): string | undefined {
   if (typeof block !== 'object' || block === null) return undefined;
@@ -1265,29 +1425,6 @@ function errorResult(toolUseId: string, message: string) {
  * and permissions red — so the collapse hit exactly the money-movement tier,
  * where one approval authorised any later action of the same tool.
  */
-function canonicalise(value: unknown): string {
-  if (value === undefined) return 'u';
-  if (value === null) return 'z';
-  if (typeof value === 'boolean') return value ? 't' : 'f';
-  // `Object.is` rather than `===` so `-0` and `0` stay distinguishable; `String`
-  // renders both as "0". NaN and the infinities are not JSON-representable but
-  // are handled rather than thrown on, because `args` is provider input.
-  if (typeof value === 'number') return Object.is(value, -0) ? 'n:-0' : `n:${String(value)}`;
-  if (typeof value === 'string') return `s:${value.length}:${value}`;
-  if (Array.isArray(value)) return `a[${value.map(canonicalise).join(',')}]`;
-  if (typeof value === 'object') {
-    const source = value as Record<string, unknown>;
-    return `o{${Object.keys(source)
-      .sort()
-      .map((key) => `${key.length}:${key}=${canonicalise(source[key])}`)
-      .join(',')}}`;
-  }
-  // bigint, symbol, function: not producible by a JSON tool_use payload, but a
-  // tag rather than a throw, so a surprising shape suspends for its own
-  // confirmation instead of failing the run.
-  return `x:${typeof value}:${String(value)}`;
-}
-
 /**
  * The digest a grant is bound to: the exact arguments, and nothing else.
  *
@@ -1308,7 +1445,7 @@ function canonicalise(value: unknown): string {
  * 'utf16le' for exactly the reason spelled out below.
  */
 export function argumentDigestFor(args: Record<string, unknown>): string {
-  return createHash('sha256').update(canonicalise(args), 'utf16le').digest('hex');
+  return actionArgumentDigest(args);
 }
 
 /**
@@ -1351,7 +1488,7 @@ export function confirmationIdFor(
   toolName: string,
   args: Record<string, unknown>,
 ): string {
-  const material = `${sessionId}|${toolName}|${canonicalise(args)}`;
+  const material = `${sessionId}|${toolName}|${canonicaliseActionValue(args)}`;
   // 'utf16le', not 'utf8', and that is not a stylistic choice. UTF-8 encoding
   // has no representation for an unpaired surrogate, so Node substitutes U+FFFD
   // for every one it meets — which means `'Rent \uD800'`, `'Rent \uDC00'` and

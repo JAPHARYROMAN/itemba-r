@@ -9,9 +9,17 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ReversibilityTier } from '../../common/capabilities/reversibility';
+import { EphemeralSecretFingerprintRegistry } from '../../common/services';
 
 /** Highest reversibility tier the agent may invoke. */
 export type WriteMode = 'read-only' | 'amber' | 'red';
+
+export interface ProviderCredentialSelection {
+  /** Opaque operator-controlled secret-manager version/key identifier. */
+  keyId: string;
+  /** Ephemeral provider credential. Never persist or log this value. */
+  apiKey: string;
+}
 
 const TIER_CEILING: Record<WriteMode, ReversibilityTier[]> = {
   'read-only': ['green'],
@@ -21,7 +29,16 @@ const TIER_CEILING: Record<WriteMode, ReversibilityTier[]> = {
 
 @Injectable()
 export class MsaidiziConfig {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly ephemeralSecrets: EphemeralSecretFingerprintRegistry,
+  ) {
+    // Declare the environment-backed secret during provider construction so
+    // every backend replica knows it before handling any durable write. The
+    // getter repeats this idempotently to cover an in-process operator rotation.
+    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
+    if (apiKey?.trim()) this.ephemeralSecrets.register(apiKey);
+  }
 
   /**
    * Master switch. Off unless explicitly enabled — deploying this module must
@@ -37,17 +54,53 @@ export class MsaidiziConfig {
    * that is not scoped to a tenant.
    */
   get apiKey(): string | undefined {
-    return this.config.get<string>('ANTHROPIC_API_KEY');
+    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
+    if (apiKey?.trim()) {
+      // This is the single environment-backed provider-secret ingress. Taint it
+      // before returning the bytes so later text/JSON persistence boundaries
+      // recognise even short, embedded, or encoded copies.
+      this.ephemeralSecrets.register(apiKey);
+    }
+    return apiKey;
+  }
+
+  /**
+   * Selects the provider credential only when its operator-controlled key ID
+   * equals the ID covered by the freshly verified contract attestation.
+   *
+   * The current deployment source is environment-backed rather than a secret
+   * manager with authenticated metadata. This therefore binds trusted opaque
+   * metadata to runtime selection after registering process-local, randomly
+   * keyed fingerprints. No raw credential or stable digest is persisted or
+   * logged; operators must still label the secret correctly.
+   */
+  selectProviderCredential(expectedKeyId: string): ProviderCredentialSelection {
+    const keyId = this.config.get<string>('MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID')?.trim();
+    if (!keyId) {
+      throw new Error(
+        'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_NOT_CONFIGURED: Provider credential key ID is required.',
+      );
+    }
+    if (keyId !== expectedKeyId) {
+      throw new Error(
+        'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_MISMATCH: Attested provider credential key ID does not match runtime selection.',
+      );
+    }
+    const apiKey = this.apiKey;
+    if (!apiKey?.trim()) {
+      throw new Error('ANTHROPIC_API_KEY is not configured; Msaidizi cannot run.');
+    }
+    return { keyId, apiKey };
   }
 
   /** Reasoning model for the agent loop. */
   get model(): string {
-    return this.config.get<string>('MSAIDIZI_MODEL', 'claude-opus-5');
+    return this.config.get<string>('MSAIDIZI_MODEL', 'claude-opus-5').trim();
   }
 
   /** Cheap model for domain pre-filtering — see MsaidiziService.narrowDomains. */
   get classifierModel(): string {
-    return this.config.get<string>('MSAIDIZI_CLASSIFIER_MODEL', 'claude-haiku-4-5');
+    return this.config.get<string>('MSAIDIZI_CLASSIFIER_MODEL', 'claude-haiku-4-5').trim();
   }
 
   /**

@@ -8,6 +8,54 @@ import {
   QueryBankReconciliationDto,
   UpsertBankReconciliationDto,
 } from './dto/bank-reconciliation.dto';
+import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+
+class RunBankMatchingDto {
+  @IsOptional()
+  @IsNumber()
+  dateWindowDays?: number;
+
+  @IsOptional()
+  @IsNumber()
+  amountToleranceCents?: number;
+}
+
+class ManualBankMatchDto {
+  @IsString()
+  statementLineId!: string;
+
+  @IsString()
+  journalEntryLineId!: string;
+}
+
+class UnmatchBankStatementLineDto {
+  @IsString()
+  statementLineId!: string;
+}
+
+class PostBankAdjustmentDto {
+  @IsOptional()
+  @IsString()
+  statementLineId?: string;
+
+  @IsNumber()
+  amount!: number;
+
+  @IsIn(['INCREASE_CASH', 'DECREASE_CASH'])
+  direction!: 'INCREASE_CASH' | 'DECREASE_CASH';
+
+  @IsOptional()
+  @IsString()
+  offsetAccountId?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  transactionDate?: string;
+}
 
 @Controller('bank-reconciliations')
 export class BankReconciliationsController {
@@ -61,7 +109,7 @@ export class BankReconciliationsController {
   @RequirePermissions('bank_reconciliations.update')
   runMatching(
     @Param('id') id: string,
-    @Body() body: { dateWindowDays?: number; amountToleranceCents?: number },
+    @Body() body: RunBankMatchingDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.runMatching(id, user, body ?? {});
@@ -71,7 +119,7 @@ export class BankReconciliationsController {
   @RequirePermissions('bank_reconciliations.update')
   manualMatch(
     @Param('id') id: string,
-    @Body() body: { statementLineId: string; journalEntryLineId: string },
+    @Body() body: ManualBankMatchDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.manualMatch(id, body.statementLineId, body.journalEntryLineId, user);
@@ -81,7 +129,7 @@ export class BankReconciliationsController {
   @RequirePermissions('bank_reconciliations.update')
   unmatch(
     @Param('id') id: string,
-    @Body() body: { statementLineId: string },
+    @Body() body: UnmatchBankStatementLineDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.unmatch(id, body.statementLineId, user);
@@ -91,15 +139,7 @@ export class BankReconciliationsController {
   @RequirePermissions('bank_reconciliations.update')
   postAdjustment(
     @Param('id') id: string,
-    @Body()
-    body: {
-      statementLineId?: string;
-      amount: number;
-      direction: 'INCREASE_CASH' | 'DECREASE_CASH';
-      offsetAccountId?: string;
-      description?: string;
-      transactionDate?: string;
-    },
+    @Body() body: PostBankAdjustmentDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.postAdjustment(id, body, user);

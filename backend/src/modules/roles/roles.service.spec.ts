@@ -23,12 +23,15 @@ function makeService(opts?: {
   holders?: string[];
   isSystem?: boolean;
   userRoleCount?: number;
+  permissions?: Array<{ code: string; isGroupControl: boolean }>;
+  existingPermissionIds?: string[];
 }) {
   const currentScope = opts?.currentScope ?? RoleScope.COMPANY;
   const holders = opts?.holders ?? ['user-a', 'user-b'];
 
   const prisma = {
     role: {
+      create: jest.fn(async () => ({ id: 'role-1', scope: currentScope })),
       findUniqueOrThrow: jest.fn(async () => ({
         scope: currentScope,
         name: 'Cashier',
@@ -38,8 +41,11 @@ function makeService(opts?: {
       update: jest.fn(async () => ({ id: 'role-1', scope: currentScope })),
       delete: jest.fn(async () => ({ id: 'role-1' })),
     },
-    permission: { findMany: jest.fn(async () => []) },
+    permission: { findMany: jest.fn(async () => opts?.permissions ?? []) },
     rolePermission: {
+      findMany: jest.fn(async () =>
+        (opts?.existingPermissionIds ?? []).map((permissionId) => ({ permissionId })),
+      ),
       deleteMany: jest.fn(async () => ({ count: 0 })),
       createMany: jest.fn(async () => ({ count: 0 })),
     },
@@ -59,13 +65,112 @@ function makeService(opts?: {
     invalidateAll: jest.fn(async () => undefined),
   } as any;
 
-  const service = new RolesService(prisma, permissionCache);
-  return { service, prisma, permissionCache };
+  const audit = { log: jest.fn().mockResolvedValue(undefined) };
+  const service = new RolesService(prisma, permissionCache, audit as any);
+  return { service, prisma, permissionCache, audit };
 }
 
 describe('RolesService — permission cache invalidation', () => {
+  it('rejects attaching a group-control permission to a COMPANY role before create', async () => {
+    const { service, prisma, audit } = makeService({
+      permissions: [{ code: 'fixed-assets.update', isGroupControl: true }],
+    });
+
+    await expect(
+      service.create(
+        {
+          name: 'company-asset-admin',
+          displayName: 'Company asset admin',
+          scope: RoleScope.COMPANY,
+          permissionIds: ['permission-fixed-assets-update'],
+        },
+        GROUP_ADMIN,
+      ),
+    ).rejects.toThrow('Group-control permissions require a GROUP-scoped role: fixed-assets.update');
+
+    expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('rejects replacing a COMPANY role grant set with a group-control permission', async () => {
+    const { service, prisma, permissionCache, audit } = makeService({
+      permissions: [{ code: 'fixed-assets.update', isGroupControl: true }],
+    });
+
+    await expect(
+      service.update('role-1', { permissionIds: ['permission-fixed-assets-update'] }, GROUP_ADMIN),
+    ).rejects.toThrow('Group-control permissions require a GROUP-scoped role: fixed-assets.update');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(permissionCache.invalidate).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('rejects downgrading a GROUP role while retaining a group-control permission', async () => {
+    const { service, prisma, permissionCache, audit } = makeService({
+      currentScope: RoleScope.GROUP,
+      existingPermissionIds: ['permission-fixed-assets-update'],
+      permissions: [{ code: 'fixed-assets.update', isGroupControl: true }],
+    });
+
+    await expect(
+      service.update('role-1', { scope: RoleScope.COMPANY }, GROUP_ADMIN),
+    ).rejects.toThrow('Group-control permissions require a GROUP-scoped role: fixed-assets.update');
+
+    expect(prisma.rolePermission.findMany).toHaveBeenCalledWith({
+      where: { roleId: 'role-1' },
+      select: { permissionId: true },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(permissionCache.invalidate).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('still allows a GROUP administrator to attach group-control permissions to a GROUP role', async () => {
+    const { service, prisma, audit } = makeService({
+      currentScope: RoleScope.GROUP,
+      permissions: [{ code: 'fixed-assets.update', isGroupControl: true }],
+    });
+
+    await service.update(
+      'role-1',
+      { permissionIds: ['permission-fixed-assets-update'] },
+      GROUP_ADMIN,
+    );
+
+    expect(prisma.rolePermission.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          roleId: 'role-1',
+          permissionId: 'permission-fixed-assets-update',
+        },
+      ],
+    });
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+
+  it('create() appends exactly one attributable audit row', async () => {
+    const { service, audit } = makeService();
+
+    await service.create(
+      { name: 'cashier', displayName: 'Cashier', scope: RoleScope.COMPANY },
+      GROUP_ADMIN,
+    );
+
+    expect(audit.log).toHaveBeenCalledTimes(1);
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'ROLE_CREATE',
+        entityType: 'Role',
+        entityId: 'role-1',
+        userId: GROUP_ADMIN.id,
+        companyId: null,
+      }),
+    );
+  });
+
   it('update() evicts the cache for every distinct user holding the role', async () => {
-    const { service, prisma, permissionCache } = makeService({
+    const { service, prisma, permissionCache, audit } = makeService({
       holders: ['user-a', 'user-b', 'user-a'], // duplicate to prove de-dup
     });
 
@@ -78,6 +183,16 @@ describe('RolesService — permission cache invalidation', () => {
     expect(permissionCache.invalidate).toHaveBeenCalledTimes(2);
     expect(permissionCache.invalidate).toHaveBeenCalledWith('user-a');
     expect(permissionCache.invalidate).toHaveBeenCalledWith('user-b');
+    expect(audit.log).toHaveBeenCalledTimes(1);
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'ROLE_UPDATE',
+        entityType: 'Role',
+        entityId: 'role-1',
+        userId: GROUP_ADMIN.id,
+        companyId: null,
+      }),
+    );
   });
 
   it('update() invalidates even when only metadata/scope changes (no permissionIds)', async () => {
@@ -97,12 +212,12 @@ describe('RolesService — permission cache invalidation', () => {
   });
 
   it('remove() invalidates the cache after deleting the role', async () => {
-    const { service, prisma, permissionCache } = makeService({
+    const { service, prisma, audit } = makeService({
       userRoleCount: 0,
       holders: [],
     });
 
-    await service.remove('role-1');
+    await service.remove('role-1', GROUP_ADMIN);
 
     expect(prisma.role.delete).toHaveBeenCalledWith({ where: { id: 'role-1' } });
     // No holders once the cascade runs, but the invalidation path is exercised.
@@ -110,6 +225,16 @@ describe('RolesService — permission cache invalidation', () => {
       where: { roleId: 'role-1' },
       select: { userId: true },
     });
+    expect(audit.log).toHaveBeenCalledTimes(1);
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'ROLE_DELETE',
+        entityType: 'Role',
+        entityId: 'role-1',
+        userId: GROUP_ADMIN.id,
+        companyId: null,
+      }),
+    );
   });
 
   it('remove() captures holders BEFORE the cascading delete and invalidates them', async () => {

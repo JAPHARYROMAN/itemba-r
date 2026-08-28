@@ -1,4 +1,9 @@
-import { CurrencyCode, RecordBookReceiptType, RecordBookStatus } from '@prisma/client';
+import {
+  AuditScopeKind,
+  CurrencyCode,
+  RecordBookReceiptType,
+  RecordBookStatus,
+} from '@prisma/client';
 import { RecordBookReportsService } from './record-book-reports.service';
 
 const user: any = {
@@ -27,10 +32,15 @@ function makeReportsService(sales: any[] = [], expenses: any[] = []) {
     division: { findFirst: jest.fn().mockResolvedValue(null) },
     branch: { findFirst: jest.fn().mockResolvedValue(null) },
   };
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) };
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrict: jest.fn().mockResolvedValue(undefined),
+  };
   const companyScope = {
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+    accessibleCompanyIds: jest.fn().mockResolvedValue(['company-1']),
+    assertGroupScoped: jest.fn(),
   };
   const generatedDocuments = {
     generateTablePdf: jest.fn().mockResolvedValue({
@@ -54,6 +64,7 @@ function makeReportsService(sales: any[] = [], expenses: any[] = []) {
     auditLogs,
     generatedDocuments,
     organizationScope,
+    companyScope,
   };
 }
 
@@ -203,5 +214,66 @@ describe('RecordBookReportsService', () => {
       }),
       user,
     );
+  });
+
+  it('attributes a company-principal export without an explicit filter to its accessible company', async () => {
+    const { service, auditLogs, companyScope } = makeReportsService();
+
+    await service.auditExport(
+      { scope: 'raw', format: 'csv', rowCount: 0 },
+      { ...user, roleScopes: ['COMPANY'] },
+    );
+
+    expect(companyScope.accessibleCompanyIds).toHaveBeenCalledTimes(1);
+    expect(auditLogs.logStrict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        scopeKind: AuditScopeKind.COMPANY,
+        companyScopeIds: ['company-1'],
+      }),
+    );
+  });
+
+  it('attributes an unrestricted export with no company grants as explicit GROUP scope', async () => {
+    const { service, auditLogs, companyScope } = makeReportsService();
+    companyScope.accessibleCompanyIds.mockResolvedValueOnce([]);
+
+    await service.auditExport({ scope: 'raw', format: 'csv', rowCount: 0 }, user);
+
+    expect(companyScope.assertGroupScoped).toHaveBeenCalledWith(
+      user,
+      'audit a group-wide Records Book export',
+    );
+    expect(auditLogs.logStrict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: null,
+        scopeKind: AuditScopeKind.GROUP,
+        companyScopeIds: [],
+      }),
+    );
+  });
+
+  it('rejects an organization-scoped audit that omits its owning company', async () => {
+    const { service, auditLogs, organizationScope } = makeReportsService();
+
+    await expect(
+      service.auditExport({ scope: 'raw', format: 'csv', rowCount: 0, branchId: 'branch-1' }, user),
+    ).rejects.toThrow('companyId is required');
+
+    expect(organizationScope.assertCanAccessScope).not.toHaveBeenCalled();
+    expect(auditLogs.logStrict).not.toHaveBeenCalled();
+  });
+
+  it('fails the audit-only export command when its ledger append fails', async () => {
+    const { service, auditLogs } = makeReportsService();
+    const failure = new Error('audit ledger unavailable');
+    auditLogs.logStrict.mockRejectedValueOnce(failure);
+
+    await expect(
+      service.auditExport(
+        { scope: 'report', format: 'json', reportKey: 'daily-sales', rowCount: 0 },
+        user,
+      ),
+    ).rejects.toBe(failure);
   });
 });

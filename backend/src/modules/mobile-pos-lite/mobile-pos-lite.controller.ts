@@ -81,6 +81,7 @@ export class MobilePosLiteController {
   }
 
   @Get('session')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   session(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -91,6 +92,7 @@ export class MobilePosLiteController {
   }
 
   @Get('products')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   products(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -102,6 +104,7 @@ export class MobilePosLiteController {
   }
 
   @Get('catalog')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   catalog(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -118,6 +121,7 @@ export class MobilePosLiteController {
    * (averageCost/totalValue/unitCost/riskValue); see the service method.
    */
   @Get('stock')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   stock(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -129,6 +133,7 @@ export class MobilePosLiteController {
   }
 
   @Get('customers')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   customers(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -165,6 +170,7 @@ export class MobilePosLiteController {
    * { data } envelope, same as generated-documents table-pdf.
    */
   @Get('sales/:id/receipt')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   async saleReceipt(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -191,6 +197,7 @@ export class MobilePosLiteController {
    * NEVER are. See the service method.
    */
   @Get('sales')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   salesHistory(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -212,6 +219,7 @@ export class MobilePosLiteController {
    * what this business pays its suppliers. See the service method.
    */
   @Get('purchases')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.purchase')
   purchaseHistory(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -227,6 +235,7 @@ export class MobilePosLiteController {
    * figures; every number the office reads is recomputed server-side.
    */
   @Post('day-reports')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   createDayReport(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -254,6 +263,7 @@ export class MobilePosLiteController {
    * { data } envelope, byte-for-byte the shape of sales/:id/receipt above.
    */
   @Get('day-reports/:id/pdf')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   async dayReportPdf(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -271,6 +281,7 @@ export class MobilePosLiteController {
   }
 
   @Get('my-sales-today')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')
   mySalesToday(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -281,6 +292,7 @@ export class MobilePosLiteController {
   }
 
   @Get('suppliers')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.purchase')
   suppliers(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -292,6 +304,7 @@ export class MobilePosLiteController {
   }
 
   @Post('purchases')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.purchase')
   createPurchase(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -310,6 +323,7 @@ export class MobilePosLiteController {
    * REVIEW-BLOCKING RULE: no cost or value field may enter or leave this route.
    */
   @Post('stock-counts')
+  @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.stock_count')
   createStockCount(
     @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
@@ -346,8 +360,9 @@ export class MobilePosLiteController {
   @RequirePermissions('mobile_pos_lite.manage')
   counterDeliveryBackfill(
     @Query() query: QueryMobilePosLiteCounterDeliveryBackfillDto,
+    @Query('companyId') companyId: string | undefined,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.counterDeliveryBackfill(query, user);
+    return this.service.counterDeliveryBackfill({ ...query, companyId }, user);
   }
 }

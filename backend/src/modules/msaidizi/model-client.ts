@@ -13,6 +13,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { MsaidiziConfig } from './msaidizi.config';
 import { DeclaredTool } from './tool-registry';
+import {
+  ANTHROPIC_API_ORIGIN,
+  FORBIDDEN_ANTHROPIC_SDK_ENVIRONMENT_OVERRIDES,
+} from './provider-contract-attestation.protocol';
+import { ProviderContractAttestationService } from './provider-contract-attestation.service';
 
 export interface ModelTextBlock {
   type: 'text';
@@ -26,7 +31,12 @@ export interface ModelToolUseBlock {
   input: Record<string, unknown>;
 }
 
-export type ModelContentBlock = ModelTextBlock | ModelToolUseBlock;
+/**
+ * The provider can also return signed thinking, redacted thinking, and
+ * server-tool trace blocks. They are opaque to our loop but must be preserved
+ * byte-for-byte when the assistant turn is sent back with a tool result.
+ */
+export type ModelContentBlock = ModelTextBlock | ModelToolUseBlock | Record<string, unknown>;
 
 export interface ModelMessage {
   role: 'user' | 'assistant';
@@ -38,6 +48,14 @@ export interface ModelRequest {
   messages: ModelMessage[];
   tools: DeclaredTool[];
   maxTokens: number;
+  /**
+   * A per-turn routing control. It does not alter the declared tool block, so a
+   * measured fast path can force one tool and then an answer-only turn without
+   * invalidating the cached tool/system prefix.
+   */
+  toolChoice?: { type: 'tool'; name: string; disableParallelToolUse?: boolean } | { type: 'none' };
+  /** Cancels the provider request when the durable job lease or timeout ends. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -74,35 +92,78 @@ export abstract class ModelClient {
 export class AnthropicModelClient extends ModelClient {
   private readonly logger = new Logger(AnthropicModelClient.name);
   private client?: Anthropic;
+  private clientCredentialKeyId?: string;
 
-  constructor(private readonly config: MsaidiziConfig) {
+  constructor(
+    private readonly config: MsaidiziConfig,
+    private readonly providerContract: ProviderContractAttestationService,
+  ) {
     super();
   }
 
-  private getClient(): Anthropic {
-    if (!this.client) {
-      const apiKey = this.config.apiKey;
-      if (!apiKey) {
-        // Fail loudly at first use rather than at boot: the rest of the
-        // application must start fine without Msaidizi configured.
-        throw new Error('ANTHROPIC_API_KEY is not configured; Msaidizi cannot run.');
+  private getClient(apiCredentialKeyId: string): Anthropic {
+    const credential = this.config.selectProviderCredential(apiCredentialKeyId);
+    if (this.client && this.clientCredentialKeyId === credential.keyId) {
+      if (this.client.apiKey !== credential.apiKey) {
+        throw new Error(
+          'MSAIDIZI_PROVIDER_CREDENTIAL_ROTATED_WITHOUT_KEY_ID: Provider credential changed without an attested key-ID rotation.',
+        );
       }
-      this.client = new Anthropic({ apiKey });
+      return this.client;
+    }
+    if (!this.client || this.clientCredentialKeyId !== credential.keyId) {
+      assertNoAnthropicSdkEnvironmentOverrides();
+      this.client = new Anthropic({
+        apiKey: credential.apiKey,
+        // All provider-routing and alternative-auth knobs are pinned here.
+        // Relying on SDK defaults would let process-level environment values
+        // redirect disclosed data or replace the attested account credential.
+        baseURL: ANTHROPIC_API_ORIGIN,
+        authToken: null,
+        webhookKey: null,
+        credentials: null,
+        config: null,
+        profile: null,
+        maxRetries: 0,
+        logLevel: 'off',
+      });
+      this.clientCredentialKeyId = credential.keyId;
     }
     return this.client;
   }
 
   async createMessage(request: ModelRequest): Promise<ModelResponse> {
+    // The contract can expire or be revoked while this process is running. It
+    // is therefore re-read and cryptographically verified immediately before
+    // every disclosure, before the provider SDK is even obtained.
+    const verifiedContract = this.providerContract.assertCurrent();
     // Streamed rather than awaited whole: max_tokens here is well above the
     // threshold where a non-streaming request risks an HTTP timeout.
-    const stream = this.getClient().messages.stream({
-      model: this.config.model,
-      max_tokens: request.maxTokens,
-      output_config: { effort: this.config.effort },
-      system: request.system as never,
-      messages: request.messages as never,
-      tools: request.tools as never,
-    } as never);
+    const stream = this.getClient(
+      verifiedContract.artifact.claims.apiCredentialKeyId,
+    ).messages.stream(
+      {
+        model: this.config.model,
+        max_tokens: request.maxTokens,
+        output_config: { effort: this.config.effort },
+        system: request.system as never,
+        messages: request.messages as never,
+        tools: request.tools as never,
+        ...(request.toolChoice
+          ? {
+              tool_choice:
+                request.toolChoice.type === 'tool'
+                  ? {
+                      type: 'tool',
+                      name: request.toolChoice.name,
+                      disable_parallel_tool_use: request.toolChoice.disableParallelToolUse ?? false,
+                    }
+                  : { type: 'none' },
+            }
+          : {}),
+      } as never,
+      request.signal ? { signal: request.signal } : undefined,
+    );
 
     const message = await stream.finalMessage();
 
@@ -111,9 +172,10 @@ export class AnthropicModelClient extends ModelClient {
     }
 
     return {
-      content: (message.content as unknown as ModelContentBlock[]).filter(
-        (block) => block.type === 'text' || block.type === 'tool_use',
-      ),
+      // Do not project this down to text/tool_use. In particular, Anthropic
+      // requires thinking and redacted_thinking blocks to be returned unchanged
+      // when a tool result continues the same assistant turn.
+      content: message.content as unknown as ModelContentBlock[],
       stopReason: message.stop_reason,
       usage: {
         inputTokens: message.usage?.input_tokens ?? 0,
@@ -124,5 +186,16 @@ export class AnthropicModelClient extends ModelClient {
         cacheCreationInputTokens: message.usage?.cache_creation_input_tokens ?? 0,
       },
     };
+  }
+}
+
+function assertNoAnthropicSdkEnvironmentOverrides(): void {
+  const configured = FORBIDDEN_ANTHROPIC_SDK_ENVIRONMENT_OVERRIDES.filter(
+    (name) => (process.env[name] ?? '').trim().length > 0,
+  );
+  if (configured.length > 0) {
+    throw new Error(
+      `MSAIDIZI_ANTHROPIC_SDK_ENVIRONMENT_OVERRIDE_FORBIDDEN: ${configured.join(', ')}`,
+    );
   }
 }

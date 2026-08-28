@@ -1,4 +1,5 @@
 import { Controller, Get, Patch, Delete, Param, Query, UseGuards } from '@nestjs/common';
+import { NotificationsQueryDto } from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -21,13 +22,13 @@ export class NotificationsController {
 
   @Get('my')
   @RequirePermissions('notifications.view')
-  findMy(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findMy(@CurrentUser() user: AuthUser, @Query() query: NotificationsQueryDto) {
     return this.service.findMyNotifications(user, query);
   }
 
   @Get()
   @RequirePermissions('notifications.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: NotificationsQueryDto) {
     return this.service.findMyNotifications(user, query);
   }
 

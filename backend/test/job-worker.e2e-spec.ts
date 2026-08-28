@@ -8,6 +8,7 @@ import { DataExportsService } from '../src/modules/data-exports/data-exports.ser
 import { JobWorkerService } from '../src/modules/job-worker/job-worker.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createE2eApp } from './e2e-app';
+import { deleteAuditLogsForTest } from './audit-log-maintenance';
 
 jest.setTimeout(60_000);
 
@@ -82,10 +83,8 @@ describe('Job worker data exports (e2e)', () => {
       await prisma.dataExportLog.deleteMany({
         where: { id: { in: exportLogIds } },
       });
-      await prisma.auditLog.deleteMany({
-        where: {
-          OR: [{ userId }, { entityId: { in: exportLogIds } }, { companyId }],
-        },
+      await deleteAuditLogsForTest(prisma, {
+        OR: [{ userId }, { entityId: { in: exportLogIds } }, { companyId }],
       });
       if (userId) {
         await prisma.user.deleteMany({ where: { id: userId } });

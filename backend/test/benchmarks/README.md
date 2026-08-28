@@ -18,6 +18,11 @@ Expectations resolve against the live capability list rather than hardcoded
 names. A stale name would otherwise make every case look like a search failure
 when it is really a broken test, and that mistake is invisible in the output.
 
+The spending case is also a path-quality gate: `Expenses_findAll` must be the
+first dispatched tool and the run may dispatch at most two tools. The original
+search run eventually found expenses but used eight tools across four turns;
+"eventually correct" is not enough for this common question.
+
 ```bash
 docker compose up -d postgres redis
 # MSAIDIZI_TOOL_SEARCH=false, restart backend
@@ -26,6 +31,16 @@ node backend/test/benchmarks/tool-search-compare.mjs baseline.json
 node backend/test/benchmarks/tool-search-compare.mjs search.json
 node backend/test/benchmarks/tool-search-compare.mjs --diff baseline.json search.json
 ```
+
+Run mode exits non-zero unless all seven cases pass. For the spending case,
+"pass" also means `Expenses_findAll` was dispatched first and no more than two
+tools were dispatched, so a correct answer reached through the old eight-call
+thrash is a failure rather than a soft warning.
+
+For a low-cost trace check while iterating on that regression, set
+`MSAIDIZI_BENCHMARK_CASE=spending`; the same first-tool and two-call ceiling
+remain enforced, while the other six prompts stay covered by the deterministic
+resident-set regression suite.
 
 The flag is read server-side, so the backend must restart between runs. Roughly
 14 model turns per pass.
@@ -99,8 +114,9 @@ it is load-bearing.
 
 **`spending` called eight tools across four turns.** It got the right answer and
 took the scenic route. Whether that is thoroughness or thrash is not something
-this harness can tell you, and it is the difference between a 37-second answer
-and a 10-second one.
+the original harness could tell you, and it is the difference between a
+37-second answer and a 10-second one. The current harness makes that distinction
+explicit: expenses must be first and no more than two tools may be dispatched.
 
 ### What this does not establish
 

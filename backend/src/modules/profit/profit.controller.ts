@@ -1,7 +1,19 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  ProfitBelowCostAttemptsQueryDto,
+  ProfitCostGapsQueryDto,
+  ProfitExportQueryDto,
+  ProfitProductSummaryQueryDto,
+} from '../../common/dto/resource-query.dto';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { RequireAnyPermissions } from '../../common/decorators/require-permissions.decorator';
-import { ProfitService, ValidateSaleLinesInput } from './profit.service';
+import { ProfitService } from './profit.service';
+import {
+  BackfillProfitSalesQueryDto,
+  FixProfitCostGapDto,
+  ValidateSaleLinesDto,
+} from './dto/profit-action.dto';
 
 @Controller('profit')
 export class ProfitController {
@@ -9,10 +21,7 @@ export class ProfitController {
 
   @Get('product-summary')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
-  productSummary(
-    @Query() query: Record<string, string | undefined>,
-    @CurrentUser() user: AuthUser,
-  ) {
+  productSummary(@Query() query: ProfitProductSummaryQueryDto, @CurrentUser() user: AuthUser) {
     return this.profit.productSummary(query, user);
   }
 
@@ -21,6 +30,7 @@ export class ProfitController {
   // asserts the user can access this company, so the path param cannot be used to
   // read another tenant's data.
   @Get('customer-summary/:companyId')
+  @AgentExcluded('query_schema_not_strict')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
   customerSummary(
     @Param('companyId') companyId: string,
@@ -32,26 +42,28 @@ export class ProfitController {
 
   @Get('cost-gaps')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
-  costGaps(@Query() query: Record<string, string | undefined>, @CurrentUser() user: AuthUser) {
+  costGaps(@Query() query: ProfitCostGapsQueryDto, @CurrentUser() user: AuthUser) {
     return this.profit.costGaps(query, user);
   }
 
   @Get('below-cost-attempts')
   @RequireAnyPermissions('profit.audit', 'profit.view')
   belowCostAttempts(
-    @Query() query: Record<string, string | undefined>,
+    @Query() query: ProfitBelowCostAttemptsQueryDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.profit.belowCostAttempts(query, user);
   }
 
   @Get('export')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
-  exportReport(@Query() query: Record<string, string | undefined>, @CurrentUser() user: AuthUser) {
+  exportReport(@Query() query: ProfitExportQueryDto, @CurrentUser() user: AuthUser) {
     return this.profit.exportReport(query, user);
   }
 
   @Get('products/:productId/ledger')
+  @AgentExcluded('query_schema_not_strict')
   @RequireAnyPermissions('profit.view', 'operations.reports.view')
   productLedger(
     @Param('productId') productId: string,
@@ -63,7 +75,7 @@ export class ProfitController {
 
   @Post('validate-sale-lines')
   @RequireAnyPermissions('profit.view', 'sales.create', 'pos.create')
-  validateSaleLines(@Body() body: ValidateSaleLinesInput, @CurrentUser() user: AuthUser) {
+  validateSaleLines(@Body() body: ValidateSaleLinesDto, @CurrentUser() user: AuthUser) {
     return this.profit.validateSaleLinesForUser(body, user);
   }
 
@@ -71,7 +83,7 @@ export class ProfitController {
   @RequireAnyPermissions('profit.manage_costs')
   fixCostGap(
     @Param('productId') productId: string,
-    @Body() body: Record<string, string | number | null | undefined>,
+    @Body() body: FixProfitCostGapDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.profit.fixCostGap(productId, body, user);
@@ -79,7 +91,11 @@ export class ProfitController {
 
   @Post('backfill-sales')
   @RequireAnyPermissions('profit.manage_costs')
-  backfillSales(@Query() query: Record<string, string | undefined>, @CurrentUser() user: AuthUser) {
-    return this.profit.backfillHistoricalSales(query, user);
+  backfillSales(
+    @Query() query: BackfillProfitSalesQueryDto,
+    @Query('companyId') companyId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.profit.backfillHistoricalSales({ ...query, companyId }, user);
   }
 }

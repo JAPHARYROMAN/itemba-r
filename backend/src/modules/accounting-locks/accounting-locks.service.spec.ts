@@ -35,12 +35,11 @@ function makePrisma() {
   } as any;
 }
 
-function makeService(prisma: any) {
-  return new AccountingLocksService(
-    prisma,
-    { log: jest.fn().mockResolvedValue(undefined) } as any,
-    new CompanyScopeService(prisma),
-  );
+function makeService(
+  prisma: any,
+  auditLogs: { log: jest.Mock } = { log: jest.fn().mockResolvedValue(undefined) },
+) {
+  return new AccountingLocksService(prisma, auditLogs as any, new CompanyScopeService(prisma));
 }
 
 describe('AccountingLocksService GL controls', () => {
@@ -142,5 +141,26 @@ describe('AccountingLocksService GL controls', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.accountingLock.create).not.toHaveBeenCalled();
+  });
+
+  it('attributes release audit records to the lock company', async () => {
+    const prisma = makePrisma();
+    prisma.accountingLock.findFirst.mockResolvedValue({
+      id: 'lock-1',
+      companyId: 'company-1',
+      status: 'ACTIVE',
+    });
+    const auditLogs = { log: jest.fn().mockResolvedValue(undefined) };
+    const service = makeService(prisma, auditLogs);
+
+    await service.release('lock-1', authUser());
+
+    expect(auditLogs.log).toHaveBeenCalledWith({
+      action: 'RELEASE',
+      entityType: 'AccountingLock',
+      entityId: 'lock-1',
+      userId: 'lock-user',
+      companyId: 'company-1',
+    });
   });
 });

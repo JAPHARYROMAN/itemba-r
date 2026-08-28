@@ -479,6 +479,25 @@ export class JournalEntriesService {
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Serialize against period close/lock before making the authoritative
+      // posting decision. If a close committed first, this revalidation sees
+      // CLOSED; if this lock wins, the close waits until the reversal commits.
+      await tx.$queryRaw`
+        SELECT "id"
+        FROM "accounting_periods"
+        WHERE "id" = ${period.id}
+        FOR UPDATE
+      `;
+      const lockedPeriod = await this.accountingControl.assertPostingAllowed(
+        {
+          companyId: original.companyId,
+          accountingPeriodId: period.id,
+          transactionDate: reversalDate,
+          moduleName: 'journal_entries',
+        },
+        tx,
+      );
+
       // Atomically claim the original POSTED entry before doing any work. Two
       // concurrent reverse() calls both pass the pre-transaction findOne status
       // check (read outside the tx), so the transition itself must be the guard:
@@ -519,7 +538,7 @@ export class JournalEntriesService {
           companyId: original.companyId,
           divisionId: original.divisionId,
           branchId: original.branchId,
-          accountingPeriodId: period.id,
+          accountingPeriodId: lockedPeriod.id,
           transactionDate: reversalDate,
           description: `Reversal of ${original.journalNumber}: ${dto.reversalReason}`,
           referenceType: original.referenceType,

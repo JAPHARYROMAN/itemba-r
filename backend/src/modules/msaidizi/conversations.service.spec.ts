@@ -41,8 +41,13 @@
 import { ConfigService } from '@nestjs/config';
 import { ConflictException, GoneException, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { EncryptionService } from '../../common/services';
+import {
+  EncryptionService,
+  EphemeralSecretFingerprintRegistry,
+  PersistenceSecretGuard,
+} from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { PERSISTED_SECRET_PLACEHOLDER } from '../../common/utils/persistent-secret-redaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MsaidiziConversationsService, OpenedTurn } from './conversations.service';
 import { GRANT_ID, mintGrantId } from './dto/approval-grants';
@@ -525,12 +530,15 @@ function authUser(overrides: Partial<AuthUser> = {}): AuthUser {
 
 function makeService(overrides: Partial<Record<string, unknown>> = {}) {
   const prisma = new FakePrisma();
+  const registry = new EphemeralSecretFingerprintRegistry();
+  const secrets = new PersistenceSecretGuard(registry);
   const service = new MsaidiziConversationsService(
     prisma as unknown as PrismaService,
     configFor(overrides),
     encryption(),
+    secrets,
   );
-  return { prisma, service };
+  return { prisma, registry, service };
 }
 
 function runResult(overrides: Partial<RunResult> = {}): RunResult {
@@ -567,6 +575,7 @@ function laterRequest(prisma: FakePrisma) {
     prisma as unknown as PrismaService,
     configFor(),
     encryption(),
+    new PersistenceSecretGuard(new EphemeralSecretFingerprintRegistry()),
   );
 }
 
@@ -988,7 +997,7 @@ describe('open() then close() leaves behind what the chat client reads', () => {
     const args = (
       stored.turns[0].events[0] as unknown as { args: { body: Record<string, unknown> } }
     ).args;
-    expect(args.body.password).toBe('[REDACTED]');
+    expect(args.body.password).toBe(PERSISTED_SECRET_PLACEHOLDER);
     expect(args.body.email).toBe('new@itemba.local');
 
     // The caller's own array is not rewritten under it — it has already been
@@ -997,6 +1006,131 @@ describe('open() then close() leaves behind what the chat client reads', () => {
     expect(
       (withSecret[0] as unknown as { args: { body: { password: string } } }).args.body.password,
     ).toBe('hunter2');
+  });
+
+  it('redacts credentials from the stored prompt and derived title', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+
+    const opened = await service.open({
+      user,
+      prompt: 'Sign in to payroll with password=hunter2 and inspect the August run',
+    });
+
+    const conversation = prisma.conversations.find((row) => row.id === opened.conversationId)!;
+    const turn = prisma.turns.find((row) => row.id === opened.turnId)!;
+    expect(conversation.title).toBe(
+      'Sign in to payroll with password=[REDACTED SECRET] and inspect the August run',
+    );
+    expect(turn.prompt).toBe(
+      'Sign in to payroll with password=[REDACTED SECRET] and inspect the August run',
+    );
+  });
+
+  it('keeps declared low-entropy raw and encoded values out of every conversation surface', async () => {
+    const { prisma, registry, service } = makeService();
+    const user = authUser();
+    const encoded = Buffer.from('123456').toString('base64');
+    registry.register('123456');
+
+    const opened = await service.open({ user, prompt: 'Use account 123456 for this check' });
+    await service.close(
+      opened,
+      runResult({
+        events: [{ type: 'text', text: `Observed raw=123456 encoded=${encoded}` }],
+        messages: [{ role: 'assistant', content: `Observed raw=123456 encoded=${encoded}` }],
+      }),
+    );
+
+    const conversation = prisma.conversations.find((row) => row.id === opened.conversationId)!;
+    const stored = await service.findOne(opened.conversationId!, user);
+    expect(conversation.resumeState).toBeNull();
+    expect(conversation.resumable).toBe(false);
+    expect(JSON.stringify(stored)).not.toContain('123456');
+    expect(JSON.stringify(stored)).not.toContain(encoded);
+    expect(registry.redactText(JSON.stringify(stored)).redactionsApplied).toBe(false);
+  });
+
+  it('does not store model resume state when it contains a raw credential', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Use the payroll login' });
+
+    await service.close(
+      opened,
+      runResult({
+        messages: [
+          {
+            role: 'user',
+            content: 'The payroll password is password=do-not-persist-this',
+          },
+        ],
+      }),
+    );
+
+    const conversation = prisma.conversations.find((row) => row.id === opened.conversationId)!;
+    expect(conversation.resumeState).toBeNull();
+    expect(conversation.resumeBytes).toBe(0);
+    expect(conversation.resumable).toBe(false);
+  });
+
+  it('does not store an alphanumeric Mobile POS activation result or activation path', async () => {
+    const { prisma, service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Issue a Mobile POS activation' });
+    const activationCode = 'AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+
+    await service.close(
+      opened,
+      runResult({
+        events: [
+          {
+            type: 'text',
+            text:
+              `Activation ready at /mobile-pos/activate?terminal=MPL-ABC123&code=${activationCode}. ` +
+              `Use ${activationCode} now.`,
+          },
+        ],
+        messages: [
+          {
+            role: 'assistant',
+            content: JSON.stringify({
+              result: { activationCode },
+              activationPath: `/mobile-pos-lite/activate?activationCode=${activationCode}`,
+            }),
+          },
+        ],
+      }),
+    );
+
+    const conversation = prisma.conversations.find((row) => row.id === opened.conversationId)!;
+    expect(conversation.resumeState).toBeNull();
+    expect(conversation.resumeBytes).toBe(0);
+    expect(conversation.resumable).toBe(false);
+    const stored = await service.findOne(opened.conversationId!, user);
+    expect(stored.turns[0].events).toEqual([{ type: 'text', text: PERSISTED_SECRET_PLACEHOLDER }]);
+  });
+
+  it('redacts credentials from persisted model-authored text and errors', async () => {
+    const { service } = makeService();
+    const user = authUser();
+    const opened = await service.open({ user, prompt: 'Check the integration' });
+
+    await service.close(
+      opened,
+      runResult({
+        events: [
+          { type: 'text', text: 'The API key is apiKey=sk-proj-abcdefghijklmnopqrstuv' },
+          { type: 'error', message: 'Upstream rejected password=hunter2' },
+        ],
+      }),
+    );
+
+    const stored = await service.findOne(opened.conversationId!, user);
+    expect(stored.turns[0].events).toEqual([
+      { type: 'text', text: 'The API key is [REDACTED SECRET]' },
+      { type: 'error', message: 'Upstream rejected password=[REDACTED SECRET]' },
+    ]);
   });
 
   /**
@@ -1055,7 +1189,7 @@ describe('open() then close() leaves behind what the chat client reads', () => {
 
     // And it survives WITHOUT the redaction having been weakened to achieve it:
     // the proposal's own body is still scrubbed on the way to rest.
-    expect(replayed.args.body.password).toBe('[REDACTED]');
+    expect(replayed.args.body.password).toBe(PERSISTED_SECRET_PLACEHOLDER);
     expect(replayed.args.body.amount).toBe(9_000_000);
   });
 });

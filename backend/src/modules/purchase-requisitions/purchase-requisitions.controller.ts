@@ -1,7 +1,13 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { CompanyStatusPageLimitQueryDto } from '../../common/dto/resource-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { PurchaseRequisitionsService } from './purchase-requisitions.service';
+import {
+  CreatePurchaseRequisitionDto,
+  RejectPurchaseRequisitionDto,
+  UpdatePurchaseRequisitionDto,
+} from './dto/purchase-requisition.dto';
 
 @Controller('purchase-requisitions')
 export class PurchaseRequisitionsController {
@@ -9,7 +15,7 @@ export class PurchaseRequisitionsController {
 
   @Get()
   @RequirePermissions('purchase_requisitions.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: CompanyStatusPageLimitQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,13 +27,17 @@ export class PurchaseRequisitionsController {
 
   @Post()
   @RequirePermissions('purchase_requisitions.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreatePurchaseRequisitionDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id')
   @RequirePermissions('purchase_requisitions.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePurchaseRequisitionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
@@ -45,7 +55,11 @@ export class PurchaseRequisitionsController {
 
   @Post(':id/reject')
   @RequirePermissions('purchase_requisitions.approve')
-  reject(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  reject(
+    @Param('id') id: string,
+    @Body() dto: RejectPurchaseRequisitionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.reject(id, dto, user);
   }
 }

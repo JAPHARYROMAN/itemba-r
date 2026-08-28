@@ -108,38 +108,61 @@ export class DepreciationService {
     scheduleId: string,
     months: number,
     user: AuthUser,
-  ): Promise<{ created: number }> {
+  ): Promise<{ created: number; entryIds: string[] }> {
     if (months <= 0 || months > 600) {
       throw new BadRequestException('months must be between 1 and 600');
     }
-    const schedule = await this.findOne(scheduleId, user, AccessLevel.WRITE);
-    const existing = await this.prisma.depreciationEntry.findMany({
-      where: { depreciationScheduleId: scheduleId, deletedAt: null },
-      orderBy: { depreciationDate: 'asc' },
-    });
+    const authorizedSchedule = await this.findOne(scheduleId, user, AccessLevel.WRITE);
+    const generated = await this.prisma.$transaction(async (tx) => {
+      // Serialize generation for one schedule before reading its existing
+      // entries. Without this lock, two requests can both observe the same
+      // final month and create duplicate DRAFT periods.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "depreciation_schedules"
+        WHERE "id" = ${scheduleId} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (locked.length === 0) {
+        throw new NotFoundException('Depreciation schedule not found');
+      }
 
-    const totalDepreciable = Number(schedule.totalDepreciableAmount);
-    const salvage = Number(schedule.salvageValue);
-    let accumulated = Number(schedule.accumulatedDepreciation);
-    let nextDate =
-      existing.length > 0
-        ? this.addMonths(existing[existing.length - 1].depreciationDate, 1)
-        : new Date(schedule.startDate);
+      const schedule = await tx.depreciationSchedule.findFirst({
+        where: { id: scheduleId, deletedAt: null },
+      });
+      if (!schedule || schedule.companyId !== authorizedSchedule.companyId) {
+        throw new NotFoundException('Depreciation schedule not found');
+      }
+      const existing = await tx.depreciationEntry.findMany({
+        where: { depreciationScheduleId: scheduleId, deletedAt: null },
+        orderBy: { depreciationDate: 'asc' },
+      });
 
-    const periodAmount =
-      schedule.depreciationMethod === 'STRAIGHT_LINE'
-        ? this.straightLinePeriodAmount(totalDepreciable, schedule.usefulLifeMonths)
-        : null; // reducing-balance is computed per-period below
+      const totalDepreciable = Number(schedule.totalDepreciableAmount);
+      const salvage = Number(schedule.salvageValue);
+      // POSTED entries are already reflected in the schedule. DRAFT entries
+      // are not, so include them before calculating any additional periods.
+      let accumulated =
+        Number(schedule.accumulatedDepreciation) +
+        existing
+          .filter((entry) => entry.status === 'DRAFT')
+          .reduce((sum, entry) => sum + Number(entry.amount), 0);
+      let nextDate =
+        existing.length > 0
+          ? this.addMonths(existing[existing.length - 1].depreciationDate, 1)
+          : new Date(schedule.startDate);
 
-    const reducingMonthlyRate =
-      schedule.depreciationMethod === 'REDUCING_BALANCE'
-        ? this.deriveReducingMonthlyRate(schedule.depreciationRate, schedule.usefulLifeMonths)
-        : null;
+      const periodAmount =
+        schedule.depreciationMethod === 'STRAIGHT_LINE'
+          ? this.straightLinePeriodAmount(totalDepreciable, schedule.usefulLifeMonths)
+          : null; // reducing-balance is computed per-period below
 
-    let created = 0;
-    await this.prisma.$transaction(async (tx) => {
+      const reducingMonthlyRate =
+        schedule.depreciationMethod === 'REDUCING_BALANCE'
+          ? this.deriveReducingMonthlyRate(schedule.depreciationRate, schedule.usefulLifeMonths)
+          : null;
+
+      const entryIds: string[] = [];
       for (let i = 0; i < months; i++) {
-        const remaining = totalDepreciable - (accumulated - Number(schedule.accumulatedDepreciation));
+        const remaining = totalDepreciable - accumulated;
         if (remaining <= 0) break;
 
         let amount: number;
@@ -157,7 +180,7 @@ export class DepreciationService {
         if (amount <= 0) break;
 
         accumulated += amount;
-        await tx.depreciationEntry.create({
+        const entry = await tx.depreciationEntry.create({
           data: {
             depreciationScheduleId: schedule.id,
             companyId: schedule.companyId,
@@ -168,20 +191,21 @@ export class DepreciationService {
             status: 'DRAFT',
           },
         });
-        created++;
+        entryIds.push(entry.id);
         nextDate = this.addMonths(nextDate, 1);
       }
+      const generated = { created: entryIds.length, entryIds };
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'GENERATE',
+        entityType: 'DepreciationSchedule',
+        entityId: authorizedSchedule.id,
+        userId: user.id,
+        companyId: authorizedSchedule.companyId,
+        metadata: { generated: generated.created, months },
+      });
+      return generated;
     });
-
-    await this.auditLogs.log({
-      action: 'GENERATE',
-      entityType: 'DepreciationSchedule',
-      entityId: schedule.id,
-      userId: user.id,
-      companyId: schedule.companyId,
-      metadata: { generated: created, months },
-    });
-    return { created };
+    return generated;
   }
 
   /**
@@ -191,7 +215,7 @@ export class DepreciationService {
    */
   async postEntry(id: string, user: AuthUser) {
     const entry = await this.prisma.depreciationEntry.findFirst({
-      where: { id },
+      where: { id, deletedAt: null },
       include: {
         depreciationSchedule: {
           select: { id: true, companyId: true, fixedAssetId: true, salvageValue: true },
@@ -216,7 +240,7 @@ export class DepreciationService {
       // entry). Only one transaction can flip DRAFT -> POSTED; the loser sees
       // count === 0 and aborts before posting the JE / incrementing the schedule.
       const claimed = await tx.depreciationEntry.updateMany({
-        where: { id, status: 'DRAFT' },
+        where: { id, status: 'DRAFT', deletedAt: null },
         data: { status: 'POSTED' },
       });
       if (claimed.count === 0) {
@@ -323,7 +347,10 @@ export class DepreciationService {
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
 
-  private straightLinePeriodAmount(totalDepreciable: number, usefulLifeMonths: number | null): number {
+  private straightLinePeriodAmount(
+    totalDepreciable: number,
+    usefulLifeMonths: number | null,
+  ): number {
     if (!usefulLifeMonths || usefulLifeMonths <= 0) {
       throw new BadRequestException(
         'usefulLifeMonths is required on the schedule for straight-line depreciation',
@@ -348,7 +375,7 @@ export class DepreciationService {
       // Convert a useful life into an equivalent annual rate via the
       // double-declining-balance approximation (2 / years).
       const years = usefulLifeMonths / 12;
-      return (2 / years) / 12;
+      return 2 / years / 12;
     }
     throw new BadRequestException(
       'Either depreciationRate or usefulLifeMonths is required for reducing-balance depreciation',
@@ -357,7 +384,13 @@ export class DepreciationService {
 
   private addMonths(date: Date, n: number): Date {
     const d = new Date(date);
+    const sourceDay = d.getDate();
+    const sourceWasMonthEnd =
+      sourceDay === new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(1);
     d.setMonth(d.getMonth() + n);
+    const targetMonthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(sourceWasMonthEnd ? targetMonthEnd : Math.min(sourceDay, targetMonthEnd));
     return d;
   }
 }

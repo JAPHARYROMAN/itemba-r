@@ -18,6 +18,7 @@ function approvableInvoice(overrides: Record<string, unknown> = {}) {
     dueDate: null,
     divisionId: 'division-1',
     branchId: 'branch-1',
+    updatedAt: new Date('2026-05-30T12:00:00.000Z'),
     lines: [{ id: 'line-1', productId: 'product-1', lineTotal: 100 }],
     ...overrides,
   };
@@ -36,7 +37,10 @@ function makeService(txOverrides: Record<string, any> = {}) {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     ...txOverrides,
   };
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
   } as any;
@@ -52,30 +56,33 @@ function makeService(txOverrides: Record<string, any> = {}) {
     postingEngine,
     codes,
   );
-  return { service, prisma };
+  return { auditLogs, service, prisma };
 }
 
 const user = { id: 'user-1' } as any;
 
 describe('SupplierInvoicesService approve atomic claim', () => {
-  it('throws ConflictException and never posts when another action already claimed the invoice', async () => {
+  it('rejects an update-to-approve stale snapshot before creating or posting a payable', async () => {
     const { service, prisma } = makeService();
     // findOne decorates results via extra queries; bypass it for a focused test.
-    jest.spyOn(service, 'findOne').mockResolvedValue(approvableInvoice() as any);
-    // Race loss: the guarded status claim matches no row.
+    const snapshot = approvableInvoice();
+    jest.spyOn(service, 'findOne').mockResolvedValue(snapshot as any);
+    // An update committed after findOne(), so the exact updatedAt claim loses even
+    // though the persisted status is still DRAFT and remains broadly approvable.
     prisma.supplierInvoice.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(service.approve('si-1', undefined, user)).rejects.toBeInstanceOf(
       ConflictException,
     );
-    // The guarded claim was attempted with the correct pre-approval status set...
+    // The claim is pinned to the exact status/version that was validated.
     expect(prisma.supplierInvoice.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: {
           id: 'si-1',
           deletedAt: null,
-          status: { in: ['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'] },
-        }),
+          status: 'DRAFT',
+          updatedAt: snapshot.updatedAt,
+        },
         data: expect.objectContaining({ status: 'APPROVED' }),
       }),
     );
@@ -113,6 +120,109 @@ describe('SupplierInvoicesService approve atomic claim', () => {
       expect.objectContaining({ status: 'APPROVED', payableId: 'pay-1' }),
     );
   });
+
+  it('reuses the active match produced by runMatch when approving a matched invoice', async () => {
+    const activeMatch = {
+      id: 'match-1',
+      supplierInvoiceId: 'si-1',
+      companyId: 'company-1',
+      purchaseOrderId: 'po-1',
+      matchStatus: 'MATCHED',
+    };
+    const { auditLogs, service, prisma } = makeService({
+      threeWayMatch: {
+        findFirst: jest.fn(async () => activeMatch),
+        create: jest.fn(),
+      },
+      payable: {
+        findUnique: jest.fn(),
+        create: jest.fn(async () => ({
+          id: 'pay-1',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          journalEntryId: null,
+        })),
+        update: jest.fn(async () => ({ id: 'pay-1' })),
+      },
+      purchaseOrder: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    });
+    const matchedSnapshot = approvableInvoice({
+      status: 'MATCHED',
+      purchaseOrderId: 'po-1',
+    });
+    jest.spyOn(service, 'findOne').mockResolvedValue(matchedSnapshot as any);
+    const createMatch = jest.spyOn(service as any, 'createThreeWayMatch');
+    jest.spyOn(service as any, 'postSupplierInvoicePayable').mockResolvedValue({ id: 'je-1' });
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+
+    await service.approve('si-1', undefined, user);
+
+    expect(prisma.supplierInvoice.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'si-1',
+          deletedAt: null,
+          status: 'MATCHED',
+          updatedAt: matchedSnapshot.updatedAt,
+        },
+      }),
+    );
+    expect(prisma.threeWayMatch.findFirst).toHaveBeenCalledWith({
+      where: {
+        supplierInvoiceId: 'si-1',
+        companyId: 'company-1',
+        purchaseOrderId: 'po-1',
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(createMatch).not.toHaveBeenCalled();
+    expect(prisma.threeWayMatch.create).not.toHaveBeenCalled();
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({ newValue: expect.objectContaining({ match: activeMatch }) }),
+    );
+  });
+
+  it('rolls back approval when a matched status has no active match to reuse', async () => {
+    const { service, prisma } = makeService({
+      threeWayMatch: { findFirst: jest.fn(async () => null) },
+    });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ status: 'DISPUTED', purchaseOrderId: 'po-1' }) as any);
+
+    await expect(service.approve('si-1', { allowVariance: true }, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    expect(prisma.supplierInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('fails the approval transaction when its mandatory audit append fails', async () => {
+    const failure = new Error('audit append unavailable');
+    const { auditLogs, service } = makeService({
+      payable: {
+        findUnique: jest.fn(),
+        create: jest.fn(async () => ({
+          id: 'pay-1',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          journalEntryId: null,
+        })),
+        update: jest.fn(async () => ({ id: 'pay-1' })),
+      },
+    });
+    jest.spyOn(service, 'findOne').mockResolvedValue(approvableInvoice() as any);
+    jest.spyOn(service as any, 'postSupplierInvoicePayable').mockResolvedValue({ id: 'je-1' });
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(failure);
+
+    await expect(service.approve('si-1', undefined, user)).rejects.toBe(failure);
+    expect(auditLogs.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'SUPPLIER_INVOICE_APPROVE' }),
+    );
+  });
 });
 
 function makeUpdateService(prismaOverrides: Record<string, any> = {}) {
@@ -120,6 +230,7 @@ function makeUpdateService(prismaOverrides: Record<string, any> = {}) {
     supplierInvoice: {
       // assertInvoiceNumberAvailable lookups + the final update.
       findFirst: jest.fn(async () => null),
+      updateMany: jest.fn(async () => ({ count: 1 })),
       update: jest.fn(async ({ data }: any) => ({ id: 'si-1', ...data, lines: [] })),
     },
     supplierInvoiceLine: {
@@ -204,6 +315,83 @@ describe('SupplierInvoicesService update three-way match invalidation', () => {
 
     expect(prisma.threeWayMatch.updateMany).not.toHaveBeenCalled();
   });
+
+  const matchAffectingCases: Array<[Record<string, string>, string]> = [
+    [{ supplierId: 'supplier-2' }, 'supplier'],
+    [{ purchaseOrderId: 'po-2' }, 'purchase order'],
+    [{ goodsReceivedNoteId: 'grn-2' }, 'goods receipt'],
+    [{ currency: 'USD' }, 'currency'],
+  ];
+
+  it.each(matchAffectingCases)(
+    'retires a stale active match when the %s input changes',
+    async (patch) => {
+      const { service, prisma } = makeUpdateService({
+        supplier: {
+          findFirst: jest.fn(async () => ({
+            id: patch.supplierId ?? 'supplier-1',
+            divisionId: 'division-1',
+            branchId: 'branch-1',
+          })),
+        },
+        purchaseOrder: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValueOnce({
+              id: patch.purchaseOrderId ?? 'po-1',
+              supplierId: patch.supplierId ?? 'supplier-1',
+              divisionId: 'division-1',
+              branchId: 'branch-1',
+              currency: patch.currency ?? 'TZS',
+              purchaseType: 'CREDIT_PURCHASE',
+            })
+            .mockResolvedValue(null),
+        },
+        goodsReceivedNote: {
+          findFirst: jest.fn(async () => ({
+            id: patch.goodsReceivedNoteId ?? 'grn-1',
+            companyId: 'company-1',
+            supplierId: patch.supplierId ?? 'supplier-1',
+            purchaseOrderId: patch.purchaseOrderId ?? 'po-1',
+            divisionId: 'division-1',
+            branchId: 'branch-1',
+          })),
+        },
+      });
+      jest.spyOn(service, 'findOne').mockResolvedValue(
+        approvableInvoice({
+          status: 'DISPUTED',
+          purchaseOrderId: 'po-1',
+          goodsReceivedNoteId: 'grn-1',
+        }) as any,
+      );
+
+      await service.update('si-1', patch as any, user);
+
+      expect(prisma.threeWayMatch.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { supplierInvoiceId: 'si-1', deletedAt: null } }),
+      );
+      expect(prisma.supplierInvoice.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'DRAFT' }) }),
+      );
+    },
+  );
+
+  it('fails the version claim before rewriting lines or matches', async () => {
+    const { service, prisma } = makeUpdateService();
+    prisma.supplierInvoice.updateMany.mockResolvedValue({ count: 0 });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ status: 'DISPUTED' }) as any);
+
+    await expect(
+      service.update('si-1', { lines: updateLines } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.supplierInvoiceLine.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.threeWayMatch.updateMany).not.toHaveBeenCalled();
+    expect(prisma.supplierInvoice.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('SupplierInvoicesService currency lock', () => {
@@ -252,6 +440,48 @@ describe('SupplierInvoicesService runMatch guard', () => {
       .mockResolvedValue(approvableInvoice({ status: 'APPROVED' }) as any);
 
     await expect(service.runMatch('si-1', user)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('strictly audits a newly-created match inside the same transaction', async () => {
+    const { auditLogs, prisma, service } = makeService();
+    const match = { id: 'match-1', matchStatus: 'MATCHED' };
+    jest.spyOn(service, 'findOne').mockResolvedValue(approvableInvoice() as any);
+    jest.spyOn(service as any, 'createThreeWayMatch').mockResolvedValue({ match, created: true });
+
+    await expect(service.runMatch('si-1', user)).resolves.toBe(match);
+
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        action: 'SUPPLIER_INVOICE_MATCH',
+        entityId: 'si-1',
+        newValue: match,
+      }),
+    );
+  });
+
+  it('returns a replayed active match without another audit append', async () => {
+    const { auditLogs, service } = makeService();
+    const match = { id: 'match-existing', matchStatus: 'MATCHED' };
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ status: 'MATCHED' }) as any);
+    jest.spyOn(service as any, 'createThreeWayMatch').mockResolvedValue({ match, created: false });
+
+    await expect(service.runMatch('si-1', user)).resolves.toBe(match);
+    expect(auditLogs.logStrictInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('propagates strict audit failure so the surrounding transaction cannot report success', async () => {
+    const { auditLogs, service } = makeService();
+    const failure = new Error('audit append unavailable');
+    jest.spyOn(service, 'findOne').mockResolvedValue(approvableInvoice() as any);
+    jest
+      .spyOn(service as any, 'createThreeWayMatch')
+      .mockResolvedValue({ match: { id: 'match-1' }, created: true });
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(failure);
+
+    await expect(service.runMatch('si-1', user)).rejects.toBe(failure);
   });
 });
 
@@ -348,8 +578,12 @@ describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance
           created.push(data);
           return { id: 'twm-1', ...data };
         }),
+        updateMany: jest.fn(async () => ({ count: 0 })),
+        findFirst: jest.fn(async () => null),
       },
       supplierInvoice: {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findUnique: jest.fn(async () => ({ status: 'DRAFT' })),
         update: jest.fn(async ({ data }: any) => {
           statusWrites.push(data);
           return { id: 'si-1', ...data };
@@ -365,7 +599,7 @@ describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance
       {} as any,
       codes,
     );
-    return { service, created, statusWrites };
+    return { service, created, prisma, statusWrites };
   }
 
   function invLine(overrides: Record<string, unknown> = {}) {
@@ -496,6 +730,74 @@ describe('SupplierInvoicesService createThreeWayMatch shared-calculator variance
     await (service as any).createThreeWayMatch(invoice, 'user-1');
     // No matched line => whole-invoice fallback: |1500 - 1000| = 500.
     expect(Number(created[0].amountVariance)).toBe(500);
+  });
+
+  it('conditionally claims a standalone match before allocating its number or row', async () => {
+    const po = {
+      id: 'po-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      lines: [{ productId: 'p-a', quantity: 1, unitCost: 100, lineTotal: 100 }],
+    };
+    const { service, prisma } = makeMatchService(po);
+    const invoice = {
+      ...approvableInvoice({ purchaseOrderId: 'po-1' }),
+      totalAmount: 100,
+      lines: [invLine({ quantity: 1, unitPrice: 100, lineTotal: 100 })],
+    };
+
+    const outcome = await (service as any).createThreeWayMatch(invoice, 'user-1', prisma, {
+      claimStandalone: true,
+    });
+
+    expect(outcome).toEqual(
+      expect.objectContaining({
+        created: true,
+        match: expect.objectContaining({ id: 'twm-1' }),
+      }),
+    );
+    expect(prisma.supplierInvoice.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'si-1',
+        companyId: 'company-1',
+        deletedAt: null,
+        status: { in: ['DRAFT', 'RECEIVED'] },
+        updatedAt: new Date('2026-05-30T12:00:00.000Z'),
+      },
+      data: { status: 'MATCHED' },
+    });
+    expect(prisma.supplierInvoice.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.threeWayMatch.create.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('returns the active match when a concurrent caller already won the claim', async () => {
+    const po = {
+      id: 'po-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      lines: [{ productId: 'p-a', quantity: 1, unitCost: 100, lineTotal: 100 }],
+    };
+    const { service, prisma } = makeMatchService(po);
+    prisma.supplierInvoice.updateMany.mockResolvedValue({ count: 0 });
+    prisma.supplierInvoice.findUnique.mockResolvedValue({ status: 'MATCHED' });
+    prisma.threeWayMatch.findFirst.mockResolvedValue({
+      id: 'match-winner',
+      matchStatus: 'MATCHED',
+    });
+
+    const outcome = await (service as any).createThreeWayMatch(
+      { ...approvableInvoice({ purchaseOrderId: 'po-1' }), lines: [invLine()] },
+      'user-1',
+      prisma,
+      { claimStandalone: true },
+    );
+
+    expect(outcome).toEqual({
+      created: false,
+      match: { id: 'match-winner', matchStatus: 'MATCHED' },
+    });
+    expect(prisma.threeWayMatch.create).not.toHaveBeenCalled();
   });
 });
 

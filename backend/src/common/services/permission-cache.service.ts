@@ -18,6 +18,18 @@ export type CachedAuthPayload = {
   companyAccess: Array<{ companyId: string; accessLevel: string }>;
   divisionAccess?: Array<{ divisionId: string; accessLevel: string }>;
   branchAccess?: Array<{ branchId: string; accessLevel: string }>;
+  principalType?: string;
+  principalId?: string;
+  mandateId?: string;
+  initiatedByUserId?: string;
+  taskId?: string;
+  stepId?: string;
+  deviceId?: string;
+  planVersion?: number;
+  taskCapability?: string;
+  taskArgsDigest?: string;
+  taskInputProvenanceSha256?: string;
+  taskCredentialJti?: string;
 };
 
 interface LocalEntry {

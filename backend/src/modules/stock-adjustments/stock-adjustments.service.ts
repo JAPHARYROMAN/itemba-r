@@ -534,24 +534,25 @@ export class StockAdjustmentsService {
           });
         }
 
-        return tx.stockAdjustment.update({
+        const posted = await tx.stockAdjustment.update({
           where: { id },
           data: { status: 'POSTED', postedById: userId, postedAt: new Date() },
         });
+
+        await this.auditLogs.logStrictInTransaction(tx, {
+          action: 'STOCK_ADJUSTMENT_POST',
+          entityType: 'StockAdjustment',
+          entityId: id,
+          userId,
+          companyId: posted.companyId,
+          oldValue: { status: 'APPROVED' } as any,
+          newValue: { status: 'POSTED' } as any,
+          severity: AuditSeverity.HIGH,
+        });
+        return posted;
       },
       { timeout: 60_000 },
     );
-
-    await this.auditLogs.log({
-      action: 'STOCK_ADJUSTMENT_POST',
-      entityType: 'StockAdjustment',
-      entityId: id,
-      userId,
-      companyId: record.companyId,
-      oldValue: { status: 'APPROVED' } as any,
-      newValue: { status: 'POSTED' } as any,
-      severity: AuditSeverity.HIGH,
-    });
 
     return record;
   }

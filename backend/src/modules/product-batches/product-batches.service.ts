@@ -160,10 +160,11 @@ export class ProductBatchesService {
   }
 
   async findExpiring(companyId?: string, user?: any) {
-    const cutoff = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
     const where: any = {
       status: 'ACTIVE',
-      expiryDate: { lte: cutoff, not: null },
+      expiryDate: { gte: now, lte: cutoff, not: null },
       deletedAt: null,
     };
     applyCompanyScopeWhere(where, user, companyId);

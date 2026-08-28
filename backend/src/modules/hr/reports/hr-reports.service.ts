@@ -49,9 +49,9 @@ export class HrReportsService {
     if (divisionId) where.employee = { divisionId };
     if (employeeId) where.employeeId = employeeId;
     if (dateFrom || dateTo) {
-      where.date = {};
-      if (dateFrom) where.date.gte = new Date(dateFrom);
-      if (dateTo) where.date.lte = new Date(dateTo);
+      where.attendanceDate = {};
+      if (dateFrom) where.attendanceDate.gte = new Date(dateFrom);
+      if (dateTo) where.attendanceDate.lte = new Date(dateTo);
     }
 
     const [data, total] = await Promise.all([

@@ -39,8 +39,9 @@ function makePrisma() {
     userCompanyAccess: {
       findMany: jest.fn(async () => []),
     },
+    $queryRaw: jest.fn(async () => [{ id: 'period-1' }]),
   };
-  prisma.$transaction = async (fn: any) => fn(prisma);
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
   return prisma;
 }
 
@@ -274,7 +275,7 @@ describe('JournalEntriesService GL controls', () => {
     };
     prisma.journalEntry.findFirst.mockResolvedValue(original);
     const { service, accountingControl } = makeService(prisma);
-    accountingControl.assertPostingAllowed.mockResolvedValueOnce({
+    accountingControl.assertPostingAllowed.mockResolvedValue({
       id: 'current-period',
       companyId: 'company-1',
       fiscalYearId: 'fy-1',
@@ -295,6 +296,43 @@ describe('JournalEntriesService GL controls', () => {
         }),
       }),
     );
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(accountingControl.assertPostingAllowed).toHaveBeenCalledTimes(2);
+    expect(accountingControl.assertPostingAllowed).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        companyId: 'company-1',
+        accountingPeriodId: 'current-period',
+        transactionDate: new Date('2026-04-10'),
+        moduleName: 'journal_entries',
+      }),
+      prisma,
+    );
+  });
+
+  it('aborts if the reversal period closes before the transactional row lock is acquired', async () => {
+    const prisma = makePrisma();
+    prisma.journalEntry.findFirst.mockResolvedValue(makePostedOriginal());
+    const { service, accountingControl } = makeService(prisma);
+    accountingControl.assertPostingAllowed
+      .mockResolvedValueOnce({
+        id: 'period-1',
+        companyId: 'company-1',
+        fiscalYearId: 'fy-1',
+      })
+      .mockRejectedValueOnce(new BadRequestException('Accounting period is not OPEN'));
+
+    await expect(
+      service.reverse(
+        'je-original',
+        { reversalReason: 'Correction', transactionDate: '2026-04-10' },
+        authUser({ id: 'poster-user' }),
+      ),
+    ).rejects.toThrow('Accounting period is not OPEN');
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(accountingControl.assertPostingAllowed).toHaveBeenCalledTimes(2);
+    expect(prisma.journalEntry.updateMany).not.toHaveBeenCalled();
+    expect(prisma.journalEntry.create).not.toHaveBeenCalled();
   });
 
   it('claims the original entry atomically before posting a reversal (#12)', async () => {

@@ -1,8 +1,10 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireAnyPermissions } from '../../common/decorators/require-permissions.decorator';
 import { DashboardService } from './dashboard.service';
+import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
+import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
 
 @ApiTags('dashboard')
 @ApiBearerAuth()
@@ -15,6 +17,8 @@ export class DashboardController {
    * the app home dashboard, so any major dashboard/report permission can open it.
    */
   @Get('executive-summary')
+  @SensitiveAccess('Dashboard')
+  @UseInterceptors(SensitiveAccessInterceptor)
   @RequireAnyPermissions(
     'group-control.view',
     'operations.dashboard.view',

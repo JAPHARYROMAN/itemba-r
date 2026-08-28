@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { FinanceService } from './finance.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { IsOptional, IsString } from 'class-validator';
 
 class FinanceDashboardQueryDto {
@@ -15,6 +16,7 @@ export class FinanceController {
   constructor(private readonly service: FinanceService) {}
 
   @Get('dashboard')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('finance.view')
   getDashboard(@Query() q: FinanceDashboardQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.getDashboard(q.companyId, user);

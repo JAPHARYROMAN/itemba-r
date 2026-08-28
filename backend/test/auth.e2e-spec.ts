@@ -3,6 +3,7 @@ import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import * as argon2 from 'argon2';
 import { createE2eApp } from './e2e-app';
+import { deleteAuditLogsForTest } from './audit-log-maintenance';
 
 jest.setTimeout(60000);
 
@@ -80,7 +81,7 @@ describe('Authentication (e2e)', () => {
       await prisma.userSecurityProfile.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.passwordHistory.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.activeSession.deleteMany({ where: { userId: { in: userIds } } });
-      await prisma.auditLog.deleteMany({ where: { userId: { in: userIds } } });
+      await deleteAuditLogsForTest(prisma, { userId: { in: userIds } });
       await prisma.securityEvent.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     }

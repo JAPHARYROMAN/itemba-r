@@ -1,10 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeAssignmentDto } from './dto/create-employee-assignment.dto';
 import { UpdateEmployeeAssignmentDto } from './dto/update-employee-assignment.dto';
-import { applyCompanyScopeWhere } from '../../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
 
 @Injectable()
 export class EmployeeAssignmentsService {
@@ -73,6 +73,7 @@ export class EmployeeAssignmentsService {
   }
 
   async create(dto: CreateEmployeeAssignmentDto, user: any) {
+    assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
     const startDate = new Date(dto.startDate);
     const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
     this.assertValidDateRange(startDate, endDate);
@@ -84,9 +85,11 @@ export class EmployeeAssignmentsService {
           select: { companyId: true, divisionId: true },
         });
         if (!employee) throw new NotFoundException('Employee not found');
+        assertCanAccessCompanyFromUser(user, employee.companyId, AccessLevel.READ);
         const requiresTransferApproval = this.isInterDivisionOrCompanyTransfer(employee, dto);
+        let record;
         if (requiresTransferApproval) {
-          return tx.employeeAssignment.create({
+          record = await tx.employeeAssignment.create({
             data: {
               ...dto,
               startDate,
@@ -98,40 +101,48 @@ export class EmployeeAssignmentsService {
               transferRequestedAt: new Date(),
             } as any,
           });
-        }
-
-        const existingPrimary = await tx.employeeAssignment.findFirst({
-          where: { employeeId: dto.employeeId, status: 'ACTIVE', isPrimary: true, deletedAt: null },
-          select: { id: true },
-        });
-        const isPrimary = dto.isPrimary ?? !existingPrimary;
-        if (isPrimary) {
-          await tx.employeeAssignment.updateMany({
+        } else {
+          const existingPrimary = await tx.employeeAssignment.findFirst({
             where: {
               employeeId: dto.employeeId,
               status: 'ACTIVE',
               isPrimary: true,
               deletedAt: null,
             },
-            data: { isPrimary: false },
+            select: { id: true },
+          });
+          const isPrimary = dto.isPrimary ?? !existingPrimary;
+          if (isPrimary) {
+            await tx.employeeAssignment.updateMany({
+              where: {
+                employeeId: dto.employeeId,
+                status: 'ACTIVE',
+                isPrimary: true,
+                deletedAt: null,
+              },
+              data: { isPrimary: false },
+            });
+          }
+
+          record = await tx.employeeAssignment.create({
+            data: {
+              ...dto,
+              startDate,
+              endDate,
+              isPrimary,
+            } as any,
           });
         }
 
-        return tx.employeeAssignment.create({
-          data: {
-            ...dto,
-            startDate,
-            endDate,
-            isPrimary,
-          } as any,
+        await this.audit.logStrictInTransaction(tx, {
+          userId: user.id,
+          action: 'CREATE',
+          entityType: 'EmployeeAssignment',
+          entityId: record.id,
+          companyId: record.companyId,
+          newValue: dto as unknown as Record<string, unknown>,
         });
-      });
-      await this.audit.log({
-        userId: user.id,
-        action: 'CREATE',
-        entityType: 'EmployeeAssignment',
-        entityId: record.id,
-        newValue: dto as unknown as Record<string, unknown>,
+        return record;
       });
       return record;
     } catch (error) {
@@ -293,7 +304,4 @@ export class EmployeeAssignmentsService {
   ): boolean {
     return dto.companyId !== employee.companyId || (dto.divisionId ?? null) !== employee.divisionId;
   }
-
-
-
 }

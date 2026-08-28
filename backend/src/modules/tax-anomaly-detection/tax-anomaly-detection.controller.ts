@@ -19,16 +19,16 @@ export class TaxAnomalyDetectionController {
   @Get('scan')
   @RequirePermissions('finance.reports.view')
   scan(
+    @CurrentUser() user: AuthUser,
     @Query('companyId') companyId?: string,
     @Query('severity') severity?: string | string[],
     @Query('category') category?: string | string[],
-    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
     const severities = severity
-      ? (Array.isArray(severity) ? severity : [severity]).filter(Boolean) as Severity[]
+      ? ((Array.isArray(severity) ? severity : [severity]).filter(Boolean) as Severity[])
       : undefined;
     const categories = category
-      ? (Array.isArray(category) ? category : [category]).filter(Boolean) as string[]
+      ? ((Array.isArray(category) ? category : [category]).filter(Boolean) as string[])
       : undefined;
     return this.service.scan({ companyId, severities, categories }, user);
   }

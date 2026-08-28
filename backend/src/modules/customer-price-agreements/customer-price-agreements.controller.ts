@@ -5,6 +5,7 @@ import { CreateCustomerPriceAgreementDto } from './dto/create-customer-price-agr
 import { UpdateCustomerPriceAgreementDto } from './dto/update-customer-price-agreement.dto';
 import { QueryCustomerPriceAgreementDto } from './dto/query-customer-price-agreement.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('westsides/customer-price-agreements')
@@ -27,6 +28,7 @@ export class CustomerPriceAgreementsController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('customer_price_agreements.view')
   @ApiOperation({ summary: 'Get customer price agreement by ID' })
   findOne(@Param('id') id: string) {
@@ -43,7 +45,11 @@ export class CustomerPriceAgreementsController {
   @Patch(':id')
   @RequirePermissions('customer_price_agreements.manage')
   @ApiOperation({ summary: 'Update customer price agreement' })
-  update(@Param('id') id: string, @Body() dto: UpdateCustomerPriceAgreementDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCustomerPriceAgreementDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 

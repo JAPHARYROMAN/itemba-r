@@ -15,9 +15,12 @@ import { UpdateBankAccountDto } from './dto/update-bank-account.dto';
 import { QueryBankAccountDto } from './dto/query-bank-account.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
+import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
 
 @Controller('bank-accounts')
+@SensitiveAccess('BankAccounts')
 @UseInterceptors(SensitiveAccessInterceptor)
 export class BankAccountsController {
   constructor(private readonly service: BankAccountsService) {}
@@ -35,6 +38,7 @@ export class BankAccountsController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('bank-accounts.read')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
@@ -48,7 +52,11 @@ export class BankAccountsController {
 
   @Put(':id')
   @RequirePermissions('bank-accounts.update')
-  update(@Param('id') id: string, @Body() dto: UpdateBankAccountDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateBankAccountDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

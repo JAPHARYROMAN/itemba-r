@@ -5,10 +5,14 @@ import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreatePositionDto } from './dto/create-position.dto';
 import { UpdatePositionDto } from './dto/update-position.dto';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class PositionsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+  ) {}
 
   private companyFilter(user: any) {
     if (user.role?.scope === 'GROUP') return {};
@@ -16,7 +20,16 @@ export class PositionsService {
   }
 
   async findAll(user: any, query: any) {
-    const { page = 1, limit = 20, search, companyId, divisionId, branchId, departmentId, status } = query;
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      companyId,
+      divisionId,
+      branchId,
+      departmentId,
+      status,
+    } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
@@ -38,7 +51,10 @@ export class PositionsService {
     }
     const [data, total] = await Promise.all([
       this.prisma.position.findMany({
-        where, skip, take: Number(limit), orderBy: { title: 'asc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { title: 'asc' },
         include: {
           company: { select: { id: true, name: true } },
           department: {
@@ -87,7 +103,7 @@ export class PositionsService {
   async create(dto: CreatePositionDto, user: any) {
     await this.assertPositionHierarchy(dto.companyId, dto.departmentId, user);
     const manualCode = dto.positionCode?.trim();
-    let positionCode = manualCode || await this.nextPositionCode(dto.companyId);
+    let positionCode = manualCode || (await this.nextPositionCode(dto.companyId));
     let record;
     try {
       record = await this.prisma.position.create({
@@ -100,7 +116,9 @@ export class PositionsService {
     } catch (error) {
       if (this.isPositionCodeConflict(error)) {
         if (manualCode) {
-          throw new BadRequestException(`Position code ${manualCode} already exists for this company`);
+          throw new BadRequestException(
+            `Position code ${manualCode} already exists for this company`,
+          );
         }
         positionCode = await this.nextPositionCode(dto.companyId);
         record = await this.prisma.position.create({
@@ -114,7 +132,13 @@ export class PositionsService {
         throw error;
       }
     }
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'Position', entityId: record.id, newValue: { ...dto, positionCode } as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'Position',
+      entityId: record.id,
+      newValue: { ...dto, positionCode } as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
@@ -133,15 +157,32 @@ export class PositionsService {
       data.positionCode = trimmed;
     }
     const record = await this.prisma.position.update({ where: { id }, data });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Position', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'Position',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
   async remove(id: string, user: any) {
     await this.findOne(id, user);
     await this.prisma.position.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'Position', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'Position',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Position deleted' };
+  }
+
+  async previewNextPositionCode(companyId: string, user: AuthUser): Promise<string> {
+    assertCanAccessCompanyFromUser(user, companyId, AccessLevel.READ);
+    return this.nextPositionCode(companyId);
   }
 
   async nextPositionCode(companyId: string): Promise<string> {
@@ -184,8 +225,15 @@ export class PositionsService {
     if (department.status !== 'ACTIVE') {
       throw new BadRequestException('Position department must be active');
     }
-    if (department.division && (department.division.companyId !== companyId || department.division.deletedAt || !department.division.isActive)) {
-      throw new BadRequestException('Position department division is not active for the selected company');
+    if (
+      department.division &&
+      (department.division.companyId !== companyId ||
+        department.division.deletedAt ||
+        !department.division.isActive)
+    ) {
+      throw new BadRequestException(
+        'Position department division is not active for the selected company',
+      );
     }
     if (department.branch && (department.branch.deletedAt || !department.branch.isActive)) {
       throw new BadRequestException('Position department branch/location is not active');

@@ -9,6 +9,7 @@ function makeService() {
   const debt = {
     count: jest.fn(async () => 0),
     aggregate: jest.fn(async () => ({ _sum: { amount: null, amountPaid: null } })),
+    findMany: jest.fn(async () => []),
   };
   const prisma = { debt } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
@@ -68,5 +69,27 @@ describe('DebtsService.getSummary', () => {
     const { service } = makeService();
     const result = await service.getSummary(user);
     expect(new Prisma.Decimal(result.totalOutstandingAmount).toString()).toBe('0');
+  });
+});
+
+describe('DebtsService.getOverdue', () => {
+  it('returns both OUTSTANDING and PARTIALLY_PAID overdue debts in company scope', async () => {
+    const { service, prisma, companyScope } = makeService();
+    companyScope.accessibleCompanyIds.mockResolvedValue(['company-1']);
+
+    await service.getOverdue(user);
+
+    expect(prisma.debt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deletedAt: null,
+          status: {
+            in: [DebtStatus.OUTSTANDING, DebtStatus.PARTIALLY_PAID],
+          },
+          dueDate: { lt: expect.any(Date) },
+          companyId: { in: ['company-1'] },
+        }),
+      }),
+    );
   });
 });

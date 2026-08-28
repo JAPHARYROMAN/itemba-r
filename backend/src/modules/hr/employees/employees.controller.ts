@@ -1,3 +1,4 @@
+import { EmployeesQueryDto } from '../../../common/dto/resource-query.dto';
 import {
   Controller,
   Get,
@@ -20,6 +21,17 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { IsOptional, IsString } from 'class-validator';
+
+class RequestEmployeeTerminationDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @IsOptional()
+  @IsString()
+  terminationDate?: string;
+}
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/employees')
@@ -28,7 +40,7 @@ export class EmployeesController {
 
   @Get()
   @RequirePermissions('employees.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: EmployeesQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -39,8 +51,8 @@ export class EmployeesController {
    */
   @Get('next-code')
   @RequirePermissions('employees.view')
-  async nextCode(@Query('companyId') companyId: string) {
-    return { employeeCode: await this.service.nextEmployeeCode(companyId) };
+  async nextCode(@Query('companyId') companyId: string, @CurrentUser() user: AuthUser) {
+    return { employeeCode: await this.service.previewNextEmployeeCode(companyId, user) };
   }
 
   @Get('linkable-users')
@@ -75,7 +87,7 @@ export class EmployeesController {
   @RequirePermissions('employees.termination.request')
   requestTermination(
     @Param('id') id: string,
-    @Body() body: { reason?: string; terminationDate?: string },
+    @Body() body: RequestEmployeeTerminationDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.requestTermination(id, body, user);

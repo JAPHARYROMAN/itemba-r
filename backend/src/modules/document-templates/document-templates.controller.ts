@@ -1,7 +1,9 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import { DocumentTemplatesQueryDto } from '../../common/dto/resource-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { DocumentTemplatesService } from './document-templates.service';
+import { CreateDocumentTemplateDto, UpdateDocumentTemplateDto } from './dto/document-template.dto';
 
 @Controller('document-templates')
 export class DocumentTemplatesController {
@@ -9,7 +11,7 @@ export class DocumentTemplatesController {
 
   @Get()
   @RequirePermissions('document_templates.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: DocumentTemplatesQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,13 +23,17 @@ export class DocumentTemplatesController {
 
   @Post()
   @RequirePermissions('document_templates.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateDocumentTemplateDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id')
   @RequirePermissions('document_templates.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDocumentTemplateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

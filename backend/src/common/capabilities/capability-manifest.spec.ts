@@ -18,9 +18,17 @@
  * rather than narrowing what it loads.
  */
 
-import { extractCapabilities, capabilitiesFor, Capability } from './capability-manifest';
+import { Controller, Post } from '@nestjs/common';
+import {
+  extractCapabilities,
+  capabilitiesFor,
+  Capability,
+  capabilityEffect,
+} from './capability-manifest';
 import { loadAllControllers } from './load-controllers';
 import { TIER_RANK } from './reversibility';
+import { ExternalEgress } from '../decorators/external-egress.decorator';
+import { RequirePermissions } from '../decorators/require-permissions.decorator';
 
 /**
  * Routes that are deliberately reachable without a permission code, with the
@@ -110,6 +118,9 @@ describe('capability manifest', () => {
       // API-key routes authenticate on their own axis (x-api-key + @RequireApiScope)
       // and are machine-to-machine; they are never agent capabilities.
       .filter((c) => c.guard !== 'api-key')
+      // Device broker writes are authenticated directly by a mutually trusted
+      // client TLS socket and are never offered as agent tools.
+      .filter((c) => c.guard !== 'mutual-tls')
       .filter((c) => !(c.controller in PERMISSIONLESS_BY_DESIGN))
       .map((c) => `${c.verb} ${c.path} (${c.id}) guard=${c.guard}`);
 
@@ -135,6 +146,20 @@ describe('capability manifest', () => {
     expect(ungated).toEqual([]);
   });
 
+  it('classifies every device-channel route as direct mutual TLS and agent-excluded', () => {
+    const routes = manifest.filter((c) => c.controller === 'MsaidiziDeviceChannelController');
+    expect(routes.length).toBeGreaterThan(0);
+    expect(routes.every((route) => route.guard === 'mutual-tls')).toBe(true);
+    expect(routes.every((route) => route.agentExcluded)).toBe(true);
+  });
+
+  it('classifies every isolated update-verifier route as mutual TLS and agent-excluded', () => {
+    const routes = manifest.filter((c) => c.controller === 'MsaidiziUpdateVerifierController');
+    expect(routes.length).toBeGreaterThan(0);
+    expect(routes.every((route) => route.guard === 'mutual-tls')).toBe(true);
+    expect(routes.every((route) => route.agentExcluded)).toBe(true);
+  });
+
   it('keeps the exemption list honest — no stale entries', () => {
     const present = new Set(manifest.map((c) => c.controller));
     const stale = Object.keys(PERMISSIONLESS_BY_DESIGN).filter((name) => !present.has(name));
@@ -151,6 +176,25 @@ describe('capability manifest', () => {
       .filter((c) => c.verb === 'GET' && TIER_RANK[c.tier] > 0)
       .map((c) => c.id);
     expect(wrong).toEqual([]);
+  });
+
+  it('extracts an explicit metered external effect without inferring a destination', () => {
+    @Controller('synthetic-external')
+    class SyntheticExternalController {
+      @Post('send')
+      @RequirePermissions('synthetic.send')
+      @ExternalEgress({ metering: 'adapter-receipt-v1', reservationBytes: 8192 })
+      send(): void {}
+    }
+
+    const [external] = extractCapabilities([SyntheticExternalController]);
+    expect(external).toMatchObject({
+      id: 'SyntheticExternalController.send',
+      tier: 'red',
+      tierReason: 'metered-external-egress',
+      externalEgress: { metering: 'adapter-receipt-v1', reservationBytes: 8192 },
+    });
+    expect(capabilityEffect(external)).toBe('EXTERNAL');
   });
 });
 

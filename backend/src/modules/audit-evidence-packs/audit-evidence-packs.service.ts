@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateAuditEvidencePackDto } from './dto/create-audit-evidence-pack.dto';
 import { UpdateAuditEvidencePackDto } from './dto/update-audit-evidence-pack.dto';
 import { CreateAuditEvidencePackItemDto } from './dto/create-audit-evidence-pack-item.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class AuditEvidencePacksService {
@@ -81,12 +83,20 @@ export class AuditEvidencePacksService {
     return this.prisma.auditEvidencePackItem.findMany({ where: { evidencePackId: packId }, orderBy: { createdAt: 'asc' } });
   }
 
-  async removeItem(packId: string, itemId: string, user: any) {
-    await this.findOne(packId, user);
+  async removeItem(packId: string, itemId: string, user: AuthUser) {
+    const pack = await this.findOne(packId, user);
+    assertCanAccessCompanyFromUser(user, pack.companyId, AccessLevel.WRITE);
     const item = await this.prisma.auditEvidencePackItem.findFirst({ where: { id: itemId, evidencePackId: packId } });
     if (!item) throw new NotFoundException('Audit evidence pack item not found');
     await this.prisma.auditEvidencePackItem.delete({ where: { id: itemId } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'AuditEvidencePackItem', entityId: itemId, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'AuditEvidencePackItem',
+      entityId: itemId,
+      companyId: pack.companyId,
+      oldValue: item as unknown as Record<string, unknown>,
+    });
     return { message: 'Audit evidence pack item deleted' };
   }
 }

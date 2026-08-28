@@ -1,12 +1,4 @@
-import {
-  IsArray,
-  IsEnum,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Min,
-} from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 import { ApiClientStatus, ApiClientType } from '@prisma/client';
 
 export class CreateApiClientDto {
@@ -35,10 +27,12 @@ export class CreateApiClientDto {
   description?: string;
 
   @IsArray()
+  @IsString({ each: true })
   allowedScopes!: string[];
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
   allowedIpAddresses?: string[];
 
   @IsOptional()

@@ -1,5 +1,5 @@
-import { ForbiddenException } from '@nestjs/common';
-import { BackgroundJobStatus } from '@prisma/client';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BackgroundJobStatus, BackgroundJobType } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService, ObservabilityBudgetService } from '../../common/services';
 import { BackgroundJobsService } from './background-jobs.service';
@@ -160,5 +160,45 @@ describe('BackgroundJobsService company scope and replay', () => {
         }),
       }),
     );
+  });
+
+  it('cannot replay a durable Msaidizi step through the generic retry endpoint', async () => {
+    const prisma = makePrisma();
+    prisma.backgroundJob.findUnique.mockResolvedValue({
+      id: 'job-msaidizi-write',
+      jobType: BackgroundJobType.MSAIDIZI_TASK_STEP,
+      companyId: 'company-A',
+      status: BackgroundJobStatus.DEAD_LETTER,
+      attempts: 1,
+      maxAttempts: 1,
+    });
+
+    await expect(serviceFor(prisma).retry('job-msaidizi-write', authUser())).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.backgroundJob.update).not.toHaveBeenCalled();
+  });
+
+  it('cannot replay a terminal Msaidizi job through idempotent enqueue', async () => {
+    const prisma = makePrisma();
+    prisma.backgroundJob.findUnique.mockResolvedValue({
+      id: 'job-msaidizi-write',
+      jobType: BackgroundJobType.MSAIDIZI_TASK_STEP,
+      companyId: 'company-A',
+      status: BackgroundJobStatus.DEAD_LETTER,
+    });
+
+    await expect(
+      serviceFor(prisma).enqueue(
+        {
+          jobType: BackgroundJobType.DATA_EXPORT,
+          queueName: 'data-exports',
+          idempotencyKey: 'msaidizi-step:step-write',
+        },
+        authUser(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.backgroundJob.update).not.toHaveBeenCalled();
+    expect(prisma.backgroundJob.create).not.toHaveBeenCalled();
   });
 });

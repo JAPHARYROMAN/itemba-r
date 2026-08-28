@@ -17,6 +17,68 @@ const D = (v: number | string) => new Prisma.Decimal(v);
 
 const USER = { id: 'user-1' } as any;
 
+function makeGenerationService() {
+  const schedule = {
+    id: 'sch-1',
+    companyId: 'company-1',
+    fixedAssetId: 'fa-1',
+    depreciationMethod: 'STRAIGHT_LINE',
+    startDate: new Date('2026-01-31T00:00:00.000Z'),
+    usefulLifeMonths: 10,
+    salvageValue: D(0),
+    totalDepreciableAmount: D(1_000),
+    accumulatedDepreciation: D(200),
+    deletedAt: null,
+  };
+  const existing = [
+    {
+      id: 'draft-1',
+      depreciationDate: new Date('2026-03-31T00:00:00.000Z'),
+      amount: D(100),
+      status: 'DRAFT',
+    },
+  ];
+  let createdSequence = 0;
+  const create = jest.fn(async ({ data }: any) => ({
+    id: `created-${++createdSequence}`,
+    ...data,
+  }));
+  const findMany = jest.fn(async () => existing);
+  const scheduleFindFirst = jest.fn(async () => schedule);
+  const $queryRaw = jest.fn(async () => [{ id: schedule.id }]);
+  const prisma: any = {
+    depreciationSchedule: { findFirst: scheduleFindFirst },
+    depreciationEntry: { findMany, create },
+    $queryRaw,
+  };
+  prisma.$transaction = jest.fn(async (callback: any) => callback(prisma));
+
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
+  const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
+  const service = new DepreciationService(
+    prisma,
+    auditLogs,
+    {} as any,
+    {} as any,
+    {} as any,
+    companyScope,
+  );
+
+  return {
+    service,
+    prisma,
+    create,
+    findMany,
+    schedule,
+    scheduleFindFirst,
+    $queryRaw,
+    auditLogs,
+  };
+}
+
 function makeService(opts?: {
   entryStatus?: string;
   amount?: number;
@@ -176,10 +238,113 @@ describe('DepreciationService.postEntry', () => {
     expect(fixedAssetUpdate).not.toHaveBeenCalled();
   });
 
+  it('excludes soft-deleted entries from both lookup and the atomic posting claim', async () => {
+    const { service, prisma } = makeService();
+
+    await service.postEntry('de-1', USER);
+
+    expect(prisma.depreciationEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'de-1', deletedAt: null } }),
+    );
+    expect(prisma.depreciationEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: 'de-1', status: 'DRAFT', deletedAt: null },
+      data: { status: 'POSTED' },
+    });
+  });
+
   it('throws NotFound when the locked asset row is missing', async () => {
     const { service, fixedAssetUpdate } = makeService({ missingAsset: true });
 
     await expect(service.postEntry('de-1', USER)).rejects.toBeInstanceOf(NotFoundException);
     expect(fixedAssetUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('DepreciationService.generateEntries', () => {
+  it('returns the exact ID for one deterministic zero-entry straight-line period', async () => {
+    const { service, create, findMany, schedule, auditLogs } = makeGenerationService();
+    findMany.mockResolvedValue([]);
+    schedule.accumulatedDepreciation = D(0);
+
+    await expect(service.generateEntries('sch-1', 1, USER)).resolves.toEqual({
+      created: 1,
+      entryIds: ['created-1'],
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        depreciationScheduleId: 'sch-1',
+        companyId: 'company-1',
+        fixedAssetId: 'fa-1',
+        depreciationDate: new Date('2026-01-31T00:00:00.000Z'),
+        amount: 100,
+        accumulatedDepreciationAfter: 100,
+        status: 'DRAFT',
+      },
+    });
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'GENERATE',
+        entityType: 'DepreciationSchedule',
+        entityId: 'sch-1',
+        companyId: 'company-1',
+        metadata: { generated: 1, months: 1 },
+      }),
+    );
+  });
+
+  it('locks the schedule before re-reading entries and includes existing drafts', async () => {
+    const { service, create, findMany, scheduleFindFirst, $queryRaw, auditLogs } =
+      makeGenerationService();
+
+    await expect(service.generateEntries('sch-1', 2, USER)).resolves.toEqual({
+      created: 2,
+      entryIds: ['created-1', 'created-2'],
+    });
+
+    // One lookup authorizes company WRITE; the second happens after the row
+    // lock and supplies the generation snapshot.
+    expect(scheduleFindFirst).toHaveBeenCalledTimes(2);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    expect($queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      findMany.mock.invocationCallOrder[0],
+    );
+    expect(create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        depreciationScheduleId: 'sch-1',
+        depreciationDate: new Date('2026-04-30T00:00:00.000Z'),
+        amount: 100,
+        // 200 posted + 100 existing draft + 100 newly generated.
+        accumulatedDepreciationAfter: 400,
+        status: 'DRAFT',
+      }),
+    });
+    expect(create).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({
+        depreciationScheduleId: 'sch-1',
+        depreciationDate: new Date('2026-05-31T00:00:00.000Z'),
+        amount: 100,
+        accumulatedDepreciationAfter: 500,
+        status: 'DRAFT',
+      }),
+    });
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledTimes(1);
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(expect.anything(), {
+      action: 'GENERATE',
+      entityType: 'DepreciationSchedule',
+      entityId: 'sch-1',
+      userId: 'user-1',
+      companyId: 'company-1',
+      metadata: { generated: 2, months: 2 },
+    });
+  });
+
+  it('fails the generation transaction when its mandatory audit append fails', async () => {
+    const { service, auditLogs } = makeGenerationService();
+    const failure = new Error('audit append unavailable');
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(failure);
+
+    await expect(service.generateEntries('sch-1', 1, USER)).rejects.toBe(failure);
   });
 });

@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../../common/services';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateMobileMoneyAccountDto } from './dto/create-mobile-money-account.dto';
 import { UpdateMobileMoneyAccountDto } from './dto/update-mobile-money-account.dto';
@@ -22,11 +24,22 @@ export class MobileMoneyAccountsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
+    private readonly companyScope: CompanyScopeService,
   ) {}
 
-  async findByEmployee(employeeId: string) {
+  async findByEmployee(employeeId: string, user: AuthUser) {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        id: employeeId,
+        deletedAt: null,
+        ...(await this.companyScope.companyWhereFor(user)),
+      },
+      select: { id: true },
+    });
+    if (!employee) throw new NotFoundException('Employee not found');
+
     return this.prisma.mobileMoneyAccount.findMany({
-      where: { employeeId, deletedAt: null },
+      where: { employeeId: employee.id, deletedAt: null },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     });
   }
@@ -120,8 +133,19 @@ export class MobileMoneyAccountsService {
     }
   }
 
-  async remove(id: string, userId: string) {
-    const existing = await this.findOne(id);
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.prisma.mobileMoneyAccount.findFirst({
+      where: { id, deletedAt: null },
+      include: { employee: { select: { companyId: true } } },
+    });
+    if (!existing) throw new NotFoundException('Mobile money account not found');
+
+    await this.companyScope.assertCanAccessCompany(
+      user,
+      existing.employee.companyId,
+      AccessLevel.WRITE,
+    );
+
     if (existing.isPrimary) {
       throw new BadRequestException(
         'Cannot delete the primary mobile money account. Promote another account first.',
@@ -131,12 +155,14 @@ export class MobileMoneyAccountsService {
       where: { id },
       data: { deletedAt: new Date(), status: 'CLOSED' },
     });
+    const { employee, ...oldValue } = existing;
     await this.audit.log({
-      userId,
+      userId: user.id,
       action: 'DELETE',
       entityType: 'MobileMoneyAccount',
       entityId: id,
-      oldValue: existing as unknown as Record<string, unknown>,
+      companyId: employee.companyId,
+      oldValue: oldValue as unknown as Record<string, unknown>,
     });
     return { success: true };
   }

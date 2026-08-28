@@ -22,15 +22,122 @@
  */
 
 import { ConfigService } from '@nestjs/config';
+import { Test } from '@nestjs/testing';
+import { EphemeralSecretsModule } from '../../common/ephemeral-secrets.module';
+import { EphemeralSecretFingerprintRegistry } from '../../common/services';
+import { PrismaModule } from '../../prisma/prisma.module';
+import { PrismaService } from '../../prisma/prisma.service';
+import { PersistenceSecretGuard } from '../msaidizi-control-plane/persistence-secret-guard';
 import { MsaidiziConfig } from './msaidizi.config';
 
 /** A ConfigService over a fixed environment, defaults honoured as Nest does. */
-function configWith(env: Record<string, string>): MsaidiziConfig {
+function configWith(
+  env: Record<string, string>,
+  ephemeralSecrets = new EphemeralSecretFingerprintRegistry(),
+): MsaidiziConfig {
   const service = {
     get: (key: string, fallback?: string) => (key in env ? env[key] : fallback),
   } as unknown as ConfigService;
-  return new MsaidiziConfig(service);
+  return new MsaidiziConfig(service, ephemeralSecrets);
 }
+
+describe('provider model identity', () => {
+  it('normalizes model IDs to the same exact values verified by the contract service', () => {
+    const config = configWith({
+      MSAIDIZI_MODEL: ' claude-opus-5 ',
+      MSAIDIZI_CLASSIFIER_MODEL: ' claude-haiku-4-5 ',
+    });
+
+    expect(config.model).toBe('claude-opus-5');
+    expect(config.classifierModel).toBe('claude-haiku-4-5');
+  });
+
+  it('selects a credential only for the exact attested opaque key ID', () => {
+    const config = configWith({
+      ANTHROPIC_API_KEY: 'raw-test-key-never-persisted',
+      MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID: 'anthropic-prod/key-v17',
+    });
+
+    expect(config.selectProviderCredential('anthropic-prod/key-v17')).toEqual({
+      keyId: 'anthropic-prod/key-v17',
+      apiKey: 'raw-test-key-never-persisted',
+    });
+    expect(() => config.selectProviderCredential('anthropic-prod/key-v18')).toThrow(
+      'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_MISMATCH',
+    );
+    expect(() =>
+      configWith({ ANTHROPIC_API_KEY: 'raw-test-key-never-persisted' }).selectProviderCredential(
+        'anthropic-prod/key-v17',
+      ),
+    ).toThrow('MSAIDIZI_PROVIDER_CREDENTIAL_KEY_NOT_CONFIGURED');
+  });
+
+  it('declares the selected provider credential before returning it to the client', () => {
+    const ephemeralSecrets = new EphemeralSecretFingerprintRegistry();
+    const config = configWith(
+      {
+        ANTHROPIC_API_KEY: 'hunter2',
+        MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID: 'anthropic-test/key-v1',
+      },
+      ephemeralSecrets,
+    );
+
+    expect(config.selectProviderCredential('anthropic-test/key-v1').apiKey).toBe('hunter2');
+    const durable = new PersistenceSecretGuard(ephemeralSecrets).sanitizeText(
+      'provider copy prefixhunter2suffix',
+    );
+    expect(durable.redactionsApplied).toBe(true);
+    expect(durable.value).not.toContain('hunter2');
+  });
+
+  it('declares the configured credential before the first provider request', () => {
+    const ephemeralSecrets = new EphemeralSecretFingerprintRegistry();
+    configWith({ ANTHROPIC_API_KEY: '123456' }, ephemeralSecrets);
+
+    const durable = new PersistenceSecretGuard(ephemeralSecrets).sanitizeText(
+      'pre-request copy xx123456yy',
+    );
+    expect(durable.redactionsApplied).toBe(true);
+    expect(durable.value).not.toContain('123456');
+  });
+
+  it('resolves one shared registry through the real Nest module boundary', async () => {
+    const env = {
+      ANTHROPIC_API_KEY: '123456',
+      MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID: 'anthropic-test/key-v2',
+    };
+    const moduleRef = await Test.createTestingModule({
+      imports: [EphemeralSecretsModule, PrismaModule],
+      providers: [
+        MsaidiziConfig,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string, fallback?: string) =>
+              key in env ? env[key as keyof typeof env] : fallback,
+          },
+        },
+      ],
+    }).compile();
+    try {
+      moduleRef.get(MsaidiziConfig).selectProviderCredential('anthropic-test/key-v2');
+      const result = moduleRef
+        .get(PersistenceSecretGuard)
+        .sanitizeJson({ note: 'embedded-xx123456yy' });
+      expect(result.redactionsApplied).toBe(true);
+      expect(JSON.stringify(result.value)).not.toContain('123456');
+      expect(
+        (
+          moduleRef.get(PrismaService) as unknown as {
+            persistenceSecrets: PersistenceSecretGuard;
+          }
+        ).persistenceSecrets,
+      ).toBe(moduleRef.get(PersistenceSecretGuard));
+    } finally {
+      await moduleRef.close();
+    }
+  });
+});
 
 describe('the write ceiling reads both the old name and the new one', () => {
   it('defaults to 10 when a deployment sets neither', () => {

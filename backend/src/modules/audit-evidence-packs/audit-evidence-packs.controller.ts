@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Patch,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { AuditEvidencePacksQueryDto } from '../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -15,7 +27,7 @@ export class AuditEvidencePacksController {
 
   @Get()
   @RequirePermissions('audit_evidence_packs.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: AuditEvidencePacksQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -33,7 +45,11 @@ export class AuditEvidencePacksController {
 
   @Put(':id')
   @RequirePermissions('audit_evidence_packs.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateAuditEvidencePackDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateAuditEvidencePackDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
@@ -51,7 +67,11 @@ export class AuditEvidencePacksController {
 
   @Post(':id/items')
   @RequirePermissions('audit_evidence_packs.manage')
-  addItem(@Param('id') id: string, @Body() dto: CreateAuditEvidencePackItemDto, @CurrentUser() user: AuthUser) {
+  addItem(
+    @Param('id') id: string,
+    @Body() dto: CreateAuditEvidencePackItemDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.addItem(id, dto, user);
   }
 
@@ -63,7 +83,11 @@ export class AuditEvidencePacksController {
 
   @Delete(':id/items/:itemId')
   @RequirePermissions('audit_evidence_packs.manage')
-  removeItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: AuthUser) {
+  removeItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.removeItem(id, itemId, user);
   }
 

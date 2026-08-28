@@ -4,7 +4,7 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
-import { EmailService } from '@common/services/email.service';
+import { EmailService } from '../../common/services/email.service';
 
 @Module({
   imports: [PrismaModule, AuditLogsModule, ConfigModule],

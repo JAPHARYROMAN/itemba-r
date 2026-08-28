@@ -385,6 +385,19 @@ export class BankReconciliationsService {
       },
     });
     await this.recomputeBalances(reconciliationId);
+    await this.auditLogs.log({
+      action: 'MATCH',
+      entityType: 'BankStatementLine',
+      entityId: statementLineId,
+      userId: user.id,
+      companyId: reconciliation.companyId,
+      metadata: {
+        reconciliationId,
+        journalEntryLineId,
+        matchId: created.id,
+        matchType: 'MANUAL',
+      },
+    });
     return created;
   }
 
@@ -392,6 +405,13 @@ export class BankReconciliationsService {
     const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
       throw new BadRequestException('Statement lines can only be unmatched on DRAFT reconciliations');
+    }
+    const line = reconciliation.statementLines.find((candidate) => candidate.id === statementLineId);
+    if (!line) {
+      // Authorisation is rooted in the reconciliation. Never let an otherwise
+      // authorised reconciliation id become a confused-deputy path to a line
+      // owned by another reconciliation (and potentially another company).
+      throw new NotFoundException('Statement line not on this reconciliation');
     }
     await this.prisma.bankReconciliationMatch.deleteMany({
       where: { bankReconciliationId: reconciliationId, bankStatementLineId: statementLineId },
@@ -406,6 +426,7 @@ export class BankReconciliationsService {
       entityType: 'BankStatementLine',
       entityId: statementLineId,
       userId: user.id,
+      companyId: reconciliation.companyId,
     });
   }
 

@@ -31,6 +31,17 @@ export interface JwtPayload {
    * strategy treats absent `sid` as legacy and only soft-warns.
    */
   sid?: string;
+  /** Discriminator for a short-lived, exact-step service-principal token. */
+  tokenUse?: 'msaidizi-task';
+  principalId?: string;
+  taskId?: string;
+  planVersion?: number;
+  stepId?: string;
+  mandateId?: string;
+  deviceId?: string;
+  capability?: string;
+  argsDigest?: string;
+  inputProvenanceSha256?: string;
 }
 
 export interface AuthUser {

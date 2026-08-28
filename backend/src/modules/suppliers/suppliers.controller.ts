@@ -1,19 +1,11 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { QuerySupplierDto } from './dto/query-supplier.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 @Controller('suppliers')
 export class SuppliersController {
@@ -32,6 +24,7 @@ export class SuppliersController {
   }
 
   @Get(':id/control-center')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('suppliers.view')
   controlCenter(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.controlCenter(id, user);
@@ -56,6 +49,7 @@ export class SuppliersController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('suppliers.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
@@ -69,11 +63,7 @@ export class SuppliersController {
 
   @Patch(':id')
   @RequirePermissions('suppliers.update')
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateSupplierDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  update(@Param('id') id: string, @Body() dto: UpdateSupplierDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 

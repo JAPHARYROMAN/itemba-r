@@ -44,7 +44,7 @@ function makeService() {
   }));
 
   const prisma: any = {
-    loan: { create: loanCreate },
+    loan: { create: loanCreate, findMany: jest.fn().mockResolvedValue([]) },
     bankAccount: { findFirst: jest.fn() },
     branch: { findFirst: jest.fn() },
     division: { findFirst: jest.fn() },
@@ -54,6 +54,7 @@ function makeService() {
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+    accessibleCompanyIds: jest.fn().mockResolvedValue(null),
   } as any;
   const accountResolver = {
     resolve: jest.fn(async (_companyId: string, role: string) =>
@@ -74,8 +75,28 @@ function makeService() {
     codes,
   );
 
-  return { service, prisma, postingEngine, accountResolver, loanCreate };
+  return { service, prisma, postingEngine, accountResolver, loanCreate, companyScope };
 }
+
+describe('LoansService.getOverdue', () => {
+  it('uses an ACTIVE, strict past-maturity filter in the caller company scope', async () => {
+    const { service, prisma, companyScope } = makeService();
+    companyScope.accessibleCompanyIds.mockResolvedValue(['company-1']);
+
+    await service.getOverdue(USER);
+
+    expect(prisma.loan.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          deletedAt: null,
+          status: LoanStatus.ACTIVE,
+          maturityDate: { lt: expect.any(Date) },
+          companyId: { in: ['company-1'] },
+        },
+      }),
+    );
+  });
+});
 
 describe('LoansService.create — disbursement journal entry', () => {
   it('posts a balanced DR Cash / CR LOAN_PRINCIPAL_PAYABLE JE for a new drawdown (outstanding == principal)', async () => {

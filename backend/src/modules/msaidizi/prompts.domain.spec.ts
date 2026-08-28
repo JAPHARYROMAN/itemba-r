@@ -511,8 +511,9 @@ describe('the load-bearing claims in DOMAIN_PRIMER are still true', () => {
 
   it('mobile-pos-lite routes are scoped to one terminal rather than to the company', () => {
     const pos = readBackendSource('modules/mobile-pos-lite/mobile-pos-lite.controller.ts');
-    // Terminal code AND the terminal's own device secret, which is what the
-    // DISAMBIGUATION note on this controller tells the model it needs.
+    // Terminal code AND the terminal's own device secret. This is an excluded
+    // transport contract, not model context: the action envelope deliberately
+    // cannot carry either credential header.
     expect(pos).toMatch(/@Headers\('x-mobile-pos-terminal'\)/);
     expect(pos).toMatch(/@Headers\('x-mobile-pos-device'\)/);
     const customers = manifest.find((c) => c.id === 'MobilePosLiteController.customers');

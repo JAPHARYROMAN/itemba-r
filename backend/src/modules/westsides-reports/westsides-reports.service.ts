@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { PurchaseOrderStatus, SalesOrderStatus } from '@prisma/client';
+import { AccessLevel, PurchaseOrderStatus, SalesOrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { QueryReportDto } from './dto/query-report.dto';
 import { SaveDailyCloseDto } from './dto/save-daily-close.dto';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 /**
  * All sales metrics now read from SalesOrder (POS module retired in W1).
@@ -67,6 +68,7 @@ export class WestsidesReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   private dateFilter(dateFrom?: string, dateTo?: string) {
@@ -598,6 +600,7 @@ export class WestsidesReportsService {
     const dayStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
     const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
     const yesterdayStart = new Date(dayStart.getTime() - 24 * 3600 * 1000);
+    const closeDateKey = localCalendarDateKey(baseDate);
 
     const where: any = {
       companyId: query.companyId,
@@ -960,7 +963,7 @@ export class WestsidesReportsService {
       where: {
         companyId: query.companyId,
         branchId: query.branchId ?? null,
-        closeDate: dayStart,
+        closeDate: closeDateKey,
       },
     });
 
@@ -973,7 +976,7 @@ export class WestsidesReportsService {
       scope: {
         companyId: query.companyId,
         branchId: query.branchId ?? null,
-        date: dayStart.toISOString().slice(0, 10),
+        date: closeDateKey.toISOString().slice(0, 10),
       },
       lineage: this.lineage(
         'Daily Close / Z-Report',
@@ -2016,10 +2019,12 @@ export class WestsidesReportsService {
    * who saved last and when, which is the supervisor sign-off of record).
    */
   async saveDailyClose(dto: SaveDailyCloseDto, user: AuthUser) {
-    await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const baseDate = new Date(dto.closeDate);
-    // Same local-day truncation as dailyClose() so GET and POST agree on the key.
-    const closeDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    // PostgreSQL DATE values are returned as UTC midnight. Preserve the local
+    // calendar label in that canonical representation instead of sending a
+    // local-midnight instant that the database can truncate to the prior day.
+    const closeDate = localCalendarDateKey(baseDate);
     const scope = {
       companyId: dto.companyId,
       branchId: dto.branchId ?? null,
@@ -2036,9 +2041,22 @@ export class WestsidesReportsService {
       closedAt: new Date(),
     };
     const existing = await this.prisma.westsidesDailyClose.findFirst({ where: scope });
-    if (existing) {
-      return this.prisma.westsidesDailyClose.update({ where: { id: existing.id }, data });
-    }
-    return this.prisma.westsidesDailyClose.create({ data: { ...scope, ...data } });
+    const record = existing
+      ? await this.prisma.westsidesDailyClose.update({ where: { id: existing.id }, data })
+      : await this.prisma.westsidesDailyClose.create({ data: { ...scope, ...data } });
+    await this.auditLogs.log({
+      action: existing ? 'WESTSIDES_DAILY_CLOSE_UPDATE' : 'WESTSIDES_DAILY_CLOSE_CREATE',
+      entityType: 'WestsidesDailyClose',
+      entityId: record.id,
+      userId: user.id,
+      companyId: record.companyId,
+      ...(existing ? { oldValue: existing as unknown as Record<string, unknown> } : {}),
+      newValue: record as unknown as Record<string, unknown>,
+    });
+    return record;
   }
+}
+
+function localCalendarDateKey(value: Date): Date {
+  return new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()));
 }

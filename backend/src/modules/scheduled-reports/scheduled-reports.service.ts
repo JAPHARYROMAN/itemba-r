@@ -202,6 +202,9 @@ export class ScheduledReportsService {
         mimeType: exportFile.mimeType,
         sizeBytes: exportFile.content.length,
       },
+      executionTimeMs: run.executionTimeMs,
+      completedAt: run.completedAt,
+      artifact: run.resultSummary,
     };
   }
 

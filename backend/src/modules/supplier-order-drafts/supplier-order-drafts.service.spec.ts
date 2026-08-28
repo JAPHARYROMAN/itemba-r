@@ -84,7 +84,10 @@ function makeService() {
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
   };
   const codes = { next: jest.fn().mockResolvedValue('SOD-2026-000001') };
-  const audit = { log: jest.fn().mockResolvedValue(undefined) };
+  const audit = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrict: jest.fn().mockResolvedValue(undefined),
+  };
   return {
     service: new SupplierOrderDraftsService(
       prisma,
@@ -326,5 +329,34 @@ describe('SupplierOrderDraftsService', () => {
     findFirst.mockResolvedValue(draft());
     await service.findOne('draft-1', user);
     expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1', 'READ');
+  });
+
+  it('strictly persists the export observation before returning success', async () => {
+    const { audit, service } = makeService();
+    jest.spyOn(service, 'findOne').mockResolvedValue(draft() as any);
+
+    await expect(service.auditExport('draft-1', { format: 'pdf' } as any, user)).resolves.toEqual({
+      success: true,
+    });
+
+    expect(audit.logStrict).toHaveBeenCalledWith({
+      action: 'SUPPLIER_ORDER_DRAFT_EXPORT',
+      entityType: 'SupplierOrderDraft',
+      entityId: 'draft-1',
+      companyId: 'company-1',
+      userId: user.id,
+      newValue: { format: 'pdf', draftNumber: 'SOD-2026-000001' },
+    });
+  });
+
+  it('fails the audit-only export command when its ledger append fails', async () => {
+    const { audit, service } = makeService();
+    const failure = new Error('audit ledger unavailable');
+    jest.spyOn(service, 'findOne').mockResolvedValue(draft() as any);
+    audit.logStrict.mockRejectedValueOnce(failure);
+
+    await expect(service.auditExport('draft-1', { format: 'pdf' } as any, user)).rejects.toBe(
+      failure,
+    );
   });
 });

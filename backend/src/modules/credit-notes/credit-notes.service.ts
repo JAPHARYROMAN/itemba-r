@@ -455,32 +455,51 @@ export class CreditNotesService {
       );
     }
 
-    // [GL guard — MEDIUM cross-module double-relief] A cash/bank refund draws on
-    // this credit note's value. If we voided the note while a live (non-VOID)
-    // refund still references it, we would reverse the AR credit here AND keep the
-    // Dr AR / Cr Cash refund posting, double-relieving the customer. Force those
-    // refunds to be voided first. Company-scoped so we never see another tenant's
-    // refunds.
-    const liveRefunds = await this.prisma.refund.count({
-      where: {
-        creditNoteId: id,
-        companyId: existing.companyId,
-        deletedAt: null,
-        status: { in: ['DRAFT', 'PAID'] as never },
-      },
-    });
-    if (liveRefunds > 0) {
-      throw new ConflictException(
-        'Cannot void a credit note that still has active refunds; void the refund(s) first',
-      );
-    }
-
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const db = creditNoteDb(tx);
+
+      // Refund creation takes this same transaction-scoped lock before it
+      // validates the note and inserts its claim. Void must share that lock so
+      // no DRAFT/PAID refund can appear after a zero-count check.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('refunds:credit-note'), hashtext(${id}))`;
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "credit_notes"
+        WHERE "id" = ${id} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (locked.length !== 1) throw new NotFoundException('Credit note not found');
+      const current = (await db.creditNote.findFirst({
+        where: { id, deletedAt: null },
+      })) as CreditNoteRow | null;
+      if (!current) throw new NotFoundException('Credit note not found');
+      if (current.companyId !== existing.companyId) {
+        throw new ConflictException('Credit note ownership changed; refresh before voiding');
+      }
+      if (current.status !== CreditNoteStatus.ISSUED) {
+        throw new ConflictException(
+          `Only ISSUED credit notes can be voided (current status: ${current.status})`,
+        );
+      }
+
+      // [GL guard — MEDIUM cross-module double-relief] A cash/bank refund draws
+      // on this note's value. Count only while holding the shared advisory lock;
+      // refund creation cannot pass its own note check until this tx finishes.
+      const liveRefunds = await tx.refund.count({
+        where: {
+          creditNoteId: id,
+          companyId: current.companyId,
+          deletedAt: null,
+          status: { in: ['DRAFT', 'PAID'] as never },
+        },
+      });
+      if (liveRefunds > 0) {
+        throw new ConflictException(
+          'Cannot void a credit note that still has active refunds; void the refund(s) first',
+        );
+      }
 
       // Atomic claim: ISSUED -> VOID.
       const claim = await db.creditNote.updateMany({
-        where: { id, status: CreditNoteStatus.ISSUED, deletedAt: null },
+        where: { id, status: current.status, updatedAt: current.updatedAt, deletedAt: null },
         data: { status: CreditNoteStatus.VOID },
       });
       if (claim.count !== 1) {
@@ -488,7 +507,7 @@ export class CreditNotesService {
       }
 
       // Post the exact reverse of the issue JE by swapping every line's sides.
-      const reversal = await this.reverseCreditNoteJournal(tx, existing, dto.reason, userId);
+      const reversal = await this.reverseCreditNoteJournal(tx, current, dto.reason, userId);
 
       // [GL guard — LOW missing-swing] This note was ISSUED with a journalEntryId,
       // so a reversal MUST post. A null result means the offsetting GL swing did
@@ -496,16 +515,16 @@ export class CreditNotesService {
       // rolls back the ISSUED->VOID claim rather than marking VOID + restoring the
       // receivable with no counter-entry, which would leave the ledger unbalanced
       // against the customer subledger.
-      if (!reversal && existing.journalEntryId) {
+      if (!reversal && current.journalEntryId) {
         throw new ConflictException(
           'Credit note reversal could not be posted; void aborted to avoid an unbalanced ledger',
         );
       }
 
       // Give back the outstanding we previously took off the linked receivable.
-      const applied = new Prisma.Decimal(existing.appliedAmount ?? 0).toDecimalPlaces(2);
-      if (existing.receivableId && applied.gt(0)) {
-        await this.restoreReceivable(tx, existing.receivableId, existing.companyId, applied, user);
+      const applied = new Prisma.Decimal(current.appliedAmount ?? 0).toDecimalPlaces(2);
+      if (current.receivableId && applied.gt(0)) {
+        await this.restoreReceivable(tx, current.receivableId, current.companyId, applied, user);
       }
 
       // NB: do NOT overwrite `notes` with the void reason — the reason is captured
@@ -516,21 +535,25 @@ export class CreditNotesService {
         data: { appliedAmount: ZERO },
       });
 
-      return { updated, reversal };
-    });
+      // Voiding changes the credit-note lifecycle, reverses the GL entry, and
+      // restores the receivable subledger. The audit row is part of that same
+      // financial fact: if it cannot be appended, Prisma must roll the entire
+      // reversal back instead of committing an unaudited void.
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'CREDIT_NOTE_VOID',
+        entityType: 'CreditNote',
+        entityId: id,
+        userId,
+        companyId: current.companyId,
+        oldValue: { status: current.status },
+        newValue: {
+          status: CreditNoteStatus.VOID,
+          reason: dto.reason,
+          reversalJournalEntryId: reversal?.id ?? null,
+        },
+      });
 
-    await this.auditLogs.log({
-      action: 'CREDIT_NOTE_VOID',
-      entityType: 'CreditNote',
-      entityId: id,
-      userId,
-      companyId: existing.companyId,
-      oldValue: { status: existing.status },
-      newValue: {
-        status: CreditNoteStatus.VOID,
-        reason: dto.reason,
-        reversalJournalEntryId: result.reversal?.id ?? null,
-      },
+      return { updated, reversal };
     });
 
     return this.findOne(id);

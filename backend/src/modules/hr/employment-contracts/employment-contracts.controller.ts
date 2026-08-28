@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Patch } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Patch,
+} from '@nestjs/common';
+import { EmployeeStatusQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -6,6 +18,13 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { EmploymentContractsService } from './employment-contracts.service';
 import { CreateEmploymentContractDto } from './dto/create-employment-contract.dto';
 import { UpdateEmploymentContractDto } from './dto/update-employment-contract.dto';
+import { IsOptional, IsString } from 'class-validator';
+
+class TerminateEmploymentContractDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/employment-contracts')
@@ -14,7 +33,7 @@ export class EmploymentContractsController {
 
   @Get()
   @RequirePermissions('employment_contracts.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: EmployeeStatusQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -32,7 +51,11 @@ export class EmploymentContractsController {
 
   @Put(':id')
   @RequirePermissions('employment_contracts.create')
-  update(@Param('id') id: string, @Body() dto: UpdateEmploymentContractDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateEmploymentContractDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
@@ -44,7 +67,11 @@ export class EmploymentContractsController {
 
   @Patch(':id/terminate')
   @RequirePermissions('employment_contracts.terminate')
-  terminate(@Param('id') id: string, @Body() body: { reason?: string }, @CurrentUser() user: AuthUser) {
+  terminate(
+    @Param('id') id: string,
+    @Body() body: TerminateEmploymentContractDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.terminate(id, body.reason, user);
   }
 

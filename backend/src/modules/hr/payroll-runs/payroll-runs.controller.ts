@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Patch } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Patch,
+} from '@nestjs/common';
+import { PayrollRunsQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -6,6 +18,7 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { PayrollRunsService } from './payroll-runs.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import { UpdatePayrollRunDto } from './dto/update-payroll-run.dto';
+import { CancelPayrollRunDto, PayPayrollRunDto } from './dto/payroll-run-action.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/payroll-runs')
@@ -14,7 +27,7 @@ export class PayrollRunsController {
 
   @Get()
   @RequirePermissions('payroll.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: PayrollRunsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -68,17 +81,17 @@ export class PayrollRunsController {
 
   @Patch(':id/pay')
   @RequirePermissions('payroll.pay')
-  pay(
-    @Param('id') id: string,
-    @Body() body: { disbursingChartOfAccountId?: string },
-    @CurrentUser() user: AuthUser,
-  ) {
+  pay(@Param('id') id: string, @Body() body: PayPayrollRunDto, @CurrentUser() user: AuthUser) {
     return this.service.pay(id, user, body);
   }
 
   @Patch(':id/cancel')
   @RequirePermissions('payroll.cancel')
-  cancel(@Param('id') id: string, @Body() body: { reason?: string }, @CurrentUser() user: AuthUser) {
+  cancel(
+    @Param('id') id: string,
+    @Body() body: CancelPayrollRunDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.cancel(id, body.reason, user);
   }
 

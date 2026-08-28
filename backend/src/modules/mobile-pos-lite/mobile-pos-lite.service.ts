@@ -908,12 +908,10 @@ export class MobilePosLiteService {
 
   async findTerminals(query: QueryMobilePosTerminalDto, user: AuthUser) {
     this.assertCanManage(user);
-    const where: Prisma.MobilePosTerminalWhereInput = query.companyId
-      ? { companyId: query.companyId }
-      : {};
-    if (query.companyId) {
-      await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.READ);
-    }
+    const where: Prisma.MobilePosTerminalWhereInput = await this.companyScope.companyWhereFor(
+      user,
+      query.companyId,
+    );
 
     const data = await this.prisma.mobilePosTerminal.findMany({
       where,
@@ -925,7 +923,7 @@ export class MobilePosLiteService {
 
   async createTerminal(dto: CreateMobilePosTerminalDto, user: AuthUser) {
     this.assertCanManage(user);
-    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.READ);
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
 
     const configuration = await this.validateConfiguration(dto);
     const activationCode = newActivationCode();
@@ -1085,29 +1083,34 @@ export class MobilePosLiteService {
 
   async issueActivation(id: string, user: AuthUser) {
     this.assertCanManage(user);
-    const existing = await this.findTerminalForManagement(id, user);
+    const existing = await this.findTerminalForManagement(id, user, AccessLevel.WRITE);
     if (existing.status !== MobilePosTerminalStatus.ACTIVE) {
       throw new BadRequestException('Only active terminals can be activated');
     }
 
     const activationCode = newActivationCode();
     const expiresAt = new Date(Date.now() + ACTIVATION_TTL_MS);
-    const terminal = await this.prisma.mobilePosTerminal.update({
-      where: { id: existing.id },
-      data: {
-        activationTokenHash: sha256(activationCode),
-        activationExpiresAt: expiresAt,
-      },
-      select: { terminalCode: true },
+    const terminal = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.mobilePosTerminal.update({
+        where: { id: existing.id },
+        data: {
+          activationTokenHash: sha256(activationCode),
+          activationExpiresAt: expiresAt,
+        },
+        select: { terminalCode: true },
+      });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'MOBILE_POS_LITE_ACTIVATION_ISSUED',
+        entityType: 'MobilePosTerminal',
+        entityId: existing.id,
+        userId: user.id,
+        companyId: existing.companyId,
+        severity: AuditSeverity.HIGH,
+      });
+      return updated;
     });
-    await this.auditLogs.log({
-      action: 'MOBILE_POS_LITE_ACTIVATION_ISSUED',
-      entityType: 'MobilePosTerminal',
-      entityId: existing.id,
-      userId: user.id,
-      companyId: existing.companyId,
-      severity: AuditSeverity.HIGH,
-    });
+    // The raw code is constructed into a response only after the hash and its
+    // mandatory audit row have committed together.
     return this.activationPayload(terminal.terminalCode, activationCode, expiresAt);
   }
 
@@ -4639,13 +4642,17 @@ export class MobilePosLiteService {
     await this.companyScope.assertCanAccessCompany(user, terminal.companyId, AccessLevel.WRITE);
   }
 
-  private async findTerminalForManagement(id: string, user: AuthUser) {
+  private async findTerminalForManagement(
+    id: string,
+    user: AuthUser,
+    minimumAccess: AccessLevel = AccessLevel.READ,
+  ) {
     const terminal = await this.prisma.mobilePosTerminal.findFirst({
       where: { id },
       include: TERMINAL_INCLUDE,
     });
     if (!terminal) throw new NotFoundException('Mobile POS terminal not found');
-    await this.companyScope.assertCanAccessCompany(user, terminal.companyId, AccessLevel.READ);
+    await this.companyScope.assertCanAccessCompany(user, terminal.companyId, minimumAccess);
     return terminal;
   }
 

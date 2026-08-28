@@ -1,4 +1,10 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  ApprovalPendingQueryDto,
+  ApprovalRequestsQueryDto,
+  ApprovalSubmittedQueryDto,
+  CompanyQueryDto,
+} from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -19,25 +25,25 @@ export class ApprovalRequestsController {
 
   @Get('readiness')
   @RequirePermissions('approval_requests.view')
-  getReadiness(@CurrentUser() user: AuthUser, @Query() query: any) {
+  getReadiness(@CurrentUser() user: AuthUser, @Query() query: CompanyQueryDto) {
     return this.service.getReadiness(user, query);
   }
 
   @Get('pending/me')
   @RequirePermissions('approval_requests.view')
-  pendingForMe(@CurrentUser() user: AuthUser, @Query() query: any) {
+  pendingForMe(@CurrentUser() user: AuthUser, @Query() query: ApprovalPendingQueryDto) {
     return this.service.findPendingForMe(user, query);
   }
 
   @Get('submitted-by/me')
   @RequirePermissions('approval_requests.view')
-  submittedByMe(@CurrentUser() user: AuthUser, @Query() query: any) {
+  submittedByMe(@CurrentUser() user: AuthUser, @Query() query: ApprovalSubmittedQueryDto) {
     return this.service.findSubmittedByMe(user, query);
   }
 
   @Get()
   @RequirePermissions('approval_requests.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: ApprovalRequestsQueryDto) {
     return this.service.findAll(user, query);
   }
 

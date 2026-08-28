@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ComplianceEventsQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -14,7 +15,7 @@ export class ComplianceEventsController {
 
   @Get()
   @RequirePermissions('compliance_events.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: ComplianceEventsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -32,7 +33,11 @@ export class ComplianceEventsController {
 
   @Put(':id')
   @RequirePermissions('compliance_events.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateComplianceEventDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateComplianceEventDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

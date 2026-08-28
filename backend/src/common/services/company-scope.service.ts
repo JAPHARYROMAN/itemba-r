@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { recordValidatedCompanyScope } from '../context/request-context';
 import { AuthUser } from '../decorators/current-user.decorator';
 
 export type CompanyScopedWhere = {
@@ -39,6 +40,7 @@ export function assertCanAccessCompanyFromUser(
     if (!isGroupScopedUser(user)) {
       throw new ForbiddenException('Group-scoped role required to access group-level records');
     }
+    recordValidatedCompanyScope('GLOBAL');
     return;
   }
 
@@ -65,12 +67,14 @@ export function assertCanAccessCompanyFromUser(
     if (ACCESS_RANK[effective] < ACCESS_RANK[minimum]) {
       throw new ForbiddenException('Insufficient access level for this company');
     }
+    recordValidatedCompanyScope('COMPANY', [companyId]);
     return;
   }
 
   if (!granted || ACCESS_RANK[granted] < ACCESS_RANK[minimum]) {
     throw new ForbiddenException('You do not have access to this company');
   }
+  recordValidatedCompanyScope('COMPANY', [companyId]);
 }
 
 export function companyWhereForUser(
@@ -87,6 +91,8 @@ export function companyWhereForUser(
       return { companyId: requestedCompanyId };
     }
     const companyIds = accessibleCompanyIdsFromUser(user);
+    if (companyIds.length === 0) recordValidatedCompanyScope('GROUP');
+    else recordCompanyIds(companyIds);
     return companyIds.length > 0 ? { companyId: { in: companyIds } } : { id: { in: [] } };
   }
 
@@ -100,6 +106,7 @@ export function companyWhereForUser(
     return { id: { in: [] } };
   }
 
+  recordCompanyIds(companyIds);
   return { companyId: { in: companyIds } };
 }
 
@@ -133,6 +140,7 @@ export class CompanyScopeService {
   ) {
     if (!companyId) {
       this.assertGroupScoped(user, 'access group-level records');
+      recordValidatedCompanyScope('GLOBAL');
       return;
     }
 
@@ -148,12 +156,14 @@ export class CompanyScopeService {
       if (ACCESS_RANK[effective] < ACCESS_RANK[minimum]) {
         throw new ForbiddenException('Insufficient access level for this company');
       }
+      recordValidatedCompanyScope('COMPANY', [companyId]);
       return;
     }
 
     if (!match || ACCESS_RANK[match.accessLevel] < ACCESS_RANK[minimum]) {
       throw new ForbiddenException('You do not have access to this company');
     }
+    recordValidatedCompanyScope('COMPANY', [companyId]);
   }
 
   async companyWhereFor(
@@ -167,6 +177,8 @@ export class CompanyScopeService {
       }
       const accessible = await this.getAccessibleCompanyAccess(user);
       const companyIds = accessible.map((a) => a.companyId);
+      if (companyIds.length === 0) recordValidatedCompanyScope('GROUP');
+      else recordCompanyIds(companyIds);
       return companyIds.length > 0 ? { companyId: { in: companyIds } } : { id: { in: [] } };
     }
 
@@ -182,11 +194,18 @@ export class CompanyScopeService {
       return { id: { in: [] } };
     }
 
+    recordCompanyIds(companyIds);
     return { companyId: { in: companyIds } };
   }
 
   async accessibleCompanyIds(user: AuthUser): Promise<string[]> {
-    return (await this.getAccessibleCompanyAccess(user)).map((a) => a.companyId);
+    const companyIds = (await this.getAccessibleCompanyAccess(user)).map((a) => a.companyId);
+    if (companyIds.length === 0 && this.isGroupScoped(user)) {
+      recordValidatedCompanyScope('GROUP');
+    } else {
+      recordCompanyIds(companyIds);
+    }
+    return companyIds;
   }
 
   private async getAccessibleCompanyAccess(
@@ -229,4 +248,9 @@ export class CompanyScopeService {
     if (!current) return next;
     return ACCESS_RANK[next] > ACCESS_RANK[current] ? next : current;
   }
+}
+
+function recordCompanyIds(companyIds: readonly string[]): void {
+  if (companyIds.length === 0) return;
+  recordValidatedCompanyScope(companyIds.length === 1 ? 'COMPANY' : 'MULTI_COMPANY', companyIds);
 }

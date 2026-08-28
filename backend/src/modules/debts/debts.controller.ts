@@ -1,24 +1,41 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseInterceptors,
+} from '@nestjs/common';
 import { DebtsService } from './debts.service';
 import { CreateDebtDto } from './dto/create-debt.dto';
 import { UpdateDebtDto } from './dto/update-debt.dto';
 import { QueryDebtDto } from './dto/query-debt.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
+import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
 
 @Controller('debts')
+@SensitiveAccess('Debts')
 @UseInterceptors(SensitiveAccessInterceptor)
 export class DebtsController {
   constructor(private readonly service: DebtsService) {}
 
   @Get('summary')
   @RequirePermissions('debts.read')
-  getSummary(@CurrentUser() user: AuthUser) { return this.service.getSummary(user); }
+  getSummary(@CurrentUser() user: AuthUser) {
+    return this.service.getSummary(user);
+  }
 
   @Get('overdue')
   @RequirePermissions('debts.read')
-  getOverdue(@CurrentUser() user: AuthUser) { return this.service.getOverdue(user); }
+  getOverdue(@CurrentUser() user: AuthUser) {
+    return this.service.getOverdue(user);
+  }
 
   @Get()
   @RequirePermissions('debts.read')
@@ -27,12 +44,14 @@ export class DebtsController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('debts.read')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
   }
 
   @Get(':id/audit-history')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('debts.read')
   getAuditHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.getAuditHistory(id, user);

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditSeverity, BackupSchedule, Prisma } from '@prisma/client';
+import { AuditScopeKind, AuditSeverity, BackupSchedule, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { computeNextBackupRunAt } from '../job-worker/backup-schedule';
@@ -90,6 +90,8 @@ export class BackupJobsService {
       entityType: 'BackupJob',
       entityId: (record as any).id,
       userId,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       severity: AuditSeverity.HIGH,
     });
     return record;
@@ -134,6 +136,8 @@ export class BackupJobsService {
       entityType: 'BackupJob',
       entityId: id,
       userId,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       oldValue: existing as any,
       newValue: record as any,
       severity: AuditSeverity.MEDIUM,
@@ -149,6 +153,8 @@ export class BackupJobsService {
       entityType: 'BackupJob',
       entityId: id,
       userId,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       oldValue: existing as any,
       severity: AuditSeverity.HIGH,
     });

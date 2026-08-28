@@ -1,3 +1,4 @@
+import { LeaveRequestsQueryDto } from '../../../common/dto/resource-query.dto';
 import {
   Controller,
   Get,
@@ -17,6 +18,19 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { LeaveRequestsService } from './leave-requests.service';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { UpdateLeaveRequestDto } from './dto/update-leave-request.dto';
+import { IsOptional, IsString } from 'class-validator';
+
+class LeaveRequestNotesDto {
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+class LeaveRequestReasonDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/leave-requests')
@@ -25,7 +39,7 @@ export class LeaveRequestsController {
 
   @Get()
   @RequirePermissions('leave_requests.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: LeaveRequestsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -61,7 +75,7 @@ export class LeaveRequestsController {
   @RequirePermissions('leave_requests.approve')
   approve(
     @Param('id') id: string,
-    @Body() body: { notes?: string },
+    @Body() body: LeaveRequestNotesDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.approve(id, body.notes, user);
@@ -71,7 +85,7 @@ export class LeaveRequestsController {
   @RequirePermissions('leave_requests.approve.hr')
   approveHr(
     @Param('id') id: string,
-    @Body() body: { notes?: string },
+    @Body() body: LeaveRequestNotesDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.approveHr(id, body.notes, user);
@@ -81,7 +95,7 @@ export class LeaveRequestsController {
   @RequirePermissions('leave_requests.reject')
   reject(
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: LeaveRequestReasonDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.reject(id, body.reason, user);
@@ -91,7 +105,7 @@ export class LeaveRequestsController {
   @RequirePermissions('leave_requests.create')
   cancel(
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: LeaveRequestReasonDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.cancel(id, body.reason, user);

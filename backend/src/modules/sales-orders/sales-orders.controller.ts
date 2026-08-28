@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { ReceiptAccountsQueryDto } from '../../common/dto/resource-query.dto';
 import { SalesOrdersService } from './sales-orders.service';
 import { CreateSalesOrderDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
@@ -33,7 +34,7 @@ export class SalesOrdersController {
 
   @Get('receipt-accounts')
   @RequireAnyPermissions('pos.create', 'sales.create', 'receivables.manage')
-  findReceiptAccounts(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findReceiptAccounts(@Query() query: ReceiptAccountsQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findReceiptAccounts(query, user);
   }
 

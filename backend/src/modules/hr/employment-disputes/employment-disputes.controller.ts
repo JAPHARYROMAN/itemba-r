@@ -1,3 +1,4 @@
+import { EmploymentDisputesQueryDto } from '../../../common/dto/resource-query.dto';
 import {
   Body,
   Controller,
@@ -32,7 +33,7 @@ export class EmploymentDisputesController {
 
   @Get()
   @RequirePermissions('employees.view')
-  findAll(@Query() q: Record<string, string>, @CurrentUser() user: AuthUser) {
+  findAll(@Query() q: EmploymentDisputesQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(
       {
         page: q.page ? Number(q.page) : undefined,
@@ -42,8 +43,7 @@ export class EmploymentDisputesController {
         branchId: q.branchId,
         employeeId: q.employeeId,
         status: q.status,
-        directToGroupHr:
-          q.directToGroupHr === undefined ? undefined : q.directToGroupHr === 'true',
+        directToGroupHr: q.directToGroupHr === undefined ? undefined : q.directToGroupHr === 'true',
       },
       user,
     );

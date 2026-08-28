@@ -60,6 +60,12 @@ function makeService(opts: {
     },
     journalEntryLine: {
       findMany: jest.fn(async () => opts.candidates ?? []),
+      findUniqueOrThrow: jest.fn(async ({ where }: any) => ({
+        id: where.id,
+        companyId: COMPANY_ID,
+        debit: new Prisma.Decimal(125),
+        credit: new Prisma.Decimal(0),
+      })),
     },
     bankReconciliationMatch: {
       create: jest.fn(async ({ data }: any) => ({ id: 'match-created-1', ...data })),
@@ -83,7 +89,14 @@ function makeService(opts: {
   } as any;
 
   const service = new BankReconciliationsService(prisma, auditLogs, accountResolver, postingEngine);
-  return { service, prisma, accountResolver, postingEngine, bankReconciliationUpdate };
+  return {
+    service,
+    prisma,
+    auditLogs,
+    accountResolver,
+    postingEngine,
+    bankReconciliationUpdate,
+  };
 }
 
 describe('BankReconciliationsService.recomputeBalances signing', () => {
@@ -94,7 +107,7 @@ describe('BankReconciliationsService.recomputeBalances signing', () => {
       creditAmount: new Prisma.Decimal(0),
       matches: [{ id: 'm1', amount: new Prisma.Decimal(300) }],
     };
-    const { service, bankReconciliationUpdate } = makeService({
+    const { service, auditLogs, bankReconciliationUpdate } = makeService({
       findOneReconciliation: baseReconciliation({
         statementLines: [{ id: 'line-out', matched: true }],
       }),
@@ -113,6 +126,14 @@ describe('BankReconciliationsService.recomputeBalances signing', () => {
     expect(new Prisma.Decimal(updateArg.data.reconciledBalance).toNumber()).toBe(700);
     // difference = statementClosing(700) - reconciled(700) = 0 (fully reconciled)
     expect(new Prisma.Decimal(updateArg.data.differenceAmount).toNumber()).toBe(0);
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'UNMATCH',
+        entityType: 'BankStatementLine',
+        entityId: 'line-out',
+        companyId: COMPANY_ID,
+      }),
+    );
   });
 
   it('ADDS an inbound (bank CREDIT / deposit) matched line to the reconciled balance', async () => {
@@ -174,6 +195,59 @@ describe('BankReconciliationsService.recomputeBalances signing', () => {
     // reconciled = 1000 + 500 - 200 = 1300
     expect(new Prisma.Decimal(updateArg.data.reconciledBalance).toNumber()).toBe(1300);
     expect(new Prisma.Decimal(updateArg.data.differenceAmount).toNumber()).toBe(0);
+  });
+});
+
+describe('BankReconciliationsService manual mutation governance', () => {
+  it('attributes a manual match to the exact statement line and reconciliation company', async () => {
+    const statementLine = { id: 'line-manual', matched: false };
+    const { service, auditLogs } = makeService({
+      findOneReconciliation: baseReconciliation({ statementLines: [statementLine] }),
+      recomputeReconciliation: baseReconciliation({
+        statementLines: [
+          {
+            ...statementLine,
+            debitAmount: new Prisma.Decimal(0),
+            creditAmount: new Prisma.Decimal(125),
+            matches: [{ id: 'match-created-1', amount: new Prisma.Decimal(125) }],
+          },
+        ],
+      }),
+    });
+
+    await service.manualMatch(RECON_ID, statementLine.id, 'journal-line-1', user);
+
+    expect(auditLogs.log).toHaveBeenCalledWith({
+      action: 'MATCH',
+      entityType: 'BankStatementLine',
+      entityId: statementLine.id,
+      userId: user.id,
+      companyId: COMPANY_ID,
+      metadata: {
+        reconciliationId: RECON_ID,
+        journalEntryLineId: 'journal-line-1',
+        matchId: 'match-created-1',
+        matchType: 'MANUAL',
+      },
+    });
+  });
+
+  it('rejects an unmatch for a line outside the authorised reconciliation before any mutation', async () => {
+    const { service, prisma, auditLogs, bankReconciliationUpdate } = makeService({
+      findOneReconciliation: baseReconciliation({
+        statementLines: [{ id: 'owned-line', matched: true }],
+      }),
+      recomputeReconciliation: baseReconciliation({ statementLines: [] }),
+    });
+
+    await expect(service.unmatch(RECON_ID, 'foreign-line', user)).rejects.toThrow(
+      'Statement line not on this reconciliation',
+    );
+
+    expect(prisma.bankReconciliationMatch.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.bankStatementLine.update).not.toHaveBeenCalled();
+    expect(bankReconciliationUpdate).not.toHaveBeenCalled();
+    expect(auditLogs.log).not.toHaveBeenCalled();
   });
 });
 

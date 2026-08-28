@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { SavedReportViewsQueryDto } from '../../common/dto/resource-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -23,7 +34,7 @@ export class SavedReportViewsController {
 
   @Get()
   @RequirePermissions('saved_report_views.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: SavedReportViewsQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -35,7 +46,11 @@ export class SavedReportViewsController {
 
   @Patch(':id')
   @RequirePermissions('saved_report_views.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateSavedReportViewDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSavedReportViewDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

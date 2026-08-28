@@ -157,13 +157,14 @@ export const DISAMBIGUATION_MAX_ENTRIES = 30;
  */
 export const DISAMBIGUATION_MAX_NOTE_CHARS = 340;
 export const DISAMBIGUATION: Record<string, string> = {
-  // ── The three "customers" ───────────────────────────────────────────────
+  // ── Customer master versus credit review ────────────────────────────────
+  // The terminal-scoped mobile lookup is deliberately absent: its two device
+  // credential headers are not representable in the agent action envelope, so
+  // that capability is excluded before this description could ever be shown.
   CustomersController:
     'This is the customer master — who the company sells to. Not credit review records (CustomerCreditProfiles_findAll) and not a POS terminal lookup.',
   CustomerCreditProfilesController:
     'Credit-limit review records only. NOT the customer master — use Customers_findAll for that. Keyed by customerId with no link to Customer, often empty, and the sales credit check reads Customer.creditLimit instead, so nothing recorded here is enforced.',
-  'MobilePosLiteController.customers':
-    "One counter terminal's own customer lookup, requiring that terminal's device secret. Not the customer master — use Customers_findAll for a company-wide answer.",
   SupplierPerformanceController:
     'Supplier review records — ratings and scores. NOT the supplier master; use Suppliers_findAll for that. Keyed by supplierId with no link to Supplier, and nothing recorded here is enforced.',
 
@@ -229,25 +230,66 @@ export function buildToolDefinition(
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
 
-  for (const param of capability.params.path) {
-    properties[param] = {
-      type: 'string',
-      description: `Identifier for the ${param.replace(/Id$/, '')} in the route path.`,
+  if (capability.params.path.length > 0) {
+    const pathProperties = Object.fromEntries(
+      capability.params.path.map((param) => [
+        param,
+        {
+          type: 'string',
+          description: `Identifier for the ${param.replace(/Id$/, '')} in the route path.`,
+        },
+      ]),
+    );
+    properties.path = {
+      type: 'object',
+      description: 'Values substituted into the route path.',
+      properties: pathProperties,
+      required: capability.params.path,
+      additionalProperties: false,
     };
-    required.push(param);
+    required.push('path');
   }
 
-  for (const param of capability.params.query) {
-    if (properties[param]) continue; // a path param of the same name wins
-    properties[param] = { type: 'string', description: `Optional \`${param}\` filter.` };
+  const derivedQuery = capability.params.querySchema?.schema;
+  const namedQueryProperties = Object.fromEntries(
+    capability.params.query.map((param) => [
+      param,
+      { type: 'string', description: `Optional \`${param}\` filter.` },
+    ]),
+  );
+  if (
+    capability.params.query.length > 0 ||
+    capability.params.freeFormQuery ||
+    derivedQuery !== undefined
+  ) {
+    const querySchema = {
+      type: 'object' as const,
+      description: 'URL query filters. Do not put these fields in path or body.',
+      properties: { ...(derivedQuery?.properties ?? {}), ...namedQueryProperties },
+      ...(derivedQuery?.required?.length ? { required: derivedQuery.required } : {}),
+      // A typed DTO is closed by the production ValidationPipe. Only a truly
+      // opaque whole-query parameter remains open.
+      additionalProperties: derivedQuery
+        ? derivedQuery.additionalProperties
+        : capability.params.freeFormQuery,
+    };
+    properties.query = querySchema;
+    if (querySchema.required) required.push('query');
   }
 
   if (capability.params.hasBody) {
-    properties.body = {
-      type: 'object',
-      description: 'Request body fields. Only send fields you were asked to set.',
-      additionalProperties: true,
-    };
+    properties.body = capability.params.bodySchema
+      ? {
+          ...capability.params.bodySchema.schema,
+          description: 'JSON request body. Only send fields required for the requested operation.',
+        }
+      : {
+          type: 'object',
+          description:
+            'JSON request body. Its DTO metadata is opaque; only send fields required for the requested operation.',
+          additionalProperties: true,
+        };
+    required.push('body');
   }
 
   const notes: string[] = [];
@@ -259,8 +301,15 @@ export function buildToolDefinition(
     );
   }
   if (capability.params.freeFormQuery) {
+    if (!capability.params.querySchema) {
+      notes.push(
+        'Its query DTO is opaque, so additional filters are accepted; prefer documented names and do not invent parameters.',
+      );
+    }
+  }
+  if (Object.keys(properties).length > 0) {
     notes.push(
-      'Accepts additional filter parameters that are not enumerated here; prefer the ones listed, and do not invent parameter names.',
+      'Use the explicit argument envelope: route identifiers in `path`, URL filters in `query`, and JSON payload fields in `body`.',
     );
   }
 
@@ -276,10 +325,10 @@ export function buildToolDefinition(
       type: 'object',
       properties,
       ...(required.length > 0 ? { required } : {}),
-      // Free-form-query handlers genuinely accept unenumerated keys; everything
-      // else is closed so a hallucinated parameter fails fast and locally
-      // instead of being rejected downstream by the global ValidationPipe.
-      additionalProperties: capability.params.freeFormQuery || capability.params.hasBody,
+      // The namespaces are always closed. Opaque query/body objects may be open
+      // internally, but a top-level field is necessarily ambiguous and belongs
+      // only to the legacy invoker compatibility path.
+      additionalProperties: false,
     },
     ...(options.defer ? { defer_loading: true } : {}),
   };
@@ -337,6 +386,31 @@ export const TOOL_SEARCH_DEFINITION = {
 export const ENTRY_POINT_BUDGET = 15;
 
 /**
+ * The no-search fast path, in measured priority order.
+ *
+ * The 2026-08-20 tool-search benchmark showed that the old "shortest route"
+ * heuristic helped none of its seven representative finance and operations
+ * questions. These six collection reads are the endpoints those questions
+ * actually needed (two prompts intentionally converge on payables).
+ *
+ * Capability ids are used instead of tool names so this stays attached to the
+ * permission-filtered manifest entry. A missing permission therefore removes a
+ * fast-path candidate altogether; this list never widens the registry.
+ */
+export const BENCHMARK_FAST_PATH_CAPABILITY_IDS = [
+  'CustomersController.findAll',
+  'SuppliersController.findAll',
+  'ReceivablesController.findAll',
+  'PayablesController.findAll',
+  'ExpensesController.findAll',
+  'InventoryBalancesController.findAll',
+] as const;
+
+const FAST_PATH_PRIORITY = new Map<string, number>(
+  BENCHMARK_FAST_PATH_CAPABILITY_IDS.map((id, index) => [id, index]),
+);
+
+/**
  * Chooses the capabilities that stay resident, deterministically.
  *
  * Deterministic, and derived only from the caller's permitted set — NOT from the
@@ -348,9 +422,11 @@ export const ENTRY_POINT_BUDGET = 15;
  * Keyed to the user's permissions, the block is identical across that user's
  * turns and the prefix can finally cache.
  *
- * The heuristic is shallow green reads: collection-level list endpoints, which
- * are where an agent orients itself before it knows what it is looking for.
- * Sorted by path depth then name so the set is stable under manifest churn.
+ * The measured finance/operations reads come first. Any remaining budget is
+ * filled with the previous shallow-green-read heuristic, which preserves a
+ * useful generic floor without displacing the endpoints the benchmark proved.
+ * Both groups are sorted without request text, so the tool prefix remains
+ * stable across requests for the same permission set.
  */
 export function selectEntryPoints(
   entries: RegistryEntry[],
@@ -360,6 +436,14 @@ export function selectEntryPoints(
     .filter((e) => e.capability.tier === 'green')
     .filter((e) => !e.capability.path.includes(':'))
     .sort((a, b) => {
+      const aPriority = FAST_PATH_PRIORITY.get(a.capability.id);
+      const bPriority = FAST_PATH_PRIORITY.get(b.capability.id);
+      if (aPriority !== undefined || bPriority !== undefined) {
+        if (aPriority === undefined) return 1;
+        if (bPriority === undefined) return -1;
+        return aPriority - bPriority;
+      }
+
       const depth = a.capability.path.split('/').length - b.capability.path.split('/').length;
       return depth !== 0 ? depth : a.tool.name.localeCompare(b.tool.name);
     })
