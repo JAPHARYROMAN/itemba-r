@@ -1,7 +1,13 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { DataIsolationTestsQueryDto } from '../../common/dto/resource-query.dto';
 import { DataIsolationTestsService } from './data-isolation-tests.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  AddDataIsolationIssueDto,
+  CompleteDataIsolationTestDto,
+  CreateDataIsolationTestDto,
+} from './dto/data-isolation-test.dto';
 
 @Controller('data-isolation-tests')
 export class DataIsolationTestsController {
@@ -9,7 +15,7 @@ export class DataIsolationTestsController {
 
   @Get()
   @RequirePermissions('data_isolation.view')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: DataIsolationTestsQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -27,19 +33,27 @@ export class DataIsolationTestsController {
 
   @Post()
   @RequirePermissions('data_isolation.run_tests')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateDataIsolationTestDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id/complete')
   @RequirePermissions('data_isolation.run_tests')
-  complete(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  complete(
+    @Param('id') id: string,
+    @Body() dto: CompleteDataIsolationTestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.complete(id, dto, user);
   }
 
   @Post(':id/issues')
   @RequirePermissions('data_isolation.run_tests')
-  addIssue(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  addIssue(
+    @Param('id') id: string,
+    @Body() dto: AddDataIsolationIssueDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.addIssue(id, dto, user);
   }
 }

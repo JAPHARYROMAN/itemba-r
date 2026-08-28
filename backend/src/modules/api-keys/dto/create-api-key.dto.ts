@@ -10,6 +10,7 @@ export class CreateApiKeyDto {
   name!: string;
 
   @IsArray()
+  @IsString({ each: true })
   scopes!: string[];
 
   @IsOptional()

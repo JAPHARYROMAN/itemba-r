@@ -1,0 +1,63 @@
+{
+  "Agent": {
+    "DeviceId": "device-issued-by-itemba",
+    "ExecutionEnabled": false,
+    "HeartbeatSeconds": 15,
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "MaximumActionWallTimeSeconds": 900,
+    "MaximumActionBytes": 67108864,
+    "SessionRecoveryPath": "%LocalAppData%\\Itemba\\Msaidizi\\session-recovery",
+    "AllowedBrowserOrigins": [
+      {
+        "Id": "itemba",
+        "Origin": "https://itemba.example.invalid/"
+      }
+    ],
+    "AllowedUiProcesses": [
+      {
+        "Id": "approved-browser",
+        "ExecutablePath": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "Sha256": "REPLACE_WITH_SIGNED_BINARY_SHA256"
+      }
+    ],
+    "AllowedBrowserUploadRoots": [
+      {
+        "Id": "approved-exports",
+        "Path": "%UserProfile%\\Documents\\Itemba Exports"
+      }
+    ],
+    "MaximumCommandOutputBytes": 1048576,
+    "MaximumCommandProcesses": 16,
+    "MaximumCommandWorkingSetBytes": 536870912,
+    "AllowedCommandWorkingDirectories": [
+      {
+        "Id": "operator-scratch",
+        "Path": "%LocalAppData%\\Itemba\\OperatorScratch"
+      }
+    ],
+    "ProtectedSupervisorPaths": [
+      "%ProgramData%\\Itemba\\Msaidizi",
+      "%LocalAppData%\\Itemba\\Msaidizi"
+    ]
+  },
+  "SessionBridge": {
+    "Enabled": true,
+    "PipeName": "Itemba.Msaidizi.Session.v1",
+    "ServiceCertificateThumbprint": "REPLACE_FROM_ENROLLMENT",
+    "ServiceCertificateStoreName": "My",
+    "ServiceCertificateStoreLocation": "LocalMachine",
+    "ConnectTimeoutSeconds": 15,
+    "MaximumFrameBytes": 8388608,
+    "ReconnectDelayMilliseconds": 1000
+  },
+  "SecretProvisioning": {
+    "Enabled": false,
+    "PipeName": "Itemba.Msaidizi.SecretProvisioning.v1",
+    "ServiceCertificateThumbprint": "REPLACE_FROM_ENROLLMENT",
+    "ServiceCertificateStoreName": "My",
+    "ServiceCertificateStoreLocation": "LocalMachine",
+    "ConnectTimeoutSeconds": 15,
+    "MaximumFrameBytes": 1048576,
+    "PendingRequestPath": "%LocalAppData%\\Itemba\\Msaidizi\\secret-provisioning\\pending.bin"
+  }
+}

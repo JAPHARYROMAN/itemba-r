@@ -63,7 +63,10 @@ function makeService() {
       findMany: jest.fn().mockResolvedValue([{ id: 'unit-1', companyId: 'company-1' }]),
     },
   } as any;
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
   const taxAutoApply = { applyForPurchaseOrder: jest.fn().mockResolvedValue({}) } as any;
   const codes = {
@@ -244,6 +247,87 @@ describe('PurchaseOrdersService payment state', () => {
         referenceId: 'po-1',
       }),
       prisma,
+    );
+  });
+
+  it('appends the attributable receive audit after the final PO write on the same tx', async () => {
+    const { service, prisma, postingEngine, auditLogs } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-2026-000001',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 200,
+      status: 'CONFIRMED',
+      lines: [],
+    });
+
+    await service.receive('po-1', user);
+
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        action: 'PURCHASE_ORDER_RECEIVE',
+        entityType: 'PurchaseOrder',
+        entityId: 'po-1',
+        userId: 'user-1',
+        companyId: 'company-1',
+        oldValue: { status: 'CONFIRMED' },
+        newValue: { status: 'RECEIVED' },
+      }),
+    );
+    expect(postingEngine.postLines.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.purchaseOrder.update.mock.invocationCallOrder.at(-1),
+    );
+    expect(prisma.purchaseOrder.update.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      auditLogs.logStrictInTransaction.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not commit receipt state when the mandatory audit append fails', async () => {
+    const { service, prisma, postingEngine, auditLogs } = makeService();
+    let committedStatus = 'CONFIRMED';
+    let stagedStatus = committedStatus;
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-2026-000001',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      divisionId: 'division-1',
+      purchaseType: 'CASH_PURCHASE',
+      totalAmount: 200,
+      status: 'CONFIRMED',
+      lines: [],
+    });
+    prisma.purchaseOrder.updateMany.mockImplementation(async ({ data }: any) => {
+      stagedStatus = data.status;
+      return { count: 1 };
+    });
+    prisma.purchaseOrder.update.mockImplementation(async ({ data }: any) => {
+      stagedStatus = data.status;
+      return { id: 'po-1', companyId: 'company-1', ...data };
+    });
+    prisma.$transaction.mockImplementationOnce(async (callback: any) => {
+      stagedStatus = committedStatus;
+      try {
+        const result = await callback(prisma);
+        committedStatus = stagedStatus;
+        return result;
+      } catch (error) {
+        stagedStatus = committedStatus;
+        throw error;
+      }
+    });
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(new Error('audit store unavailable'));
+
+    await expect(service.receive('po-1', user)).rejects.toThrow('audit store unavailable');
+
+    expect(committedStatus).toBe('CONFIRMED');
+    expect(postingEngine.postLines).toHaveBeenCalledWith(expect.any(Object), prisma);
+    expect(auditLogs.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PURCHASE_ORDER_RECEIVE' }),
     );
   });
 

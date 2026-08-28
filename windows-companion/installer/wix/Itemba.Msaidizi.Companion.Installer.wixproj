@@ -1,0 +1,47 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>Itemba.Msaidizi.WindowsCompanion</OutputName>
+    <Platform>x64</Platform>
+    <Platforms>x64</Platforms>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\payload</PayloadRoot>
+    <ConfigRoot Condition="'$(ConfigRoot)' == ''">$(MSBuildThisFileDirectory)..\config</ConfigRoot>
+    <DefineConstants>PayloadRoot=$(PayloadRoot);ConfigRoot=$(ConfigRoot);ProductVersion=$(ProductVersion)</DefineConstants>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Pedantic>true</Pedantic>
+    <SuppressAllWarnings>false</SuppressAllWarnings>
+    <SuppressSpecificWarnings></SuppressSpecificWarnings>
+    <SuppressValidation>false</SuppressValidation>
+    <SuppressIces></SuppressIces>
+    <ValidationAdditionalOptions></ValidationAdditionalOptions>
+    <VerboseOutput>true</VerboseOutput>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath>$(MSBuildThisFileDirectory)..\locks\wix.packages.lock.json</NuGetLockFilePath>
+    <RestoreLockedMode>true</RestoreLockedMode>
+    <ValidationEvidencePath Condition="'$(ValidationEvidencePath)' == ''">$(IntermediateOutputPath)windows-installer-validation.passed.txt</ValidationEvidencePath>
+  </PropertyGroup>
+
+  <Target Name="AssertReleaseValidationPolicy" BeforeTargets="CoreCompile;WindowsInstallerValidation">
+    <Error Condition="'$(SuppressValidation)' == 'true'" Text="MSI schema/ICE validation may not be suppressed." />
+    <Error Condition="'$(TreatWarningsAsErrors)' != 'true'" Text="All WiX compiler and ICE warnings must be errors." />
+    <Error Condition="'$(Pedantic)' != 'true'" Text="WiX pedantic diagnostics must remain enabled." />
+    <Error Condition="'$(SuppressAllWarnings)' == 'true' or '$(SuppressSpecificWarnings)' != ''" Text="WiX warning suppression is forbidden." />
+    <Error Condition="'$(SuppressIces)' != ''" Text="Suppressing any stock MSI ICE is forbidden." />
+    <Error Condition="'$(ValidationAdditionalOptions)' != ''" Text="Unreviewed MSI validation options are forbidden." />
+  </Target>
+
+  <!-- WiX MSBuild's WindowsInstallerValidation target runs the stock MSI SDK
+       ICE set after CoreCompile. This marker is emitted only after that target
+       succeeds; a new release directory makes stale evidence impossible. -->
+  <Target Name="RecordSuccessfulWindowsInstallerValidation" AfterTargets="WindowsInstallerValidation">
+    <WriteLinesToFile
+      File="$(ValidationEvidencePath)"
+      Overwrite="true"
+      Encoding="UTF-8"
+      Lines="schema-and-stock-ice-validation=PASS;warnings-as-errors=true;pedantic=true;suppress-validation=false;suppressed-ices=none;validated-output=$(IntermediateOutputPath)$(TargetFileName)" />
+  </Target>
+</Project>

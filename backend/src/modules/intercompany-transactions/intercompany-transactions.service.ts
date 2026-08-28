@@ -17,7 +17,7 @@ import { CreateIntercompanyTransactionDto } from './dto/create-intercompany-tran
 import { UpdateIntercompanyTransactionDto } from './dto/update-intercompany-transaction.dto';
 import { QueryIntercompanyTransactionDto } from './dto/query-intercompany-transaction.dto';
 import { RejectIntercompanyTransactionDto } from './dto/reject-intercompany-transaction.dto';
-import { AccessLevel, AuditSeverity } from '@prisma/client';
+import { AccessLevel, AuditScopeKind, AuditSeverity } from '@prisma/client';
 
 @Injectable()
 export class IntercompanyTransactionsService {
@@ -406,6 +406,8 @@ export class IntercompanyTransactionsService {
       entityType: 'InterCompanyTransaction',
       entityId: id,
       userId,
+      scopeKind: AuditScopeKind.MULTI_COMPANY,
+      companyScopeIds: [existing.fromCompanyId, existing.toCompanyId],
       oldValue: { status: 'APPROVED' } as any,
       newValue: { status: 'POSTED' } as any,
       severity: AuditSeverity.HIGH,

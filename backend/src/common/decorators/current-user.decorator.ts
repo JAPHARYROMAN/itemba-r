@@ -16,6 +16,20 @@ export interface AuthUser {
   rawRefreshToken?: string;
   /** Active session id, if the access token was issued with one (P1-01). */
   sid?: string;
+  /** Present only for a short-lived autonomous task token. */
+  principalType?: string;
+  principalId?: string;
+  mandateId?: string;
+  initiatedByUserId?: string;
+  taskId?: string;
+  stepId?: string;
+  deviceId?: string;
+  planVersion?: number;
+  taskCapability?: string;
+  taskArgsDigest?: string;
+  taskInputProvenanceSha256?: string;
+  /** One-shot identifier consumed only after the exact route/args match. */
+  taskCredentialJti?: string;
 }
 
 export const CurrentUser = createParamDecorator(

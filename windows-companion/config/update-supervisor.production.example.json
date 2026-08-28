@@ -1,0 +1,40 @@
+{
+  "MsaidiziUpdateSupervisor": {
+    "DeviceId": "REPLACE_WITH_PAIRED_DEVICE_UUID",
+    "BrokerBaseUri": "https://msaidizi-broker.example.invalid:3443/api/v1/",
+    "ClientCertificateThumbprint": "REPLACE_WITH_LOCAL_MACHINE_CERTIFICATE_THUMBPRINT",
+    "SupervisorRoot": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\update",
+    "JournalPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\update\\journal.jsonl",
+    "ResultCachePath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\update\\results",
+    "OutboxPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\update\\outbox",
+    "PendingCommandPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\update\\pending-commands",
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "PinnedBootstrapPublicKeyPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\update\\bootstrap-public.pem",
+    "PinnedBootstrapPublicKeySha256": "REPLACE_WITH_PINNED_SPKI_SHA256",
+    "BootstrapKeyId": "msaidizi-bootstrap-2026-01",
+    "PollIntervalSeconds": 10,
+    "ProtectedRoots": [
+      "%ProgramData%\\Itemba\\Msaidizi\\supervisor",
+      "%SystemRoot%",
+      "%ProgramData%\\Microsoft\\Crypto"
+    ],
+    "Targets": [
+      {
+        "TargetId": "itemba.msaidizi.application",
+        "VersionsRoot": "%ProgramData%\\Itemba\\Msaidizi\\application-versions",
+        "ActivePointerPath": "%ProgramData%\\Itemba\\Msaidizi\\application-state\\active-application.txt",
+        "HealthProbeUri": "https://127.0.0.1:7443/health",
+        "RequireObservedVersion": true,
+        "ObservedVersionHeaderName": "X-Itemba-Version",
+        "MaxHealthTimeoutSeconds": 900,
+        "MinimumHealthySoakSeconds": 300,
+        "HealthProbeIntervalSeconds": 5,
+        "MaxPackageBytes": 262144000,
+        "MaxExpandedBytes": 2147483648,
+        "MaxFileCount": 50000,
+        "ActivationMode": "WindowsServiceRestart",
+        "WindowsServiceName": "REPLACE_WITH_ALLOWLISTED_WINDOWS_SERVICE_NAME"
+      }
+    ]
+  }
+}

@@ -8,7 +8,6 @@ import {
   IsString,
   MaxLength,
   Min,
-  ValidateIf,
 } from 'class-validator';
 import { BackupJobStatus, BackupSchedule, BackupStorageTarget, BackupType } from '@prisma/client';
 
@@ -68,7 +67,7 @@ export class CreateBackupJobDto {
   @IsEnum(BackupJobStatus)
   status?: BackupJobStatus;
 
-  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsOptional()
   @IsDateString()
   nextRunAt?: string | null;
 }
@@ -101,7 +100,7 @@ export class UpdateBackupJobDto {
   @IsEnum(BackupJobStatus)
   status?: BackupJobStatus;
 
-  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsOptional()
   @IsDateString()
   nextRunAt?: string | null;
 }

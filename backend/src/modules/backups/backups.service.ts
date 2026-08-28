@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { assertCanAccessCompanyFromUser } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 @Injectable()
@@ -9,18 +11,37 @@ export class BackupsService {
     private readonly auditLogs: AuditLogsService,
   ) {}
 
-  async getDashboard() {
+  async getDashboard(user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, null);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const [activeJobs, recentRuns, failedCount] = await Promise.all([
       this.prisma.backupJob.findMany({
         where: { deletedAt: null, status: 'ACTIVE' },
-        select: { id: true, backupJobCode: true, name: true, backupType: true, schedule: true, lastRunAt: true, nextRunAt: true, status: true },
+        select: {
+          id: true,
+          backupJobCode: true,
+          name: true,
+          backupType: true,
+          schedule: true,
+          lastRunAt: true,
+          nextRunAt: true,
+          status: true,
+        },
       }),
       this.prisma.backupRun.findMany({
         orderBy: { createdAt: 'desc' },
         take: 5,
-        select: { id: true, backupRunNumber: true, backupJobId: true, backupType: true, status: true, startedAt: true, completedAt: true, fileSizeBytes: true },
+        select: {
+          id: true,
+          backupRunNumber: true,
+          backupJobId: true,
+          backupType: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          fileSizeBytes: true,
+        },
       }),
       this.prisma.backupRun.count({
         where: { status: 'FAILED', createdAt: { gte: sevenDaysAgo } },

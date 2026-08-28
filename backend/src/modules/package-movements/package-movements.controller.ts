@@ -4,6 +4,7 @@ import { PackageMovementsService } from './package-movements.service';
 import { CreatePackageMovementDto } from './dto/create-package-movement.dto';
 import { QueryPackageMovementDto } from './dto/query-package-movement.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('westsides/package-movements')
@@ -26,6 +27,7 @@ export class PackageMovementsController {
   }
 
   @Get('balances/customer/:customerId')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('package_movements.view')
   @ApiOperation({ summary: 'Get customer package balances' })
   findBalancesByCustomer(@Param('customerId') customerId: string) {
@@ -33,6 +35,7 @@ export class PackageMovementsController {
   }
 
   @Get('customer/:customerId')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('package_movements.view')
   @ApiOperation({ summary: 'All movements for a customer' })
   findByCustomer(@Param('customerId') customerId: string) {
@@ -40,6 +43,7 @@ export class PackageMovementsController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('package_movements.view')
   @ApiOperation({ summary: 'Get package movement by ID' })
   findOne(@Param('id') id: string) {

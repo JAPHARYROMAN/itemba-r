@@ -1,0 +1,94 @@
+{
+  "MsaidiziUpdateEvaluator": {
+    "Enabled": false,
+    "BrokerBaseUri": "https://msaidizi-evaluator-broker.example.invalid:3444/msaidizi/update-verifier/",
+    "TransportCertificateThumbprint": "",
+    "PinnedBrokerCertificateSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "PinnedBrokerSpkiSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "EvaluatorRoot": "%ProgramData%\\Itemba\\Msaidizi\\update-evaluator",
+    "StatePath": "%ProgramData%\\Itemba\\Msaidizi\\update-evaluator\\state",
+    "TransferPath": "%ProgramData%\\Itemba\\Msaidizi\\update-evaluator\\transfer",
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "PollIntervalSeconds": 10,
+    "HeartbeatIntervalSeconds": 30,
+    "AttestationTtlSeconds": 600,
+    "ProtectedPolicyVersion": "msaidizi-generated-update-policy/v1",
+    "ProtectedPolicySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "ArtifactSigner": {
+      "KeyId": "artifact-verifier-provisioning-required",
+      "CertificateThumbprint": "",
+      "HardwareKeyProvider": "Microsoft Platform Crypto Provider"
+    },
+    "RunnerSigner": {
+      "KeyId": "evaluation-runner-provisioning-required",
+      "CertificateThumbprint": "",
+      "HardwareKeyProvider": "Microsoft Platform Crypto Provider"
+    },
+    "Reviewers": [
+      {
+        "ProviderId": "independent-provider-a",
+        "ReviewerId": "independent-reviewer-a",
+        "ModelId": "review-model-a-version-required",
+        "Endpoint": "https://reviewer-a.example.invalid/v1/msaidizi-review",
+        "PinnedServerSpkiSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ApiKeyEnvironmentVariable": "MSAIDIZI_REVIEWER_A_API_KEY",
+        "TimeoutSeconds": 120,
+        "Signer": {
+          "KeyId": "model-reviewer-a-provisioning-required",
+          "CertificateThumbprint": "",
+          "HardwareKeyProvider": "Microsoft Platform Crypto Provider"
+        }
+      },
+      {
+        "ProviderId": "independent-provider-b",
+        "ReviewerId": "independent-reviewer-b",
+        "ModelId": "review-model-b-version-required",
+        "Endpoint": "https://reviewer-b.example.invalid/v1/msaidizi-review",
+        "PinnedServerSpkiSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ApiKeyEnvironmentVariable": "MSAIDIZI_REVIEWER_B_API_KEY",
+        "TimeoutSeconds": 120,
+        "Signer": {
+          "KeyId": "model-reviewer-b-provisioning-required",
+          "CertificateThumbprint": "",
+          "HardwareKeyProvider": "Microsoft Platform Crypto Provider"
+        }
+      }
+    ],
+    "HyperV": {
+      "VmName": "Itemba-Msaidizi-Update-Evaluation",
+      "CleanSnapshotName": "operator-approved-clean",
+      "CleanSnapshotId": "operator-approved-windows11-clean-v1",
+      "GuestCredentialPath": "%ProgramData%\\Itemba\\Msaidizi\\update-evaluator\\secrets\\guest-credential.xml",
+      "GuestRepositoryPath": "C:\\Itemba\\repository",
+      "GuestWorkspaceRoot": "C:\\Itemba\\evaluation",
+      "PowerShellExecutablePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "ProviderScriptPath": "%ProgramFiles%\\Itemba\\Msaidizi\\UpdateEvaluator\\Evaluation\\Invoke-MsaidiziUpdateEvaluationVm.ps1",
+      "ProviderScriptSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "VmReadyTimeoutSeconds": 180,
+      "ProviderOperationTimeoutSeconds": 900
+    },
+    "Commands": [
+      {
+        "Check": "TESTS",
+        "FileName": "npm.cmd",
+        "Arguments": ["test", "--", "--runInBand"],
+        "WorkingDirectory": "backend",
+        "TimeoutSeconds": 900
+      },
+      {
+        "Check": "STATIC_ANALYSIS",
+        "FileName": "npm.cmd",
+        "Arguments": ["run", "lint"],
+        "WorkingDirectory": "backend",
+        "TimeoutSeconds": 600
+      },
+      {
+        "Check": "ADVERSARIAL",
+        "FileName": "npm.cmd",
+        "Arguments": ["test", "--", "--runInBand", "zzadversarial"],
+        "WorkingDirectory": "backend",
+        "TimeoutSeconds": 600
+      }
+    ]
+  }
+}

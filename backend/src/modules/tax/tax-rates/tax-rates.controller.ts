@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Patch,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { CurrentTaxRateQueryDto, TaxRatesQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -14,13 +26,13 @@ export class TaxRatesController {
 
   @Get()
   @RequirePermissions('tax_rates.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: TaxRatesQueryDto) {
     return this.service.findAll(user, query);
   }
 
   @Get('current')
   @RequirePermissions('tax_rates.view')
-  findCurrent(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findCurrent(@CurrentUser() user: AuthUser, @Query() query: CurrentTaxRateQueryDto) {
     return this.service.findCurrent(user, query);
   }
 

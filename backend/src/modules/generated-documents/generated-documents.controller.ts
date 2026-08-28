@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { GeneratedDocumentsQueryDto } from '../../common/dto/resource-query.dto';
 import { Request, Response } from 'express';
 import {
   RequireAnyPermissions,
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { GeneratedDocumentsService } from './generated-documents.service';
 import { GenerateBusinessPdfDto } from './dto/generate-business-pdf.dto';
 import { GenerateTablePdfDto } from './dto/generate-table-pdf.dto';
@@ -43,11 +45,12 @@ export class GeneratedDocumentsController {
 
   @Get()
   @RequirePermissions('generated_documents.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: GeneratedDocumentsQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
   @Post('pdf')
+  @AgentExcluded('filesystem_materialization_not_represented')
   @RequireAnyPermissions(...BUSINESS_PDF_SOURCE_PERMISSIONS)
   generatePdf(
     @Body() dto: GenerateBusinessPdfDto,
@@ -86,6 +89,7 @@ export class GeneratedDocumentsController {
   }
 
   @Get(':id/download')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequireAnyPermissions(...BUSINESS_PDF_SOURCE_PERMISSIONS, 'generated_documents.view')
   async download(
     @Param('id') id: string,

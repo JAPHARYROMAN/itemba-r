@@ -9,16 +9,24 @@ interface AssertPostingAllowedInput {
   moduleName?: string;
 }
 
+type AccountingControlClient = Pick<
+  Prisma.TransactionClient,
+  'accountingPeriod' | 'accountingLock'
+>;
+
 @Injectable()
 export class AccountingControlService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async assertPostingAllowed(input: AssertPostingAllowedInput): Promise<ResolvedAccountingPeriod> {
+  async assertPostingAllowed(
+    input: AssertPostingAllowedInput,
+    client: AccountingControlClient = this.prisma,
+  ): Promise<ResolvedAccountingPeriod> {
     const transactionDate = this.startOfDay(input.transactionDate);
     let period: ResolvedAccountingPeriod | null = null;
 
     if (input.accountingPeriodId) {
-      period = await this.prisma.accountingPeriod.findUnique({
+      period = await client.accountingPeriod.findUnique({
         where: { id: input.accountingPeriodId },
         include: { fiscalYear: { select: { id: true, status: true } } },
       });
@@ -27,7 +35,7 @@ export class AccountingControlService {
         throw new BadRequestException('Accounting period not found');
       }
     } else {
-      period = await this.prisma.accountingPeriod.findFirst({
+      period = await client.accountingPeriod.findFirst({
         where: {
           companyId: input.companyId,
           startDate: { lte: transactionDate },
@@ -44,13 +52,16 @@ export class AccountingControlService {
 
     this.assertPeriodAllowsPosting(period, input.companyId, transactionDate);
 
-    await this.assertNoActiveLock({
-      companyId: input.companyId,
-      accountingPeriodId: period.id,
-      fiscalYearId: period.fiscalYearId,
-      transactionDate,
-      moduleName: input.moduleName,
-    });
+    await this.assertNoActiveLock(
+      {
+        companyId: input.companyId,
+        accountingPeriodId: period.id,
+        fiscalYearId: period.fiscalYearId,
+        transactionDate,
+        moduleName: input.moduleName,
+      },
+      client,
+    );
 
     return period;
   }
@@ -77,7 +88,10 @@ export class AccountingControlService {
     }
   }
 
-  private async assertNoActiveLock(input: AssertPostingAllowedInput & { fiscalYearId?: string }) {
+  private async assertNoActiveLock(
+    input: AssertPostingAllowedInput & { fiscalYearId?: string },
+    client: AccountingControlClient,
+  ) {
     const scopeOr: Prisma.AccountingLockWhereInput[] = [];
 
     if (input.accountingPeriodId) {
@@ -112,7 +126,7 @@ export class AccountingControlService {
       ? [input.moduleName, 'accounting', 'finance']
       : ['accounting', 'finance'];
 
-    const lock = await this.prisma.accountingLock.findFirst({
+    const lock = await client.accountingLock.findFirst({
       where: {
         companyId: input.companyId,
         status: 'ACTIVE',

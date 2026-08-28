@@ -29,10 +29,41 @@ function makeService({
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
   } as any;
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
-  return { service: new ProfitService(prisma, companyScope, auditLogs), prisma, auditLogs };
+  return {
+    service: new ProfitService(prisma, companyScope, auditLogs),
+    prisma,
+    auditLogs,
+    companyScope,
+  };
 }
 
 describe('ProfitService no-loss rules', () => {
+  it('audits a successful manual line validation with the executing user and company', async () => {
+    const { service, auditLogs } = makeService({
+      balance: { productId: 'product-1', quantityOnHand: 5, averageCost: 80 },
+    });
+    const user = { id: 'user-1', companyId: 'company-1' } as any;
+
+    await service.validateSaleLinesForUser(
+      {
+        companyId: 'company-1',
+        branchId: 'branch-1',
+        lines: [{ productId: 'product-1', quantity: 1, unitPrice: 100 }],
+      },
+      user,
+    );
+
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'PROFIT_VALIDATION_RUN',
+        entityType: 'ProfitValidation',
+        companyId: 'company-1',
+        userId: 'user-1',
+        newValue: { lineCount: 1, hasBlockingErrors: false },
+      }),
+    );
+  });
+
   it('rejects stock products without a purchase cost', () => {
     const { service } = makeService();
 
@@ -90,6 +121,66 @@ describe('ProfitService no-loss rules', () => {
         profitCostSource: ProfitCostSource.BRANCH_AVERAGE_COST,
       }),
     );
+  });
+});
+
+describe('ProfitService cost-gap company scope', () => {
+  it('applies the company predicate to both sources and returns only the scoped product gap', async () => {
+    const { service, prisma, companyScope } = makeService();
+    const products = [
+      {
+        id: 'gap-product-a',
+        productCode: 'GAP-A',
+        name: 'Company A missing cost',
+        companyId: 'company-1',
+        divisionId: null,
+        defaultPurchasePrice: 0,
+        productFamily: null,
+        company: { id: 'company-1', name: 'Company A', code: 'A' },
+        division: null,
+      },
+      {
+        id: 'gap-product-b',
+        productCode: 'GAP-B',
+        name: 'Company B missing cost',
+        companyId: 'company-2',
+        divisionId: null,
+        defaultPurchasePrice: 0,
+        productFamily: null,
+        company: { id: 'company-2', name: 'Company B', code: 'B' },
+        division: null,
+      },
+    ];
+    prisma.product.findMany.mockImplementation(async ({ where }: any) =>
+      products.filter((product) => product.companyId === where.companyId),
+    );
+    prisma.inventoryBalance.findMany.mockResolvedValue([]);
+
+    const result = await service.costGaps({ companyId: 'company-1' }, { id: 'user-1' } as any);
+
+    expect(companyScope.companyWhereFor).toHaveBeenCalledWith({ id: 'user-1' }, 'company-1');
+    expect(prisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyId: 'company-1' }),
+      }),
+    );
+    expect(prisma.inventoryBalance.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          product: expect.objectContaining({ companyId: 'company-1' }),
+        }),
+      }),
+    );
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        type: 'PRODUCT_MASTER_COST',
+        productId: 'gap-product-a',
+        company: expect.objectContaining({ id: 'company-1' }),
+      }),
+    ]);
+    expect(result.rows.some((row) => row.productId === 'gap-product-b')).toBe(false);
+    expect(result.total).toBe(1);
   });
 });
 

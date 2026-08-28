@@ -4,8 +4,12 @@ import { PriceListsService } from './price-lists.service';
 import { CreatePriceListDto } from './dto/create-price-list.dto';
 import { UpdatePriceListDto } from './dto/update-price-list.dto';
 import { QueryPriceListDto } from './dto/query-price-list.dto';
-import { CreatePriceListItemStandaloneDto, UpdatePriceListItemDto } from './dto/price-list-item.dto';
+import {
+  CreatePriceListItemStandaloneDto,
+  UpdatePriceListItemDto,
+} from './dto/price-list-item.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('westsides/price-lists')
@@ -28,6 +32,7 @@ export class PriceListsController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('price_lists.view')
   @ApiOperation({ summary: 'Get price list with items' })
   findOne(@Param('id') id: string) {
@@ -37,7 +42,11 @@ export class PriceListsController {
   @Patch('price-list-items/:id')
   @RequirePermissions('price_lists.manage')
   @ApiOperation({ summary: 'Update price list item' })
-  updateItem(@Param('id') id: string, @Body() dto: UpdatePriceListItemDto, @CurrentUser() user: AuthUser) {
+  updateItem(
+    @Param('id') id: string,
+    @Body() dto: UpdatePriceListItemDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.updateItem(id, dto, user.id);
   }
 
@@ -56,6 +65,7 @@ export class PriceListsController {
   }
 
   @Get(':id/items')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('price_lists.view')
   @ApiOperation({ summary: 'List items for a price list' })
   findItems(@Param('id') id: string) {
@@ -65,7 +75,11 @@ export class PriceListsController {
   @Post(':id/items')
   @RequirePermissions('price_lists.manage')
   @ApiOperation({ summary: 'Add item to price list' })
-  addItem(@Param('id') id: string, @Body() dto: CreatePriceListItemStandaloneDto, @CurrentUser() user: AuthUser) {
+  addItem(
+    @Param('id') id: string,
+    @Body() dto: CreatePriceListItemStandaloneDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.addItem(id, dto, user.id);
   }
 

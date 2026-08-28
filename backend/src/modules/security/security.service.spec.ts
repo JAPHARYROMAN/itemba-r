@@ -1,4 +1,23 @@
+import { ForbiddenException } from '@nestjs/common';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { SecurityService } from './security.service';
+
+const GROUP_USER: AuthUser = {
+  id: 'group-user',
+  email: 'group-user@itemba.invalid',
+  roles: ['group-reader'],
+  roleScopes: ['GROUP'],
+  permissions: ['security.dashboard.view'],
+  companyId: 'company-1',
+};
+
+const COMPANY_USER: AuthUser = {
+  ...GROUP_USER,
+  id: 'company-user',
+  email: 'company-user@itemba.invalid',
+  roles: ['company-reader'],
+  roleScopes: ['COMPANY'],
+};
 
 function makeService(
   overrides: { activeUsersWithoutRoles?: number; refreshExpiresIn?: string } = {},
@@ -64,6 +83,18 @@ function makeService(
     service: new SecurityService(prisma, {} as any, config),
     prisma,
     config,
+    queryMocks: [
+      prisma.securityEvent.groupBy,
+      prisma.securityEvent.findMany,
+      prisma.securityEvent.count,
+      prisma.activeSession.count,
+      prisma.user.count,
+      prisma.userSecurityProfile.groupBy,
+      prisma.userSecurityProfile.count,
+      prisma.refreshToken.count,
+      prisma.role.count,
+      prisma.permission.count,
+    ],
   };
 }
 
@@ -71,7 +102,7 @@ describe('SecurityService readiness', () => {
   it('returns production-ready auth, session, and access readiness when controls are healthy', async () => {
     const { service } = makeService();
 
-    const readiness = await service.getReadiness();
+    const readiness = await service.getReadiness(GROUP_USER);
 
     expect(readiness.score).toBeGreaterThanOrEqual(90);
     expect(readiness.status).toBe('READY');
@@ -82,7 +113,7 @@ describe('SecurityService readiness', () => {
   it('marks users without roles as a critical access-control blocker', async () => {
     const { service } = makeService({ activeUsersWithoutRoles: 2 });
 
-    const readiness = await service.getReadiness();
+    const readiness = await service.getReadiness(GROUP_USER);
 
     expect(readiness.status).toBe('CRITICAL');
     expect(readiness.checks.find((check) => check.key === 'rbac-scope-coverage')?.status).toBe(
@@ -93,10 +124,22 @@ describe('SecurityService readiness', () => {
   it('includes readiness on the security dashboard response', async () => {
     const { service } = makeService();
 
-    const dashboard = await service.getDashboard();
+    const dashboard = await service.getDashboard(GROUP_USER);
 
     expect(dashboard.activeSessionsCount).toBe(3);
     expect(dashboard.twoFactorAdoptionRate).toBe(80);
     expect(dashboard.readiness.score).toBeGreaterThanOrEqual(90);
   });
+
+  it.each(['getDashboard', 'getSummary', 'getReadiness'] as const)(
+    'denies a company principal before any query in %s',
+    async (method) => {
+      const { service, queryMocks, config } = makeService();
+
+      await expect(service[method](COMPANY_USER)).rejects.toBeInstanceOf(ForbiddenException);
+
+      for (const query of queryMocks) expect(query).not.toHaveBeenCalled();
+      expect(config.get).not.toHaveBeenCalled();
+    },
+  );
 });

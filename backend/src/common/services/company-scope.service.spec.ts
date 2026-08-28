@@ -6,6 +6,8 @@ import {
   CompanyScopeService,
 } from './company-scope.service';
 import { AuthUser } from '../decorators/current-user.decorator';
+import { AuditChannel } from '@prisma/client';
+import { ambientValidatedCompanyScope, runWithRequestContext } from '../context/request-context';
 
 const prisma = {
   userCompanyAccess: {
@@ -168,6 +170,30 @@ describe('CompanyScopeService', () => {
       deletedAt: null,
       status: 'ACTIVE',
       companyId: { in: ['company-1'] },
+    });
+  });
+
+  it('records only successfully validated company ids for downstream auditing', async () => {
+    await runWithRequestContext({ channel: AuditChannel.WEB }, async () => {
+      await service.assertCanAccessCompany(
+        user({
+          companyAccess: [{ companyId: 'company-2', accessLevel: AccessLevel.WRITE }],
+        }),
+        'company-2',
+        AccessLevel.WRITE,
+      );
+      expect(ambientValidatedCompanyScope()).toEqual({
+        kind: 'COMPANY',
+        companyIds: ['company-2'],
+      });
+
+      await expect(
+        service.assertCanAccessCompany(user(), 'company-denied', AccessLevel.WRITE),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(ambientValidatedCompanyScope()).toEqual({
+        kind: 'COMPANY',
+        companyIds: ['company-2'],
+      });
     });
   });
 });

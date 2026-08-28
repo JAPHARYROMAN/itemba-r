@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CreateUserSecurityProfileDto } from './dto/create-user-security-profile.dto';
+import { UpdateUserSecurityProfileDto } from './dto/update-user-security-profile.dto';
 
 function stripSensitive(profile: any) {
   if (!profile) return profile;
@@ -88,7 +90,7 @@ export class UserSecurityProfilesService {
     return stripSensitive(record);
   }
 
-  async create(dto: any, user: AuthUser) {
+  async create(dto: CreateUserSecurityProfileDto, user: AuthUser) {
     const target = await this.findTargetUser(dto.userId);
     await this.assertCanAccessTargetUser(user, target, AccessLevel.MANAGE);
 
@@ -96,7 +98,7 @@ export class UserSecurityProfilesService {
     // by the /auth/2fa/setup flow). Enabling twoFactorEnabled here would leave the
     // user with a flag but no secret, so login issues a 2FA challenge that can never
     // be satisfied — permanently locking them out. Reject it and require enrolment.
-    if (dto.twoFactorEnabled === true || dto.twoFactorEnabled === 'true') {
+    if (dto.twoFactorEnabled === true) {
       throw new BadRequestException(
         'twoFactorEnabled cannot be turned on here — the user must complete the /auth/2fa/setup flow to provision a secret. Set forceTwoFactorSetup to require enrolment.',
       );
@@ -122,7 +124,7 @@ export class UserSecurityProfilesService {
     return record;
   }
 
-  async update(id: string, dto: any, user: AuthUser) {
+  async update(id: string, dto: UpdateUserSecurityProfileDto, user: AuthUser) {
     const existing = await this.prisma.userSecurityProfile.findFirst({
       where: { id },
       // twoFactorSecretEncrypted is needed to validate 2FA enablement below; it is
@@ -133,7 +135,7 @@ export class UserSecurityProfilesService {
     await this.assertCanAccessTargetUser(user, existing.user, AccessLevel.MANAGE);
 
     const updateData: any = {};
-    const allowed = [
+    const allowed: readonly (keyof UpdateUserSecurityProfileDto)[] = [
       'twoFactorEnabled',
       'twoFactorMethod',
       'forcePasswordChange',
@@ -149,10 +151,7 @@ export class UserSecurityProfilesService {
     // Never allow twoFactorEnabled to be turned on without a provisioned TOTP secret.
     // Login gates the 2FA challenge on this flag alone; enabling it without a secret
     // means every submitted code fails verification, permanently locking the user out.
-    if (
-      (updateData.twoFactorEnabled === true || updateData.twoFactorEnabled === 'true') &&
-      !existing.twoFactorSecretEncrypted
-    ) {
+    if (updateData.twoFactorEnabled === true && !existing.twoFactorSecretEncrypted) {
       throw new BadRequestException(
         'twoFactorEnabled cannot be turned on for a user with no 2FA secret — the user must complete the /auth/2fa/setup flow first. Set forceTwoFactorSetup to require enrolment.',
       );
@@ -175,9 +174,7 @@ export class UserSecurityProfilesService {
         const lockedUntil = updateData.lockedUntil ? new Date(updateData.lockedUntil) : null;
         await tx.user.update({
           where: { id: existing.userId },
-          data: lockedUntil
-            ? { lockedUntil }
-            : { lockedUntil: null, failedLoginAttempts: 0 },
+          data: lockedUntil ? { lockedUntil } : { lockedUntil: null, failedLoginAttempts: 0 },
         });
       }
       return updated;

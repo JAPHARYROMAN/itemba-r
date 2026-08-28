@@ -1,0 +1,42 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%Itemba%
+DriverVer=08/28/2026,0.1.0.0
+CatalogFile=Msaidizi.NetworkIsolationDriver.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DriverCopyFiles=12
+
+[DefaultInstall.NTamd64]
+CopyFiles=DriverCopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService=MsaidiziNetworkIsolation,0x00000002,DriverService
+
+[DriverCopyFiles]
+Msaidizi.NetworkIsolationDriver.sys
+
+[DriverService]
+DisplayName=%DriverDisplayName%
+Description=%DriverDescription%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\Msaidizi.NetworkIsolationDriver.sys
+LoadOrderGroup=NetworkProvider
+Security="D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+
+[SourceDisksNames]
+1=%InstallDisk%,,,
+
+[SourceDisksFiles]
+Msaidizi.NetworkIsolationDriver.sys=1
+
+[Strings]
+Itemba="Itemba"
+DriverDisplayName="Itemba Msaidizi Network Isolation Driver"
+DriverDescription="Fail-closed WFP egress enforcement for explicitly enrolled Msaidizi processes"
+InstallDisk="Itemba Msaidizi Network Isolation Driver installation media"

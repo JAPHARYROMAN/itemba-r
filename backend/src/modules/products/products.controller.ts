@@ -27,6 +27,7 @@ import {
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 @Controller('products')
 export class ProductsController {
@@ -108,6 +109,7 @@ export class ProductsController {
 
   /** Stream the product image. Same read permissions as the product itself so POS reps can load tiles. */
   @Get(':id/image')
+  @AgentExcluded('binary_result_not_represented')
   @RequireAnyPermissions(
     'products.view',
     'pos.create',
@@ -134,6 +136,7 @@ export class ProductsController {
 
   /** Upload / replace the product image (multipart field `file`, JPEG/PNG/WebP, ≤ 2 MB). */
   @Post(':id/image')
+  @AgentExcluded('multipart_transport_not_represented')
   @RequirePermissions('products.update')
   @UseInterceptors(
     FileInterceptor('file', {

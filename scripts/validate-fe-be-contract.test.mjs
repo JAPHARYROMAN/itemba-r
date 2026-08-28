@@ -167,6 +167,20 @@ test("checks the Msaidizi streaming endpoint against this repo's own routes", ()
   assert.deepEqual(brokenContracts(streaming, routes), []);
 });
 
+test('expands literal controller-prefix arrays into every Nest route alias', () => {
+  const routes = collectBackendRoutes();
+  const scheduleCreates = routes
+    .filter(
+      (route) =>
+        route.method === 'POST' &&
+        (route.route === '/msaidizi/schedules' || route.route === '/msaidizi/routines'),
+    )
+    .map((route) => route.route)
+    .sort();
+
+  assert.deepEqual(scheduleCreates, ['/msaidizi/routines', '/msaidizi/schedules']);
+});
+
 test('the checked set is the whole frontend, not one lucky file', () => {
   const { calls } = collectFrontendCalls();
 

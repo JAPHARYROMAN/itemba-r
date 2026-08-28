@@ -3,7 +3,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { PersistenceSafeLoggerService, PersistenceSecretGuard } from '../src/common/services';
 import { PrismaExceptionFilter } from '../src/common/filters/prisma-exception.filter';
+import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
 
 const allowAllThrottlerGuard: Pick<ThrottlerGuard, 'canActivate'> = {
   canActivate: async () => true,
@@ -46,7 +48,13 @@ export async function createE2eApp(options: CreateE2eAppOptions = {}): Promise<I
     ),
   );
   if (options.useProductionPipeline) {
-    app.useGlobalFilters(new HttpExceptionFilter(), new PrismaExceptionFilter());
+    const persistenceSecrets = app.get(PersistenceSecretGuard);
+    app.useLogger(app.get(PersistenceSafeLoggerService));
+    app.useGlobalFilters(
+      new HttpExceptionFilter(persistenceSecrets),
+      new PrismaExceptionFilter(persistenceSecrets),
+    );
+    app.useGlobalInterceptors(new TransformInterceptor());
   }
   await app.init();
   return app;

@@ -1,11 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { CompanyScopeService } from '../../common/services';
 
 @Injectable()
 export class DataIsolationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyScope: CompanyScopeService,
+  ) {}
 
-  async getDashboard() {
+  async getDashboard(user: AuthUser) {
+    this.companyScope.assertGroupScoped(user, 'view the data isolation dashboard');
     const [total, passed, failed, partial, openIssues, recentRuns] = await Promise.all([
       this.prisma.dataIsolationTestRun.count(),
       this.prisma.dataIsolationTestRun.count({ where: { status: 'PASSED' } }),

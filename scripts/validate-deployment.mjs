@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +80,109 @@ const sampleEnv = {
   SEED_DEMO_DATA: 'true',
 };
 
+const msaidiziInputMounts = [
+  {
+    hostEnv: 'MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_HOST_PATH',
+    pathEnv: 'MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_PATH',
+    target: '/run/msaidizi-provider-contract/attestation.json',
+  },
+  {
+    hostEnv: 'MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_PATH',
+    target: '/run/msaidizi-provider-contract/public.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_ACTION_SIGNING_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_ACTION_SIGNING_KEY_PATH',
+    target: '/run/secrets/msaidizi-action-es256.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_UPDATE_SIGNING_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_UPDATE_SIGNING_KEY_PATH',
+    target: '/run/secrets/msaidizi-update-es256.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_RECOVERY_SIGNING_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_RECOVERY_SIGNING_KEY_PATH',
+    target: '/run/secrets/msaidizi-recovery-es256.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_HOST_PATH',
+    pathEnv: 'MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_PATH',
+    target: '/run/secrets/msaidizi-evaluator-keys.json',
+  },
+  {
+    hostEnv: 'MSAIDIZI_EVALUATOR_MTLS_SERVER_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_EVALUATOR_MTLS_SERVER_KEY_PATH',
+    target: '/run/secrets/msaidizi-evaluator-server-key.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_EVALUATOR_MTLS_SERVER_CERT_HOST_PATH',
+    pathEnv: 'MSAIDIZI_EVALUATOR_MTLS_SERVER_CERT_PATH',
+    target: '/run/secrets/msaidizi-evaluator-server-cert.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_EVALUATOR_MTLS_CLIENT_CA_HOST_PATH',
+    pathEnv: 'MSAIDIZI_EVALUATOR_MTLS_CLIENT_CA_PATH',
+    target: '/run/secrets/msaidizi-evaluator-client-ca.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_DIRECT_MTLS_SERVER_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_DIRECT_MTLS_SERVER_KEY_PATH',
+    target: '/run/secrets/msaidizi-device-server-key.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_DIRECT_MTLS_SERVER_CERT_HOST_PATH',
+    pathEnv: 'MSAIDIZI_DIRECT_MTLS_SERVER_CERT_PATH',
+    target: '/run/secrets/msaidizi-device-server-cert.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_DIRECT_MTLS_CLIENT_CA_HOST_PATH',
+    pathEnv: 'MSAIDIZI_DIRECT_MTLS_CLIENT_CA_PATH',
+    target: '/run/secrets/msaidizi-device-client-ca.pem',
+  },
+  {
+    hostEnv: 'MSAIDIZI_CRUD_EVIDENCE_HOST_PATH',
+    pathEnv: 'MSAIDIZI_CRUD_EVIDENCE_PATH',
+    target: '/run/msaidizi/crud-evidence.json',
+  },
+  {
+    hostEnv: 'MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_HOST_PATH',
+    pathEnv: 'MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH',
+    target: '/run/secrets/msaidizi-crud-evidence-public.pem',
+  },
+];
+
+const configuredMsaidiziHostInputs = Object.fromEntries(
+  msaidiziInputMounts.map(({ hostEnv, target }) => [
+    hostEnv,
+    `/operator/itemba-msaidizi${target}`,
+  ]),
+);
+
+const substitutedMsaidiziContainerPaths = Object.fromEntries(
+  msaidiziInputMounts.map(({ pathEnv, target }) => [pathEnv, `/unreviewed${target}`]),
+);
+
+const msaidiziEnableSwitches = [
+  'MSAIDIZI_ENABLED',
+  'MSAIDIZI_AUTONOMY_ENABLED',
+  'MSAIDIZI_TASK_WORKER_ENABLED',
+  'MSAIDIZI_AUTOPILOT_ENABLED',
+  'MSAIDIZI_HOST_EXECUTION_ENABLED',
+  'MSAIDIZI_ADAPTIVE_REASONING_ENABLED',
+  'MSAIDIZI_DEVICE_PAIRING_ENABLED',
+  'MSAIDIZI_DEVICE_CHANNEL_ENABLED',
+  'MSAIDIZI_DIRECT_MTLS_ENABLED',
+  'MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED',
+  'MSAIDIZI_UPDATE_SUPERVISOR_ENABLED',
+  'MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED',
+  'MSAIDIZI_UPDATE_EVALUATOR_ENABLED',
+  'MSAIDIZI_EVALUATOR_MTLS_ENABLED',
+  'MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED',
+  'MSAIDIZI_AUDIT_SIGNER_ENABLED',
+];
+
 const tempDir = mkdtempSync(join(tmpdir(), 'itemba-deploy-validate-'));
 const emptyEnvFile = join(tempDir, 'empty.env');
 writeFileSync(emptyEnvFile, '', 'utf8');
@@ -89,8 +192,29 @@ try {
     validateMissingSecretsFail(target);
     const config = validateConfigPasses(target);
     assertDeploymentShape(target, config);
+    if (target.name === 'production') {
+      const configuredInputs = validateConfigPasses(target, configuredMsaidiziHostInputs);
+      assertMsaidiziInputMounts(target, configuredInputs.services?.backend, configuredMsaidiziHostInputs);
+      const substitutedPaths = validateConfigPasses(target, substitutedMsaidiziContainerPaths);
+      assertMsaidiziInputMounts(
+        target,
+        substitutedPaths.services?.backend,
+        {},
+        'when a direct container-path substitution is attempted',
+      );
+      const configuredWithSubstitution = validateConfigPasses(target, {
+        ...configuredMsaidiziHostInputs,
+        ...substitutedMsaidiziContainerPaths,
+      });
+      assertMsaidiziInputMounts(
+        target,
+        configuredWithSubstitution.services?.backend,
+        configuredMsaidiziHostInputs,
+      );
+    }
     console.log(`OK ${target.name}: compose fail-fast and deployment shape verified`);
   }
+  assertProductionDeploymentWorkflow();
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }
@@ -100,6 +224,15 @@ function composeConfig(target, extraEnv = {}) {
     ...process.env,
     ...extraEnv,
   };
+
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith('MSAIDIZI_') &&
+      !Object.prototype.hasOwnProperty.call(extraEnv, key)
+    ) {
+      delete env[key];
+    }
+  }
 
   for (const key of requiredSecretKeys) {
     if (!Object.prototype.hasOwnProperty.call(extraEnv, key)) {
@@ -142,8 +275,8 @@ function validateMissingSecretsFail(target) {
   }
 }
 
-function validateConfigPasses(target) {
-  const result = composeConfig(target, sampleEnv);
+function validateConfigPasses(target, extraEnv = {}) {
+  const result = composeConfig(target, { ...sampleEnv, ...extraEnv });
 
   if (result.error) {
     fail(`${target.name}: unable to run docker compose: ${result.error.message}`);
@@ -300,6 +433,67 @@ function assertDeploymentShape(target, config) {
   const backendVolumes = (backend.volumes ?? []).map((volume) => volume.target ?? '');
   assert(target, backendVolumes.includes('/app/storage'), 'backend mounts persistent file storage');
   assert(target, backendVolumes.includes('/app/backups'), 'backend mounts persistent backups');
+  if (target.name === 'production') {
+    for (const envKey of [
+      ...msaidiziEnableSwitches,
+      'MSAIDIZI_WRITE_MODE',
+      'MSAIDIZI_SUPERVISOR_ENROLLMENT_PEPPER',
+      'MSAIDIZI_SUPERVISOR_ENROLLMENT_TTL_SECONDS',
+      'MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_PATH',
+      'MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_PATH',
+      'MSAIDIZI_PROVIDER_CONTRACT_KEY_ID',
+      'MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256',
+      'MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256',
+      'MSAIDIZI_PROVIDER_ACCOUNT_ID',
+      'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID',
+      'MSAIDIZI_AUDIT_SIGNER_KILL_SWITCH',
+      'MSAIDIZI_AUDIT_SIGNER_KEY_ID',
+      'MSAIDIZI_AUDIT_SIGNER_CLIENT_CERT_SHA256',
+      'MSAIDIZI_AUDIT_SIGNER_CLIENT_SPKI_SHA256',
+      'MSAIDIZI_AUDIT_SIGNER_MAX_SEGMENT_EVENTS',
+      'MSAIDIZI_AUDIT_SIGNER_CHECKPOINT_TTL_SECONDS',
+      'MSAIDIZI_AUDIT_SIGNER_MAX_CLOCK_SKEW_SECONDS',
+      'MSAIDIZI_UPDATE_RING_0_MIN_DWELL_SECONDS',
+      'MSAIDIZI_UPDATE_RING_5_MIN_DWELL_SECONDS',
+      'MSAIDIZI_UPDATE_RING_25_MIN_DWELL_SECONDS',
+      'MSAIDIZI_UPDATE_RING_100_MIN_DWELL_SECONDS',
+      'MSAIDIZI_CRUD_EVIDENCE_PATH',
+      'MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH',
+      'MSAIDIZI_CRUD_EVIDENCE_KEY_ID',
+      'MSAIDIZI_CRUD_EVIDENCE_APPLICATION_BUILD_DIGEST',
+      'MSAIDIZI_CRUD_EVIDENCE_PRISMA_SCHEMA_MIGRATION_DIGEST',
+      'MSAIDIZI_CRUD_EVIDENCE_MAX_AGE_HOURS',
+    ]) {
+      assert(
+        target,
+        Object.prototype.hasOwnProperty.call(backend.environment ?? {}, envKey),
+        `backend forwards ${envKey}`,
+      );
+    }
+    for (const envKey of msaidiziEnableSwitches) {
+      assertEqual(target, backend.environment?.[envKey], 'false', `${envKey} safe default`);
+    }
+    assertEqual(
+      target,
+      backend.environment?.MSAIDIZI_WRITE_MODE,
+      'read-only',
+      'MSAIDIZI_WRITE_MODE safe default',
+    );
+    assert(
+      target,
+      String(backend.environment?.MSAIDIZI_ARTIFACT_ROOT ?? '').startsWith('/app/storage/'),
+      'Msaidizi artifact root remains under persistent backend storage',
+    );
+    assertMsaidiziInputMounts(target, backend, {});
+  } else {
+    for (const { target: inputTarget } of msaidiziInputMounts) {
+      assert(
+        target,
+        !backendVolumes.includes(inputTarget),
+        `staging behavior excludes production operator input mount ${inputTarget}`,
+      );
+    }
+  }
 
   assert(target, redis.environment?.REDIS_PASSWORD, 'redis has password environment');
   assert(
@@ -342,12 +536,62 @@ function assertDeploymentShape(target, config) {
   );
   assert(target, caddyPorts.includes('80'), 'caddy publishes HTTP port 80');
   assert(target, caddyPorts.includes('443'), 'caddy publishes HTTPS port 443');
-  assert(target, !(backend.ports ?? []).length, 'backend does not publish a public port');
+
+  // The ordinary API remains reachable only through Caddy. Two listeners are
+  // deliberately NOT reachable that way and are published to the host loopback
+  // interface instead:
+  //
+  //   - the update evaluator, so the isolated verifier can reach it without
+  //     joining the application network;
+  //   - the direct device channel, which cannot be proxied at all. Device
+  //     identity comes from the TLS socket, and forwarded certificate
+  //     assertions are deliberately ignored, so terminating TLS at Caddy would
+  //     leave the channel unable to authenticate anything.
+  //
+  // Accept exactly those two bindings. A third published port, a port that does
+  // not match its configured listener, or any non-loopback bind is a release
+  // failure — that last one is the whole point of checking, because publishing
+  // either listener on a wildcard address puts an mTLS endpoint on the internet.
+  const evaluatorPort = String(backend.environment?.MSAIDIZI_EVALUATOR_MTLS_PORT ?? '');
+  const devicePort = String(backend.environment?.MSAIDIZI_DIRECT_MTLS_PORT ?? '');
+  const backendPorts = backend.ports ?? [];
+  assert(
+    target,
+    backendPorts.length === 2,
+    'backend publishes only the device and evaluator mTLS ports',
+  );
+
+  for (const [label, expectedPort] of [
+    ['device', devicePort],
+    ['evaluator', evaluatorPort],
+  ]) {
+    const binding =
+      backendPorts.find((entry) => String(entry.target ?? '') === expectedPort) ?? {};
+    assertEqual(
+      target,
+      String(binding.target ?? ''),
+      expectedPort,
+      `${label} mTLS target port`,
+    );
+    assertEqual(
+      target,
+      String(binding.published ?? ''),
+      expectedPort,
+      `${label} mTLS published port`,
+    );
+    assertEqual(target, binding.host_ip, '127.0.0.1', `${label} mTLS host bind address`);
+    assertEqual(target, binding.protocol, 'tcp', `${label} mTLS transport`);
+  }
   assert(target, !(frontend.ports ?? []).length, 'frontend does not publish a public port');
   assert(
     target,
     (backend.expose ?? []).map(String).includes('3001'),
     'backend exposes port 3001 internally',
+  );
+  assert(
+    target,
+    (backend.expose ?? []).map(String).includes(evaluatorPort),
+    'backend exposes the dedicated evaluator mTLS port',
   );
   assert(
     target,
@@ -364,11 +608,22 @@ function assertDeploymentShape(target, config) {
     assert(target, services[serviceName].healthcheck?.test, `${serviceName} has a healthcheck`);
   }
 
+  // The ordinary listener is plain HTTP and stays that way: `NestFactory.create`
+  // is given no TLS options, and both mTLS listeners are separate https servers
+  // that explicitly refuse to bind the ordinary port. This check used to demand
+  // a healthcheck that switched transport on MSAIDIZI_DIRECT_MTLS_ENABLED, which
+  // describes a configuration the code cannot produce — enabling the device
+  // channel adds a listener, it does not convert this one.
   const backendHealthcheck = flatten(backend.healthcheck?.test);
   assert(
     target,
-    backendHealthcheck.includes('node -e') && backendHealthcheck.includes('fetch('),
-    'backend healthcheck uses Node fetch',
+    backendHealthcheck.includes('node -e') && backendHealthcheck.includes("require('http').get"),
+    'backend healthcheck probes the ordinary HTTP listener',
+  );
+  assert(
+    target,
+    backendHealthcheck.includes('statusCode>=200&&r.statusCode<300?0:1'),
+    'backend healthcheck fails on a non-2xx readiness response',
   );
   assert(
     target,
@@ -403,9 +658,169 @@ function assertDeploymentShape(target, config) {
   const caddyHealthcheck = flatten(caddy.healthcheck?.test);
   assert(
     target,
-    caddyHealthcheck.includes('wget -qO-') &&
-      caddyHealthcheck.includes('127.0.0.1:2019/config'),
+    caddyHealthcheck.includes('wget -qO-') && caddyHealthcheck.includes('127.0.0.1:2019/config'),
     'caddy healthcheck probes the admin config endpoint',
+  );
+}
+
+
+/**
+ * Whether the compose file itself declares `create_host_path: false` on the
+ * bind whose container target is `inputTarget`. Reads the block that follows
+ * the matching `target:` line, so a false on a neighbouring mount cannot be
+ * mistaken for this one's.
+ */
+function declaresNoImplicitHostPath(target, inputTarget) {
+  const text = readFileSync(resolve(rootDir, target.file), 'utf8');
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === `target: ${inputTarget}`);
+  if (start === -1) return false;
+  // The bind option belongs to this mount until the next list entry begins.
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^\s*-\s/.test(line));
+  const block = (end === -1 ? rest : rest.slice(0, end)).join('\n');
+  return /create_host_path:\s*false/.test(block);
+}
+
+function assertMsaidiziInputMounts(target, backend, expectedSources, unsetReason = 'by default') {
+  const volumes = backend?.volumes ?? [];
+  for (const { hostEnv, pathEnv, target: inputTarget } of msaidiziInputMounts) {
+    const matches = volumes.filter((volume) => volume.target === inputTarget);
+    assert(target, matches.length === 1, `exactly one mount covers ${inputTarget}`);
+    const mount = matches[0] ?? {};
+    assertEqual(target, mount.type, 'bind', `${inputTarget} uses a bind mount`);
+    assertEqual(
+      target,
+      mount.source,
+      expectedSources[hostEnv] ?? '/dev/null',
+      `${inputTarget} source`,
+    );
+    assertEqual(target, mount.read_only, true, `${inputTarget} is read-only`);
+    // Checked against the compose FILE, not only the normalised config.
+    // `docker compose config --format json` does not report bind options
+    // identically across versions - a runner whose compose omits an explicitly
+    // false `create_host_path` would read as undefined here, and asserting on
+    // that alone made this pass or fail on the toolchain rather than on the
+    // deployment. The file is what ships, so the file is what must say it.
+    assert(
+      target,
+      declaresNoImplicitHostPath(target, inputTarget),
+      `${inputTarget} refuses implicit host-path creation`,
+    );
+    assert(
+      target,
+      mount.bind?.create_host_path !== true,
+      `${inputTarget} is not resolved with implicit host-path creation`,
+    );
+    if (Object.prototype.hasOwnProperty.call(expectedSources, hostEnv)) {
+      assertEqual(
+        target,
+        backend?.environment?.[pathEnv],
+        inputTarget,
+        `${pathEnv} resolves to its fixed container mount`,
+      );
+    } else {
+      assertEqual(target, backend?.environment?.[pathEnv], '', `${pathEnv} stays unset ${unsetReason}`);
+    }
+  }
+}
+
+function assertProductionDeploymentWorkflow() {
+  const target = { name: 'production workflow' };
+  const workflow = readFileSync(
+    resolve(rootDir, '.github', 'workflows', 'deploy-production.yml'),
+    'utf8',
+  );
+  const postureDeclaration = `POSTURE_KEYS='${msaidiziEnableSwitches.join(' ')}'`;
+  const postureStart = workflow.indexOf(postureDeclaration);
+  const switchRejection = workflow.indexOf('if [ "$VALUE" != "false" ]; then', postureStart);
+  const switchExit = workflow.indexOf('exit 1', switchRejection);
+  const modeRead = workflow.indexOf(
+    'MODE="$($COMPOSE exec -T backend printenv MSAIDIZI_WRITE_MODE </dev/null || echo unset)"',
+    postureStart,
+  );
+  const modeRejection = workflow.indexOf('if [ "$MODE" != "read-only" ]; then', modeRead);
+  const modeExit = workflow.indexOf('exit 1', modeRejection);
+  const sentinel = workflow.indexOf('echo "--- verification complete ---"', postureStart);
+  assert(target, postureStart >= 0, 'declares the exact independent-switch allowlist');
+  assert(
+    target,
+    workflow.includes('VALUE="$($COMPOSE exec -T backend printenv "$KEY" </dev/null || echo unset)"'),
+    'maps a missing or unreadable switch to an unsafe value',
+  );
+  assert(target, switchRejection > postureStart, 'rejects every switch not exactly false');
+  assert(target, switchExit > switchRejection && switchExit < modeRead, 'switch rejection exits nonzero');
+  assert(target, modeRead > switchExit, 'reads write mode after all independent switches');
+  assert(target, modeRejection > modeRead, 'rejects write mode unless exactly read-only');
+  assert(target, modeExit > modeRejection && modeExit < sentinel, 'write-mode rejection exits nonzero');
+  assert(target, sentinel > modeExit, 'posture rejection runs before the completion sentinel');
+
+  const relaunch = readFileSync(resolve(rootDir, 'deploy', 'relaunch', 'deploy.sh'), 'utf8');
+  const preflightDeclaration = `MSAIDIZI_DARK_SWITCHES='${msaidiziEnableSwitches.join(' ')}'`;
+  const resolvedConfig = relaunch.indexOf(
+    'docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null',
+  );
+  const preflightStart = relaunch.indexOf(preflightDeclaration);
+  const pythonDependency = relaunch.indexOf('command -v python3', preflightStart);
+  const preflightConfig = relaunch.indexOf('config --format json', pythonDependency);
+  const exactSwitchDecision = relaunch.indexOf('environment.get(key) != "false"', preflightConfig);
+  const exactModeDecision = relaunch.indexOf('mode != "read-only"', exactSwitchDecision);
+  const firstComposeUp = relaunch.indexOf(
+    'docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up',
+    exactModeDecision,
+  );
+  const firstMigration = relaunch.indexOf('prisma migrate', exactModeDecision);
+  assert(target, relaunch.indexOf('set -euo pipefail') >= 0, 'relaunch uses pipeline failure propagation');
+  assert(target, resolvedConfig >= 0, 'relaunch validates Compose before posture preflight');
+  assert(target, preflightStart > resolvedConfig, 'relaunch declares the exact dark switch set after config');
+  assert(target, pythonDependency > preflightStart, 'relaunch fails closed when python3 is unavailable');
+  assert(target, preflightConfig > pythonDependency, 'relaunch parses resolved Compose JSON');
+  assert(target, exactSwitchDecision > preflightConfig, 'relaunch rejects switches not exactly false');
+  assert(target, exactModeDecision > exactSwitchDecision, 'relaunch rejects mode not exactly read-only');
+  assert(
+    target,
+    firstComposeUp > exactModeDecision,
+    'relaunch posture preflight runs before the first Compose up',
+  );
+  assert(
+    target,
+    firstMigration === -1 || firstMigration > exactModeDecision,
+    'relaunch posture preflight runs before migration',
+  );
+
+  const safe = Object.fromEntries(msaidiziEnableSwitches.map((key) => [key, 'false']));
+  safe.MSAIDIZI_WRITE_MODE = 'read-only';
+  assert(target, isSafeMsaidiziPosture(safe), 'negative-control baseline accepts exact dark posture');
+  for (const key of msaidiziEnableSwitches) {
+    assert(
+      target,
+      !isSafeMsaidiziPosture({ ...safe, [key]: 'true' }),
+      `negative control rejects ${key}=true`,
+    );
+    const missing = { ...safe };
+    delete missing[key];
+    assert(
+      target,
+      !isSafeMsaidiziPosture(missing),
+      `negative control rejects missing ${key}`,
+    );
+  }
+  for (const mode of ['amber', 'red', 'unset', 'READ-ONLY']) {
+    assert(
+      target,
+      !isSafeMsaidiziPosture({ ...safe, MSAIDIZI_WRITE_MODE: mode }),
+      `negative control rejects write mode ${mode}`,
+    );
+  }
+  console.log(
+    'OK production workflow: pre/post-deploy dark posture and negative controls verified',
+  );
+}
+
+function isSafeMsaidiziPosture(values) {
+  return (
+    msaidiziEnableSwitches.every((key) => values[key] === 'false') &&
+    values.MSAIDIZI_WRITE_MODE === 'read-only'
   );
 }
 

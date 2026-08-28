@@ -9,9 +9,17 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ReversibilityTier } from '../../common/capabilities/reversibility';
+import { EphemeralSecretFingerprintRegistry } from '../../common/services';
 
 /** Highest reversibility tier the agent may invoke. */
 export type WriteMode = 'read-only' | 'amber' | 'red';
+
+export interface ProviderCredentialSelection {
+  /** Opaque operator-controlled secret-manager version/key identifier. */
+  keyId: string;
+  /** Ephemeral provider credential. Never persist or log this value. */
+  apiKey: string;
+}
 
 const TIER_CEILING: Record<WriteMode, ReversibilityTier[]> = {
   'read-only': ['green'],
@@ -21,7 +29,16 @@ const TIER_CEILING: Record<WriteMode, ReversibilityTier[]> = {
 
 @Injectable()
 export class MsaidiziConfig {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly ephemeralSecrets: EphemeralSecretFingerprintRegistry,
+  ) {
+    // Declare the environment-backed secret during provider construction so
+    // every backend replica knows it before handling any durable write. The
+    // getter repeats this idempotently to cover an in-process operator rotation.
+    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
+    if (apiKey?.trim()) this.ephemeralSecrets.register(apiKey);
+  }
 
   /**
    * Master switch. Off unless explicitly enabled — deploying this module must
@@ -37,17 +54,65 @@ export class MsaidiziConfig {
    * that is not scoped to a tenant.
    */
   get apiKey(): string | undefined {
-    return this.config.get<string>('ANTHROPIC_API_KEY');
+    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
+    if (apiKey?.trim()) {
+      // This is the single environment-backed provider-secret ingress. Taint it
+      // before returning the bytes so later text/JSON persistence boundaries
+      // recognise even short, embedded, or encoded copies.
+      this.ephemeralSecrets.register(apiKey);
+    }
+    return apiKey;
+  }
+
+  /**
+   * Selects the provider credential only when its operator-controlled key ID
+   * equals the ID covered by the freshly verified contract attestation.
+   *
+   * The current deployment source is environment-backed rather than a secret
+   * manager with authenticated metadata. This therefore binds trusted opaque
+   * metadata to runtime selection after registering process-local, randomly
+   * keyed fingerprints. No raw credential or stable digest is persisted or
+   * logged; operators must still label the secret correctly.
+   */
+  selectProviderCredential(expectedKeyId: string): ProviderCredentialSelection {
+    const keyId = this.config.get<string>('MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID')?.trim();
+    if (!keyId) {
+      throw new Error(
+        'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_NOT_CONFIGURED: Provider credential key ID is required.',
+      );
+    }
+    if (keyId !== expectedKeyId) {
+      throw new Error(
+        'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_MISMATCH: Attested provider credential key ID does not match runtime selection.',
+      );
+    }
+    const apiKey = this.apiKey;
+    if (!apiKey?.trim()) {
+      throw new Error('ANTHROPIC_API_KEY is not configured; Msaidizi cannot run.');
+    }
+    return { keyId, apiKey };
   }
 
   /** Reasoning model for the agent loop. */
   get model(): string {
-    return this.config.get<string>('MSAIDIZI_MODEL', 'claude-opus-5');
+    return this.config.get<string>('MSAIDIZI_MODEL', 'claude-opus-5').trim();
   }
 
-  /** Cheap model for domain pre-filtering — see MsaidiziService.narrowDomains. */
+  /**
+   * Cheap model reserved for domain pre-filtering. Nothing calls this yet.
+   *
+   * The comment here used to name a `MsaidiziService.narrowDomains` that has
+   * never existed, which reads as though a model-driven pre-filter ships. It
+   * does not: narrowing is deterministic and lexical (`domain-filter.ts`), and
+   * the Haiku pre-filter is the layer that would sit in front of it.
+   *
+   * `MSAIDIZI_CLASSIFIER_MODEL` is nevertheless live and must keep its value —
+   * `ProviderContractAttestationService.expectedModelIds()` includes it, so the
+   * signed provider contract has to cover it. Changing it without a contract
+   * that names the new model fails attestation and stops the agent.
+   */
   get classifierModel(): string {
-    return this.config.get<string>('MSAIDIZI_CLASSIFIER_MODEL', 'claude-haiku-4-5');
+    return this.config.get<string>('MSAIDIZI_CLASSIFIER_MODEL', 'claude-haiku-4-5').trim();
   }
 
   /**
@@ -138,6 +203,42 @@ export class MsaidiziConfig {
   /** Output token ceiling per request. Streaming is used, so this can be generous. */
   get maxTokens(): number {
     return Number(this.config.get<string>('MSAIDIZI_MAX_TOKENS', '32000'));
+  }
+
+  /**
+   * Total attempts for ONE provider turn, retries included. `1` disables retry.
+   *
+   * The loop treats a throw from the provider as terminal, so before this
+   * existed a single 429 or 529 ended a run that may already have committed
+   * writes — the actions stood, and the user got "could not complete" with no
+   * account of them. The provider failure that motivates a retry is exactly the
+   * one that carries no information: the turn never reached the model, so
+   * nothing was decided and nothing was dispatched.
+   *
+   * Kept small deliberately. A run holds a request open, and a generous retry
+   * budget converts a provider outage into a pile of hung requests rather than
+   * a prompt failure.
+   */
+  get modelMaxAttempts(): number {
+    const configured = Number(this.config.get<string>('MSAIDIZI_MODEL_MAX_ATTEMPTS', '3'));
+    if (!Number.isFinite(configured)) return 3;
+    return Math.min(5, Math.max(1, Math.trunc(configured)));
+  }
+
+  /** First retry delay; each further attempt doubles it up to `modelRetryMaxDelayMs`. */
+  get modelRetryBaseDelayMs(): number {
+    const configured = Number(this.config.get<string>('MSAIDIZI_MODEL_RETRY_BASE_DELAY_MS', '500'));
+    return Number.isFinite(configured) && configured >= 0 ? configured : 500;
+  }
+
+  /**
+   * Ceiling on any single wait, including one the provider asks for by
+   * `retry-after`. A provider may name a delay longer than a user will hold a
+   * page open for; past this we fail honestly instead of hanging.
+   */
+  get modelRetryMaxDelayMs(): number {
+    const configured = Number(this.config.get<string>('MSAIDIZI_MODEL_RETRY_MAX_DELAY_MS', '8000'));
+    return Number.isFinite(configured) && configured >= 0 ? configured : 8000;
   }
 
   /**

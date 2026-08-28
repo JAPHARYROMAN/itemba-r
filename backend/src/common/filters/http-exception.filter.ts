@@ -8,10 +8,13 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { scrubLogText } from '../utils/log-scrubber';
+import { PersistenceSecretGuard } from '../services';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
+
+  constructor(private readonly persistenceSecrets: PersistenceSecretGuard) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -64,13 +67,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error(
-        scrubLogText(`[${request.method}] ${request.url} → ${status}`),
-        scrubLogText(exception instanceof Error ? exception.stack : undefined),
+        this.scrub(`[${request.method}] ${request.url} → ${status}`),
+        this.scrub(exception instanceof Error ? exception.stack : undefined),
       );
     } else {
       this.logger.warn(`[${request.method}] ${request.url} → ${status}`);
     }
 
     response.status(status).json(body);
+  }
+
+  private scrub(value: unknown): string | undefined {
+    const heuristicSafe = scrubLogText(value);
+    return heuristicSafe === undefined
+      ? undefined
+      : this.persistenceSecrets.sanitizeText(heuristicSafe).value;
   }
 }

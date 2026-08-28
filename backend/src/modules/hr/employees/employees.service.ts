@@ -5,6 +5,7 @@ import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 const SENSITIVE_FIELDS = [
   'baseSalary',
@@ -163,7 +164,7 @@ export class EmployeesService {
    * account is eligible only when its primary company or explicit access grant
    * satisfies that requirement and it is not already linked elsewhere.
    */
-  async findLinkableUsers(companyId: string, employeeId: string | undefined, user: any) {
+  async findLinkableUsers(companyId: string, employeeId: string | undefined, user: AuthUser) {
     assertCanAccessCompanyFromUser(user, companyId, AccessLevel.WRITE);
 
     const users = await this.prisma.user.findMany({
@@ -247,6 +248,11 @@ export class EmployeesService {
    * caller runs this inside a $transaction and retries once on the unique
    * constraint (see createWithGeneratedCode).
    */
+  async previewNextEmployeeCode(companyId: string, user: AuthUser): Promise<string> {
+    assertCanAccessCompanyFromUser(user, companyId, AccessLevel.READ);
+    return this.nextEmployeeCode(companyId);
+  }
+
   async nextEmployeeCode(
     companyId: string,
     client: Prisma.TransactionClient | PrismaService = this.prisma,
@@ -483,8 +489,9 @@ export class EmployeesService {
     return stripSensitive(record, user);
   }
 
-  async remove(id: string, user: any) {
-    await this.findOne(id, user);
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     await this.assertEmployeeCanBeDeleted(id);
     await this.prisma.employee.update({
       where: { id },
@@ -495,7 +502,8 @@ export class EmployeesService {
       action: 'DELETE',
       entityType: 'Employee',
       entityId: id,
-      newValue: {},
+      companyId: existing.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
     });
     return { message: 'Employee deleted' };
   }
@@ -678,5 +686,4 @@ export class EmployeesService {
       throw new BadRequestException('Maker-checker: termination requester cannot approve');
     }
   }
-
 }

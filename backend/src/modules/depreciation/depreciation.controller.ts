@@ -1,7 +1,19 @@
 import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import { DepreciationQueryDto } from '../../common/dto/resource-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { DepreciationService } from './depreciation.service';
+import { IsNumber, IsOptional } from 'class-validator';
+import {
+  CreateDepreciationEntryDto,
+  CreateDepreciationScheduleDto,
+} from './dto/depreciation-mutation.dto';
+
+class GenerateDepreciationEntriesDto {
+  @IsOptional()
+  @IsNumber()
+  months?: number;
+}
 
 @Controller('depreciation')
 export class DepreciationController {
@@ -9,7 +21,7 @@ export class DepreciationController {
 
   @Get()
   @RequirePermissions('depreciation.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: DepreciationQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,7 +33,7 @@ export class DepreciationController {
 
   @Post()
   @RequirePermissions('depreciation.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateDepreciationScheduleDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
@@ -33,7 +45,11 @@ export class DepreciationController {
 
   @Post(':scheduleId/entries')
   @RequirePermissions('depreciation.create')
-  addEntry(@Param('scheduleId') scheduleId: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  addEntry(
+    @Param('scheduleId') scheduleId: string,
+    @Body() dto: CreateDepreciationEntryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.addEntry(scheduleId, dto, user);
   }
 
@@ -41,7 +57,7 @@ export class DepreciationController {
   @RequirePermissions('depreciation.create')
   generateEntries(
     @Param('scheduleId') scheduleId: string,
-    @Body() body: { months?: number },
+    @Body() body: GenerateDepreciationEntriesDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.generateEntries(scheduleId, body?.months ?? 12, user);

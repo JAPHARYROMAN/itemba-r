@@ -1,0 +1,19 @@
+{
+  "contractVersion": 1,
+  "policyId": "dynamic-authenticated-external-actions",
+  "entries": [],
+  "dynamicDestinations": {
+    "enabled": true,
+    "capabilityIds": [
+      "external.email.send",
+      "external.message.send",
+      "external.publish.create",
+      "external.purchase.submit"
+    ],
+    "allowedPorts": [443],
+    "maximumPathAndQueryLength": 2048,
+    "maximumRequestBodyBytes": 1048576,
+    "credentialMode": "vault-reference-required",
+    "maximumCredentialPrefixLength": 64
+  }
+}

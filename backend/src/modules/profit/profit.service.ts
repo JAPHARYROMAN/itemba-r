@@ -14,6 +14,20 @@ import { CompanyScopeService } from '../../common/services';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
+interface ProfitQuery {
+  companyId?: string;
+  divisionId?: string;
+  branchId?: string;
+  customerId?: string;
+  productId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: string | number;
+  limit?: string | number;
+  report?: string;
+  format?: string;
+}
+
 const STOCK_EXEMPT_TYPES = new Set(['SERVICE', 'NON_STOCK_ITEM']);
 // Synthetic bucket key for sales orders with no customerId (walk-in / cash sales).
 const UNASSIGNED_KEY = '__UNASSIGNED__';
@@ -209,6 +223,14 @@ export class ProfitService {
       user,
       source: 'ManualSaleLineValidation',
     });
+    await this.auditLogs.log({
+      action: 'PROFIT_VALIDATION_RUN',
+      entityType: 'ProfitValidation',
+      companyId: input.companyId,
+      userId: user.id,
+      newValue: { lineCount: lines.length, hasBlockingErrors: false },
+      severity: AuditSeverity.LOW,
+    });
     return {
       lines,
       hasBlockingErrors: false,
@@ -336,7 +358,7 @@ export class ProfitService {
     });
   }
 
-  async productSummary(query: Record<string, string | undefined>, user: AuthUser) {
+  async productSummary(query: ProfitQuery, user: AuthUser) {
     const salesOrderWhere = await this.salesOrderWhere(query, user);
     const lineWhere: Prisma.SalesOrderLineWhereInput = {
       salesOrder: salesOrderWhere,
@@ -447,7 +469,7 @@ export class ProfitService {
    * SalesOrder.customerId is nullable (walk-in cash sales); those orders are folded
    * into a single synthetic "Unassigned / Walk-in" bucket keyed by UNASSIGNED_KEY.
    */
-  async customerSummary(query: Record<string, string | undefined>, user: AuthUser) {
+  async customerSummary(query: ProfitQuery, user: AuthUser) {
     const salesOrderWhere = await this.salesOrderWhere(query, user);
     const orderFilter: Prisma.SalesOrderWhereInput = {
       ...salesOrderWhere,
@@ -588,7 +610,7 @@ export class ProfitService {
     };
   }
 
-  async costGaps(query: Record<string, string | undefined>, user: AuthUser) {
+  async costGaps(query: ProfitQuery, user: AuthUser) {
     const companyWhere = await this.companyScope.companyWhereFor(user, query.companyId);
     const productWhere: Prisma.ProductWhereInput = {
       deletedAt: null,
@@ -697,11 +719,7 @@ export class ProfitService {
     return { rows, total: rows.length };
   }
 
-  async productLedger(
-    productId: string,
-    query: Record<string, string | undefined>,
-    user: AuthUser,
-  ) {
+  async productLedger(productId: string, query: ProfitQuery, user: AuthUser) {
     const salesOrderWhere = await this.salesOrderWhere(query, user);
     const rows = await this.prisma.salesOrderLine.findMany({
       where: { productId, salesOrder: salesOrderWhere },
@@ -735,7 +753,7 @@ export class ProfitService {
     }));
   }
 
-  async belowCostAttempts(query: Record<string, string | undefined>, user: AuthUser) {
+  async belowCostAttempts(query: ProfitQuery, user: AuthUser) {
     const page = Math.max(Number(query.page ?? 1), 1);
     const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 200);
     const where: Prisma.AuditLogWhereInput = {
@@ -886,7 +904,7 @@ export class ProfitService {
     return { productId, changes };
   }
 
-  async backfillHistoricalSales(query: Record<string, string | undefined>, user: AuthUser) {
+  async backfillHistoricalSales(query: ProfitQuery, user: AuthUser) {
     const limit = Math.min(Math.max(Number(query.limit ?? 1000), 1), 5000);
     const salesOrderWhere = await this.salesOrderWhere(query, user);
     const lines = await this.prisma.salesOrderLine.findMany({
@@ -1011,7 +1029,7 @@ export class ProfitService {
     return { scanned: lines.length, updated, skipped, skippedSamples };
   }
 
-  async exportReport(query: Record<string, string | undefined>, user: AuthUser) {
+  async exportReport(query: ProfitQuery, user: AuthUser) {
     const report = query.report || 'product-summary';
     const format = (query.format || 'csv').toLowerCase();
     let rows: Array<Record<string, unknown>>;
@@ -1126,7 +1144,7 @@ export class ProfitService {
     throw new BadRequestException(`${product.name} is missing purchase cost and cannot be sold`);
   }
 
-  private async salesOrderWhere(query: Record<string, string | undefined>, user: AuthUser) {
+  private async salesOrderWhere(query: ProfitQuery, user: AuthUser) {
     return {
       deletedAt: null,
       status: { in: PROFIT_SALES_STATUSES },

@@ -265,7 +265,7 @@ export class DebtsService {
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
     const where: Prisma.DebtWhereInput = {
       deletedAt: null,
-      status: DebtStatus.OUTSTANDING,
+      status: { in: [DebtStatus.OUTSTANDING, DebtStatus.PARTIALLY_PAID] },
       dueDate: { lt: new Date() },
       ...(accessibleIds === null ? {} : { companyId: { in: accessibleIds } }),
     };

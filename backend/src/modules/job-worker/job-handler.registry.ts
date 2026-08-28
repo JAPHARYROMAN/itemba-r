@@ -8,6 +8,21 @@ export interface JobContext {
   payload: Record<string, unknown>;
   correlationId: string | null;
   attempts: number;
+  /** Aborted when the worker timeout fires or periodic/checkpoint renewal loses the lease. */
+  signal?: AbortSignal;
+  /**
+   * Durable cancellation checkpoint. Long-running handlers call this between
+   * externally visible steps; it throws once the leased row is no longer
+   * RUNNING, so no later step can dispatch after cancel or stale recovery.
+   */
+  checkpoint?: () => Promise<void>;
+}
+
+export class JobLeaseEndedError extends Error {
+  constructor(jobId: string) {
+    super(`Job ${jobId} no longer holds a RUNNING lease`);
+    this.name = 'JobLeaseEndedError';
+  }
 }
 
 export interface JobResult {

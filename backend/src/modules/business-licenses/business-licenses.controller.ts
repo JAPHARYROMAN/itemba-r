@@ -1,7 +1,18 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessLicensesService } from './business-licenses.service';
 import { CreateBusinessLicenseDto } from './dto/create-business-license.dto';
@@ -18,7 +29,8 @@ export class BusinessLicensesController {
   @RequirePermissions('business_licenses.view')
   findExpiring(
     @Query('companyId') companyId?: string,
-    @Query('daysAhead') daysAhead?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
+    @Query('daysAhead') daysAhead?: string,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
     return this.service.findExpiring(companyId, daysAhead ? +daysAhead : 30, user);
   }
@@ -34,12 +46,25 @@ export class BusinessLicensesController {
     @Query('licenseType') licenseType?: BusinessLicenseType,
     @Query('search') search?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string, @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
+    @Query('limit') limit?: string,
+    @CurrentUser() user: AuthUser = undefined as unknown as AuthUser,
   ) {
-    return this.service.findAll(companyId, divisionId, branchId, licensedBusinessUnitId, status, licenseType, search, page ? +page : 1, limit ? +limit : 20, user);
+    return this.service.findAll(
+      companyId,
+      divisionId,
+      branchId,
+      licensedBusinessUnitId,
+      status,
+      licenseType,
+      search,
+      page ? +page : 1,
+      limit ? +limit : 20,
+      user,
+    );
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('business_licenses.view')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
@@ -53,13 +78,21 @@ export class BusinessLicensesController {
 
   @Patch(':id')
   @RequirePermissions('business_licenses.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateBusinessLicenseDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateBusinessLicenseDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 
   @Post(':id/renew')
   @RequirePermissions('business_licenses.renew')
-  renew(@Param('id') id: string, @Body() dto: RenewBusinessLicenseDto, @CurrentUser() user: AuthUser) {
+  renew(
+    @Param('id') id: string,
+    @Body() dto: RenewBusinessLicenseDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.renew(id, dto, user);
   }
 

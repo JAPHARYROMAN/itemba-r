@@ -1,7 +1,9 @@
 import { Controller, Get, Post, Patch, Body, Param, Query } from '@nestjs/common';
+import { SecurityEventsQueryDto } from '../../common/dto/resource-query.dto';
 import { SecurityEventsService } from './security-events.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { CreateSecurityEventDto } from './dto/security-event.dto';
 
 @Controller('security-events')
 export class SecurityEventsController {
@@ -9,7 +11,7 @@ export class SecurityEventsController {
 
   @Get()
   @RequirePermissions('security_events.view')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: SecurityEventsQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,19 +23,19 @@ export class SecurityEventsController {
 
   @Post()
   @RequirePermissions('security_events.manage')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateSecurityEventDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user.id);
   }
 
   @Patch(':id/review')
   @RequirePermissions('security_events.review')
-  review(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
-    return this.service.review(id, dto, user.id);
+  review(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.review(id, {}, user.id);
   }
 
   @Patch(':id/resolve')
   @RequirePermissions('security_events.resolve')
-  resolve(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
-    return this.service.resolve(id, dto, user.id);
+  resolve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.resolve(id, {}, user.id);
   }
 }

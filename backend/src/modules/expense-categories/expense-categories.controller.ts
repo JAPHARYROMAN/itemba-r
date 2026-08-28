@@ -1,18 +1,10 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { ExpenseCategoriesService } from './expense-categories.service';
 import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto';
 import { UpdateExpenseCategoryDto } from './dto/update-expense-category.dto';
 import { QueryExpenseCategoryDto } from './dto/query-expense-category.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('expense-categories')
@@ -26,6 +18,7 @@ export class ExpenseCategoriesController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('expenses.view')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
@@ -39,7 +32,11 @@ export class ExpenseCategoriesController {
 
   @Patch(':id')
   @RequirePermissions('chart_of_accounts.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateExpenseCategoryDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateExpenseCategoryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 

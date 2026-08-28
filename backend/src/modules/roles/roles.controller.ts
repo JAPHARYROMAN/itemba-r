@@ -38,7 +38,7 @@ export class RolesController {
 
   @Delete(':id')
   @RequirePermissions('roles.delete')
-  remove(@Param('id') id: string) {
-    return this.roles.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.roles.remove(id, user);
   }
 }

@@ -1,7 +1,9 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { CompanyStatusPageLimitQueryDto } from '../../common/dto/resource-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RfqsService } from './rfqs.service';
+import { CreateRfqDto, SendRfqDto, UpdateRfqDto } from './dto/rfq.dto';
 
 @Controller('rfqs')
 export class RfqsController {
@@ -9,7 +11,7 @@ export class RfqsController {
 
   @Get()
   @RequirePermissions('rfqs.list')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: CompanyStatusPageLimitQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -21,19 +23,19 @@ export class RfqsController {
 
   @Post()
   @RequirePermissions('rfqs.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateRfqDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 
   @Put(':id')
   @RequirePermissions('rfqs.update')
-  update(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  update(@Param('id') id: string, @Body() dto: UpdateRfqDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user);
   }
 
   @Post(':id/send')
   @RequirePermissions('rfqs.send')
-  send(@Param('id') id: string, @Body() dto: any, @CurrentUser() user: AuthUser) {
+  send(@Param('id') id: string, @Body() dto: SendRfqDto, @CurrentUser() user: AuthUser) {
     return this.service.send(id, dto, user);
   }
 }

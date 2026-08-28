@@ -5,12 +5,14 @@ import { CompanyScopeService } from '../../common/services';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 @Injectable()
 export class DivisionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(user: AuthUser, companyId?: string) {
@@ -69,7 +71,16 @@ export class DivisionsService {
 
   async create(dto: CreateDivisionDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    return this.prisma.division.create({ data: dto });
+    const division = await this.prisma.division.create({ data: dto });
+    await this.auditLogs.log({
+      action: 'DIVISION_CREATE',
+      entityType: 'Division',
+      entityId: division.id,
+      userId: user.id,
+      companyId: division.companyId,
+      newValue: division as unknown as Record<string, unknown>,
+    });
+    return division;
   }
 
   async update(id: string, dto: UpdateDivisionDto, user: AuthUser) {
@@ -85,9 +96,28 @@ export class DivisionsService {
         }),
         this.prisma.division.update({ where: { id }, data: dto }),
       ]);
+      await this.auditLogs.log({
+        action: 'DIVISION_UPDATE',
+        entityType: 'Division',
+        entityId: id,
+        userId: user.id,
+        companyId: division.companyId,
+        oldValue: existing as unknown as Record<string, unknown>,
+        newValue: division as unknown as Record<string, unknown>,
+      });
       return division;
     }
-    return this.prisma.division.update({ where: { id }, data: dto });
+    const division = await this.prisma.division.update({ where: { id }, data: dto });
+    await this.auditLogs.log({
+      action: 'DIVISION_UPDATE',
+      entityType: 'Division',
+      entityId: id,
+      userId: user.id,
+      companyId: division.companyId,
+      oldValue: existing as unknown as Record<string, unknown>,
+      newValue: division as unknown as Record<string, unknown>,
+    });
+    return division;
   }
 
   async remove(id: string, user: AuthUser) {
@@ -103,6 +133,14 @@ export class DivisionsService {
         data: { deletedAt: now, isActive: false },
       }),
     ]);
+    await this.auditLogs.log({
+      action: 'DIVISION_DELETE',
+      entityType: 'Division',
+      entityId: id,
+      userId: user.id,
+      companyId: division.companyId,
+      newValue: division as unknown as Record<string, unknown>,
+    });
     return division;
   }
 }

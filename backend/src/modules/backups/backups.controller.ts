@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { BackupsService } from './backups.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('backups')
 export class BackupsController {
@@ -8,7 +9,7 @@ export class BackupsController {
 
   @Get('dashboard')
   @RequirePermissions('backups.dashboard.view')
-  dashboard() {
-    return this.service.getDashboard();
+  dashboard(@CurrentUser() user: AuthUser) {
+    return this.service.getDashboard(user);
   }
 }

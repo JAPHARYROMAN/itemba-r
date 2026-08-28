@@ -61,6 +61,11 @@ function makeHarness() {
 
   const companyFindMany = jest.fn().mockResolvedValue([]);
   const companyCount = jest.fn().mockResolvedValue(0);
+  const companyProfileUpsert = jest.fn().mockResolvedValue({
+    id: 'profile-1',
+    companyId: 'company-seeded',
+    registeredName: 'Seeded Company Limited',
+  });
 
   const prisma = {
     company: {
@@ -69,6 +74,9 @@ function makeHarness() {
       findMany: companyFindMany,
       count: companyCount,
       update: companyUpdate,
+    },
+    companyProfile: {
+      upsert: companyProfileUpsert,
     },
     branch: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -110,6 +118,7 @@ function makeHarness() {
     companyFindMany,
     companyCount,
     companyUpdate,
+    companyProfileUpsert,
   };
 }
 
@@ -221,6 +230,53 @@ describe('CompaniesService registry administration', () => {
     ).rejects.toThrow();
 
     expect(harness.companyUpdate).not.toHaveBeenCalled();
+  });
+
+  it('attributes one audit row after a legal profile upsert succeeds', async () => {
+    const harness = makeHarness();
+    const user = groupUser({ permissions: ['companies.update'] });
+
+    await harness.service.upsertProfile(
+      'company-seeded',
+      {
+        registeredName: 'Seeded Company Limited',
+        brelaRegNumber: 'BRELA-1',
+        tin: 'TIN-1',
+        registeredAddress: 'Dar es Salaam',
+      },
+      user,
+    );
+
+    expect(harness.companyProfileUpsert).toHaveBeenCalledTimes(1);
+    expect(harness.auditLogs.log).toHaveBeenCalledTimes(1);
+    expect(harness.auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'LEGAL_PROFILE_UPDATE',
+        entityType: 'CompanyProfile',
+        entityId: 'profile-1',
+        userId: 'user-1',
+        companyId: 'company-seeded',
+      }),
+    );
+  });
+
+  it('does not claim profile audit evidence when the upsert fails', async () => {
+    const harness = makeHarness();
+    harness.companyProfileUpsert.mockRejectedValueOnce(new Error('database rejected mutation'));
+
+    await expect(
+      harness.service.upsertProfile(
+        'company-seeded',
+        {
+          registeredName: 'Seeded Company Limited',
+          brelaRegNumber: 'BRELA-1',
+          tin: 'TIN-1',
+          registeredAddress: 'Dar es Salaam',
+        },
+        groupUser({ permissions: ['companies.update'] }),
+      ),
+    ).rejects.toThrow('database rejected mutation');
+    expect(harness.auditLogs.log).not.toHaveBeenCalled();
   });
 });
 

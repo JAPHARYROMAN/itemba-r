@@ -166,7 +166,10 @@ function makeService(opts?: {
     update: jest.fn(async () => ({})),
   };
 
-  const $queryRaw = jest.fn(async () => (receivable ? [receivable] : []));
+  const $queryRaw = jest.fn(async (query: unknown) =>
+    String(query).includes('credit_notes') ? [{ id: note.id }] : receivable ? [receivable] : [],
+  );
+  const $executeRaw = jest.fn(async () => 1);
 
   const prisma: any = {
     creditNote,
@@ -191,10 +194,14 @@ function makeService(opts?: {
       })),
     },
     $queryRaw,
+    $executeRaw,
     $transaction: jest.fn(async (cb: any) => cb(prisma)),
   };
 
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     accessibleCompanyIds: jest.fn().mockResolvedValue(['company-1']),
@@ -566,6 +573,61 @@ describe('CreditNotesService.void — reverses the issue JE', () => {
     expect(new Prisma.Decimal(recUpdate.data.outstandingAmount).toString()).toBe('400');
   });
 
+  it('appends the attributable void audit after all business writes on the same transaction', async () => {
+    const { service, prisma, auditLogs } = makeService({
+      note: { status: CreditNoteStatus.ISSUED, journalEntryId: 'je-1' },
+    });
+
+    await service.void('cn-1', { reason: 'Issued in error' }, user);
+
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(prisma, {
+      action: 'CREDIT_NOTE_VOID',
+      entityType: 'CreditNote',
+      entityId: 'cn-1',
+      userId: 'user-1',
+      companyId: 'company-1',
+      oldValue: { status: CreditNoteStatus.ISSUED },
+      newValue: {
+        status: CreditNoteStatus.VOID,
+        reason: 'Issued in error',
+        reversalJournalEntryId: 'je-1',
+      },
+    });
+    expect(prisma.creditNote.update.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      auditLogs.logStrictInTransaction.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('rolls the void claim back when the mandatory audit append fails', async () => {
+    const { service, prisma, note, auditLogs } = makeService({
+      note: {
+        status: CreditNoteStatus.ISSUED,
+        journalEntryId: 'je-1',
+        appliedAmount: D('400'),
+      },
+    });
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(new Error('audit store unavailable'));
+    prisma.$transaction.mockImplementationOnce(async (callback: any) => {
+      const snapshot = { ...note };
+      try {
+        return await callback(prisma);
+      } catch (error) {
+        Object.assign(note, snapshot);
+        throw error;
+      }
+    });
+
+    await expect(service.void('cn-1', { reason: 'Issued in error' }, user)).rejects.toThrow(
+      'audit store unavailable',
+    );
+
+    expect(note.status).toBe(CreditNoteStatus.ISSUED);
+    expect(note.appliedAmount.toString()).toBe('400');
+    expect(auditLogs.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'CREDIT_NOTE_VOID' }),
+    );
+  });
+
   it('rejects voiding a DRAFT credit note', async () => {
     const { service, postingEngine } = makeService({ note: { status: CreditNoteStatus.DRAFT } });
     await expect(service.void('cn-1', { reason: 'x' }, user)).rejects.toBeInstanceOf(
@@ -607,7 +669,7 @@ describe('CreditNotesService.void — reverses the issue JE', () => {
 
 describe('CreditNotesService.void — cross-module double-relief guard', () => {
   it('blocks voiding while a live (DRAFT/PAID) refund still references the note', async () => {
-    const { service, postingEngine, refundDelegate } = makeService({
+    const { service, prisma, postingEngine, refundDelegate } = makeService({
       note: { status: CreditNoteStatus.ISSUED, journalEntryId: 'je-1' },
       liveRefundCount: 1,
     });
@@ -628,16 +690,27 @@ describe('CreditNotesService.void — cross-module double-relief guard', () => {
         }),
       }),
     );
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.$queryRaw.mock.invocationCallOrder[0],
+    );
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      refundDelegate.count.mock.invocationCallOrder[0],
+    );
+    expect(prisma.creditNote.updateMany).not.toHaveBeenCalled();
   });
 
   it('allows voiding when only VOID refunds reference the note', async () => {
-    const { service, postingEngine } = makeService({
+    const { service, prisma, postingEngine, refundDelegate } = makeService({
       note: { status: CreditNoteStatus.ISSUED, journalEntryId: 'je-1' },
       liveRefundCount: 0,
     });
 
     await service.void('cn-1', { reason: 'ok' }, user);
     expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    expect(refundDelegate.count.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.creditNote.updateMany.mock.invocationCallOrder[0],
+    );
   });
 });
 

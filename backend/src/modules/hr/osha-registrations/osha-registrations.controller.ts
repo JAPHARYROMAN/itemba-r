@@ -1,9 +1,19 @@
+import { OshaRegistrationsQueryDto } from '../../../common/dto/resource-query.dto';
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { OshaRegistrationsService } from './osha-registrations.service';
 import { CreateOshaRegistrationDto } from './dto/create-osha-registration.dto';
@@ -16,7 +26,7 @@ export class OshaRegistrationsController {
 
   @Get()
   @RequirePermissions('compliance.dashboard.view')
-  findAll(@Query() query: Record<string, string>) {
+  findAll(@Query() query: OshaRegistrationsQueryDto) {
     return this.service.findAll({
       page: query.page ? Number(query.page) : undefined,
       limit: query.limit ? Number(query.limit) : undefined,
@@ -28,6 +38,7 @@ export class OshaRegistrationsController {
   }
 
   @Get(':id')
+  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('compliance.dashboard.view')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
@@ -41,7 +52,11 @@ export class OshaRegistrationsController {
 
   @Patch(':id')
   @RequirePermissions('compliance_obligations.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateOshaRegistrationDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateOshaRegistrationDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.id);
   }
 

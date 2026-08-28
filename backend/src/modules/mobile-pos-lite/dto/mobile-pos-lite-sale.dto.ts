@@ -20,7 +20,7 @@ export class MobilePosLiteSaleLineDto {
   @IsUUID()
   productId!: string;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.0001)
   @Max(1000000)
   quantity!: number;

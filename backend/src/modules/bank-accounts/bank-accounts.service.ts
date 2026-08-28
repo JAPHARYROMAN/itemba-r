@@ -68,6 +68,25 @@ export class BankAccountsService {
 
   async findOne(id: string, user?: AuthUser) {
     if (user) this.companyScope.assertGroupScoped(user, 'view bank accounts');
+    const record = await this.findScopedRecord(id, user);
+    if (user) {
+      await this.auditLogs.log({
+        action: 'SENSITIVE_VIEW',
+        entityType: 'BankAccount',
+        entityId: id,
+        userId: user.id,
+        companyId: record.companyId,
+        severity: AuditSeverity.HIGH,
+        metadata: {
+          accountNumber: record.accountNumber?.slice(-4),
+          bankName: record.bankName,
+        } as any,
+      });
+    }
+    return record;
+  }
+
+  private async findScopedRecord(id: string, user?: AuthUser) {
     const record = await this.prisma.bankAccount.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -80,17 +99,6 @@ export class BankAccountsService {
     if (!record) throw new NotFoundException('Bank account not found');
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId);
-      await this.auditLogs.log({
-        action: 'SENSITIVE_VIEW',
-        entityType: 'BankAccount',
-        entityId: id,
-        userId: user.id,
-        severity: AuditSeverity.HIGH,
-        metadata: {
-          accountNumber: record.accountNumber?.slice(-4),
-          bankName: record.bankName,
-        } as any,
-      });
     }
     return record;
   }
@@ -118,6 +126,7 @@ export class BankAccountsService {
       entityType: 'BankAccount',
       entityId: record.id,
       userId: user.id,
+      companyId: record.companyId,
       severity: AuditSeverity.HIGH,
       newValue: {
         bankName: record.bankName,
@@ -130,7 +139,7 @@ export class BankAccountsService {
 
   async update(id: string, dto: UpdateBankAccountDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'update bank accounts');
-    const existing = await this.findOne(id, user);
+    const existing = await this.findScopedRecord(id, user);
     if (dto.companyId !== undefined) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId);
     }
@@ -155,6 +164,7 @@ export class BankAccountsService {
       entityType: 'BankAccount',
       entityId: id,
       userId: user.id,
+      companyId: record.companyId,
       severity: AuditSeverity.HIGH,
       oldValue: existing as any,
       newValue: dto as any,
@@ -164,7 +174,7 @@ export class BankAccountsService {
 
   async remove(id: string, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'delete bank accounts');
-    const existing = await this.findOne(id, user);
+    await this.findScopedRecord(id, user);
     const record = await this.prisma.bankAccount.update({
       where: { id },
       data: { deletedAt: new Date() },
@@ -175,6 +185,7 @@ export class BankAccountsService {
       entityType: 'BankAccount',
       entityId: id,
       userId: user.id,
+      companyId: record.companyId,
       severity: AuditSeverity.HIGH,
     });
     return record;

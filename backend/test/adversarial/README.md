@@ -126,9 +126,12 @@ returned `awaiting_confirmation` with a confirmation id bound to the exact argum
 **What this still does not cover.** Ten shapes, one model, one effort setting, one run
 per mode. No payload has been tried against a *saved procedure* run, where the
 capability list is fixed in advance and the instruction comes from the database rather
-than the user — a materially different shape worth its own pass. And nothing here tests
-a payload delivered through an uploaded document or an MCP tool result, because neither
-is wired up yet.
+than the user — a materially different shape worth its own pass. This live suite still
+does not deliver a payload through a task attachment, webpage, email, clipboard, audio
+transcript, screenshot, or external tool result. Those sources are now wired into
+durable reasoning as untrusted observations and have deterministic policy regressions,
+but they still need signed-VM/live-model evidence before a rollout may claim the
+multimodal injection acceptance case.
 
 ---
 

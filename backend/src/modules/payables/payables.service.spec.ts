@@ -26,10 +26,15 @@ function makeService(
   lockedRow: Record<string, unknown>,
   opts: { originalJe?: any; resolve?: jest.Mock } = {},
 ) {
+  let committedRow = { ...lockedRow };
+  let stagedRow = { ...committedRow };
   const tx = {
     $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
     payable: {
-      update: jest.fn().mockResolvedValue({ ...lockedRow, status: 'WRITTEN_OFF' }),
+      update: jest.fn().mockImplementation(async ({ data }: any) => {
+        stagedRow = { ...stagedRow, ...data };
+        return { ...stagedRow };
+      }),
       groupBy: jest.fn().mockResolvedValue([]),
     },
     supplier: { updateMany: jest.fn() },
@@ -39,7 +44,17 @@ function makeService(
     },
   } as any;
   const prisma = {
-    $transaction: jest.fn(async (fn: any) => fn(tx)),
+    $transaction: jest.fn(async (fn: any) => {
+      stagedRow = { ...committedRow };
+      try {
+        const result = await fn(tx);
+        committedRow = { ...stagedRow };
+        return result;
+      } catch (error) {
+        stagedRow = { ...committedRow };
+        throw error;
+      }
+    }),
   } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
@@ -50,9 +65,13 @@ function makeService(
   const resolve =
     opts.resolve ??
     jest.fn(async (_companyId: string, role: string) => ({ id: `${role}-acc` }) as any);
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const service = new PayablesService(
     prisma,
-    { log: jest.fn() } as any,
+    auditLogs,
     companyScope,
     { resolve } as any,
     postingEngine,
@@ -62,7 +81,15 @@ function makeService(
   jest
     .spyOn(service as any, 'findOne')
     .mockResolvedValue({ ...lockedRow, status: lockedRow.status });
-  return { service, tx, postingEngine, prisma, resolve };
+  return {
+    service,
+    tx,
+    postingEngine,
+    prisma,
+    resolve,
+    auditLogs,
+    readCommitted: () => ({ ...committedRow }),
+  };
 }
 
 describe('PayablesService.recordPayment status guard', () => {
@@ -76,6 +103,48 @@ describe('PayablesService.recordPayment status guard', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.payable.update).not.toHaveBeenCalled();
     expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+});
+
+describe('PayablesService.update supplier balance projection', () => {
+  it('does not recalculate or rewrite a supplier for a notes-only update', async () => {
+    const existing = lockedPayable();
+    const { service, tx } = makeService(existing);
+    jest.spyOn(service as any, 'resolvePayableScope').mockResolvedValue({
+      divisionId: null,
+      branchId: null,
+      supplierName: 'Acme',
+    });
+    tx.payable.update.mockResolvedValue({ ...existing, notes: 'Updated note' });
+
+    await service.update('pay-1', { notes: 'Updated note' } as any, user);
+
+    expect(tx.payable.groupBy).not.toHaveBeenCalled();
+    expect(tx.supplier.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the old and new supplier exactly once when reassigned', async () => {
+    const existing = lockedPayable();
+    const { service, tx } = makeService(existing);
+    jest.spyOn(service as any, 'resolvePayableScope').mockResolvedValue({
+      divisionId: null,
+      branchId: null,
+      supplierName: 'Beta',
+    });
+    tx.payable.update.mockResolvedValue({
+      ...existing,
+      supplierId: 'supplier-2',
+      supplierName: 'Beta',
+    });
+
+    await service.update('pay-1', { supplierId: 'supplier-2' } as any, user);
+
+    expect(tx.payable.groupBy).toHaveBeenCalledTimes(2);
+    expect(tx.supplier.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.supplier.updateMany.mock.calls.map(([args]: [any]) => args.where.id)).toEqual([
+      'supplier-1',
+      'supplier-2',
+    ]);
   });
 });
 
@@ -136,6 +205,48 @@ describe('PayablesService.writeOff forgiveness journal (#H write-off, ITMB)', ()
     const totalCredit = lines.reduce((s: number, l: any) => s + Number(l.credit), 0);
     expect(totalDebit).toBe(totalCredit);
     expect(totalDebit).toBe(500);
+  });
+
+  it('appends the attributable audit after the subledger and supplier projection on the same tx', async () => {
+    const { service, tx, auditLogs, readCommitted } = makeService(lockedPayable(), {
+      resolve: roleResolver(),
+    });
+
+    await service.writeOff('pay-1', { reason: 'supplier dispute' } as any, user);
+
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(tx, {
+      action: 'PAYABLE_WRITE_OFF',
+      entityType: 'Payable',
+      entityId: 'pay-1',
+      userId: 'user-1',
+      companyId: 'company-1',
+      oldValue: { status: 'OPEN' },
+      newValue: { status: 'WRITTEN_OFF', reason: 'supplier dispute' },
+    });
+    expect(tx.payable.update.mock.invocationCallOrder[0]).toBeLessThan(
+      auditLogs.logStrictInTransaction.mock.invocationCallOrder[0],
+    );
+    expect(tx.supplier.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      auditLogs.logStrictInTransaction.mock.invocationCallOrder[0],
+    );
+    expect(readCommitted()).toMatchObject({ status: 'WRITTEN_OFF', outstandingAmount: 0 });
+  });
+
+  it('does not commit the write-off when the mandatory audit append fails', async () => {
+    const { service, tx, auditLogs, readCommitted } = makeService(lockedPayable(), {
+      resolve: roleResolver(),
+    });
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(new Error('audit store unavailable'));
+
+    await expect(
+      service.writeOff('pay-1', { reason: 'supplier dispute' } as any, user),
+    ).rejects.toThrow('audit store unavailable');
+
+    expect(tx.payable.update).toHaveBeenCalled();
+    expect(readCommitted()).toMatchObject({ status: 'OPEN', outstandingAmount: '500' });
+    expect(auditLogs.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PAYABLE_WRITE_OFF' }),
+    );
   });
 
   it('writes off only the unpaid remainder when the payable is partially paid', async () => {

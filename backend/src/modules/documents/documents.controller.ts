@@ -21,6 +21,7 @@ import { randomUUID } from 'crypto';
 import * as os from 'os';
 import { Response, Request } from 'express';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
@@ -58,6 +59,7 @@ export class DocumentsController {
 
   /** Upload a file and register document metadata */
   @Post('upload')
+  @AgentExcluded('multipart_transport_not_represented')
   @RequirePermissions('documents.manage')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
@@ -108,6 +110,7 @@ export class DocumentsController {
   }
 
   @Get('by-entity')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('documents.view')
   findByEntity(
     @Query('ownerType') ownerType: DocumentOwnerType,
@@ -119,12 +122,14 @@ export class DocumentsController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('documents.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser, @Req() req: Request) {
     return this.service.findOne(id, user, req.ip);
   }
 
   @Get(':id/download')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('documents.view')
   async download(
     @Param('id') id: string,
@@ -147,6 +152,7 @@ export class DocumentsController {
   }
 
   @Get(':id/audit-history')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('documents.view')
   getAuditHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.getAuditHistory(id, user);

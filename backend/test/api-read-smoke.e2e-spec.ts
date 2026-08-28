@@ -7,6 +7,7 @@ import * as path from 'path';
 import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createE2eApp } from './e2e-app';
+import { deleteAuditLogsForTest } from './audit-log-maintenance';
 
 jest.setTimeout(120_000);
 
@@ -118,11 +119,7 @@ describe('API read route smoke coverage (e2e)', () => {
 
   afterAll(async () => {
     if (prisma) {
-      await prisma.auditLog.deleteMany({
-        where: {
-          OR: [{ userId }, { companyId }],
-        },
-      });
+      await deleteAuditLogsForTest(prisma, { OR: [{ userId }, { companyId }] });
       if (apiKeyId || apiClientId) {
         await prisma.apiRequestLog.deleteMany({
           where: {
@@ -184,6 +181,15 @@ describe('API read route smoke coverage (e2e)', () => {
         toMonth: 5,
       })
       .set('Authorization', `Bearer ${token}`);
+
+    if (route.path === '/api/v1/msaidizi/tasks' && response.status === 503) {
+      // Durable autonomy is deployment-gated and defaults off. A precisely
+      // identified fail-closed response is healthy here; accepting arbitrary
+      // 503s would hide real route failures, so bind this exception to both the
+      // exact endpoint and its policy message.
+      expect(JSON.stringify(response.body)).toContain('Durable Msaidizi autonomy is disabled');
+      return;
+    }
 
     expect(response.status).toBeLessThan(500);
     expect(response.status).not.toBe(401);

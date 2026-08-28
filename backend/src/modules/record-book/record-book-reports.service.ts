@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
-import { AccessLevel, Prisma, RecordBookStatus } from '@prisma/client';
+import { AccessLevel, AuditScopeKind, Prisma, RecordBookStatus } from '@prisma/client';
 import type { Response } from 'express';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
@@ -321,8 +321,35 @@ export class RecordBookReportsService {
   }
 
   async auditExport(dto: RecordBookExportAuditDto, user: AuthUser) {
+    if (!dto.companyId && (dto.divisionId || dto.branchId)) {
+      throw new BadRequestException(
+        'companyId is required when auditing a division- or branch-scoped export',
+      );
+    }
+    let auditCompanyId: string | null;
+    let auditScopeKind: AuditScopeKind;
+    let auditCompanyScopeIds: string[];
     if (dto.companyId) {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.READ);
+      auditCompanyId = dto.companyId;
+      auditScopeKind = AuditScopeKind.COMPANY;
+      auditCompanyScopeIds = [dto.companyId];
+    } else {
+      const companyIds = [...new Set(await this.companyScope.accessibleCompanyIds(user))].sort();
+      if (companyIds.length === 0) {
+        this.companyScope.assertGroupScoped(user, 'audit a group-wide Records Book export');
+        auditCompanyId = null;
+        auditScopeKind = AuditScopeKind.GROUP;
+        auditCompanyScopeIds = [];
+      } else if (companyIds.length === 1) {
+        auditCompanyId = companyIds[0];
+        auditScopeKind = AuditScopeKind.COMPANY;
+        auditCompanyScopeIds = companyIds;
+      } else {
+        auditCompanyId = null;
+        auditScopeKind = AuditScopeKind.MULTI_COMPANY;
+        auditCompanyScopeIds = companyIds;
+      }
     }
     if (dto.divisionId || dto.branchId) {
       await this.organizationScope.assertCanAccessScope(
@@ -332,12 +359,14 @@ export class RecordBookReportsService {
         AccessLevel.READ,
       );
     }
-    await this.auditLogs.log({
+    await this.auditLogs.logStrict({
       action: 'RECORD_BOOK_EXPORT',
       entityType: dto.scope === 'report' ? 'RecordBookReport' : 'RecordBookExport',
       entityId: dto.reportKey ?? dto.scope,
       userId: user.id,
-      companyId: dto.companyId,
+      companyId: auditCompanyId,
+      scopeKind: auditScopeKind,
+      companyScopeIds: auditCompanyScopeIds,
       newValue: dto as any,
       severity: 'MEDIUM' as any,
     });

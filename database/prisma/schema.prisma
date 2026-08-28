@@ -268,6 +268,24 @@ enum AuditSeverity {
   CRITICAL
 }
 
+/// Immutable tenant-boundary classification captured when an audit row is written.
+/// Never derive this from the nullable compatibility company foreign key when reading.
+enum AuditScopeKind {
+  COMPANY
+  MULTI_COMPANY
+  GROUP
+  GLOBAL
+  UNATTRIBUTED
+}
+
+/// Records how the immutable audit scope was obtained.
+enum AuditAttributionStatus {
+  EXPLICIT
+  RESOLVED
+  LEGACY
+  FAILED
+}
+
 enum MsaidiziProcedureStatus {
   /// Compiled from prose but not yet reviewed. Cannot be invoked.
   DRAFT
@@ -275,6 +293,225 @@ enum MsaidiziProcedureStatus {
   ACTIVE
   /// Retired. Kept for the audit trail; cannot be invoked.
   ARCHIVED
+}
+
+enum MsaidiziPrincipalStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum MsaidiziTaskMode {
+  ASK
+  COLLABORATIVE
+  AUTOPILOT
+}
+
+enum MsaidiziTaskStatus {
+  PLANNING
+  READY
+  QUEUED
+  RUNNING
+  PAUSING
+  PAUSED
+  CANCELLING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+  NEEDS_ATTENTION
+}
+
+enum MsaidiziTaskStepStatus {
+  PENDING
+  READY
+  LEASED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  SKIPPED
+  NEEDS_ATTENTION
+}
+
+enum MsaidiziToolAttemptStatus {
+  REQUESTED
+  REJECTED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+  CANCELLED
+}
+
+enum MsaidiziReasoningTurnStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum MsaidiziReasoningDecision {
+  CONTINUE
+  STOP
+  REPLAN
+}
+
+enum MsaidiziProposalUsageStatus {
+  RESERVED
+  SETTLED
+  FAILED
+  CONSUMED
+}
+
+enum MsaidiziExecutionTarget {
+  ERP
+  HOST
+  SELF_IMPROVEMENT
+}
+
+enum MsaidiziEffect {
+  READ
+  WRITE
+  EXTERNAL
+  IRREVERSIBLE
+}
+
+enum MsaidiziMandateStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  EXPIRED
+}
+
+enum MsaidiziScheduleStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum MsaidiziArtifactKind {
+  FILE
+  SCREENSHOT
+  REPORT
+  AUDIO
+  DOCUMENT
+  OTHER
+}
+
+enum MsaidiziMemoryKind {
+  SEMANTIC
+  EPISODIC
+  PROCEDURAL
+}
+
+enum MsaidiziTrustLevel {
+  TRUSTED
+  UNTRUSTED
+}
+
+enum MsaidiziTrustedArtifactPurpose {
+  SOURCE
+  ROLLBACK
+  REPORT
+}
+
+enum MsaidiziUpdateEvaluationAttestationKind {
+  RUNNER
+  MODEL_REVIEW
+}
+
+enum MsaidiziUpdateEvaluationVerdict {
+  PASS
+  FAIL
+  APPROVE
+  REJECT
+}
+
+enum MsaidiziDeviceStatus {
+  PENDING
+  ACTIVE
+  OFFLINE
+  REVOKED
+  KILLED
+}
+
+enum MsaidiziSupervisorRole {
+  UPDATE
+  RECOVERY
+}
+
+enum MsaidiziDeviceLeaseStatus {
+  ACTIVE
+  RELEASED
+  EXPIRED
+  REVOKED
+}
+
+enum MsaidiziHostActionFenceStatus {
+  PENDING
+  DISPATCHED
+  ACKNOWLEDGED
+  CONFLICTED
+}
+
+enum MsaidiziHostActionStatus {
+  QUEUED
+  DISPATCHED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+  CANCELLED
+}
+
+enum MsaidiziRecoveryCommandStatus {
+  QUEUED
+  DISPATCHED
+  RECOVERING
+  SUCCEEDED
+  FAILED
+  NEEDS_ATTENTION
+}
+
+enum MsaidiziUpdateCandidateStatus {
+  DRAFT
+  EVALUATING
+  REJECTED
+  APPROVED
+  CANARY
+  ACTIVE
+  ROLLED_BACK
+  FAILED
+}
+
+enum MsaidiziUpdateEvaluationRunStatus {
+  QUEUED
+  LEASED
+  RUNNING
+  SUCCEEDED
+  REJECTED
+  FAILED
+  NEEDS_ATTENTION
+  CANCELLED
+}
+
+enum MsaidiziUpdateDeploymentStatus {
+  QUEUED
+  DISPATCHED
+  APPLYING
+  HEALTH_CHECK
+  SUCCEEDED
+  ROLLED_BACK
+  FAILED
+  NEEDS_ATTENTION
+}
+
+enum MsaidiziUpdateDeploymentOperation {
+  APPLY
+  ROLLBACK
 }
 
 /// A named procedure a user taught Msaidizi once, so it need not be re-derived
@@ -286,26 +523,26 @@ enum MsaidiziProcedureStatus {
 /// A saved procedure is reviewed once, then bounded to the capabilities it
 /// declares — so what it may touch is knowable before anyone runs it.
 model MsaidiziProcedure {
-  id          String                 @id @default(uuid())
-  companyId   String?
-  name        String
+  id           String                  @id @default(uuid())
+  companyId    String?
+  name         String
   /// The user's own words. This is what the agent is asked to carry out.
-  instruction String
+  instruction  String
   /// Tool names the compile step resolved, and the ceiling on what a run may
   /// call. A run cannot reach beyond this list even if the invoker's permissions
   /// would otherwise allow it.
   capabilities Json
   /// Highest reversibility tier any declared capability carries. Denormalised so
   /// a reviewer sees the blast radius without resolving every capability.
-  highestTier String                 @default("green")
-  status      MsaidiziProcedureStatus @default(DRAFT)
-  version     Int                    @default(1)
-  createdById String
+  highestTier  String                  @default("green")
+  status       MsaidiziProcedureStatus @default(DRAFT)
+  version      Int                     @default(1)
+  createdById  String
   approvedById String?
-  approvedAt  DateTime?
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
-  deletedAt   DateTime?
+  approvedAt   DateTime?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  deletedAt    DateTime?
 
   company    Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   createdBy  User     @relation("MsaidiziProcedureAuthor", fields: [createdById], references: [id])
@@ -325,7 +562,7 @@ model MsaidiziProcedure {
 /// is destroyed within a day. A conversation past that window is readable and not
 /// continuable, which is what a chat app does when a session ages out.
 model MsaidiziConversation {
-  id              String    @id @default(uuid())
+  id             String  @id @default(uuid())
   /// Mirrors audit_logs.agentSessionId. MINTED BY THIS SERVER, on every path,
   /// and echoed back by the client on every later turn.
   ///
@@ -354,20 +591,20 @@ model MsaidiziConversation {
   /// already been shown. Before that ledger existed, confirmationIdFor() derived
   /// approval ids from this value and a fresh id mid-approval re-asked the user
   /// for ever, which is why a caller-supplied id was adopted on its own word.
-  agentSessionId  String    @unique
-  userId          String
-  companyId       String?
+  agentSessionId String  @unique
+  userId         String
+  companyId      String?
   /// Derived from the first prompt, truncated. The one plaintext field that can
   /// name a customer — which is why the oversight projection excludes it.
-  title           String?
+  title          String?
 
-  turnCount       Int       @default(0)
-  toolCallCount   Int       @default(0)
-  writeCallCount  Int       @default(0)
+  turnCount      Int    @default(0)
+  toolCallCount  Int    @default(0)
+  writeCallCount Int    @default(0)
   /// Highest reversibility tier this conversation has touched. Denormalised so
   /// oversight can rank conversations without decrypting anything. Raised only
   /// by a conditional UPDATE, never by read-then-write.
-  highestTier     String    @default("green")
+  highestTier    String @default("green")
 
   /// AES-256-GCM ciphertext of JSON.stringify(messages). NOT jsonb: opaque by
   /// intent, and the only column in this schema holding retrieved records.
@@ -378,19 +615,19 @@ model MsaidiziConversation {
   /// array would break tool_use/tool_result pairing, so we store nothing and say so.
   resumable       Boolean   @default(true)
 
-  lastTurnAt      DateTime?
+  lastTurnAt DateTime?
   /// Sliding: recomputed as lastTurnAt + retention window on every turn.
-  expiresAt       DateTime
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
 
   /// Cascade, deliberately unlike audit_logs' SetNull. A conversation is private
   /// to its author; when the author is gone nobody may read it, and what it *did*
   /// survives independently in the audit trail.
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  turns   MsaidiziConversationTurn[]
+  user           User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company        Company?                   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  turns          MsaidiziConversationTurn[]
   approvalGrants MsaidiziApprovalGrant[]
 
   @@index([userId, deletedAt, lastTurnAt])
@@ -460,7 +697,7 @@ model MsaidiziApprovalGrant {
   /// session, the tool, the arguments or anything else a caller holds — which is
   /// the whole difference from the derived id it replaced. Unguessable, so it
   /// can only have come from a confirmation_required event this server emitted.
-  id             String   @id
+  id             String    @id
   conversationId String
   /// Copied from the conversation at issue, so the spend's WHERE clause can name
   /// both boundaries — this conversation AND this user — in the same conditional
@@ -477,7 +714,7 @@ model MsaidiziApprovalGrant {
   /// grant issued for "delete invoice 41" cannot dispatch "delete invoice 42" —
   /// including when both are approved in one batch.
   argsDigest     String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
   /// Unspent past this point. Enforced in the spend's own WHERE clause, not by
   /// the sweep — the sweep only reclaims space, so a sweep that never runs
   /// cannot resurrect an expired approval.
@@ -497,6 +734,1167 @@ model MsaidiziApprovalGrant {
   @@index([conversationId, usedAt])
   @@index([expiresAt])
   @@map("msaidizi_approval_grants")
+}
+
+/// The non-human identity used by durable Msaidizi work. The globally unique
+/// key permits one service principal without persisting a bearer credential.
+model MsaidiziPrincipal {
+  id              String                  @id @default(uuid())
+  key             String                  @unique
+  displayName     String
+  status          MsaidiziPrincipalStatus @default(ACTIVE)
+  grants          Json
+  createdByUserId String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  createdByUser    User?                     @relation("MsaidiziPrincipalCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tasks            MsaidiziTask[]
+  mandates         MsaidiziMandate[]
+  schedules        MsaidiziSchedule[]
+  memories         MsaidiziMemory[]
+  devices          MsaidiziDevice[]
+  updateCandidates MsaidiziUpdateCandidate[]
+
+  @@index([status])
+  @@map("msaidizi_principals")
+}
+
+/// Durable work header and hard budget ledger. Core task records are never
+/// soft-deleted: their events and action evidence must remain reconcilable.
+model MsaidiziTask {
+  id                   String             @id @default(uuid())
+  principalId          String
+  initiatedByUserId    String?
+  companyId            String?
+  mandateId            String?
+  scheduleId           String?
+  idempotencyKey       String?            @unique
+  /// One-use receipt for model work performed before this task was persisted.
+  proposalUsageId      String?            @unique
+  mode                 MsaidiziTaskMode
+  title                String
+  objective            String
+  status               MsaidiziTaskStatus @default(PLANNING)
+  activePlanVersion    Int                @default(0)
+  stateVersion         Int                @default(0)
+  hostExecutionAllowed Boolean            @default(false)
+
+  maxWallTimeSeconds     Int     @default(7200)
+  maxModelTurns          Int     @default(200)
+  maxAttemptedToolCalls  Int     @default(500)
+  maxMutations           Int     @default(100)
+  maxLocalBytes          BigInt  @default(5368709120)
+  maxExternalEgressBytes BigInt  @default(262144000)
+  maxModelCostUsd        Decimal @default(20.0) @db.Decimal(16, 6)
+
+  modelTurns                  Int     @default(0)
+  attemptedToolCalls          Int     @default(0)
+  executedToolCalls           Int     @default(0)
+  mutations                   Int     @default(0)
+  inputTokens                 BigInt  @default(0)
+  outputTokens                BigInt  @default(0)
+  modelCostUsd                Decimal @default(0) @db.Decimal(16, 6)
+  bytesRead                   BigInt  @default(0)
+  bytesWritten                BigInt  @default(0)
+  externalEgressBytes         BigInt  @default(0)
+  /// Egress ceilings already issued to active host actions. This is reserved,
+  /// not spent, and is released atomically when the action settles.
+  reservedExternalEgressBytes BigInt  @default(0)
+  /// Database-clock wall time consumed since the task first entered RUNNING.
+  /// This hard-clock continues through pause, cancellation, and replanning;
+  /// the database trigger owns this value so application retries cannot reset it.
+  consumedWallTimeMs          BigInt  @default(0)
+  /// Last database-clock boundary folded into consumedWallTimeMs. It remains
+  /// live for every started, non-terminal task and is cleared on terminal state.
+  wallTimeCheckpointAt        DateTime?
+
+  statusDetail      String?
+  failureCode       String?
+  queuedAt          DateTime?
+  startedAt         DateTime?
+  lastCheckpointAt  DateTime?
+  pauseRequestedAt  DateTime?
+  cancelRequestedAt DateTime?
+  endedAt           DateTime?
+  createdAt         DateTime  @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"))
+  updatedAt         DateTime  @updatedAt
+
+  principal                MsaidiziPrincipal         @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  initiatedByUser          User?                     @relation("MsaidiziTaskInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+  company                  Company?                  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  mandate                  MsaidiziMandate?          @relation(fields: [mandateId], references: [id], onDelete: SetNull)
+  schedule                 MsaidiziSchedule?         @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  proposalUsage            MsaidiziProposalUsage?    @relation(fields: [proposalUsageId], references: [id], onDelete: Restrict)
+  planVersions             MsaidiziPlanVersion[]
+  steps                    MsaidiziTaskStep[]
+  toolAttempts             MsaidiziToolAttempt[]
+  events                   MsaidiziTaskEvent[]
+  artifacts                MsaidiziArtifact[]
+  memories                 MsaidiziMemory[]
+  deviceLeases             MsaidiziDeviceLease[]
+  hostActions              MsaidiziHostAction[]
+  reasoningTurns           MsaidiziReasoningTurn[]
+  proposedUpdateCandidates MsaidiziUpdateCandidate[]
+  updateEvaluationRuns     MsaidiziUpdateEvaluationRun[]
+
+  @@index([initiatedByUserId, createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([principalId, status, createdAt])
+  @@index([status, queuedAt])
+  @@map("msaidizi_tasks")
+}
+
+/// Immutable plan snapshot. Replanning inserts another version and changes only
+/// the task's activePlanVersion pointer.
+model MsaidiziPlanVersion {
+  id                   String   @id @default(uuid())
+  taskId               String
+  version              Int
+  createdByUserId      String?
+  summary              String
+  objective            String
+  inputs               Json
+  stopConditions       Json
+  budgetSnapshot       Json
+  planDigest           String
+  /// Digest of the reviewed AI proposal whose one-use usage receipt funded it.
+  sourceProposalDigest String?
+  createdAt            DateTime @default(now())
+
+  task                     MsaidiziTask              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdByUser            User?                     @relation("MsaidiziPlanVersionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  steps                    MsaidiziTaskStep[]
+  reasoningTurns           MsaidiziReasoningTurn[]
+  proposedUpdateCandidates MsaidiziUpdateCandidate[]
+  updateEvaluationRuns     MsaidiziUpdateEvaluationRun[]
+
+  @@unique([taskId, version])
+  @@index([taskId, createdAt])
+  @@map("msaidizi_plan_versions")
+}
+
+model MsaidiziTaskStep {
+  id                     String                  @id @default(uuid())
+  taskId                 String
+  planVersionId          String
+  stepKey                String
+  sequence               Int
+  name                   String
+  target                 MsaidiziExecutionTarget @default(ERP)
+  capability             String
+  capabilityVersion      String                  @default("1")
+  arguments              Json
+  dependencies           Json
+  /// Immutable, reviewed typed dataflow edges. Empty preserves the legacy
+  /// static-arguments execution contract.
+  inputBindings          Json                    @default("[]")
+  expectedEffect         MsaidiziEffect
+  dataClass              String
+  preconditions          Json
+  recovery               Json?
+  budgets                Json
+  stopConditions         Json
+  idempotent             Boolean                 @default(false)
+  mutation               Boolean                 @default(false)
+  status                 MsaidiziTaskStepStatus  @default(PENDING)
+  attemptCount           Int                     @default(0)
+  /// Durable local-I/O ledger for this immutable plan step. Reservations and
+  /// refunds use the same fields, so task and step ceilings are enforced by a
+  /// single transaction before another side effect may be dispatched.
+  bytesRead              BigInt                  @default(0)
+  bytesWritten           BigInt                  @default(0)
+  /// False only for rows predating step-local accounting whose historical
+  /// usage cannot be attributed exactly. Such a step must be replanned.
+  localIoAccountingValid Boolean                 @default(true)
+  startedAt              DateTime?
+  checkpointedAt         DateTime?
+  endedAt                DateTime?
+  createdAt              DateTime                @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"))
+  updatedAt              DateTime                @updatedAt
+
+  task                     MsaidiziTask              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  planVersion              MsaidiziPlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  toolAttempts             MsaidiziToolAttempt[]
+  artifacts                MsaidiziArtifact[]
+  deviceLeases             MsaidiziDeviceLease[]
+  hostActions              MsaidiziHostAction[]
+  reasoningTurns           MsaidiziReasoningTurn[]   @relation("MsaidiziReasoningCheckpointStep")
+  proposedUpdateCandidates MsaidiziUpdateCandidate[]
+  updateEvaluationRuns     MsaidiziUpdateEvaluationRun[]
+
+  @@unique([planVersionId, stepKey])
+  @@unique([planVersionId, sequence])
+  @@index([taskId, status, sequence])
+  @@map("msaidizi_task_steps")
+}
+
+/// Every attempted dispatch, including policy rejection, is counted and kept.
+model MsaidiziToolAttempt {
+  id                   String                    @id @default(uuid())
+  taskId               String
+  stepId               String
+  attemptNumber        Int
+  toolName             String
+  argumentsRedacted    Json
+  argsDigest           String
+  idempotencyKey       String                    @unique
+  /// SHA-256 of the one-shot ERP task JWT jti. The bearer itself is never stored.
+  credentialJtiDigest  String?                   @unique
+  credentialConsumedAt DateTime?
+  status               MsaidiziToolAttemptStatus @default(REQUESTED)
+  rejectionReason      String?
+  resultSummary        Json?
+  /// Canonical value-free graph for the exact arguments dispatched by this
+  /// attempt. Secret-reference identifiers never appear here, only digests.
+  resolvedInputProvenance Json?
+  inputProvenanceSha256 String?                   @db.Char(64)
+  errorCode            String?
+  errorMessage         String?
+  uncertainOutcome     Boolean                   @default(false)
+  startedAt            DateTime?
+  endedAt              DateTime?
+  createdAt            DateTime                  @default(now())
+
+  task MsaidiziTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step MsaidiziTaskStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  updateEvaluationRun MsaidiziUpdateEvaluationRun?
+  hostAction MsaidiziHostAction?
+
+  @@unique([stepId, attemptNumber])
+  @@index([taskId, createdAt])
+  @@index([status, createdAt])
+  @@map("msaidizi_tool_attempts")
+}
+
+/// One durable, non-retryable model evaluation for a completed task-step
+/// checkpoint. The unique checkpoint key prevents a restart or a second worker
+/// from applying two different model decisions to the same immutable plan.
+model MsaidiziReasoningTurn {
+  id                   String                      @id @default(uuid())
+  taskId               String
+  planVersionId        String
+  checkpointStepId     String
+  status               MsaidiziReasoningTurnStatus @default(QUEUED)
+  inputDigest          String
+  inputByteSize        Int
+  reservedInputTokens  BigInt                      @default(0)
+  reservedOutputTokens BigInt                      @default(0)
+  reservedCostUsd      Decimal                     @default(0) @db.Decimal(12, 6)
+  inputTokens          BigInt                      @default(0)
+  outputTokens         BigInt                      @default(0)
+  actualCostUsd        Decimal                     @default(0) @db.Decimal(12, 6)
+  decision             MsaidiziReasoningDecision?
+  evaluation           Json?
+  errorCode            String?
+  startedAt            DateTime?
+  endedAt              DateTime?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  task           MsaidiziTask        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  planVersion    MsaidiziPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  checkpointStep MsaidiziTaskStep    @relation("MsaidiziReasoningCheckpointStep", fields: [checkpointStepId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, planVersionId, checkpointStepId])
+  @@index([taskId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("msaidizi_reasoning_turns")
+}
+
+/// One durable, one-use accounting receipt for proposal-model work performed
+/// before a task exists. No objective, prompt, attachment, or model output is
+/// stored here: only digests, usage, conservative reservations, and lifecycle.
+model MsaidiziProposalUsage {
+  id                        String                      @id @default(uuid())
+  userId                    String
+  companyId                 String?
+  mode                      MsaidiziTaskMode
+  requestDigest             String
+  proposalDigest            String?
+  model                     String
+  inputUsdPerMillionTokens  Decimal                     @db.Decimal(12, 6)
+  outputUsdPerMillionTokens Decimal                     @db.Decimal(12, 6)
+  status                    MsaidiziProposalUsageStatus @default(RESERVED)
+
+  reservedModelTurns       Int
+  reservedInputTokens      BigInt
+  reservedOutputTokens     BigInt
+  reservedCostUsd          Decimal @db.Decimal(12, 6)
+  actualModelTurns         Int     @default(0)
+  inputTokens              BigInt  @default(0)
+  cacheReadInputTokens     BigInt  @default(0)
+  cacheCreationInputTokens BigInt  @default(0)
+  billedInputTokens        BigInt  @default(0)
+  outputTokens             BigInt  @default(0)
+  actualCostUsd            Decimal @default(0) @db.Decimal(12, 6)
+  /// RESERVED rows carry the full reservation; settled rows carry actual use.
+  accountedModelTurns      Int
+  accountedCostUsd         Decimal @db.Decimal(12, 6)
+
+  failureCode          String?
+  reservationExpiresAt DateTime
+  expiresAt            DateTime
+  settledAt            DateTime?
+  consumedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user    User          @relation("MsaidiziProposalUsageUser", fields: [userId], references: [id], onDelete: Restrict)
+  company Company?      @relation("MsaidiziProposalUsageCompany", fields: [companyId], references: [id], onDelete: SetNull)
+  task    MsaidiziTask?
+
+  @@index([userId, companyId, createdAt])
+  @@index([status, reservationExpiresAt])
+  @@index([proposalDigest])
+  @@map("msaidizi_proposal_usages")
+}
+
+/// Globally monotonic cursor makes reconnect and polling deterministic. Payloads
+/// are append-only and must already be redacted before insertion.
+model MsaidiziTaskEvent {
+  cursor           BigInt   @id @default(autoincrement())
+  taskId           String
+  type             String
+  actorType        String
+  actorId          String?
+  payload          Json
+  createdAt        DateTime @default(now())
+  /// Versioned database-computed integrity envelope. Application callers
+  /// cannot choose or rewrite any value in the chain.
+  integrityVersion Int      @default(dbgenerated("1"))
+  previousHash     String   @default(dbgenerated()) @db.Char(64)
+  eventHash        String   @unique @default(dbgenerated()) @db.Char(64)
+
+  task                      MsaidiziTask        @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  hostActionJournalEvidence MsaidiziHostAction? @relation("MsaidiziHostActionJournalEvidence")
+
+  @@index([taskId, cursor])
+  @@map("msaidizi_task_events")
+}
+
+/// An external trusted signer checkpoint over one exact contiguous segment of
+/// the global task-event hash chain. Rows are append-only at the database
+/// layer; ordinary task/model APIs have no relation that can mutate them.
+model MsaidiziAuditCheckpoint {
+  id                           String   @id @default(uuid())
+  schemaVersion                Int
+  signerKeyId                  String
+  fromCursor                   BigInt
+  toCursor                     BigInt   @unique
+  previousEventHash            String   @db.Char(64)
+  eventHeadHash                String   @unique @db.Char(64)
+  eventCount                   Int
+  canonicalSegmentSha256       String   @db.Char(64)
+  previousCheckpointSha256     String   @unique @db.Char(64)
+  manifestJson                 String   @db.Text
+  manifestSha256               String   @unique @db.Char(64)
+  signature                    String
+  signerCertificateSha256      String   @db.Char(64)
+  signerSubjectPublicKeySha256 String   @db.Char(64)
+  issuedAt                     DateTime
+  expiresAt                    DateTime
+  receivedAt                   DateTime @default(now())
+
+  @@index([signerKeyId, toCursor])
+  @@index([receivedAt])
+  @@map("msaidizi_audit_checkpoints")
+}
+
+model MsaidiziMandate {
+  id              String                @id @default(uuid())
+  principalId     String
+  companyId       String?
+  createdByUserId String?
+  name            String
+  description     String
+  status          MsaidiziMandateStatus @default(DRAFT)
+  version         Int                   @default(1)
+  capabilities    Json
+  deviceIds       Json
+  budgets         Json
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  activatedAt     DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  principal     MsaidiziPrincipal        @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  company       Company?                 @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdByUser User?                    @relation("MsaidiziMandateCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  schedules     MsaidiziSchedule[]
+  tasks         MsaidiziTask[]
+  versions      MsaidiziMandateVersion[]
+
+  @@index([principalId, status])
+  @@index([companyId, status])
+  @@map("msaidizi_mandates")
+}
+
+model MsaidiziSchedule {
+  id              String                 @id @default(uuid())
+  principalId     String
+  mandateId       String
+  createdByUserId String?
+  name            String
+  status          MsaidiziScheduleStatus @default(DRAFT)
+  version         Int                    @default(1)
+  cronExpression  String
+  timezone        String
+  taskTemplate    Json
+  concurrencyMode String                 @default("SKIP")
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  principal     MsaidiziPrincipal         @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  mandate       MsaidiziMandate           @relation(fields: [mandateId], references: [id], onDelete: Restrict)
+  createdByUser User?                     @relation("MsaidiziScheduleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tasks         MsaidiziTask[]
+  versions      MsaidiziScheduleVersion[]
+
+  @@index([principalId, status, nextRunAt])
+  @@index([mandateId, status])
+  @@map("msaidizi_schedules")
+}
+
+/// Complete, append-only snapshots of every user-visible mandate revision and
+/// lifecycle transition. Database triggers reject UPDATE, DELETE, and TRUNCATE.
+model MsaidiziMandateVersion {
+  id              String                @id @default(uuid())
+  mandateId       String
+  version         Int
+  changeType      String
+  changedByUserId String?
+  principalId     String
+  companyId       String?
+  createdByUserId String?
+  name            String
+  description     String
+  status          MsaidiziMandateStatus
+  capabilities    Json
+  deviceIds       Json
+  budgets         Json
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  activatedAt     DateTime?
+  revokedAt       DateTime?
+  sourceCreatedAt DateTime
+  sourceUpdatedAt DateTime
+  recordedAt      DateTime              @default(now())
+
+  mandate MsaidiziMandate @relation(fields: [mandateId], references: [id], onDelete: Restrict)
+
+  @@unique([mandateId, version])
+  @@index([mandateId, recordedAt])
+  @@map("msaidizi_mandate_versions")
+}
+
+/// Complete, append-only snapshots of every user-visible routine revision and
+/// lifecycle transition. Operational dispatch timestamps do not create a new
+/// configuration version. Database triggers reject history rewrites.
+model MsaidiziScheduleVersion {
+  id              String                 @id @default(uuid())
+  scheduleId      String
+  version         Int
+  changeType      String
+  changedByUserId String?
+  principalId     String
+  mandateId       String
+  companyId       String?
+  createdByUserId String?
+  name            String
+  status          MsaidiziScheduleStatus
+  cronExpression  String
+  timezone        String
+  taskTemplate    Json
+  concurrencyMode String
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  sourceCreatedAt DateTime
+  sourceUpdatedAt DateTime
+  recordedAt      DateTime               @default(now())
+
+  schedule MsaidiziSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+
+  @@unique([scheduleId, version])
+  @@index([scheduleId, recordedAt])
+  @@map("msaidizi_schedule_versions")
+}
+
+model MsaidiziArtifact {
+  id             String                          @id @default(uuid())
+  taskId         String
+  stepId         String?
+  kind           MsaidiziArtifactKind
+  name           String
+  mimeType       String
+  storageKey     String                          @unique
+  sha256         String
+  byteSize       BigInt
+  encrypted      Boolean                         @default(true)
+  dataClass      String
+  trustLevel     MsaidiziTrustLevel              @default(UNTRUSTED)
+  trustedPurpose MsaidiziTrustedArtifactPurpose?
+  provenance     Json
+  createdAt      DateTime                        @default(now())
+
+  task               MsaidiziTask                     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step               MsaidiziTaskStep?                @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  sourceForUpdates   MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateSourceArtifact")
+  rollbackForUpdates MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateRollbackArtifact")
+  reportForUpdates   MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateReportArtifact")
+  generatedForUpdates MsaidiziUpdateCandidate[]       @relation("MsaidiziUpdateGeneratedArtifact")
+  generatedForEvaluationRuns MsaidiziUpdateEvaluationRun[] @relation("MsaidiziGeneratedUpdateArtifact")
+  trustedEvidence    MsaidiziTrustedArtifactEvidence?
+
+  @@index([taskId, createdAt])
+  @@index([stepId, createdAt])
+  @@map("msaidizi_artifacts")
+}
+
+/// Memory content is ciphertext. Search/index metadata may describe it, but raw
+/// credentials and retrieved records must never be copied into plaintext fields.
+model MsaidiziMemory {
+  id                String             @id @default(uuid())
+  principalId       String
+  companyId         String?
+  sourceTaskId      String?
+  createdByUserId   String?
+  kind              MsaidiziMemoryKind
+  scopeKey          String
+  contentCiphertext String
+  contentDigest     String
+  metadata          Json
+  trustLevel        MsaidiziTrustLevel @default(UNTRUSTED)
+  sourceProvenance  Json
+  expiresAt         DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  principal     MsaidiziPrincipal @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  company       Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  sourceTask    MsaidiziTask?     @relation(fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  createdByUser User?             @relation("MsaidiziMemoryCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([principalId, kind, scopeKey])
+  @@index([companyId, kind, deletedAt])
+  @@index([expiresAt])
+  @@map("msaidizi_memories")
+}
+
+model MsaidiziDevice {
+  id                                    String               @id @default(uuid())
+  principalId                           String
+  name                                  String
+  status                                MsaidiziDeviceStatus @default(PENDING)
+  platform                              String               @default("windows")
+  osVersion                             String?
+  architecture                          String?
+  publicKey                             String
+  certificateThumbprint                 String?              @unique
+  updateSupervisorCertificateSha256     String?              @unique @db.Char(64)
+  updateSupervisorPublicKeySpkiSha256   String?              @unique @db.Char(64)
+  recoverySupervisorCertificateSha256   String?              @unique @db.Char(64)
+  recoverySupervisorPublicKeySpkiSha256 String?              @unique @db.Char(64)
+  /// Separately enrolled boundary-supervisor key. This is never the paired
+  /// device identity key and remains null until external WFP validation.
+  egressBoundaryKeyId                   String?
+  egressBoundaryPublicKey               String?
+  egressBoundaryPublicKeySha256         String?
+  egressDestinationPolicySha256         String?
+  egressExecutionIdentitySha256         String?
+  capabilityManifest                    Json
+  pairedAt                              DateTime?
+  lastSeenAt                            DateTime?
+  revokedAt                             DateTime?
+  killedAt                              DateTime?
+  createdAt                             DateTime             @default(now())
+  updatedAt                             DateTime             @updatedAt
+
+  principal                      MsaidiziPrincipal                       @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  leases                         MsaidiziDeviceLease[]
+  hostActions                    MsaidiziHostAction[]
+  hostActionFences               MsaidiziHostActionFence[]
+  recoveryCommands               MsaidiziRecoveryCommand[]
+  updateDeployments              MsaidiziUpdateDeployment[]
+  supervisorEnrollmentChallenges MsaidiziSupervisorEnrollmentChallenge[]
+  journalHead                    MsaidiziDeviceJournalHead?
+  journalEntries                 MsaidiziDeviceJournalEntry[]
+
+  @@index([principalId, status])
+  @@index([status, lastSeenAt])
+  @@map("msaidizi_devices")
+}
+
+/// Mutable CAS pointer only. The referenced records remain append-only and
+/// contain journal digests/identifiers, never payload JSON or tool output.
+model MsaidiziDeviceJournalHead {
+  deviceId     String   @id
+  sequence     Int      @default(0)
+  hashVersion  Int      @default(2)
+  entryHash    String   @db.Char(64)
+  reconciledAt DateTime @default(now())
+  /// Null until the device has explicitly ACK-bound its complete local head.
+  exactAcknowledgedAt DateTime?
+
+  device MsaidiziDevice @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@map("msaidizi_device_journal_heads")
+}
+
+model MsaidiziDeviceJournalEntry {
+  deviceId       String
+  sequence       Int
+  hashVersion    Int      @default(2)
+  occurredAt     DateTime
+  kind           String
+  actionId       String
+  idempotencyKey String
+  previousHash   String   @db.Char(64)
+  payloadSha256  String   @db.Char(64)
+  entryHash      String   @db.Char(64)
+  recordedAt     DateTime @default(now())
+
+  device MsaidiziDevice @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@id([deviceId, sequence])
+  @@unique([deviceId, entryHash])
+  @@index([deviceId, recordedAt])
+  @@map("msaidizi_device_journal_entries")
+}
+
+model MsaidiziSupervisorEnrollmentChallenge {
+  id              String                 @id @default(uuid())
+  deviceId        String
+  role            MsaidiziSupervisorRole
+  challengeDigest String                 @unique @db.Char(64)
+  createdByUserId String
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  createdAt       DateTime               @default(now())
+
+  device        MsaidiziDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  createdByUser User           @relation("MsaidiziSupervisorEnrollmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([deviceId, role, consumedAt, expiresAt])
+  @@index([createdByUserId, createdAt])
+  @@map("msaidizi_supervisor_enrollment_challenges")
+}
+
+model MsaidiziDeviceLease {
+  id               String                    @id @default(uuid())
+  taskId           String
+  stepId           String?
+  deviceId         String
+  status           MsaidiziDeviceLeaseStatus @default(ACTIVE)
+  leaseTokenDigest String                    @unique
+  fencingToken     BigInt                    @unique @default(autoincrement())
+  acquiredAt       DateTime                  @default(now())
+  heartbeatAt      DateTime                  @default(now())
+  expiresAt        DateTime
+  releasedAt       DateTime?
+
+  task        MsaidiziTask         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step        MsaidiziTaskStep?    @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  device      MsaidiziDevice       @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  hostActions MsaidiziHostAction[]
+
+  @@index([deviceId, status, expiresAt])
+  @@index([taskId, status])
+  @@map("msaidizi_device_leases")
+}
+
+model MsaidiziHostAction {
+  id                                    String                   @id @default(uuid())
+  taskId                                String
+  stepId                                String
+  attemptId                             String?                  @unique
+  deviceId                              String
+  leaseId                               String?
+  /// Immutable fence copied from the bound lease and signed into every dispatch.
+  leaseFencingToken                     BigInt?
+  /// Exact lease expiry signed into the most recent dispatch generation.
+  leaseAuthorizationExpiresAt           DateTime?
+  actionId                              String                   @unique
+  capability                            String
+  capabilityVersion                     String
+  argumentsRedacted                     Json
+  argsDigest                            String
+  resolvedInputProvenance               Json?
+  inputProvenanceSha256                 String?                  @db.Char(64)
+  actionTokenDigest                     String
+  idempotencyKey                        String                   @unique
+  expectedPreState                      Json
+  budgetSnapshot                        Json
+  dataClass                             String
+  effect                                MsaidiziEffect
+  consent                               String
+  recovery                              String
+  status                                MsaidiziHostActionStatus @default(QUEUED)
+  uncertainOutcome                      Boolean                  @default(false)
+  /// Immutable ceiling reserved from the task when this action first crosses
+  /// the broker/device boundary.
+  reservedExternalEgressBytes           BigInt                   @default(0)
+  /// Settled capability-side application egress to non-Itemba destinations.
+  capabilityExternalEgressBytes         BigInt                   @default(0)
+  /// Immutable prepaid device-to-broker result delivery egress.
+  brokerExternalEgressBytes             BigInt                   @default(0)
+  /// Conservative charge used when exact egress cannot be trusted.
+  uncertainExternalEgressBytes          BigInt                   @default(0)
+  brokerMaxDeliverySessions             Int                      @default(0)
+  brokerMaxRequestAttemptsPerSession    Int                      @default(0)
+  brokerSerializedResultUpperBoundBytes Int                      @default(0)
+  dispatchCount                         Int                      @default(0)
+  /// Exact signed dispatch generation most recently acknowledged by device
+  /// progress. Zero means the current generation has no receipt proof.
+  acknowledgedDispatchCount             Int                      @default(0)
+  acknowledgedAt                        DateTime?
+  journalPrepareSequence                Int?
+  journalPreparePreviousHash            String?
+  journalPrepareHash                    String?
+  journalRecoveryPreparedSequence       Int?
+  journalRecoveryPreparedPreviousHash   String?
+  journalRecoveryPreparedHash           String?
+  journalExpectedPreviousSequence       Int?
+  journalSequence                       Int?
+  journalPreviousHash                   String?
+  journalHash                           String?
+  journalAccepted                       Boolean                  @default(false)
+  journalReceiptDigest                  String?                  @unique
+  journalEvidenceEventCursor            BigInt?                  @unique
+  journalEvidenceAcceptedAt             DateTime?
+  lateEvidenceAcceptedAt                DateTime?
+  /// Immutable digest of the protected supervisor recovery record. It is set
+  /// only when the broker accepts the linked journal-evidence event.
+  recoveryRecordSha256                  String?                  @db.Char(64)
+  /// Immutable pre-action state that a trusted recovery must restore.
+  expectedRestoredStateSha256           String?                  @db.Char(64)
+  resultSummary                         Json?
+  egressEvidenceSha256                  String?
+  egressReceiptId                       String?                  @unique @db.Uuid
+  egressAuthorizationLeaseId            String?                  @unique @db.Uuid
+  egressBoundaryBootId                  String?                  @db.Uuid
+  egressReceiptSequence                 Int?
+  /// Privacy-preserving route evidence; raw DNS answers and selected IPs are never stored.
+  egressReservationDnsAnswerSetSha256   String?                  @db.Char(64)
+  egressConnectionDnsAnswerSetSha256    String?                  @db.Char(64)
+  egressSelectedAddressSha256            String?                  @db.Char(64)
+  errorCode                             String?
+  queuedAt                              DateTime                 @default(now())
+  dispatchedAt                          DateTime?
+  startedAt                             DateTime?
+  endedAt                               DateTime?
+  createdAt                             DateTime                 @default(now())
+  updatedAt                             DateTime                 @updatedAt
+
+  task                 MsaidiziTask                 @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step                 MsaidiziTaskStep             @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  attempt              MsaidiziToolAttempt?         @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  device               MsaidiziDevice               @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  lease                MsaidiziDeviceLease?         @relation(fields: [leaseId], references: [id], onDelete: SetNull)
+  dispatches           MsaidiziHostActionDispatch[]
+  fence                MsaidiziHostActionFence?
+  recoveryCommand      MsaidiziRecoveryCommand?
+  journalEvidenceEvent MsaidiziTaskEvent?           @relation("MsaidiziHostActionJournalEvidence", fields: [journalEvidenceEventCursor], references: [cursor], onDelete: Restrict)
+
+  @@unique([deviceId, egressBoundaryBootId, egressReceiptSequence])
+  @@index([taskId, status, createdAt])
+  @@index([deviceId, status, createdAt])
+  @@index([leaseId])
+  @@index([leaseId, leaseFencingToken])
+  @@map("msaidizi_host_actions")
+}
+
+/// Immutable authorization history for every broker delivery generation.
+/// Durable device results may legitimately reference the token that began the
+/// execution even after a later delivery generation was issued.
+model MsaidiziHostActionDispatch {
+  id                          String    @id @default(uuid())
+  hostActionId                String
+  dispatchCount               Int
+  actionTokenDigest           String    @unique
+  /// Immutable authorization class. Replay-only transport tokens can never
+  /// serve as proof that a host effect executed.
+  executionMode               String
+  tokenId                     String?   @unique
+  tokenIssuedAt               DateTime?
+  tokenExpiresAt              DateTime?
+  leaseId                     String
+  leaseFencingToken           BigInt
+  leaseAuthorizationExpiresAt DateTime
+  createdAt                   DateTime  @default(now())
+
+  hostAction MsaidiziHostAction @relation(fields: [hostActionId], references: [id], onDelete: Cascade)
+
+  @@unique([hostActionId, dispatchCount])
+  @@index([hostActionId, createdAt])
+  @@map("msaidizi_host_action_dispatches")
+}
+
+/// Durable protocol-v3 revocation state for an execute authorization whose
+/// short database lease expired before any device Prepared receipt arrived.
+model MsaidiziHostActionFence {
+  fenceId                     String                        @id @default(uuid())
+  hostActionId                String                        @unique
+  deviceId                    String
+  status                      MsaidiziHostActionFenceStatus @default(PENDING)
+  oldLeaseId                  String
+  oldLeaseFencingToken        BigInt
+  oldActionTokenDigest        String                        @db.Char(64)
+  journalPreviousSequence     Int
+  journalPreviousHash         String                        @db.Char(64)
+  dispatchCount               Int                           @default(0)
+  maxDispatches               Int                           @default(3)
+  dispatchedAt                DateTime?
+  receiptDigest               String?                       @unique @db.Char(64)
+  tombstoneSequence           Int?
+  tombstonePreviousHash       String?                       @db.Char(64)
+  tombstoneHash               String?                       @db.Char(64)
+  acknowledgedAt              DateTime?
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
+
+  hostAction MsaidiziHostAction                @relation(fields: [hostActionId], references: [id], onDelete: Cascade)
+  device     MsaidiziDevice                    @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  dispatches MsaidiziHostActionFenceDispatch[]
+
+  @@index([deviceId, status, dispatchedAt])
+  @@map("msaidizi_host_action_fences")
+}
+
+/// Immutable signed-token history for bounded fence-command redelivery.
+model MsaidiziHostActionFenceDispatch {
+  id               String   @id @default(uuid())
+  fenceId          String
+  dispatchCount    Int
+  fenceTokenDigest String   @unique @db.Char(64)
+  /// Stable JWT jti equals the fence id across delivery generations.
+  tokenId          String
+  tokenIssuedAt    DateTime
+  tokenExpiresAt   DateTime
+  createdAt        DateTime @default(now())
+
+  fence MsaidiziHostActionFence @relation(fields: [fenceId], references: [fenceId], onDelete: Cascade)
+
+  @@unique([fenceId, dispatchCount])
+  @@index([fenceId, createdAt])
+  @@map("msaidizi_host_action_fence_dispatches")
+}
+
+/// An exact, operator-authorized instruction for the separately installed
+/// recovery supervisor. It is deliberately not a task step or host capability:
+/// model-generated plans cannot create, parameterize, dispatch, or acknowledge it.
+model MsaidiziRecoveryCommand {
+  id                          String                        @id @default(uuid())
+  hostActionId                String                        @unique
+  deviceId                    String
+  requestedByUserId           String
+  originalActionId            String                        @unique
+  recoveryRecordSha256        String                        @db.Char(64)
+  expectedCurrentStateSha256  String                        @db.Char(64)
+  /// Frozen pre-action state signed into schema-v2 recovery manifests. NULL
+  /// identifies a legacy command that cannot report a successful recovery.
+  expectedRestoredStateSha256 String?                       @db.Char(64)
+  status                      MsaidiziRecoveryCommandStatus @default(QUEUED)
+  idempotencyKey              String                        @unique
+  manifestJson                String
+  manifestSha256              String
+  manifestSignature           String
+  signingKeyId                String
+  dispatchCount               Int                           @default(0)
+  resultDigest                String?
+  resultSummary               Json?
+  supervisorJournalHead       String?
+  queuedAt                    DateTime                      @default(now())
+  dispatchedAt                DateTime?
+  startedAt                   DateTime?
+  completedAt                 DateTime?
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
+
+  hostAction      MsaidiziHostAction @relation(fields: [hostActionId], references: [id], onDelete: Restrict)
+  device          MsaidiziDevice     @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  requestedByUser User               @relation("MsaidiziRecoveryRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([deviceId, status, queuedAt])
+  @@index([requestedByUserId, createdAt])
+  @@map("msaidizi_recovery_commands")
+}
+
+model MsaidiziUpdateCandidate {
+  id                                       String                        @id @default(uuid())
+  principalId                              String
+  proposedByTaskId                         String?
+  proposedByPlanVersionId                  String?
+  proposedByStepId                         String?                       @unique
+  proposalIdempotencyKey                   String?                       @unique
+  proposalDigest                           String?
+  proposalRationale                        String?
+  generatedSourceArtifactId                String?
+  generationManifestSha256                 String?                       @db.Char(64)
+  sourceArtifactId                         String?
+  sourceArtifactSha256                     String?
+  rollbackArtifactId                       String?
+  rollbackArtifactSha256                   String?
+  evaluationReportArtifactId               String?
+  evaluationReportArtifactSha256           String?
+  evaluationBundleDigest                   String?                       @unique
+  evaluationDecidedAt                      DateTime?
+  name                                     String
+  version                                  String
+  /// Exact version that the trusted supervisor must observe after activating
+  /// the separately evaluated rollback artifact. Older candidates remain null
+  /// and are deliberately ineligible for deployment.
+  rollbackVersion                          String?
+  scope                                    String
+  status                                   MsaidiziUpdateCandidateStatus @default(DRAFT)
+  evaluationSummary                        Json
+  reviewerDecisions                        Json
+  rolloutRing                              Int                           @default(0)
+  /// Projection that deployment-owned policy has armed 0 -> 5 -> 25 -> 100 progression.
+  /// Authority comes from the active mandate plus immutable external policy;
+  /// candidate creation, evaluation, and model output cannot set this field.
+  automaticProgressionEnabled              Boolean                       @default(false)
+  automaticProgressionArmedAt              DateTime?
+  automaticProgressionArmedById            String?
+  automaticProgressionMinimumSoakSeconds   Int?
+  automaticProgressionHealthTimeoutSeconds Int?
+  automaticProgressionRing0DwellSeconds    Int?
+  automaticProgressionRing5DwellSeconds    Int?
+  automaticProgressionRing25DwellSeconds   Int?
+  automaticProgressionRing100DwellSeconds  Int?
+  automaticProgressionRingHealthyAt        DateTime?
+  automaticProgressionRingEvidenceSha256   String?                       @db.Char(64)
+  /// Immutable ring population captured under device row locks when automatic
+  /// progression is armed. New enrollment cannot change an in-flight rollout.
+  automaticProgressionCohortDeviceIds      Json?
+  automaticProgressionCohortSha256         String?                       @db.Char(64)
+  automaticProgressionCohortCapturedAt     DateTime?
+  /// Durable recovery outbox projection. A terminal supervisor result is
+  /// committed even when the kill switch/signer prevents immediate rollback.
+  recoveryPending                          Boolean                       @default(false)
+  recoveryRequestedAt                      DateTime?
+  recoveryLastAttemptAt                    DateTime?
+  recoveryLastErrorCode                    String?
+  healthSummary                            Json?
+  createdAt                                DateTime                      @default(now())
+  updatedAt                                DateTime                      @updatedAt
+  deployedAt                               DateTime?
+  rolledBackAt                             DateTime?
+
+  principal                MsaidiziPrincipal                     @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  proposedByTask           MsaidiziTask?                         @relation(fields: [proposedByTaskId], references: [id], onDelete: SetNull)
+  proposedByPlanVersion    MsaidiziPlanVersion?                  @relation(fields: [proposedByPlanVersionId], references: [id], onDelete: SetNull)
+  proposedByStep           MsaidiziTaskStep?                     @relation(fields: [proposedByStepId], references: [id], onDelete: SetNull)
+  sourceArtifact           MsaidiziArtifact?                     @relation("MsaidiziUpdateSourceArtifact", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  rollbackArtifact         MsaidiziArtifact?                     @relation("MsaidiziUpdateRollbackArtifact", fields: [rollbackArtifactId], references: [id], onDelete: SetNull)
+  evaluationReportArtifact MsaidiziArtifact?                     @relation("MsaidiziUpdateReportArtifact", fields: [evaluationReportArtifactId], references: [id], onDelete: SetNull)
+  generatedSourceArtifact  MsaidiziArtifact?                     @relation("MsaidiziUpdateGeneratedArtifact", fields: [generatedSourceArtifactId], references: [id], onDelete: Restrict)
+  evaluationAttestations   MsaidiziUpdateEvaluationAttestation[]
+  evaluationRun            MsaidiziUpdateEvaluationRun?
+  deployments              MsaidiziUpdateDeployment[]
+
+  @@unique([name, version])
+  @@index([principalId, status, createdAt])
+  @@index([proposedByTaskId])
+  @@index([proposedByPlanVersionId])
+  @@index([automaticProgressionEnabled, status, rolloutRing, updatedAt])
+  @@index([recoveryPending, recoveryLastErrorCode, recoveryRequestedAt])
+  @@map("msaidizi_update_candidates")
+}
+
+/// Durable outbox/lease for one isolated evaluation of a generated update.
+/// The generated manifest is untrusted input; only separately signed VM,
+/// artifact-verifier, and two independent model-review attestations can move
+/// its candidate into APPROVED.
+model MsaidiziUpdateEvaluationRun {
+  id                         String                            @id @default(uuid())
+  candidateId                String                            @unique
+  taskId                     String
+  planVersionId              String
+  stepId                     String
+  attemptId                  String                            @unique
+  generationArtifactId       String                            @unique
+  generationArtifactSha256   String                            @db.Char(64)
+  generationManifestSha256   String                            @db.Char(64)
+  requestDigest              String                            @unique @db.Char(64)
+  evaluationRunId            String                            @unique
+  generatorPrincipalId       String
+  generatorModelId           String
+  policyVersion              String
+  policyDigest               String                            @db.Char(64)
+  requiredChecks             Json
+  provenance                 Json
+  status                     MsaidiziUpdateEvaluationRunStatus @default(QUEUED)
+
+  maxWallTimeSeconds         Int
+  maxCpuTimeSeconds          Int
+  maxBytesRead               BigInt
+  maxBytesWritten            BigInt
+  maxExternalEgressBytes     BigInt
+  maxModelTurns              Int
+  maxModelInputTokens        BigInt
+  maxModelOutputTokens       BigInt
+  maxModelCostMicrousd       BigInt
+
+  usedCpuTimeSeconds         Int                               @default(0)
+  usedBytesRead              BigInt                            @default(0)
+  usedBytesWritten           BigInt                            @default(0)
+  usedExternalEgressBytes    BigInt                            @default(0)
+  usedModelTurns             Int                               @default(0)
+  usedModelInputTokens       BigInt                            @default(0)
+  usedModelOutputTokens      BigInt                            @default(0)
+  usedModelCostMicrousd      BigInt                            @default(0)
+
+  leaseId                    String?                           @unique
+  leaseGeneration            Int                               @default(0)
+  leaseExpiresAt             DateTime?
+  dispatchCount              Int                               @default(0)
+  failureCode                String?
+  deadlineAt                 DateTime
+  queuedAt                   DateTime                          @default(now())
+  leasedAt                   DateTime?
+  startedAt                  DateTime?
+  lastHeartbeatAt            DateTime?
+  completedAt                DateTime?
+  createdAt                  DateTime                          @default(now())
+  updatedAt                  DateTime                          @updatedAt
+
+  candidate          MsaidiziUpdateCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  task               MsaidiziTask            @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  planVersion        MsaidiziPlanVersion      @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  step               MsaidiziTaskStep         @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  attempt            MsaidiziToolAttempt      @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  generationArtifact MsaidiziArtifact         @relation("MsaidiziGeneratedUpdateArtifact", fields: [generationArtifactId], references: [id], onDelete: Restrict)
+
+  @@index([status, queuedAt])
+  @@index([taskId, createdAt])
+  @@index([leaseExpiresAt, status])
+  @@index([deadlineAt, status])
+  @@map("msaidizi_update_evaluation_runs")
+}
+
+/// Append-only verifier evidence for a newly-created TRUSTED artifact. There
+/// is deliberately no update path and no relation that can upgrade an existing
+/// UNTRUSTED artifact in place.
+model MsaidiziTrustedArtifactEvidence {
+  id                String                         @id @default(uuid())
+  artifactId        String                         @unique
+  taskId            String
+  planVersionId     String
+  stepId            String
+  candidateId       String?
+  purpose           MsaidiziTrustedArtifactPurpose
+  signerKeyId       String
+  claimsDigest      String                         @unique
+  nonce             String                         @unique
+  canonicalClaims   Json
+  signature         String
+  evaluationRunId   String
+  cleanSnapshotId   String
+  toolchainVersions Json
+  issuedAt          DateTime
+  expiresAt         DateTime
+  receivedAt        DateTime                       @default(now())
+
+  artifact MsaidiziArtifact @relation(fields: [artifactId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, stepId, purpose])
+  @@index([candidateId, purpose])
+  @@index([signerKeyId, receivedAt])
+  @@map("msaidizi_trusted_artifact_evidence")
+}
+
+/// Canonical signed evaluator/model evidence. Rows are append-only; the
+/// candidate carries only the resulting bundle digest and decision projection.
+model MsaidiziUpdateEvaluationAttestation {
+  id                     String                                  @id @default(uuid())
+  candidateId            String
+  taskId                 String
+  planVersionId          String
+  stepId                 String
+  kind                   MsaidiziUpdateEvaluationAttestationKind
+  signerKeyId            String
+  claimsDigest           String                                  @unique
+  nonce                  String                                  @unique
+  canonicalClaims        Json
+  signature              String
+  verdict                MsaidiziUpdateEvaluationVerdict
+  evaluationRunId        String
+  cleanSnapshotId        String
+  sourceArtifactId       String
+  sourceArtifactSha256   String
+  rollbackArtifactId     String
+  rollbackArtifactSha256 String
+  reportArtifactId       String
+  reportArtifactSha256   String
+  runnerClaimsDigest     String?
+  reviewerId             String?
+  modelId                String?
+  issuedAt               DateTime
+  expiresAt              DateTime
+  receivedAt             DateTime                                @default(now())
+
+  candidate MsaidiziUpdateCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, kind, signerKeyId])
+  @@index([candidateId, kind, receivedAt])
+  @@index([signerKeyId, receivedAt])
+  @@map("msaidizi_update_evaluation_attestations")
+}
+
+/// A command issued to the separately signed update supervisor. Its stable
+/// deployment/idempotency identity is immutable; a pre-mutation delivery lease
+/// may be versioned and re-signed after expiry. Only the mTLS-bound supervisor
+/// assigned to `deviceId` may advance the execution/result fields.
+model MsaidiziUpdateDeployment {
+  id                        String                            @id @default(uuid())
+  candidateId               String
+  deviceId                  String
+  operation                 MsaidiziUpdateDeploymentOperation @default(APPLY)
+  ring                      Int
+  targetId                  String
+  status                    MsaidiziUpdateDeploymentStatus    @default(QUEUED)
+  idempotencyKey            String                            @unique
+  manifestJson              String
+  manifestSha256            String
+  manifestSignature         String
+  signingKeyId              String
+  /// Append-only broker-issued delivery attempts retained so a durable local
+  /// result can prove the exact older envelope that actually executed.
+  manifestHistory           Json                              @default("[]")
+  /// True only for APPLY commands issued by the governed automatic progression worker.
+  automaticProgression      Boolean                           @default(false)
+  dispatchCount             Int                               @default(0)
+  /// A command may receive a newly signed lease after expiry until APPLYING.
+  /// ACK is only the pre-mutation fence; execution states are never redelivered.
+  deliveryLeaseId           String?                           @unique
+  deliveryLeaseExpiresAt    DateTime?
+  deliveryAcknowledgedAt    DateTime?
+  resultDigest              String?
+  resultSummary             Json?
+  supervisorJournalHead     String?
+  queuedAt                  DateTime                          @default(now())
+  dispatchedAt              DateTime?
+  startedAt                 DateTime?
+  healthCheckStartedAt      DateTime?
+  healthySoakEvidenceSha256 String?                           @db.Char(64)
+  completedAt               DateTime?
+  createdAt                 DateTime                          @default(now())
+  updatedAt                 DateTime                          @updatedAt
+
+  candidate MsaidiziUpdateCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  device    MsaidiziDevice          @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, deviceId, ring, operation])
+  @@index([deviceId, status, queuedAt])
+  @@index([deviceId, status, deliveryAcknowledgedAt, deliveryLeaseExpiresAt])
+  @@index([candidateId, ring, status])
+  @@map("msaidizi_update_deployments")
 }
 
 /// How an audited action reached the system.
@@ -846,6 +2244,10 @@ model Company {
   automationRules             AutomationRule[]
   msaidiziProcedures          MsaidiziProcedure[]
   msaidiziConversations       MsaidiziConversation[]
+  msaidiziTasks               MsaidiziTask[]
+  msaidiziProposalUsages      MsaidiziProposalUsage[]      @relation("MsaidiziProposalUsageCompany")
+  msaidiziMandates            MsaidiziMandate[]
+  msaidiziMemories            MsaidiziMemory[]
 
   backgroundJobs         BackgroundJob[]
   cacheEntries           CacheEntry[]
@@ -1396,65 +2798,74 @@ model User {
   readinessChecksCompleted   ProductionReadinessCheck[] @relation("ReadinessCheckCompletedBy")
 
   // Milestone 14.5 — Advanced Accounting, Procurement, CRM/SRM, Document Templates, Automation
-  postingRulesCreated           AccountingPostingRule[]      @relation("PostingRuleCreatedBy")
-  postingRulesApproved          AccountingPostingRule[]      @relation("PostingRuleApprovedBy")
-  postingRunsPosted             PostingRun[]                 @relation("PostingRunPostedBy")
-  postingRunsReversed           PostingRun[]                 @relation("PostingRunReversedBy")
-  periodClosesCreated           AccountingPeriodClose[]      @relation("PeriodCloseCreatedBy")
-  periodClosesClosed            AccountingPeriodClose[]      @relation("PeriodCloseClosedBy")
-  periodClosesReopened          AccountingPeriodClose[]      @relation("PeriodCloseReopenedBy")
-  accountingLocksCreated        AccountingLock[]             @relation("AccountingLockCreatedBy")
-  accountingLocksReleased       AccountingLock[]             @relation("AccountingLockReleasedBy")
-  bankReconciliationsPrepared   BankReconciliation[]         @relation("ReconciliationPreparedBy")
-  bankReconciliationsApproved   BankReconciliation[]         @relation("ReconciliationApprovedBy")
-  bankReconciliationsClosed     BankReconciliation[]         @relation("ReconciliationClosedBy")
-  bankReconciliationMatches     BankReconciliationMatch[]    @relation("ReconciliationMatchBy")
-  depSchedulesCreated           DepreciationSchedule[]       @relation("DepScheduleCreatedBy")
-  depEntriesPosted              DepreciationEntry[]          @relation("DepEntryPostedBy")
-  loanPaymentsMade              LoanRepaymentPayment[]       @relation("LoanPaymentPaidBy")
-  financialStatementsGenerated  FinancialStatementRun[]      @relation("StatementRunGeneratedBy")
-  auditAdjCreated               AuditAdjustment[]            @relation("AuditAdjCreatedBy")
-  auditAdjApproved              AuditAdjustment[]            @relation("AuditAdjApprovedBy")
-  auditAdjPosted                AuditAdjustment[]            @relation("AuditAdjPostedBy")
-  auditAdjReversed              AuditAdjustment[]            @relation("AuditAdjReversedBy")
-  purchaseRequisitionsRequested PurchaseRequisition[]        @relation("RequisitionRequestedBy")
-  purchaseRequisitionsApproved  PurchaseRequisition[]        @relation("RequisitionApprovedBy")
-  purchaseRequisitionsRejected  PurchaseRequisition[]        @relation("RequisitionRejectedBy")
-  rfqsCreated                   RequestForQuotation[]        @relation("RFQCreatedBy")
-  supplierQuotCreated           SupplierQuotation[]          @relation("SupplierQuotCreatedBy")
-  supplierQuotAccepted          SupplierQuotation[]          @relation("SupplierQuotAcceptedBy")
-  bidCompPrepared               BidComparison[]              @relation("BidCompPreparedBy")
-  bidCompApproved               BidComparison[]              @relation("BidCompApprovedBy")
-  grnsReceived                  GoodsReceivedNote[]          @relation("GRNReceivedBy")
-  grnsApproved                  GoodsReceivedNote[]          @relation("GRNApprovedBy")
-  supplierInvsCreated           SupplierInvoice[]            @relation("SupplierInvCreatedBy")
-  supplierInvsApproved          SupplierInvoice[]            @relation("SupplierInvApprovedBy")
-  threeWayMatches               ThreeWayMatch[]              @relation("ThreeWayMatchedBy")
-  threeWayMatchesApproved       ThreeWayMatch[]              @relation("ThreeWayApprovedBy")
-  procPlanCreated               ProcurementPlan[]            @relation("ProcPlanCreatedBy")
-  procPlanApproved              ProcurementPlan[]            @relation("ProcPlanApprovedBy")
-  communicationLogsCreated      CommunicationLog[]           @relation("CommLogCreatedBy")
-  communicationLogsAssigned     CommunicationLog[]           @relation("CommLogAssignedTo")
-  creditProfilesReviewed        CustomerCreditProfile[]      @relation("CreditProfileReviewedBy")
-  supplierPerfReviewed          SupplierPerformanceProfile[] @relation("SupplierPerfReviewedBy")
-  customerStatementsGenerated   CustomerStatementRun[]       @relation("CustStatGeneratedBy")
-  supplierStatementsGenerated   SupplierStatementRun[]       @relation("SuppStatGeneratedBy")
-  docTemplatesCreated           DocumentTemplate[]           @relation("DocTemplateCreatedBy")
-  docTemplatesApproved          DocumentTemplate[]           @relation("DocTemplateApprovedBy")
-  generatedDocsCreated          GeneratedDocument[]          @relation("GeneratedDocGeneratedBy")
-  automationRulesCreated        AutomationRule[]             @relation("AutoRuleCreatedBy")
-  automationRulesApproved       AutomationRule[]             @relation("AutoRuleApprovedBy")
-  msaidiziProceduresAuthored    MsaidiziProcedure[]          @relation("MsaidiziProcedureAuthor")
-  msaidiziProceduresApproved    MsaidiziProcedure[]          @relation("MsaidiziProcedureApprover")
+  postingRulesCreated           AccountingPostingRule[]                 @relation("PostingRuleCreatedBy")
+  postingRulesApproved          AccountingPostingRule[]                 @relation("PostingRuleApprovedBy")
+  postingRunsPosted             PostingRun[]                            @relation("PostingRunPostedBy")
+  postingRunsReversed           PostingRun[]                            @relation("PostingRunReversedBy")
+  periodClosesCreated           AccountingPeriodClose[]                 @relation("PeriodCloseCreatedBy")
+  periodClosesClosed            AccountingPeriodClose[]                 @relation("PeriodCloseClosedBy")
+  periodClosesReopened          AccountingPeriodClose[]                 @relation("PeriodCloseReopenedBy")
+  accountingLocksCreated        AccountingLock[]                        @relation("AccountingLockCreatedBy")
+  accountingLocksReleased       AccountingLock[]                        @relation("AccountingLockReleasedBy")
+  bankReconciliationsPrepared   BankReconciliation[]                    @relation("ReconciliationPreparedBy")
+  bankReconciliationsApproved   BankReconciliation[]                    @relation("ReconciliationApprovedBy")
+  bankReconciliationsClosed     BankReconciliation[]                    @relation("ReconciliationClosedBy")
+  bankReconciliationMatches     BankReconciliationMatch[]               @relation("ReconciliationMatchBy")
+  depSchedulesCreated           DepreciationSchedule[]                  @relation("DepScheduleCreatedBy")
+  depEntriesPosted              DepreciationEntry[]                     @relation("DepEntryPostedBy")
+  loanPaymentsMade              LoanRepaymentPayment[]                  @relation("LoanPaymentPaidBy")
+  financialStatementsGenerated  FinancialStatementRun[]                 @relation("StatementRunGeneratedBy")
+  auditAdjCreated               AuditAdjustment[]                       @relation("AuditAdjCreatedBy")
+  auditAdjApproved              AuditAdjustment[]                       @relation("AuditAdjApprovedBy")
+  auditAdjPosted                AuditAdjustment[]                       @relation("AuditAdjPostedBy")
+  auditAdjReversed              AuditAdjustment[]                       @relation("AuditAdjReversedBy")
+  purchaseRequisitionsRequested PurchaseRequisition[]                   @relation("RequisitionRequestedBy")
+  purchaseRequisitionsApproved  PurchaseRequisition[]                   @relation("RequisitionApprovedBy")
+  purchaseRequisitionsRejected  PurchaseRequisition[]                   @relation("RequisitionRejectedBy")
+  rfqsCreated                   RequestForQuotation[]                   @relation("RFQCreatedBy")
+  supplierQuotCreated           SupplierQuotation[]                     @relation("SupplierQuotCreatedBy")
+  supplierQuotAccepted          SupplierQuotation[]                     @relation("SupplierQuotAcceptedBy")
+  bidCompPrepared               BidComparison[]                         @relation("BidCompPreparedBy")
+  bidCompApproved               BidComparison[]                         @relation("BidCompApprovedBy")
+  grnsReceived                  GoodsReceivedNote[]                     @relation("GRNReceivedBy")
+  grnsApproved                  GoodsReceivedNote[]                     @relation("GRNApprovedBy")
+  supplierInvsCreated           SupplierInvoice[]                       @relation("SupplierInvCreatedBy")
+  supplierInvsApproved          SupplierInvoice[]                       @relation("SupplierInvApprovedBy")
+  threeWayMatches               ThreeWayMatch[]                         @relation("ThreeWayMatchedBy")
+  threeWayMatchesApproved       ThreeWayMatch[]                         @relation("ThreeWayApprovedBy")
+  procPlanCreated               ProcurementPlan[]                       @relation("ProcPlanCreatedBy")
+  procPlanApproved              ProcurementPlan[]                       @relation("ProcPlanApprovedBy")
+  communicationLogsCreated      CommunicationLog[]                      @relation("CommLogCreatedBy")
+  communicationLogsAssigned     CommunicationLog[]                      @relation("CommLogAssignedTo")
+  creditProfilesReviewed        CustomerCreditProfile[]                 @relation("CreditProfileReviewedBy")
+  supplierPerfReviewed          SupplierPerformanceProfile[]            @relation("SupplierPerfReviewedBy")
+  customerStatementsGenerated   CustomerStatementRun[]                  @relation("CustStatGeneratedBy")
+  supplierStatementsGenerated   SupplierStatementRun[]                  @relation("SuppStatGeneratedBy")
+  docTemplatesCreated           DocumentTemplate[]                      @relation("DocTemplateCreatedBy")
+  docTemplatesApproved          DocumentTemplate[]                      @relation("DocTemplateApprovedBy")
+  generatedDocsCreated          GeneratedDocument[]                     @relation("GeneratedDocGeneratedBy")
+  automationRulesCreated        AutomationRule[]                        @relation("AutoRuleCreatedBy")
+  automationRulesApproved       AutomationRule[]                        @relation("AutoRuleApprovedBy")
+  msaidiziProceduresAuthored    MsaidiziProcedure[]                     @relation("MsaidiziProcedureAuthor")
+  msaidiziProceduresApproved    MsaidiziProcedure[]                     @relation("MsaidiziProcedureApprover")
   msaidiziConversations         MsaidiziConversation[]
   msaidiziApprovalGrants        MsaidiziApprovalGrant[]
-  automationRunsStarted         AutomationRun[]              @relation("AutoRunStartedBy")
-  backgroundJobsRequested       BackgroundJob[]              @relation("BackgroundJobRequestedBy")
-  performanceTraces             PerformanceTrace[]           @relation("PerformanceTraceUser")
-  isolationTestsStarted         DataIsolationTestRun[]       @relation("IsolationTestStartedBy")
-  deploymentReleases            DeploymentRelease[]          @relation("DeploymentReleasedBy")
-  deploymentRollbacks           DeploymentRelease[]          @relation("DeploymentRolledBackBy")
-  loadTestsStarted              LoadTestRun[]                @relation("LoadTestStartedBy")
+  msaidiziPrincipalsCreated     MsaidiziPrincipal[]                     @relation("MsaidiziPrincipalCreator")
+  msaidiziTasksInitiated        MsaidiziTask[]                          @relation("MsaidiziTaskInitiator")
+  msaidiziPlanVersionsCreated   MsaidiziPlanVersion[]                   @relation("MsaidiziPlanVersionCreator")
+  msaidiziProposalUsages        MsaidiziProposalUsage[]                 @relation("MsaidiziProposalUsageUser")
+  msaidiziMandatesCreated       MsaidiziMandate[]                       @relation("MsaidiziMandateCreator")
+  msaidiziSchedulesCreated      MsaidiziSchedule[]                      @relation("MsaidiziScheduleCreator")
+  msaidiziMemoriesCreated       MsaidiziMemory[]                        @relation("MsaidiziMemoryCreator")
+  msaidiziRecoveriesRequested   MsaidiziRecoveryCommand[]               @relation("MsaidiziRecoveryRequestedBy")
+  msaidiziSupervisorEnrollments MsaidiziSupervisorEnrollmentChallenge[] @relation("MsaidiziSupervisorEnrollmentCreator")
+  automationRunsStarted         AutomationRun[]                         @relation("AutoRunStartedBy")
+  backgroundJobsRequested       BackgroundJob[]                         @relation("BackgroundJobRequestedBy")
+  performanceTraces             PerformanceTrace[]                      @relation("PerformanceTraceUser")
+  isolationTestsStarted         DataIsolationTestRun[]                  @relation("IsolationTestStartedBy")
+  deploymentReleases            DeploymentRelease[]                     @relation("DeploymentReleasedBy")
+  deploymentRollbacks           DeploymentRelease[]                     @relation("DeploymentRolledBackBy")
+  loadTestsStarted              LoadTestRun[]                           @relation("LoadTestStartedBy")
 
   // Milestone 16 — QA, Launch Readiness, Documentation, Training, Support
   qaTestSuitesCreated         QATestSuite[]               @relation("QATestSuiteCreatedBy")
@@ -2031,33 +3442,46 @@ model Document {
 /// Append-only audit trail — must NEVER be updated or deleted.
 /// Covers: CREATE, UPDATE, DELETE, LOGIN, LOGOUT, APPROVE, EXPORT, VIEW_SENSITIVE.
 model AuditLog {
-  id         String        @id @default(uuid())
-  action     String
-  entityType String
-  entityId   String?
-  userId     String?
-  companyId  String?
+  id                String                 @id @default(uuid())
+  action            String
+  entityType        String
+  entityId          String?
+  userId            String?
+  /// Compatibility/display FK only. Immutable authorization uses companyScopes.
+  companyId         String?
+  scopeKind         AuditScopeKind         @default(UNATTRIBUTED)
+  attributionStatus AuditAttributionStatus @default(FAILED)
   /// Snapshot of the record BEFORE the change (null for CREATE / LOGIN).
-  oldValue   Json?
+  oldValue          Json?
   /// Snapshot of the record AFTER the change (null for DELETE / LOGOUT).
-  newValue   Json?
+  newValue          Json?
   /// Additional context that does not fit old/new value.
-  metadata   Json?
-  ipAddress  String?
-  userAgent  String?
-  severity   AuditSeverity @default(LOW)
+  metadata          Json?
+  ipAddress         String?
+  userAgent         String?
+  severity          AuditSeverity          @default(LOW)
   /// How the action reached the system. Rows written before this column existed
   /// carry the WEB default and are NOT evidence of channel — treat pre-migration
   /// history as unattributed rather than as confirmed human activity.
-  channel    AuditChannel  @default(WEB)
+  channel           AuditChannel           @default(WEB)
   /// Correlates every entry produced by one agent run, so a run can be reviewed
   /// and reversed as a unit rather than as scattered individual actions.
   /// Null off the agent path.
-  agentSessionId String?
-  createdAt  DateTime      @default(now())
+  agentSessionId    String?
+  /// Durable autonomous-task attribution. Kept as nullable scalar ids rather
+  /// than foreign keys so audit evidence survives identity/task retirement.
+  principalType     String?
+  principalId       String?
+  mandateId         String?
+  initiatedByUserId String?
+  taskId            String?
+  stepId            String?
+  deviceId          String?
+  createdAt         DateTime               @default(now())
 
-  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  user          User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  company       Company?               @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  companyScopes AuditLogCompanyScope[]
 
   @@index([entityType, entityId])
   @@index([userId])
@@ -2069,7 +3493,26 @@ model AuditLog {
   @@index([userId, createdAt])
   @@index([channel, createdAt])
   @@index([agentSessionId])
+  @@index([principalId, createdAt])
+  @@index([taskId, createdAt])
+  @@index([deviceId, createdAt])
+  @@index([scopeKind, createdAt])
   @@map("audit_logs")
+}
+
+/// Immutable company-id snapshots owned by an audit row. companyId deliberately
+/// has no Company FK: deleting a company must not erase or reclassify history.
+/// A database trigger permits INSERT only in the parent AuditLog's creation
+/// transaction, preventing a later append from rewriting historical scope.
+model AuditLogCompanyScope {
+  auditLogId String
+  companyId  String
+
+  auditLog AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Cascade)
+
+  @@id([auditLogId, companyId])
+  @@index([companyId, auditLogId])
+  @@map("audit_log_company_scopes")
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -2402,13 +3845,13 @@ model CashAccount {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
-  company              Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division             Division?             @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch               Branch?               @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  linkedBank           BankAccount?          @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
+  company              Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division             Division?                  @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch               Branch?                    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  linkedBank           BankAccount?               @relation(fields: [linkedBankAccountId], references: [id], onDelete: SetNull)
   expenses             Expense[]
   fuelShiftCollections FuelShiftCollection[]
-  salesOrders          SalesOrder[]          @relation("SalesOrderCashAccount")
+  salesOrders          SalesOrder[]               @relation("SalesOrderCashAccount")
   refunds              Refund[]
   customerPayments     CustomerPayment[]
   mobilePosPayments    MobilePosTerminalPayment[]
@@ -3232,17 +4675,17 @@ model Customer {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division         Division?         @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch           Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  createdBy        User?             @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy        User?             @relation("CustomerUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  salesOrders      SalesOrder[]
-  fuelCreditSales  FuelCreditSale[]
-  receivables      Receivable[]
-  creditNotes      CreditNote[]
-  refunds          Refund[]
-  customerPayments CustomerPayment[]
+  company                   Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division                  Division?           @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch                    Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdBy                 User?               @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy                 User?               @relation("CustomerUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  salesOrders               SalesOrder[]
+  fuelCreditSales           FuelCreditSale[]
+  receivables               Receivable[]
+  creditNotes               CreditNote[]
+  refunds                   Refund[]
+  customerPayments          CustomerPayment[]
   mobilePosGeneralTerminals MobilePosTerminal[] @relation("MobilePosTerminalGeneralCustomer")
 
   // Westsides (Milestone 6)
@@ -3370,7 +4813,6 @@ model UnitOfMeasure {
   priceListItems          PriceListItem[]
   productBatches          ProductBatch[]
   stockDamages            StockDamage[]
-  packageMovements        PackageMovement[]        @relation("PackageMovement_unit_fk")
   quotationLines          QuotationLine[]
   proformaLines           ProformaInvoiceLine[]
   deliveryNoteLines       DeliveryNoteLine[]
@@ -3694,66 +5136,66 @@ model StockAdjustmentLine {
 }
 
 model SalesOrder {
-  id                String             @id @default(uuid())
-  salesOrderNumber  String
-  companyId         String
-  divisionId        String?
-  branchId          String?
-  customerId        String?
-  customerName      String?
-  salesType         SalesType          @default(CASH_SALE)
-  orderDate         DateTime
-  dueDate           DateTime?
-  currency          CurrencyCode       @default(TZS)
-  subtotal          Decimal            @default(0) @db.Decimal(18, 2)
-  discountAmount    Decimal            @default(0) @db.Decimal(18, 2)
+  id                  String             @id @default(uuid())
+  salesOrderNumber    String
+  companyId           String
+  divisionId          String?
+  branchId            String?
+  customerId          String?
+  customerName        String?
+  salesType           SalesType          @default(CASH_SALE)
+  orderDate           DateTime
+  dueDate             DateTime?
+  currency            CurrencyCode       @default(TZS)
+  subtotal            Decimal            @default(0) @db.Decimal(18, 2)
+  discountAmount      Decimal            @default(0) @db.Decimal(18, 2)
   /// Order-level (document) discount applied on top of per-line discounts,
   /// entered as a flat TZS amount against the whole order.
-  documentDiscount  Decimal            @default(0) @db.Decimal(18, 2)
-  taxAmount         Decimal            @default(0) @db.Decimal(18, 2)
-  totalAmount       Decimal            @default(0) @db.Decimal(18, 2)
-  paidAmount        Decimal            @default(0) @db.Decimal(18, 2)
-  outstandingAmount Decimal            @default(0) @db.Decimal(18, 2)
-  status            SalesOrderStatus   @default(DRAFT)
-  paymentStatus     PaymentStatus      @default(UNPAID)
+  documentDiscount    Decimal            @default(0) @db.Decimal(18, 2)
+  taxAmount           Decimal            @default(0) @db.Decimal(18, 2)
+  totalAmount         Decimal            @default(0) @db.Decimal(18, 2)
+  paidAmount          Decimal            @default(0) @db.Decimal(18, 2)
+  outstandingAmount   Decimal            @default(0) @db.Decimal(18, 2)
+  status              SalesOrderStatus   @default(DRAFT)
+  paymentStatus       PaymentStatus      @default(UNPAID)
   /// Method of payment for this sale. CREDIT means a Receivable is created on
   /// confirm; the others credit the chosen `cashAccountId` immediately.
   /// Folded in from the retired POS module so a single SalesOrder can model
   /// both walk-in cash sales and traditional credit invoices.
-  paymentMethod     SalesPaymentMethod @default(CREDIT)
+  paymentMethod       SalesPaymentMethod @default(CREDIT)
   /// Optional human-readable reference (M-Pesa code, card slip number, etc.).
-  paymentReference  String?
+  paymentReference    String?
   /// FK to the cash/bank account credited on confirm for non-CREDIT payments.
   /// Required when paymentMethod ∈ {CASH, MOBILE_MONEY, BANK_CARD, BANK_TRANSFER}.
-  cashAccountId     String?
-  createdById       String
-  confirmedById     String?
-  confirmedAt       DateTime?
+  cashAccountId       String?
+  createdById         String
+  confirmedById       String?
+  confirmedAt         DateTime?
   /// Optional FK to the employee credited as the salesperson for this order.
   /// Used by the SalesCommission flow to attribute commission earnings.
-  salespersonId     String?
-  notes             String?
+  salespersonId       String?
+  notes               String?
   /// Client-supplied idempotency token for the atomic quick-sale path (Mobile
   /// POS). A retried checkout carrying the same key returns the original order
   /// instead of creating a duplicate. Unique per company; many NULLs allowed.
-  idempotencyKey    String?
+  idempotencyKey      String?
   /// The locked Mobile POS Lite terminal that recorded this sale, when applicable.
   mobilePosTerminalId String?
-  receivableId      String?
-  journalEntryId    String?
-  deletedAt         DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  receivableId        String?
+  journalEntryId      String?
+  deletedAt           DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
-  company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division    Division?    @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch      Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  createdBy   User         @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  confirmedBy User?        @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
-  receivable  Receivable?  @relation(fields: [receivableId], references: [id], onDelete: SetNull)
-  salesperson Employee?    @relation("SalesOrderSalesperson", fields: [salespersonId], references: [id], onDelete: SetNull)
-  cashAccount CashAccount? @relation("SalesOrderCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division          Division?          @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch            Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer          Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy         User               @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  confirmedBy       User?              @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  receivable        Receivable?        @relation(fields: [receivableId], references: [id], onDelete: SetNull)
+  salesperson       Employee?          @relation("SalesOrderSalesperson", fields: [salespersonId], references: [id], onDelete: SetNull)
+  cashAccount       CashAccount?       @relation("SalesOrderCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
   mobilePosTerminal MobilePosTerminal? @relation(fields: [mobilePosTerminalId], references: [id], onDelete: SetNull)
 
   lines           SalesOrderLine[]
@@ -3905,45 +5347,45 @@ model SalesOrderLine {
 }
 
 model PurchaseOrder {
-  id                  String              @id @default(uuid())
-  purchaseOrderNumber String
-  companyId           String
-  divisionId          String?
-  branchId            String?
-  supplierId          String?
-  supplierName        String?
-  purchaseType        PurchaseType        @default(STOCK_PURCHASE)
-  orderDate           DateTime
-  expectedDate        DateTime?
-  currency            CurrencyCode        @default(TZS)
-  subtotal            Decimal             @default(0) @db.Decimal(18, 2)
-  discountAmount      Decimal             @default(0) @db.Decimal(18, 2)
-  taxAmount           Decimal             @default(0) @db.Decimal(18, 2)
-  totalAmount         Decimal             @default(0) @db.Decimal(18, 2)
-  paidAmount          Decimal             @default(0) @db.Decimal(18, 2)
-  outstandingAmount   Decimal             @default(0) @db.Decimal(18, 2)
-  status              PurchaseOrderStatus @default(DRAFT)
-  paymentStatus       PaymentStatus       @default(UNPAID)
-  createdById         String
-  confirmedById       String?
-  confirmedAt         DateTime?
-  receivedById        String?
-  receivedAt          DateTime?
+  id                    String              @id @default(uuid())
+  purchaseOrderNumber   String
+  companyId             String
+  divisionId            String?
+  branchId              String?
+  supplierId            String?
+  supplierName          String?
+  purchaseType          PurchaseType        @default(STOCK_PURCHASE)
+  orderDate             DateTime
+  expectedDate          DateTime?
+  currency              CurrencyCode        @default(TZS)
+  subtotal              Decimal             @default(0) @db.Decimal(18, 2)
+  discountAmount        Decimal             @default(0) @db.Decimal(18, 2)
+  taxAmount             Decimal             @default(0) @db.Decimal(18, 2)
+  totalAmount           Decimal             @default(0) @db.Decimal(18, 2)
+  paidAmount            Decimal             @default(0) @db.Decimal(18, 2)
+  outstandingAmount     Decimal             @default(0) @db.Decimal(18, 2)
+  status                PurchaseOrderStatus @default(DRAFT)
+  paymentStatus         PaymentStatus       @default(UNPAID)
+  createdById           String
+  confirmedById         String?
+  confirmedAt           DateTime?
+  receivedById          String?
+  receivedAt            DateTime?
   supplierInvoiceNumber String?
   supplierInvoiceDate   DateTime?
-  notes               String?
+  notes                 String?
   /// Client-supplied idempotency token for the Mobile POS Lite purchase chain,
   /// stamped on the row immediately after create. Same reason the stock-count
   /// twin carries one: the unique index, not a best-effort read, is what stops
   /// two concurrent requests under one key from each driving their own order
   /// and receiving the same lorry twice. Unique per company; many NULLs allowed
   /// (every desktop-created purchase order leaves it NULL).
-  idempotencyKey      String?
-  payableId           String?
-  journalEntryId      String?
-  deletedAt           DateTime?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  idempotencyKey        String?
+  payableId             String?
+  journalEntryId        String?
+  deletedAt             DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
   company     Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division    Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -3954,9 +5396,9 @@ model PurchaseOrder {
   receivedBy  User?     @relation("PurchaseOrderReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
   payable     Payable?  @relation(fields: [payableId], references: [id], onDelete: SetNull)
 
-  lines          PurchaseOrderLine[]
-  supplierInvoices SupplierInvoice[] @relation("PurchaseOrderSupplierInvoices")
-  fuelDeliveries FuelDelivery[]
+  lines            PurchaseOrderLine[]
+  supplierInvoices SupplierInvoice[]   @relation("PurchaseOrderSupplierInvoices")
+  fuelDeliveries   FuelDelivery[]
 
   // Westsides (Milestone 6)
   productBatches ProductBatch[]
@@ -5039,7 +6481,6 @@ model PackageMovement {
   supplier          Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   returnablePackage ReturnablePackage? @relation(fields: [returnablePackageId], references: [id], onDelete: Restrict)
   createdBy         User               @relation("PackageMovementCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  unit              UnitOfMeasure?     @relation("PackageMovement_unit_fk", fields: [returnablePackageId], references: [id], onDelete: SetNull, map: "PackageMovement_unit_fk")
 
   @@unique([companyId, movementNumber])
   @@index([companyId])
@@ -14357,6 +15798,8 @@ enum BackgroundJobType {
   EMAIL_SEND
   SMS_SEND
   RENT_INVOICE_GENERATION
+  MSAIDIZI_TASK_STEP
+  MSAIDIZI_REASONING_CHECKPOINT
   CUSTOM
 }
 
@@ -14489,32 +15932,37 @@ enum LoadTestStatus {
 // ─── M15 Models ───────────────────────────────────────────────────────────────
 
 model BackgroundJob {
-  id             String                @id @default(uuid())
-  jobNumber      String                @unique
-  jobType        BackgroundJobType
-  queueName      String
-  companyId      String?
-  requestedById  String?
-  status         BackgroundJobStatus   @default(QUEUED)
-  priority       BackgroundJobPriority @default(NORMAL)
-  payload        Json?
-  result         Json?
-  attempts       Int                   @default(0)
-  maxAttempts    Int                   @default(3)
-  scheduledAt    DateTime?
-  startedAt      DateTime?
-  completedAt    DateTime?
-  failedAt       DateTime?
-  errorMessage   String?
-  correlationId  String?
-  idempotencyKey String?               @unique
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  id               String                @id @default(uuid())
+  jobNumber        String                @unique
+  jobType          BackgroundJobType
+  queueName        String
+  companyId        String?
+  requestedById    String?
+  status           BackgroundJobStatus   @default(QUEUED)
+  priority         BackgroundJobPriority @default(NORMAL)
+  payload          Json?
+  result           Json?
+  attempts         Int                   @default(0)
+  maxAttempts      Int                   @default(3)
+  scheduledAt      DateTime?
+  startedAt        DateTime?
+  /// Process-unique owner of the current RUNNING lease. Cleared when the lease settles.
+  leaseOwner       String?
+  /// Renewed by the owning worker while the handler is alive and at explicit checkpoints.
+  leaseHeartbeatAt DateTime?
+  completedAt      DateTime?
+  failedAt         DateTime?
+  errorMessage     String?
+  correlationId    String?
+  idempotencyKey   String?               @unique
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 
   company     Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   requestedBy User?    @relation("BackgroundJobRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
 
   @@index([queueName, status, priority, scheduledAt])
+  @@index([status, leaseHeartbeatAt])
   @@index([companyId, jobType, status, createdAt])
   @@index([correlationId])
   @@map("background_jobs")

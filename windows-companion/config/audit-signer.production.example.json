@@ -1,0 +1,16 @@
+{
+  "MsaidiziAuditSigner": {
+    "BrokerBaseUri": "https://msaidizi-broker.example.invalid:3443/api/v1/",
+    "ClientCertificateThumbprint": "REPLACE_WITH_LOCAL_MACHINE_TPM_CERT_THUMBPRINT",
+    "SignerKeyId": "REPLACE_WITH_PINNED_AUDIT_SIGNER_KEY_ID",
+    "HardwareKeyProvider": "Microsoft Platform Crypto Provider",
+    "PinnedBrokerCertificateSha256": "REPLACE_WITH_LOWERCASE_BROKER_CERT_SHA256",
+    "PinnedBrokerSpkiSha256": "REPLACE_WITH_LOWERCASE_BROKER_SPKI_SHA256",
+    "SupervisorRoot": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\audit-signer",
+    "JournalPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\audit-signer\\journal.jsonl",
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "MaxSegmentEvents": 256,
+    "CheckpointTtlSeconds": 300,
+    "PollIntervalSeconds": 10
+  }
+}

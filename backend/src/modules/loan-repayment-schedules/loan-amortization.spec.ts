@@ -73,9 +73,11 @@ describe('LoanRepaymentSchedulesService — repayment frequency', () => {
     periodicRate: number,
     n: number,
   ) => Array<{ principal: number; interest: number }>;
-  const frequencyProfile = (svc as any).frequencyProfile.bind(svc) as (
-    frequency: string,
-  ) => { periodsPerYear: number; monthsPerPeriod: number; advance: (d: Date, p: number) => Date };
+  const frequencyProfile = (svc as any).frequencyProfile.bind(svc) as (frequency: string) => {
+    periodsPerYear: number;
+    monthsPerPeriod: number;
+    advance: (d: Date, p: number) => Date;
+  };
   const computePeriodCount = (svc as any).computePeriodCount.bind(svc) as (
     start: Date,
     end: Date,
@@ -85,7 +87,10 @@ describe('LoanRepaymentSchedulesService — repayment frequency', () => {
   it('maps each real RepaymentFrequency enum value to the right cadence', () => {
     expect(frequencyProfile('MONTHLY')).toMatchObject({ periodsPerYear: 12, monthsPerPeriod: 1 });
     expect(frequencyProfile('QUARTERLY')).toMatchObject({ periodsPerYear: 4, monthsPerPeriod: 3 });
-    expect(frequencyProfile('SEMI_ANNUALLY')).toMatchObject({ periodsPerYear: 2, monthsPerPeriod: 6 });
+    expect(frequencyProfile('SEMI_ANNUALLY')).toMatchObject({
+      periodsPerYear: 2,
+      monthsPerPeriod: 6,
+    });
     expect(frequencyProfile('ANNUALLY')).toMatchObject({ periodsPerYear: 1, monthsPerPeriod: 12 });
   });
 
@@ -130,5 +135,85 @@ describe('LoanRepaymentSchedulesService — repayment frequency', () => {
     // First-period interest on 100k at 3% ≈ 3000; the old monthly (1%) path
     // would have produced ≈ 1000.
     expect(firstInterest).toBeGreaterThan(2500);
+  });
+});
+
+describe('LoanRepaymentSchedulesService — governed schedule generation', () => {
+  const loan = {
+    id: 'loan-1',
+    companyId: 'company-a',
+    principalAmount: 1000,
+    interestRate: 0,
+    disbursementDate: new Date('2026-01-01T00:00:00.000Z'),
+    maturityDate: new Date('2027-01-01T00:00:00.000Z'),
+    repaymentFrequency: 'BULLET',
+  };
+
+  function harness(scopeResult: Promise<void> = Promise.resolve()) {
+    const create = jest.fn().mockResolvedValue({ id: 'schedule-1' });
+    const tx = { loanRepaymentSchedule: { create } };
+    const prisma = {
+      loan: { findFirst: jest.fn().mockResolvedValue(loan) },
+      loanRepaymentSchedule: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(async (work: (transaction: typeof tx) => unknown) => work(tx)),
+    };
+    const auditLogs = { log: jest.fn().mockResolvedValue(undefined) };
+    const companyScope = { assertCanAccessCompany: jest.fn(() => scopeResult) };
+    const service = new LoanRepaymentSchedulesService(
+      prisma as any,
+      auditLogs as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      companyScope as any,
+    );
+    return { service, prisma, auditLogs, companyScope, create };
+  }
+
+  it('checks WRITE access to the parent loan company before reading or creating schedules', async () => {
+    const denied = Promise.reject(new Error('company denied'));
+    // Avoid reporting the intentionally rejected promise before the service awaits it.
+    denied.catch(() => undefined);
+    const { service, prisma, companyScope } = harness(denied);
+
+    await expect(service.generateForLoan(loan.id, { id: 'user-1' })).rejects.toThrow(
+      'company denied',
+    );
+
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      { id: 'user-1' },
+      loan.companyId,
+      'WRITE',
+    );
+    expect(prisma.loanRepaymentSchedule.count).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns every created schedule identity for governed effect binding and recovery', async () => {
+    const { service, auditLogs, create } = harness();
+
+    await expect(service.generateForLoan(loan.id, { id: 'user-1' })).resolves.toEqual({
+      installments: 1,
+      scheduleIds: ['schedule-1'],
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        companyId: loan.companyId,
+        loanDebtId: loan.id,
+        installmentNumber: 1,
+        repaymentScheduleNumber: 'LRS-loan-1-001',
+      }),
+    });
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'GENERATE',
+        entityType: 'LoanRepaymentSchedule',
+        entityId: loan.id,
+        userId: 'user-1',
+        companyId: loan.companyId,
+      }),
+    );
   });
 });

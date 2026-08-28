@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditSeverity, DataIsolationIssueStatus, Prisma } from '@prisma/client';
+import { AuditScopeKind, AuditSeverity, DataIsolationIssueStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -59,6 +59,8 @@ export class DataIsolationIssuesService {
       entityType: 'DataIsolationTestIssue',
       entityId: id,
       userId: user.id,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
       severity: AuditSeverity.MEDIUM,
     });
     return record;

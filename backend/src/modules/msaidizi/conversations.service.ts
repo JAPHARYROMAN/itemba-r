@@ -92,9 +92,18 @@ import {
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EncryptionService, companyWhereForUser } from '../../common/services';
+import {
+  EncryptionService,
+  PersistenceSecretGuard,
+  companyWhereForUser,
+} from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { redactSensitiveFields } from '../audit-logs/audit-logs.service';
+import {
+  containsPersistedSecret,
+  PERSISTED_SECRET_PLACEHOLDER,
+  redactPersistedSecrets,
+} from '../../common/utils/persistent-secret-redaction';
 import { ReversibilityTier, TIER_RANK } from '../../common/capabilities/reversibility';
 import { ModelMessage } from './model-client';
 import { MsaidiziConfig } from './msaidizi.config';
@@ -350,6 +359,7 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
     private readonly prisma: PrismaService,
     private readonly config: MsaidiziConfig,
     private readonly encryption: EncryptionService,
+    private readonly persistenceSecrets: PersistenceSecretGuard,
   ) {}
 
   // ─── Write path ─────────────────────────────────────────────────────────────
@@ -399,12 +409,16 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
       const counts = countCalls(result.events);
       const now = new Date();
 
-      // The transcript, redacted then encrypted. Redaction is applied HERE and
-      // not to `messages`: a red-tier POST /users would otherwise put a
-      // plaintext password in the transcript, which is exactly what this helper
-      // already exists to catch on the audit path. The resume state cannot be
-      // redacted — see `encodeResume`.
-      const eventsCipher = this.encryption.encrypt(JSON.stringify(redactEvents(result.events)));
+      // The transcript is redacted then encrypted. The resume state must remain
+      // byte-identical to the model conversation, so it is stored only when the
+      // persistence DLP detector finds no credential at all — see encodeResume.
+      const messagesContainSecret =
+        containsPersistedSecret(JSON.stringify(result.messages)) ||
+        this.persistenceSecrets.sanitizeJson(result.messages).redactionsApplied;
+      const durableEvents = this.persistenceSecrets.sanitizeJson(
+        redactEvents(result.events, messagesContainSecret),
+      ).value as MsaidiziEvent[];
+      const eventsCipher = this.encryption.encrypt(JSON.stringify(durableEvents));
       const resume = this.encodeResume(result.messages);
 
       const writes: Prisma.PrismaPromise<unknown>[] = [
@@ -1002,6 +1016,7 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
 
   private async startConversation(input: OpenTurnInput, sessionId: string): Promise<OpenedTurn> {
     const now = new Date();
+    const persistedPrompt = this.persistenceSecrets.sanitizeText(input.prompt).value;
 
     try {
       const conversation = await this.prisma.msaidiziConversation.create({
@@ -1009,14 +1024,14 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
           agentSessionId: sessionId,
           userId: input.user.id,
           companyId: input.user.companyId ?? null,
-          title: deriveTitle(input.prompt),
+          title: deriveTitle(persistedPrompt),
           turnCount: 1,
           lastTurnAt: now,
           expiresAt: new Date(now.getTime() + this.config.conversationRetentionDays * 86_400_000),
           turns: {
             create: {
               sequence: 1,
-              prompt: input.prompt,
+              prompt: persistedPrompt,
               events: this.encryption.encrypt('[]'),
               reason: 'running',
               procedureId: input.procedureId ?? null,
@@ -1327,6 +1342,7 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
   ): Promise<OpenedTurn> {
     const conversationId = conversation.id;
     const priorTier = asTier(conversation.highestTier);
+    const persistedPrompt = this.persistenceSecrets.sanitizeText(input.prompt).value;
 
     try {
       const { turnId, sequence } = await this.prisma.$transaction(async (tx) => {
@@ -1343,7 +1359,7 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
           data: {
             conversationId,
             sequence: updated.turnCount,
-            prompt: input.prompt,
+            prompt: persistedPrompt,
             events: this.encryption.encrypt('[]'),
             reason: 'running',
             procedureId: input.procedureId ?? null,
@@ -1411,12 +1427,11 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
    * so no numeric or key-order normalisation can touch a customer balance on the
    * way through.
    *
-   * Nothing here is redacted, and that is not an oversight. The API requires the
-   * content echoed back unchanged; an altered tool result is a different
-   * conversation. (It also becomes cryptographically impossible the moment
-   * thinking-block signatures stop being stripped, since a signature covers the
-   * content you would be altering.) The protection is the encryption, the
-   * 24-hour clock, and the author-only read gate — not selective rewriting.
+   * Nothing here is redacted because the API requires content to be echoed back
+   * unchanged. Instead, a payload containing a recognisable credential is not
+   * stored at all. The live run still receives the original bytes; only durable
+   * resume is disabled for that conversation turn. A supervisor-owned secret
+   * reference is the long-term way to preserve resumability without persistence.
    */
   private encodeResume(messages: ModelMessage[]): {
     ciphertext: string | null;
@@ -1424,6 +1439,12 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
     stored: boolean;
   } {
     const plaintext = JSON.stringify(messages);
+    if (
+      containsPersistedSecret(plaintext) ||
+      this.persistenceSecrets.sanitizeJson(messages).redactionsApplied
+    ) {
+      return { ciphertext: null, bytes: 0, stored: false };
+    }
     const bytes = Buffer.byteLength(plaintext, 'utf8');
     if (bytes > this.config.resumeMaxBytes) {
       // Store nothing rather than truncating. Dropping arbitrary blocks breaks
@@ -1679,10 +1700,53 @@ function deriveTitle(prompt: string): string {
  * Returns a new array; the caller's events — already sent to the client — are
  * untouched.
  */
-export function redactEvents(events: MsaidiziEvent[]): MsaidiziEvent[] {
+export function redactEvents(
+  events: MsaidiziEvent[],
+  suppressModelOutput = false,
+): MsaidiziEvent[] {
   return events.map((event) => {
-    if (event.type === 'tool_call' || event.type === 'confirmation_required') {
-      return { ...event, args: redactSensitiveFields(event.args ?? {}) };
+    if (event.type === 'text') {
+      return {
+        ...event,
+        text: suppressModelOutput
+          ? PERSISTED_SECRET_PLACEHOLDER
+          : redactPersistedSecrets(event.text),
+      };
+    }
+    if (event.type === 'tool_call') {
+      return {
+        ...event,
+        args: suppressModelOutput
+          ? { redacted: PERSISTED_SECRET_PLACEHOLDER }
+          : redactSensitiveFields(event.args ?? {}),
+      };
+    }
+    if (event.type === 'confirmation_required') {
+      return {
+        ...event,
+        description: suppressModelOutput
+          ? PERSISTED_SECRET_PLACEHOLDER
+          : redactPersistedSecrets(event.description),
+        args: suppressModelOutput
+          ? { redacted: PERSISTED_SECRET_PLACEHOLDER }
+          : redactSensitiveFields(event.args ?? {}),
+      };
+    }
+    if (event.type === 'tool_result' && event.error) {
+      return {
+        ...event,
+        error: suppressModelOutput
+          ? PERSISTED_SECRET_PLACEHOLDER
+          : redactPersistedSecrets(event.error),
+      };
+    }
+    if (event.type === 'error') {
+      return {
+        ...event,
+        message: suppressModelOutput
+          ? PERSISTED_SECRET_PLACEHOLDER
+          : redactPersistedSecrets(event.message),
+      };
     }
     return event;
   });

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itemba.local/schemas/msaidizi-crud-evidence-release-v1.json",
+  "title": "Msaidizi CRUD evidence release binding v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "issuedAt",
+    "source",
+    "backendImage",
+    "evidence",
+    "pipeline",
+    "payloadDigest",
+    "signature"
+  ],
+  "properties": {
+    "contract": { "const": "msaidizi-crud-evidence-release/v1" },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitSha", "gitTreeDigest", "trackedSourceSha256", "trackedFileCount"],
+      "properties": {
+        "commitSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+        "gitTreeDigest": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+        "trackedSourceSha256": { "$ref": "#/$defs/sha256" },
+        "trackedFileCount": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "backendImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "repository", "digest"],
+      "properties": {
+        "reference": { "type": "string", "pattern": "^[^\\s@]+@sha256:[a-f0-9]{64}$" },
+        "repository": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifactSha256",
+        "payloadDigest",
+        "signatureKeyId",
+        "runId",
+        "generatedAt",
+        "expiresAt",
+        "manifestDigest",
+        "applicationBuildDigest",
+        "prismaSchemaMigrationDigest",
+        "executedCaseCount"
+      ],
+      "properties": {
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "payloadDigest": { "$ref": "#/$defs/sha256" },
+        "signatureKeyId": { "$ref": "#/$defs/keyId" },
+        "runId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "manifestDigest": { "$ref": "#/$defs/sha256" },
+        "applicationBuildDigest": { "$ref": "#/$defs/sha256" },
+        "prismaSchemaMigrationDigest": { "$ref": "#/$defs/sha256" },
+        "executedCaseCount": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "workflow", "runId", "runAttempt"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "workflow": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "runId": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+        "runAttempt": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" }
+      }
+    },
+    "payloadDigest": { "$ref": "#/$defs/sha256" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "keyId", "value"],
+      "properties": {
+        "algorithm": { "const": "ES256" },
+        "keyId": { "$ref": "#/$defs/keyId" },
+        "value": {
+          "type": "string",
+          "minLength": 88,
+          "maxLength": 88,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" }
+  }
+}

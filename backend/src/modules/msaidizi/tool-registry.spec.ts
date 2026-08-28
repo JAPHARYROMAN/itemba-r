@@ -1,8 +1,15 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { Capability } from '../../common/capabilities/capability-manifest';
+import { Capability, extractCapabilities } from '../../common/capabilities/capability-manifest';
+import { CustomersController } from '../customers/customers.controller';
+import { ExpensesController } from '../expenses/expenses.controller';
+import { InventoryBalancesController } from '../inventory-balances/inventory-balances.controller';
+import { PayablesController } from '../payables/payables.controller';
+import { ReceivablesController } from '../receivables/receivables.controller';
+import { SuppliersController } from '../suppliers/suppliers.controller';
 import { narrowCapabilities, tokenize } from './domain-filter';
 import {
+  BENCHMARK_FAST_PATH_CAPABILITY_IDS,
   buildRegistry,
   buildSearchToolSet,
   buildToolDefinition,
@@ -55,8 +62,16 @@ describe('tool schemas', () => {
       'Customers_statements',
     );
 
-    expect(tool.input_schema.required).toEqual(['id']);
-    expect(Object.keys(tool.input_schema.properties)).toEqual(['id', 'dateFrom']);
+    expect(tool.input_schema.required).toEqual(['path']);
+    expect(Object.keys(tool.input_schema.properties)).toEqual(['path', 'query']);
+    expect(tool.input_schema.properties.path).toMatchObject({
+      required: ['id'],
+      additionalProperties: false,
+    });
+    expect(tool.input_schema.properties.query).toMatchObject({
+      properties: { dateFrom: { type: 'string' } },
+      additionalProperties: false,
+    });
   });
 
   it('closes the schema when the handler enumerates its parameters', () => {
@@ -74,8 +89,50 @@ describe('tool schemas', () => {
       capability({ params: { path: [], query: [], freeFormQuery: true, hasBody: false } }),
       'X',
     );
-    expect(tool.input_schema.additionalProperties).toBe(true);
-    expect(tool.description).toMatch(/do not invent parameter names/i);
+    expect(tool.input_schema.additionalProperties).toBe(false);
+    expect(tool.input_schema.properties.query).toMatchObject({ additionalProperties: true });
+    expect(tool.description).toMatch(/do not invent parameter/i);
+  });
+
+  it('derives a strict body contract from the controller DTO metadata', () => {
+    const create = extractCapabilities([ExpensesController]).find(
+      (entry) => entry.id === 'ExpensesController.create',
+    );
+    expect(create).toBeDefined();
+
+    const tool = buildToolDefinition(create!, 'Expenses_create');
+    const body = tool.input_schema.properties.body as {
+      properties: Record<string, Record<string, unknown>>;
+      required: string[];
+      additionalProperties: boolean;
+    };
+
+    expect(tool.input_schema.required).toEqual(['body']);
+    expect(body.additionalProperties).toBe(false);
+    expect(body.required).toEqual(
+      expect.arrayContaining(['companyId', 'expenseCategoryId', 'amount', 'expenseDate']),
+    );
+    expect(body.properties.amount).toMatchObject({ type: 'number' });
+    expect(body.properties.currency.enum).toEqual(expect.arrayContaining(['TZS', 'USD']));
+    expect(body.properties.vendorName).toMatchObject({ type: 'string' });
+  });
+
+  it('derives and closes typed whole-query DTOs instead of treating them as free form', () => {
+    const findAll = extractCapabilities([ExpensesController]).find(
+      (entry) => entry.id === 'ExpensesController.findAll',
+    );
+    expect(findAll).toBeDefined();
+
+    const tool = buildToolDefinition(findAll!, 'Expenses_findAll');
+    const query = tool.input_schema.properties.query as {
+      properties: Record<string, Record<string, unknown>>;
+      additionalProperties: boolean;
+    };
+
+    expect(query.additionalProperties).toBe(false);
+    expect(query.properties.page).toMatchObject({ type: 'integer', minimum: 1 });
+    expect(query.properties.limit).toMatchObject({ type: 'integer', minimum: 1, maximum: 5000 });
+    expect(tool.input_schema.required).toBeUndefined();
   });
 
   it('warns the model about tiers that change or destroy data', () => {
@@ -278,5 +335,73 @@ describe('tool search', () => {
 
   it('defaults to a small entry set', () => {
     expect(ENTRY_POINT_BUDGET).toBeLessThanOrEqual(20);
+  });
+
+  describe('2026-08-20 benchmark fast path', () => {
+    const benchmarkCases = [
+      ['How many customers do we have on file?', 'CustomersController.findAll'],
+      ['List our suppliers.', 'SuppliersController.findAll'],
+      ['Who owes us money?', 'ReceivablesController.findAll'],
+      ['What do we owe our suppliers?', 'PayablesController.findAll'],
+      ['What did we spend money on recently?', 'ExpensesController.findAll'],
+      ['Which items are running low and need reordering?', 'InventoryBalancesController.findAll'],
+      ['Are there any bills we have not settled yet?', 'PayablesController.findAll'],
+    ] as const;
+
+    const benchmarkManifest = BENCHMARK_FAST_PATH_CAPABILITY_IDS.map((id) => {
+      const controller = id.split('.')[0];
+      const resource = controller.replace(/Controller$/, '');
+      return capability({
+        id,
+        controller,
+        handler: 'findAll',
+        path: resource.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase(),
+        permissions: [`${resource.toLowerCase()}.view`],
+      });
+    });
+
+    it('names capabilities that still exist in the routed controllers', () => {
+      const actualIds = new Set(
+        extractCapabilities([
+          CustomersController,
+          SuppliersController,
+          ReceivablesController,
+          PayablesController,
+          ExpensesController,
+          InventoryBalancesController,
+        ]).map((entry) => entry.id),
+      );
+
+      expect(BENCHMARK_FAST_PATH_CAPABILITY_IDS.every((id) => actualIds.has(id))).toBe(true);
+    });
+
+    it.each(benchmarkCases)('%s keeps %s resident', (_prompt, expectedId) => {
+      const permissions = benchmarkManifest.flatMap((entry) => entry.permissions);
+      const permitted = buildRegistry(benchmarkManifest, permissions, ['green']);
+      const selected = selectEntryPoints(permitted).map((entry) => entry.capability.id);
+
+      expect(selected).toContain(expectedId);
+    });
+
+    it('does not use the measured list to bypass permission filtering', () => {
+      const permitted = buildRegistry(benchmarkManifest, ['expenses.view'], ['green']);
+      const selected = selectEntryPoints(permitted).map((entry) => entry.capability.id);
+
+      expect(selected).toEqual(['ExpensesController.findAll']);
+      expect(selected).not.toContain('PayablesController.findAll');
+    });
+
+    it('prioritizes measured reads ahead of generic shallow routes when the budget is tight', () => {
+      const generic = capability({
+        id: 'AController.findAll',
+        controller: 'AController',
+        path: 'a',
+        permissions: ['a.view'],
+      });
+      const permissions = [...benchmarkManifest.flatMap((entry) => entry.permissions), 'a.view'];
+      const permitted = buildRegistry([...benchmarkManifest, generic], permissions, ['green']);
+
+      expect(selectEntryPoints(permitted, 1)[0].capability.id).toBe('CustomersController.findAll');
+    });
   });
 });

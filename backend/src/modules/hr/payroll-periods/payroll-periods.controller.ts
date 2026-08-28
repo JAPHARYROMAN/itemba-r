@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { CompanyStatusPageLimitQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -14,7 +15,7 @@ export class PayrollPeriodsController {
 
   @Get()
   @RequirePermissions('payroll.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: CompanyStatusPageLimitQueryDto) {
     return this.service.findAll(user, query);
   }
 
@@ -32,7 +33,11 @@ export class PayrollPeriodsController {
 
   @Put(':id')
   @RequirePermissions('payroll.manage')
-  update(@Param('id') id: string, @Body() dto: UpdatePayrollPeriodDto, @CurrentUser() user: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePayrollPeriodDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user);
   }
 

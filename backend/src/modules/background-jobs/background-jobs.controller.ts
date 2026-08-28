@@ -1,7 +1,9 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
+import { BackgroundJobsQueryDto, CompanyQueryDto } from '../../common/dto/resource-query.dto';
 import { BackgroundJobsService } from './background-jobs.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { EnqueueBackgroundJobDto } from './dto/enqueue-background-job.dto';
 
 @Controller('background-jobs')
 export class BackgroundJobsController {
@@ -9,13 +11,13 @@ export class BackgroundJobsController {
 
   @Get('stats')
   @RequirePermissions('background_jobs.view')
-  getStats(@CurrentUser() user: AuthUser, @Query() query: any) {
+  getStats(@CurrentUser() user: AuthUser, @Query() query: CompanyQueryDto) {
     return this.service.getStats(user, query);
   }
 
   @Get()
   @RequirePermissions('background_jobs.view')
-  findAll(@Query() query: any, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: BackgroundJobsQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
@@ -27,7 +29,7 @@ export class BackgroundJobsController {
 
   @Post()
   @RequirePermissions('background_jobs.manage')
-  enqueue(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  enqueue(@Body() dto: EnqueueBackgroundJobDto, @CurrentUser() user: AuthUser) {
     return this.service.enqueue(dto, user);
   }
 

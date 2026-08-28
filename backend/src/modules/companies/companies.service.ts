@@ -255,11 +255,20 @@ export class CompaniesService {
       incorporationDate: dto.incorporationDate ? new Date(dto.incorporationDate) : undefined,
       authorizedCapital: dto.authorizedCapital ? parseFloat(dto.authorizedCapital) : undefined,
     };
-    return this.prisma.companyProfile.upsert({
+    const profile = await this.prisma.companyProfile.upsert({
       where: { companyId },
       create: { companyId, ...data },
       update: data,
     });
+    await this.auditLogs.log({
+      action: 'LEGAL_PROFILE_UPDATE',
+      entityType: 'CompanyProfile',
+      entityId: profile.id,
+      userId: user.id,
+      companyId,
+      newValue: profile as unknown as Record<string, unknown>,
+    });
+    return profile;
   }
 
   private async assertCanAdministerRegistryCompany(user: AuthUser, companyId: string) {

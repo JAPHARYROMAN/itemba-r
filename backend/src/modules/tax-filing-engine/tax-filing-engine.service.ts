@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 /**
  * TaxFilingEngineService — Sprint C3.
@@ -39,6 +40,7 @@ export class TaxFilingEngineService {
     private readonly prisma: PrismaService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   /** Compute and persist a draft TaxReturn for the given filing period. */
@@ -89,6 +91,21 @@ export class TaxFilingEngineService {
             taxTypeId: figures.taxTypeId,
           },
         });
+
+    await this.auditLogs.log({
+      action: existing ? 'UPDATE' : 'CREATE',
+      entityType: 'TaxReturn',
+      entityId: saved.id,
+      userId: user.id,
+      companyId: figures.companyId,
+      ...(existing ? { oldValue: existing as unknown as Record<string, unknown> } : {}),
+      newValue: saved as unknown as Record<string, unknown>,
+      metadata: {
+        source: 'TaxFilingEngine',
+        taxFilingPeriodId: periodId,
+        taxTypeId: figures.taxTypeId,
+      },
+    });
 
     return { ...figures, taxReturnId: saved.id, taxReturnNumber: saved.taxReturnNumber };
   }

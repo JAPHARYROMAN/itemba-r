@@ -81,6 +81,7 @@ export class AccountingLocksService {
       entityType: 'AccountingLock',
       entityId: id,
       userId: user.id,
+      companyId: existing.companyId,
     });
     return updated;
   }

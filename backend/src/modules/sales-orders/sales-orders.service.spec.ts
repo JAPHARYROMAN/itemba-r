@@ -1,5 +1,5 @@
 import { SalesOrdersService } from './sales-orders.service';
-import { Prisma } from '@prisma/client';
+import { AccessLevel, Prisma } from '@prisma/client';
 
 function persistedOrder(overrides: Record<string, unknown> = {}) {
   return {
@@ -107,7 +107,8 @@ function makeService() {
     },
     cashAccount: {
       findFirst: jest.fn(),
-      findMany: jest.fn(),
+      findMany: jest.fn(async () => []),
+      create: jest.fn(),
       update: jest.fn(),
     },
     creditNote: {
@@ -162,7 +163,7 @@ function makeService() {
     profit,
   );
 
-  return { service, prisma };
+  return { service, prisma, auditLogs, companyScope };
 }
 
 const user = { id: 'user-1', permissions: ['sales.create'] } as any;
@@ -193,6 +194,95 @@ function createDto(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
+describe('SalesOrdersService receipt-account reads', () => {
+  it('returns an empty result without provisioning or reactivating an account', async () => {
+    const { service, prisma, auditLogs } = makeService();
+
+    const result = await service.findReceiptAccounts(
+      {
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        paymentMethod: 'CASH',
+      },
+      posOnlyUser,
+    );
+
+    expect(result).toEqual([]);
+    expect(prisma.cashAccount.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          deletedAt: null,
+          isActive: true,
+          accountType: { in: ['CASH_ON_HAND', 'PETTY_CASH'] },
+        }),
+      }),
+    );
+    expect(prisma.branch.findFirst).not.toHaveBeenCalled();
+    expect(prisma.cashAccount.findFirst).not.toHaveBeenCalled();
+    expect(prisma.cashAccount.create).not.toHaveBeenCalled();
+    expect(prisma.cashAccount.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+
+  it('enforces company scope and returns only the exact requested branch/division receipt account', async () => {
+    const { service, prisma, companyScope } = makeService();
+    const matching = {
+      id: 'receipt-account-a',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountName: 'Exact till',
+      accountType: 'CASH_ON_HAND',
+    };
+    prisma.cashAccount.findMany.mockResolvedValue([
+      matching,
+      {
+        ...matching,
+        id: 'wrong-branch',
+        branchId: 'branch-2',
+        accountName: 'Other till',
+      },
+      {
+        ...matching,
+        id: 'wrong-division',
+        divisionId: 'division-2',
+        accountName: 'Other division till',
+      },
+    ]);
+
+    const result = await service.findReceiptAccounts(
+      {
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        paymentMethod: 'CASH',
+        limit: 20,
+      },
+      posOnlyUser,
+    );
+
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      posOnlyUser,
+      'company-1',
+      AccessLevel.READ,
+    );
+    expect(prisma.cashAccount.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          deletedAt: null,
+          isActive: true,
+          accountType: { in: ['CASH_ON_HAND', 'PETTY_CASH'] },
+        }),
+      }),
+    );
+    expect(result).toEqual([matching]);
+  });
+});
+
 describe('SalesOrdersService payment normalization', () => {
   it('does not allow a CASH_SALE to be created as a credit receivable', async () => {
     const { service } = makeService();
@@ -222,6 +312,31 @@ describe('SalesOrdersService payment normalization', () => {
         }),
       }),
     );
+  });
+
+  it('normalizes a legacy CASH_SALE/CREDIT row during an unrelated draft update', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({ status: 'DRAFT', paymentMethod: 'CREDIT' }),
+    );
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+
+    await service.update('so-1', { notes: 'Updated notes' }, user);
+
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith({
+      where: { id: 'so-1' },
+      data: expect.objectContaining({
+        notes: 'Updated notes',
+        paymentMethod: 'CASH',
+        cashAccountId: 'cash-account-1',
+      }),
+    });
   });
 });
 

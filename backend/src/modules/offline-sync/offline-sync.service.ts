@@ -1,5 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { AccessLevel, AuditSeverity, OfflineSyncBatchStatus, OfflineSyncDirection, OfflineSyncRecordStatus, Prisma } from '@prisma/client';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  AccessLevel,
+  AuditScopeKind,
+  AuditSeverity,
+  OfflineSyncBatchStatus,
+  OfflineSyncDirection,
+  OfflineSyncRecordStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -28,7 +36,12 @@ export class OfflineSyncService {
     if (companyId) {
       await this.companyScope.assertCanAccessCompany(user, companyId);
       where.companyId = companyId;
-    } else if (accessibleIds !== null) {
+    } else if (this.companyScope.isGroupScoped(user)) {
+      where.OR = [
+        ...(accessibleIds.length > 0 ? [{ companyId: { in: accessibleIds } }] : []),
+        { companyId: null },
+      ];
+    } else {
       where.companyId = { in: accessibleIds };
     }
     if (userId) where.userId = userId;
@@ -57,53 +70,71 @@ export class OfflineSyncService {
   }
 
   async createBatch(dto: CreateSyncBatchDto, user: AuthUser) {
-    await this.companyScope.assertCanAccessCompany(user, dto.companyId);
+    const companyId = dto.companyId ?? null;
+    await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
     const userId = user.id;
     const existing = await this.prisma.offlineSyncBatch.findFirst({
       where: { clientBatchId: dto.clientBatchId },
     });
-    if (existing) throw new BadRequestException(`Batch with clientBatchId "${dto.clientBatchId}" already exists`);
+    if (existing)
+      throw new BadRequestException(
+        `Batch with clientBatchId "${dto.clientBatchId}" already exists`,
+      );
 
     const batchNumber = `SYNC-${Date.now().toString(36).toUpperCase()}`;
 
-    const batch = await this.prisma.offlineSyncBatch.create({
-      data: {
-        batchNumber,
-        clientBatchId: dto.clientBatchId,
-        userId,
-        deviceId: dto.deviceId,
-        companyId: dto.companyId,
-        syncDirection: dto.syncDirection ?? OfflineSyncDirection.UPLOAD,
-        status: OfflineSyncBatchStatus.RECEIVED,
-        recordCount: dto.records.length,
-        records: {
-          create: dto.records.map((r) => ({
-            clientRecordId: r.clientRecordId,
-            entityType: r.entityType,
-            operation: r.operation,
-            payload: r.payload as any,
-            clientUpdatedAt: r.clientUpdatedAt ? new Date(r.clientUpdatedAt) : undefined,
-            status: OfflineSyncRecordStatus.PENDING,
-          })),
+    const batch = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.offlineSyncBatch.create({
+        data: {
+          batchNumber,
+          clientBatchId: dto.clientBatchId,
+          userId,
+          deviceId: dto.deviceId,
+          companyId,
+          syncDirection: dto.syncDirection ?? OfflineSyncDirection.UPLOAD,
+          status: OfflineSyncBatchStatus.RECEIVED,
+          recordCount: dto.records.length,
+          records: {
+            create: dto.records.map((r) => ({
+              clientRecordId: r.clientRecordId,
+              entityType: r.entityType,
+              operation: r.operation,
+              payload: r.payload as any,
+              clientUpdatedAt: r.clientUpdatedAt ? new Date(r.clientUpdatedAt) : undefined,
+              status: OfflineSyncRecordStatus.PENDING,
+            })),
+          },
         },
-      },
-      include: { records: { select: { id: true, clientRecordId: true, entityType: true, operation: true, status: true } } },
-    });
+        include: {
+          records: {
+            select: {
+              id: true,
+              clientRecordId: true,
+              entityType: true,
+              operation: true,
+              status: true,
+            },
+          },
+        },
+      });
 
-    await this.auditLogs.log({
-      action: 'SYNC_BATCH_CREATED',
-      entityType: 'OfflineSyncBatch',
-      entityId: batch.id,
-      userId,
-      companyId: dto.companyId,
-      severity: AuditSeverity.LOW,
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'SYNC_BATCH_CREATED',
+        entityType: 'OfflineSyncBatch',
+        entityId: created.id,
+        userId,
+        companyId,
+        ...(companyId === null ? { scopeKind: AuditScopeKind.GROUP, companyScopeIds: [] } : {}),
+        severity: AuditSeverity.LOW,
+      });
+      return created;
     });
 
     return batch;
   }
 
-  async findCheckpoints(userId: string, deviceId?: string) {
-    const where: any = { userId };
+  async findCheckpoints(user: AuthUser, deviceId?: string) {
+    const where: any = { userId: user.id };
     if (deviceId) where.deviceId = deviceId;
     return this.prisma.syncCheckpoint.findMany({ where });
   }
@@ -123,28 +154,38 @@ export class OfflineSyncService {
       where: { userId, deviceId: dto.deviceId ?? null, entityType: dto.entityType },
     });
 
-    if (existing) {
-      return this.prisma.syncCheckpoint.update({
-        where: { id: existing.id },
-        data: {
-          lastSyncAt: new Date(dto.lastSyncAt),
-          lastServerCursor: dto.lastServerCursor,
-          metadata: dto.metadata as any,
-        },
-      });
-    }
+    const checkpoint = existing
+      ? await this.prisma.syncCheckpoint.update({
+          where: { id: existing.id },
+          data: {
+            lastSyncAt: new Date(dto.lastSyncAt),
+            lastServerCursor: dto.lastServerCursor,
+            metadata: dto.metadata as any,
+          },
+        })
+      : await this.prisma.syncCheckpoint.create({
+          data: {
+            userId,
+            deviceId: dto.deviceId,
+            companyId: dto.companyId,
+            entityType: dto.entityType,
+            lastSyncAt: new Date(dto.lastSyncAt),
+            lastServerCursor: dto.lastServerCursor,
+            metadata: dto.metadata as any,
+          },
+        });
 
-    return this.prisma.syncCheckpoint.create({
-      data: {
-        userId,
-        deviceId: dto.deviceId,
-        companyId: dto.companyId,
-        entityType: dto.entityType,
-        lastSyncAt: new Date(dto.lastSyncAt),
-        lastServerCursor: dto.lastServerCursor,
-        metadata: dto.metadata as any,
-      },
+    await this.auditLogs.log({
+      action: 'SYNC_CHECKPOINT_UPSERTED',
+      entityType: 'SyncCheckpoint',
+      entityId: checkpoint.id,
+      userId,
+      companyId: checkpoint.companyId ?? undefined,
+      oldValue: existing ? (existing as unknown as Record<string, unknown>) : undefined,
+      newValue: checkpoint as unknown as Record<string, unknown>,
+      severity: AuditSeverity.LOW,
     });
+    return checkpoint;
   }
 
   async findConflicts(query: QuerySyncConflictDto, user: AuthUser) {

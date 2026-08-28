@@ -14,6 +14,7 @@ import { UpdateIntegrationConnectionDto } from './dto/update-integration-connect
 import { QueryIntegrationConnectionDto } from './dto/query-integration-connection.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 @Controller('integration-connections')
 export class IntegrationConnectionsController {
@@ -54,6 +55,7 @@ export class IntegrationConnectionsController {
   }
 
   @Post(':id/test')
+  @AgentExcluded('external_egress_not_represented')
   @RequirePermissions('integration_connections.test')
   test(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.testConnection(id, user);

@@ -4,27 +4,27 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class StockAdjustmentLineDto {
   @IsNotEmpty() @IsString() productId!: string;
-  @ValidateIf((line) => line.systemQty === undefined)
-  @IsNotEmpty()
+  // Both canonical and legacy names remain typed in the closed DTO envelope.
+  // The service's normalizeAdjustmentLine enforces the cross-field rule that
+  // one value from each pair is present and finite; class-validator cannot
+  // express that JSON-schema union without downgrading the whole body to
+  // `partial` discovery quality.
+  @IsOptional()
   @IsNumber()
   systemQuantity?: number;
-  @ValidateIf((line) => line.countedQty === undefined)
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   countedQuantity?: number;
-  @ValidateIf((line) => line.systemQuantity === undefined)
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   systemQty?: number;
-  @ValidateIf((line) => line.countedQuantity === undefined)
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   countedQty?: number;
   @IsNotEmpty() @IsString() unitId!: string;

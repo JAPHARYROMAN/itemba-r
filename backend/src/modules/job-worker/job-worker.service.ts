@@ -3,16 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EmailAttachment, EmailService } from '@common/services/email.service';
+import { EmailAttachment, EmailService } from '../../common/services/email.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ScheduledReportsService } from '../scheduled-reports/scheduled-reports.service';
 import { computeNextBackupRunAt } from './backup-schedule';
-import { JobContext, JobHandlerRegistry } from './job-handler.registry';
+import { JobContext, JobHandlerRegistry, JobLeaseEndedError } from './job-handler.registry';
 
 const POLL_INTERVAL_MS = 2_000; // baseline poll cadence
 const POLL_BATCH = 5; // jobs leased per tick
 const DEFAULT_STALE_AFTER_MS = 30 * 60_000; // running jobs older than this are reclaimed
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const STALE_RECOVERY_BATCH = 100;
 const DEFAULT_CANDIDATE_MULTIPLIER = 10;
 
@@ -50,7 +51,8 @@ const DEFAULT_AUTOMATION_BATCH = 25;
 @Injectable()
 export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobWorkerService.name);
-  private readonly workerId = `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  /** Stable for this worker instance and collision-resistant across processes/restarts. */
+  private readonly workerId = `worker-${process.pid}-${randomUUID()}`;
 
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -175,11 +177,20 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
    */
   private async recoverStale(): Promise<number> {
     const cutoff = new Date(Date.now() - this.staleAfterMs());
-    const staleJobs = await this.prisma.backgroundJob.findMany({
-      where: { status: 'RUNNING', startedAt: { lt: cutoff } },
+    const staleWhere: Prisma.BackgroundJobWhereInput & BackgroundJobLeaseWhere = {
+      status: 'RUNNING',
+      // `startedAt` is retained only for rows leased before this migration.
+      // Every new lease has a heartbeat and is recovered by that clock.
+      OR: [
+        { leaseHeartbeatAt: { lt: cutoff } },
+        { leaseHeartbeatAt: null, startedAt: { lt: cutoff } },
+      ],
+    };
+    const staleJobs = (await this.prisma.backgroundJob.findMany({
+      where: staleWhere,
       orderBy: { startedAt: 'asc' },
       take: STALE_RECOVERY_BATCH,
-    });
+    })) as unknown as StaleLeasedJob[];
     if (staleJobs.length === 0) return 0;
 
     const queueNames = Array.from(new Set(staleJobs.map((job) => job.queueName)));
@@ -190,32 +201,47 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     const configByQueue = new Map(configs.map((config) => [config.queueName, config]));
     const message = 'Worker lease expired before completion';
 
+    let recovered = 0;
     for (const job of staleJobs) {
       const queueConfig = configByQueue.get(job.queueName);
       const nextAttempts = job.attempts + 1;
       const maxAttempts = this.maxAttemptsFor(job, queueConfig);
       const isFinal = nextAttempts >= maxAttempts;
-      await this.prisma.backgroundJob.update({
-        where: { id: job.id },
-        data: {
-          status: isFinal ? 'DEAD_LETTER' : 'RETRYING',
-          attempts: nextAttempts,
-          failedAt: new Date(),
-          startedAt: null,
-          scheduledAt: isFinal
-            ? null
-            : new Date(
-                Date.now() + this.retryBackoffMs(nextAttempts, queueConfig?.retryBackoffSeconds),
-              ),
-          errorMessage: message,
-        },
+      const where: Prisma.BackgroundJobWhereInput & BackgroundJobLeaseWhere = {
+        id: job.id,
+        status: 'RUNNING',
+        leaseOwner: job.leaseOwner,
+        leaseHeartbeatAt: job.leaseHeartbeatAt,
+        // A legacy null/null lease has no heartbeat to compare, so bind its
+        // original start time as the final recovery CAS component.
+        ...(job.leaseHeartbeatAt === null && { startedAt: job.startedAt }),
+      };
+      const data: Prisma.BackgroundJobUpdateManyMutationInput & BackgroundJobLeaseData = {
+        status: isFinal ? 'DEAD_LETTER' : 'RETRYING',
+        attempts: nextAttempts,
+        failedAt: new Date(),
+        startedAt: null,
+        leaseOwner: null,
+        leaseHeartbeatAt: null,
+        scheduledAt: isFinal
+          ? null
+          : new Date(
+              Date.now() + this.retryBackoffMs(nextAttempts, queueConfig?.retryBackoffSeconds),
+            ),
+        errorMessage: message,
+      };
+      const won = await this.prisma.backgroundJob.updateMany({
+        where,
+        data,
       });
+      if (won.count !== 1) continue;
+      recovered += 1;
       if (isFinal) {
         await this.markRelatedWorkFailed(job, message);
       }
     }
 
-    return staleJobs.length;
+    return recovered;
   }
 
   /**
@@ -303,31 +329,39 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       if (ids.length === 0) return [];
 
       const startedAt = new Date();
+      const leaseData: Prisma.BackgroundJobUpdateManyMutationInput & BackgroundJobLeaseData = {
+        status: 'RUNNING',
+        startedAt,
+        leaseOwner: this.workerId,
+        leaseHeartbeatAt: startedAt,
+        completedAt: null,
+        failedAt: null,
+        errorMessage: null,
+      };
       await tx.backgroundJob.updateMany({
-        where: { id: { in: ids } },
-        data: {
-          status: 'RUNNING',
-          startedAt,
-          completedAt: null,
-          failedAt: null,
-          errorMessage: null,
-        },
+        where: { id: { in: ids }, status: { in: ['QUEUED', 'RETRYING'] } },
+        data: leaseData,
       });
-      const rows = await tx.backgroundJob.findMany({ where: { id: { in: ids } } });
+      const ownedWhere: Prisma.BackgroundJobWhereInput & BackgroundJobLeaseWhere = {
+        id: { in: ids },
+        status: 'RUNNING',
+        leaseOwner: this.workerId,
+      };
+      const rows = (await tx.backgroundJob.findMany({
+        where: ownedWhere,
+      })) as unknown as LeasedJob[];
       const leasedById = new Map(rows.map((row) => [row.id, row as LeasedJob]));
       return ids.map((id) => leasedById.get(id)).filter((row): row is LeasedJob => Boolean(row));
     });
   }
 
   private async runJob(job: LeasedJob): Promise<void> {
+    const leaseOwner = job.leaseOwner ?? this.workerId;
     const handler = this.registry.get(job.jobType);
     if (!handler) {
       // Should not happen; leaseJobs filters by registered types, but guard anyway.
       this.logger.warn(`No handler for ${job.jobType}, requeueing job ${job.id}`);
-      await this.prisma.backgroundJob.update({
-        where: { id: job.id },
-        data: { status: 'QUEUED' },
-      });
+      await this.releaseLease(job.id, leaseOwner, 'QUEUED');
       return;
     }
 
@@ -335,13 +369,12 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       where: { queueName: job.queueName },
     });
     if (queueConfig && !queueConfig.isActive) {
-      await this.prisma.backgroundJob.update({
-        where: { id: job.id },
-        data: { status: 'QUEUED' },
-      });
+      await this.releaseLease(job.id, leaseOwner, 'QUEUED');
       return;
     }
 
+    const execution = new AbortController();
+    const heartbeat = this.startLeaseHeartbeat(job.id, leaseOwner, execution);
     const ctx: JobContext = {
       jobId: job.id,
       jobType: job.jobType,
@@ -349,20 +382,49 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       payload: (job.payload ?? {}) as Record<string, unknown>,
       correlationId: job.correlationId,
       attempts: job.attempts,
+      signal: execution.signal,
+      checkpoint: heartbeat.checkpoint,
     };
 
     try {
-      const result = await this.withTimeout(handler(ctx), this.handlerTimeoutMs(queueConfig), job);
-      await this.prisma.backgroundJob.update({
-        where: { id: job.id },
-        data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          result: (result?.data ?? {}) as any,
-          errorMessage: null,
-        },
+      // Leasing and handler invocation are separated by the queue-config read.
+      // Revalidate ownership here so a cancellation during that gap cannot
+      // start a handler that no longer has authority to run.
+      await heartbeat.checkpoint();
+      const result = await this.withTimeout(
+        handler(ctx),
+        this.handlerTimeoutMs(queueConfig),
+        job,
+        execution,
+      );
+      const where = this.ownedRunningLeaseWhere(job.id, leaseOwner);
+      const data: Prisma.BackgroundJobUpdateManyMutationInput & BackgroundJobLeaseData = {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        result: (result?.data ?? {}) as Prisma.InputJsonObject,
+        errorMessage: null,
+        leaseOwner: null,
+        leaseHeartbeatAt: null,
+      };
+      const settled = await this.prisma.backgroundJob.updateMany({
+        // Completion is a compare-and-set. A cancellation, stale-lease
+        // recovery, a new owner, or operator intervention wins; a late handler
+        // must never rewrite that decision or the next worker's lease.
+        where,
+        data,
       });
+      if (settled.count === 0) {
+        this.logger.warn(
+          `Job ${job.id} finished after its RUNNING lease ended; the late completion was ignored.`,
+        );
+      }
     } catch (err) {
+      if (execution.signal.reason instanceof JobLeaseEndedError) {
+        this.logger.warn(
+          `Job ${job.id} stopped because its RUNNING lease ended; settlement was skipped.`,
+        );
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const nextAttempts = job.attempts + 1;
       const maxAttempts = this.maxAttemptsFor(job, queueConfig);
@@ -371,52 +433,151 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `Job ${job.id} (${job.jobType}) failed on attempt ${nextAttempts}: ${message}`,
       );
-      await this.prisma.backgroundJob.update({
-        where: { id: job.id },
-        data: {
-          status: isFinal ? 'DEAD_LETTER' : 'RETRYING',
-          attempts: nextAttempts,
-          failedAt: new Date(),
-          errorMessage: message.slice(0, 4000),
-          scheduledAt: isFinal ? null : new Date(Date.now() + backoffMs),
-        },
+      const where = this.ownedRunningLeaseWhere(job.id, leaseOwner);
+      const data: Prisma.BackgroundJobUpdateManyMutationInput & BackgroundJobLeaseData = {
+        status: isFinal ? 'DEAD_LETTER' : 'RETRYING',
+        attempts: nextAttempts,
+        failedAt: new Date(),
+        errorMessage: message.slice(0, 4000),
+        scheduledAt: isFinal ? null : new Date(Date.now() + backoffMs),
+        leaseOwner: null,
+        leaseHeartbeatAt: null,
+      };
+      const settled = await this.prisma.backgroundJob.updateMany({
+        // Same compare-and-set as success: cancellation is terminal and cannot
+        // be turned back into RETRYING by a handler that failed after cancel;
+        // an earlier owner cannot settle a lease that was recovered/re-leased.
+        where,
+        data,
       });
+      if (settled.count === 0) {
+        this.logger.warn(
+          `Job ${job.id} failed after its RUNNING lease ended; the late failure was ignored.`,
+        );
+        return;
+      }
       if (isFinal) {
         await this.markRelatedWorkFailed(job, message);
       }
+    } finally {
+      execution.abort();
+      await heartbeat.stop();
     }
   }
 
-  private handlerTimeoutMs(queueConfig?: { timeoutSeconds?: number | null } | null): number | null {
+  private startLeaseHeartbeat(
+    jobId: string,
+    leaseOwner: string,
+    execution: AbortController,
+  ): LeaseHeartbeat {
+    let stopped = false;
+    let failed: Error | null = null;
+    let inFlight: Promise<void> | null = null;
+    let timer: NodeJS.Timeout | null = null;
+
+    const checkpoint = async (): Promise<void> => {
+      if (stopped) throw new JobLeaseEndedError(jobId);
+      if (failed) throw failed;
+      if (inFlight) return inFlight;
+
+      inFlight = this.renewLease(jobId, leaseOwner)
+        .catch((error: unknown) => {
+          failed = error instanceof Error ? error : new Error(String(error));
+          execution.abort(failed);
+          if (timer) clearInterval(timer);
+          timer = null;
+          throw failed;
+        })
+        .finally(() => {
+          inFlight = null;
+        });
+      return inFlight;
+    };
+
+    timer = setInterval(() => {
+      void checkpoint().catch((error: unknown) => {
+        this.logger.warn(
+          `Job ${jobId} lease heartbeat stopped: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }, this.heartbeatIntervalMs());
+    timer.unref?.();
+
+    return {
+      checkpoint,
+      stop: async () => {
+        stopped = true;
+        if (timer) clearInterval(timer);
+        timer = null;
+        if (inFlight) await inFlight.catch(() => undefined);
+      },
+    };
+  }
+
+  private async renewLease(jobId: string, leaseOwner: string): Promise<void> {
+    const where = this.ownedRunningLeaseWhere(jobId, leaseOwner);
+    const data: Prisma.BackgroundJobUpdateManyMutationInput & BackgroundJobLeaseData = {
+      leaseHeartbeatAt: new Date(),
+    };
+    const renewed = await this.prisma.backgroundJob.updateMany({ where, data });
+    if (renewed.count !== 1) throw new JobLeaseEndedError(jobId);
+  }
+
+  private async releaseLease(jobId: string, leaseOwner: string, status: 'QUEUED'): Promise<void> {
+    const where = this.ownedRunningLeaseWhere(jobId, leaseOwner);
+    const data: Prisma.BackgroundJobUpdateManyMutationInput & BackgroundJobLeaseData = {
+      status,
+      startedAt: null,
+      leaseOwner: null,
+      leaseHeartbeatAt: null,
+    };
+    await this.prisma.backgroundJob.updateMany({ where, data });
+  }
+
+  private ownedRunningLeaseWhere(
+    jobId: string,
+    leaseOwner: string,
+  ): Prisma.BackgroundJobWhereInput & BackgroundJobLeaseWhere {
+    return { id: jobId, status: 'RUNNING', leaseOwner };
+  }
+
+  private handlerTimeoutMs(queueConfig?: { timeoutSeconds?: number | null } | null): number {
     const configuredSeconds =
       queueConfig?.timeoutSeconds ??
       Number(this.config.get<string>('JOB_WORKER_DEFAULT_TIMEOUT_SECONDS', '0'));
-    if (!Number.isFinite(configuredSeconds) || configuredSeconds <= 0) return null;
-    return Math.max(1, configuredSeconds * 1000);
+    if (Number.isFinite(configuredSeconds) && configuredSeconds > 0) {
+      return Math.max(1, configuredSeconds * 1000);
+    }
+    // A missing queue/default timeout must not create an immortal in-process
+    // handler. The stale window is already the operator's upper bound for a
+    // silent worker, and remains long enough for healthy handlers because they
+    // renew their lease independently while this timer is running.
+    return this.staleAfterMs();
   }
 
   private async withTimeout<T>(
     promise: Promise<T>,
-    timeoutMs: number | null,
+    timeoutMs: number,
     job: Pick<LeasedJob, 'id' | 'jobType'>,
+    execution?: AbortController,
   ): Promise<T> {
-    if (!timeoutMs) return promise;
     let timeout: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
         promise,
         new Promise<never>((_, reject) => {
-          timeout = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Job ${job.id} (${job.jobType}) exceeded timeout of ${Math.ceil(
-                    timeoutMs / 1000,
-                  )}s`,
-                ),
+          timeout = setTimeout(() => {
+            execution?.abort();
+            reject(
+              new Error(
+                `Job ${job.id} (${job.jobType}) exceeded timeout of ${Math.ceil(
+                  timeoutMs / 1000,
+                )}s`,
               ),
-            timeoutMs,
-          );
+            );
+          }, timeoutMs);
         }),
       ]);
     } finally {
@@ -428,7 +589,14 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     job: Pick<LeasedJob, 'maxAttempts'>,
     queueConfig?: { retryAttempts?: number | null } | null,
   ): number {
-    return Math.max(1, queueConfig?.retryAttempts ?? job.maxAttempts);
+    // Queue policy may tighten a job's retry budget, never widen it. Mutation
+    // jobs deliberately persist maxAttempts=1; allowing a generic queue value
+    // to replace that ceiling would turn an uncertain write into a replay.
+    const persistedCeiling = Math.max(1, job.maxAttempts);
+    const queueCeiling = queueConfig?.retryAttempts;
+    return queueCeiling == null
+      ? persistedCeiling
+      : Math.max(1, Math.min(persistedCeiling, queueCeiling));
   }
 
   private async markRelatedWorkFailed(
@@ -488,6 +656,15 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       return configuredSeconds * 1000;
     }
     return DEFAULT_STALE_AFTER_MS;
+  }
+
+  private heartbeatIntervalMs(): number {
+    // At least two missed beats must fit inside the stale window. The normal
+    // cadence is 30s; tiny configured stale windows remain usable in tests.
+    return Math.max(
+      1,
+      Math.min(DEFAULT_HEARTBEAT_INTERVAL_MS, Math.floor(this.staleAfterMs() / 3)),
+    );
   }
 
   private logRelatedFailureUpdate(entityType: string, id: string, err: unknown): void {
@@ -953,9 +1130,13 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
           // Isolate each send so one bad recipient does not abort the batch.
           try {
             if (attachment) {
-              await this.emailService.sendEmailWithAttachments(to, subject, `<p>${body}</p>`, body, [
-                attachment,
-              ]);
+              await this.emailService.sendEmailWithAttachments(
+                to,
+                subject,
+                `<p>${body}</p>`,
+                body,
+                [attachment],
+              );
             } else {
               await this.emailService.sendEmail(to, subject, `<p>${body}</p>`, body);
             }
@@ -1004,7 +1185,9 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Could not load scheduled report attachment for run ${reportRunId}: ${message}`);
+      this.logger.warn(
+        `Could not load scheduled report attachment for run ${reportRunId}: ${message}`,
+      );
       return null;
     }
   }
@@ -1212,6 +1395,31 @@ type LeasedJob = {
   correlationId: string | null;
   attempts: number;
   maxAttempts: number;
+  startedAt?: Date | null;
+  leaseOwner?: string | null;
+  leaseHeartbeatAt?: Date | null;
+};
+
+type StaleLeasedJob = LeasedJob & {
+  startedAt: Date | null;
+  leaseOwner: string | null;
+  leaseHeartbeatAt: Date | null;
+};
+
+type BackgroundJobLeaseWhere = {
+  leaseOwner?: string | null;
+  leaseHeartbeatAt?: Date | null | { lt?: Date };
+  OR?: Array<Prisma.BackgroundJobWhereInput & BackgroundJobLeaseWhere>;
+};
+
+type BackgroundJobLeaseData = {
+  leaseOwner?: string | null;
+  leaseHeartbeatAt?: Date | null;
+};
+
+type LeaseHeartbeat = {
+  checkpoint: () => Promise<void>;
+  stop: () => Promise<void>;
 };
 
 type JobDrainFilter = {

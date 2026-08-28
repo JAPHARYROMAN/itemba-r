@@ -4,6 +4,7 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { GoodsReceivedNotesService } from './goods-received-notes.service';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
 import { QueryGoodsReceivedNotesDto } from './dto/query-goods-received-notes.dto';
+import { CreateGoodsReceivedNoteDto } from './dto/create-goods-received-note.dto';
 
 @Controller('goods-received-notes')
 export class GoodsReceivedNotesController {
@@ -23,7 +24,7 @@ export class GoodsReceivedNotesController {
 
   @Post()
   @RequirePermissions('grn.create')
-  create(@Body() dto: any, @CurrentUser() user: AuthUser) {
+  create(@Body() dto: CreateGoodsReceivedNoteDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
   }
 

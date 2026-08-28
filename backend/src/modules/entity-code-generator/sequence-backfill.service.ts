@@ -1,9 +1,51 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { AccessLevel } from '@prisma/client';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { AccessLevel, AuditScopeKind, Prisma, SequenceResetFrequency } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { DEFAULT_PATTERNS, fallbackPattern } from './defaults';
+import { DEFAULT_PATTERNS, fallbackPattern, interpolateTokens } from './defaults';
+
+export function sequenceResetDue(
+  frequency: SequenceResetFrequency,
+  lastResetAt: Date | null,
+  now: Date,
+): boolean {
+  if (frequency === 'NEVER') return false;
+  if (!lastResetAt) return true;
+  if (frequency === 'YEARLY') return lastResetAt.getFullYear() !== now.getFullYear();
+  if (frequency === 'MONTHLY') {
+    return (
+      lastResetAt.getFullYear() !== now.getFullYear() || lastResetAt.getMonth() !== now.getMonth()
+    );
+  }
+  return (
+    lastResetAt.getFullYear() !== now.getFullYear() ||
+    lastResetAt.getMonth() !== now.getMonth() ||
+    lastResetAt.getDate() !== now.getDate()
+  );
+}
+
+export interface SequenceBackfillAuditScope {
+  scopeKind: AuditScopeKind;
+  companyScopeIds: string[];
+}
+
+/**
+ * Exact immutable audit scope for the companies that passed WRITE policy.
+ * An empty sweep has no mutation summary: no company authority was established
+ * and every available zero-id scope would overclaim or misstate attribution.
+ */
+export function sequenceBackfillAuditScope(
+  authorizedCompanyIds: readonly string[],
+): SequenceBackfillAuditScope | undefined {
+  const companyScopeIds = [...new Set(authorizedCompanyIds)].sort();
+  if (companyScopeIds.length === 0) return undefined;
+  return {
+    scopeKind: companyScopeIds.length === 1 ? AuditScopeKind.COMPANY : AuditScopeKind.MULTI_COMPANY,
+    companyScopeIds,
+  };
+}
 
 /**
  * SequenceBackfillService — one-shot helper that aligns
@@ -23,43 +65,91 @@ import { DEFAULT_PATTERNS, fallbackPattern } from './defaults';
  *   - Skips entity rows whose code doesn't match the sequence's prefix
  *     pattern (e.g. legacy timestamp-based `SO-2026-AB12CD` codes don't
  *     contribute, so the new sequential format starts cleanly from 1)
- *   - Never decreases — only updates if the found max > current counter
+ *   - Never decreases — counter writes use an atomic database maximum; a
+ *     stale periodic anchor may also be refreshed without lowering the count
  *
  * Run via `POST /entity-code-generator/backfill?companyId=X` after a fresh
  * deploy. Operators can also re-run any time without harm.
  */
 
-interface BackfillTarget {
+export interface BackfillTarget {
   entityType: string;
   /** Prisma model name on the client (e.g. `salesOrder`). */
   prismaModel: string;
   /** Field on the row that holds the human-readable code. */
   numberField: string;
+  /**
+   * Field that owns the generated-number namespace for this model.
+   * Most models use `companyId`; asymmetric intercompany rows are scoped by
+   * their source company instead.
+   */
+  companyIdField?: string;
 }
 
-const BACKFILL_TARGETS: BackfillTarget[] = [
+export const BACKFILL_TARGETS: readonly BackfillTarget[] = [
   { entityType: 'Trip', prismaModel: 'trip', numberField: 'tripNumber' },
   { entityType: 'HarvestRecord', prismaModel: 'harvestRecord', numberField: 'harvestNumber' },
-  { entityType: 'ProjectMaterialIssue', prismaModel: 'projectMaterialIssue', numberField: 'issueNumber' },
+  {
+    entityType: 'ProjectMaterialIssue',
+    prismaModel: 'projectMaterialIssue',
+    numberField: 'issueNumber',
+  },
   { entityType: 'ProjectBilling', prismaModel: 'projectBilling', numberField: 'billingNumber' },
   { entityType: 'SalesOrder', prismaModel: 'salesOrder', numberField: 'salesOrderNumber' },
   { entityType: 'PurchaseOrder', prismaModel: 'purchaseOrder', numberField: 'purchaseOrderNumber' },
   { entityType: 'JournalEntry', prismaModel: 'journalEntry', numberField: 'journalNumber' },
   { entityType: 'Receivable', prismaModel: 'receivable', numberField: 'receivableNumber' },
   { entityType: 'Payable', prismaModel: 'payable', numberField: 'payableNumber' },
-  { entityType: 'TaxTransaction', prismaModel: 'taxTransaction', numberField: 'taxTransactionNumber' },
+  {
+    entityType: 'TaxTransaction',
+    prismaModel: 'taxTransaction',
+    numberField: 'taxTransactionNumber',
+  },
   { entityType: 'TaxReturn', prismaModel: 'taxReturn', numberField: 'taxReturnNumber' },
-  { entityType: 'InventoryMovement', prismaModel: 'inventoryMovement', numberField: 'movementNumber' },
+  {
+    entityType: 'InventoryMovement',
+    prismaModel: 'inventoryMovement',
+    numberField: 'movementNumber',
+  },
   { entityType: 'Expense', prismaModel: 'expense', numberField: 'expenseNumber' },
-  { entityType: 'AuditAdjustment', prismaModel: 'auditAdjustment', numberField: 'adjustmentNumber' },
-  { entityType: 'LoanRepaymentPayment', prismaModel: 'loanRepaymentPayment', numberField: 'repaymentPaymentNumber' },
-  { entityType: 'IntercompanyTransaction', prismaModel: 'interCompanyTransaction', numberField: 'transactionNumber' },
+  {
+    entityType: 'AuditAdjustment',
+    prismaModel: 'auditAdjustment',
+    numberField: 'adjustmentNumber',
+  },
+  {
+    entityType: 'LoanRepaymentPayment',
+    prismaModel: 'loanRepaymentPayment',
+    numberField: 'repaymentPaymentNumber',
+  },
+  {
+    entityType: 'IntercompanyTransaction',
+    prismaModel: 'interCompanyTransaction',
+    numberField: 'transactionNumber',
+    companyIdField: 'fromCompanyId',
+  },
   { entityType: 'DeliveryNote', prismaModel: 'deliveryNote', numberField: 'deliveryNoteNumber' },
   { entityType: 'PackageMovement', prismaModel: 'packageMovement', numberField: 'movementNumber' },
-  { entityType: 'AttendanceRecord', prismaModel: 'attendanceRecord', numberField: 'attendanceNumber' },
-  { entityType: 'DisciplinaryAction', prismaModel: 'disciplinaryAction', numberField: 'actionNumber' },
-  { entityType: 'EmploymentDispute', prismaModel: 'employmentDispute', numberField: 'disputeNumber' },
-  { entityType: 'SubcontractorRecord', prismaModel: 'subcontractorRecord', numberField: 'subcontractorCode' },
+  {
+    entityType: 'AttendanceRecord',
+    prismaModel: 'attendanceRecord',
+    numberField: 'attendanceNumber',
+  },
+  {
+    entityType: 'DisciplinaryAction',
+    prismaModel: 'disciplinaryAction',
+    numberField: 'actionNumber',
+  },
+  {
+    entityType: 'EmploymentDispute',
+    prismaModel: 'employmentDispute',
+    numberField: 'disputeNumber',
+  },
+  {
+    entityType: 'SubcontractorRecord',
+    prismaModel: 'subcontractorRecord',
+    numberField: 'subcontractorCode',
+  },
 ];
 
 export interface BackfillResult {
@@ -72,6 +162,8 @@ export interface BackfillResult {
   after: number;
   updated: boolean;
   message?: string;
+  /** True only when this target threw; informational no-op messages are not failures. */
+  failed?: boolean;
 }
 
 @Injectable()
@@ -80,6 +172,7 @@ export class SequenceBackfillService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   /**
@@ -93,39 +186,44 @@ export class SequenceBackfillService {
    * can actually write to — group-scoped users hit the whole group, non-group
    * users only their own accessible set.
    */
-  async backfillAll(
-    user: AuthUser,
-    query: { companyId?: string } = {},
-  ): Promise<BackfillResult[]> {
+  async backfillAll(user: AuthUser, query: { companyId?: string } = {}): Promise<BackfillResult[]> {
     let companies: Array<{ id: string }>;
 
     if (query.companyId) {
-      await this.companyScope.assertCanAccessCompany(
-        user,
-        query.companyId,
-        AccessLevel.WRITE,
-      );
+      await this.companyScope.assertCanAccessCompany(user, query.companyId, AccessLevel.WRITE);
       companies = [{ id: query.companyId }];
     } else {
-      // No company specified: sweep only the caller's accessible companies.
-      // Group-scoped users get every non-deleted company in the group; other
-      // users are restricted to their explicitly accessible set. This avoids a
-      // non-group user with `doc_sequences.update` advancing every company's
-      // counters via the all-companies path.
+      // No company specified: enumerate potential companies, then authorize
+      // every one at WRITE. Group scope and membership/read visibility are
+      // candidate-discovery mechanisms only; neither grants mutation rights.
+      // Keep authorization sequential so large groups have bounded database
+      // concurrency and one denied company cannot broaden the sweep.
+      let candidates: Array<{ id: string }>;
       if (this.companyScope.isGroupScoped(user)) {
-        companies = await this.prisma.company.findMany({
+        candidates = await this.prisma.company.findMany({
           where: { deletedAt: null },
           select: { id: true },
         });
       } else {
         const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
-        companies =
+        candidates =
           accessibleIds.length === 0
             ? []
             : await this.prisma.company.findMany({
                 where: { id: { in: accessibleIds }, deletedAt: null },
                 select: { id: true },
               });
+      }
+
+      companies = [];
+      for (const candidate of candidates) {
+        try {
+          await this.companyScope.assertCanAccessCompany(user, candidate.id, AccessLevel.WRITE);
+          companies.push(candidate);
+        } catch (err) {
+          if (err instanceof ForbiddenException) continue;
+          throw err;
+        }
       }
     }
 
@@ -149,9 +247,25 @@ export class SequenceBackfillService {
             after: 0,
             updated: false,
             message: err instanceof Error ? err.message : String(err),
+            failed: true,
           });
         }
       }
+    }
+    const auditScope = sequenceBackfillAuditScope(companies.map((company) => company.id));
+    if (auditScope) {
+      await this.auditLogs.log({
+        action: 'ENTITY_CODE_BACKFILL',
+        entityType: 'DocumentNumberSequence',
+        userId: user.id,
+        ...auditScope,
+        metadata: {
+          companies: companies.length,
+          targets: results.length,
+          updated: results.filter((result) => result.updated).length,
+          failed: results.filter((result) => result.failed).length,
+        },
+      });
     }
     return results;
   }
@@ -159,20 +273,24 @@ export class SequenceBackfillService {
   private async backfillOne(target: BackfillTarget, companyId: string): Promise<BackfillResult> {
     const sequenceCode = `${target.entityType}_${companyId}`;
     const pattern = DEFAULT_PATTERNS[target.entityType] ?? fallbackPattern(target.entityType);
+    const backfillAt = new Date();
 
     // Fetch the existing entity codes for this company. Limited to a sane
     // page size so a million-row table doesn't blow memory; if a company
     // has more than this we still get the highest by ordering.
-    const client = this.prisma as unknown as Record<string, {
-      findMany: (args: unknown) => Promise<Array<Record<string, unknown>>>;
-    }>;
+    const client = this.prisma as unknown as Record<
+      string,
+      {
+        findMany: (args: unknown) => Promise<Array<Record<string, unknown>>>;
+      }
+    >;
     const model = client[target.prismaModel];
     if (!model) {
       throw new Error(`Prisma model "${target.prismaModel}" not found`);
     }
 
     const rows = await model.findMany({
-      where: { companyId },
+      where: { [target.companyIdField ?? 'companyId']: companyId },
       select: { [target.numberField]: true },
       take: 5000,
       orderBy: { [target.numberField]: 'desc' },
@@ -184,7 +302,7 @@ export class SequenceBackfillService {
     // codes match the active format. Legacy codes with a different shape
     // (e.g. timestamp-based `SO-2026-AB12CD` when the new pattern is
     // `SO-{YYYY}-{counter}`) are ignored — new codes will start cleanly.
-    const matchers = this.buildPatternMatchers(pattern.prefix, pattern.suffix);
+    const matchers = this.buildPatternMatchers(pattern.prefix, pattern.suffix, backfillAt);
 
     for (const row of rows) {
       const code = row[target.numberField];
@@ -204,7 +322,12 @@ export class SequenceBackfillService {
     // row's `before` value).
     const existing = await this.prisma.documentNumberSequence.findFirst({
       where: { sequenceCode, deletedAt: null },
-      select: { id: true, currentNumber: true },
+      select: {
+        id: true,
+        currentNumber: true,
+        resetFrequency: true,
+        lastResetAt: true,
+      },
     });
 
     let before = 0;
@@ -237,6 +360,10 @@ export class SequenceBackfillService {
           padding: pattern.padding,
           resetFrequency: pattern.resetFrequency,
           currentNumber: maxFound,
+          // A periodic sequence with a null anchor is treated by `next()` as
+          // first-use and reset to 1. Stamp the backfill instant so the next
+          // issue advances from the recovered maximum instead.
+          lastResetAt: pattern.resetFrequency === 'NEVER' ? null : backfillAt,
           isActive: true,
         },
       });
@@ -244,13 +371,50 @@ export class SequenceBackfillService {
       updated = true;
     } else {
       before = existing.currentNumber;
-      if (maxFound > existing.currentNumber) {
-        await this.prisma.documentNumberSequence.update({
-          where: { id: existing.id },
-          data: { currentNumber: maxFound },
+      const needsPeriodicAnchor =
+        maxFound > 0 && sequenceResetDue(existing.resetFrequency, existing.lastResetAt, backfillAt);
+      if (maxFound > existing.currentNumber || needsPeriodicAnchor) {
+        let mutations: number;
+        if (needsPeriodicAnchor) {
+          // One PostgreSQL statement owns the row for the entire alignment.
+          // GREATEST makes a concurrent issuer monotonic, while refreshing the
+          // current-period anchor makes any issuer holding a stale reset CAS
+          // lose, re-read, and increment from the recovered maximum. The CASE
+          // protects a concurrent administrative change to NEVER frequency.
+          mutations = await this.prisma.$executeRaw(
+            Prisma.sql`
+              UPDATE "document_number_sequences"
+              SET
+                "currentNumber" = GREATEST("currentNumber", ${maxFound}),
+                "lastResetAt" = CASE
+                  WHEN "resetFrequency" <> 'NEVER'::"SequenceResetFrequency" THEN ${backfillAt}
+                  ELSE "lastResetAt"
+                END,
+                "updatedAt" = ${backfillAt}
+              WHERE "id" = ${existing.id}
+                AND "deletedAt" IS NULL
+            `,
+          );
+        } else {
+          mutations = await this.prisma.$executeRaw(
+            Prisma.sql`
+              UPDATE "document_number_sequences"
+              SET
+                "currentNumber" = GREATEST("currentNumber", ${maxFound}),
+                "updatedAt" = ${backfillAt}
+              WHERE "id" = ${existing.id}
+                AND "deletedAt" IS NULL
+                AND "currentNumber" < ${maxFound}
+            `,
+          );
+        }
+
+        const fresh = await this.prisma.documentNumberSequence.findFirstOrThrow({
+          where: { id: existing.id, deletedAt: null },
+          select: { currentNumber: true },
         });
-        after = maxFound;
-        updated = true;
+        after = fresh.currentNumber;
+        updated = mutations > 0;
       } else {
         after = existing.currentNumber;
       }
@@ -269,43 +433,16 @@ export class SequenceBackfillService {
   }
 
   /**
-   * Build regex matchers for code parsing. Token-bearing prefixes (e.g.
-   * `TRIP-{YYYY}-`) are expanded for both the current year and the previous
-   * year so a backfill in early January still picks up December's codes.
+   * Build the matcher for the active reset period. A previous-period maximum
+   * must not seed the current period: doing so either creates needless gaps or
+   * leaves a stale reset anchor that causes the next issuer to reset to 1.
    */
-  private buildPatternMatchers(prefix: string, suffix?: string): RegExp[] {
-    const now = new Date();
-    const years = [now.getFullYear(), now.getFullYear() - 1];
-    const months = Array.from({ length: 12 }, (_, i) => i + 1);
-    const days = Array.from({ length: 31 }, (_, i) => i + 1);
-
-    // Build token expansions. For YEARLY the only variable is YYYY; for
-    // MONTHLY/DAILY we also iterate months/days. Cap the cardinality so we
-    // don't generate thousands of regexes.
-    const candidates: string[] = [];
-    if (!prefix.includes('{')) {
-      candidates.push(prefix);
-    } else {
-      for (const y of years) {
-        for (const m of months) {
-          for (const d of days) {
-            candidates.push(
-              prefix
-                .replace(/\{YYYY\}/g, String(y))
-                .replace(/\{YY\}/g, String(y).slice(-2))
-                .replace(/\{MM\}/g, String(m).padStart(2, '0'))
-                .replace(/\{DD\}/g, String(d).padStart(2, '0'))
-            );
-          }
-        }
-      }
-    }
-    const uniqueCandidates = Array.from(new Set(candidates));
-    const escapedSuffix = (suffix ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    return uniqueCandidates.map((p) => {
-      const escapedPrefix = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`^${escapedPrefix}(\\d+)${escapedSuffix}$`);
-    });
+  private buildPatternMatchers(prefix: string, suffix: string | undefined, when: Date): RegExp[] {
+    const escapedPrefix = interpolateTokens(prefix, when).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedSuffix = interpolateTokens(suffix ?? '', when).replace(
+      /[.*+?^${}()|[\]\\]/g,
+      '\\$&',
+    );
+    return [new RegExp(`^${escapedPrefix}(\\d+)${escapedSuffix}$`)];
   }
 }

@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { FixedAssetStatus } from '@prisma/client';
 
 const DISPOSAL_STATUSES = [
@@ -10,8 +10,8 @@ const DISPOSAL_STATUSES = [
 
 export class DisposeAssetDto {
   @IsNotEmpty()
-  @IsEnum(FixedAssetStatus)
-  disposalStatus!: typeof DISPOSAL_STATUSES[number];
+  @IsIn(DISPOSAL_STATUSES)
+  disposalStatus!: (typeof DISPOSAL_STATUSES)[number];
 
   @IsNotEmpty() @IsString() disposalDate!: string;
   @IsOptional() @IsString() disposalValue?: string;

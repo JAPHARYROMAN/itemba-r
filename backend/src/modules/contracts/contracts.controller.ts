@@ -1,6 +1,15 @@
 import {
-  Controller, Get, Post, Put, Patch, Delete,
-  Body, Param, Query, Req, UseInterceptors,
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  Req,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { ContractsService } from './contracts.service';
@@ -10,9 +19,12 @@ import { QueryContractDto } from './dto/query-contract.dto';
 import { ChangeContractStatusDto } from './dto/change-contract-status.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
+import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
 
 @Controller('contracts')
+@SensitiveAccess('Contracts')
 @UseInterceptors(SensitiveAccessInterceptor)
 export class ContractsController {
   constructor(private readonly service: ContractsService) {}
@@ -36,16 +48,14 @@ export class ContractsController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('contracts.view')
-  findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthUser,
-    @Req() req: Request,
-  ) {
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser, @Req() req: Request) {
     return this.service.findOne(id, user, req.ip);
   }
 
   @Get(':id/audit-history')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('contracts.view')
   getAuditHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.getAuditHistory(id, user);
@@ -53,11 +63,7 @@ export class ContractsController {
 
   @Post()
   @RequirePermissions('contracts.manage')
-  create(
-    @Body() dto: CreateContractDto,
-    @CurrentUser() user: AuthUser,
-    @Req() req: Request,
-  ) {
+  create(@Body() dto: CreateContractDto, @CurrentUser() user: AuthUser, @Req() req: Request) {
     return this.service.create(dto, user, req.ip);
   }
 
@@ -85,11 +91,7 @@ export class ContractsController {
 
   @Delete(':id')
   @RequirePermissions('contracts.manage')
-  remove(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthUser,
-    @Req() req: Request,
-  ) {
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser, @Req() req: Request) {
     return this.service.remove(id, user, req.ip);
   }
 }

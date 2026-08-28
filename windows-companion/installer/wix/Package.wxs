@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" RequiredVersion="7.0.0">
+  <Package
+    Id="Itemba.Msaidizi.WindowsCompanion"
+    Name="Itemba Msaidizi Windows Companion"
+    Manufacturer="Itemba"
+    Version="$(var.ProductVersion)"
+    Scope="perMachine"
+    InstallerVersion="500"
+    Compressed="yes">
+
+    <SummaryInformation Description="Governed Itemba Msaidizi Windows companion" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <MajorUpgrade DowngradeErrorMessage="A newer Itemba Msaidizi Windows Companion is already installed." />
+    <Launch
+      Condition="Installed OR (VersionNT64 &gt;= 1000 AND WindowsBuildNumber &gt;= 22000)"
+      Message="Itemba Msaidizi requires Windows 11 x64 build 22000 or newer." />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="ItembaProgramFilesDir" Name="Itemba">
+        <Directory Id="INSTALLFOLDER" Name="Msaidizi Companion">
+          <Directory Id="ServiceDir" Name="Service">
+            <Component Id="CompanionServiceComponent" Guid="{0CAD7B12-6652-4123-B6F0-53BBCAC67350}" Bitness="always64">
+              <File
+                Id="CompanionServiceExe"
+                Source="$(var.PayloadRoot)\Service\Itemba.Msaidizi.Companion.Service.exe"
+                KeyPath="yes" />
+              <ServiceInstall
+                Id="CompanionServiceInstall"
+                Name="Itemba Msaidizi Companion"
+                DisplayName="Itemba Msaidizi Companion"
+                Description="Governed privileged Windows execution companion for Itemba Msaidizi"
+                Type="ownProcess"
+                Start="auto"
+                ErrorControl="normal"
+                Account="LocalSystem"
+                Arguments="--contentRoot &quot;[ServiceConfigDir]&quot;"
+                Vital="yes">
+                <ServiceDependency Id="Itemba Msaidizi Egress Supervisor" />
+                <ServiceDependency Id="Itemba Msaidizi Privileged Command Supervisor" />
+                <ServiceConfig
+                  DelayedAutoStart="yes"
+                  ServiceSid="restricted"
+                  FailureActionsWhen="failedToStopOrReturnedError"
+                  OnInstall="yes"
+                  OnReinstall="yes">
+                  <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+                  <RequiredPrivilege Name="SeImpersonatePrivilege" />
+                  <RequiredPrivilege Name="SeAssignPrimaryTokenPrivilege" />
+                  <RequiredPrivilege Name="SeIncreaseQuotaPrivilege" />
+                  <RequiredPrivilege Name="SeShutdownPrivilege" />
+                  <RequiredPrivilege Name="SeSystemtimePrivilege" />
+                </ServiceConfig>
+                <ServiceConfigFailureActions ResetPeriod="86400" OnInstall="yes" OnReinstall="yes">
+                  <Failure Action="restartService" Delay="60000" />
+                  <Failure Action="restartService" Delay="300000" />
+                  <Failure Action="none" Delay="0" />
+                </ServiceConfigFailureActions>
+              </ServiceInstall>
+              <ServiceControl
+                Id="CompanionServiceControl"
+                Name="Itemba Msaidizi Companion"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="AgentDir" Name="Agent">
+            <Component Id="AgentExecutableComponent" Guid="{DAAA0F32-6AF7-4D0A-B57C-EC3B20B95D21}" Bitness="always64">
+              <File
+                Id="AgentExe"
+                Source="$(var.PayloadRoot)\Agent\Itemba.Msaidizi.Companion.Agent.exe"
+                KeyPath="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="EgressSupervisorDir" Name="EgressSupervisor">
+            <Component Id="EgressSupervisorServiceComponent" Guid="{77C6C9A2-AFB3-4D74-92E9-19B5B5916E11}" Bitness="always64">
+              <File
+                Id="EgressSupervisorExe"
+                Source="$(var.PayloadRoot)\EgressSupervisor\Itemba.Msaidizi.EgressSupervisor.exe"
+                KeyPath="yes" />
+              <ServiceInstall
+                Id="EgressSupervisorServiceInstall"
+                Name="Itemba Msaidizi Egress Supervisor"
+                DisplayName="Itemba Msaidizi Egress Supervisor"
+                Description="Independent fail-closed network egress enforcement supervisor for Itemba Msaidizi"
+                Type="ownProcess"
+                Start="auto"
+                ErrorControl="normal"
+                Account="LocalSystem"
+                Arguments="--contentRoot &quot;[EgressSupervisorConfigDir]&quot;"
+                Vital="yes">
+                <ServiceConfig
+                  DelayedAutoStart="no"
+                  ServiceSid="restricted"
+                  OnInstall="yes"
+                  OnReinstall="yes">
+                  <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+                  <RequiredPrivilege Name="SeImpersonatePrivilege" />
+                </ServiceConfig>
+                <ServiceConfigFailureActions ResetPeriod="86400" OnInstall="yes" OnReinstall="yes">
+                  <Failure Action="restartService" Delay="60000" />
+                  <Failure Action="restartService" Delay="300000" />
+                  <Failure Action="none" Delay="0" />
+                </ServiceConfigFailureActions>
+              </ServiceInstall>
+              <ServiceControl
+                Id="EgressSupervisorServiceControl"
+                Name="Itemba Msaidizi Egress Supervisor"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="PrivilegedCommandSupervisorDir" Name="PrivilegedCommandSupervisor">
+            <Component Id="PrivilegedCommandSupervisorServiceComponent" Guid="{2601C199-1CD0-44B3-B839-E31627ED6A27}" Bitness="always64">
+              <File
+                Id="PrivilegedCommandSupervisorExe"
+                Source="$(var.PayloadRoot)\PrivilegedCommandSupervisor\Itemba.Msaidizi.PrivilegedCommandSupervisor.exe"
+                KeyPath="yes" />
+              <ServiceInstall
+                Id="PrivilegedCommandSupervisorServiceInstall"
+                Name="Itemba Msaidizi Privileged Command Supervisor"
+                DisplayName="Itemba Msaidizi Privileged Command Supervisor"
+                Description="Independent fail-closed privileged-command isolation supervisor for Itemba Msaidizi"
+                Type="ownProcess"
+                Start="auto"
+                ErrorControl="normal"
+                Account="LocalSystem"
+                Arguments="--contentRoot &quot;[PrivilegedCommandSupervisorConfigDir]&quot;"
+                Vital="yes">
+                <ServiceConfig
+                  DelayedAutoStart="no"
+                  ServiceSid="restricted"
+                  OnInstall="yes"
+                  OnReinstall="yes">
+                  <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+                  <RequiredPrivilege Name="SeImpersonatePrivilege" />
+                </ServiceConfig>
+                <ServiceConfigFailureActions ResetPeriod="86400" OnInstall="yes" OnReinstall="yes">
+                  <Failure Action="restartService" Delay="60000" />
+                  <Failure Action="restartService" Delay="300000" />
+                  <Failure Action="none" Delay="0" />
+                </ServiceConfigFailureActions>
+              </ServiceInstall>
+              <ServiceControl
+                Id="PrivilegedCommandSupervisorServiceControl"
+                Name="Itemba Msaidizi Privileged Command Supervisor"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="UpdateSupervisorDir" Name="UpdateSupervisor">
+            <Component Id="UpdateSupervisorServiceComponent" Guid="{E4F8DC10-68D5-45E8-8659-36EE8723D595}" Bitness="always64">
+              <File
+                Id="UpdateSupervisorExe"
+                Source="$(var.PayloadRoot)\UpdateSupervisor\Itemba.Msaidizi.UpdateSupervisor.exe"
+                KeyPath="yes" />
+              <ServiceInstall
+                Id="UpdateSupervisorServiceInstall"
+                Name="Itemba Msaidizi Update Supervisor"
+                DisplayName="Itemba Msaidizi Update Supervisor"
+                Description="Trusted signed update and automatic rollback supervisor for Itemba Msaidizi"
+                Type="ownProcess"
+                Start="demand"
+                ErrorControl="normal"
+                Account="LocalSystem"
+                Arguments="--contentRoot &quot;[UpdateConfigDir]&quot;"
+                Vital="yes">
+                <ServiceConfig ServiceSid="restricted" OnInstall="yes" OnReinstall="yes">
+                  <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+                </ServiceConfig>
+                <ServiceConfigFailureActions ResetPeriod="86400" OnInstall="yes" OnReinstall="yes">
+                  <Failure Action="none" Delay="0" />
+                  <Failure Action="none" Delay="0" />
+                  <Failure Action="none" Delay="0" />
+                </ServiceConfigFailureActions>
+              </ServiceInstall>
+              <ServiceControl
+                Id="UpdateSupervisorServiceControl"
+                Name="Itemba Msaidizi Update Supervisor"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="RecoverySupervisorDir" Name="RecoverySupervisor">
+            <Component Id="RecoverySupervisorServiceComponent" Guid="{A04B9BAA-BE3A-42A5-BA9A-5349B2F06DE9}" Bitness="always64">
+              <File
+                Id="RecoverySupervisorExe"
+                Source="$(var.PayloadRoot)\RecoverySupervisor\Itemba.Msaidizi.RecoverySupervisor.exe"
+                KeyPath="yes" />
+              <ServiceInstall
+                Id="RecoverySupervisorServiceInstall"
+                Name="Itemba Msaidizi Recovery Supervisor"
+                DisplayName="Itemba Msaidizi Recovery Supervisor"
+                Description="Trusted exact-state recovery supervisor for Itemba Msaidizi"
+                Type="ownProcess"
+                Start="demand"
+                ErrorControl="normal"
+                Account="LocalSystem"
+                Arguments="--contentRoot &quot;[RecoveryConfigDir]&quot;"
+                Vital="yes">
+                <ServiceConfig ServiceSid="restricted" OnInstall="yes" OnReinstall="yes">
+                  <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+                  <RequiredPrivilege Name="SeBackupPrivilege" />
+                  <RequiredPrivilege Name="SeRestorePrivilege" />
+                  <RequiredPrivilege Name="SeTakeOwnershipPrivilege" />
+                  <RequiredPrivilege Name="SeSecurityPrivilege" />
+                  <RequiredPrivilege Name="SeShutdownPrivilege" />
+                </ServiceConfig>
+                <ServiceConfigFailureActions ResetPeriod="86400" OnInstall="yes" OnReinstall="yes">
+                  <Failure Action="none" Delay="0" />
+                  <Failure Action="none" Delay="0" />
+                  <Failure Action="none" Delay="0" />
+                </ServiceConfigFailureActions>
+              </ServiceInstall>
+              <ServiceControl
+                Id="RecoverySupervisorServiceControl"
+                Name="Itemba Msaidizi Recovery Supervisor"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="AuditSignerDir" Name="AuditSigner">
+            <Component Id="AuditSignerServiceComponent" Guid="{B35AA905-380F-4075-B4BD-CA31A25E32DF}" Bitness="always64">
+              <File
+                Id="AuditSignerExe"
+                Source="$(var.PayloadRoot)\AuditSigner\Itemba.Msaidizi.AuditSigner.exe"
+                KeyPath="yes" />
+              <ServiceInstall
+                Id="AuditSignerServiceInstall"
+                Name="Itemba Msaidizi Audit Signer"
+                DisplayName="Itemba Msaidizi Audit Signer"
+                Description="Hardware-backed task-event checkpoint signer for Itemba Msaidizi"
+                Type="ownProcess"
+                Start="demand"
+                ErrorControl="normal"
+                Account="LocalSystem"
+                Arguments="--contentRoot &quot;[AuditSignerConfigDir]&quot;"
+                Vital="yes">
+                <ServiceConfig ServiceSid="restricted" OnInstall="yes" OnReinstall="yes">
+                  <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+                </ServiceConfig>
+                <ServiceConfigFailureActions ResetPeriod="86400" OnInstall="yes" OnReinstall="yes">
+                  <Failure Action="none" Delay="0" />
+                  <Failure Action="none" Delay="0" />
+                  <Failure Action="none" Delay="0" />
+                </ServiceConfigFailureActions>
+              </ServiceInstall>
+              <ServiceControl
+                Id="AuditSignerServiceControl"
+                Name="Itemba Msaidizi Audit Signer"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+            </Component>
+          </Directory>
+
+          <Directory Id="InstallerSupportDir" Name="Installer">
+            <Component Id="InstallerHardeningComponent" Guid="{5C937BB6-7C9C-4AB3-8EC6-2EB4A4B5F20B}" Bitness="always64">
+              <File
+                Id="InstallerHardeningExe"
+                Source="$(var.PayloadRoot)\Installer\Itemba.Msaidizi.Installer.Hardening.exe"
+                KeyPath="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ItembaProgramDataDir" Name="Itemba">
+        <Directory Id="DataRootDir" Name="Msaidizi">
+          <Directory Id="ConfigRootDir" Name="config">
+            <Directory Id="ServiceConfigDir" Name="service">
+              <Component
+                Id="ServiceSafeConfigComponent"
+                Guid="{000D9487-21CD-40FF-BBD7-1CF0E7AE370D}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="ServiceSafeConfigFile"
+                  Source="$(var.ConfigRoot)\service\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+            <Directory Id="AgentConfigDir" Name="agent">
+              <Component
+                Id="AgentSafeConfigComponent"
+                Guid="{85B08282-0F22-4973-A619-E3923E115600}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="AgentSafeConfigFile"
+                  Source="$(var.ConfigRoot)\agent\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+            <Directory Id="UpdateConfigDir" Name="update">
+              <Component
+                Id="UpdateSafeConfigComponent"
+                Guid="{B40EC25E-5EFA-46BF-A4C4-42ECEE10FB26}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="UpdateSafeConfigFile"
+                  Source="$(var.ConfigRoot)\update\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+            <Directory Id="RecoveryConfigDir" Name="recovery">
+              <Component
+                Id="RecoverySafeConfigComponent"
+                Guid="{19E66783-B0D4-481E-9340-66B34EADE714}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="RecoverySafeConfigFile"
+                  Source="$(var.ConfigRoot)\recovery\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+            <Directory Id="AuditSignerConfigDir" Name="audit-signer">
+              <Component
+                Id="AuditSignerSafeConfigComponent"
+                Guid="{47A0A5C7-E78F-4C82-9708-9F0D2D116F63}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="AuditSignerSafeConfigFile"
+                  Source="$(var.ConfigRoot)\audit-signer\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+            <Directory Id="EgressSupervisorConfigDir" Name="egress-supervisor">
+              <Component
+                Id="EgressSupervisorSafeConfigComponent"
+                Guid="{D8F2638B-567F-45CB-99EF-1DAF660C7E10}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="EgressSupervisorSafeConfigFile"
+                  Source="$(var.ConfigRoot)\egress-supervisor\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+            <Directory Id="PrivilegedCommandSupervisorConfigDir" Name="privileged-command-supervisor">
+              <Component
+                Id="PrivilegedCommandSupervisorSafeConfigComponent"
+                Guid="{73C7B11A-4DA7-4EF6-87DB-CC479A3AC9FA}"
+                Bitness="always64"
+                Permanent="yes"
+                NeverOverwrite="yes">
+                <File
+                  Id="PrivilegedCommandSupervisorSafeConfigFile"
+                  Source="$(var.ConfigRoot)\privileged-command-supervisor\appsettings.json"
+                  Name="appsettings.json"
+                  KeyPath="yes" />
+              </Component>
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Component Id="AgentPerUserStartupComponent" Guid="{92E3A8EB-302F-4EE8-98A3-728D56D2DD9F}" Directory="INSTALLFOLDER" Bitness="always64">
+      <RegistryValue
+        Id="AgentPerUserStartupValue"
+        Root="HKLM"
+        Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+        Name="Itemba Msaidizi Agent"
+        Type="string"
+        Value="&quot;[AgentDir]Itemba.Msaidizi.Companion.Agent.exe&quot; --contentRoot &quot;[AgentConfigDir]&quot;"
+        KeyPath="yes" />
+    </Component>
+
+    <ComponentGroup Id="HarvestedPayloadComponents">
+      <Files Include="$(var.PayloadRoot)\Service\**" Directory="ServiceDir">
+        <Exclude Files="$(var.PayloadRoot)\Service\Itemba.Msaidizi.Companion.Service.exe" />
+        <Exclude Files="$(var.PayloadRoot)\Service\appsettings.json" />
+      </Files>
+      <Files Include="$(var.PayloadRoot)\Agent\**" Directory="AgentDir">
+        <Exclude Files="$(var.PayloadRoot)\Agent\Itemba.Msaidizi.Companion.Agent.exe" />
+        <Exclude Files="$(var.PayloadRoot)\Agent\appsettings.json" />
+      </Files>
+      <Files Include="$(var.PayloadRoot)\UpdateSupervisor\**" Directory="UpdateSupervisorDir">
+        <Exclude Files="$(var.PayloadRoot)\UpdateSupervisor\Itemba.Msaidizi.UpdateSupervisor.exe" />
+        <Exclude Files="$(var.PayloadRoot)\UpdateSupervisor\appsettings.json" />
+      </Files>
+      <Files Include="$(var.PayloadRoot)\RecoverySupervisor\**" Directory="RecoverySupervisorDir">
+        <Exclude Files="$(var.PayloadRoot)\RecoverySupervisor\Itemba.Msaidizi.RecoverySupervisor.exe" />
+        <Exclude Files="$(var.PayloadRoot)\RecoverySupervisor\appsettings.json" />
+      </Files>
+      <Files Include="$(var.PayloadRoot)\AuditSigner\**" Directory="AuditSignerDir">
+        <Exclude Files="$(var.PayloadRoot)\AuditSigner\Itemba.Msaidizi.AuditSigner.exe" />
+        <Exclude Files="$(var.PayloadRoot)\AuditSigner\appsettings.json" />
+      </Files>
+      <Files Include="$(var.PayloadRoot)\EgressSupervisor\**" Directory="EgressSupervisorDir">
+        <Exclude Files="$(var.PayloadRoot)\EgressSupervisor\Itemba.Msaidizi.EgressSupervisor.exe" />
+        <Exclude Files="$(var.PayloadRoot)\EgressSupervisor\appsettings.json" />
+      </Files>
+      <Files Include="$(var.PayloadRoot)\PrivilegedCommandSupervisor\**" Directory="PrivilegedCommandSupervisorDir">
+        <Exclude Files="$(var.PayloadRoot)\PrivilegedCommandSupervisor\Itemba.Msaidizi.PrivilegedCommandSupervisor.exe" />
+        <Exclude Files="$(var.PayloadRoot)\PrivilegedCommandSupervisor\appsettings.json" />
+      </Files>
+    </ComponentGroup>
+
+    <CustomAction
+      Id="RollbackInstallerHardening"
+      FileRef="InstallerHardeningExe"
+      ExeCommand="remove-firewall --binary-root &quot;[INSTALLFOLDER]&quot;"
+      Execute="rollback"
+      Impersonate="no"
+      Return="check"
+      HideTarget="yes" />
+    <CustomAction
+      Id="ApplyInstallerHardening"
+      FileRef="InstallerHardeningExe"
+      ExeCommand="install --binary-root &quot;[INSTALLFOLDER]&quot; --data-root &quot;[DataRootDir]&quot;"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      HideTarget="yes" />
+    <CustomAction
+      Id="RemoveInstallerFirewallRules"
+      FileRef="InstallerHardeningExe"
+      ExeCommand="remove-firewall --binary-root &quot;[INSTALLFOLDER]&quot;"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      HideTarget="yes" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RollbackInstallerHardening" Before="ApplyInstallerHardening" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="ApplyInstallerHardening" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="RemoveInstallerFirewallRules" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+    <Feature Id="Complete" Title="Itemba Msaidizi Windows Companion" Level="1">
+      <ComponentRef Id="CompanionServiceComponent" />
+      <ComponentRef Id="AgentExecutableComponent" />
+      <ComponentRef Id="UpdateSupervisorServiceComponent" />
+      <ComponentRef Id="RecoverySupervisorServiceComponent" />
+      <ComponentRef Id="AuditSignerServiceComponent" />
+      <ComponentRef Id="EgressSupervisorServiceComponent" />
+      <ComponentRef Id="PrivilegedCommandSupervisorServiceComponent" />
+      <ComponentRef Id="InstallerHardeningComponent" />
+      <ComponentRef Id="ServiceSafeConfigComponent" />
+      <ComponentRef Id="AgentSafeConfigComponent" />
+      <ComponentRef Id="UpdateSafeConfigComponent" />
+      <ComponentRef Id="RecoverySafeConfigComponent" />
+      <ComponentRef Id="AuditSignerSafeConfigComponent" />
+      <ComponentRef Id="EgressSupervisorSafeConfigComponent" />
+      <ComponentRef Id="PrivilegedCommandSupervisorSafeConfigComponent" />
+      <ComponentRef Id="AgentPerUserStartupComponent" />
+      <ComponentGroupRef Id="HarvestedPayloadComponents" />
+    </Feature>
+  </Package>
+</Wix>

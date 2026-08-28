@@ -8,6 +8,8 @@ import {
   UserStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { assertCanAccessCompanyFromUser } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 type SecurityReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
@@ -29,7 +31,8 @@ export class SecurityService {
     private readonly config: ConfigService,
   ) {}
 
-  async getDashboard() {
+  async getDashboard(user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, null);
     const now = new Date();
     const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -75,13 +78,13 @@ export class SecurityService {
       failedLoginsLast24h: failedLoginsCount,
       twoFactorAdoptionRate,
       recentCriticalEvents,
-      readiness: await this.getReadiness(),
+      readiness: await this.getReadiness(user),
     };
   }
 
-  async getSummary() {
+  async getSummary(user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, null);
     const now = new Date();
-    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
     const [activeSessionsCount, lockedAccountsCount, openEventsCount] = await Promise.all([
       this.prisma.activeSession.count({ where: { status: 'ACTIVE' } }),
@@ -92,7 +95,8 @@ export class SecurityService {
     return { activeSessionsCount, lockedAccountsCount, openEventsCount };
   }
 
-  async getReadiness() {
+  async getReadiness(user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, null);
     const now = new Date();
     const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const refreshExpiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES_IN', 'never').trim();

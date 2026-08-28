@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { CustomerStatementsService } from './customer-statements.service';
 import { GenerateCustomerStatementDto } from './dto/generate-customer-statement.dto';
@@ -31,6 +32,7 @@ export class CustomerStatementsController {
   }
 
   @Post('export/pdf')
+  @AgentExcluded('binary_result_not_represented')
   @RequirePermissions('customer_statements.view')
   async exportPdf(
     @Body() dto: ExportStatementDto,
@@ -45,6 +47,7 @@ export class CustomerStatementsController {
   }
 
   @Post('export/excel')
+  @AgentExcluded('binary_result_not_represented')
   @RequirePermissions('customer_statements.view')
   async exportExcel(
     @Body() dto: ExportStatementDto,
@@ -59,6 +62,7 @@ export class CustomerStatementsController {
   }
 
   @Post('email')
+  @AgentExcluded('external_egress_not_represented')
   @RequirePermissions('customer_statements.generate')
   emailToCustomer(@Body() dto: EmailStatementDto, @CurrentUser() user: AuthUser) {
     return this.service.emailToCustomer(dto, user);

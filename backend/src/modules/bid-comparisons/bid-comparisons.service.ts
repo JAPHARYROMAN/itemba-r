@@ -17,14 +17,23 @@ export class BidComparisonsService {
     applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
     const [items, total] = await Promise.all([
-      this.prisma.bidComparison.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' }, include: { lines: true } }),
+      this.prisma.bidComparison.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+        include: { lines: true },
+      }),
       this.prisma.bidComparison.count({ where }),
     ]);
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
   async findOne(id: string) {
-    const item = await this.prisma.bidComparison.findFirst({ where: { id, deletedAt: null }, include: { lines: true } });
+    const item = await this.prisma.bidComparison.findFirst({
+      where: { id, deletedAt: null },
+      include: { lines: true },
+    });
     if (!item) throw new NotFoundException('Bid comparison not found');
     return item;
   }
@@ -32,25 +41,52 @@ export class BidComparisonsService {
   async create(dto: any, user: any) {
     const { lines, ...rest } = dto;
     const item = await this.prisma.bidComparison.create({
-      data: { ...rest, status: 'DRAFT', createdById: user.id, lines: lines ? { create: lines } : undefined },
+      data: {
+        ...rest,
+        status: 'DRAFT',
+        preparedById: user.id,
+        lines: lines ? { create: lines } : undefined,
+      },
       include: { lines: true },
     });
-    await this.auditLogs.log({ action: 'CREATE', entityType: 'BidComparison', entityId: item.id, userId: user.id, companyId: item.companyId });
+    await this.auditLogs.log({
+      action: 'CREATE',
+      entityType: 'BidComparison',
+      entityId: item.id,
+      userId: user.id,
+      companyId: item.companyId,
+    });
     return item;
   }
 
   async update(id: string, dto: any, user: any) {
     const existing = await this.findOne(id);
     const updated = await this.prisma.bidComparison.update({ where: { id }, data: dto });
-    await this.auditLogs.log({ action: 'UPDATE', entityType: 'BidComparison', entityId: id, userId: user.id, oldValue: existing, newValue: updated });
+    await this.auditLogs.log({
+      action: 'UPDATE',
+      entityType: 'BidComparison',
+      entityId: id,
+      userId: user.id,
+      oldValue: existing,
+      newValue: updated,
+    });
     return updated;
   }
 
   async approve(id: string, user: any) {
     const existing = await this.findOne(id);
-    if (existing.status !== 'DRAFT') throw new BadRequestException('Only DRAFT comparisons can be approved');
-    const updated = await this.prisma.bidComparison.update({ where: { id }, data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id } });
-    await this.auditLogs.log({ action: 'APPROVE', entityType: 'BidComparison', entityId: id, userId: user.id });
+    if (existing.status !== 'DRAFT')
+      throw new BadRequestException('Only DRAFT comparisons can be approved');
+    const updated = await this.prisma.bidComparison.update({
+      where: { id },
+      data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
+    });
+    await this.auditLogs.log({
+      action: 'APPROVE',
+      entityType: 'BidComparison',
+      entityId: id,
+      userId: user.id,
+    });
     return updated;
   }
 }

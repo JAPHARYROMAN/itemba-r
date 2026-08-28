@@ -1,5 +1,13 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Put, Query,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
   UseInterceptors,
 } from '@nestjs/common';
 import { FixedAssetsService } from './fixed-assets.service';
@@ -11,9 +19,12 @@ import { MarkCollateralDto } from './dto/mark-collateral.dto';
 import { CapitalizeFixedAssetDto } from './dto/capitalize-fixed-asset.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
+import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
 
 @Controller('fixed-assets')
+@SensitiveAccess('FixedAssets')
 @UseInterceptors(SensitiveAccessInterceptor)
 export class FixedAssetsController {
   constructor(private readonly service: FixedAssetsService) {}
@@ -31,12 +42,14 @@ export class FixedAssetsController {
   }
 
   @Get(':id')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('fixed-assets.read')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
   }
 
   @Get(':id/audit-history')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('fixed-assets.read')
   getAuditHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.getAuditHistory(id, user);
@@ -68,13 +81,21 @@ export class FixedAssetsController {
 
   @Patch(':id/collateral')
   @RequirePermissions('fixed-assets.update')
-  markCollateral(@Param('id') id: string, @Body() dto: MarkCollateralDto, @CurrentUser() user: AuthUser) {
+  markCollateral(
+    @Param('id') id: string,
+    @Body() dto: MarkCollateralDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.markCollateral(id, dto, user);
   }
 
   @Post(':id/capitalize')
   @RequirePermissions('fixed-assets.update')
-  capitalize(@Param('id') id: string, @Body() dto: CapitalizeFixedAssetDto, @CurrentUser() user: AuthUser) {
+  capitalize(
+    @Param('id') id: string,
+    @Body() dto: CapitalizeFixedAssetDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.capitalize(id, dto, user);
   }
 }

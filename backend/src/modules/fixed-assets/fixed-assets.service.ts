@@ -187,27 +187,51 @@ export class FixedAssetsService {
       ...rest
     } = dto;
 
-    const updated = await this.prisma.fixedAsset.update({
-      where: { id },
-      data: {
-        ...rest,
-        ...(acquisitionCost && { acquisitionCost: new Prisma.Decimal(acquisitionCost) }),
-        ...(currentBookValue && { currentBookValue: new Prisma.Decimal(currentBookValue) }),
-        ...(acquisitionDate && { acquisitionDate: new Date(acquisitionDate) }),
-        ...(depreciationRate && { depreciationRate: new Prisma.Decimal(depreciationRate) }),
-        ...(residualValue && { residualValue: new Prisma.Decimal(residualValue) }),
-      },
-      include: ASSET_INCLUDES,
-    });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "fixed_assets" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      if (locked.length !== 1) throw new NotFoundException('Fixed asset not found');
+      const current = await tx.fixedAsset.findFirst({
+        where: { id, deletedAt: null },
+        include: ASSET_INCLUDES,
+      });
+      if (!current) throw new NotFoundException('Fixed asset not found');
+      if (current.companyId !== existing.companyId) {
+        throw new BadRequestException('Fixed asset ownership changed; refresh before updating');
+      }
+      if (!DISPOSABLE_STATUSES.includes(current.status)) {
+        throw new BadRequestException(
+          `Fixed asset ${current.assetCode} is ${current.status} and can no longer be edited`,
+        );
+      }
+      const requestedStatus = (rest as { status?: FixedAssetStatus }).status;
+      if (requestedStatus && !DISPOSABLE_STATUSES.includes(requestedStatus)) {
+        throw new BadRequestException('Use the governed disposal action for terminal asset states');
+      }
 
-    await this.audit.log({
-      action: 'fixed_asset.update',
-      entityType: 'FixedAsset',
-      entityId: id,
-      userId,
-      companyId: existing.companyId ?? undefined,
-      oldValue: { status: existing.status, collateralStatus: existing.collateralStatus },
-      newValue: { status: updated.status, collateralStatus: updated.collateralStatus },
+      const result = await tx.fixedAsset.update({
+        where: { id },
+        data: {
+          ...rest,
+          ...(acquisitionCost && { acquisitionCost: new Prisma.Decimal(acquisitionCost) }),
+          ...(currentBookValue && { currentBookValue: new Prisma.Decimal(currentBookValue) }),
+          ...(acquisitionDate && { acquisitionDate: new Date(acquisitionDate) }),
+          ...(depreciationRate && { depreciationRate: new Prisma.Decimal(depreciationRate) }),
+          ...(residualValue && { residualValue: new Prisma.Decimal(residualValue) }),
+        },
+        include: ASSET_INCLUDES,
+      });
+      await this.audit.logStrictInTransaction(tx, {
+        action: 'fixed_asset.update',
+        entityType: 'FixedAsset',
+        entityId: id,
+        userId,
+        companyId: current.companyId ?? undefined,
+        oldValue: { status: current.status, collateralStatus: current.collateralStatus },
+        newValue: { status: result.status, collateralStatus: result.collateralStatus },
+      });
+      return result;
     });
 
     return updated;
@@ -230,6 +254,11 @@ export class FixedAssetsService {
   }
 
   async dispose(id: string, dto: DisposeAssetDto, user: AuthUser) {
+    // Disposal is a Group Control action even when the register row is owned by
+    // one company. Enforce the role boundary before reading the target so a
+    // company-scoped principal that somehow carries fixed-assets.update cannot
+    // use that stale/mis-issued grant to inspect or mutate the asset.
+    this.companyScope.assertGroupScoped(user, 'dispose fixed assets');
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
@@ -252,12 +281,30 @@ export class FixedAssetsService {
       throw new BadRequestException('Disposal value cannot be negative');
     }
 
-    const { updated, journalEntry } = await this.prisma.$transaction(async (tx) => {
+    const { updated } = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "fixed_assets" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      if (locked.length !== 1) throw new NotFoundException('Fixed asset not found');
+      const current = await tx.fixedAsset.findFirst({
+        where: { id, deletedAt: null },
+        include: ASSET_INCLUDES,
+      });
+      if (!current) throw new NotFoundException('Fixed asset not found');
+      if (current.companyId !== existing.companyId) {
+        throw new BadRequestException('Fixed asset ownership changed; refresh before disposal');
+      }
+      if (!DISPOSABLE_STATUSES.includes(current.status)) {
+        throw new BadRequestException(
+          `Fixed asset ${current.assetCode} is no longer in a disposable state`,
+        );
+      }
+
       // Atomic status claim: only one transaction can move the asset out of a
       // live status. The loser sees count === 0 and aborts before posting any
       // GL swing, preventing a double-relief of cost / accumulated depreciation.
       const claimed = await tx.fixedAsset.updateMany({
-        where: { id, status: { in: DISPOSABLE_STATUSES }, deletedAt: null },
+        where: { id, status: current.status, deletedAt: null },
         data: {
           status: dto.disposalStatus,
           disposalDate,
@@ -273,7 +320,7 @@ export class FixedAssetsService {
         );
       }
 
-      const journalEntry = await this.postDisposalLedger(tx, existing, {
+      const journalEntry = await this.postDisposalLedger(tx, current, {
         disposalDate,
         proceeds,
         userId: user.id,
@@ -283,22 +330,21 @@ export class FixedAssetsService {
         where: { id },
         include: ASSET_INCLUDES,
       });
+      await this.audit.logStrictInTransaction(tx, {
+        action: 'fixed_asset.dispose',
+        entityType: 'FixedAsset',
+        entityId: id,
+        userId,
+        companyId: current.companyId ?? undefined,
+        oldValue: { status: current.status },
+        newValue: {
+          status: dto.disposalStatus,
+          disposalDate: dto.disposalDate,
+          disposalValue: proceeds.toString(),
+          journalEntryId: journalEntry?.id ?? null,
+        },
+      });
       return { updated, journalEntry };
-    });
-
-    await this.audit.log({
-      action: 'fixed_asset.dispose',
-      entityType: 'FixedAsset',
-      entityId: id,
-      userId,
-      companyId: existing.companyId ?? undefined,
-      oldValue: { status: existing.status },
-      newValue: {
-        status: dto.disposalStatus,
-        disposalDate: dto.disposalDate,
-        disposalValue: proceeds.toString(),
-        journalEntryId: journalEntry?.id ?? null,
-      },
     });
 
     return updated;
@@ -324,7 +370,15 @@ export class FixedAssetsService {
    */
   private async postDisposalLedger(
     tx: Prisma.TransactionClient,
-    asset: { id: string; companyId: string | null; divisionId: string | null; branchId: string | null; assetCode: string; name: string; acquisitionCost: Prisma.Decimal },
+    asset: {
+      id: string;
+      companyId: string | null;
+      divisionId: string | null;
+      branchId: string | null;
+      assetCode: string;
+      name: string;
+      acquisitionCost: Prisma.Decimal;
+    },
     opts: { disposalDate: Date; proceeds: Prisma.Decimal; userId: string },
   ): Promise<{ id: string; journalNumber: string } | null> {
     // Only company-owned, capitalized assets have a GL cost/contra to relieve.
@@ -382,7 +436,12 @@ export class FixedAssetsService {
     // Resolve gain/loss defensively: these roles are not part of the shared
     // AccountResolver role map yet, so resolve() will throw a clear BadRequest
     // if the chart isn't configured, rather than posting to a wrong account.
-    const lines: Array<{ accountId: string; description: string; debit: Prisma.Decimal | number; credit: Prisma.Decimal | number }> = [];
+    const lines: Array<{
+      accountId: string;
+      description: string;
+      debit: Prisma.Decimal | number;
+      credit: Prisma.Decimal | number;
+    }> = [];
 
     const assetAccount = await this.accountResolver.resolve(asset.companyId, 'FIXED_ASSET', tx);
     // CR Fixed Asset for full cost — reverse the capitalize debit.
@@ -492,50 +551,71 @@ export class FixedAssetsService {
     }
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
 
-    const existingJournal = await this.prisma.journalEntry.findFirst({
-      where: {
-        companyId: existing.companyId,
-        referenceType: 'FixedAsset',
-        referenceId: existing.id,
-        deletedAt: null,
-        status: { in: ['DRAFT', 'POSTED'] },
-      },
-      select: { id: true, journalNumber: true },
-    });
-    if (existingJournal) {
-      throw new BadRequestException(
-        `Fixed asset is already capitalized by journal entry ${existingJournal.journalNumber}`,
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Capitalization and disposal serialize on the same register row. If
+      // disposal wins, this lock observes its terminal status and refuses to
+      // post cost afterwards. If capitalization wins, disposal waits and then
+      // sees/reverses the committed capitalization journal in its own tx.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "fixed_assets" WHERE "id" = ${id} FOR UPDATE`,
       );
-    }
+      if (locked.length !== 1) throw new NotFoundException('Fixed asset not found');
 
-    const amount = new Prisma.Decimal(existing.acquisitionCost).toDecimalPlaces(2);
-    if (amount.lte(0)) {
-      throw new BadRequestException('Fixed asset acquisition cost must be greater than zero');
-    }
+      const current = await tx.fixedAsset.findFirst({
+        where: { id, deletedAt: null },
+        include: ASSET_INCLUDES,
+      });
+      if (!current) throw new NotFoundException('Fixed asset not found');
+      if (current.companyId !== existing.companyId) {
+        throw new BadRequestException('Fixed asset ownership changed; refresh before capitalizing');
+      }
+      if (!DISPOSABLE_STATUSES.includes(current.status)) {
+        throw new BadRequestException(
+          `Fixed asset ${current.assetCode} is ${current.status} and cannot be capitalized`,
+        );
+      }
 
-    const source = dto.source ?? this.defaultCapitalizationSource(existing.financingStatus);
-    const transactionDate = dto.transactionDate
-      ? new Date(dto.transactionDate)
-      : existing.acquisitionDate;
-    const creditRole =
-      source === FixedAssetCapitalizationSource.PAYABLE ? 'AP_CONTROL' : 'CASH_ON_HAND';
-    const description = `Capitalize fixed asset ${existing.assetCode} - ${existing.name}`;
+      const existingJournal = await tx.journalEntry.findFirst({
+        where: {
+          companyId: current.companyId!,
+          referenceType: 'FixedAsset',
+          referenceId: current.id,
+          deletedAt: null,
+          status: { in: ['DRAFT', 'POSTED'] },
+        },
+        select: { id: true, journalNumber: true },
+      });
+      if (existingJournal) {
+        throw new BadRequestException(
+          `Fixed asset is already capitalized by journal entry ${existingJournal.journalNumber}`,
+        );
+      }
 
-    const journalEntry = await this.prisma.$transaction(async (tx) => {
+      const amount = new Prisma.Decimal(current.acquisitionCost).toDecimalPlaces(2);
+      if (amount.lte(0)) {
+        throw new BadRequestException('Fixed asset acquisition cost must be greater than zero');
+      }
+      const source = dto.source ?? this.defaultCapitalizationSource(current.financingStatus);
+      const transactionDate = dto.transactionDate
+        ? new Date(dto.transactionDate)
+        : current.acquisitionDate;
+      const creditRole =
+        source === FixedAssetCapitalizationSource.PAYABLE ? 'AP_CONTROL' : 'CASH_ON_HAND';
+      const description = `Capitalize fixed asset ${current.assetCode} - ${current.name}`;
       const [assetAccount, creditAccount] = await Promise.all([
-        this.accountResolver.resolve(existing.companyId!, 'FIXED_ASSET', tx),
-        this.accountResolver.resolve(existing.companyId!, creditRole, tx),
+        this.accountResolver.resolve(current.companyId!, 'FIXED_ASSET', tx),
+        this.accountResolver.resolve(current.companyId!, creditRole, tx),
       ]);
 
-      return this.postingEngine.postLines(
+      const journalEntry = await this.postingEngine.postLines(
         {
-          companyId: existing.companyId!,
-          divisionId: existing.divisionId,
-          branchId: existing.branchId,
+          companyId: current.companyId!,
+          divisionId: current.divisionId,
+          branchId: current.branchId,
           transactionDate,
           description,
           referenceType: 'FixedAsset',
-          referenceId: existing.id,
+          referenceId: current.id,
           moduleName: 'fixed_assets',
           userId: user.id,
           lines: [
@@ -549,8 +629,8 @@ export class FixedAssetsService {
               accountId: creditAccount.id,
               description:
                 source === FixedAssetCapitalizationSource.PAYABLE
-                  ? `Asset payable: ${existing.assetCode}`
-                  : `Asset cash acquisition: ${existing.assetCode}`,
+                  ? `Asset payable: ${current.assetCode}`
+                  : `Asset cash acquisition: ${current.assetCode}`,
               debit: 0,
               credit: amount,
             },
@@ -558,18 +638,18 @@ export class FixedAssetsService {
         },
         tx,
       );
+      await this.audit.logStrictInTransaction(tx, {
+        action: 'fixed_asset.capitalize',
+        entityType: 'FixedAsset',
+        entityId: current.id,
+        userId: user.id,
+        companyId: current.companyId!,
+        metadata: { source, amount: amount.toString(), journalEntryId: journalEntry.id },
+      });
+      return { asset: current, journalEntry };
     });
 
-    await this.audit.log({
-      action: 'fixed_asset.capitalize',
-      entityType: 'FixedAsset',
-      entityId: existing.id,
-      userId: user.id,
-      companyId: existing.companyId,
-      metadata: { source, amount: amount.toString(), journalEntryId: journalEntry.id },
-    });
-
-    return { asset: existing, journalEntry };
+    return result;
   }
 
   private defaultCapitalizationSource(

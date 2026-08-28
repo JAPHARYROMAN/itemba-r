@@ -5,10 +5,14 @@ import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../../common/services';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 @Injectable()
 export class DepartmentsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+  ) {}
 
   private companyFilter(user: any) {
     if (user.role?.scope === 'GROUP') return {};
@@ -26,7 +30,10 @@ export class DepartmentsService {
     if (search) where.name = { contains: search, mode: 'insensitive' };
     const [data, total] = await Promise.all([
       this.prisma.department.findMany({
-        where, skip, take: Number(limit), orderBy: { name: 'asc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { name: 'asc' },
         include: {
           company: { select: { id: true, name: true } },
           division: { select: { id: true, name: true, code: true } },
@@ -54,14 +61,16 @@ export class DepartmentsService {
   async create(dto: CreateDepartmentDto, user: any) {
     await this.assertDepartmentHierarchy(dto.companyId, dto.divisionId, dto.branchId, user);
     const manualCode = dto.departmentCode?.trim();
-    let departmentCode = manualCode || await this.nextDepartmentCode(dto.companyId);
+    let departmentCode = manualCode || (await this.nextDepartmentCode(dto.companyId));
     let record;
     try {
       record = await this.prisma.department.create({ data: { ...dto, departmentCode } });
     } catch (error) {
       if (this.isDepartmentCodeConflict(error)) {
         if (manualCode) {
-          throw new BadRequestException(`Department code ${manualCode} already exists for this company`);
+          throw new BadRequestException(
+            `Department code ${manualCode} already exists for this company`,
+          );
         }
         departmentCode = await this.nextDepartmentCode(dto.companyId);
         record = await this.prisma.department.create({ data: { ...dto, departmentCode } });
@@ -69,7 +78,13 @@ export class DepartmentsService {
         throw error;
       }
     }
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'Department', entityId: record.id, newValue: { ...dto, departmentCode } as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'Department',
+      entityId: record.id,
+      newValue: { ...dto, departmentCode } as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
@@ -78,6 +93,11 @@ export class DepartmentsService {
    * Checks existing codes directly so soft-deleted records, imports, and
    * previous failed previews cannot cause duplicate auto-generated codes.
    */
+  async previewNextDepartmentCode(companyId: string, user: AuthUser): Promise<string> {
+    assertCanAccessCompanyFromUser(user, companyId, AccessLevel.READ);
+    return this.nextDepartmentCode(companyId);
+  }
+
   async nextDepartmentCode(companyId: string): Promise<string> {
     if (!companyId) throw new BadRequestException('companyId is required');
     const company = await this.prisma.company.findUnique({
@@ -108,14 +128,26 @@ export class DepartmentsService {
       user,
     );
     const record = await this.prisma.department.update({ where: { id }, data: dto });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Department', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'Department',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
   async remove(id: string, user: any) {
     await this.findOne(id, user);
     await this.prisma.department.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'Department', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'Department',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Department deleted' };
   }
 
@@ -150,10 +182,14 @@ export class DepartmentsService {
       });
       if (!branch) throw new NotFoundException('Branch/location not found');
       if (branch.division.companyId !== companyId) {
-        throw new BadRequestException('Department branch/location must belong to the selected company');
+        throw new BadRequestException(
+          'Department branch/location must belong to the selected company',
+        );
       }
       if (divisionId && branch.divisionId !== divisionId) {
-        throw new BadRequestException('Department branch/location must belong to the selected division');
+        throw new BadRequestException(
+          'Department branch/location must belong to the selected division',
+        );
       }
       if (!branch.isActive || !branch.division.isActive || branch.division.deletedAt) {
         throw new BadRequestException('Department branch/location must be active');

@@ -1,3 +1,4 @@
+import { EmployeeAssignmentQueryDto } from '../../../common/dto/resource-query.dto';
 import {
   Controller,
   Get,
@@ -25,7 +26,7 @@ export class EmployeeAssignmentsController {
 
   @Get()
   @RequirePermissions('employees.assignments.manage')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: any) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: EmployeeAssignmentQueryDto) {
     return this.service.findAll(user, query);
   }
 

@@ -1,6 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpStatus, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
+import { PersistenceSecretGuard } from '../services';
 
 /**
  * Maps known Prisma errors to stable HTTP responses so callers get
@@ -9,6 +10,8 @@ import { Request, Response } from 'express';
 @Catch(Prisma.PrismaClientKnownRequestError, Prisma.PrismaClientValidationError)
 export class PrismaExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(PrismaExceptionFilter.name);
+
+  constructor(private readonly persistenceSecrets: PersistenceSecretGuard) {}
 
   catch(
     exception: Prisma.PrismaClientKnownRequestError | Prisma.PrismaClientValidationError,
@@ -38,7 +41,9 @@ export class PrismaExceptionFilter implements ExceptionFilter {
         default:
           // Do not leak raw driver/schema details to the client; log server-side.
           this.logger.error(
-            `[${request.method}] ${request.url} → Prisma ${exception.code}: ${exception.message.split('\n').pop()}`,
+            this.persistenceSecrets.sanitizeText(
+              `[${request.method}] ${request.url} → Prisma ${exception.code}: ${exception.message.split('\n').pop()}`,
+            ).value,
           );
           message = 'Database error';
       }
@@ -48,7 +53,11 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     }
 
     if (status >= 500) {
-      this.logger.error(`[${request.method}] ${request.url} → Prisma error`, exception.stack);
+      this.logger.error(
+        this.persistenceSecrets.sanitizeText(`[${request.method}] ${request.url} → Prisma error`)
+          .value,
+        this.persistenceSecrets.sanitizeText(exception.stack ?? '').value,
+      );
     }
 
     response.status(status).json({

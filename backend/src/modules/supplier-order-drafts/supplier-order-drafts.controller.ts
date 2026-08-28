@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import {
   CreateSupplierOrderDraftDto,
@@ -54,6 +55,7 @@ export class SupplierOrderDraftsController {
   }
 
   @Post(':id/share/email')
+  @AgentExcluded('external_egress_not_represented')
   @RequirePermissions('supplier_order_drafts.export')
   emailPdf(
     @Param('id') id: string,

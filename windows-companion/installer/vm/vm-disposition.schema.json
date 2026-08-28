@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itemba.invalid/schemas/msaidizi/vm-disposition-v1.json",
+  "title": "Msaidizi disposable VM disposition attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "vmRunId",
+    "provider",
+    "cleanTemplateId",
+    "sourceSnapshotId",
+    "vmEvidenceSha256",
+    "disposedAtUtc",
+    "attestationId",
+    "proofReference"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": {
+      "enum": ["DESTROYED", "REVERTED_TO_APPROVED_CLEAN_SNAPSHOT"]
+    },
+    "vmRunId": { "type": "string", "format": "uuid" },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "cleanTemplateId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "sourceSnapshotId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "revertedToSnapshotId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "vmEvidenceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "disposedAtUtc": { "type": "string", "format": "date-time" },
+    "attestationId": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "proofReference": { "type": "string", "minLength": 1, "maxLength": 2000 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "REVERTED_TO_APPROVED_CLEAN_SNAPSHOT" } }
+      },
+      "then": { "required": ["revertedToSnapshotId"] }
+    }
+  ]
+}

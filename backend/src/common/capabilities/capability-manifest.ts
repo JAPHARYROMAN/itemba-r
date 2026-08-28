@@ -16,11 +16,21 @@
 import { METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { RequestMethod } from '@nestjs/common';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { DIRECT_MTLS_DEVICE_KEY } from '../decorators/direct-mtls-device.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
-import { AGENT_EXCLUDED_KEY } from '../decorators/agent-excluded.decorator';
+import {
+  AGENT_EXCLUDED_KEY,
+  AGENT_EXCLUSION_REASON_KEY,
+  AgentExclusionReason,
+} from '../decorators/agent-excluded.decorator';
 import { API_SCOPE_KEY } from '../decorators/require-api-scope.decorator';
 import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { classifyTier, ReversibilityTier } from './reversibility';
+import { deriveDtoSchema, DerivedDtoSchema } from './dto-json-schema';
+import {
+  EXTERNAL_EGRESS_KEY,
+  ExternalEgressMetadata,
+} from '../decorators/external-egress.decorator';
 
 export type HttpVerb = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE' | 'OPTIONS' | 'HEAD' | 'ALL';
 
@@ -29,6 +39,7 @@ export type GuardKind =
   | 'permission' // @RequirePermissions — all listed codes required
   | 'permission-any' // @RequireAnyPermissions — at least one required
   | 'api-key' // @RequireApiScope + ApiKeyAuthGuard — machine-to-machine, scope-gated
+  | 'mutual-tls' // directly authenticated client TLS socket, no proxy assertion
   | 'role' // @Roles at class or handler level, no permission codes
   | 'authenticated' // JWT only — no permission or role gate
   | 'public'; // @Public with no other gate — genuinely unauthenticated
@@ -59,7 +70,13 @@ export interface Capability {
   summary?: string;
   /** `@AgentExcluded()` — never offered to the agent, whatever the permissions. */
   agentExcluded: boolean;
+  /** Stable reason supplied by `@AgentExcluded(reason)` for coverage and policy diagnostics. */
+  agentExclusionReason?: AgentExclusionReason;
+  /** Explicit server-side egress contract. Absence means no metered external effect. */
+  externalEgress?: ExternalEgressMetadata;
 }
+
+export type CapabilityEffect = 'READ' | 'WRITE' | 'EXTERNAL' | 'IRREVERSIBLE';
 
 export interface ParamSpec {
   /** `:name` segments the route requires. */
@@ -73,12 +90,23 @@ export interface ParamSpec {
   freeFormQuery: boolean;
   /** True when the handler declares a `@Body()`. */
   hasBody: boolean;
+  /**
+   * Named transport headers consumed by the controller. Header values are
+   * contextual request material, never model arguments; recording the names
+   * here lets the loopback boundary forward only the exact declared contract.
+   */
+  headers?: string[];
+  /** DTO/OpenAPI-derived contract for a whole-object `@Query()`, when available. */
+  querySchema?: DerivedDtoSchema;
+  /** DTO/OpenAPI-derived contract for `@Body()`, when available. */
+  bodySchema?: DerivedDtoSchema;
 }
 
 /** Nest's route-arg paramtype enum values we care about. */
 const PARAMTYPE_BODY = 3;
 const PARAMTYPE_QUERY = 4;
 const PARAMTYPE_PARAM = 5;
+const PARAMTYPE_HEADERS = 6;
 
 const API_OPERATION_METADATA = 'swagger/apiOperation';
 
@@ -95,22 +123,47 @@ export function extractParams(controller: ControllerClass, handlerName: string):
     | Record<string, { data?: unknown }>
     | undefined;
 
-  const spec: ParamSpec = { path: [], query: [], freeFormQuery: false, hasBody: false };
+  const spec: ParamSpec = {
+    path: [],
+    query: [],
+    freeFormQuery: false,
+    hasBody: false,
+    headers: [],
+  };
   if (!raw) return spec;
+
+  const parameterTypes = (Reflect.getMetadata(
+    'design:paramtypes',
+    controller.prototype,
+    handlerName,
+  ) ?? []) as unknown[];
 
   for (const [key, value] of Object.entries(raw)) {
     const paramtype = Number(key.split(':')[0]);
     const name = typeof value?.data === 'string' && value.data ? value.data : undefined;
+    const parameterIndex = Number(key.split(':')[1]);
+    const parameterType = Number.isInteger(parameterIndex)
+      ? parameterTypes[parameterIndex]
+      : undefined;
 
     if (paramtype === PARAMTYPE_PARAM && name) spec.path.push(name);
     else if (paramtype === PARAMTYPE_QUERY) {
       if (name) spec.query.push(name);
-      else spec.freeFormQuery = true;
-    } else if (paramtype === PARAMTYPE_BODY) spec.hasBody = true;
+      else {
+        spec.freeFormQuery = true;
+        spec.querySchema = deriveDtoSchema(parameterType);
+      }
+    } else if (paramtype === PARAMTYPE_BODY) {
+      spec.hasBody = true;
+      spec.bodySchema = deriveDtoSchema(parameterType);
+    } else if (paramtype === PARAMTYPE_HEADERS && name) {
+      spec.headers?.push(name.toLowerCase());
+    }
   }
 
   spec.path.sort();
   spec.query.sort();
+  spec.headers?.sort();
   return spec;
 }
 
@@ -143,16 +196,45 @@ function readStrings(key: string, ...targets: unknown[]): string[] {
   return [];
 }
 
+function readExternalEgress(...targets: unknown[]): ExternalEgressMetadata | undefined {
+  for (const target of targets) {
+    const value = Reflect.getMetadata(EXTERNAL_EGRESS_KEY, target as object) as unknown;
+    if (value === undefined) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('External egress metadata must be an object');
+    }
+    const source = value as Record<string, unknown>;
+    const keys = Object.keys(source).sort();
+    if (
+      keys.length !== 2 ||
+      keys[0] !== 'metering' ||
+      keys[1] !== 'reservationBytes' ||
+      source.metering !== 'adapter-receipt-v1' ||
+      !Number.isSafeInteger(source.reservationBytes) ||
+      Number(source.reservationBytes) <= 0
+    ) {
+      throw new TypeError('External egress metadata is invalid');
+    }
+    return {
+      metering: 'adapter-receipt-v1',
+      reservationBytes: Number(source.reservationBytes),
+    };
+  }
+  return undefined;
+}
+
 function determineGuard(
   permissions: string[],
   anyPermissions: string[],
   roles: string[],
   apiScopes: string[],
+  isDirectMtls: boolean,
   isPublic: boolean,
 ): GuardKind {
   // API-scope routes carry @Public() to bypass JWT, then authenticate via
   // x-api-key. Checked before `isPublic` or they would read as unauthenticated.
   if (apiScopes.length > 0) return 'api-key';
+  if (isDirectMtls) return 'mutual-tls';
   if (isPublic) return 'public';
   if (permissions.length > 0) return 'permission';
   if (anyPermissions.length > 0) return 'permission-any';
@@ -199,10 +281,22 @@ export function extractCapabilities(controllers: ControllerClass[]): Capability[
       const isPublic =
         Reflect.getMetadata(IS_PUBLIC_KEY, handler) === true ||
         Reflect.getMetadata(IS_PUBLIC_KEY, controller) === true;
+      const isDirectMtls =
+        Reflect.getMetadata(DIRECT_MTLS_DEVICE_KEY, handler) === true ||
+        Reflect.getMetadata(DIRECT_MTLS_DEVICE_KEY, controller) === true;
 
       const operation = Reflect.getMetadata(API_OPERATION_METADATA, handler) as
         | { summary?: string }
         | undefined;
+      const agentExcluded =
+        Reflect.getMetadata(AGENT_EXCLUDED_KEY, handler) === true ||
+        Reflect.getMetadata(AGENT_EXCLUDED_KEY, controller) === true;
+      const agentExclusionReason = agentExcluded
+        ? ((Reflect.getMetadata(AGENT_EXCLUSION_REASON_KEY, handler) ??
+            Reflect.getMetadata(AGENT_EXCLUSION_REASON_KEY, controller) ??
+            'agent_excluded') as AgentExclusionReason)
+        : undefined;
+      const externalEgress = readExternalEgress(handler, controller);
 
       const base: Omit<Capability, 'tier' | 'tierReason'> = {
         id: `${controller.name}.${handlerName}`,
@@ -214,20 +308,41 @@ export function extractCapabilities(controllers: ControllerClass[]): Capability[
         anyPermissions,
         roles,
         apiScopes,
-        guard: determineGuard(permissions, anyPermissions, roles, apiScopes, isPublic),
+        guard: determineGuard(
+          permissions,
+          anyPermissions,
+          roles,
+          apiScopes,
+          isDirectMtls,
+          isPublic,
+        ),
         params: extractParams(controller, handlerName),
         summary: operation?.summary,
-        agentExcluded:
-          Reflect.getMetadata(AGENT_EXCLUDED_KEY, handler) === true ||
-          Reflect.getMetadata(AGENT_EXCLUDED_KEY, controller) === true,
+        agentExcluded,
+        ...(agentExclusionReason ? { agentExclusionReason } : {}),
+        ...(externalEgress ? { externalEgress } : {}),
       };
 
       const { tier, reason } = classifyTier(base);
-      capabilities.push({ ...base, tier, tierReason: reason });
+      // External actions always use the existing red/autopilot ceiling. Encoding
+      // the declaration in tierReason also binds it into current signed CRUD
+      // capability digests without weakening or rewriting evidence machinery.
+      capabilities.push({
+        ...base,
+        tier: externalEgress ? 'red' : tier,
+        tierReason: externalEgress ? 'metered-external-egress' : reason,
+      });
     }
   }
 
   return capabilities.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** The exact effect a durable ERP plan must copy from the manifest. */
+export function capabilityEffect(capability: Capability): CapabilityEffect {
+  if (capability.externalEgress) return 'EXTERNAL';
+  if (capability.verb === 'GET' || capability.verb === 'HEAD') return 'READ';
+  return capability.tier === 'red' ? 'IRREVERSIBLE' : 'WRITE';
 }
 
 /** Every permission code a capability could require, in one list. */

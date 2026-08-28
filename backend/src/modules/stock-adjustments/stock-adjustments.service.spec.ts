@@ -36,7 +36,10 @@ function makeService() {
       findMany: jest.fn(async () => [{ id: 'unit-1', companyId: 'company-1' }]),
     },
   } as any;
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
   const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
   const postingEngine = {
@@ -57,7 +60,7 @@ function makeService() {
     postingEngine,
     accountResolver,
   );
-  return { service, prisma, postingEngine, accountResolver, inventoryMovements };
+  return { service, prisma, auditLogs, postingEngine, accountResolver, inventoryMovements };
 }
 
 const user = { id: 'user-1', permissions: ['inventory.adjustments.create'] } as any;
@@ -173,23 +176,48 @@ describe('StockAdjustmentsService approval revert', () => {
 
 describe('StockAdjustmentsService post durability', () => {
   it('opens the posting transaction with an explicit long timeout, not Prisma 5s default', async () => {
-    const { service, prisma } = makeService();
+    const { service, prisma, auditLogs } = makeService();
     // A count of a few hundred lines runs ~10 round-trips per line inside this
     // one transaction. On Prisma's 5s interactive default it dies with P2028
     // partway through, which rolls back correctly but leaves the adjustment at
     // APPROVED — a stranded, hand-postable orphan of exactly the shape the
     // Mobile POS Lite count wrapper exists to make impossible.
-    prisma.$transaction = jest.fn(async (callback: any) =>
-      callback({
-        stockAdjustment: {
-          updateMany: jest.fn(async () => ({ count: 1 })),
-          update: jest.fn(async () => ({ id: 'sa-1', companyId: 'company-1', status: 'POSTED' })),
-        },
-      }),
-    );
+    const tx = {
+      stockAdjustment: {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        update: jest.fn(async () => ({ id: 'sa-1', companyId: 'company-1', status: 'POSTED' })),
+      },
+    };
+    prisma.$transaction = jest.fn(async (callback: any) => callback(tx));
 
     await service.post('sa-1', user);
 
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 60_000 });
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        action: 'STOCK_ADJUSTMENT_POST',
+        entityId: 'sa-1',
+        companyId: 'company-1',
+      }),
+    );
+  });
+
+  it('fails the posting transaction when its mandatory audit append fails', async () => {
+    const { service, prisma, auditLogs } = makeService();
+    const failure = new Error('audit append unavailable');
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(failure);
+    const tx = {
+      stockAdjustment: {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        update: jest.fn(async () => ({ id: 'sa-1', companyId: 'company-1', status: 'POSTED' })),
+      },
+    };
+    prisma.$transaction = jest.fn(async (callback: any) => callback(tx));
+
+    await expect(service.post('sa-1', user)).rejects.toBe(failure);
+    expect(auditLogs.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'STOCK_ADJUSTMENT_POST' }),
+    );
   });
 });

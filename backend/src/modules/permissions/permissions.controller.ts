@@ -4,6 +4,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { Roles } from '../../common/decorators/roles.decorator';
 import { PermissionsService } from './permissions.service';
 import { CreatePermissionDto } from './dto/create-permission.dto';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * Permission catalog endpoints.
@@ -39,14 +40,14 @@ export class PermissionsController {
   @Post()
   @Roles('GROUP_SUPER_ADMIN')
   @RequirePermissions('permissions.create')
-  create(@Body() dto: CreatePermissionDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreatePermissionDto, @CurrentUser() user: AuthUser) {
+    return this.service.create(dto, user);
   }
 
   @Delete(':id')
   @Roles('GROUP_SUPER_ADMIN')
   @RequirePermissions('permissions.delete')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user);
   }
 }

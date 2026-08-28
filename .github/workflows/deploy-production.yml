@@ -38,8 +38,10 @@ jobs:
       - name: Check the confirmation phrase
         # A typed phrase, not a boolean, so a deploy cannot happen by clicking
         # through the form on autopilot.
+        env:
+          REQUESTED_CONFIRMATION: ${{ inputs.confirm }}
         run: |
-          if [ "${{ inputs.confirm }}" != "deploy-production" ]; then
+          if [ "$REQUESTED_CONFIRMATION" != "deploy-production" ]; then
             echo "::error::Confirmation phrase did not match. Type exactly: deploy-production"
             exit 1
           fi
@@ -65,15 +67,21 @@ jobs:
       - name: Require CI to have passed for this exact commit
         env:
           GH_TOKEN: ${{ github.token }}
-        # The bar we kept failing to hold by hand. A run that is queued, running,
-        # cancelled or failed is not a pass — only an explicit success is.
+        # Only the main-branch push run exercises main-only runtime/deployment
+        # gates. A PR run can share the same commit SHA but may legitimately skip
+        # those jobs, so it can never authorize production deployment.
         run: |
           SHA="${{ steps.resolve.outputs.sha }}"
-          CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" \
-            --workflow 'ITEMBA-R CI' --limit 1 --json conclusion -q '.[0].conclusion')"
-          echo "CI conclusion for $SHA: ${CONCLUSION:-none}"
-          if [ "$CONCLUSION" != "success" ]; then
-            echo "::error::CI for $SHA is '${CONCLUSION:-not found}', not success. Refusing to deploy."
+          RUN="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" \
+            --workflow 'ITEMBA-R CI' --event push --branch main --status success --limit 1 \
+            --json databaseId,conclusion,event,headBranch,headSha,status \
+            --jq '.[0] | [.databaseId, .conclusion, .event, .headBranch, .headSha, .status] | @tsv')"
+          IFS=$'\t' read -r RUN_ID CONCLUSION EVENT HEAD_BRANCH HEAD_SHA STATUS <<< "$RUN"
+          echo "CI push run for $SHA: id=${RUN_ID:-none} status=${STATUS:-none} conclusion=${CONCLUSION:-none}"
+          if [ -z "$RUN_ID" ] || [ "$CONCLUSION" != "success" ] || \
+             [ "$EVENT" != "push" ] || [ "$HEAD_BRANCH" != "main" ] || \
+             [ "$HEAD_SHA" != "$SHA" ] || [ "$STATUS" != "completed" ]; then
+            echo "::error::No successful completed ITEMBA-R CI push run on main exists for exact SHA $SHA. Refusing to deploy."
             exit 1
           fi
 
@@ -157,9 +165,22 @@ jobs:
           $COMPOSE exec -T backend node -e "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>{console.log('health HTTP',r.status);process.exit(r.ok?0:1)}).catch(e=>{console.log('health unreachable:',e.message);process.exit(1)})" </dev/null
 
           echo "--- msaidizi posture ---"
-          ENABLED="$($COMPOSE exec -T backend printenv MSAIDIZI_ENABLED </dev/null || echo unset)"
+          POSTURE_KEYS='MSAIDIZI_ENABLED MSAIDIZI_AUTONOMY_ENABLED MSAIDIZI_TASK_WORKER_ENABLED MSAIDIZI_AUTOPILOT_ENABLED MSAIDIZI_HOST_EXECUTION_ENABLED MSAIDIZI_ADAPTIVE_REASONING_ENABLED MSAIDIZI_DEVICE_PAIRING_ENABLED MSAIDIZI_DEVICE_CHANNEL_ENABLED MSAIDIZI_DIRECT_MTLS_ENABLED MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED MSAIDIZI_UPDATE_SUPERVISOR_ENABLED MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED MSAIDIZI_UPDATE_EVALUATOR_ENABLED MSAIDIZI_EVALUATOR_MTLS_ENABLED MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED MSAIDIZI_AUDIT_SIGNER_ENABLED'
+          for KEY in $POSTURE_KEYS; do
+            VALUE="$($COMPOSE exec -T backend printenv "$KEY" </dev/null || echo unset)"
+            echo "${KEY}=${VALUE}"
+            if [ "$VALUE" != "false" ]; then
+              echo "ERROR: production deployment requires ${KEY}=false; refusing unsafe Msaidizi posture." >&2
+              exit 1
+            fi
+          done
           MODE="$($COMPOSE exec -T backend printenv MSAIDIZI_WRITE_MODE </dev/null || echo unset)"
-          echo "MSAIDIZI_ENABLED=${ENABLED} MSAIDIZI_WRITE_MODE=${MODE}"
+          echo "MSAIDIZI_WRITE_MODE=${MODE}"
+          if [ "$MODE" != "read-only" ]; then
+            echo "ERROR: production deployment requires MSAIDIZI_WRITE_MODE=read-only; refusing unsafe Msaidizi posture." >&2
+            exit 1
+          fi
+          echo "Msaidizi posture: PASS (all independent switches disabled, read-only)"
 
           # Prove the script reached its end. Without a sentinel, a future
           # stdin-eating command truncates these checks silently instead of
@@ -169,9 +190,13 @@ jobs:
 
       - name: Report
         if: always()
+        env:
+          REPORT_REF: ${{ inputs.ref }}
+          REPORT_COMMIT: ${{ steps.resolve.outputs.sha }}
+          REPORT_RESULT: ${{ job.status }}
         run: |
           echo "### Production deploy" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- ref: \`${{ inputs.ref }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- commit: \`${{ steps.resolve.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- result: **${{ job.status }}**" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- ref: \`$REPORT_REF\`" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- commit: \`$REPORT_COMMIT\`" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- result: **$REPORT_RESULT**" >> "$GITHUB_STEP_SUMMARY"

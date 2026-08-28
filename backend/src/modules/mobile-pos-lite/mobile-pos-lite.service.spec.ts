@@ -5171,7 +5171,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
     const controller = new MobilePosLiteController(service);
     const user = repUser();
 
-    controller.counterDeliveryBackfill({ companyId: 'company-1' }, user);
+    controller.counterDeliveryBackfill({}, 'company-1', user);
 
     expect(service.counterDeliveryBackfill).toHaveBeenCalledWith({ companyId: 'company-1' }, user);
     // Two arguments, so nothing a request body could carry can reach the run.

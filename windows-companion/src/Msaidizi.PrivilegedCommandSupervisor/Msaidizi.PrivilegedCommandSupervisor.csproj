@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>Itemba.Msaidizi.PrivilegedCommandSupervisor</AssemblyName>
+    <RootNamespace>Itemba.Msaidizi.PrivilegedCommandSupervisor</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Independent trusted-root isolation supervisor for Msaidizi privileged commands.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Msaidizi.Companion.Contracts\Msaidizi.Companion.Contracts.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

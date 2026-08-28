@@ -14,5 +14,4 @@ export class CreateEmployeeAssignmentDto {
   @IsOptional() @IsBoolean() isPrimary?: boolean;
   @IsOptional() @IsEnum(AssignmentStatus) status?: AssignmentStatus;
   @IsOptional() @IsString() notes?: string;
-  @IsString() createdById!: string;
 }

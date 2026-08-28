@@ -1,0 +1,47 @@
+{
+  "MsaidiziRecoverySupervisor": {
+    "DeviceId": "REPLACE_WITH_ENROLLED_DEVICE_UUID",
+    "BrokerBaseUri": "https://msaidizi-broker.example.invalid:3443/api/v1/",
+    "ClientCertificateThumbprint": "REPLACE_WITH_LOCAL_MACHINE_CLIENT_CERT_THUMBPRINT",
+    "SupervisorRoot": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\recovery",
+    "JournalPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\recovery\\journal.jsonl",
+    "ResultCachePath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\recovery\\results",
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "PinnedRecoveryPublicKeyPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\recovery\\recovery-public.pem",
+    "PinnedRecoveryPublicKeySha256": "REPLACE_WITH_LOWERCASE_SHA256_OF_PINNED_P256_SPKI",
+    "RecoveryKeyId": "REPLACE_WITH_RECOVERY_SIGNING_KEY_ID",
+    "PollIntervalSeconds": 10
+  },
+  "Companion": {
+    "DeviceId": "REPLACE_WITH_ENROLLED_DEVICE_UUID",
+    "ExecutionEnabled": false,
+    "JournalPath": "%ProgramData%\\Itemba\\Msaidizi\\journal\\actions.jsonl",
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "ResultCachePath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\result-cache"
+  },
+  "BrokerChannel": {
+    "Enabled": false,
+    "RequireHardwareBackedDeviceIdentity": true,
+    "DevelopmentOnlyAllowSoftwareDeviceIdentity": false,
+    "PreferTpm": true,
+    "DeviceIdentityRecordPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\device-identity.bin"
+  },
+  "HostCapabilities": {
+    "Enabled": true,
+    "RecoveryVaultPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\recovery-vault",
+    "SecretVaultPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\secret-vault",
+    "AllowedRoots": [],
+    "AllowedFileAclProfiles": [],
+    "AllowedRegistryRoots": [],
+    "AllowedMachineEnvironmentVariables": [],
+    "AllowedWindowsServices": [],
+    "AllowedScheduledTasks": [],
+    "AllowedLocalAccounts": [],
+    "AllowedLocalGroups": [],
+    "AllowedLocalUserRights": [],
+    "AllowedNetworkAdapters": [],
+    "AllowedPrinters": [],
+    "AllowedPowerSchemes": [],
+    "AllowedTimeZones": []
+  }
+}

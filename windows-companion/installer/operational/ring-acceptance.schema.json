@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itemba.invalid/schemas/msaidizi/ring-acceptance-v1.json",
+  "title": "Msaidizi staged rollout ring acceptance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "productionDeploymentEligible",
+    "acceptanceRunId",
+    "completedAtUtc",
+    "signerThumbprint",
+    "operationalEvidenceSha256",
+    "release",
+    "rings",
+    "noSkippedChecks",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": { "const": "PASS" },
+    "productionDeploymentEligible": { "const": true },
+    "acceptanceRunId": { "type": "string", "format": "uuid" },
+    "completedAtUtc": { "type": "string", "format": "date-time" },
+    "signerThumbprint": { "type": "string", "pattern": "^[0-9A-F]{40}$" },
+    "operationalEvidenceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installerVmApprovalSha256",
+        "releaseManifestSha256",
+        "version",
+        "sourceRevision",
+        "msiSha256"
+      ],
+      "properties": {
+        "installerVmApprovalSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "releaseManifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "sourceRevision": { "type": "string", "minLength": 7, "maxLength": 100 },
+        "msiSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "rings": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "sequence",
+          "targetPercent",
+          "status",
+          "enrolledPopulation",
+          "targetedDeviceCount",
+          "observedHealthyDeviceCount",
+          "targetDeviceSetSha256",
+          "startedAtUtc",
+          "completedAtUtc",
+          "observedHealthHours",
+          "checks",
+          "counters"
+        ],
+        "properties": {
+          "name": { "enum": ["RING_0", "RING_5", "RING_25", "RING_100"] },
+          "sequence": { "type": "integer", "minimum": 0, "maximum": 3 },
+          "targetPercent": { "enum": [0, 5, 25, 100] },
+          "status": { "const": "PASS" },
+          "enrolledPopulation": { "type": "integer", "minimum": 1 },
+          "targetedDeviceCount": { "type": "integer", "minimum": 1 },
+          "observedHealthyDeviceCount": { "type": "integer", "minimum": 1 },
+          "targetDeviceSetSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "startedAtUtc": { "type": "string", "format": "date-time" },
+          "completedAtUtc": { "type": "string", "format": "date-time" },
+          "observedHealthHours": { "type": "number", "minimum": 0 },
+          "checks": {
+            "type": "array",
+            "minItems": 8,
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "status", "artifactSha256"],
+              "properties": {
+                "id": {
+                  "enum": [
+                    "rollout-health",
+                    "audit-ledger-reconciliation",
+                    "recovery-drill",
+                    "central-kill-switch",
+                    "device-kill-switch",
+                    "global-autopilot-disable",
+                    "autonomous-update-rollback",
+                    "no-duplicate-mutation-or-external-action"
+                  ]
+                },
+                "status": { "const": "PASS" },
+                "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            }
+          },
+          "counters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "failedDevices",
+              "unhealthyDevices",
+              "reconciliationMismatches",
+              "dispatchesAfterKillSwitch",
+              "rollbackFailures",
+              "duplicateMutations",
+              "duplicateExternalActions"
+            ],
+            "properties": {
+              "failedDevices": { "const": 0 },
+              "unhealthyDevices": { "const": 0 },
+              "reconciliationMismatches": { "const": 0 },
+              "dispatchesAfterKillSwitch": { "const": 0 },
+              "rollbackFailures": { "const": 0 },
+              "duplicateMutations": { "const": 0 },
+              "duplicateExternalActions": { "const": 0 }
+            }
+          }
+        }
+      }
+    },
+    "noSkippedChecks": { "const": true },
+    "artifacts": {
+      "type": "array",
+      "minItems": 36,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256", "immutableReference"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "immutableReference": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    }
+  }
+}

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CompanyScopeService } from '../../../common/services';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 
 /**
  * Generates payroll disbursement files for a payroll run. Each Tanzanian bank
@@ -28,6 +29,7 @@ export class DisbursementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async generateForRun(payrollRunId: string, user: AuthUser) {
@@ -103,7 +105,13 @@ export class DisbursementsService {
     }
 
     // ── Build files ─────────────────────────────────────────────────────────
-    const files: Array<{ filename: string; mimeType: string; rowCount: number; total: number; content: string }> = [];
+    const files: Array<{
+      filename: string;
+      mimeType: string;
+      rowCount: number;
+      total: number;
+      content: string;
+    }> = [];
 
     for (const [bankName, lines] of bankBuckets) {
       // Need each line's bank account number — re-look from entries because
@@ -146,7 +154,7 @@ export class DisbursementsService {
       files.push(buildUnmappedFile(run.payrollRunNumber, unmapped));
     }
 
-    return {
+    const result = {
       runNumber: run.payrollRunNumber,
       companyName: run.company.name,
       generatedAt: new Date().toISOString(),
@@ -158,6 +166,20 @@ export class DisbursementsService {
       },
       files,
     };
+    // File content is response-only, so the audit row is this export action's
+    // sole durable effect. Persist it fail-closed before releasing salary and
+    // account data to the caller.
+    await this.prisma.$transaction((tx) =>
+      this.auditLogs.logStrictInTransaction(tx, {
+        action: 'PAYROLL_DISBURSEMENT_FILES_GENERATED',
+        entityType: 'PayrollRun',
+        entityId: run.id,
+        userId: user.id,
+        companyId: run.companyId,
+        metadata: result.summary,
+      }),
+    );
+    return result;
   }
 }
 
@@ -204,7 +226,12 @@ interface MmRow {
   reference: string;
 }
 
-function buildMobileMoneyFile(companyCode: string, runNumber: string, provider: string, rows: MmRow[]) {
+function buildMobileMoneyFile(
+  companyCode: string,
+  runNumber: string,
+  provider: string,
+  rows: MmRow[],
+) {
   const safeProvider = provider.toUpperCase();
   const filename = `mobilemoney_${safeProvider}_${companyCode}_${runNumber}.csv`;
   const header = 'EmployeeCode,FullName,AccountName,MSISDN,Amount,Reference';
@@ -229,7 +256,10 @@ function buildMobileMoneyFile(companyCode: string, runNumber: string, provider: 
   };
 }
 
-function buildUnmappedFile(runNumber: string, rows: { employeeCode: string; fullName: string; netPay: number; reference: string }[]) {
+function buildUnmappedFile(
+  runNumber: string,
+  rows: { employeeCode: string; fullName: string; netPay: number; reference: string }[],
+) {
   const filename = `unmapped_${runNumber}.csv`;
   const header = 'EmployeeCode,FullName,Amount,Reference,Reason';
   const body = rows.map((r) =>

@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AuditScopeKind, Prisma } from '@prisma/client';
 import { IntercompanyTransactionsService } from './intercompany-transactions.service';
 
 /**
@@ -123,7 +123,15 @@ function makeService(opts?: { txn?: Partial<TxnState> }) {
     postingEngine,
   );
 
-  return { service, prisma, txn, postingEngine, accountResolver, interCompanyTransaction };
+  return {
+    service,
+    prisma,
+    txn,
+    postingEngine,
+    accountResolver,
+    interCompanyTransaction,
+    auditLogs,
+  };
 }
 
 const user = { id: 'user-1', permissions: [] } as any;
@@ -194,6 +202,20 @@ describe('IntercompanyTransactionsService.post — balanced dual-company journal
     expect(finalUpdate.data.status).toBeUndefined();
     expect(finalUpdate.data.fromCompanyJournalEntryId).toBe('je-company-A-1');
     expect(finalUpdate.data.toCompanyJournalEntryId).toBe('je-company-B-2');
+  });
+
+  it('attributes the post audit to both affected companies', async () => {
+    const { service, auditLogs } = makeService();
+
+    await service.post('ic-1', user);
+
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'INTERCOMPANY_POST',
+        scopeKind: AuditScopeKind.MULTI_COMPANY,
+        companyScopeIds: ['company-A', 'company-B'],
+      }),
+    );
   });
 });
 

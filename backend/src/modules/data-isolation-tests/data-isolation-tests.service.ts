@@ -1,13 +1,21 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AuditScopeKind, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import {
+  AddDataIsolationIssueDto,
+  CompleteDataIsolationTestDto,
+  CreateDataIsolationTestDto,
+} from './dto/data-isolation-test.dto';
 
 @Injectable()
 export class DataIsolationTestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(query: any, user: AuthUser) {
@@ -47,9 +55,9 @@ export class DataIsolationTestsService {
     });
   }
 
-  async create(dto: any, user: AuthUser) {
+  async create(dto: CreateDataIsolationTestDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'run data isolation tests');
-    return this.prisma.dataIsolationTestRun.create({
+    const record = await this.prisma.dataIsolationTestRun.create({
       data: {
         testRunNumber: 'ISO-' + Date.now(),
         runType: dto.runType,
@@ -59,9 +67,19 @@ export class DataIsolationTestsService {
         totalChecks: dto.totalChecks ?? 0,
       },
     });
+    await this.auditLogs.log({
+      action: 'DATA_ISOLATION_TEST_CREATED',
+      entityType: 'DataIsolationTestRun',
+      entityId: record.id,
+      userId: user.id,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
+      newValue: record as unknown as Record<string, unknown>,
+    });
+    return record;
   }
 
-  async complete(id: string, dto: any, user: AuthUser) {
+  async complete(id: string, dto: CompleteDataIsolationTestDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'complete data isolation tests');
     await this.findOne(id);
     const failedChecks = Number(dto.failedChecks ?? 0);
@@ -74,22 +92,32 @@ export class DataIsolationTestsService {
     } else {
       status = 'PARTIAL';
     }
-    return this.prisma.dataIsolationTestRun.update({
+    const record = await this.prisma.dataIsolationTestRun.update({
       where: { id },
       data: {
         status,
         completedAt: new Date(),
         failedChecks,
         passedChecks,
-        resultSummary: dto.resultSummary ?? undefined,
+        resultSummary: (dto.resultSummary as Prisma.InputJsonValue | undefined) ?? undefined,
       },
     });
+    await this.auditLogs.log({
+      action: 'DATA_ISOLATION_TEST_COMPLETED',
+      entityType: 'DataIsolationTestRun',
+      entityId: id,
+      userId: user.id,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
+      newValue: record as unknown as Record<string, unknown>,
+    });
+    return record;
   }
 
-  async addIssue(testRunId: string, dto: any, user: AuthUser) {
+  async addIssue(testRunId: string, dto: AddDataIsolationIssueDto, user: AuthUser) {
     this.companyScope.assertGroupScoped(user, 'add data isolation test issues');
     await this.findOne(testRunId);
-    return this.prisma.dataIsolationTestIssue.create({
+    const record = await this.prisma.dataIsolationTestIssue.create({
       data: {
         testRunId,
         issueType: dto.issueType,
@@ -100,5 +128,15 @@ export class DataIsolationTestsService {
         status: 'OPEN',
       },
     });
+    await this.auditLogs.log({
+      action: 'DATA_ISOLATION_ISSUE_CREATED',
+      entityType: 'DataIsolationTestIssue',
+      entityId: record.id,
+      userId: user.id,
+      scopeKind: AuditScopeKind.GLOBAL,
+      companyScopeIds: [],
+      newValue: record as unknown as Record<string, unknown>,
+    });
+    return record;
   }
 }

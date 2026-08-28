@@ -40,6 +40,41 @@ describe('AccountingControlService', () => {
     ).resolves.toBeTruthy();
   });
 
+  it('uses a supplied transaction client for authoritative period and lock checks', async () => {
+    const transactionClient = {
+      accountingPeriod: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'period-1',
+          fiscalYearId: 'fy-1',
+          companyId: 'company-1',
+          status: 'OPEN',
+          startDate: new Date('2026-04-01'),
+          endDate: new Date('2026-04-30'),
+          fiscalYear: { id: 'fy-1', status: 'OPEN' },
+        }),
+        findFirst: jest.fn(),
+      },
+      accountingLock: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+
+    await service.assertPostingAllowed(
+      {
+        companyId: 'company-1',
+        accountingPeriodId: 'period-1',
+        transactionDate: new Date('2026-04-15'),
+        moduleName: 'journal_entries',
+      },
+      transactionClient as any,
+    );
+
+    expect(transactionClient.accountingPeriod.findUnique).toHaveBeenCalledTimes(1);
+    expect(transactionClient.accountingLock.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.accountingPeriod.findUnique).not.toHaveBeenCalled();
+    expect(prisma.accountingLock.findFirst).not.toHaveBeenCalled();
+  });
+
   it('rejects posting into a closed period', async () => {
     prisma.accountingPeriod.findUnique.mockResolvedValue({
       id: 'period-1',

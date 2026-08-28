@@ -24,8 +24,8 @@ export class MobileMoneyAccountsController {
 
   @Get()
   @RequirePermissions('employees.view')
-  findByEmployee(@Query('employeeId') employeeId: string) {
-    return this.service.findByEmployee(employeeId);
+  findByEmployee(@Query('employeeId') employeeId: string, @CurrentUser() user: AuthUser) {
+    return this.service.findByEmployee(employeeId, user);
   }
 
   @Post()
@@ -47,6 +47,6 @@ export class MobileMoneyAccountsController {
   @Delete(':id')
   @RequirePermissions('employees.update')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

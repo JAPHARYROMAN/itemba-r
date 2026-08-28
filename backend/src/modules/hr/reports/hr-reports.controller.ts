@@ -1,4 +1,10 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  HrAttendanceReportQueryDto,
+  HrEmployeeReportQueryDto,
+  HrLeaveReportQueryDto,
+  HrPayrollReportQueryDto,
+} from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -12,25 +18,25 @@ export class HrReportsController {
 
   @Get('employees')
   @RequirePermissions('hr.reports.view')
-  employeeReport(@CurrentUser() user: AuthUser, @Query() query: any) {
+  employeeReport(@CurrentUser() user: AuthUser, @Query() query: HrEmployeeReportQueryDto) {
     return this.service.employeeReport(user, query);
   }
 
   @Get('attendance')
   @RequirePermissions('hr.reports.view')
-  attendanceReport(@CurrentUser() user: AuthUser, @Query() query: any) {
+  attendanceReport(@CurrentUser() user: AuthUser, @Query() query: HrAttendanceReportQueryDto) {
     return this.service.attendanceReport(user, query);
   }
 
   @Get('payroll')
   @RequirePermissions('hr.reports.view')
-  payrollReport(@CurrentUser() user: AuthUser, @Query() query: any) {
+  payrollReport(@CurrentUser() user: AuthUser, @Query() query: HrPayrollReportQueryDto) {
     return this.service.payrollReport(user, query);
   }
 
   @Get('leave')
   @RequirePermissions('hr.reports.view')
-  leaveReport(@CurrentUser() user: AuthUser, @Query() query: any) {
+  leaveReport(@CurrentUser() user: AuthUser, @Query() query: HrLeaveReportQueryDto) {
     return this.service.leaveReport(user, query);
   }
 }

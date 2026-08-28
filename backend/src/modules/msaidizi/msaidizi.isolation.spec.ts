@@ -23,6 +23,7 @@ import { CapabilityInvoker, InvocationRequest, InvocationResult } from './capabi
 import { ManifestProvider } from './manifest.provider';
 import { ModelClient, ModelMessage, ModelRequest, ModelResponse } from './model-client';
 import { MsaidiziConfig, WriteMode } from './msaidizi.config';
+import { buildRegistry } from './tool-registry';
 import {
   ApprovalGrant,
   ApprovalGrantClaim,
@@ -106,6 +107,22 @@ class ScriptedModel extends ModelClient {
 
 function toolUse(name: string, input: Record<string, unknown> = {}, id = 'tu_1'): ModelResponse {
   return { content: [{ type: 'tool_use', id, name, input }], stopReason: 'tool_use' };
+}
+
+function toolResultIds(messages: readonly ModelMessage[]): string[] {
+  return messages.flatMap((message) =>
+    Array.isArray(message.content)
+      ? message.content
+          .filter(
+            (block): block is { type: 'tool_result'; tool_use_id: string } =>
+              typeof block === 'object' &&
+              block !== null &&
+              (block as { type?: unknown }).type === 'tool_result' &&
+              typeof (block as { tool_use_id?: unknown }).tool_use_id === 'string',
+          )
+          .map((block) => block.tool_use_id)
+      : [],
+  );
 }
 
 /**
@@ -949,5 +966,348 @@ describe('enabling tool search does not widen the envelope', () => {
 
     expect(model.seen.length).toBeGreaterThan(1);
     expect(JSON.stringify(model.seen[1].tools)).toBe(JSON.stringify(model.seen[0].tools));
+  });
+});
+
+describe('measured finance and operations fast paths', () => {
+  const expenses = capability({
+    id: 'ExpensesController.findAll',
+    controller: 'ExpensesController',
+    path: 'expenses',
+    permissions: ['expenses.view'],
+  });
+  const payables = capability({
+    id: 'PayablesController.findAll',
+    controller: 'PayablesController',
+    path: 'payables',
+    permissions: ['payables.view'],
+  });
+
+  it('forces Expenses first, rejects an adjacent parallel read, then makes the model answer', async () => {
+    const model = new ScriptedModel([
+      {
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'opaque reasoning',
+            signature: 'signed-thinking',
+          },
+          {
+            type: 'tool_use',
+            id: 'tu_payables',
+            name: 'Payables_findAll',
+            input: { query: { limit: 100 } },
+          },
+          {
+            type: 'tool_use',
+            id: 'tu_expenses',
+            name: 'Expenses_findAll',
+            input: { query: { limit: 100 } },
+          },
+        ],
+        stopReason: 'tool_use',
+      },
+      {
+        content: [{ type: 'text', text: 'Here are the recent expenses.' }],
+        stopReason: 'end_turn',
+      },
+    ]);
+    const invoker = new RecordingInvoker({ ok: true, status: 200, body: [{ amount: 10 }] });
+    const service = makeService(
+      [expenses, payables],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view', 'payables.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(model.seen[0].toolChoice).toEqual({
+      type: 'tool',
+      name: 'Expenses_findAll',
+      disableParallelToolUse: true,
+    });
+    expect(model.seen[1].toolChoice).toEqual({ type: 'none' });
+    expect(model.seen[1].tools).toEqual(model.seen[0].tools);
+    expect(model.seen[1].system[0]).toEqual(model.seen[0].system[0]);
+    expect(model.seen[1].messages[1]).toMatchObject({ role: 'assistant' });
+    expect((model.seen[1].messages[1].content as unknown[])[0]).toEqual({
+      type: 'thinking',
+      thinking: 'opaque reasoning',
+      signature: 'signed-thinking',
+    });
+    expect(invoker.calls.map((call) => call.capability.id)).toEqual(['ExpensesController.findAll']);
+    expect(result.events.filter((event) => event.type === 'tool_call')).toHaveLength(1);
+    expect(result.reason).toBe('end_turn');
+  });
+
+  it('allows only one retry when the measured read fails', async () => {
+    const model = new ScriptedModel([
+      toolUse('Expenses_findAll', { query: { limit: 100 } }, 'tu_1'),
+      toolUse('Expenses_findAll', { query: { limit: 50 } }, 'tu_2'),
+      // Deliberately violate the answer-only third turn. The dispatch boundary,
+      // not provider compliance, must still keep this from becoming attempt 3.
+      toolUse('Expenses_findAll', { query: { limit: 25 } }, 'tu_3'),
+    ]);
+    const invoker = new RecordingInvoker({
+      ok: false,
+      status: 503,
+      body: null,
+      error: 'upstream down',
+    });
+    const service = makeService(
+      [expenses, payables],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view', 'payables.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(invoker.calls).toHaveLength(2);
+    expect(invoker.calls.every((call) => call.capability.id === expenses.id)).toBe(true);
+    expect(model.seen.slice(0, 2).map((request) => request.toolChoice)).toEqual([
+      { type: 'tool', name: 'Expenses_findAll', disableParallelToolUse: true },
+      { type: 'tool', name: 'Expenses_findAll', disableParallelToolUse: true },
+    ]);
+    expect(model.seen[2].toolChoice).toEqual({ type: 'none' });
+    expect(result.reason).toBe('failed');
+  });
+
+  it.each([
+    {
+      caseName: 'the caller lacks expense permission',
+      permissions: ['payables.view'],
+      config: { searchEnabled: true },
+      request: {},
+    },
+    {
+      caseName: 'tool search is disabled',
+      permissions: ['expenses.view'],
+      config: { searchEnabled: false },
+      request: {},
+    },
+    {
+      caseName: 'a saved procedure supplies its reviewed capability set',
+      permissions: ['expenses.view'],
+      config: { searchEnabled: true },
+      request: {
+        restrictTo: buildRegistry([expenses], ['expenses.view'], ['green']),
+      },
+    },
+    {
+      caseName: 'the request is resuming a confirmed turn',
+      permissions: ['expenses.view'],
+      config: { searchEnabled: true },
+      request: { confirmed: ['grt_existing'] },
+    },
+  ])('does not force a measured route when $caseName', async ({ permissions, config, request }) => {
+    const model = new ScriptedModel([]);
+    const service = makeService(
+      [expenses, payables],
+      model,
+      new RecordingInvoker(),
+      configFor('read-only', config),
+    );
+
+    await service.run({
+      user: authUser(permissions),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+      ...request,
+    });
+
+    expect(model.seen[0].toolChoice).toBeUndefined();
+  });
+
+  it('lets a zero global tool budget prevent even the measured read', async () => {
+    const model = new ScriptedModel([toolUse('Expenses_findAll')]);
+    const invoker = new RecordingInvoker();
+    const service = makeService(
+      [expenses],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true, maxToolCallsPerRun: 0 }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(invoker.calls).toHaveLength(0);
+    expect(result.reason).toBe('tool_budget_exhausted');
+    expect(toolResultIds(result.messages)).toEqual(['tu_1']);
+  });
+
+  it('lets a one-call global budget prevent the measured retry', async () => {
+    const model = new ScriptedModel([
+      toolUse('Expenses_findAll', {}, 'tu_budget_1'),
+      toolUse('Expenses_findAll', {}, 'tu_budget_2'),
+    ]);
+    const invoker = new RecordingInvoker({
+      ok: false,
+      status: 503,
+      body: null,
+      error: 'upstream down',
+    });
+    const service = makeService(
+      [expenses],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true, maxToolCallsPerRun: 1 }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(invoker.calls).toHaveLength(1);
+    expect(result.reason).toBe('tool_budget_exhausted');
+    expect(toolResultIds(result.messages)).toEqual(['tu_budget_1', 'tu_budget_2']);
+  });
+
+  it.each([401, 403])(
+    'treats an HTTP %i denial as terminal instead of retrying',
+    async (status) => {
+      const model = new ScriptedModel([
+        toolUse('Expenses_findAll', {}, `tu_denied_${status}`),
+        {
+          content: [{ type: 'text', text: 'The expense read was denied.' }],
+          stopReason: 'end_turn',
+        },
+      ]);
+      const invoker = new RecordingInvoker({ ok: false, status, body: null, error: 'denied' });
+      const service = makeService(
+        [expenses],
+        model,
+        invoker,
+        configFor('read-only', { searchEnabled: true }),
+      );
+
+      const result = await service.run({
+        user: authUser(['expenses.view']),
+        authorization: 'Bearer t',
+        messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+      });
+
+      expect(invoker.calls).toHaveLength(1);
+      expect(model.seen[1].toolChoice).toEqual({ type: 'none' });
+      expect(result.reason).toBe('end_turn');
+    },
+  );
+
+  it('counts invented tool names and stops repeated exact-tool violations', async () => {
+    const model = new ScriptedModel([
+      toolUse('Invented_findAll', {}, 'tu_unknown_1'),
+      toolUse('AnotherInvented_findAll', {}, 'tu_unknown_2'),
+      toolUse('Expenses_findAll', {}, 'tu_should_not_run'),
+    ]);
+    const invoker = new RecordingInvoker();
+    const service = makeService(
+      [expenses],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(model.seen).toHaveLength(2);
+    expect(invoker.calls).toHaveLength(0);
+    expect(result.reason).toBe('failed');
+  });
+
+  it('hard-stops when the provider ignores answer-only mode after success', async () => {
+    const model = new ScriptedModel([
+      toolUse('Expenses_findAll', {}, 'tu_success'),
+      toolUse('Expenses_findAll', {}, 'tu_ignored_none'),
+      toolUse('Expenses_findAll', {}, 'tu_never_reached'),
+    ]);
+    const invoker = new RecordingInvoker();
+    const service = makeService(
+      [expenses],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(model.seen).toHaveLength(2);
+    expect(model.seen[1].toolChoice).toEqual({ type: 'none' });
+    expect(invoker.calls).toHaveLength(1);
+    expect(result.reason).toBe('failed');
+  });
+
+  it('fails closed when exact-tool mode returns no tool call', async () => {
+    const model = new ScriptedModel([
+      { content: [{ type: 'text', text: 'Unsupported answer.' }], stopReason: 'end_turn' },
+    ]);
+    const invoker = new RecordingInvoker();
+    const service = makeService(
+      [expenses],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(invoker.calls).toHaveLength(0);
+    expect(result.reason).toBe('failed');
+    expect(result.events.some((event) => event.type === 'text')).toBe(false);
+    expect(result.messages).toEqual([
+      { role: 'user', content: 'What did we spend money on recently?' },
+    ]);
+  });
+
+  it('does not expose truncated prose from an exact-tool turn that never dispatched', async () => {
+    const model = new ScriptedModel([
+      { content: [{ type: 'text', text: 'Unsupported partial answer' }], stopReason: 'max_tokens' },
+    ]);
+    const invoker = new RecordingInvoker();
+    const service = makeService(
+      [expenses],
+      model,
+      invoker,
+      configFor('read-only', { searchEnabled: true }),
+    );
+
+    const result = await service.run({
+      user: authUser(['expenses.view']),
+      authorization: 'Bearer t',
+      messages: [{ role: 'user', content: 'What did we spend money on recently?' }],
+    });
+
+    expect(invoker.calls).toHaveLength(0);
+    expect(result.reason).toBe('truncated');
+    expect(result.events.some((event) => event.type === 'text')).toBe(false);
+    expect(result.messages).toEqual([
+      { role: 'user', content: 'What did we spend money on recently?' },
+    ]);
   });
 });

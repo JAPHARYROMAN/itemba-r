@@ -1,5 +1,10 @@
 import { ArgumentsHost, ConflictException, Logger } from '@nestjs/common';
+import { EphemeralSecretFingerprintRegistry, PersistenceSecretGuard } from '../services';
 import { HttpExceptionFilter } from './http-exception.filter';
+
+function secretGuard(registry = new EphemeralSecretFingerprintRegistry()): PersistenceSecretGuard {
+  return new PersistenceSecretGuard(registry);
+}
 
 /** A host whose `json` call is the body the browser would receive. */
 function hostFor(response: { status: jest.Mock; json: jest.Mock }): ArgumentsHost {
@@ -14,7 +19,7 @@ function hostFor(response: { status: jest.Mock; json: jest.Mock }): ArgumentsHos
 function bodyFor(exception: unknown): Record<string, unknown> {
   const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
   const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
-  new HttpExceptionFilter().catch(exception, hostFor(response));
+  new HttpExceptionFilter(secretGuard()).catch(exception, hostFor(response));
   warnSpy.mockRestore();
   return response.json.mock.calls[0][0] as Record<string, unknown>;
 }
@@ -57,24 +62,29 @@ describe('HttpExceptionFilter discriminator passthrough', () => {
 describe('HttpExceptionFilter redaction', () => {
   it('scrubs sensitive values from 5xx log context', () => {
     const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
-    const filter = new HttpExceptionFilter();
+    const registry = new EphemeralSecretFingerprintRegistry();
+    registry.register('123456');
+    const filter = new HttpExceptionFilter(secretGuard(registry));
+    const encoded = Buffer.from('123456').toString('base64');
     const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const host = {
       switchToHttp: () => ({
         getResponse: () => response,
         getRequest: () => ({
           method: 'POST',
-          url: '/boom?token=abc123',
+          url: `/boom?token=abc123&reference=${encoded}`,
         }),
       }),
     } as unknown as ArgumentsHost;
 
-    filter.catch(new Error('failure password=secret token=abc123'), host);
+    filter.catch(new Error('failure password=secret token=abc123 batch=xx123456yy'), host);
 
     expect(errorSpy).toHaveBeenCalled();
     const [message, stack] = errorSpy.mock.calls[0];
     expect(message).not.toContain('abc123');
+    expect(message).not.toContain(encoded);
     expect(stack).not.toContain('secret');
+    expect(stack).not.toContain('123456');
     errorSpy.mockRestore();
   });
 });

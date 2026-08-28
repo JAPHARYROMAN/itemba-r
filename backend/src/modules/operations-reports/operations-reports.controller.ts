@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { OperationsReportsService } from './operations-reports.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { IsOptional, IsString, IsNumberString } from 'class-validator';
 import { Supplier360ReportService } from './supplier-360-report.service';
 import {
@@ -83,12 +84,14 @@ export class OperationsReportsController {
   ) {}
 
   @Get('supplier-360')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('operations.reports.view')
   getSupplier360(@Query() q: Supplier360ReportQueryDto, @CurrentUser() user: AuthUser) {
     return this.supplier360.getReport(q, user);
   }
 
   @Get('supplier-360/export')
+  @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('operations.reports.view')
   exportSupplier360(
     @Query() q: Supplier360ExportQueryDto,

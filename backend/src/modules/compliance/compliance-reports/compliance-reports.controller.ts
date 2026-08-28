@@ -1,4 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { CompanyDateRangeQueryDto, CompanyQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -12,19 +13,22 @@ export class ComplianceReportsController {
 
   @Get('obligations-summary')
   @RequirePermissions('compliance.reports.view')
-  getObligationsSummary(@CurrentUser() user: AuthUser, @Query() query: any) {
+  getObligationsSummary(@CurrentUser() user: AuthUser, @Query() query: CompanyDateRangeQueryDto) {
     return this.service.getObligationsSummary(user, query);
   }
 
   @Get('tax-transactions-summary')
   @RequirePermissions('compliance.reports.view')
-  getTaxTransactionsSummary(@CurrentUser() user: AuthUser, @Query() query: any) {
+  getTaxTransactionsSummary(
+    @CurrentUser() user: AuthUser,
+    @Query() query: CompanyDateRangeQueryDto,
+  ) {
     return this.service.getTaxTransactionsSummary(user, query);
   }
 
   @Get('document-status-summary')
   @RequirePermissions('compliance.reports.view')
-  getDocumentStatusSummary(@CurrentUser() user: AuthUser, @Query() query: any) {
+  getDocumentStatusSummary(@CurrentUser() user: AuthUser, @Query() query: CompanyQueryDto) {
     return this.service.getDocumentStatusSummary(user, query);
   }
 }

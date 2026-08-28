@@ -1,0 +1,255 @@
+{
+  "Companion": {
+    "DeviceId": "device-issued-by-itemba",
+    "ExecutionEnabled": false,
+    "HeartbeatSeconds": 15,
+    "LeaseHeartbeatSeconds": 10,
+    "MaxConcurrentActions": 1,
+    "MaxResultDeliverySessions": 3,
+    "MaxBrokerResultEgressBytes": 16777216,
+    "MaximumArgumentsBytes": 1048576,
+    "HardMaxWallTimeSeconds": 7200,
+    "HardMaxModelTurns": 200,
+    "HardMaxAttemptedToolCalls": 500,
+    "HardMaxMutations": 100,
+    "HardMaxLocalBytes": 5368709120,
+    "HardMaxExternalEgressBytes": 262144000,
+    "HardMaxModelSpendUsd": 20,
+    "RequireCentralLedgerForMutations": true,
+    "JournalPath": "%ProgramData%\\Itemba\\Msaidizi\\journal\\actions.jsonl",
+    "KillSwitchPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\DISABLED",
+    "ResultCachePath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\result-cache",
+    "EgressReceiptReplayPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\egress-boundary\\receipts.v1.jsonl",
+    "EgressDestinationPolicySha256": "",
+    "EgressExecutionIdentitySha256": ""
+  },
+  "HostCapabilities": {
+    "Enabled": false,
+    "PermanentDeleteEnabled": false,
+    "RecoveryVaultPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\recovery-vault",
+    "SecretVaultPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\secret-vault",
+    "MaximumSearchResults": 1000,
+    "MaximumArgumentCount": 128,
+    "MaximumArgumentLength": 8192,
+    "MaximumProcessInventoryEntries": 512,
+    "MaximumInstalledSoftwareInventoryEntries": 512,
+    "MaximumSingleFileBytes": 67108864,
+    "MaximumArchiveEntries": 2048,
+    "MaximumArchiveEntryPathLength": 1024,
+    "MaximumArchiveExpandedBytes": 536870912,
+    "MaximumArchiveCompressionRatio": 100,
+    "MaximumRecoveryBytes": 5368709120,
+    "AllowedRoots": [
+      {
+        "Id": "employee-documents",
+        "Path": "C:\\ItembaManaged\\Documents",
+        "QuarantinePath": "C:\\ProgramData\\Itemba\\Msaidizi\\quarantine\\employee-documents",
+        "AllowRead": true,
+        "AllowWrite": true,
+        "AllowDelete": true
+      }
+    ],
+    "AllowedFileAclProfiles": [
+      {
+        "Id": "system-and-administrators",
+        "Sddl": "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+        "RootIds": ["employee-documents"]
+      }
+    ],
+    "AllowedExecutables": [
+      {
+        "Id": "approved-worker",
+        "Path": "C:\\Program Files\\Itemba\\ApprovedWorker.exe",
+        "AllowLocalSystem": true
+      }
+    ],
+    "AllowedRegistryRoots": [],
+    "AllowedRegistryDurableValueTargets": [],
+    "AllowedRegistryDeleteTargets": [],
+    "AllowedMachineEnvironmentVariables": [],
+    "AllowedWindowsServices": [
+      {
+        "Id": "approved-business-service",
+        "ServiceName": "REPLACE_WITH_APPROVED_SERVICE_NAME",
+        "AllowStart": true,
+        "AllowStop": true,
+        "AllowedStartModes": []
+      }
+    ],
+    "AllowedScheduledTasks": [
+      {
+        "Id": "approved-daily-task",
+        "TaskPath": "\\ItembaManaged\\DailyInventory",
+        "AllowRun": true,
+        "AllowEnableDisable": true
+      }
+    ],
+    "AllowedMsiPackages": [
+      {
+        "Id": "approved-itemba-package",
+        "InstallerPath": "C:\\ProgramData\\Itemba\\Packages\\approved.msi",
+        "Sha256": "REPLACE_WITH_PACKAGE_SHA256",
+        "SignerCertificateThumbprint": "REPLACE_WITH_SIGNER_THUMBPRINT",
+        "ProductCode": "{00000000-0000-0000-0000-000000000000}",
+        "AllowInstallOrUpdate": true,
+        "AllowUninstall": true
+      }
+    ],
+    "AllowedLocalAccounts": [],
+    "AllowedLocalGroups": [],
+    "AllowedLocalUserRights": [],
+    "AllowedNetworkAdapters": [],
+    "AllowedPrinters": [],
+    "AllowedPowerSchemes": [],
+    "AllowedTimeZones": []
+  },
+  "PrivilegedCommand": {
+    "Enabled": false,
+    "MaximumTimeoutSeconds": 300,
+    "MaximumOutputBytes": 1048576,
+    "MaximumProcesses": 16,
+    "MaximumProcessMemoryBytes": 536870912,
+    "IsolationReplayStorePath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\privileged-command-isolation\\replay.v1.jsonl"
+  },
+  "PrivilegedCommandIsolationClient": {
+    "Enabled": false,
+    "Transport": "disabled",
+    "ProtocolVersion": 2,
+    "PipeName": "",
+    "ExpectedSupervisorImagePath": "",
+    "ExpectedSupervisorImageSha256": "",
+    "ExpectedSupervisorServiceSid": "",
+    "ExpectedDeviceId": "",
+    "ExpectedIsolationPolicySha256": "",
+    "ExpectedDriverMeasurementSha256": "",
+    "ExpectedServiceMeasurementSha256": "",
+    "MaximumFrameBytes": 131072,
+    "ConnectTimeoutMilliseconds": 5000,
+    "OperationTimeoutMilliseconds": 10000,
+    "ReservationRequestLifetimeSeconds": 60,
+    "AllowedClockSkewSeconds": 30,
+    "MaximumReservationRequestAgeSeconds": 60,
+    "MaximumReservationLeaseLifetimeSeconds": 120,
+    "MaximumBindAcknowledgementLifetimeSeconds": 30,
+    "MaximumExecutionDurationSeconds": 7200,
+    "MaximumReceiptDelaySeconds": 300,
+    "ReservationLeasePublicKey": {
+      "KeyId": "",
+      "SubjectPublicKeyInfoBase64": ""
+    },
+    "PreBindReservationReleasePublicKey": {
+      "KeyId": "",
+      "SubjectPublicKeyInfoBase64": ""
+    },
+    "SuspendedProcessBindAcknowledgementPublicKey": {
+      "KeyId": "",
+      "SubjectPublicKeyInfoBase64": ""
+    },
+    "TerminalEnforcementReceiptPublicKey": {
+      "KeyId": "",
+      "SubjectPublicKeyInfoBase64": ""
+    }
+  },
+  "SystemPower": {
+    "Enabled": false,
+    "RestartDelaySeconds": 120
+  },
+  "ExternalActions": {
+    "Enabled": false,
+    "DynamicDestinationsEnabled": false,
+    "ConnectTimeoutSeconds": 15,
+    "MaximumResponseBytes": 1048576,
+    "MaximumRequestBodyBytes": 1048576,
+    "Endpoints": [
+      {
+        "Id": "corporate-email-gateway",
+        "Kind": "email",
+        "Origin": "https://actions.example.invalid",
+        "RelativePath": "/v1/email/send",
+        "ServerCertificateSha256Pin": "REPLACE_WITH_GATEWAY_LEAF_CERTIFICATE_SHA256",
+        "CredentialReferenceId": "00000000-0000-0000-0000-000000000000",
+        "CredentialRecordSha256": "REPLACE_WITH_EXACT_DPAPI_V2_VAULT_RECORD_SHA256",
+        "CredentialPrefix": "Bearer "
+      }
+    ]
+  },
+  "BrokerChannel": {
+    "Enabled": false,
+    "Endpoint": "https://msaidizi-broker.example.invalid:3443/api/v1/msaidizi/devices/channel",
+    "DeviceCertificateThumbprint": "REPLACE_FROM_ENROLLMENT",
+    "BootstrapIdentityEnabled": true,
+    "RequireHardwareBackedDeviceIdentity": true,
+    "DevelopmentOnlyAllowSoftwareDeviceIdentity": false,
+    "PreferTpm": true,
+    "DeviceCertificateStoreName": "My",
+    "DeviceCertificateStoreLocation": "LocalMachine",
+    "ServerCertificateSha256Pin": "REPLACE_WITH_DEPLOYMENT_PIN",
+    "ConnectTimeoutSeconds": 15,
+    "RequestTimeoutSeconds": 30,
+    "MaxRequestAttempts": 3,
+    "InitialRetryDelayMilliseconds": 250,
+    "MaximumRetryDelaySeconds": 30,
+    "PollIntervalMilliseconds": 1000,
+    "MaxCommandsPerPoll": 5,
+    "LedgerConnectivityTtlSeconds": 45,
+    "MaximumResponseBytes": 1048576
+  },
+  "SessionBridge": {
+    "Enabled": true,
+    "PipeName": "Itemba.Msaidizi.Session.v1",
+    "AllowedAgentExecutableSha256": "REPLACE_WITH_SIGNED_AGENT_BINARY_SHA256",
+    "MaximumFrameBytes": 8388608,
+    "ActionTimeoutSeconds": 900,
+    "HeartbeatTtlSeconds": 45,
+    "RequireActiveConsoleSession": true
+  },
+  "SecretProvisioning": {
+    "Enabled": false,
+    "PipeName": "Itemba.Msaidizi.SecretProvisioning.v1",
+    "AllowedAgentExecutableSha256": "REPLACE_WITH_SIGNED_AGENT_BINARY_SHA256",
+    "AuditJournalPath": "%ProgramData%\\Itemba\\Msaidizi\\supervisor\\secret-provisioning\\audit.jsonl",
+    "MaximumFrameBytes": 1048576,
+    "ConfirmationTtlSeconds": 120,
+    "RequireActiveConsoleSession": true,
+    "Bindings": []
+  },
+  "TokenVerification": {
+    "ExpectedIssuer": "itemba-msaidizi-broker",
+    "ExpectedAudience": "itemba-windows-companion",
+    "ExpectedSubject": "msaidizi-global",
+    "AllowedClockSkewSeconds": 30,
+    "MaximumTokenLifetimeSeconds": 300,
+    "TrustedSigningCertificates": [
+      {
+        "KeyId": "replace-with-key-id",
+        "Thumbprint": "REPLACE_WITH_PUBLIC_CERTIFICATE_THUMBPRINT",
+        "StoreName": "TrustedPeople",
+        "StoreLocation": "LocalMachine"
+      }
+    ]
+  },
+  "EgressAttestationTrust": {
+    "Enabled": false,
+    "TrustedSupervisorCertificates": [],
+    "PairedDeviceCertificateThumbprints": []
+  },
+  "EgressSupervisorClient": {
+    "Enabled": false,
+    "Transport": "disabled",
+    "ProtocolVersion": 2,
+    "PipeName": "",
+    "ExpectedSupervisorImagePath": "",
+    "ExpectedSupervisorImageSha256": "",
+    "ExpectedSupervisorServiceSid": "",
+    "AttestationKeyId": "",
+    "MaximumFrameBytes": 131072,
+    "ConnectTimeoutMilliseconds": 5000,
+    "OperationTimeoutMilliseconds": 10000
+  },
+  "EgressSupervisorFlowClient": {
+    "Enabled": false,
+    "ProtocolVersion": 2,
+    "PipeName": "",
+    "MaximumFlowFrameBytes": 16384
+  }
+}

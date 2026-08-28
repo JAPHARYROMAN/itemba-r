@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-  Request,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { OfflineSyncService } from './offline-sync.service';
 import { CreateSyncBatchDto } from './dto/create-sync-batch.dto';
 import { QuerySyncBatchDto } from './dto/query-sync-batch.dto';
@@ -40,8 +32,8 @@ export class OfflineSyncController {
 
   @Get('checkpoints')
   @RequirePermissions('offline_sync.view')
-  findCheckpoints(@Request() req: any, @Query('deviceId') deviceId?: string) {
-    return this.service.findCheckpoints(req.user.id, deviceId);
+  findCheckpoints(@CurrentUser() user: AuthUser, @Query('deviceId') deviceId?: string) {
+    return this.service.findCheckpoints(user, deviceId);
   }
 
   @Post('checkpoints')

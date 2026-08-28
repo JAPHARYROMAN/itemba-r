@@ -328,9 +328,16 @@ export class SupplierOrderDraftsService {
 
   async auditExport(id: string, dto: SupplierOrderDraftExportAuditDto, user: AuthUser) {
     const draft = await this.findOne(id, user);
-    await this.audit('SUPPLIER_ORDER_DRAFT_EXPORT', draft, user, undefined, {
-      format: dto.format,
-      draftNumber: draft.draftNumber,
+    await this.auditLogs.logStrict({
+      action: 'SUPPLIER_ORDER_DRAFT_EXPORT',
+      entityType: 'SupplierOrderDraft',
+      entityId: draft.id,
+      companyId: draft.companyId,
+      userId: user.id,
+      newValue: {
+        format: dto.format,
+        draftNumber: draft.draftNumber,
+      },
     });
     return { success: true };
   }

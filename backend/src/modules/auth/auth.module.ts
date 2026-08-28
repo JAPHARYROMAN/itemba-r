@@ -13,6 +13,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { RecentAuthGuard } from '../../common/guards/recent-auth.guard';
 import { PermissionCacheService } from '../../common/services';
+import { MsaidiziTaskTokenService } from './msaidizi-task-token.service';
 
 const jwtExpiresIn = (value: string): JwtSignOptions['expiresIn'] =>
   value as JwtSignOptions['expiresIn'];
@@ -78,7 +79,15 @@ const ACCESS_TOKEN_FALLBACK_TTL = '12h';
     JwtStrategy,
     JwtRefreshStrategy,
     PermissionCacheService,
+    MsaidiziTaskTokenService,
   ],
-  exports: [AuthService, TwoFactorService, RecentAuthGuard, JwtStrategy, PermissionCacheService],
+  exports: [
+    AuthService,
+    TwoFactorService,
+    RecentAuthGuard,
+    JwtStrategy,
+    PermissionCacheService,
+    MsaidiziTaskTokenService,
+  ],
 })
 export class AuthModule {}

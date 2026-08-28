@@ -7,7 +7,7 @@
  * does: `userId` alone cannot answer "did I do this, or did I ask for it?"
  */
 
-import { AuditChannel, AuditSeverity } from '@prisma/client';
+import { AuditChannel, AuditScopeKind, AuditSeverity } from '@prisma/client';
 import { AuditLogsService } from './audit-logs.service';
 
 type CreateArgs = { data: Record<string, unknown> };
@@ -93,6 +93,15 @@ describe('AuditLogsService.log — channel attribution', () => {
     expect(dataOf().severity).toBe(AuditSeverity.CRITICAL);
   });
 
+  it.each(['VIEW_SENSITIVE', 'VIEW_SENSITIVE_DENIED'])(
+    'classifies %s as a critical security event',
+    async (action) => {
+      const { service, dataOf } = makeService();
+      await service.log({ action, entityType: 'Contract', scopeKind: AuditScopeKind.GROUP });
+      expect(dataOf().severity).toBe(AuditSeverity.CRITICAL);
+    },
+  );
+
   it('warns, but still writes, when an agent entry has no run to correlate to', async () => {
     const { service, dataOf } = makeService();
     const warn = jest
@@ -117,5 +126,48 @@ describe('AuditLogsService.log — channel attribution', () => {
     await expect(
       service.log({ action: 'X', entityType: 'Y', channel: AuditChannel.AGENT }),
     ).resolves.toBeUndefined();
+  });
+
+  it('propagates the same append failure from logStrict for fail-closed callers', async () => {
+    const failure = new Error('mandatory audit unavailable');
+    const create = jest.fn().mockRejectedValue(failure);
+    const service = new AuditLogsService({ auditLog: { create } } as never);
+
+    await expect(
+      service.logStrict({ action: 'SENSITIVE_READ', entityType: 'Contract' }),
+    ).rejects.toBe(failure);
+  });
+
+  it('rejects malformed explicit scope in logStrict before attempting the append', async () => {
+    const { service, create } = makeService();
+
+    await expect(
+      service.logStrict({
+        action: 'SENSITIVE_READ',
+        entityType: 'Contract',
+        scopeKind: AuditScopeKind.MULTI_COMPANY,
+        companyScopeIds: ['only-one-company'],
+      }),
+    ).rejects.toThrow('MULTI_COMPANY scope requires at least two');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('warns and appends UNATTRIBUTED for malformed best-effort scope', async () => {
+    const { service, create, dataOf } = makeService();
+    const warn = jest
+      .spyOn((service as unknown as { logger: { warn: (m: string) => void } }).logger, 'warn')
+      .mockImplementation(() => undefined);
+
+    await service.log({
+      action: 'LEGACY_EVENT',
+      entityType: 'Contract',
+      scopeKind: AuditScopeKind.COMPANY,
+      companyScopeIds: [],
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(dataOf().scopeKind).toBe(AuditScopeKind.UNATTRIBUTED);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('COMPANY scope requires'));
+    warn.mockRestore();
   });
 });

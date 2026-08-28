@@ -61,6 +61,8 @@ const QUESTIONS = [
     ask: 'What did we spend money on recently?',
     want: /Expense/i,
     why: 'near miss - "spend" vs "expenses"',
+    first: /Expense/i,
+    maxCalls: 2,
   },
   {
     id: 'low-stock',
@@ -75,6 +77,14 @@ const QUESTIONS = [
     why: 'colloquial phrasing',
   },
 ];
+
+const requestedCase = process.env.MSAIDIZI_BENCHMARK_CASE?.trim();
+const selectedQuestions = requestedCase
+  ? QUESTIONS.filter((question) => question.id === requestedCase)
+  : QUESTIONS;
+if (requestedCase && selectedQuestions.length === 0) {
+  throw new Error(`Unknown MSAIDIZI_BENCHMARK_CASE: ${requestedCase}`);
+}
 
 async function login() {
   const res = await fetch(`${API}/auth/login`, {
@@ -107,7 +117,8 @@ async function ask(token, message) {
   return { result: body.data ?? body, ms: Date.now() - started, status: res.status };
 }
 
-const toolsCalled = (r) => (r.events ?? []).filter((e) => e.type === 'tool_call').map((e) => e.tool);
+const toolsCalled = (r) =>
+  (r.events ?? []).filter((e) => e.type === 'tool_call').map((e) => e.tool);
 const answerText = (r) =>
   (r.events ?? [])
     .filter((e) => e.type === 'text')
@@ -143,8 +154,7 @@ if (process.argv[2] === '--diff') {
     console.log(`${id.padEnd(18)} ${xs.padEnd(10)} ${ys.padEnd(10)} ${verdict}`);
   }
 
-  const cacheReads = (r) =>
-    r.cases.reduce((s, c) => s + (c.usage?.cacheReadInputTokens ?? 0), 0);
+  const cacheReads = (r) => r.cases.reduce((s, c) => s + (c.usage?.cacheReadInputTokens ?? 0), 0);
 
   console.log('-'.repeat(62));
   console.log(`better ${better}   worse ${worse}   same ${same}`);
@@ -176,19 +186,25 @@ console.log(`narrowing active: ${caps.narrowing?.active}   write mode: ${caps.wr
 const label = process.env.RUN_LABEL ?? (out.includes('search') ? 'search' : 'baseline');
 const cases = [];
 
-for (const q of QUESTIONS) {
+for (const q of selectedQuestions) {
   // Resolve the expectation before judging, so a stale regex reports itself
   // rather than masquerading as a miss.
   const resolvable = names.filter((n) => q.want.test(n));
   if (resolvable.length === 0) {
-    console.log(`? ${q.id.padEnd(18)} EXPECTATION UNRESOLVABLE - nothing permitted matches ${q.want}`);
+    console.log(
+      `? ${q.id.padEnd(18)} EXPECTATION UNRESOLVABLE - nothing permitted matches ${q.want}`,
+    );
     cases.push({ id: q.id, broken: true, hit: false, want: String(q.want) });
     continue;
   }
 
   const { result, ms } = await ask(token, q.ask);
   const called = toolsCalled(result);
-  const hit = called.some((t) => q.want.test(t));
+  const reachedExpected = called.some((t) => q.want.test(t));
+  const firstMatched =
+    q.first === undefined || (called[0] !== undefined && q.first.test(called[0]));
+  const withinCallBudget = q.maxCalls === undefined || called.length <= q.maxCalls;
+  const hit = reachedExpected && firstMatched && withinCallBudget;
 
   cases.push({
     id: q.id,
@@ -197,6 +213,8 @@ for (const q of QUESTIONS) {
     want: String(q.want),
     called,
     hit,
+    ...(q.first ? { first: String(q.first), firstMatched } : {}),
+    ...(q.maxCalls ? { maxCalls: q.maxCalls, withinCallBudget } : {}),
     ms,
     usage: result.usage,
     reason: result.reason,
@@ -206,7 +224,11 @@ for (const q of QUESTIONS) {
   console.log(
     `${hit ? '+' : '-'} ${q.id.padEnd(18)} ${String(ms).padStart(6)}ms  ${called.join(', ') || '(no tools)'}`,
   );
-  if (!hit) console.log(`    wanted ${q.want} - ${q.why}`);
+  if (!hit) {
+    console.log(`    wanted ${q.want} - ${q.why}`);
+    if (!firstMatched) console.log(`    first call must match ${q.first}`);
+    if (!withinCallBudget) console.log(`    call budget ${q.maxCalls}, observed ${called.length}`);
+  }
 }
 
 fs.writeFileSync(
@@ -216,3 +238,7 @@ fs.writeFileSync(
 
 const hits = cases.filter((c) => c.hit).length;
 console.log(`\n${label}: ${hits}/${cases.length} reached the expected tool  ->  ${out}`);
+// A benchmark that only prints misses is documentation, not a regression gate.
+// This includes the spending trace requirements because that case's `hit`
+// already requires Expenses first and no more than two dispatched tools.
+if (hits !== cases.length) process.exitCode = 1;

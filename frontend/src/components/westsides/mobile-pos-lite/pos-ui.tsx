@@ -16,36 +16,48 @@ export function QuantityInput({
   value,
   label,
   onCommit,
+  maxDecimalPlaces = 0,
 }: {
   value: number;
   label: string;
   onCommit: (next: number) => void;
+  maxDecimalPlaces?: number;
 }) {
   const [draft, setDraft] = useState(String(value));
 
+  function sanitize(raw: string) {
+    const normalized = raw.replace(',', '.');
+    if (maxDecimalPlaces === 0) return normalized.replace(/\D/g, '').slice(0, 4);
+
+    const cleaned = normalized.replace(/[^\d.]/g, '');
+    const [whole = '', ...fractionParts] = cleaned.split('.');
+    const fraction = fractionParts.join('').slice(0, maxDecimalPlaces);
+    return `${whole.slice(0, 4)}${cleaned.includes('.') ? `.${fraction}` : ''}`;
+  }
+
   function commit() {
-    const parsed = Number.parseInt(draft, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
       setDraft(String(value));
       return;
     }
-    if (parsed !== value) onCommit(Math.min(parsed, 9999));
+    if (parsed !== value) onCommit(parsed);
   }
 
   return (
     <input
       type="text"
-      inputMode="numeric"
-      pattern="[0-9]*"
+      inputMode={maxDecimalPlaces > 0 ? 'decimal' : 'numeric'}
+      pattern={maxDecimalPlaces > 0 ? `[0-9]*[.,]?[0-9]{0,${maxDecimalPlaces}}` : '[0-9]*'}
       value={draft}
       aria-label={label}
       onFocus={(event) => event.currentTarget.select()}
-      onChange={(event) => setDraft(event.target.value.replace(/\D/g, '').slice(0, 4))}
+      onChange={(event) => setDraft(sanitize(event.target.value))}
       onBlur={commit}
       onKeyDown={(event) => {
         if (event.key === 'Enter') event.currentTarget.blur();
       }}
-      className="h-10 w-14 rounded-lg border text-center text-base font-bold"
+      className={`${maxDecimalPlaces > 0 ? 'w-20' : 'w-14'} h-10 rounded-lg border text-center text-base font-bold`}
       style={{
         borderColor: 'var(--aurora-border)',
         background: 'var(--aurora-card)',

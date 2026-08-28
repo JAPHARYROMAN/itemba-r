@@ -101,6 +101,7 @@ export class WebhookEndpointsService {
       entityType: 'WebhookEndpoint',
       entityId: record.id,
       userId,
+      companyId: record.companyId,
       newValue: record as any,
       severity: AuditSeverity.LOW,
     });
@@ -138,6 +139,7 @@ export class WebhookEndpointsService {
       entityType: 'WebhookEndpoint',
       entityId: id,
       userId,
+      companyId: record.companyId,
       severity: AuditSeverity.LOW,
     });
 
@@ -146,7 +148,7 @@ export class WebhookEndpointsService {
 
   async remove(id: string, user: AuthUser) {
     const userId = user.id;
-    await this.findOneRaw(id, user, AccessLevel.WRITE);
+    const existing = await this.findOneRaw(id, user, AccessLevel.WRITE);
     await this.prisma.webhookEndpoint.update({ where: { id }, data: { deletedAt: new Date() } });
 
     await this.auditLogs.log({
@@ -154,6 +156,7 @@ export class WebhookEndpointsService {
       entityType: 'WebhookEndpoint',
       entityId: id,
       userId,
+      companyId: existing.companyId,
       severity: AuditSeverity.MEDIUM,
     });
 

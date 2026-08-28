@@ -28,7 +28,10 @@ export class EmploymentContractsService {
     if (status) where.status = status;
     const [data, total] = await Promise.all([
       this.prisma.employmentContract.findMany({
-        where, skip, take: Number(limit), orderBy: { createdAt: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
           company: { select: { id: true, name: true } },
@@ -64,14 +67,26 @@ export class EmploymentContractsService {
         probationEndDate: dto.probationEndDate ? new Date(dto.probationEndDate) : undefined,
       } as any,
     });
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'EmploymentContract', entityId: record.id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'EmploymentContract',
+      entityId: record.id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
   async update(id: string, dto: UpdateEmploymentContractDto, user: any) {
     await this.findOne(id, user);
     const record = await this.prisma.employmentContract.update({ where: { id }, data: dto });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'EmploymentContract', entityId: id, newValue: dto as unknown as Record<string, unknown> });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'EmploymentContract',
+      entityId: id,
+      newValue: dto as unknown as Record<string, unknown>,
+    });
     return record;
   }
 
@@ -82,25 +97,44 @@ export class EmploymentContractsService {
       where: { id },
       data: { status: 'ACTIVE', approvedById: user.id, approvedAt: new Date() },
     });
-    await this.audit.log({ userId: user.id, action: 'CONTRACT_STATUS_CHANGE', entityType: 'EmploymentContract', entityId: id, newValue: { status: 'ACTIVE' } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CONTRACT_STATUS_CHANGE',
+      entityType: 'EmploymentContract',
+      entityId: id,
+      newValue: { status: 'ACTIVE' },
+    });
     return updated;
   }
 
   async terminate(id: string, reason: string | undefined, user: any) {
     const record = await this.findOne(id, user);
-    if (record.status === 'TERMINATED') throw new BadRequestException('Contract already terminated');
+    if (record.status === 'TERMINATED')
+      throw new BadRequestException('Contract already terminated');
     const updated = await this.prisma.employmentContract.update({
       where: { id },
-      data: { status: 'TERMINATED', notes: reason } as any,
+      data: { status: 'TERMINATED' },
     });
-    await this.audit.log({ userId: user.id, action: 'CONTRACT_TERMINATED', entityType: 'EmploymentContract', entityId: id, newValue: { status: 'TERMINATED', reason } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CONTRACT_TERMINATED',
+      entityType: 'EmploymentContract',
+      entityId: id,
+      newValue: { status: 'TERMINATED', reason },
+    });
     return updated;
   }
 
   async remove(id: string, user: any) {
     await this.findOne(id, user);
     await this.prisma.employmentContract.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'EmploymentContract', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'EmploymentContract',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Employment contract deleted' };
   }
 }

@@ -25,12 +25,13 @@ function msaidiziGrantsOf(roleName: string): string[] {
 }
 
 describe('the msaidizi permission vocabulary', () => {
-  it('still defines all four codes', () => {
+  it('still defines all five codes', () => {
     // The definitions stay even though almost nobody is granted them: they are
     // the vocabulary. Removing one would orphan the matching
     // @RequirePermissions decorator and make that route unreachable by anyone,
     // including the admin.
     expect(MSAIDIZI_PERMS.map((p) => p.code).sort()).toEqual([
+      'msaidizi.oversight',
       'msaidizi.procedures.approve',
       'msaidizi.procedures.manage',
       'msaidizi.procedures.view',
@@ -157,6 +158,7 @@ describe('MSAIDIZI_USER — the deliberate grant, and why it survives', () => {
       // Authoring a procedure and approving one are the two halves of the
       // maker-checker split; handing a pilot user both collapses it.
       expect(codes).toEqual(['msaidizi.procedures.view', 'msaidizi.use']);
+      expect(codes).not.toContain('msaidizi.oversight');
       expect(codes).not.toContain('msaidizi.procedures.manage');
       expect(codes).not.toContain('msaidizi.procedures.approve');
     });
