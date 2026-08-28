@@ -11,7 +11,7 @@ import type {
   MsaidiziTask,
   MsaidiziTaskEvent,
 } from '@/lib/msaidizi-task-types';
-import { MsaidiziTaskCenter, MsaidiziWorkspacePlaceholder } from './msaidizi-task-center';
+import { MsaidiziTaskCenter, MsaidiziWorkspacePanel } from './msaidizi-task-center';
 
 const h = vi.hoisted(() => ({
   list: vi.fn(),
@@ -407,7 +407,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
   it('creates drafts without escalation and activates a mandate only after an explicit click', async () => {
     h.createMandate.mockResolvedValue({ ...MANDATE, id: 'mandate-2', name: 'Sales review' });
     h.activateMandate.mockResolvedValue({ ...MANDATE, status: 'ACTIVE', version: 4 });
-    render(<MsaidiziWorkspacePlaceholder workspace="routines" />);
+    render(<MsaidiziWorkspacePanel workspace="routines" />);
 
     expect(await screen.findByText('Daily finance review')).toBeInTheDocument();
     expect(h.activateMandate).not.toHaveBeenCalled();
@@ -447,7 +447,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
 
   it('adds emergency-operator consent only through the explicit irreversible mandate control', async () => {
     h.createMandate.mockResolvedValue({ ...MANDATE, id: 'mandate-3', name: 'Permanent cleanup' });
-    render(<MsaidiziWorkspacePlaceholder workspace="routines" />);
+    render(<MsaidiziWorkspacePanel workspace="routines" />);
     await screen.findByText('Daily finance review');
 
     const form = screen.getByRole('form', { name: 'Create mandate draft' });
@@ -478,7 +478,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
   it('creates a routine draft but does not activate it implicitly', async () => {
     h.createSchedule.mockResolvedValue({ ...SCHEDULE, id: 'schedule-2', name: 'Close books' });
     h.archiveSchedule.mockResolvedValue({ ...SCHEDULE, status: 'ARCHIVED', version: 2 });
-    render(<MsaidiziWorkspacePlaceholder workspace="routines" />);
+    render(<MsaidiziWorkspacePanel workspace="routines" />);
     await screen.findByText('Daily finance review');
 
     const form = screen.getByRole('form', { name: 'Create routine draft' });
@@ -528,7 +528,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
       content: 'Password removed.',
     });
     h.deleteMemory.mockResolvedValue({ id: MEMORY.id, deleted: true });
-    render(<MsaidiziWorkspacePlaceholder workspace="memory" />);
+    render(<MsaidiziWorkspacePanel workspace="memory" />);
 
     const form = screen.getByRole('form', { name: 'Create governed memory' });
     await userEvent.type(within(form).getByLabelText('Scope key'), 'finance-policy');
@@ -561,7 +561,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
   });
 
   it('lists and refreshes companion health without causing a device mutation', async () => {
-    render(<MsaidiziWorkspacePlaceholder workspace="devices" />);
+    render(<MsaidiziWorkspacePanel workspace="devices" />);
 
     expect(await screen.findByText('Finance workstation')).toBeInTheDocument();
     expect(screen.getByText('Healthy')).toBeInTheDocument();
@@ -583,7 +583,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
     };
     h.listDevices.mockResolvedValue({ items: [DEVICE, focusedDevice], total: 2 });
 
-    render(<MsaidiziWorkspacePlaceholder workspace="devices" focusedDeviceId={focusedDevice.id} />);
+    render(<MsaidiziWorkspacePanel workspace="devices" focusedDeviceId={focusedDevice.id} />);
 
     const focusedCard = await screen.findByText('Opened incident');
     const listItem = focusedCard.closest('li');
@@ -601,7 +601,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
     h.recoveryDetail.mockResolvedValue(RECOVERY);
 
     render(
-      <MsaidiziWorkspacePlaceholder
+      <MsaidiziWorkspacePanel
         workspace="devices"
         focusedDeviceId={DEVICE.id}
         focusedRecoveryId={RECOVERY.id}
@@ -655,7 +655,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
       completedAt: null,
     });
 
-    render(<MsaidiziWorkspacePlaceholder workspace="devices" />);
+    render(<MsaidiziWorkspacePanel workspace="devices" />);
     const form = screen.getByRole('form', { name: 'Authorize trusted recovery' });
     fireEvent.change(within(form).getByLabelText('Recovery kind'), {
       target: { value: 'ADMINISTRATIVE' },
@@ -697,7 +697,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
   it('keeps a one-time pairing code in the mounted view only and lets the operator dismiss it', async () => {
     const storageSpy = vi.spyOn(Storage.prototype, 'setItem');
     h.createPairing.mockResolvedValue(PAIRING);
-    render(<MsaidiziWorkspacePlaceholder workspace="devices" />);
+    render(<MsaidiziWorkspacePanel workspace="devices" />);
     await screen.findByText('Finance workstation');
 
     const form = screen.getByRole('form', { name: 'Create device pairing code' });
@@ -718,7 +718,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
   it('requires explicit confirmation before revoking or killing a device', async () => {
     h.revokeDevice.mockResolvedValue({ id: DEVICE.id, status: 'REVOKED' });
     h.killDevice.mockResolvedValue({ id: DEVICE.id, status: 'KILLED' });
-    render(<MsaidiziWorkspacePlaceholder workspace="devices" />);
+    render(<MsaidiziWorkspacePanel workspace="devices" />);
     await screen.findByText('Finance workstation');
 
     await userEvent.click(screen.getByRole('button', { name: 'Revoke enrollment' }));
@@ -740,7 +740,7 @@ describe('Msaidizi autonomy control-plane workspaces', () => {
 
   it('requires the global emergency phrase before issuing kill-all', async () => {
     h.killAllDevices.mockResolvedValue({ killed: 1 });
-    render(<MsaidiziWorkspacePlaceholder workspace="devices" />);
+    render(<MsaidiziWorkspacePanel workspace="devices" />);
     await screen.findByText('Finance workstation');
 
     await userEvent.click(screen.getByRole('button', { name: 'Emergency stop all devices' }));

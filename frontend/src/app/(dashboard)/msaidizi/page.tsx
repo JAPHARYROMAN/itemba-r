@@ -35,7 +35,7 @@ import { MsaidiziChat } from '@/components/msaidizi/msaidizi-chat';
 import {
   MSAIDIZI_WORKSPACES,
   MsaidiziTaskCenter,
-  MsaidiziWorkspacePlaceholder,
+  MsaidiziWorkspacePanel,
 } from '@/components/msaidizi/msaidizi-task-center';
 import {
   MSAIDIZI_ASK_PARAM,
@@ -150,8 +150,11 @@ function MsaidiziWorkspaceBody() {
       </nav>
       {workspace === 'conversations' ? <MsaidiziPageBody initialQuestion={question} /> : null}
       {workspace === 'tasks' ? <MsaidiziTaskCenter initialTaskId={taskId} /> : null}
-      {workspace === 'routines' || workspace === 'devices' || workspace === 'memory' ? (
-        <MsaidiziWorkspacePlaceholder
+      {workspace === 'routines' ||
+      workspace === 'procedures' ||
+      workspace === 'devices' ||
+      workspace === 'memory' ? (
+        <MsaidiziWorkspacePanel
           workspace={workspace}
           focusedDeviceId={deviceId}
           focusedRecoveryId={recoveryId}

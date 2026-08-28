@@ -65,14 +65,22 @@ import type {
 import { displayTaskWallTime, formatTaskWallTime } from '@/lib/msaidizi-task-wall-time';
 import { MsaidiziLocalDictationButton, MsaidiziTaskCapture } from './msaidizi-task-capture';
 import { MsaidiziMemoryDetailPanel } from './msaidizi-memory-detail';
+import { MsaidiziProceduresWorkspace } from './msaidizi-procedures';
 import { MsaidiziRoutineDetail } from './msaidizi-routine-detail';
 
-type MsaidiziWorkspace = 'conversations' | 'tasks' | 'routines' | 'devices' | 'memory';
+type MsaidiziWorkspace =
+  | 'conversations'
+  | 'tasks'
+  | 'routines'
+  | 'procedures'
+  | 'devices'
+  | 'memory';
 
 export const MSAIDIZI_WORKSPACES: Array<{ id: MsaidiziWorkspace; label: string }> = [
   { id: 'conversations', label: 'Conversations' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'routines', label: 'Routines' },
+  { id: 'procedures', label: 'Procedures' },
   { id: 'devices', label: 'Devices' },
   { id: 'memory', label: 'Memory' },
 ];
@@ -4312,7 +4320,13 @@ function MsaidiziDevicesWorkspace({
   );
 }
 
-export function MsaidiziWorkspacePlaceholder({
+/**
+ * Dispatches the non-chat, non-task workspaces to their real implementations.
+ *
+ * Named `MsaidiziWorkspacePlaceholder` until it had cost a reader an hour: every
+ * branch here is live, and the name advertised the opposite. It is a panel.
+ */
+export function MsaidiziWorkspacePanel({
   workspace,
   focusedDeviceId = null,
   focusedRecoveryId = null,
@@ -4322,6 +4336,7 @@ export function MsaidiziWorkspacePlaceholder({
   focusedRecoveryId?: string | null;
 }) {
   if (workspace === 'routines') return <MsaidiziRoutinesWorkspace />;
+  if (workspace === 'procedures') return <MsaidiziProceduresWorkspace />;
   if (workspace === 'devices')
     return (
       <MsaidiziDevicesWorkspace

@@ -38,7 +38,7 @@ vi.mock('@/components/msaidizi/msaidizi-task-center', () => ({
     h.taskCenter(props);
     return <div data-testid="task-center">{props.initialTaskId ?? 'no target'}</div>;
   },
-  MsaidiziWorkspacePlaceholder: (props: {
+  MsaidiziWorkspacePanel: (props: {
     workspace: string;
     focusedDeviceId?: string | null;
     focusedRecoveryId?: string | null;
