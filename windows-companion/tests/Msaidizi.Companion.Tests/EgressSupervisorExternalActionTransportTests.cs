@@ -130,6 +130,7 @@ public sealed class EgressSupervisorExternalActionTransportTests
     Assert.False(connector.RawStreamRequested);
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Theory]
   [InlineData(true, 100, 1_000, 5_000)]
   [InlineData(false, 1_000, 100, 5_000)]

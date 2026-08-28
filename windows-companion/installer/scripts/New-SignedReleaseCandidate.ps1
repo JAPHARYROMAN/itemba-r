@@ -34,7 +34,7 @@ if ($PSVersionTable.PSEdition -cne 'Core' -or
 # already-running entry script its own root of trust.
 $embeddedPipelineSignerThumbprint = 'PROVISIONING_REQUIRED'
 $embeddedReleasePolicySha256 = '2F58E627B61FF938663A91481E33E485486CE68D120438969F19202FC0BCD8B2'
-$embeddedProtectedSourceVerificationSha256 = '48743A65A3F979D4270EECFCBC01631CF2943EBCBF1D437DA7798A93422AA75E'
+$embeddedProtectedSourceVerificationSha256 = 'EE82806AE9825DB6BAEDE560EDDE1209BA650451615969AE58687D051A564468'
 $installerRoot = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, '..'))
 $companionRoot = [IO.Path]::GetFullPath([IO.Path]::Combine($installerRoot, '..'))
 $repositoryRoot = [IO.Path]::GetFullPath([IO.Path]::Combine($companionRoot, '..'))

@@ -91,6 +91,38 @@ jobs:
           $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
           .\scripts\Invoke-ProtectedSourceVerification.ps1 -DotNetPath $dotnet
 
+
+  windows-companion-timing:
+    name: Windows Companion — Process Timing (advisory)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    # Deliberately not required, and deliberately not silent.
+    #
+    # These tests spawn real process trees and assert on wall-clock budgets, so
+    # on a shared runner they measure the runner as much as the code. They are
+    # excluded from the protected verification for that reason - but excluding
+    # them from the gate is not the same as not running them, and a category
+    # nobody executes is a category that rots. This job runs exactly what the
+    # gate skips, and `continue-on-error` keeps a loaded runner from blocking a
+    # merge while still showing the result on the PR.
+    #
+    # A failure here is worth reading rather than re-running: the first CI run
+    # of this suite failed six of these, and one of them was a genuine defect in
+    # the pre-bind release path, not slowness.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: ./windows-companion
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.400'
+      - name: Run the process-timing tests
+        run: |
+          dotnet test .\Msaidizi.WindowsCompanion.sln -c Release --nologo `
+            --filter 'Category=ProcessTiming'
   backend-build:
     name: Backend — Build
     runs-on: ubuntu-latest

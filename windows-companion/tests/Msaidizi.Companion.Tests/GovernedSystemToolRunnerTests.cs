@@ -126,6 +126,7 @@ public sealed class GovernedSystemToolRunnerTests : IDisposable
     Assert.False(File.Exists(marker));
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task CancellationTerminatesTheEntireDescendantTree()
   {

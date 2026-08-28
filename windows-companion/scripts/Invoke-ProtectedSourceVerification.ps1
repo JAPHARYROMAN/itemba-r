@@ -135,8 +135,22 @@ try {
   Invoke-CheckedDotNet -Description 'build Windows companion solution' -Arguments @(
     'build', $solutionPath, '-c', 'Release', '--no-restore', '--nologo'
   )
+  # ProcessTiming is excluded here and run by a separate, dedicated job.
+  #
+  # Those tests spawn real process trees and assert on wall-clock budgets - a
+  # five-second command timeout, "elapsed under eight seconds", millisecond pipe
+  # deadlines. On a shared, virtualised runner the budget is spent on process
+  # startup rather than on the behaviour under test, so they fail for reasons
+  # unrelated to the code. Keeping them in this gate would make the required
+  # check report the runner's load rather than the source's correctness, and a
+  # gate that fails at random is a gate people learn to re-run rather than read.
+  #
+  # They are NOT dropped: `windows-companion-timing` runs exactly this category.
+  # Excluding by an explicit category also means a new timing-dependent test is
+  # in this gate by default and has to be opted out deliberately.
   Invoke-CheckedDotNet -Description 'test Windows companion solution' -Arguments @(
-    'test', $solutionPath, '-c', 'Release', '--no-build', '--no-restore', '--nologo'
+    'test', $solutionPath, '-c', 'Release', '--no-build', '--no-restore', '--nologo',
+    '--filter', 'Category!=ProcessTiming'
   )
   Invoke-CheckedDotNet -Description 'restore installer hardening tests from lock files' -Arguments @(
     'restore', $installerHardeningTestProject, '--locked-mode', '--nologo'

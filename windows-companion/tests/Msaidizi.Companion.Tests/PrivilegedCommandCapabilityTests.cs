@@ -182,6 +182,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
     Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5));
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task TimeoutKillsTheOwnedProcessTree()
   {
@@ -210,6 +211,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
     Assert.True(await ProcessExitedAsync(processId, TimeSpan.FromSeconds(3)));
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task CancellationTerminatesADescendantInTheOwnedJob()
   {
@@ -441,6 +443,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
       marker => Assert.Empty(marker.GetConstructors()));
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task SignedIsolationLifecycleAndReplayCommitsPrecedeEachNativeTransition()
   {
@@ -662,6 +665,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
     Assert.Equal(1, isolationGate.ReserveCallCount);
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task IsolationViolationReceiptCommitsBeforePermanentlyFencingDispatch()
   {
