@@ -163,6 +163,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
     Assert.True(fixture.Recovery.PreparedIrreversible);
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task OutputCeilingKillsTheOwnedProcessTree()
   {
@@ -482,6 +483,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
     Assert.Equal(PrivilegedCommandIsolationTerminalOutcomes.Completed, terminal.Outcome);
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task BlockingBindCannotResumeOrExecuteTheSuspendedChild()
   {
@@ -591,6 +593,7 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
     Assert.Equal(["reservation", "bind", "terminal"], replayStore.Calls);
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task MissingTerminalReceiptTripsLatchAndIsNotRetriedAfterTheCommandRan()
   {
