@@ -967,6 +967,15 @@ public sealed class EgressSupervisorEngine : IDisposable
     }
   }
 
+  /// <summary>
+  /// NOT the enforcing path, despite the name. Nothing routes here:
+  /// <c>EgressControlProtocolHandler</c> dispatches BrowserRegisterRequest to
+  /// <see cref="RegisterBrowserAsync"/>, which refuses with the same code at its
+  /// first statement. This exists so the code is asserted somewhere cheap; do
+  /// not mistake it for the boundary when auditing by search. The real refusals
+  /// are the browser-evidence provider and the posture provider, neither of
+  /// which is reachable by configuration.
+  /// </summary>
   public static ValueTask<EgressRegistrationAcknowledgementV1>
     RejectBrowserRegistrationAsync() =>
     ValueTask.FromException<EgressRegistrationAcknowledgementV1>(

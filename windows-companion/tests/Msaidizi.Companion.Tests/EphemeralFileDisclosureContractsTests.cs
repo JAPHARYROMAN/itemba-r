@@ -35,7 +35,7 @@ public sealed class EphemeralFileDisclosureContractsTests
   public void AuthorizesOnlyCanonicalBytesAndExactSignedAuthority()
   {
     var grant = FixtureGrant();
-    var parsed = EphemeralFileDisclosureProtocol.ParseAndAuthorize(
+    var parsed = EphemeralFileDisclosureProtocol.ParseAgainstExpectedBinding(
       Encoding.UTF8.GetBytes(CanonicalFixture),
       Expected(grant),
       FixtureNow);
@@ -78,7 +78,7 @@ public sealed class EphemeralFileDisclosureContractsTests
     foreach (var mismatch in drifted)
     {
       var error = Assert.Throws<EphemeralFileDisclosureProtocolException>(() =>
-        EphemeralFileDisclosureProtocol.ParseAndAuthorize(
+        EphemeralFileDisclosureProtocol.ParseAgainstExpectedBinding(
           Encoding.UTF8.GetBytes(CanonicalFixture),
           mismatch,
           FixtureNow));
@@ -95,7 +95,7 @@ public sealed class EphemeralFileDisclosureContractsTests
       + $",\"contentBase64\":\"{Convert.ToBase64String(pdfBytes)}\"}}";
 
     var error = Assert.Throws<EphemeralFileDisclosureProtocolException>(() =>
-      EphemeralFileDisclosureProtocol.ParseAndAuthorize(
+      EphemeralFileDisclosureProtocol.ParseAgainstExpectedBinding(
         Encoding.UTF8.GetBytes(forged),
         Expected(FixtureGrant()),
         FixtureNow));
@@ -105,7 +105,7 @@ public sealed class EphemeralFileDisclosureContractsTests
 
     var binaryGrant = FixtureGrant() with { AllowedMimeTypes = ["application/octet-stream"] };
     var binaryError = Assert.Throws<EphemeralFileDisclosureProtocolException>(() =>
-      EphemeralFileDisclosureProtocol.ParseAndAuthorize(
+      EphemeralFileDisclosureProtocol.ParseAgainstExpectedBinding(
         EphemeralFileDisclosureProtocol.CanonicalBytes(binaryGrant),
         Expected(binaryGrant),
         FixtureNow));
@@ -173,7 +173,7 @@ public sealed class EphemeralFileDisclosureContractsTests
     DateTimeOffset? now = null)
   {
     var error = Assert.Throws<EphemeralFileDisclosureProtocolException>(() =>
-      EphemeralFileDisclosureProtocol.ParseAndAuthorize(
+      EphemeralFileDisclosureProtocol.ParseAgainstExpectedBinding(
         Encoding.UTF8.GetBytes(json),
         expected,
         now ?? FixtureNow));

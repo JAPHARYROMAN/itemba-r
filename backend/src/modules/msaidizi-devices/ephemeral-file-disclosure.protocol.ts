@@ -103,7 +103,20 @@ export class EphemeralFileDisclosureProtocolError extends Error {
   }
 }
 
-export function parseAndAuthorizeEphemeralFileDisclosureGrant(
+/**
+ * Parses a grant and checks it field-by-field against a binding the CALLER
+ * already derived from verified authority.
+ *
+ * This is NOT authorization, and the name used to say it was. Nothing here
+ * verifies a signature, and nothing here consumes a nonce - the nonce is
+ * checked for shape only. A caller that treats "did not throw" as "authorized"
+ * has built a replayable channel.
+ *
+ * Whoever implements the disclosure channel owes both missing halves: an
+ * authenticated grant issuer, and the atomic ledger that consumes the nonce and
+ * idempotency key exactly once. See docs/EPHEMERAL-FILE-DISCLOSURE.md.
+ */
+export function parseEphemeralFileDisclosureGrantAgainstExpectedBinding(
   value: unknown,
   expected: EphemeralFileDisclosureExpectedBinding,
   now = new Date(),

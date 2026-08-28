@@ -5658,6 +5658,21 @@ export class MsaidiziDevicesService implements OnModuleInit, OnModuleDestroy {
             },
           };
         }
+        // KNOWN GAP, deliberately recorded rather than silently carried.
+        //
+        // This branch hands raw host-file bytes to the artifact store with
+        // `redactionsApplied: false`, while the generic branch below routes the
+        // same class of untrusted host output through
+        // `preparePersistedUntrustedObservation`, which DLP-sanitises it and can
+        // reject with PERSISTENCE_DLP_REJECTED. So the file path is not merely
+        // missing the DLP decision the ephemeral-disclosure design requires - it
+        // is already written to skip it.
+        //
+        // Unreachable today: every host-file-content capability is refused
+        // earlier by `isUnavailableHostFileContentCapability`. Whoever builds
+        // the disclosure channel must close this before that refusal is lifted,
+        // or the first working implementation will persist unscanned file
+        // contents. See docs/EPHEMERAL-FILE-DISCLOSURE.md requirement 3.
         return await this.persistHostObservationArtifact(
           action,
           {

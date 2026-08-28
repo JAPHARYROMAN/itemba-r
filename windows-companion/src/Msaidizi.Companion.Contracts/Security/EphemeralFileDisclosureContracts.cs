@@ -131,7 +131,16 @@ public static class EphemeralFileDisclosureProtocol
     "taskId",
   ];
 
-  public static EphemeralFileDisclosureGrantV1 ParseAndAuthorize(
+  /// <summary>
+  /// Parses a grant and checks it field-by-field against a binding the CALLER
+  /// already derived from verified authority. This is NOT authorization, and the
+  /// name used to say it was: no signature is verified, and the nonce is checked
+  /// for shape only, never consumed. A caller that treats a non-throwing return
+  /// as "authorized" has built a replayable channel. The authenticated issuer and
+  /// the single-consumption nonce ledger are both still owed - see
+  /// docs/EPHEMERAL-FILE-DISCLOSURE.md.
+  /// </summary>
+  public static EphemeralFileDisclosureGrantV1 ParseAgainstExpectedBinding(
     ReadOnlySpan<byte> utf8Json,
     EphemeralFileDisclosureExpectedBinding expected,
     DateTimeOffset now)

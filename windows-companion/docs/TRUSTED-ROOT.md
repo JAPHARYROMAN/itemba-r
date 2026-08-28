@@ -70,12 +70,26 @@ An enabling deployment still needs an independently signed supervisor and
 kernel enforcement component that owns the purpose-separated signing key,
 logical/kernel Job identity, durable boot sequence and policy measurements. The
 deployment-owned gate is independent of action/configuration input and of the
-egress boundary. The only production gate registered in this repository always
-rejects and has no configuration override, so no configuration or egress client
-can enable privileged command launch. Signed test sessions exist only to prove
-the consuming runner and verifier. Until the external supervisor and driver
-exist and pass VM/ring acceptance, the rejecting registration is the only sound
-production behavior.
+egress boundary.
+
+Which gate is bound is decided by configuration, not by a fixed registration.
+`PrivilegedCommandIsolationClientFactory` returns the named-pipe client when
+every pin in `IsComplete` is satisfied and falls back to
+`RejectingPrivilegedCommandTrustedRootIsolationGate` otherwise, so the rejecting
+gate is the default, not the only implementation that ships. An operator can
+select the pipe client with configuration alone.
+
+What actually keeps privileged command launch refused here lives in the
+supervisor and is compile-time, not configuration:
+`WindowsKernelIsolationDriverClient` installs
+`UnavailableV3SignedDriverAttestationSource`, which fails every attestation, and
+`RequireReadyHealth` refuses a driver whose boot or image measurement is
+unprovisioned (all-zero). `scripts/verify-static.ps1` pins both, and neither may
+be replaced without the VM/ring acceptance below. Signed test sessions exist
+only to prove the consuming runner and verifier. Until the external supervisor
+and driver exist and pass that acceptance, keeping the rejecting fallback bound
+is an operational requirement on the deployment, not an invariant the code
+enforces on its own.
 
 The production installer must ACL `%ProgramData%\Itemba\Msaidizi\supervisor`
 and its parents so only `SYSTEM` and a dedicated administrator/operator group

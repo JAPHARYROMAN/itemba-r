@@ -7,7 +7,7 @@ import {
   assertEphemeralFileProviderContract,
   canonicalEphemeralFileDisclosureGrantJson,
   ephemeralFileDisclosureGrantSha256,
-  parseAndAuthorizeEphemeralFileDisclosureGrant,
+  parseEphemeralFileDisclosureGrantAgainstExpectedBinding,
 } from './ephemeral-file-disclosure.protocol';
 import { REASONING_FILE_EPHEMERAL_CHANNEL_NOT_READY } from './host-file-ephemerality.policy';
 
@@ -27,7 +27,7 @@ describe('ephemeral host-file disclosure metadata protocol', () => {
     const grant = fixtureGrant();
 
     expect(
-      parseAndAuthorizeEphemeralFileDisclosureGrant(
+      parseEphemeralFileDisclosureGrantAgainstExpectedBinding(
         grant,
         expectedBinding(grant),
         new Date('2030-01-01T00:00:00.000Z'),
@@ -64,7 +64,7 @@ describe('ephemeral host-file disclosure metadata protocol', () => {
       const expected = { ...expectedBinding(grant), [key]: replacement };
 
       expect(() =>
-        parseAndAuthorizeEphemeralFileDisclosureGrant(
+        parseEphemeralFileDisclosureGrantAgainstExpectedBinding(
           grant,
           expected,
           new Date('2030-01-01T00:00:00.000Z'),
@@ -97,7 +97,7 @@ describe('ephemeral host-file disclosure metadata protocol', () => {
   ])('rejects %s before authority can be consumed', (_label, mutate) => {
     const grant = fixtureGrant();
     expect(() =>
-      parseAndAuthorizeEphemeralFileDisclosureGrant(
+      parseEphemeralFileDisclosureGrantAgainstExpectedBinding(
         mutate(grant as unknown as Record<string, unknown>),
         expectedBinding(grant),
         new Date('2030-01-01T00:00:00.000Z'),
@@ -108,7 +108,7 @@ describe('ephemeral host-file disclosure metadata protocol', () => {
   it('rejects expiration and an excessive lifetime before disclosure', () => {
     const expired = fixtureGrant({ expiresAt: '2030-01-01T00:00:00.000Z' });
     expect(() =>
-      parseAndAuthorizeEphemeralFileDisclosureGrant(
+      parseEphemeralFileDisclosureGrantAgainstExpectedBinding(
         expired,
         expectedBinding(expired),
         new Date('2030-01-01T00:00:00.000Z'),
@@ -117,7 +117,7 @@ describe('ephemeral host-file disclosure metadata protocol', () => {
 
     const long = fixtureGrant({ expiresAt: '2030-01-01T00:02:01.000Z' });
     expect(() =>
-      parseAndAuthorizeEphemeralFileDisclosureGrant(
+      parseEphemeralFileDisclosureGrantAgainstExpectedBinding(
         long,
         expectedBinding(long),
         new Date('2030-01-01T00:00:00.000Z'),

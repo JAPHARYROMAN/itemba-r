@@ -2481,6 +2481,29 @@ if ($isolationSupervisorDriverSource -match
   $problems.Add(
     'Privileged-command production client must not dispatch legacy JSON v2 IOCTLs.')
 }
+# The single runtime fence that keeps privileged-command launch refused once a
+# deployment has provisioned the companion-side trust bundle. The DI factory can
+# be pointed at the named-pipe client by configuration alone, so this field
+# initializer - not the gate registration - is what actually holds the boundary.
+# Replacing it with an accepting source would open privileged execution with no
+# other code change, so it is pinned here.
+foreach ($requiredAttestationFence in @(
+    '_attestationSource = new UnavailableV3SignedDriverAttestationSource()',
+    'ValueTask.FromException<SignedPrivilegedCommandDriverAttestationV2>('
+  )) {
+  if ($isolationSupervisorDriverSource -notmatch
+      [regex]::Escape($requiredAttestationFence)) {
+    $problems.Add(
+      "Privileged-command driver client must retain the unprovisioned attestation fence $requiredAttestationFence.")
+  }
+}
+$attestationSourceAssignments = [regex]::Matches(
+  $isolationSupervisorDriverSource,
+  [regex]::Escape('_attestationSource = '))
+if ($attestationSourceAssignments.Count -ne 2) {
+  $problems.Add(
+    'Privileged-command driver client must assign _attestationSource exactly twice: the production fence and the internal test constructor.')
+}
 foreach ($requiredDriverAttestationBoundary in @(
     'PrivilegedCommandIsolationCanonical.VerifyDriverAttestation(',
     'PrivilegedCommandIsolationSignaturePurposes.DriverAttestation',
@@ -2636,9 +2659,11 @@ foreach ($requiredJournalProtection in @(
   }
 }
 foreach ($requiredKillSwitchBoundary in @(
-    'if (string.IsNullOrWhiteSpace(path))',
-    'MarkerParentIsPresentAndOrdinary(path)',
+    'string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)',
+    'MarkerRootIsTrustworthy(path)',
+    'for (var current = new DirectoryInfo(root); current is not null; current = current.Parent)',
     'catch (DirectoryNotFoundException)',
+    'FileAttributes.Directory',
     'FileAttributes.ReparsePoint'
   )) {
   if ($isolationSupervisorKillSwitchSource -notmatch

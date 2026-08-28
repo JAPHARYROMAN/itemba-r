@@ -41,8 +41,17 @@ verified signed claims cover both credentials and documents, name the exact
 model, assert zero training, and specify zero seconds of provider retention.
 Unknown fields, noncanonical JSON/identifiers/digests/nonces, replay-shaped
 normal action results, unsupported MIME types, oversized grants, stale grants,
-and every authority drift fail closed. The production port is a rejecting port
-and has no configuration switch. Restart and replay therefore remain closed.
+and every authority drift fail closed.
+
+`RejectingEphemeralFileDisclosurePort` is a contract fixture, not a component:
+it implements no interface and is never constructed on either side, so do not
+read it as the thing holding this closed. The refusal is enforced by static
+capability predicates at every entry point instead - manifest publication and
+the DPAPI result store in the companion, and device enrollment, plan proposal,
+the offered capability catalogue, host-action queueing, dispatch, result and
+late-evidence submission, observation persistence and artifact ingestion in the
+backend. None of them reads configuration. Restart and replay therefore remain
+closed.
 
 Only digest-and-counter receipt fields are defined for future durable evidence.
 Defining a receipt does not prove that a disclosure occurred and does not make
