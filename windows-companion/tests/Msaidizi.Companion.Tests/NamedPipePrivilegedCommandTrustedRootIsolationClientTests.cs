@@ -450,6 +450,7 @@ public sealed class NamedPipePrivilegedCommandTrustedRootIsolationClientTests
       client.TryReserveAsync(CreateBinding(), CancellationToken.None).AsTask());
   }
 
+  [Trait("Category", "ProcessTiming")]
   [Fact]
   public async Task AUserControlledPipeSquatterCannotPassServerIdentityValidation()
   {
