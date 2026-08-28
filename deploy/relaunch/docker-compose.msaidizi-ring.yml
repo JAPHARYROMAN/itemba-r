@@ -1,0 +1,22 @@
+services:
+  backend:
+    # The protected promotion path supplies only an immutable repository digest.
+    # `!reset` removes the ordinary source-build definition from the merged
+    # service, so a missing pulled image is an error rather than a rebuild.
+    image: ${MSAIDIZI_PROMOTION_BACKEND_IMAGE:?immutable promoted backend image is required}
+    build: !reset null
+    environment:
+      MSAIDIZI_PRODUCTION_PROMOTION_INVENTORY_PATH: /run/msaidizi/promotion-inventory.json
+      MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256: ${MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256:?accepted inventory digest is required}
+      MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256: ${MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256:?accepted evidence digest is required}
+      MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST: ${MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST:?accepted image digest is required}
+      MSAIDIZI_DEPLOYED_BACKEND_IMAGE_REFERENCE: ${MSAIDIZI_DEPLOYED_BACKEND_IMAGE_REFERENCE:?deployed immutable backend image is required}
+      MSAIDIZI_DEPLOYED_SOURCE_COMMIT: ${MSAIDIZI_DEPLOYED_SOURCE_COMMIT:?deployed source commit is required}
+      MSAIDIZI_DEPLOYED_SOURCE_REPOSITORY: ${MSAIDIZI_DEPLOYED_SOURCE_REPOSITORY:?deployed source repository is required}
+    volumes:
+      - type: bind
+        source: ${MSAIDIZI_PRODUCTION_PROMOTION_INVENTORY_HOST_PATH:?promotion inventory host path is required}
+        target: /run/msaidizi/promotion-inventory.json
+        read_only: true
+        bind:
+          create_host_path: false

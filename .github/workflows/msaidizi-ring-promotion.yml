@@ -1,0 +1,399 @@
+name: Msaidizi Protected Ring Promotion
+
+# Manual and default-off. The verify-only default cannot contact production.
+# A promotion requires the separate protected environment, exact confirmation,
+# a signed CRUD release run, and three operator-accepted production digests.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Verify only, or promote the verified image on the production target'
+        required: true
+        type: choice
+        default: 'verify-only'
+        options:
+          - verify-only
+          - promote-ring
+      backend_image:
+        description: 'Exact lowercase backend repository@sha256:<digest> from the release bundle'
+        required: true
+        type: string
+      release_run_id:
+        description: 'Completed Msaidizi CRUD Evidence Release workflow run ID'
+        required: true
+        type: string
+      release_run_attempt:
+        description: 'Exact workflow run attempt bound by the release signature'
+        required: true
+        type: string
+        default: '1'
+      ring:
+        description: 'Protected production rollout ring'
+        required: true
+        type: choice
+        default: '0'
+        options:
+          - '0'
+          - '5'
+          - '25'
+          - '100'
+      confirm:
+        description: 'Type verify-msaidizi-ring or promote-msaidizi-ring exactly'
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: msaidizi-production-ring-promotion-${{ inputs.ring }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-optionally-promote:
+    name: Verify signed release and optionally promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Configure required reviewers and prevent self-review for this environment.
+    # Public trust roots and accepted digests must be provisioned here, not as
+    # workflow inputs and never derived by this job.
+    environment: msaidizi-production-ring-promotion
+    env:
+      NODE_VERSION: '20'
+      MSAIDIZI_PROMOTION_BACKEND_IMAGE: ${{ inputs.backend_image }}
+      MSAIDIZI_PROMOTION_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+      MSAIDIZI_PROMOTION_RELEASE_RUN_ATTEMPT: ${{ inputs.release_run_attempt }}
+      MSAIDIZI_PROMOTION_RING: ${{ inputs.ring }}
+      MSAIDIZI_PRODUCTION_TARGET_ID: ${{ vars.MSAIDIZI_PRODUCTION_TARGET_ID }}
+      MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256: ${{ vars.MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256 }}
+      MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256: ${{ vars.MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256 }}
+      MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST: ${{ vars.MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST }}
+
+    steps:
+      - name: Require an exact manual operation and immutable coordinates
+        shell: bash
+        env:
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+          REQUESTED_CONFIRMATION: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo '::error::Ring promotion workflow must execute from the protected main branch.'
+            exit 1
+          fi
+          EXPECTED_CONFIRM='verify-msaidizi-ring'
+          if [ "$REQUESTED_OPERATION" = 'promote-ring' ]; then
+            EXPECTED_CONFIRM='promote-msaidizi-ring'
+          fi
+          if [ "$REQUESTED_CONFIRMATION" != "$EXPECTED_CONFIRM" ]; then
+            echo "::error::Confirmation must be exactly $EXPECTED_CONFIRM."
+            exit 1
+          fi
+          if ! [[ "$MSAIDIZI_PROMOTION_BACKEND_IMAGE" =~ ^[a-z0-9.-]+(:[0-9]{1,5})?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]; then
+            echo '::error::backend_image must be a lowercase repository@sha256:<digest>.'
+            exit 1
+          fi
+          EXPECTED_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY,,}-backend"
+          if [ "${MSAIDIZI_PROMOTION_BACKEND_IMAGE%@*}" != "$EXPECTED_REPOSITORY" ]; then
+            echo "::error::Backend repository must be $EXPECTED_REPOSITORY."
+            exit 1
+          fi
+          if ! [[ "$MSAIDIZI_PROMOTION_RELEASE_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || \
+             ! [[ "$MSAIDIZI_PROMOTION_RELEASE_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,19}$ ]]; then
+            echo '::error::Release run ID and attempt must be canonical positive integers.'
+            exit 1
+          fi
+          for NAME in \
+            MSAIDIZI_PRODUCTION_TARGET_ID \
+            MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256 \
+            MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256 \
+            MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST; do
+            if [ -z "${!NAME:-}" ]; then
+              echo "::error::Protected environment variable $NAME is required."
+              exit 1
+            fi
+          done
+          echo "RELEASE_ROOT=$RUNNER_TEMP/msaidizi-crud-release" >> "$GITHUB_ENV"
+          echo "TRUST_ROOT=$RUNNER_TEMP/msaidizi-promotion-trust" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # This checkout supplies verifier code only. It is never an application
+          # deployment input and no source compilation command exists in this job.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Require the exact successful CRUD release workflow run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_PATH="/repos/$GITHUB_REPOSITORY/actions/runs/$MSAIDIZI_PROMOTION_RELEASE_RUN_ID"
+          RUN_FACTS="$(gh api "$RUN_PATH" --jq '[.name,.path,.event,.status,.conclusion,(.run_attempt|tostring),.head_branch,.head_repository.full_name] | @tsv')"
+          IFS=$'\t' read -r NAME PATH EVENT STATUS CONCLUSION ATTEMPT HEAD_BRANCH HEAD_REPOSITORY <<< "$RUN_FACTS"
+          if [ "$NAME" != 'Msaidizi CRUD Evidence Release' ] || \
+             [ "$PATH" != '.github/workflows/crud-evidence-release.yml' ] || \
+             [ "$EVENT" != 'workflow_dispatch' ] || [ "$STATUS" != 'completed' ] || \
+             [ "$CONCLUSION" != 'success' ] || \
+             [ "$ATTEMPT" != "$MSAIDIZI_PROMOTION_RELEASE_RUN_ATTEMPT" ] || \
+             [ "$HEAD_BRANCH" != 'main' ] || [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+            echo '::error::Requested run is not the exact successful CRUD evidence release attempt.'
+            exit 1
+          fi
+
+      - name: Download the one release artifact without trusting bundled keys
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RELEASE_ROOT"
+          API="/repos/$GITHUB_REPOSITORY/actions/runs/$MSAIDIZI_PROMOTION_RELEASE_RUN_ID/artifacts?per_page=100"
+          COUNT="$(gh api "$API" --jq '[.artifacts[] | select((.expired|not) and (.name|startswith("msaidizi-crud-evidence-")))] | length')"
+          if [ "$COUNT" != '1' ]; then
+            echo "::error::Expected one live CRUD evidence release artifact; found $COUNT."
+            exit 1
+          fi
+          ARTIFACT_ID="$(gh api "$API" --jq '.artifacts[] | select((.expired|not) and (.name|startswith("msaidizi-crud-evidence-"))) | .id')"
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/crud-release.zip"
+          unzip -q "$RUNNER_TEMP/crud-release.zip" -d "$RELEASE_ROOT"
+          rm -f -- "$RUNNER_TEMP/crud-release.zip"
+          EXPECTED="$RUNNER_TEMP/expected-release-files.txt"
+          ACTUAL="$RUNNER_TEMP/actual-release-files.txt"
+          printf '%s\n' \
+            backend-image-reference.txt \
+            crud-evidence-release.json \
+            crud-evidence.json \
+            evidence-public.pem \
+            release-public.pem \
+            source-commit.txt | sort > "$EXPECTED"
+          find "$RELEASE_ROOT" -type f -printf '%P\n' | sort > "$ACTUAL"
+          if ! cmp -s "$EXPECTED" "$ACTUAL"; then
+            echo '::error::Release artifact file inventory is not closed.'
+            diff -u "$EXPECTED" "$ACTUAL" || true
+            exit 1
+          fi
+
+      - name: Provision purpose-separated protected public trust roots
+        shell: bash
+        env:
+          EVIDENCE_PUBLIC_KEY: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PEM }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PEM }}
+          MSAIDIZI_CRUD_EVIDENCE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID }}
+        run: |
+          set -euo pipefail
+          for NAME in EVIDENCE_PUBLIC_KEY RELEASE_PUBLIC_KEY \
+            MSAIDIZI_CRUD_EVIDENCE_KEY_ID MSAIDIZI_CRUD_RELEASE_KEY_ID; do
+            if [ -z "${!NAME:-}" ]; then
+              echo "::error::Protected environment secret $NAME is required."
+              exit 1
+            fi
+          done
+          mkdir -m 700 "$TRUST_ROOT"
+          umask 077
+          printf '%s\n' "$EVIDENCE_PUBLIC_KEY" > "$TRUST_ROOT/evidence-public.pem"
+          printf '%s\n' "$RELEASE_PUBLIC_KEY" > "$TRUST_ROOT/release-public.pem"
+          openssl pkey -pubin -in "$TRUST_ROOT/evidence-public.pem" -noout
+          openssl pkey -pubin -in "$TRUST_ROOT/release-public.pem" -noout
+          EVIDENCE_SPKI="$(openssl pkey -pubin -in "$TRUST_ROOT/evidence-public.pem" -outform DER | sha256sum | cut -d' ' -f1)"
+          RELEASE_SPKI="$(openssl pkey -pubin -in "$TRUST_ROOT/release-public.pem" -outform DER | sha256sum | cut -d' ' -f1)"
+          BUNDLED_EVIDENCE_SPKI="$(openssl pkey -pubin -in "$RELEASE_ROOT/evidence-public.pem" -outform DER | sha256sum | cut -d' ' -f1)"
+          BUNDLED_RELEASE_SPKI="$(openssl pkey -pubin -in "$RELEASE_ROOT/release-public.pem" -outform DER | sha256sum | cut -d' ' -f1)"
+          if [ "$EVIDENCE_SPKI" = "$RELEASE_SPKI" ]; then
+            echo '::error::Evidence and release trust roots must be purpose-separated.'
+            exit 1
+          fi
+          if [ "$EVIDENCE_SPKI" != "$BUNDLED_EVIDENCE_SPKI" ] || \
+             [ "$RELEASE_SPKI" != "$BUNDLED_RELEASE_SPKI" ]; then
+            echo '::error::Bundled diagnostic public keys do not match protected trust roots.'
+            exit 1
+          fi
+          echo "MSAIDIZI_CRUD_EVIDENCE_KEY_ID=$MSAIDIZI_CRUD_EVIDENCE_KEY_ID" >> "$GITHUB_ENV"
+          echo "MSAIDIZI_CRUD_RELEASE_KEY_ID=$MSAIDIZI_CRUD_RELEASE_KEY_ID" >> "$GITHUB_ENV"
+
+      - name: Verify both signatures and the complete production acceptance binding
+        shell: bash
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PATH: ${{ runner.temp }}/msaidizi-crud-release/crud-evidence.json
+          MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH: ${{ runner.temp }}/msaidizi-promotion-trust/evidence-public.pem
+          MSAIDIZI_CRUD_RELEASE_BUNDLE_PATH: ${{ runner.temp }}/msaidizi-crud-release/crud-evidence-release.json
+          MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PATH: ${{ runner.temp }}/msaidizi-promotion-trust/release-public.pem
+          MSAIDIZI_PROMOTION_REPOSITORY: ${{ github.repository }}
+          MSAIDIZI_PROMOTION_INVENTORY_OUTPUT_PATH: ${{ runner.temp }}/msaidizi-crud-release/promotion-inventory.json
+        run: node backend/scripts/verify-msaidizi-ring-promotion.mjs
+
+      - name: Pull and verify the exact OCI image on the protected runner
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+          MSAIDIZI_PROMOTION_INVENTORY_PATH: ${{ runner.temp }}/msaidizi-crud-release/promotion-inventory.json
+          MSAIDIZI_PROMOTION_IMAGE_INSPECT_PATH: ${{ runner.temp }}/msaidizi-crud-release/runner-image-inspect.json
+          MSAIDIZI_CRUD_EVIDENCE_PATH: ${{ runner.temp }}/msaidizi-crud-release/crud-evidence.json
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker pull "$MSAIDIZI_PROMOTION_BACKEND_IMAGE"
+          docker image inspect "$MSAIDIZI_PROMOTION_BACKEND_IMAGE" > "$MSAIDIZI_PROMOTION_IMAGE_INSPECT_PATH"
+          node backend/scripts/verify-msaidizi-target-oci.mjs
+
+      - name: Install the production transport key
+        if: inputs.operation == 'promote-ring'
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo '::error::Protected deployment SSH key and known_hosts are required.'
+            exit 1
+          fi
+          mkdir -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_msaidizi_promotion
+          chmod 600 ~/.ssh/id_msaidizi_promotion
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Stage the closed verifier package on the production target
+        if: inputs.operation == 'promote-ring'
+        id: target
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          MSAIDIZI_RING_ENV_FILE: ${{ vars.MSAIDIZI_RING_ENV_FILE }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || \
+             ! [[ "$DEPLOY_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]] || \
+             ! [[ "$MSAIDIZI_RING_ENV_FILE" =~ ^/[A-Za-z0-9_./-]+$ ]]; then
+            echo '::error::Target host, user, or root-owned ring environment path is invalid.'
+            exit 1
+          fi
+          REMOTE_STAGE="/tmp/itemba-msaidizi-ring-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "install -d -m 700 '$REMOTE_STAGE/scripts'"
+          scp -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+            "$RELEASE_ROOT/crud-evidence.json" \
+            "$RELEASE_ROOT/crud-evidence-release.json" \
+            "$RELEASE_ROOT/promotion-inventory.json" \
+            "$TRUST_ROOT/evidence-public.pem" \
+            "$TRUST_ROOT/release-public.pem" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:$REMOTE_STAGE/"
+          scp -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+            backend/scripts/crud-evidence-runner-lib.mjs \
+            backend/scripts/crud-evidence-release-lib.mjs \
+            backend/scripts/msaidizi-ring-promotion-lib.mjs \
+            backend/scripts/verify-msaidizi-ring-promotion.mjs \
+            backend/scripts/verify-msaidizi-target-oci.mjs \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:$REMOTE_STAGE/scripts/"
+          scp -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+            deploy/relaunch/promote-msaidizi-ring.sh \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:$REMOTE_STAGE/"
+          REQUEST="$RUNNER_TEMP/promotion-request.env"
+          cat > "$REQUEST" <<EOF
+          MSAIDIZI_CRUD_EVIDENCE_KEY_ID=$MSAIDIZI_CRUD_EVIDENCE_KEY_ID
+          MSAIDIZI_CRUD_EVIDENCE_PATH=$REMOTE_STAGE/crud-evidence.json
+          MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH=$REMOTE_STAGE/evidence-public.pem
+          MSAIDIZI_CRUD_RELEASE_BUNDLE_PATH=$REMOTE_STAGE/crud-evidence-release.json
+          MSAIDIZI_CRUD_RELEASE_KEY_ID=$MSAIDIZI_CRUD_RELEASE_KEY_ID
+          MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PATH=$REMOTE_STAGE/release-public.pem
+          MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256=$MSAIDIZI_PRODUCTION_ACCEPTED_EVIDENCE_SHA256
+          MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST=$MSAIDIZI_PRODUCTION_ACCEPTED_IMAGE_DIGEST
+          MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256=$MSAIDIZI_PRODUCTION_ACCEPTED_INVENTORY_SHA256
+          MSAIDIZI_PRODUCTION_TARGET_ID=$MSAIDIZI_PRODUCTION_TARGET_ID
+          MSAIDIZI_PROMOTION_BACKEND_IMAGE=$MSAIDIZI_PROMOTION_BACKEND_IMAGE
+          MSAIDIZI_PROMOTION_CENTRAL_INVENTORY_PATH=$REMOTE_STAGE/promotion-inventory.json
+          MSAIDIZI_PROMOTION_RELEASE_RUN_ATTEMPT=$MSAIDIZI_PROMOTION_RELEASE_RUN_ATTEMPT
+          MSAIDIZI_PROMOTION_RELEASE_RUN_ID=$MSAIDIZI_PROMOTION_RELEASE_RUN_ID
+          MSAIDIZI_PROMOTION_REPOSITORY=$GITHUB_REPOSITORY
+          MSAIDIZI_PROMOTION_RING=$MSAIDIZI_PROMOTION_RING
+          MSAIDIZI_PROMOTION_STAGE=$REMOTE_STAGE
+          MSAIDIZI_REPOSITORY_ROOT=/opt/itemba-r
+          MSAIDIZI_RING_ENV_FILE=$MSAIDIZI_RING_ENV_FILE
+          EOF
+          sed -i 's/^          //' "$REQUEST"
+          scp -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+            "$REQUEST" "${DEPLOY_USER}@${DEPLOY_HOST}:$REMOTE_STAGE/promotion-request.env"
+          echo "stage=$REMOTE_STAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate the target to the immutable image repository
+        if: inputs.operation == 'promote-ring'
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/id_msaidizi_promotion \
+            -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+      - name: Re-verify on target and promote without a source rebuild
+        if: inputs.operation == 'promote-ring'
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          REMOTE_STAGE: ${{ steps.target.outputs.stage }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash '$REMOTE_STAGE/promote-msaidizi-ring.sh' '$REMOTE_STAGE/promotion-request.env'"
+
+      - name: Report immutable promotion coordinates
+        if: always()
+        shell: bash
+        env:
+          REPORT_OPERATION: ${{ inputs.operation }}
+          REPORT_RING: ${{ inputs.ring }}
+          REPORT_BACKEND_IMAGE: ${{ inputs.backend_image }}
+          REPORT_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          REPORT_RELEASE_RUN_ATTEMPT: ${{ inputs.release_run_attempt }}
+          REPORT_RESULT: ${{ job.status }}
+        run: |
+          {
+            echo '### Msaidizi protected ring promotion'
+            echo
+            printf '%s\n' "- operation: \`$REPORT_OPERATION\`"
+            printf '%s\n' "- ring: \`$REPORT_RING\`"
+            printf '%s\n' "- backend image: \`$REPORT_BACKEND_IMAGE\`"
+            printf '%s\n' "- CRUD release run: \`$REPORT_RELEASE_RUN_ID\` attempt \`$REPORT_RELEASE_RUN_ATTEMPT\`"
+            printf '%s\n' "- result: **$REPORT_RESULT**"
+            echo
+            echo 'The workflow did not generate or change any production acceptance digest.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove ephemeral transport and registry credentials
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          REMOTE_STAGE: ${{ steps.target.outputs.stage }}
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          if [ -n "${REMOTE_STAGE:-}" ] && [ "$REQUESTED_OPERATION" = 'promote-ring' ] && \
+             [[ "${DEPLOY_HOST:-}" =~ ^[A-Za-z0-9.-]+$ ]] && \
+             [[ "${DEPLOY_USER:-}" =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]] && \
+             [ -f ~/.ssh/id_msaidizi_promotion ]; then
+            ssh -i ~/.ssh/id_msaidizi_promotion -o StrictHostKeyChecking=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -rf -- '$REMOTE_STAGE' && docker logout ghcr.io >/dev/null 2>&1 || true" || true
+          fi
+          rm -f -- ~/.ssh/id_msaidizi_promotion

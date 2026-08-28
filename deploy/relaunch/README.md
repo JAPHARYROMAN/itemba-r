@@ -39,6 +39,44 @@ Running the seed against an existing database is blocked unless
 `CONFIRM_ROLE_PERMISSION_RESEED=true` is also supplied. That extra confirmation
 is reserved for deliberate role-permission maintenance.
 
+## Msaidizi protected ring promotion
+
+The ordinary deployment above intentionally keeps every Msaidizi switch false
+and `MSAIDIZI_WRITE_MODE=read-only`. It remains the recovery/default path and
+must be run for the exact signed source commit before a ring promotion.
+
+Use the manual `Msaidizi Protected Ring Promotion` GitHub workflow only after a
+separate `Msaidizi CRUD Evidence Release` run and independent acceptance of its
+promotion inventory, evidence artifact digest, and backend image digest. Its
+`verify-only` operation is the default and never contacts production.
+
+The `promote-ring` operation requires:
+
+- required reviewers and self-review prevention on the
+  `msaidizi-production-ring-promotion` GitHub environment;
+- the purpose-separated CRUD evidence and release P-256 public keys plus their
+  exact key IDs;
+- production SSH key, pinned `known_hosts`, host, and user settings;
+- the protected target ID and three externally accepted digests documented in
+  `backend/test/CRUD_EVIDENCE.md`;
+- registry read access to the digest-qualified GHCR backend image; and
+- a root-owned, non-symbolic, non-group/world-writable ring environment file at
+  `MSAIDIZI_RING_ENV_FILE` containing all provider, signing, device, recovery,
+  audit, budget, and kill-switch configuration required by the selected ring.
+  If autonomous update rollout is enabled, this file must also set
+  `MSAIDIZI_UPDATE_AUTOMATIC_MAX_RING` explicitly to `0`, `5`, `25`, or `100`;
+  the default `-1` is deliberately non-authorizing.
+
+The target must provide Bash, Node.js 20+, Git, Docker Compose, `flock`, and the
+ordinary `/opt/itemba-r` deployment at the signed commit. The promotion does not
+run migrations. It replaces only the backend after confirming the existing
+dark deployment is healthy, and the separate Compose override removes its build
+definition. No mutable tag or source rebuild is an authorized fallback.
+
+Do not type acceptance digests as workflow inputs or derive them in the
+promotion job. Missing external acceptance or operational ring evidence is a
+failed prerequisite, not something this repository can fabricate.
+
 ## Forbidden during deployment
 
 Do not run `docker compose down -v`, `docker volume rm`, or

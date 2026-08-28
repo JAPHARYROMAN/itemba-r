@@ -1,0 +1,385 @@
+name: Msaidizi CRUD Evidence Release
+
+# Deliberately manual and environment-gated. A normal PR or push must never
+# manufacture a signing key, silently skip the real loopback matrix, or publish
+# a source-only report as release evidence.
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Commit, tag, or branch to attest (must already be on main)'
+        required: true
+        default: 'main'
+      confirm:
+        description: 'Type generate-crud-evidence-release to confirm the disposable mutation run'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: msaidizi-crud-evidence-release-${{ inputs.source_ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  execute-bind-publish:
+    name: Execute, verify, bind, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: msaidizi-crud-evidence-release
+    services:
+      postgres:
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+        env:
+          POSTGRES_DB: itemba_crud_evidence
+          POSTGRES_USER: crud_evidence_runner
+          POSTGRES_PASSWORD: disposable-loopback-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crud_evidence_runner -d itemba_crud_evidence"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://crud_evidence_runner:disposable-loopback-only@127.0.0.1:5432/itemba_crud_evidence?schema=public
+      CRUD_COVERAGE_DISPOSABLE_DATABASE_ACK: 127.0.0.1:5432/itemba_crud_evidence
+      JWT_ACCESS_SECRET: crud-evidence-loopback-access-secret-32chars
+      JWT_REFRESH_SECRET: crud-evidence-loopback-refresh-secret-32chars
+      TWO_FACTOR_ENCRYPTION_KEY: crud-evidence-loopback-two-factor-key-32chars
+      REFRESH_TOKEN_PEPPER: crud-evidence-loopback-refresh-pepper-32chars
+      APP_ENCRYPTION_KEY: crud-evidence-loopback-app-key-32chars
+      THROTTLE_LIMIT: '100000'
+      THROTTLE_TTL: '1'
+
+    steps:
+      - name: Require the exact mutation-run confirmation
+        shell: bash
+        env:
+          REQUESTED_CONFIRMATION: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$REQUESTED_CONFIRMATION" != "generate-crud-evidence-release" ]; then
+            echo "::error::Type exactly generate-crud-evidence-release to authorize disposable loopback fixtures."
+            exit 1
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve an immutable source commit already merged to main
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          if ! [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$|^[a-f0-9]{64}$ ]]; then
+            echo "::error::Checkout did not resolve to an immutable Git object ID."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
+            echo "::error::$SOURCE_SHA is not on origin/main. Refusing unsigned source promotion."
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
+            echo "::error::Tracked source is dirty immediately after checkout."
+            exit 1
+          fi
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install the exact evidence dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Generate the exact Prisma client used by the evidence harness
+        working-directory: ./backend
+        run: npx prisma generate --schema=../database/prisma/schema.prisma
+
+      - name: Provision the P-256 evidence key only for evidence signing
+        id: material
+        shell: bash
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PRIVATE_KEY_PEM: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_PRIVATE_KEY_PEM }}
+          MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PEM: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PEM }}
+          MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+        run: |
+          set -euo pipefail
+          for NAME in \
+            MSAIDIZI_CRUD_EVIDENCE_PRIVATE_KEY_PEM \
+            MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PEM \
+            MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID; do
+            if [ -z "${!NAME:-}" ]; then
+              echo "::error::Protected environment secret $NAME is required."
+              exit 1
+            fi
+          done
+
+          umask 077
+          ROOT="$RUNNER_TEMP/msaidizi-crud-evidence-release"
+          mkdir -m 700 "$ROOT"
+          printf '%s\n' "$MSAIDIZI_CRUD_EVIDENCE_PRIVATE_KEY_PEM" > "$ROOT/evidence-private.pem"
+          printf '%s\n' "$MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PEM" > "$ROOT/evidence-public.pem"
+          openssl ec -in "$ROOT/evidence-private.pem" -check -noout
+          openssl pkey -pubin -in "$ROOT/evidence-public.pem" -noout
+          PRIVATE_SPKI="$(openssl pkey -in "$ROOT/evidence-private.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+          PUBLIC_SPKI="$(openssl pkey -pubin -in "$ROOT/evidence-public.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+          if [ "$PRIVATE_SPKI" != "$PUBLIC_SPKI" ]; then
+            echo "::error::Evidence private/public key pair does not match."
+            exit 1
+          fi
+          if ! openssl ec -in "$ROOT/evidence-private.pem" -text -noout | grep -q 'ASN1 OID: prime256v1'; then
+            echo "::error::Evidence signing key must be EC P-256."
+            exit 1
+          fi
+
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+
+      - name: Execute every real loopback CRUD fixture and sign the artifact
+        working-directory: ./backend
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PRIVATE_KEY_PATH: ${{ steps.material.outputs.root }}/evidence-private.pem
+          MSAIDIZI_CRUD_EVIDENCE_OUTPUT_PATH: ${{ steps.material.outputs.root }}/crud-evidence.json
+          MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+        run: npm run evidence:crud
+
+      - name: Independently verify the signed evidence before image publication
+        working-directory: ./backend
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PATH: ${{ steps.material.outputs.root }}/crud-evidence.json
+          MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH: ${{ steps.material.outputs.root }}/evidence-public.pem
+          MSAIDIZI_CRUD_EVIDENCE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+        run: node scripts/verify-crud-evidence-artifact.mjs
+
+      - name: Resolve the exact signed source and evidence facts for OCI labels
+        id: binding
+        working-directory: ./backend
+        shell: bash
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PATH: ${{ steps.material.outputs.root }}/crud-evidence.json
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          import {
+            evidenceReleaseFacts,
+            readBoundedJsonFile,
+            sourceProvenance,
+          } from './scripts/crud-evidence-release-lib.mjs';
+
+          const source = sourceProvenance(resolve(process.cwd(), '..'));
+          const evidence = readBoundedJsonFile(
+            process.env.MSAIDIZI_CRUD_EVIDENCE_PATH,
+            5 * 1024 * 1024,
+            'CRUD evidence artifact',
+          );
+          const facts = evidenceReleaseFacts(evidence.bytes, evidence.value);
+          const outputs = {
+            source_tree: source.gitTreeDigest,
+            tracked_source_sha256: source.trackedSourceSha256,
+            tracked_file_count: String(source.trackedFileCount),
+            evidence_artifact_sha256: facts.artifactSha256,
+            evidence_payload_digest: facts.payloadDigest,
+            evidence_manifest_digest: facts.manifestDigest,
+            evidence_application_build_digest: facts.applicationBuildDigest,
+            evidence_prisma_digest: facts.prismaSchemaMigrationDigest,
+          };
+          appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `${Object.entries(outputs)
+              .map(([key, value]) => `${key}=${value}`)
+              .join('\n')}\n`,
+          );
+          NODE
+
+      - name: Remove the evidence private key after artifact verification
+        shell: bash
+        run: rm -f -- '${{ steps.material.outputs.root }}/evidence-private.pem'
+
+      - name: Authenticate the immutable backend image publisher
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GHCR_TOKEN" ] || [ -z "$GHCR_USER" ]; then
+            echo "::error::GitHub Packages publisher identity is unavailable."
+            exit 1
+          fi
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Build and push the exact backend image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY,,}-backend"
+          IMAGE_TAG="$IMAGE_REPOSITORY:${{ steps.source.outputs.sha }}"
+          METADATA="$RUNNER_TEMP/backend-image-metadata.json"
+          docker buildx build \
+            --pull \
+            --provenance=mode=max \
+            --sbom=true \
+            --file backend/Dockerfile \
+            --label "org.opencontainers.image.revision=${{ steps.source.outputs.sha }}" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "io.itemba.msaidizi.source-tree=${{ steps.binding.outputs.source_tree }}" \
+            --label "io.itemba.msaidizi.tracked-source-sha256=${{ steps.binding.outputs.tracked_source_sha256 }}" \
+            --label "io.itemba.msaidizi.tracked-file-count=${{ steps.binding.outputs.tracked_file_count }}" \
+            --label "io.itemba.msaidizi.evidence-artifact-sha256=${{ steps.binding.outputs.evidence_artifact_sha256 }}" \
+            --label "io.itemba.msaidizi.evidence-payload-digest=${{ steps.binding.outputs.evidence_payload_digest }}" \
+            --label "io.itemba.msaidizi.evidence-manifest-digest=${{ steps.binding.outputs.evidence_manifest_digest }}" \
+            --label "io.itemba.msaidizi.evidence-application-build-digest=${{ steps.binding.outputs.evidence_application_build_digest }}" \
+            --label "io.itemba.msaidizi.evidence-prisma-digest=${{ steps.binding.outputs.evidence_prisma_digest }}" \
+            --label "io.itemba.msaidizi.release-workflow=$GITHUB_WORKFLOW" \
+            --label "io.itemba.msaidizi.release-run-id=$GITHUB_RUN_ID" \
+            --label "io.itemba.msaidizi.release-run-attempt=$GITHUB_RUN_ATTEMPT" \
+            --tag "$IMAGE_TAG" \
+            --metadata-file "$METADATA" \
+            --push \
+            .
+          IMAGE_DIGEST="$(node -e "const m=require(process.argv[1]); const d=m['containerimage.digest']; if(!/^sha256:[a-f0-9]{64}$/.test(d||'')) process.exit(1); process.stdout.write(d)" "$METADATA")"
+          IMAGE_REFERENCE="$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+          # Downstream code accepts only repository@sha256:<digest>, never this mutable tag.
+          echo "repository@sha256:<digest> = $IMAGE_REFERENCE"
+          echo "reference=$IMAGE_REFERENCE" >> "$GITHUB_OUTPUT"
+
+      - name: Provision the purpose-separated P-256 release-binding key
+        shell: bash
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_PRIVATE_KEY_PEM: ${{ secrets.MSAIDIZI_CRUD_RELEASE_PRIVATE_KEY_PEM }}
+          MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PEM: ${{ secrets.MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PEM }}
+          MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID }}
+        run: |
+          set -euo pipefail
+          for NAME in \
+            MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID \
+            MSAIDIZI_CRUD_RELEASE_PRIVATE_KEY_PEM \
+            MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PEM \
+            MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID; do
+            if [ -z "${!NAME:-}" ]; then
+              echo "::error::Protected environment secret $NAME is required."
+              exit 1
+            fi
+          done
+          if [ "$MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID" = "$MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID" ]; then
+            echo "::error::Evidence execution and release binding require distinct key IDs."
+            exit 1
+          fi
+          umask 077
+          ROOT='${{ steps.material.outputs.root }}'
+          printf '%s\n' "$MSAIDIZI_CRUD_RELEASE_PRIVATE_KEY_PEM" > "$ROOT/release-private.pem"
+          printf '%s\n' "$MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PEM" > "$ROOT/release-public.pem"
+          openssl ec -in "$ROOT/release-private.pem" -check -noout
+          openssl pkey -pubin -in "$ROOT/release-public.pem" -noout
+          PRIVATE_SPKI="$(openssl pkey -in "$ROOT/release-private.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+          PUBLIC_SPKI="$(openssl pkey -pubin -in "$ROOT/release-public.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+          EVIDENCE_SPKI="$(openssl pkey -pubin -in "$ROOT/evidence-public.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+          if [ "$PRIVATE_SPKI" != "$PUBLIC_SPKI" ]; then
+            echo "::error::Release private/public key pair does not match."
+            exit 1
+          fi
+          if [ "$PUBLIC_SPKI" = "$EVIDENCE_SPKI" ]; then
+            echo "::error::Release binding must not reuse the evidence signing key."
+            exit 1
+          fi
+          if ! openssl ec -in "$ROOT/release-private.pem" -text -noout | grep -q 'ASN1 OID: prime256v1'; then
+            echo "::error::Release signing key must be EC P-256."
+            exit 1
+          fi
+
+      - name: Verify evidence and create the independently signed release binding
+        working-directory: ./backend
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PATH: ${{ steps.material.outputs.root }}/crud-evidence.json
+          MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH: ${{ steps.material.outputs.root }}/evidence-public.pem
+          MSAIDIZI_CRUD_EVIDENCE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_PRIVATE_KEY_PATH: ${{ steps.material.outputs.root }}/release-private.pem
+          MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PATH: ${{ steps.material.outputs.root }}/release-public.pem
+          MSAIDIZI_CRUD_RELEASE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_OUTPUT_PATH: ${{ steps.material.outputs.root }}/crud-evidence-release.json
+          MSAIDIZI_CRUD_RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+          MSAIDIZI_CRUD_RELEASE_BACKEND_IMAGE: ${{ steps.image.outputs.reference }}
+        run: node scripts/create-crud-evidence-release.mjs
+
+      - name: Remove the release private key after binding signature
+        shell: bash
+        run: rm -f -- '${{ steps.material.outputs.root }}/release-private.pem'
+
+      - name: Re-verify the published inputs from disk
+        working-directory: ./backend
+        env:
+          MSAIDIZI_CRUD_EVIDENCE_PATH: ${{ steps.material.outputs.root }}/crud-evidence.json
+          MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH: ${{ steps.material.outputs.root }}/evidence-public.pem
+          MSAIDIZI_CRUD_EVIDENCE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_EVIDENCE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_BUNDLE_PATH: ${{ steps.material.outputs.root }}/crud-evidence-release.json
+          MSAIDIZI_CRUD_RELEASE_PUBLIC_KEY_PATH: ${{ steps.material.outputs.root }}/release-public.pem
+          MSAIDIZI_CRUD_RELEASE_KEY_ID: ${{ secrets.MSAIDIZI_CRUD_RELEASE_SIGNING_KEY_ID }}
+          MSAIDIZI_CRUD_RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+          MSAIDIZI_CRUD_RELEASE_BACKEND_IMAGE: ${{ steps.image.outputs.reference }}
+        run: node scripts/verify-crud-evidence-release.mjs
+
+      - name: Stage only public release material
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ROOT="${{ steps.material.outputs.root }}"
+          PUBLIC_ROOT="$RUNNER_TEMP/msaidizi-crud-evidence-public"
+          mkdir -m 700 "$PUBLIC_ROOT"
+          install -m 600 "$SOURCE_ROOT/crud-evidence.json" "$PUBLIC_ROOT/crud-evidence.json"
+          install -m 600 "$SOURCE_ROOT/crud-evidence-release.json" "$PUBLIC_ROOT/crud-evidence-release.json"
+          install -m 600 "$SOURCE_ROOT/evidence-public.pem" "$PUBLIC_ROOT/evidence-public.pem"
+          install -m 600 "$SOURCE_ROOT/release-public.pem" "$PUBLIC_ROOT/release-public.pem"
+          printf '%s\n' '${{ steps.image.outputs.reference }}' > "$PUBLIC_ROOT/backend-image-reference.txt"
+          printf '%s\n' '${{ steps.source.outputs.sha }}' > "$PUBLIC_ROOT/source-commit.txt"
+          echo "path=$PUBLIC_ROOT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish verified CRUD evidence and release binding
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: msaidizi-crud-evidence-${{ steps.source.outputs.sha }}
+          path: ${{ steps.stage.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record immutable release coordinates
+        shell: bash
+        run: |
+          {
+            echo '### Msaidizi CRUD evidence release'
+            echo
+            echo '- source commit: `${{ steps.source.outputs.sha }}`'
+            echo '- backend image: `${{ steps.image.outputs.reference }}`'
+            echo '- artifact: `msaidizi-crud-evidence-${{ steps.source.outputs.sha }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove private key material
+        if: always()
+        shell: bash
+        run: |
+          ROOT='${{ steps.material.outputs.root }}'
+          if [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
+            rm -f -- "$ROOT/evidence-private.pem" "$ROOT/release-private.pem"
+          fi
+          docker logout ghcr.io >/dev/null 2>&1 || true

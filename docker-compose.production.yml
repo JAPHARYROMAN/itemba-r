@@ -11,8 +11,6 @@ services:
       API_HOST: ${API_HOST:-api.itembagrouptz.com}
       WEBSITE_HOST: ${WEBSITE_HOST:-itembagrouptz.com}
       WEBSITE_WWW_HOST: ${WEBSITE_WWW_HOST:-www.itembagrouptz.com}
-      FUELGRID_APP_HOST: ${FUELGRID_APP_HOST:-fuelgrid.itembagrouptz.com}
-      FUELGRID_API_HOST: ${FUELGRID_API_HOST:-api.fuelgrid.itembagrouptz.com}
     ports:
       - '80:80'
       - '443:443'
@@ -30,7 +28,6 @@ services:
         condition: service_healthy
     networks:
       - itemba_network
-      - shared_edge
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:2019/config/ >/dev/null']
       interval: 30s
@@ -181,6 +178,119 @@ services:
       # inside this container resolves to the backend itself — the same address
       # the healthcheck above uses. Override only behind a proxy.
       MSAIDIZI_LOOPBACK_URL: ${MSAIDIZI_LOOPBACK_URL:-}
+      MSAIDIZI_TOOL_SEARCH: ${MSAIDIZI_TOOL_SEARCH:-false}
+      # Durable autonomy has independent, fail-closed switches. Enabling chat
+      # never enables a task worker, Autopilot, or workstation execution.
+      MSAIDIZI_AUTONOMY_ENABLED: ${MSAIDIZI_AUTONOMY_ENABLED:-false}
+      MSAIDIZI_TASK_WORKER_ENABLED: ${MSAIDIZI_TASK_WORKER_ENABLED:-false}
+      MSAIDIZI_AUTOPILOT_ENABLED: ${MSAIDIZI_AUTOPILOT_ENABLED:-false}
+      MSAIDIZI_HOST_EXECUTION_ENABLED: ${MSAIDIZI_HOST_EXECUTION_ENABLED:-false}
+      MSAIDIZI_GLOBAL_KILL_SWITCH: ${MSAIDIZI_GLOBAL_KILL_SWITCH:-false}
+      # Direct device mTLS is intentionally separate from the public proxy.
+      # Paths must refer to externally mounted secret files when enabled.
+      MSAIDIZI_DEVICE_PAIRING_ENABLED: ${MSAIDIZI_DEVICE_PAIRING_ENABLED:-false}
+      MSAIDIZI_DEVICE_CHANNEL_ENABLED: ${MSAIDIZI_DEVICE_CHANNEL_ENABLED:-false}
+      MSAIDIZI_DIRECT_MTLS_ENABLED: ${MSAIDIZI_DIRECT_MTLS_ENABLED:-false}
+      MSAIDIZI_DIRECT_MTLS_PORT: ${MSAIDIZI_DIRECT_MTLS_PORT:-3443}
+      MSAIDIZI_DIRECT_MTLS_BIND_ADDRESS: ${MSAIDIZI_DIRECT_MTLS_CONTAINER_BIND_ADDRESS:-0.0.0.0}
+      MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED: ${MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED:-false}
+      MSAIDIZI_SUPERVISOR_ENROLLMENT_PEPPER: ${MSAIDIZI_SUPERVISOR_ENROLLMENT_PEPPER:-}
+      MSAIDIZI_SUPERVISOR_ENROLLMENT_TTL_SECONDS: ${MSAIDIZI_SUPERVISOR_ENROLLMENT_TTL_SECONDS:-300}
+      MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_PATH: ${MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_HOST_PATH:+/run/msaidizi-provider-contract/attestation.json}
+      MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_PATH: ${MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_HOST_PATH:+/run/msaidizi-provider-contract/public.pem}
+      MSAIDIZI_PROVIDER_CONTRACT_KEY_ID: ${MSAIDIZI_PROVIDER_CONTRACT_KEY_ID:-}
+      MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256: ${MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256:-}
+      MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256: ${MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256:-}
+      MSAIDIZI_PROVIDER_ACCOUNT_ID: ${MSAIDIZI_PROVIDER_ACCOUNT_ID:-}
+      MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID: ${MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID:-}
+      MSAIDIZI_DEVICE_PAIRING_PEPPER: ${MSAIDIZI_DEVICE_PAIRING_PEPPER:-}
+      MSAIDIZI_DEVICE_LEASE_PEPPER: ${MSAIDIZI_DEVICE_LEASE_PEPPER:-}
+      MSAIDIZI_ACTION_SIGNING_KEY_PATH: ${MSAIDIZI_ACTION_SIGNING_KEY_HOST_PATH:+/run/secrets/msaidizi-action-es256.pem}
+      MSAIDIZI_ACTION_SIGNING_KEY_ID: ${MSAIDIZI_ACTION_SIGNING_KEY_ID:-}
+      MSAIDIZI_UPDATE_SUPERVISOR_ENABLED: ${MSAIDIZI_UPDATE_SUPERVISOR_ENABLED:-false}
+      MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED: ${MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED:-false}
+      MSAIDIZI_UPDATE_AUTOMATIC_MAX_RING: ${MSAIDIZI_UPDATE_AUTOMATIC_MAX_RING:--1}
+      MSAIDIZI_UPDATE_ROLLOUT_SWEEP_SECONDS: ${MSAIDIZI_UPDATE_ROLLOUT_SWEEP_SECONDS:-15}
+      MSAIDIZI_UPDATE_EVALUATOR_ENABLED: ${MSAIDIZI_UPDATE_EVALUATOR_ENABLED:-false}
+      MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_PATH: ${MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_HOST_PATH:+/run/secrets/msaidizi-evaluator-keys.json}
+      MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_SHA256: ${MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_SHA256:-}
+      MSAIDIZI_EVALUATOR_MAX_CLOCK_SKEW_SECONDS: ${MSAIDIZI_EVALUATOR_MAX_CLOCK_SKEW_SECONDS:-60}
+      MSAIDIZI_EVALUATOR_MAX_ATTESTATION_AGE_SECONDS: ${MSAIDIZI_EVALUATOR_MAX_ATTESTATION_AGE_SECONDS:-86400}
+      MSAIDIZI_EVALUATOR_MTLS_ENABLED: ${MSAIDIZI_EVALUATOR_MTLS_ENABLED:-false}
+      MSAIDIZI_EVALUATOR_MTLS_PORT: ${MSAIDIZI_EVALUATOR_MTLS_PORT:-3444}
+      # The container must listen on its own interface; Docker's published-port
+      # host bind remains independently loopback-only below.
+      MSAIDIZI_EVALUATOR_MTLS_BIND_ADDRESS: ${MSAIDIZI_EVALUATOR_MTLS_CONTAINER_BIND_ADDRESS:-0.0.0.0}
+      MSAIDIZI_EVALUATOR_MTLS_SERVER_KEY_PATH: ${MSAIDIZI_EVALUATOR_MTLS_SERVER_KEY_HOST_PATH:+/run/secrets/msaidizi-evaluator-server-key.pem}
+      MSAIDIZI_EVALUATOR_MTLS_SERVER_CERT_PATH: ${MSAIDIZI_EVALUATOR_MTLS_SERVER_CERT_HOST_PATH:+/run/secrets/msaidizi-evaluator-server-cert.pem}
+      MSAIDIZI_EVALUATOR_MTLS_CLIENT_CA_PATH: ${MSAIDIZI_EVALUATOR_MTLS_CLIENT_CA_HOST_PATH:+/run/secrets/msaidizi-evaluator-client-ca.pem}
+      MSAIDIZI_EVALUATOR_CLIENT_CERT_SHA256: ${MSAIDIZI_EVALUATOR_CLIENT_CERT_SHA256:-}
+      MSAIDIZI_EVALUATOR_CLIENT_SPKI_SHA256: ${MSAIDIZI_EVALUATOR_CLIENT_SPKI_SHA256:-}
+      MSAIDIZI_UPDATE_SIGNING_KEY_PATH: ${MSAIDIZI_UPDATE_SIGNING_KEY_HOST_PATH:+/run/secrets/msaidizi-update-es256.pem}
+      MSAIDIZI_UPDATE_SIGNING_KEY_ID: ${MSAIDIZI_UPDATE_SIGNING_KEY_ID:-}
+      MSAIDIZI_UPDATE_MANIFEST_TTL_SECONDS: ${MSAIDIZI_UPDATE_MANIFEST_TTL_SECONDS:-600}
+      MSAIDIZI_UPDATE_REDELIVERY_SECONDS: ${MSAIDIZI_UPDATE_REDELIVERY_SECONDS:-30}
+      MSAIDIZI_UPDATE_HEALTH_TIMEOUT_SECONDS: ${MSAIDIZI_UPDATE_HEALTH_TIMEOUT_SECONDS:-600}
+      MSAIDIZI_UPDATE_MIN_HEALTHY_SOAK_SECONDS: ${MSAIDIZI_UPDATE_MIN_HEALTHY_SOAK_SECONDS:-300}
+      MSAIDIZI_UPDATE_RING_0_MIN_DWELL_SECONDS: ${MSAIDIZI_UPDATE_RING_0_MIN_DWELL_SECONDS:-86400}
+      MSAIDIZI_UPDATE_RING_5_MIN_DWELL_SECONDS: ${MSAIDIZI_UPDATE_RING_5_MIN_DWELL_SECONDS:-86400}
+      MSAIDIZI_UPDATE_RING_25_MIN_DWELL_SECONDS: ${MSAIDIZI_UPDATE_RING_25_MIN_DWELL_SECONDS:-172800}
+      MSAIDIZI_UPDATE_RING_100_MIN_DWELL_SECONDS: ${MSAIDIZI_UPDATE_RING_100_MIN_DWELL_SECONDS:-259200}
+      MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED: ${MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED:-false}
+      MSAIDIZI_RECOVERY_SIGNING_KEY_PATH: ${MSAIDIZI_RECOVERY_SIGNING_KEY_HOST_PATH:+/run/secrets/msaidizi-recovery-es256.pem}
+      MSAIDIZI_RECOVERY_SIGNING_KEY_ID: ${MSAIDIZI_RECOVERY_SIGNING_KEY_ID:-}
+      MSAIDIZI_RECOVERY_MANIFEST_TTL_SECONDS: ${MSAIDIZI_RECOVERY_MANIFEST_TTL_SECONDS:-600}
+      MSAIDIZI_RECOVERY_REDELIVERY_SECONDS: ${MSAIDIZI_RECOVERY_REDELIVERY_SECONDS:-30}
+      MSAIDIZI_AUDIT_SIGNER_ENABLED: ${MSAIDIZI_AUDIT_SIGNER_ENABLED:-false}
+      MSAIDIZI_AUDIT_SIGNER_KILL_SWITCH: ${MSAIDIZI_AUDIT_SIGNER_KILL_SWITCH:-false}
+      MSAIDIZI_AUDIT_SIGNER_KEY_ID: ${MSAIDIZI_AUDIT_SIGNER_KEY_ID:-}
+      MSAIDIZI_AUDIT_SIGNER_CLIENT_CERT_SHA256: ${MSAIDIZI_AUDIT_SIGNER_CLIENT_CERT_SHA256:-}
+      MSAIDIZI_AUDIT_SIGNER_CLIENT_SPKI_SHA256: ${MSAIDIZI_AUDIT_SIGNER_CLIENT_SPKI_SHA256:-}
+      MSAIDIZI_AUDIT_SIGNER_MAX_SEGMENT_EVENTS: ${MSAIDIZI_AUDIT_SIGNER_MAX_SEGMENT_EVENTS:-256}
+      MSAIDIZI_AUDIT_SIGNER_CHECKPOINT_TTL_SECONDS: ${MSAIDIZI_AUDIT_SIGNER_CHECKPOINT_TTL_SECONDS:-300}
+      MSAIDIZI_AUDIT_SIGNER_MAX_CLOCK_SKEW_SECONDS: ${MSAIDIZI_AUDIT_SIGNER_MAX_CLOCK_SKEW_SECONDS:-30}
+      MSAIDIZI_ACTION_TOKEN_ISSUER: ${MSAIDIZI_ACTION_TOKEN_ISSUER:-itemba-msaidizi-broker}
+      MSAIDIZI_ACTION_TOKEN_AUDIENCE: ${MSAIDIZI_ACTION_TOKEN_AUDIENCE:-itemba-windows-companion}
+      MSAIDIZI_ACTION_TOKEN_SUBJECT: ${MSAIDIZI_ACTION_TOKEN_SUBJECT:-msaidizi-global}
+      MSAIDIZI_ACTION_TOKEN_TTL_SECONDS: ${MSAIDIZI_ACTION_TOKEN_TTL_SECONDS:-120}
+      MSAIDIZI_DEVICE_PAIRING_TTL_SECONDS: ${MSAIDIZI_DEVICE_PAIRING_TTL_SECONDS:-300}
+      MSAIDIZI_DEVICE_LEASE_TTL_SECONDS: ${MSAIDIZI_DEVICE_LEASE_TTL_SECONDS:-90}
+      MSAIDIZI_DEVICE_REDELIVERY_SECONDS: ${MSAIDIZI_DEVICE_REDELIVERY_SECONDS:-15}
+      MSAIDIZI_DIRECT_MTLS_SERVER_KEY_PATH: ${MSAIDIZI_DIRECT_MTLS_SERVER_KEY_HOST_PATH:+/run/secrets/msaidizi-device-server-key.pem}
+      MSAIDIZI_DIRECT_MTLS_SERVER_CERT_PATH: ${MSAIDIZI_DIRECT_MTLS_SERVER_CERT_HOST_PATH:+/run/secrets/msaidizi-device-server-cert.pem}
+      MSAIDIZI_DIRECT_MTLS_CLIENT_CA_PATH: ${MSAIDIZI_DIRECT_MTLS_CLIENT_CA_HOST_PATH:+/run/secrets/msaidizi-device-client-ca.pem}
+      MSAIDIZI_AUTONOMY_PRINCIPAL_KEY: ${MSAIDIZI_AUTONOMY_PRINCIPAL_KEY:-global-msaidizi}
+      MSAIDIZI_AUTONOMY_GRANTS: ${MSAIDIZI_AUTONOMY_GRANTS:-}
+      MSAIDIZI_TASK_TOKEN_TTL_SECONDS: ${MSAIDIZI_TASK_TOKEN_TTL_SECONDS:-120}
+      MSAIDIZI_TASK_DISPATCH_INTERVAL_MS: ${MSAIDIZI_TASK_DISPATCH_INTERVAL_MS:-2000}
+      MSAIDIZI_AUTONOMY_MAX_WALL_SECONDS: ${MSAIDIZI_AUTONOMY_MAX_WALL_SECONDS:-7200}
+      MSAIDIZI_AUTONOMY_MAX_MODEL_TURNS: ${MSAIDIZI_AUTONOMY_MAX_MODEL_TURNS:-200}
+      MSAIDIZI_AUTONOMY_MAX_TOOL_ATTEMPTS: ${MSAIDIZI_AUTONOMY_MAX_TOOL_ATTEMPTS:-500}
+      MSAIDIZI_AUTONOMY_MAX_MUTATIONS: ${MSAIDIZI_AUTONOMY_MAX_MUTATIONS:-100}
+      MSAIDIZI_AUTONOMY_MAX_LOCAL_BYTES: ${MSAIDIZI_AUTONOMY_MAX_LOCAL_BYTES:-5368709120}
+      MSAIDIZI_AUTONOMY_MAX_EGRESS_BYTES: ${MSAIDIZI_AUTONOMY_MAX_EGRESS_BYTES:-262144000}
+      MSAIDIZI_AUTONOMY_MAX_MODEL_COST_USD: ${MSAIDIZI_AUTONOMY_MAX_MODEL_COST_USD:-20}
+      MSAIDIZI_ADAPTIVE_REASONING_ENABLED: ${MSAIDIZI_ADAPTIVE_REASONING_ENABLED:-false}
+      MSAIDIZI_ADAPTIVE_REASONING_MAX_INPUT_BYTES: ${MSAIDIZI_ADAPTIVE_REASONING_MAX_INPUT_BYTES:-65536}
+      MSAIDIZI_ADAPTIVE_REASONING_MAX_OUTPUT_TOKENS: ${MSAIDIZI_ADAPTIVE_REASONING_MAX_OUTPUT_TOKENS:-2048}
+      MSAIDIZI_MODEL_INPUT_USD_PER_MILLION_TOKENS: ${MSAIDIZI_MODEL_INPUT_USD_PER_MILLION_TOKENS:-30}
+      MSAIDIZI_MODEL_OUTPUT_USD_PER_MILLION_TOKENS: ${MSAIDIZI_MODEL_OUTPUT_USD_PER_MILLION_TOKENS:-150}
+      MSAIDIZI_MODEL_CACHE_READ_USD_PER_MILLION_TOKENS: ${MSAIDIZI_MODEL_CACHE_READ_USD_PER_MILLION_TOKENS:-30}
+      MSAIDIZI_MODEL_CACHE_CREATION_USD_PER_MILLION_TOKENS: ${MSAIDIZI_MODEL_CACHE_CREATION_USD_PER_MILLION_TOKENS:-37.5}
+      MSAIDIZI_PROPOSAL_MAX_INPUT_TOKENS_PER_TURN: ${MSAIDIZI_PROPOSAL_MAX_INPUT_TOKENS_PER_TURN:-200000}
+      MSAIDIZI_PROPOSAL_QUOTA_WINDOW_SECONDS: ${MSAIDIZI_PROPOSAL_QUOTA_WINDOW_SECONDS:-3600}
+      MSAIDIZI_PROPOSAL_MAX_MODEL_TURNS_PER_WINDOW: ${MSAIDIZI_PROPOSAL_MAX_MODEL_TURNS_PER_WINDOW:-200}
+      MSAIDIZI_PROPOSAL_MAX_COST_USD_PER_WINDOW: ${MSAIDIZI_PROPOSAL_MAX_COST_USD_PER_WINDOW:-20}
+      MSAIDIZI_PROPOSAL_RECEIPT_TTL_SECONDS: ${MSAIDIZI_PROPOSAL_RECEIPT_TTL_SECONDS:-86400}
+      MSAIDIZI_PROPOSAL_RESERVATION_TIMEOUT_SECONDS: ${MSAIDIZI_PROPOSAL_RESERVATION_TIMEOUT_SECONDS:-300}
+      MSAIDIZI_ARTIFACT_ENCRYPTION_KEY: ${MSAIDIZI_ARTIFACT_ENCRYPTION_KEY:-}
+      MSAIDIZI_ARTIFACT_ROOT: ${MSAIDIZI_ARTIFACT_ROOT:-/app/storage/msaidizi-artifacts}
+      MSAIDIZI_CRUD_EVIDENCE_PATH: ${MSAIDIZI_CRUD_EVIDENCE_HOST_PATH:+/run/msaidizi/crud-evidence.json}
+      MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_PATH: ${MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_HOST_PATH:+/run/secrets/msaidizi-crud-evidence-public.pem}
+      MSAIDIZI_CRUD_EVIDENCE_KEY_ID: ${MSAIDIZI_CRUD_EVIDENCE_KEY_ID:-}
+      MSAIDIZI_CRUD_EVIDENCE_APPLICATION_BUILD_DIGEST: ${MSAIDIZI_CRUD_EVIDENCE_APPLICATION_BUILD_DIGEST:-}
+      MSAIDIZI_CRUD_EVIDENCE_PRISMA_SCHEMA_MIGRATION_DIGEST: ${MSAIDIZI_CRUD_EVIDENCE_PRISMA_SCHEMA_MIGRATION_DIGEST:-}
+      MSAIDIZI_CRUD_EVIDENCE_MAX_AGE_HOURS: ${MSAIDIZI_CRUD_EVIDENCE_MAX_AGE_HOURS:-168}
       AT_USERNAME: ${AT_USERNAME:-}
       AT_SENDER_ID: ${AT_SENDER_ID:-}
       MPESA_CONSUMER_KEY: ${MPESA_CONSUMER_KEY:-}
@@ -196,10 +306,106 @@ services:
       JOB_WORKER_ENABLED: ${JOB_WORKER_ENABLED:-true}
     expose:
       - '3001'
+      - '${MSAIDIZI_DIRECT_MTLS_PORT:-3443}'
+      - '${MSAIDIZI_EVALUATOR_MTLS_PORT:-3444}'
+    ports:
+      - '${MSAIDIZI_DIRECT_MTLS_HOST_BIND_ADDRESS:-127.0.0.1}:${MSAIDIZI_DIRECT_MTLS_PORT:-3443}:${MSAIDIZI_DIRECT_MTLS_PORT:-3443}'
+      - '${MSAIDIZI_EVALUATOR_MTLS_HOST_BIND_ADDRESS:-127.0.0.1}:${MSAIDIZI_EVALUATOR_MTLS_PORT:-3444}:${MSAIDIZI_EVALUATOR_MTLS_PORT:-3444}'
     volumes:
       - backend_storage:/app/storage
       - backend_backups:/app/backups
       - backend_exports:/app/exports
+      # Expose only the reviewed operator-owned files, never an entire
+      # host secrets directory. `/dev/null` keeps the disabled default inert;
+      # enabling the corresponding feature without real regular files fails at
+      # backend startup. Long bind syntax also refuses Docker's unsafe default
+      # of silently creating a missing host path as a directory. HOST_PATH is
+      # operator-controlled; each container PATH above is derived and fixed so
+      # an environment override cannot redirect the backend outside this set.
+      - type: bind
+        source: ${MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_HOST_PATH:-/dev/null}
+        target: /run/msaidizi-provider-contract/attestation.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_HOST_PATH:-/dev/null}
+        target: /run/msaidizi-provider-contract/public.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_ACTION_SIGNING_KEY_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-action-es256.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_UPDATE_SIGNING_KEY_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-update-es256.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_RECOVERY_SIGNING_KEY_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-recovery-es256.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_EVALUATOR_KEY_ALLOWLIST_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-evaluator-keys.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_EVALUATOR_MTLS_SERVER_KEY_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-evaluator-server-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_EVALUATOR_MTLS_SERVER_CERT_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-evaluator-server-cert.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_EVALUATOR_MTLS_CLIENT_CA_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-evaluator-client-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_DIRECT_MTLS_SERVER_KEY_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-device-server-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_DIRECT_MTLS_SERVER_CERT_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-device-server-cert.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_DIRECT_MTLS_CLIENT_CA_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-device-client-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_CRUD_EVIDENCE_HOST_PATH:-/dev/null}
+        target: /run/msaidizi/crud-evidence.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_CRUD_EVIDENCE_PUBLIC_KEY_HOST_PATH:-/dev/null}
+        target: /run/secrets/msaidizi-crud-evidence-public.pem
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
@@ -211,7 +417,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'node -e "fetch(''http://127.0.0.1:3001/api/v1/health/ready'').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+          'node -e "require(''http'').get({hostname:''127.0.0.1'',port:3001,path:''/api/v1/health/ready''},r=>process.exit(r.statusCode>=200&&r.statusCode<300?0:1)).on(''error'',()=>process.exit(1))"',
         ]
       interval: 30s
       timeout: 10s
@@ -239,10 +445,6 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       # Public website URL shown from login/signup as the permanent group address.
       NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
-      # Fuel Grid stays separately deployed and authenticated; these values only
-      # configure the Itemba-R launcher and its server-side availability check.
-      FUELGRID_APP_URL: ${FUELGRID_APP_URL:-}
-      FUELGRID_HEALTH_URL: ${FUELGRID_HEALTH_URL:-}
       # Canonical origins used by the Next.js backend proxy CSRF origin guard.
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       APP_URL: ${APP_URL:?APP_URL is required}
@@ -318,6 +520,3 @@ volumes:
 networks:
   itemba_network:
     driver: bridge
-  shared_edge:
-    name: ${SHARED_EDGE_NETWORK:-itemba_shared_edge}
-    external: true

@@ -169,6 +169,41 @@ ensure_env_default FUELGRID_HEALTH_URL "https://api.fuelgrid.${DOMAIN}/readyz"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
 
+# This deployment path is not the signed Msaidizi production-promotion path.
+# Refuse an unsafe .env before starting even the data services: a post-deploy
+# check is too late because an independently enabled worker could dispatch work
+# while the stack is coming up. Inspect Compose's resolved backend environment,
+# not the source .env, so defaults and interpolation are covered exactly.
+MSAIDIZI_DARK_SWITCHES='MSAIDIZI_ENABLED MSAIDIZI_AUTONOMY_ENABLED MSAIDIZI_TASK_WORKER_ENABLED MSAIDIZI_AUTOPILOT_ENABLED MSAIDIZI_HOST_EXECUTION_ENABLED MSAIDIZI_ADAPTIVE_REASONING_ENABLED MSAIDIZI_DEVICE_PAIRING_ENABLED MSAIDIZI_DEVICE_CHANNEL_ENABLED MSAIDIZI_DIRECT_MTLS_ENABLED MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED MSAIDIZI_UPDATE_SUPERVISOR_ENABLED MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED MSAIDIZI_UPDATE_EVALUATOR_ENABLED MSAIDIZI_EVALUATOR_MTLS_ENABLED MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED MSAIDIZI_AUDIT_SIGNER_ENABLED'
+if ! command -v python3 >/dev/null 2>&1; then
+  echo 'ERROR: python3 is required for the fail-closed Msaidizi deployment preflight.' >&2
+  exit 1
+fi
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json \
+  | MSAIDIZI_DARK_SWITCHES="$MSAIDIZI_DARK_SWITCHES" python3 -c '
+import json
+import os
+import sys
+
+try:
+    config = json.load(sys.stdin)
+    environment = config["services"]["backend"]["environment"]
+except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    print(f"ERROR: cannot resolve backend environment for Msaidizi preflight: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+switches = os.environ["MSAIDIZI_DARK_SWITCHES"].split()
+missing = "<unset>"
+unsafe = [f"{key}={environment.get(key, missing)}" for key in switches if environment.get(key) != "false"]
+mode = environment.get("MSAIDIZI_WRITE_MODE")
+if mode != "read-only":
+    unsafe.append(f"MSAIDIZI_WRITE_MODE={mode if mode is not None else missing}")
+if unsafe:
+    print("ERROR: unsafe Msaidizi production posture: " + ", ".join(unsafe), file=sys.stderr)
+    raise SystemExit(1)
+print("Msaidizi preflight: PASS (all independent switches disabled, read-only)")
+'
+
 # Refuse to silently replace a missing production database with a new empty
 # volume. The opt-in is intended only for a deliberate first installation.
 POSTGRES_VOLUME="$(

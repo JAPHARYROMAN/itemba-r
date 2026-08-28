@@ -3,3 +3,16 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# These scripts form an exact SHA-256 chain used before signed Windows release
+# construction. Keep their repository and checkout bytes identical on every OS.
+windows-companion/scripts/Invoke-ProtectedSourceVerification.ps1 text eol=lf
+windows-companion/scripts/verify-static.ps1 text eol=lf
+windows-companion/installer/scripts/Test-InstallerStatic.ps1 text eol=lf
+windows-companion/installer/scripts/Test-ReleaseBootstrapPolicy.ps1 text eol=lf
+windows-companion/installer/scripts/Test-ReleasePathPolicy.ps1 text eol=lf
+windows-companion/installer/scripts/Test-ReleaseToolTrustPolicy.ps1 text eol=lf
+windows-companion/installer/scripts/Test-OperationalEvidencePolicy.ps1 text eol=lf
+windows-companion/installer/scripts/Test-ProductionPrerequisites.ps1 text eol=lf
+windows-companion/installer/scripts/Test-ProductionPrerequisiteInventory.ps1 text eol=lf
+windows-companion/native/Msaidizi.NetworkIsolationDriver/tests/verify-protocol.ps1 text eol=lf

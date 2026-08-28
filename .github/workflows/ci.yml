@@ -73,6 +73,24 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  windows-companion-verify:
+    name: Windows Companion — Protected Verification
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ./windows-companion
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.400'
+      - name: Run tests, formatting, and fail-closed static verification
+        run: |
+          $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+          .\scripts\Invoke-ProtectedSourceVerification.ps1 -DotNetPath $dotnet
+
   backend-build:
     name: Backend — Build
     runs-on: ubuntu-latest
@@ -112,6 +130,10 @@ jobs:
         run: npx prisma generate --schema=../database/prisma/schema.prisma
       - name: Run tests (missing suites must fail the build)
         run: npm run test:ci
+      - name: Run CRUD evidence and release-boundary tests
+        run: npm run test:evidence-runner && npm run test:evidence-release && npm run test:evidence-promotion
+      - name: Verify device-journal reconciliation source contract
+        run: npm run test:msaidizi-device-journal-reconciliation
 
   backend-e2e:
     name: Backend — E2E Smoke
@@ -158,6 +180,29 @@ jobs:
         run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
       - name: Run e2e smoke tests
         run: npm run test:e2e:ci
+      - name: Verify immutable Msaidizi plans, ceilings, and first-start clocks
+        env:
+          MSAIDIZI_PLAN_IMMUTABILITY_TEST_ALLOW_DISPOSABLE_DATABASE: 'true'
+          MSAIDIZI_PLAN_IMMUTABILITY_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+          MSAIDIZI_PLAN_IMMUTABILITY_TEST_DATABASE_ACK: 'localhost:5432/itemba_r_test'
+        run: npm run test:msaidizi-plan-immutability
+      - name: Verify append-only Msaidizi task-event hash chain
+        env:
+          MSAIDIZI_LEDGER_TEST_ALLOW_DISPOSABLE_DATABASE: 'true'
+          MSAIDIZI_LEDGER_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+          MSAIDIZI_LEDGER_TEST_DATABASE_ACK: 'localhost:5432/itemba_r_test'
+        run: npm run test:msaidizi-task-event-integrity
+      - name: Verify one-use Msaidizi proposal receipts
+        env:
+          MSAIDIZI_PROPOSAL_USAGE_TEST_ALLOW_DISPOSABLE_DATABASE: 'true'
+          MSAIDIZI_PROPOSAL_USAGE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+          MSAIDIZI_PROPOSAL_USAGE_TEST_DATABASE_ACK: 'localhost:5432/itemba_r_test'
+        run: npm run test:msaidizi-proposal-usage-integrity
+      - name: Verify host-journal evidence attribution constraints
+        env:
+          MSAIDIZI_HOST_JOURNAL_EVIDENCE_TEST_ALLOW_DISPOSABLE_DATABASE: 'true'
+          MSAIDIZI_HOST_JOURNAL_EVIDENCE_TEST_DATABASE_ACK: 'localhost:5432/itemba_r_test'
+        run: npm run test:msaidizi-host-journal-evidence-integrity
 
   migration-rehearsal:
     name: Migration — Rehearsal
@@ -202,6 +247,14 @@ jobs:
         run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
       - name: Verify migration status
         run: npx prisma migrate status --schema=../database/prisma/schema.prisma
+      - name: Verify Msaidizi migration invariants
+        run: |
+          npm run test:msaidizi-egress-migration
+          npm run test:msaidizi-input-provenance-migration
+          npm run test:msaidizi-egress-route-migration
+          npm run test:msaidizi-update-rollout-migration
+          npm run test:msaidizi-wall-time-migration
+          npm run test:msaidizi-update-evaluation-migration
 
   frontend-test:
     name: Frontend — Test
@@ -297,6 +350,7 @@ jobs:
       - backend-e2e
       - frontend-build
       - frontend-test
+      - windows-companion-verify
       - unsafe-patterns
       - deployment-validate
       - migration-rehearsal
