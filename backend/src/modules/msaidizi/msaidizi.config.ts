@@ -98,7 +98,19 @@ export class MsaidiziConfig {
     return this.config.get<string>('MSAIDIZI_MODEL', 'claude-opus-5').trim();
   }
 
-  /** Cheap model for domain pre-filtering — see MsaidiziService.narrowDomains. */
+  /**
+   * Cheap model reserved for domain pre-filtering. Nothing calls this yet.
+   *
+   * The comment here used to name a `MsaidiziService.narrowDomains` that has
+   * never existed, which reads as though a model-driven pre-filter ships. It
+   * does not: narrowing is deterministic and lexical (`domain-filter.ts`), and
+   * the Haiku pre-filter is the layer that would sit in front of it.
+   *
+   * `MSAIDIZI_CLASSIFIER_MODEL` is nevertheless live and must keep its value —
+   * `ProviderContractAttestationService.expectedModelIds()` includes it, so the
+   * signed provider contract has to cover it. Changing it without a contract
+   * that names the new model fails attestation and stops the agent.
+   */
   get classifierModel(): string {
     return this.config.get<string>('MSAIDIZI_CLASSIFIER_MODEL', 'claude-haiku-4-5').trim();
   }
