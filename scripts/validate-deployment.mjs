@@ -537,34 +537,51 @@ function assertDeploymentShape(target, config) {
   assert(target, caddyPorts.includes('80'), 'caddy publishes HTTP port 80');
   assert(target, caddyPorts.includes('443'), 'caddy publishes HTTPS port 443');
 
-  // The ordinary API remains reachable only through Caddy. The autonomous
-  // update evaluator has a separate mTLS listener that is intentionally
-  // published to the host loopback interface so the isolated verifier can
-  // reach it without joining the application network. Accept exactly that one
-  // binding; a wildcard/public bind or a second backend port is a release
-  // failure.
+  // The ordinary API remains reachable only through Caddy. Two listeners are
+  // deliberately NOT reachable that way and are published to the host loopback
+  // interface instead:
+  //
+  //   - the update evaluator, so the isolated verifier can reach it without
+  //     joining the application network;
+  //   - the direct device channel, which cannot be proxied at all. Device
+  //     identity comes from the TLS socket, and forwarded certificate
+  //     assertions are deliberately ignored, so terminating TLS at Caddy would
+  //     leave the channel unable to authenticate anything.
+  //
+  // Accept exactly those two bindings. A third published port, a port that does
+  // not match its configured listener, or any non-loopback bind is a release
+  // failure — that last one is the whole point of checking, because publishing
+  // either listener on a wildcard address puts an mTLS endpoint on the internet.
   const evaluatorPort = String(backend.environment?.MSAIDIZI_EVALUATOR_MTLS_PORT ?? '');
+  const devicePort = String(backend.environment?.MSAIDIZI_DIRECT_MTLS_PORT ?? '');
   const backendPorts = backend.ports ?? [];
   assert(
     target,
-    backendPorts.length === 1,
-    'backend publishes only the dedicated evaluator mTLS port',
+    backendPorts.length === 2,
+    'backend publishes only the device and evaluator mTLS ports',
   );
-  const evaluatorBinding = backendPorts[0] ?? {};
-  assertEqual(
-    target,
-    String(evaluatorBinding.target ?? ''),
-    evaluatorPort,
-    'evaluator mTLS target port',
-  );
-  assertEqual(
-    target,
-    String(evaluatorBinding.published ?? ''),
-    evaluatorPort,
-    'evaluator mTLS published port',
-  );
-  assertEqual(target, evaluatorBinding.host_ip, '127.0.0.1', 'evaluator mTLS host bind address');
-  assertEqual(target, evaluatorBinding.protocol, 'tcp', 'evaluator mTLS transport');
+
+  for (const [label, expectedPort] of [
+    ['device', devicePort],
+    ['evaluator', evaluatorPort],
+  ]) {
+    const binding =
+      backendPorts.find((entry) => String(entry.target ?? '') === expectedPort) ?? {};
+    assertEqual(
+      target,
+      String(binding.target ?? ''),
+      expectedPort,
+      `${label} mTLS target port`,
+    );
+    assertEqual(
+      target,
+      String(binding.published ?? ''),
+      expectedPort,
+      `${label} mTLS published port`,
+    );
+    assertEqual(target, binding.host_ip, '127.0.0.1', `${label} mTLS host bind address`);
+    assertEqual(target, binding.protocol, 'tcp', `${label} mTLS transport`);
+  }
   assert(target, !(frontend.ports ?? []).length, 'frontend does not publish a public port');
   assert(
     target,
@@ -591,13 +608,22 @@ function assertDeploymentShape(target, config) {
     assert(target, services[serviceName].healthcheck?.test, `${serviceName} has a healthcheck`);
   }
 
+  // The ordinary listener is plain HTTP and stays that way: `NestFactory.create`
+  // is given no TLS options, and both mTLS listeners are separate https servers
+  // that explicitly refuse to bind the ordinary port. This check used to demand
+  // a healthcheck that switched transport on MSAIDIZI_DIRECT_MTLS_ENABLED, which
+  // describes a configuration the code cannot produce — enabling the device
+  // channel adds a listener, it does not convert this one.
   const backendHealthcheck = flatten(backend.healthcheck?.test);
   assert(
     target,
-    backendHealthcheck.includes('node -e') &&
-      backendHealthcheck.includes('MSAIDIZI_DIRECT_MTLS_ENABLED') &&
-      backendHealthcheck.includes("require(t?'https':'http').get"),
-    'backend healthcheck follows the configured HTTP or HTTPS transport',
+    backendHealthcheck.includes('node -e') && backendHealthcheck.includes("require('http').get"),
+    'backend healthcheck probes the ordinary HTTP listener',
+  );
+  assert(
+    target,
+    backendHealthcheck.includes('statusCode>=200&&r.statusCode<300?0:1'),
+    'backend healthcheck fails on a non-2xx readiness response',
   );
   assert(
     target,

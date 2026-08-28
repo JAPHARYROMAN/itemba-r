@@ -464,13 +464,13 @@ internal sealed class MachineEnvironmentSetCapabilityAdapter(
   internal static object CreateRecoveryRecord(
     MachineEnvironmentTarget target,
     MachineEnvironmentState before) => new
-  {
-    recordContract = MachineEnvironmentSchemas.RecoveryRecordContract,
-    target.Id,
-    target.Name,
-    before.Exists,
-    before.Value,
-  };
+    {
+      recordContract = MachineEnvironmentSchemas.RecoveryRecordContract,
+      target.Id,
+      target.Name,
+      before.Exists,
+      before.Value,
+    };
 }
 
 internal sealed class MachineEnvironmentDeleteCapabilityAdapter(

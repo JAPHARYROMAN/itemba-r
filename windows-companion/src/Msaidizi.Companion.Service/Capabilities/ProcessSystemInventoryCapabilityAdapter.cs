@@ -194,7 +194,7 @@ internal static class SystemProcessInventoryRules
   internal const int MaximumNameLength = 260;
 
   public static bool IsSafeName(string? value) => value is
-      { Length: >= 1 and <= MaximumNameLength }
+  { Length: >= 1 and <= MaximumNameLength }
     && string.Equals(value, value.Trim(), StringComparison.Ordinal)
     && value is not "." and not ".."
     && !value.Any(character => char.IsControl(character)

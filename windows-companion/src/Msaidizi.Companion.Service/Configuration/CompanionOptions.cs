@@ -135,10 +135,12 @@ public sealed class HostCapabilityOptions
   public List<AllowedRegistryRootOptions> AllowedRegistryRoots { get; set; } = [];
 
   public List<AllowedRegistryDurableValueTargetOptions>
-    AllowedRegistryDurableValueTargets { get; set; } = [];
+    AllowedRegistryDurableValueTargets
+  { get; set; } = [];
 
   public List<AllowedRegistryDeleteTargetOptions>
-    AllowedRegistryDeleteTargets { get; set; } = [];
+    AllowedRegistryDeleteTargets
+  { get; set; } = [];
 
   public List<AllowedMachineEnvironmentVariableOptions> AllowedMachineEnvironmentVariables
   { get; set; } = [];

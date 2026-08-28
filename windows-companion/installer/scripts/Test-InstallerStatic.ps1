@@ -302,14 +302,33 @@ $expectedHostCapabilityKeys = @(
     'AllowedMsiPackages', 'AllowedLocalAccounts', 'AllowedLocalGroups', 'AllowedLocalUserRights',
     'AllowedNetworkAdapters', 'AllowedPrinters', 'AllowedPowerSchemes', 'AllowedTimeZones'
 ) | Sort-Object
-$expectedHostAllowlists = @($expectedHostCapabilityKeys | Where-Object { $_.StartsWith('Allowed', [StringComparison]::Ordinal) })
+# The main service additionally binds the registry durable-value/delete targets
+# and the inventory ceilings. The recovery supervisor deliberately does not:
+# these are the executing service's surface, and a recovery-only host that
+# carried them would be claiming reach it has no reason to have. One shared list
+# for both hosts silently required them to stay identical, which they are not.
+$expectedServiceOnlyHostCapabilityKeys = @(
+    'MaximumProcessInventoryEntries', 'MaximumInstalledSoftwareInventoryEntries',
+    'AllowedRegistryDurableValueTargets', 'AllowedRegistryDeleteTargets'
+)
+$expectedServiceHostCapabilityKeys =
+    @($expectedHostCapabilityKeys + $expectedServiceOnlyHostCapabilityKeys) | Sort-Object
 foreach ($packagedHost in @(
-    [pscustomobject]@{ Name = 'service'; Value = if ($serviceConfig) { $serviceConfig.HostCapabilities } else { $null } },
-    [pscustomobject]@{ Name = 'recovery'; Value = if ($recoveryConfig) { $recoveryConfig.HostCapabilities } else { $null } }
+    [pscustomobject]@{
+        Name = 'service'
+        Value = if ($serviceConfig) { $serviceConfig.HostCapabilities } else { $null }
+        Expected = $expectedServiceHostCapabilityKeys
+    },
+    [pscustomobject]@{
+        Name = 'recovery'
+        Value = if ($recoveryConfig) { $recoveryConfig.HostCapabilities } else { $null }
+        Expected = $expectedHostCapabilityKeys
+    }
 )) {
     if ($null -eq $packagedHost.Value) { continue }
     $actualKeys = @($packagedHost.Value.PSObject.Properties.Name | Sort-Object)
-    Assert-Static (($actualKeys -join '|') -ceq ($expectedHostCapabilityKeys -join '|')) "Packaged $($packagedHost.Name) HostCapabilities has no unknown/stale/unbound keys"
+    $expectedHostAllowlists = @($packagedHost.Expected | Where-Object { $_.StartsWith('Allowed', [StringComparison]::Ordinal) })
+    Assert-Static (($actualKeys -join '|') -ceq ($packagedHost.Expected -join '|')) "Packaged $($packagedHost.Name) HostCapabilities has no unknown/stale/unbound keys"
     Assert-Static ($packagedHost.Value.MaximumArchiveEntries -eq 2048 -and
         $packagedHost.Value.MaximumArchiveEntryPathLength -eq 1024 -and
         $packagedHost.Value.MaximumArchiveExpandedBytes -eq 536870912 -and

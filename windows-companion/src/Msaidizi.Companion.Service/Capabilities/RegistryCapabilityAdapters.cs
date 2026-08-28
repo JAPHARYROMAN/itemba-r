@@ -734,17 +734,17 @@ internal static class RegistryStateSupport
   public static bool IsDurableArgumentValueSafe(
     string? valueType,
     JsonElement value) => valueType switch
-  {
-    "String" or "ExpandString" => value.ValueKind == JsonValueKind.String
-      && !DurableNonSecretValuePolicy.AppearsSecretBearingText(value.GetString()),
-    "DWord" => value.TryGetInt32(out _),
-    "QWord" => value.TryGetInt64(out _),
-    "Binary" => TrySafeBinary(value),
-    "MultiString" => value.ValueKind == JsonValueKind.Array
-      && value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String
-        && !DurableNonSecretValuePolicy.AppearsSecretBearingText(item.GetString())),
-    _ => false,
-  };
+    {
+      "String" or "ExpandString" => value.ValueKind == JsonValueKind.String
+        && !DurableNonSecretValuePolicy.AppearsSecretBearingText(value.GetString()),
+      "DWord" => value.TryGetInt32(out _),
+      "QWord" => value.TryGetInt64(out _),
+      "Binary" => TrySafeBinary(value),
+      "MultiString" => value.ValueKind == JsonValueKind.Array
+        && value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String
+          && !DurableNonSecretValuePolicy.AppearsSecretBearingText(item.GetString())),
+      _ => false,
+    };
 
   public static bool IsDurableStateValueSafe(
     RegistryState state,
@@ -927,16 +927,16 @@ internal static partial class RegistryValueMutationSupport
   internal static object CreateRecoveryRecord(
     ResolvedRegistryTarget target,
     RegistryState before) => new
-  {
-    recordContract = RegistryCapabilitySchemas.RecoveryRecordContract,
-    target.RootId,
-    target.SubKey,
-    target.ValueName,
-    keyExisted = before.KeyExists,
-    before.Exists,
-    before.ValueType,
-    before.Value,
-  };
+    {
+      recordContract = RegistryCapabilitySchemas.RecoveryRecordContract,
+      target.RootId,
+      target.SubKey,
+      target.ValueName,
+      keyExisted = before.KeyExists,
+      before.Exists,
+      before.ValueType,
+      before.Value,
+    };
 
   private static RegistryCreationTarget OpenCreationParent(
     ResolvedRegistryTarget target)
