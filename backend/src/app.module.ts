@@ -142,6 +142,8 @@ import { MsaidiziControlPlaneModule } from './modules/msaidizi-control-plane/msa
 import { MsaidiziUpdatesModule } from './modules/msaidizi-updates/msaidizi-updates.module';
 import { MsaidiziRecoveryModule } from './modules/msaidizi-recovery/msaidizi-recovery.module';
 import { MsaidiziAuditSignerModule } from './modules/msaidizi-audit-signer/msaidizi-audit-signer.module';
+import { MsaidiziTasksModule } from './modules/msaidizi-tasks/msaidizi-tasks.module';
+import { MsaidiziReasoningModule } from './modules/msaidizi-reasoning/msaidizi-reasoning.module';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { ExternalPaymentsModule } from './modules/external-payments/external-payments.module';
 import { ExternalMessagesModule } from './modules/external-messages/external-messages.module';
@@ -437,6 +439,13 @@ import { RolesGuard } from './common/guards/roles.guard';
     MsaidiziUpdatesModule,
     MsaidiziRecoveryModule,
     MsaidiziAuditSignerModule,
+    // Both already reach the container through MsaidiziTaskRuntimeModule, so
+    // importing them changes nothing at runtime - Nest dedupes by reference.
+    // They are named here because this list is what someone reads to answer
+    // "which Msaidizi subsystems does this deployment run", and leaving the
+    // planning plane off it meant the honest answer was not visible anywhere.
+    MsaidiziTasksModule,
+    MsaidiziReasoningModule,
     // M16 - QA, Launch Readiness, Documentation, Training, Support
   ],
   controllers: [HealthController],
