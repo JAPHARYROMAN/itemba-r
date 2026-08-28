@@ -1,0 +1,783 @@
+<title>Msaidizi Trust Boundaries</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --ground: #f2f3f6;
+    --surface: #ffffff;
+    --surface-sunk: #e9ebf0;
+    --line: #d5d8e0;
+    --line-soft: #e4e6ec;
+    --ink: #14161d;
+    --ink-soft: #5a6072;
+    --ink-faint: #858b9c;
+    --verified: #0b6e5f;
+    --verified-wash: #e2f0ec;
+    --mismatch: #a85b00;
+    --mismatch-wash: #f6ece0;
+    --accent: #2f3e8f;
+    --accent-wash: #e7e9f5;
+
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1218;
+      --surface: #161a22;
+      --surface-sunk: #1d222c;
+      --line: #2b313e;
+      --line-soft: #232833;
+      --ink: #e4e7ee;
+      --ink-soft: #98a0b4;
+      --ink-faint: #6f7789;
+      --verified: #4fd1bc;
+      --verified-wash: #12302c;
+      --mismatch: #e0a458;
+      --mismatch-wash: #33261596;
+      --accent: #8c9be8;
+      --accent-wash: #1d2333;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0f1218;
+    --surface: #161a22;
+    --surface-sunk: #1d222c;
+    --line: #2b313e;
+    --line-soft: #232833;
+    --ink: #e4e7ee;
+    --ink-soft: #98a0b4;
+    --ink-faint: #6f7789;
+    --verified: #4fd1bc;
+    --verified-wash: #12302c;
+    --mismatch: #e0a458;
+    --mismatch-wash: #33261596;
+    --accent: #8c9be8;
+    --accent-wash: #1d2333;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 1.5rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 50rem; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: 4rem 0 2rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-size: clamp(2.1rem, 6vw, 3.1rem);
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 1.2rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 40rem;
+  }
+
+  /* ---------- verdict ---------- */
+
+  .verdict {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--verified);
+    padding: 1.5rem 1.75rem;
+    margin: 2.5rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .verdict h2 {
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--verified);
+    margin: 0;
+  }
+
+  .verdict p { margin: 0; }
+  .verdict p + p { color: var(--ink-soft); }
+
+  /* ---------- sections ---------- */
+
+  section { margin-top: 4rem; }
+
+  h2.section {
+    font-family: var(--sans);
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.5rem;
+    text-wrap: balance;
+  }
+
+  .section-note {
+    color: var(--ink-soft);
+    margin: 0 0 2rem;
+    max-width: 40rem;
+  }
+
+  p { margin: 0 0 1.1rem; }
+  p:last-child { margin-bottom: 0; }
+
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--surface-sunk);
+    padding: 0.1em 0.36em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  /* ---------- boundary ledger ---------- */
+
+  .ledger {
+    display: grid;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+
+  .boundary {
+    background: var(--surface);
+    padding: 1.5rem 1.5rem;
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .boundary-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .boundary-name {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.0625rem;
+    margin: 0;
+  }
+
+  .pill {
+    font-family: var(--sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.28em 0.7em;
+    border-radius: 100px;
+    white-space: nowrap;
+  }
+
+  .pill-verified { background: var(--verified-wash); color: var(--verified); }
+  .pill-mismatch { background: var(--mismatch-wash); color: var(--mismatch); }
+
+  .holds {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    gap: 0.4rem 1rem;
+    font-size: 0.95rem;
+  }
+
+  .holds dt {
+    font-family: var(--sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-top: 0.3em;
+  }
+
+  .holds dd { margin: 0; color: var(--ink-soft); }
+
+  /* ---------- findings ---------- */
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 1.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .finding-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 1.1rem;
+  }
+
+  .finding-head h3 {
+    font-family: var(--sans);
+    font-size: 1.1875rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+    flex: 1 1 18rem;
+    text-wrap: balance;
+  }
+
+  /* The claim/reality pair is the structural spine: every finding in this
+     review is a gap between what is documented and what the code does. */
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line-soft);
+    margin-bottom: 1.1rem;
+  }
+
+  .pair > div {
+    background: var(--surface);
+    padding: 1rem 1.1rem;
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+  }
+
+  .pair-label {
+    font-family: var(--sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  .pair .claimed .pair-label { color: var(--mismatch); }
+  .pair .actual .pair-label { color: var(--verified); }
+
+  .pair p {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+
+  .cite {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    background: var(--surface-sunk);
+    border-left: 2px solid var(--accent);
+    padding: 0.7rem 0.9rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .why {
+    margin-top: 1.1rem;
+    font-size: 0.98rem;
+  }
+
+  .why-label {
+    font-family: var(--sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+
+  /* ---------- minor findings ---------- */
+
+  .minor {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .minor-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+    padding: 1.1rem 1.4rem;
+  }
+
+  .minor-row + .minor-row { border-top: 1px solid var(--line-soft); }
+
+  .minor-row h4 {
+    font-family: var(--sans);
+    font-size: 0.98rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .minor-row p {
+    margin: 0;
+    font-size: 0.94rem;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- evidence bar ---------- */
+
+  .evidence {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+
+  .stat {
+    background: var(--surface);
+    padding: 1.25rem 1.25rem;
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .stat-num {
+    font-family: var(--sans);
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .stat-label {
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    line-height: 1.35;
+  }
+
+  /* ---------- closing ---------- */
+
+  .closing {
+    border-top: 2px solid var(--ink);
+    margin-top: 4rem;
+    padding-top: 2rem;
+  }
+
+  .recommend {
+    background: var(--accent-wash);
+    border: 1px solid var(--accent);
+    padding: 1.5rem 1.75rem;
+    margin-top: 1.5rem;
+  }
+
+  .recommend .pair-label { color: var(--accent); display: block; margin-bottom: 0.5rem; }
+  .recommend p { margin: 0; }
+
+  ul { margin: 0 0 1.1rem; padding-left: 1.2rem; }
+  li { margin-bottom: 0.5rem; }
+  li:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+    font-family: var(--sans);
+    font-size: 0.8125rem;
+    color: var(--ink-faint);
+  }
+
+  @media (max-width: 34rem) {
+    .pair { grid-template-columns: 1fr; }
+    .holds { grid-template-columns: 1fr; gap: 0.15rem; }
+    .holds dt { padding-top: 0.6em; }
+    body { padding: 0 1.1rem 4rem; }
+    .finding, .boundary { padding: 1.25rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">
+      <span>Verification pass</span>
+      <span>28 August 2026</span>
+      <span>Branch fix/msaidizi-code-gaps</span>
+    </div>
+    <h1>Msaidizi Trust Boundaries</h1>
+    <p class="standfirst">
+      Three unbuilt boundaries in the Windows companion — privileged command
+      execution, browser egress, and host file disclosure — read against the code
+      rather than the documentation.
+    </p>
+  </header>
+
+  <div class="verdict">
+    <h2>Verdict</h2>
+    <p>
+      <strong>All three are genuinely fail-closed.</strong> No fail-open path was
+      found: every catch on every traced boundary resolves to refuse, kill
+      switches report “engaged” on unreadable paths, replay stores latch and
+      throw, and unknown outcomes settle as <code>NeedsAttention</code> rather
+      than success.
+    </p>
+    <p>
+      But in two of the three, the protection described in the documentation is
+      not the protection doing the work — and in one case the documentation
+      states the opposite of what the code does.
+    </p>
+  </div>
+
+  <section>
+    <h2 class="section">What actually holds each boundary</h2>
+    <p class="section-note">
+      For each boundary: the refusal is real, but it is worth knowing precisely
+      which line would have to change to lift it.
+    </p>
+
+    <div class="ledger">
+
+      <article class="boundary">
+        <div class="boundary-head">
+          <h3 class="boundary-name">Privileged command execution</h3>
+          <span class="pill pill-mismatch">Doc contradicts code</span>
+        </div>
+        <dl class="holds">
+          <dt>Documented</dt>
+          <dd>A single always-rejecting gate with no configuration override.</dd>
+          <dt>Actual fence</dt>
+          <dd>
+            One field initializer in a different service —
+            <code>UnavailableV3SignedDriverAttestationSource</code> — plus the
+            all-zero measurement refusal in <code>RequireReadyHealth</code>.
+          </dd>
+        </dl>
+      </article>
+
+      <article class="boundary">
+        <div class="boundary-head">
+          <h3 class="boundary-name">Browser egress</h3>
+          <span class="pill pill-verified">Strongest of the three</span>
+        </div>
+        <dl class="holds">
+          <dt>Documented</dt>
+          <dd>Refused pending a measured broker and WFP driver.</dd>
+          <dt>Actual fence</dt>
+          <dd>
+            Four independent layers. The load-bearing one is compile-time: the
+            only shipped posture provider hard-codes a null broker digest, so the
+            capability attestation can never be minted.
+          </dd>
+        </dl>
+      </article>
+
+      <article class="boundary">
+        <div class="boundary-head">
+          <h3 class="boundary-name">Host file disclosure</h3>
+          <span class="pill pill-mismatch">Doc points at a fixture</span>
+        </div>
+        <dl class="holds">
+          <dt>Documented</dt>
+          <dd>A rejecting “production port” with no configuration switch.</dd>
+          <dt>Actual fence</dt>
+          <dd>
+            Roughly eleven static predicates scattered across entry points on both
+            sides. The named port is a test fixture that never enters the
+            production object graph.
+          </dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section">Findings</h2>
+    <p class="section-note">
+      Ordered by how badly each would mislead someone hardening or extending this
+      code. None is a live exposure; all are traps laid for the next
+      implementer.
+    </p>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>The documentation states the opposite of the code</h3>
+        <span class="pill pill-mismatch">Corrected</span>
+      </div>
+      <div class="pair">
+        <div class="claimed">
+          <span class="pair-label">Documented</span>
+          <p>
+            “The only production gate registered in this repository always rejects
+            and has no configuration override, so no configuration or egress
+            client can enable privileged command launch.”
+          </p>
+        </div>
+        <div class="actual">
+          <span class="pair-label">Verified in code</span>
+          <p>
+            The DI binding is a <em>factory</em>. The rejecting gate is the
+            fallback; configuration alone selects the named-pipe client, with no
+            source change.
+          </p>
+        </div>
+      </div>
+      <div class="cite">docs/TRUSTED-ROOT.md:74        — claim
+Program.cs:390-404             — AddSingleton&lt;…Gate&gt;(provider =&gt; Create(…, fallback))
+Program.cs:414                 — return TryCreate(…) ? client! : fallback</div>
+      <p class="why">
+        <span class="why-label">Why it matters</span>
+        An operator reading the doc believes configuring the pipe client is
+        impossible. It is not. The real fence lives in a component nobody would
+        think to check, and unlike the factory registration — which the static
+        verifier already pins — nothing guarded it.
+      </p>
+    </article>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>A function named “Authorize” authorizes nothing</h3>
+        <span class="pill pill-mismatch">Renamed</span>
+      </div>
+      <div class="pair">
+        <div class="claimed">
+          <span class="pair-label">Implied by the name</span>
+          <p>
+            <code>parseAndAuthorizeEphemeralFileDisclosureGrant</code> establishes
+            that a disclosure grant is authentic and unused.
+          </p>
+        </div>
+        <div class="actual">
+          <span class="pair-label">Verified in code</span>
+          <p>
+            No signature is verified anywhere in the file, and the nonce is
+            checked for shape only — never consumed. It compares a grant against
+            a binding the caller supplies.
+          </p>
+        </div>
+      </div>
+      <div class="cite">ephemeral-file-disclosure.protocol.ts:106
+grep -iE "signature|verify|publicKey|ed25519|p256"  →  no matches</div>
+      <p class="why">
+        <span class="why-label">Why it matters</span>
+        Harmless today — nothing calls it in production. It is a loaded gun for
+        whoever builds the channel: call it, treat “did not throw” as authorized,
+        and the result is a fully replayable disclosure channel. Both the
+        authenticated issuer and the single-consumption nonce ledger are still
+        owed.
+      </p>
+    </article>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>The pipeline is ~90% built, and the missing 10% is the safety</h3>
+        <span class="pill pill-mismatch">Recorded in code</span>
+      </div>
+      <div class="pair">
+        <div class="claimed">
+          <span class="pair-label">Reads as</span>
+          <p>
+            An unimplemented feature awaiting a full build, with the unsafe parts
+            simply absent.
+          </p>
+        </div>
+        <div class="actual">
+          <span class="pair-label">Verified in code</span>
+          <p>
+            Prompt assembly, budgeting and file metadata are all wired. A
+            four-line guard and one stub — sitting beside a fully implemented
+            image equivalent — are what stand between it and a live provider
+            call.
+          </p>
+        </div>
+      </div>
+      <div class="cite">msaidizi-adaptive-reasoning.service.ts:377   — the four-line guard
+msaidizi-adaptive-reasoning.service.ts:1237  — attachCheckpointFile stub
+msaidizi-devices.service.ts:5661             — raw bytes, redactionsApplied: false
+msaidizi-devices.service.ts:5678             — sibling branch DLP-sanitises</div>
+      <p class="why">
+        <span class="why-label">Why it matters</span>
+        Deleting the guard and mirroring the image path produces something that
+        compiles, passes the existing tests, and is insecure. Worse, the file
+        branch is <em>already written</em> to skip the DLP scan its sibling branch
+        applies — so the first working implementation would persist unscanned file
+        contents unless that is closed first.
+      </p>
+    </article>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>Two implementations of one primitive, at different rigour</h3>
+        <span class="pill pill-verified">Aligned</span>
+      </div>
+      <div class="pair">
+        <div class="claimed">
+          <span class="pair-label">Egress kill switch</span>
+          <p>
+            Requires a fully-qualified path and walks the entire ancestor chain
+            for reparse points before believing a marker is absent.
+          </p>
+        </div>
+        <div class="actual">
+          <span class="pair-label">Privileged kill switch</span>
+          <p>
+            Accepted a relative path and checked only the immediate parent, so a
+            redirect planted higher in the tree could hide the marker.
+          </p>
+        </div>
+      </div>
+      <div class="cite">EgressTrustedKillSwitch.cs   — IsPathFullyQualified + ancestor walk
+TrustedKillSwitch.cs         — immediate parent only  (now aligned)</div>
+      <p class="why">
+        <span class="why-label">Why it matters</span>
+        Both are fail-closed and both were written with care — the doc comment on
+        one states that a missing marker is the only affirmative safe state. But
+        the same idea implemented twice drifted, and only one version got the
+        stronger check. Exploiting it needs write access high in
+        <code>ProgramData</code>, so this is defence in depth, not a hole.
+      </p>
+    </article>
+  </section>
+
+  <section>
+    <h2 class="section">Also recorded</h2>
+    <p class="section-note">
+      Smaller traps, fixed in place rather than left for a future reader to
+      rediscover.
+    </p>
+    <div class="minor">
+      <div class="minor-row">
+        <h4>Dead code that reads like a safeguard</h4>
+        <p>
+          <code>RejectBrowserRegistrationAsync</code> is routed to by nothing —
+          the enforcing refusal is in <code>RegisterBrowserAsync</code>. Marked
+          as not-wired rather than deleted, because it is the only coverage of
+          that error code.
+        </p>
+      </div>
+      <div class="minor-row">
+        <h4>Zero is “refuse” only where it counts</h4>
+        <p>
+          The driver health check treats an all-zero measurement as unprovisioned
+          and refuses. Everywhere else in the managed stack, 64 zeros is an
+          ordinary valid digest — there is no shared non-zero helper, so nothing
+          structurally stops a future digest field being added without the check.
+        </p>
+      </div>
+      <div class="minor-row">
+        <h4>A name stronger than its check</h4>
+        <p>
+          <code>ProbeDriverEnforcement</code> verifies driver health and
+          policy-digest knowledge, not enforcement. Moot today — an ACL mismatch
+          makes the path unreachable — but the name would justify over-claiming
+          later.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section">How this was checked</h2>
+    <p class="section-note">
+      Three independent deep reads, then every load-bearing claim re-verified
+      directly at file and line. One earlier claim — that a configuration
+      variable was dead — was wrong and was caught this way, so nothing here
+      rests on a summary alone.
+    </p>
+    <div class="evidence">
+      <div class="stat">
+        <span class="stat-num">1,146</span>
+        <span class="stat-label">Companion tests, green after changes</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">3,426</span>
+        <span class="stat-label">Backend tests, green</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">18</span>
+        <span class="stat-label">Projects passing static verification</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num">6</span>
+        <span class="stat-label">Claims personally re-verified at source</span>
+      </div>
+    </div>
+    <p style="margin-top:1.5rem">
+      The new static check was itself tested by temporarily substituting an
+      accepting attestation source: the verifier failed, as it should. A guard
+      that cannot fail is not a guard.
+    </p>
+  </section>
+
+  <section class="closing">
+    <h2 class="section">What this means for deployment</h2>
+    <p>
+      The engineering here is careful in a way that is hard to fake. The
+      fail-closed reasoning — a missing marker being the only affirmative safe
+      state, a latch that survives restart, an isolation path strictly stricter
+      than its sibling — is the work of someone thinking properly about trust.
+    </p>
+    <p>
+      The problem was never that the guards fail. It is that the map did not
+      match the territory: in two of three boundaries the documented protection
+      was decorative and the real protection was incidental — a fallback, a field
+      initializer, a hard-coded null. That is corrected, and the real fences are
+      now pinned by the static verifier.
+    </p>
+    <div class="recommend">
+      <span class="pair-label">Recommendation</span>
+      <p>
+        Do not build these three until the operational ceremonies are done —
+        signing keys, enrolled device identity, live-VM acceptance. Those are
+        human prerequisites no agent can satisfy, and
+        <code>productionDeploymentEligible</code> stays false until they are.
+        What was buildable here was removing the traps that would have made a
+        future implementation dangerous, and that is done.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    Verification pass and hardening commit <code>6a48122</code> on
+    <code>fix/msaidizi-code-gaps</code>. Nothing pushed; nothing deployed. All
+    autonomy switches remain fail-closed by default.
+  </footer>
+
+</div>
