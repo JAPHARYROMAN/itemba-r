@@ -7,10 +7,21 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, expect } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { toHaveNoViolations } from 'jest-axe';
 
 expect.extend(toHaveNoViolations as any);
+
+// Testing Library's findBy* default is 1000ms, which is generous on a developer
+// machine and tight on a shared CI runner - a component that fetches before it
+// renders its label can lose the race and fail on an assertion about text.
+//
+// Raising it does not weaken anything, because the timeout is not what these
+// tests assert. That distinction matters: the companion's process-timing tests
+// were tiered rather than scaled precisely because there the clock IS the
+// subject, and stretching it would have hidden the behaviour under test. Here
+// it is plumbing, so give it room.
+configure({ asyncUtilTimeout: process.env.CI ? 5_000 : 1_000 });
 
 afterEach(() => {
   cleanup();
