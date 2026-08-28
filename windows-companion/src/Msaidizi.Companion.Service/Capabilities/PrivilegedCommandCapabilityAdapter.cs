@@ -502,6 +502,8 @@ public sealed partial class PrivilegedOwnedCommandRunner
       specification,
       context,
       executableSha256,
+      executableLock.VolumeSerialNumber,
+      executableLock.FileId,
       timeoutSeconds,
       outputLimit,
       _options.MaximumProcesses,
@@ -614,6 +616,13 @@ public sealed partial class PrivilegedOwnedCommandRunner
         checked((int)processInformation.ThreadId),
         PayloadDigest.Sha256Hex(specification.ExecutablePath),
         executableSha256,
+        executableLock.VolumeSerialNumber,
+        executableLock.FileId,
+        isolationBinding.EphemeralBinding!.Invocation.CommandLineSha256,
+        PrivilegedCommandIsolationCanonical.WorkingDirectorySha256(
+          specification.WorkingDirectory),
+        isolationBinding.EphemeralBinding.Invocation.EnvironmentBlockSha256,
+        isolationBinding.InvocationSha256,
         CreatedSuspended: true,
         AssignedToJob: true);
       isolationBind = await isolationSession.TryBindSuspendedProcessAsync(
@@ -789,6 +798,7 @@ public sealed partial class PrivilegedOwnedCommandRunner
     }
     catch (PrivilegedCommandIsolationUnsafeException)
     {
+      _isolationDispatchLatch.Trip();
       throw;
     }
     catch (Exception exception)
@@ -846,6 +856,7 @@ public sealed partial class PrivilegedOwnedCommandRunner
     }
     catch (PrivilegedCommandIsolationUnsafeException)
     {
+      _isolationDispatchLatch.Trip();
       throw;
     }
     catch (Exception exception)
@@ -876,6 +887,7 @@ public sealed partial class PrivilegedOwnedCommandRunner
     }
     catch (PrivilegedCommandIsolationUnsafeException)
     {
+      _isolationDispatchLatch.Trip();
       throw;
     }
     catch (Exception exception)
@@ -962,43 +974,57 @@ public sealed partial class PrivilegedOwnedCommandRunner
     PrivilegedCommandSpec specification,
     ActionExecutionContext context,
     string executableSha256,
+    uint executableVolumeSerialNumber,
+    ulong executableFileId,
     int effectiveTimeoutSeconds,
     long effectiveMaximumOutputBytes,
     int maximumProcesses,
     long maximumProcessMemoryBytes)
   {
     if (context.ActionTokenSha256 is null
-      || !PayloadDigest.IsSha256Hex(context.ActionTokenSha256))
+      || !PayloadDigest.IsSha256Hex(context.ActionTokenSha256)
+      || context.EphemeralAuthorization is null)
     {
-      throw new HostPreconditionException("command_action_token_digest_required");
+      throw new HostPreconditionException("command_action_authorization_required");
     }
 
-    var invocationSha256 = PayloadDigest.Sha256Hex(JsonSerializer.Serialize(new
-    {
-      protocol = "msaidizi-privileged-command-isolation-binding/v1",
-      context.ActionId,
-      context.TaskId,
-      context.PlanVersionId,
-      context.StepId,
-      context.DeviceId,
-      context.MandateId,
-      context.ActionTokenSha256,
-      context.ExpectedPreStateSha256,
-      executable = specification.ExecutableId,
+    var environment = specification.Environment
+      .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+      .ThenBy(pair => pair.Key, StringComparer.Ordinal)
+      .Select(pair => new PrivilegedCommandIsolationEnvironmentVariableV2(
+        pair.Key,
+        pair.Value))
+      .ToArray();
+    var invocationWithoutDigests = new PrivilegedCommandIsolationInvocationV2(
+      PrivilegedCommandIsolationCanonical.ContractVersion,
+      specification.ExecutableId,
+      specification.ExecutablePath,
       executableSha256,
-      executablePathSha256 = PayloadDigest.Sha256Hex(specification.ExecutablePath),
-      argumentsSha256 = PayloadDigest.Sha256Hex(JsonSerializer.Serialize(
-        specification.Arguments)),
-      workingDirectorySha256 = PayloadDigest.Sha256Hex(specification.WorkingDirectory),
-      environmentSha256 = PayloadDigest.Sha256Hex(JsonSerializer.Serialize(
-        specification.Environment.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))),
-      requestedTimeoutSeconds = specification.TimeoutSeconds,
-      requestedMaximumOutputBytes = specification.MaximumOutputBytes,
+      executableVolumeSerialNumber,
+      executableFileId,
+      specification.Arguments.ToArray(),
+      specification.WorkingDirectory,
+      environment,
+      specification.TimeoutSeconds,
+      specification.MaximumOutputBytes,
       effectiveTimeoutSeconds,
       effectiveMaximumOutputBytes,
       maximumProcesses,
       maximumProcessMemoryBytes,
-    }));
+      string.Empty,
+      string.Empty);
+    var invocation = invocationWithoutDigests with
+    {
+      CommandLineSha256 = PayloadDigest.Sha256Hex(
+        PrivilegedCommandIsolationCanonical.BuildCommandLine(invocationWithoutDigests)),
+      EnvironmentBlockSha256 =
+        PrivilegedCommandIsolationCanonical.EnvironmentBlockSha256(environment),
+    };
+    if (!PrivilegedCommandIsolationCanonical.IsValidInvocation(invocation))
+    {
+      throw new HostPreconditionException("command_invocation_contract_invalid");
+    }
+    var invocationSha256 = PrivilegedCommandIsolationCanonical.InvocationSha256(invocation);
     return new PrivilegedCommandIsolationRequestBinding(
       context.ActionId,
       context.TaskId,
@@ -1009,7 +1035,10 @@ public sealed partial class PrivilegedOwnedCommandRunner
       context.ActionTokenSha256,
       invocationSha256,
       PayloadDigest.Sha256Hex(specification.ExecutablePath),
-      executableSha256);
+      executableSha256,
+      new PrivilegedCommandIsolationEphemeralBinding(
+        context.EphemeralAuthorization,
+        invocation));
   }
 
   private static char[] BuildEnvironmentBlock(IReadOnlyDictionary<string, string> values) =>

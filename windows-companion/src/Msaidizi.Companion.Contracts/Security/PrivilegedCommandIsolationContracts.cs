@@ -2,38 +2,48 @@ using System.Collections.Frozen;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Itemba.Msaidizi.Companion.Contracts.Commands;
 
 namespace Itemba.Msaidizi.Companion.Contracts.Security;
 
 /// <summary>
-/// Kernel-enforced capabilities that a v1 privileged-command isolation
+/// Kernel-enforced capabilities that a v2 privileged-command isolation
 /// supervisor must attest. The ordered list is part of the signed protocol.
 /// </summary>
 public static class PrivilegedCommandIsolationFeatures
 {
+  public const string ExactInvocationMeasurement =
+    "exact-invocation-measurement-v2";
   public const string FileSystemDeny = "filesystem-trusted-root-deny-v1";
   public const string JobKillOnClose = "job-kill-on-close-v1";
   public const string KernelProcessTreeBinding = "kernel-process-tree-binding-v1";
+  public const string ProcessImageFileIdentity = "process-image-file-identity-v2";
   public const string RegistryDeny = "registry-trusted-root-deny-v1";
   public const string ServiceControlDeny = "service-control-deny-v1";
   public const string SignedTerminalReceipt = "signed-terminal-enforcement-receipt-v1";
+  public const string SignedDriverAttestation = "signed-driver-attestation-v2";
   public const string SupervisorBootReplayProtection =
     "supervisor-boot-replay-protection-v1";
   public const string SupervisorProcessDeny = "supervisor-process-control-deny-v1";
   public const string SuspendedBindBeforeResume =
     "suspended-process-bind-before-resume-v1";
+  public const string WindowsSecurityPosture = "windows-security-posture-v1";
 
   public static IReadOnlyList<string> Required { get; } = Array.AsReadOnly(
   [
+    ExactInvocationMeasurement,
     FileSystemDeny,
     JobKillOnClose,
     KernelProcessTreeBinding,
+    ProcessImageFileIdentity,
     RegistryDeny,
     ServiceControlDeny,
+    SignedDriverAttestation,
     SignedTerminalReceipt,
     SupervisorBootReplayProtection,
     SupervisorProcessDeny,
     SuspendedBindBeforeResume,
+    WindowsSecurityPosture,
   ]);
 
   internal static IReadOnlySet<string> Allowed { get; } = Required.ToFrozenSet(
@@ -48,6 +58,8 @@ public static class PrivilegedCommandIsolationFeatures
 /// </summary>
 public static class PrivilegedCommandIsolationSignaturePurposes
 {
+  public const string DriverAttestation =
+    "msaidizi.privileged-command-isolation.driver-attestation.v2";
   public const string ReservationLease =
     "msaidizi.privileged-command-isolation.reservation-lease.v1";
   public const string SuspendedProcessBindAcknowledgement =
@@ -56,6 +68,33 @@ public static class PrivilegedCommandIsolationSignaturePurposes
     "msaidizi.privileged-command-isolation.pre-bind-reservation-release.v1";
   public const string TerminalEnforcementReceipt =
     "msaidizi.privileged-command-isolation.terminal-enforcement-receipt.v1";
+}
+
+public static class PrivilegedCommandIsolationCapability
+{
+  public const string Id = "command.privileged.execute";
+  public const string Version = "1.0.0";
+}
+
+public static class PrivilegedCommandIsolationActionTokenTrust
+{
+  public const string Issuer = "itemba-msaidizi-broker";
+  public const string Audience = "itemba-windows-companion";
+  public const string Subject = "msaidizi-global";
+}
+
+/// <summary>
+/// Compile-time trust anchors shared by the LocalSystem companion and the
+/// separately installed isolation supervisor. Configuration may repeat these
+/// values for deployment evidence, but it may never select a different peer.
+/// </summary>
+public static class PrivilegedCommandIsolationSupervisorIdentity
+{
+  public const string ServiceSid =
+    "S-1-5-80-1792805186-3282615177-1795010573-3676175622-4117989893";
+
+  public const string DriverServiceName =
+    "Itemba Msaidizi Privileged Command Isolation Driver";
 }
 
 public static class PrivilegedCommandIsolationPreBindReleaseOutcomes
@@ -98,6 +137,48 @@ public static class PrivilegedCommandIsolationTerminalOutcomes
 /// Immutable-by-convention action facts supplied by the companion and copied
 /// by the verifier before use. Every digest is lowercase canonical SHA-256.
 /// </summary>
+public sealed record PrivilegedCommandIsolationActionAuthorizationV2(
+  string CapabilityId,
+  string CapabilityVersion,
+  string ArgumentsSha256,
+  string? ExpectedPreStateSha256,
+  string? InputProvenanceSha256,
+  string IdempotencyKeySha256,
+  string LeaseId,
+  string FencingToken,
+  long LeaseExpiresAtUnixSeconds,
+  int DispatchCount,
+  string ExecutionMode,
+  ActionBudget Budgets);
+
+public sealed record PrivilegedCommandIsolationEnvironmentVariableV2(
+  string Name,
+  string Value);
+
+/// <summary>
+/// Exact invocation facts carried only on the live reserve/bind channel. The
+/// supervisor persists only <see cref="PrivilegedCommandIsolationCanonical.InvocationSha256"/>,
+/// so argv and environment values never enter its journal.
+/// </summary>
+public sealed record PrivilegedCommandIsolationInvocationV2(
+  int ContractVersion,
+  string ExecutableId,
+  string ExecutablePath,
+  string ExecutableImageSha256,
+  uint ExecutableVolumeSerialNumber,
+  ulong ExecutableFileId,
+  IReadOnlyList<string> Arguments,
+  string WorkingDirectory,
+  IReadOnlyList<PrivilegedCommandIsolationEnvironmentVariableV2> Environment,
+  int RequestedTimeoutSeconds,
+  long RequestedMaximumOutputBytes,
+  int EffectiveTimeoutSeconds,
+  long EffectiveMaximumOutputBytes,
+  int MaximumProcesses,
+  long MaximumProcessMemoryBytes,
+  string CommandLineSha256,
+  string EnvironmentBlockSha256);
+
 public sealed record PrivilegedCommandIsolationActionBinding(
   string ActionId,
   string TaskId,
@@ -112,7 +193,8 @@ public sealed record PrivilegedCommandIsolationActionBinding(
   string IsolationPolicySha256,
   string DriverMeasurementSha256,
   string ServiceMeasurementSha256,
-  IReadOnlyList<string> RequiredFeatures);
+  IReadOnlyList<string> RequiredFeatures,
+  PrivilegedCommandIsolationActionAuthorizationV2 Authorization);
 
 /// <summary>
 /// Exact native identities observed while the child primary thread is still
@@ -129,7 +211,38 @@ public sealed record PrivilegedCommandIsolationProcessBinding(
   string JobObjectId,
   string JobObjectIdentitySha256,
   string ImagePathSha256,
-  string ImageSha256);
+  string ImageSha256,
+  uint ImageVolumeSerialNumber,
+  ulong ImageFileId,
+  string CommandLineSha256,
+  string WorkingDirectorySha256,
+  string EnvironmentBlockSha256,
+  string InvocationSha256);
+
+public sealed record PrivilegedCommandDriverAttestationEvidenceV2(
+  int ContractVersion,
+  string SignaturePurpose,
+  string KeyId,
+  string DeviceId,
+  string SupervisorInstanceId,
+  string BootId,
+  string PolicyEpoch,
+  string ChallengeNonceSha256,
+  string IsolationPolicySha256,
+  string DriverMeasurementSha256,
+  string ServiceMeasurementSha256,
+  string DriverServiceName,
+  string DriverImagePathSha256,
+  bool SecureBootEnabled,
+  bool HvciEnabled,
+  bool WdacEnforced,
+  IReadOnlyList<string> EnforcedFeatures,
+  long IssuedAtUnixMilliseconds,
+  long ExpiresAtUnixMilliseconds);
+
+public sealed record SignedPrivilegedCommandDriverAttestationV2(
+  PrivilegedCommandDriverAttestationEvidenceV2 Evidence,
+  string SignatureBase64);
 
 public sealed record PrivilegedCommandIsolationReservationRequestV1(
   int ContractVersion,
@@ -249,7 +362,7 @@ public sealed record SignedPrivilegedCommandIsolationTerminalReceipt(
   string SignatureBase64);
 
 /// <summary>
-/// Absolute v1 protocol ceilings are enforced in addition to these deployment
+/// Absolute protocol ceilings are enforced in addition to these deployment
 /// settings. Configuration can tighten, but cannot raise, those ceilings.
 /// </summary>
 public sealed record PrivilegedCommandIsolationVerificationSettings(
@@ -320,6 +433,22 @@ public sealed class VerifiedPrivilegedCommandIsolationReservation
   public string LeaseSha256 { get; }
 }
 
+/// <summary>
+/// Recovery-only marker for a signed reservation already present in the
+/// durable replay ledger. It is intentionally not interchangeable with the
+/// live reservation marker used to authorize bind/resume operations.
+/// </summary>
+public sealed class VerifiedPrivilegedCommandIsolationRecoveryReservation
+{
+  internal VerifiedPrivilegedCommandIsolationRecoveryReservation(
+    VerifiedPrivilegedCommandIsolationReservation reservation)
+  {
+    Reservation = reservation;
+  }
+
+  internal VerifiedPrivilegedCommandIsolationReservation Reservation { get; }
+}
+
 public sealed class VerifiedPrivilegedCommandIsolationBindAcknowledgement
 {
   internal VerifiedPrivilegedCommandIsolationBindAcknowledgement(
@@ -345,6 +474,24 @@ public sealed class VerifiedPrivilegedCommandIsolationBindAcknowledgement
   public string SuspendedProcessBindingSha256 { get; }
 
   public string AcknowledgementSha256 { get; }
+}
+
+/// <summary>
+/// Recovery-only marker for a signed bind already present in the durable
+/// replay ledger. It cannot be passed to the live terminal-settlement API.
+/// </summary>
+public sealed class VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement
+{
+  internal VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement(
+    VerifiedPrivilegedCommandIsolationBindAcknowledgement bindAcknowledgement)
+  {
+    BindAcknowledgement = bindAcknowledgement;
+  }
+
+  internal VerifiedPrivilegedCommandIsolationBindAcknowledgement BindAcknowledgement
+  {
+    get;
+  }
 }
 
 public sealed class VerifiedPrivilegedCommandIsolationPreBindRelease
@@ -561,7 +708,42 @@ public sealed class PrivilegedCommandIsolationContractVerifier
     VerifiedPrivilegedCommandIsolationReservation> VerifyReservation(
       PrivilegedCommandIsolationReservationRequestV1 request,
       SignedPrivilegedCommandIsolationReservationLease signedLease,
+      PrivilegedCommandIsolationActionBinding expectedAction) =>
+    VerifyReservationCore(request, signedLease, expectedAction, historicalRecovery: false);
+
+  /// <summary>
+  /// Verifies a reservation already committed to the durable replay ledger.
+  /// Historical recovery accepts an expired request and lease, but it never
+  /// accepts future-dated evidence, invalid internal lifetimes, changed action
+  /// measurements, or an untrusted/wrong-purpose signature. It must not be used
+  /// to authorize a new process launch.
+  /// </summary>
+  public PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationRecoveryReservation>
+      VerifyReservationForRecovery(
+      PrivilegedCommandIsolationReservationRequestV1 request,
+      SignedPrivilegedCommandIsolationReservationLease signedLease,
       PrivilegedCommandIsolationActionBinding expectedAction)
+  {
+    var verified = VerifyReservationCore(
+      request,
+      signedLease,
+      expectedAction,
+      historicalRecovery: true);
+    return verified.IsValid && verified.Value is not null
+      ? PrivilegedCommandIsolationVerificationResult.Valid(
+        new VerifiedPrivilegedCommandIsolationRecoveryReservation(verified.Value))
+      : PrivilegedCommandIsolationVerificationResult.Invalid<
+        VerifiedPrivilegedCommandIsolationRecoveryReservation>(
+          verified.ErrorCode ?? "isolation_recovery_reservation_invalid");
+  }
+
+  private PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationReservation> VerifyReservationCore(
+      PrivilegedCommandIsolationReservationRequestV1 request,
+      SignedPrivilegedCommandIsolationReservationLease signedLease,
+      PrivilegedCommandIsolationActionBinding expectedAction,
+      bool historicalRecovery)
   {
     if (!PrivilegedCommandIsolationCanonical.IsValidAction(expectedAction)
       || !ExpectedPinsMatch(expectedAction))
@@ -593,9 +775,11 @@ public sealed class PrivilegedCommandIsolationContractVerifier
     var maximumLeaseLifetime = Milliseconds(
       _settings.MaximumReservationLeaseLifetime);
     if (requestSnapshot.RequestedAtUnixMilliseconds > Add(now, skew)
-      || Subtract(now, requestSnapshot.RequestedAtUnixMilliseconds)
-        > Add(maximumRequestAge, skew)
-      || requestSnapshot.RequestedExpiresAtUnixMilliseconds <= now
+      || (!historicalRecovery
+        && Subtract(now, requestSnapshot.RequestedAtUnixMilliseconds)
+          > Add(maximumRequestAge, skew))
+      || (!historicalRecovery
+        && requestSnapshot.RequestedExpiresAtUnixMilliseconds <= now)
       || Subtract(
           requestSnapshot.RequestedExpiresAtUnixMilliseconds,
           requestSnapshot.RequestedAtUnixMilliseconds) > maximumLeaseLifetime)
@@ -640,7 +824,7 @@ public sealed class PrivilegedCommandIsolationContractVerifier
     if (leaseSnapshot.IssuedAtUnixMilliseconds
         < Subtract(requestSnapshot.RequestedAtUnixMilliseconds, skew)
       || leaseSnapshot.IssuedAtUnixMilliseconds > Add(now, skew)
-      || leaseSnapshot.ExpiresAtUnixMilliseconds <= now
+      || (!historicalRecovery && leaseSnapshot.ExpiresAtUnixMilliseconds <= now)
       || leaseSnapshot.ExpiresAtUnixMilliseconds
         > requestSnapshot.RequestedExpiresAtUnixMilliseconds
       || Subtract(
@@ -682,7 +866,36 @@ public sealed class PrivilegedCommandIsolationContractVerifier
   public PrivilegedCommandIsolationVerificationResult<
     VerifiedPrivilegedCommandIsolationPreBindRelease> VerifyPreBindRelease(
       VerifiedPrivilegedCommandIsolationReservation reservation,
+      SignedPrivilegedCommandIsolationPreBindRelease signedRelease) =>
+    VerifyPreBindReleaseCore(reservation, signedRelease, historicalRecovery: false);
+
+  /// <summary>
+  /// Verifies a newly issued settlement for an already-persisted reservation.
+  /// The old lease may have expired, but the release itself must still be fresh
+  /// relative to the verifier clock and signed by the exact release-purpose key.
+  /// </summary>
+  public PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationPreBindRelease> VerifyPreBindReleaseForRecovery(
+      VerifiedPrivilegedCommandIsolationRecoveryReservation reservation,
       SignedPrivilegedCommandIsolationPreBindRelease signedRelease)
+  {
+    if (reservation is null)
+    {
+      return PrivilegedCommandIsolationVerificationResult.Invalid<
+        VerifiedPrivilegedCommandIsolationPreBindRelease>(
+          "isolation_verified_recovery_reservation_required");
+    }
+    return VerifyPreBindReleaseCore(
+      reservation.Reservation,
+      signedRelease,
+      historicalRecovery: true);
+  }
+
+  private PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationPreBindRelease> VerifyPreBindReleaseCore(
+      VerifiedPrivilegedCommandIsolationReservation reservation,
+      SignedPrivilegedCommandIsolationPreBindRelease signedRelease,
+      bool historicalRecovery)
   {
     if (reservation is null)
     {
@@ -728,8 +941,9 @@ public sealed class PrivilegedCommandIsolationContractVerifier
     if (releaseSnapshot.ReleasedAtUnixMilliseconds
         < Subtract(lease.IssuedAtUnixMilliseconds, skew)
       || releaseSnapshot.ReleasedAtUnixMilliseconds > Add(now, skew)
-      || releaseSnapshot.ReleasedAtUnixMilliseconds
-        > Add(lease.ExpiresAtUnixMilliseconds, maximumDelay)
+      || (!historicalRecovery
+        && releaseSnapshot.ReleasedAtUnixMilliseconds
+          > Add(lease.ExpiresAtUnixMilliseconds, maximumDelay))
       || Subtract(now, releaseSnapshot.ReleasedAtUnixMilliseconds)
         > Add(maximumDelay, skew)
       || (Exact(
@@ -772,7 +986,53 @@ public sealed class PrivilegedCommandIsolationContractVerifier
     VerifiedPrivilegedCommandIsolationBindAcknowledgement> VerifyBindAcknowledgement(
       VerifiedPrivilegedCommandIsolationReservation reservation,
       PrivilegedCommandSuspendedProcessBindingV1 binding,
-      SignedPrivilegedCommandIsolationBindAcknowledgement signedAcknowledgement)
+      SignedPrivilegedCommandIsolationBindAcknowledgement signedAcknowledgement) =>
+    VerifyBindAcknowledgementCore(
+      reservation,
+      binding,
+      signedAcknowledgement,
+      historicalRecovery: false);
+
+  /// <summary>
+  /// Verifies bind evidence already committed to the durable replay ledger.
+  /// The lease and acknowledgement may be expired, while their signatures,
+  /// action/process binding, measurements, sequence, and bounded historical
+  /// lifetimes remain mandatory. It must not authorize a process resume.
+  /// </summary>
+  public PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement>
+      VerifyBindAcknowledgementForRecovery(
+        VerifiedPrivilegedCommandIsolationRecoveryReservation reservation,
+        PrivilegedCommandSuspendedProcessBindingV1 binding,
+        SignedPrivilegedCommandIsolationBindAcknowledgement signedAcknowledgement)
+  {
+    if (reservation is null)
+    {
+      return PrivilegedCommandIsolationVerificationResult.Invalid<
+        VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement>(
+          "isolation_verified_recovery_reservation_required");
+    }
+    var verified = VerifyBindAcknowledgementCore(
+      reservation.Reservation,
+      binding,
+      signedAcknowledgement,
+      historicalRecovery: true);
+    return verified.IsValid && verified.Value is not null
+      ? PrivilegedCommandIsolationVerificationResult.Valid(
+        new VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement(
+          verified.Value))
+      : PrivilegedCommandIsolationVerificationResult.Invalid<
+        VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement>(
+          verified.ErrorCode ?? "isolation_recovery_bind_invalid");
+  }
+
+  private PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationBindAcknowledgement>
+      VerifyBindAcknowledgementCore(
+        VerifiedPrivilegedCommandIsolationReservation reservation,
+        PrivilegedCommandSuspendedProcessBindingV1 binding,
+        SignedPrivilegedCommandIsolationBindAcknowledgement signedAcknowledgement,
+        bool historicalRecovery)
   {
     if (reservation is null)
     {
@@ -814,7 +1074,7 @@ public sealed class PrivilegedCommandIsolationContractVerifier
         < Subtract(lease.IssuedAtUnixMilliseconds, skew)
       || bindingSnapshot.ObservedAtUnixMilliseconds > Add(now, skew)
       || bindingSnapshot.ObservedAtUnixMilliseconds >= lease.ExpiresAtUnixMilliseconds
-      || lease.ExpiresAtUnixMilliseconds <= now)
+      || (!historicalRecovery && lease.ExpiresAtUnixMilliseconds <= now))
     {
       return PrivilegedCommandIsolationVerificationResult.Invalid<
         VerifiedPrivilegedCommandIsolationBindAcknowledgement>(
@@ -872,7 +1132,8 @@ public sealed class PrivilegedCommandIsolationContractVerifier
       || acknowledgementSnapshot.IssuedAtUnixMilliseconds
         < Subtract(bindingSnapshot.ObservedAtUnixMilliseconds, skew)
       || acknowledgementSnapshot.IssuedAtUnixMilliseconds > Add(now, skew)
-      || acknowledgementSnapshot.ExpiresAtUnixMilliseconds <= now
+      || (!historicalRecovery
+        && acknowledgementSnapshot.ExpiresAtUnixMilliseconds <= now)
       || acknowledgementSnapshot.ExpiresAtUnixMilliseconds
         > lease.ExpiresAtUnixMilliseconds
       || Subtract(
@@ -916,7 +1177,42 @@ public sealed class PrivilegedCommandIsolationContractVerifier
   public PrivilegedCommandIsolationVerificationResult<
     VerifiedPrivilegedCommandIsolationTerminalReceipt> VerifyTerminalReceipt(
       VerifiedPrivilegedCommandIsolationBindAcknowledgement bindAcknowledgement,
-      SignedPrivilegedCommandIsolationTerminalReceipt signedReceipt)
+      SignedPrivilegedCommandIsolationTerminalReceipt signedReceipt) =>
+    VerifyTerminalReceiptCore(
+      bindAcknowledgement,
+      signedReceipt,
+      historicalRecovery: false);
+
+  /// <summary>
+  /// Verifies a newly issued terminal settlement for historical bind evidence.
+  /// The terminal receipt must be fresh and preserve the original bounded
+  /// execution timeline, but it may report a process that ended while the
+  /// companion was offline longer than the ordinary receipt-delivery window.
+  /// </summary>
+  public PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationTerminalReceipt>
+      VerifyTerminalReceiptForRecovery(
+        VerifiedPrivilegedCommandIsolationRecoveryBindAcknowledgement
+          bindAcknowledgement,
+        SignedPrivilegedCommandIsolationTerminalReceipt signedReceipt)
+  {
+    if (bindAcknowledgement is null)
+    {
+      return PrivilegedCommandIsolationVerificationResult.Invalid<
+        VerifiedPrivilegedCommandIsolationTerminalReceipt>(
+          "isolation_verified_recovery_bind_acknowledgement_required");
+    }
+    return VerifyTerminalReceiptCore(
+      bindAcknowledgement.BindAcknowledgement,
+      signedReceipt,
+      historicalRecovery: true);
+  }
+
+  private PrivilegedCommandIsolationVerificationResult<
+    VerifiedPrivilegedCommandIsolationTerminalReceipt> VerifyTerminalReceiptCore(
+      VerifiedPrivilegedCommandIsolationBindAcknowledgement bindAcknowledgement,
+      SignedPrivilegedCommandIsolationTerminalReceipt signedReceipt,
+      bool historicalRecovery)
   {
     if (bindAcknowledgement is null)
     {
@@ -991,9 +1287,10 @@ public sealed class PrivilegedCommandIsolationContractVerifier
       || receiptSnapshot.IssuedAtUnixMilliseconds > Add(now, skew)
       || Subtract(now, receiptSnapshot.IssuedAtUnixMilliseconds)
         > Add(maximumReceiptDelay, skew)
-      || Subtract(
-          receiptSnapshot.IssuedAtUnixMilliseconds,
-          receiptSnapshot.EndedAtUnixMilliseconds) > maximumReceiptDelay)
+      || (!historicalRecovery
+        && Subtract(
+            receiptSnapshot.IssuedAtUnixMilliseconds,
+            receiptSnapshot.EndedAtUnixMilliseconds) > maximumReceiptDelay))
     {
       return PrivilegedCommandIsolationVerificationResult.Invalid<
         VerifiedPrivilegedCommandIsolationTerminalReceipt>(
@@ -1106,7 +1403,8 @@ public sealed class PrivilegedCommandIsolationContractVerifier
     && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
       left.ServiceMeasurementSha256,
       right.ServiceMeasurementSha256)
-    && left.RequiredFeatures.SequenceEqual(right.RequiredFeatures, StringComparer.Ordinal);
+    && left.RequiredFeatures.SequenceEqual(right.RequiredFeatures, StringComparer.Ordinal)
+    && AuthorizationMatches(left.Authorization, right.Authorization);
 
   private static bool ProcessMatches(
     PrivilegedCommandIsolationProcessBinding left,
@@ -1126,7 +1424,21 @@ public sealed class PrivilegedCommandIsolationContractVerifier
       right.ImagePathSha256)
     && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
       left.ImageSha256,
-      right.ImageSha256);
+      right.ImageSha256)
+    && left.ImageVolumeSerialNumber == right.ImageVolumeSerialNumber
+    && left.ImageFileId == right.ImageFileId
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      left.CommandLineSha256,
+      right.CommandLineSha256)
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      left.WorkingDirectorySha256,
+      right.WorkingDirectorySha256)
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      left.EnvironmentBlockSha256,
+      right.EnvironmentBlockSha256)
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      left.InvocationSha256,
+      right.InvocationSha256);
 
   private static bool ProcessImageMatchesAction(
     PrivilegedCommandIsolationProcessBinding process,
@@ -1136,12 +1448,44 @@ public sealed class PrivilegedCommandIsolationContractVerifier
       action.ExpectedImagePathSha256)
     && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
       process.ImageSha256,
-      action.ExpectedImageSha256);
+      action.ExpectedImageSha256)
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      process.InvocationSha256,
+      action.InvocationSha256);
+
+  private static bool AuthorizationMatches(
+    PrivilegedCommandIsolationActionAuthorizationV2 left,
+    PrivilegedCommandIsolationActionAuthorizationV2 right) =>
+    Exact(left.CapabilityId, right.CapabilityId)
+    && Exact(left.CapabilityVersion, right.CapabilityVersion)
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      left.ArgumentsSha256,
+      right.ArgumentsSha256)
+    && OptionalDigestMatches(left.ExpectedPreStateSha256, right.ExpectedPreStateSha256)
+    && OptionalDigestMatches(left.InputProvenanceSha256, right.InputProvenanceSha256)
+    && PrivilegedCommandIsolationCanonical.FixedDigestEquals(
+      left.IdempotencyKeySha256,
+      right.IdempotencyKeySha256)
+    && Exact(left.LeaseId, right.LeaseId)
+    && Exact(left.FencingToken, right.FencingToken)
+    && left.LeaseExpiresAtUnixSeconds == right.LeaseExpiresAtUnixSeconds
+    && left.DispatchCount == right.DispatchCount
+    && Exact(left.ExecutionMode, right.ExecutionMode)
+    && left.Budgets == right.Budgets;
+
+  private static bool OptionalDigestMatches(string? left, string? right) =>
+    left is null || right is null
+      ? left is null && right is null
+      : PrivilegedCommandIsolationCanonical.FixedDigestEquals(left, right);
 
   private static PrivilegedCommandIsolationActionBinding SnapshotAction(
     PrivilegedCommandIsolationActionBinding action) => action with
     {
       RequiredFeatures = Array.AsReadOnly(action.RequiredFeatures.ToArray()),
+      Authorization = action.Authorization with
+      {
+        Budgets = action.Authorization.Budgets with { },
+      },
     };
 
   private static PrivilegedCommandIsolationReservationRequestV1 SnapshotRequest(
@@ -1290,22 +1634,90 @@ public sealed class PrivilegedCommandIsolationContractVerifier
 /// </summary>
 public static class PrivilegedCommandIsolationCanonical
 {
-  public const int ContractVersion = 1;
+  public const int ContractVersion = 2;
   private const int NonceBytes = 32;
+  private const string InvocationDomain =
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-INVOCATION-V2";
+  private const string DriverAttestationDomain =
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-DRIVER-ATTESTATION-V2";
   private const string ReservationRequestDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-RESERVATION-REQUEST-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-RESERVATION-REQUEST-V2";
   private const string ReservationLeaseDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-RESERVATION-LEASE-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-RESERVATION-LEASE-V2";
   private const string PreBindReleaseDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-PRE-BIND-RELEASE-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-PRE-BIND-RELEASE-V2";
   private const string SuspendedProcessBindingDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-SUSPENDED-PROCESS-BINDING-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-SUSPENDED-PROCESS-BINDING-V2";
   private const string BindAcknowledgementDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-BIND-ACKNOWLEDGEMENT-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-BIND-ACKNOWLEDGEMENT-V2";
   private const string TerminalReceiptDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-TERMINAL-RECEIPT-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-TERMINAL-RECEIPT-V2";
   private const string SignatureEnvelopeDomain =
-    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-PURPOSE-SIGNATURE-V1";
+    "MSAIDIZI-PRIVILEGED-COMMAND-ISOLATION-PURPOSE-SIGNATURE-V2";
+
+  public static byte[] InvocationBytes(PrivilegedCommandIsolationInvocationV2 value)
+  {
+    var fields = Start(
+      InvocationDomain,
+      value.ContractVersion,
+      value.ExecutableId,
+      value.ExecutablePath,
+      value.ExecutableImageSha256);
+    fields.Add(Number(value.ExecutableVolumeSerialNumber));
+    fields.Add(Number(value.ExecutableFileId));
+    fields.Add(Number(value.Arguments.Count));
+    fields.AddRange(value.Arguments.Select(Field));
+    fields.Add(Field(value.WorkingDirectory));
+    fields.Add(Number(value.Environment.Count));
+    foreach (var variable in value.Environment)
+    {
+      fields.Add(Field(variable.Name));
+      fields.Add(Field(variable.Value));
+    }
+    fields.Add(Number(value.RequestedTimeoutSeconds));
+    fields.Add(Number(value.RequestedMaximumOutputBytes));
+    fields.Add(Number(value.EffectiveTimeoutSeconds));
+    fields.Add(Number(value.EffectiveMaximumOutputBytes));
+    fields.Add(Number(value.MaximumProcesses));
+    fields.Add(Number(value.MaximumProcessMemoryBytes));
+    fields.Add(Field(value.CommandLineSha256));
+    fields.Add(Field(value.EnvironmentBlockSha256));
+    return Bytes(fields);
+  }
+
+  public static string InvocationSha256(PrivilegedCommandIsolationInvocationV2 value) =>
+    Digest(InvocationBytes(value));
+
+  public static byte[] DriverAttestationBytes(
+    PrivilegedCommandDriverAttestationEvidenceV2 value)
+  {
+    var fields = Start(
+      DriverAttestationDomain,
+      value.ContractVersion,
+      value.SignaturePurpose,
+      value.KeyId,
+      value.DeviceId,
+      value.SupervisorInstanceId,
+      value.BootId,
+      value.PolicyEpoch,
+      value.ChallengeNonceSha256,
+      value.IsolationPolicySha256,
+      value.DriverMeasurementSha256,
+      value.ServiceMeasurementSha256,
+      value.DriverServiceName,
+      value.DriverImagePathSha256);
+    fields.Add(Number(value.SecureBootEnabled ? 1 : 0));
+    fields.Add(Number(value.HvciEnabled ? 1 : 0));
+    fields.Add(Number(value.WdacEnforced ? 1 : 0));
+    AddFeatures(fields, value.EnforcedFeatures);
+    fields.Add(Number(value.IssuedAtUnixMilliseconds));
+    fields.Add(Number(value.ExpiresAtUnixMilliseconds));
+    return Bytes(fields);
+  }
+
+  public static string DriverAttestationSha256(
+    PrivilegedCommandDriverAttestationEvidenceV2 value) =>
+    Digest(DriverAttestationBytes(value));
 
   public static byte[] ReservationRequestBytes(
     PrivilegedCommandIsolationReservationRequestV1 value)
@@ -1521,6 +1933,28 @@ public static class PrivilegedCommandIsolationCanonical
       keyId,
       TerminalReceiptBytes(value));
 
+  public static byte[] DriverAttestationSignatureBytes(
+    PrivilegedCommandDriverAttestationEvidenceV2 value) => PurposeSignatureBytes(
+      PrivilegedCommandIsolationSignaturePurposes.DriverAttestation,
+      value.KeyId,
+      DriverAttestationBytes(value));
+
+  public static SignedPrivilegedCommandDriverAttestationV2 SignDriverAttestation(
+    PrivilegedCommandDriverAttestationEvidenceV2 value,
+    ECDsa privateKey) => new(
+      value,
+      Sign(privateKey, DriverAttestationSignatureBytes(value)));
+
+  public static bool VerifyDriverAttestation(
+    SignedPrivilegedCommandDriverAttestationV2? value,
+    ECDsa publicKey) =>
+    value is not null
+    && IsValidDriverAttestation(value.Evidence)
+    && Verify(
+      publicKey,
+      DriverAttestationSignatureBytes(value.Evidence),
+      value.SignatureBase64);
+
   public static SignedPrivilegedCommandIsolationReservationLease SignReservationLease(
     PrivilegedCommandIsolationReservationLeaseV1 value,
     string keyId,
@@ -1554,7 +1988,7 @@ public static class PrivilegedCommandIsolationCanonical
       keyId,
       Sign(privateKey, TerminalReceiptSignatureBytes(value, keyId)));
 
-  internal static bool IsValidReservationRequest(
+  public static bool IsValidReservationRequest(
     PrivilegedCommandIsolationReservationRequestV1? value) =>
     value is not null
     && value.ContractVersion == ContractVersion
@@ -1711,7 +2145,8 @@ public static class PrivilegedCommandIsolationCanonical
     && IsCanonicalSha256(value.IsolationPolicySha256)
     && IsCanonicalSha256(value.DriverMeasurementSha256)
     && IsCanonicalSha256(value.ServiceMeasurementSha256)
-    && IsValidFeatures(value.RequiredFeatures);
+    && IsValidFeatures(value.RequiredFeatures)
+    && IsValidAuthorization(value.Authorization);
 
   internal static bool IsValidProcess(PrivilegedCommandIsolationProcessBinding? value) =>
     value is not null
@@ -1725,7 +2160,117 @@ public static class PrivilegedCommandIsolationCanonical
     && IsCanonicalGuid(value.JobObjectId)
     && IsCanonicalSha256(value.JobObjectIdentitySha256)
     && IsCanonicalSha256(value.ImagePathSha256)
-    && IsCanonicalSha256(value.ImageSha256);
+    && IsCanonicalSha256(value.ImageSha256)
+    && value.ImageVolumeSerialNumber > 0
+    && value.ImageFileId > 0
+    && IsCanonicalSha256(value.CommandLineSha256)
+    && IsCanonicalSha256(value.WorkingDirectorySha256)
+    && IsCanonicalSha256(value.EnvironmentBlockSha256)
+    && IsCanonicalSha256(value.InvocationSha256);
+
+  public static bool IsValidInvocation(PrivilegedCommandIsolationInvocationV2? value)
+  {
+    if (value is null
+      || value.ContractVersion != ContractVersion
+      || value.ExecutableId is not ("cmd" or "windows-powershell")
+      || !IsSafeAbsoluteLocalPath(value.ExecutablePath)
+      || !IsCanonicalSha256(value.ExecutableImageSha256)
+      || value.ExecutableVolumeSerialNumber == 0
+      || value.ExecutableFileId == 0
+      || value.Arguments is null
+      || value.Arguments.Count is < 1 or > 64
+      || value.Arguments.Any(argument => !IsSafeInvocationValue(argument, 8_192))
+      || !IsSafeAbsoluteLocalPath(value.WorkingDirectory)
+      || value.Environment is null
+      || value.Environment.Count is < 1 or > 64
+      || !IsValidEnvironment(value.Environment)
+      || value.RequestedTimeoutSeconds is < 1 or > 7_200
+      || value.EffectiveTimeoutSeconds is < 1 or > 7_200
+      || value.EffectiveTimeoutSeconds > value.RequestedTimeoutSeconds
+      || value.RequestedMaximumOutputBytes is < 1 or > 16_777_216
+      || value.EffectiveMaximumOutputBytes is < 1 or > 16_777_216
+      || value.EffectiveMaximumOutputBytes > value.RequestedMaximumOutputBytes
+      || value.MaximumProcesses is < 1 or > 32
+      || value.MaximumProcessMemoryBytes is < 16_777_216 or > 2_147_483_648
+      || !IsCanonicalSha256(value.CommandLineSha256)
+      || !IsCanonicalSha256(value.EnvironmentBlockSha256))
+    {
+      return false;
+    }
+
+    return FixedDigestEquals(
+        value.CommandLineSha256,
+        PayloadDigest.Sha256Hex(BuildCommandLine(value)))
+      && FixedDigestEquals(
+        value.EnvironmentBlockSha256,
+        EnvironmentBlockSha256(value.Environment));
+  }
+
+  public static bool IsValidDriverAttestation(
+    PrivilegedCommandDriverAttestationEvidenceV2? value) =>
+    value is not null
+    && value.ContractVersion == ContractVersion
+    && string.Equals(
+      value.SignaturePurpose,
+      PrivilegedCommandIsolationSignaturePurposes.DriverAttestation,
+      StringComparison.Ordinal)
+    && IsSafeKeyId(value.KeyId)
+    && IsCanonicalGuid(value.DeviceId)
+    && IsCanonicalGuid(value.SupervisorInstanceId)
+    && IsCanonicalGuid(value.BootId)
+    && IsSafeIdentifier(value.PolicyEpoch, 128)
+    && IsCanonicalSha256(value.ChallengeNonceSha256)
+    && IsCanonicalSha256(value.IsolationPolicySha256)
+    && IsCanonicalSha256(value.DriverMeasurementSha256)
+    && IsCanonicalSha256(value.ServiceMeasurementSha256)
+    && string.Equals(
+      value.DriverServiceName,
+      PrivilegedCommandIsolationSupervisorIdentity.DriverServiceName,
+      StringComparison.Ordinal)
+    && IsCanonicalSha256(value.DriverImagePathSha256)
+    && value.SecureBootEnabled
+    && value.HvciEnabled
+    && value.WdacEnforced
+    && IsValidFeatures(value.EnforcedFeatures)
+    && value.IssuedAtUnixMilliseconds > 0
+    && value.ExpiresAtUnixMilliseconds > value.IssuedAtUnixMilliseconds;
+
+  private static bool IsValidAuthorization(
+    PrivilegedCommandIsolationActionAuthorizationV2? value) =>
+    value is not null
+    && string.Equals(
+      value.CapabilityId,
+      PrivilegedCommandIsolationCapability.Id,
+      StringComparison.Ordinal)
+    && string.Equals(
+      value.CapabilityVersion,
+      PrivilegedCommandIsolationCapability.Version,
+      StringComparison.Ordinal)
+    && IsCanonicalSha256(value.ArgumentsSha256)
+    && (value.ExpectedPreStateSha256 is null
+      || IsCanonicalSha256(value.ExpectedPreStateSha256))
+    && (value.InputProvenanceSha256 is null
+      || IsCanonicalSha256(value.InputProvenanceSha256))
+    && IsCanonicalSha256(value.IdempotencyKeySha256)
+    && LeaseFenceContract.HasValidIdentity(value.LeaseId, value.FencingToken)
+    && value.LeaseExpiresAtUnixSeconds > 0
+    && value.DispatchCount >= 1
+    && ActionExecutionModes.IsSupported(value.ExecutionMode)
+    && IsValidBudget(value.Budgets)
+    && value.DispatchCount <= value.Budgets.BrokerMaxDeliverySessions;
+
+  private static bool IsValidBudget(ActionBudget? value) =>
+    value is not null
+    && value.MaxWallTimeSeconds is >= 1 and <= 7_200
+    && value.MaxModelTurns is >= 1 and <= 200
+    && value.MaxAttemptedToolCalls is >= 1 and <= 500
+    && value.MaxMutations is >= 1 and <= 100
+    && value.MaxLocalBytes is >= 1 and <= 5_368_709_120
+    && value.MaxExternalEgressBytes is >= 0 and <= 262_144_000
+    && value.MaxModelSpendUsd is > 0 and <= 20
+    && value.BrokerMaxDeliverySessions is >= 1 and <= 32
+    && value.BrokerMaxRequestAttemptsPerSession is >= 1 and <= 32
+    && value.BrokerSerializedResultUpperBoundBytes is >= 1 and <= 16_777_216;
 
   internal static bool IsCanonicalSha256(string? value) =>
     PayloadDigest.IsSha256Hex(value)
@@ -1910,6 +2455,18 @@ public static class PrivilegedCommandIsolationCanonical
     fields.Add(Field(value.DriverMeasurementSha256));
     fields.Add(Field(value.ServiceMeasurementSha256));
     AddFeatures(fields, value.RequiredFeatures);
+    fields.Add(Field(value.Authorization.CapabilityId));
+    fields.Add(Field(value.Authorization.CapabilityVersion));
+    fields.Add(Field(value.Authorization.ArgumentsSha256));
+    fields.Add(Field(value.Authorization.ExpectedPreStateSha256));
+    fields.Add(Field(value.Authorization.InputProvenanceSha256));
+    fields.Add(Field(value.Authorization.IdempotencyKeySha256));
+    fields.Add(Field(value.Authorization.LeaseId));
+    fields.Add(Field(value.Authorization.FencingToken));
+    fields.Add(Number(value.Authorization.LeaseExpiresAtUnixSeconds));
+    fields.Add(Number(value.Authorization.DispatchCount));
+    fields.Add(Field(value.Authorization.ExecutionMode));
+    AddBudget(fields, value.Authorization.Budgets);
   }
 
   private static void AddProcess(
@@ -1925,6 +2482,26 @@ public static class PrivilegedCommandIsolationCanonical
     fields.Add(Field(value.JobObjectIdentitySha256));
     fields.Add(Field(value.ImagePathSha256));
     fields.Add(Field(value.ImageSha256));
+    fields.Add(Number(value.ImageVolumeSerialNumber));
+    fields.Add(Number(value.ImageFileId));
+    fields.Add(Field(value.CommandLineSha256));
+    fields.Add(Field(value.WorkingDirectorySha256));
+    fields.Add(Field(value.EnvironmentBlockSha256));
+    fields.Add(Field(value.InvocationSha256));
+  }
+
+  private static void AddBudget(List<string> fields, ActionBudget value)
+  {
+    fields.Add(Number(value.MaxWallTimeSeconds));
+    fields.Add(Number(value.MaxModelTurns));
+    fields.Add(Number(value.MaxAttemptedToolCalls));
+    fields.Add(Number(value.MaxMutations));
+    fields.Add(Number(value.MaxLocalBytes));
+    fields.Add(Number(value.MaxExternalEgressBytes));
+    fields.Add(Number(value.MaxModelSpendUsd));
+    fields.Add(Number(value.BrokerMaxDeliverySessions));
+    fields.Add(Number(value.BrokerMaxRequestAttemptsPerSession));
+    fields.Add(Number(value.BrokerSerializedResultUpperBoundBytes));
   }
 
   private static void AddFeatures(
@@ -1999,4 +2576,131 @@ public static class PrivilegedCommandIsolationCanonical
   }
 
   private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
+
+  private static string Number(ulong value) => value.ToString(CultureInfo.InvariantCulture);
+
+  private static string Number(decimal value) =>
+    value.ToString("G29", CultureInfo.InvariantCulture);
+
+  public static string BuildCommandLine(PrivilegedCommandIsolationInvocationV2 value)
+  {
+    ArgumentNullException.ThrowIfNull(value);
+    return string.Join(' ', new[] { QuoteWindowsArgument(value.ExecutablePath) }
+      .Concat(value.Arguments.Select(QuoteWindowsArgument)));
+  }
+
+  public static string EnvironmentBlockSha256(
+    IReadOnlyList<PrivilegedCommandIsolationEnvironmentVariableV2> environment)
+  {
+    ArgumentNullException.ThrowIfNull(environment);
+    var ordered = environment
+      .OrderBy(variable => variable.Name, StringComparer.OrdinalIgnoreCase)
+      .ThenBy(variable => variable.Name, StringComparer.Ordinal)
+      .Select(variable => $"{variable.Name}={variable.Value}");
+    var block = string.Join('\0', ordered) + "\0\0";
+    return Convert.ToHexString(SHA256.HashData(Encoding.Unicode.GetBytes(block)))
+      .ToLowerInvariant();
+  }
+
+  public static string WorkingDirectorySha256(string workingDirectory) =>
+    PayloadDigest.Sha256Hex(workingDirectory);
+
+  private static string QuoteWindowsArgument(string value)
+  {
+    if (value.Length > 0
+      && value.All(character => character is not (' ' or '\t' or '\n' or '\v' or '"')))
+    {
+      return value;
+    }
+
+    var builder = new StringBuilder(value.Length + 2);
+    builder.Append('"');
+    var backslashes = 0;
+    foreach (var character in value)
+    {
+      if (character == '\\')
+      {
+        backslashes++;
+        continue;
+      }
+
+      if (character == '"')
+      {
+        builder.Append('\\', checked((backslashes * 2) + 1));
+        builder.Append('"');
+        backslashes = 0;
+        continue;
+      }
+
+      builder.Append('\\', backslashes);
+      backslashes = 0;
+      builder.Append(character);
+    }
+    builder.Append('\\', checked(backslashes * 2));
+    builder.Append('"');
+    return builder.ToString();
+  }
+
+  private static bool IsValidEnvironment(
+    IReadOnlyList<PrivilegedCommandIsolationEnvironmentVariableV2> environment)
+  {
+    var ordered = environment
+      .OrderBy(variable => variable.Name, StringComparer.OrdinalIgnoreCase)
+      .ThenBy(variable => variable.Name, StringComparer.Ordinal)
+      .ToArray();
+    return environment.SequenceEqual(ordered)
+      && environment.Select(variable => variable.Name)
+        .Distinct(StringComparer.OrdinalIgnoreCase).Count() == environment.Count
+      && environment.All(variable =>
+        variable is not null
+        && IsEnvironmentName(variable.Name)
+        && IsSafeInvocationValue(variable.Value, 32_768));
+  }
+
+  private static bool IsEnvironmentName(string? value) =>
+    value is { Length: >= 1 and <= 128 }
+    && value.All(character => char.IsAsciiLetterOrDigit(character)
+      || character is '_' or '(' or ')' or '-')
+    && !value.Contains('=');
+
+  private static bool IsSafeInvocationValue(string? value, int maximumLength) =>
+    value is not null
+    && value.Length <= maximumLength
+    && value.All(character => character != '\0'
+      && (character >= ' ' || character is '\t'));
+
+  private static bool IsSafeIdentifier(string? value, int maximumLength) =>
+    !string.IsNullOrWhiteSpace(value)
+    && value.Length <= maximumLength
+    && value.All(character => character >= ' ' && character != '\u007f');
+
+  private static bool IsSafeAbsoluteLocalPath(string? value)
+  {
+    if (string.IsNullOrWhiteSpace(value)
+      || value.Length > 32_767
+      || !Path.IsPathFullyQualified(value)
+      || value.StartsWith("\\\\", StringComparison.Ordinal)
+      || value.StartsWith("\\??\\", StringComparison.Ordinal)
+      || value.StartsWith("\\\\?\\", StringComparison.Ordinal)
+      || value.IndexOf(':', 3) >= 0
+      || value.EndsWith(' ')
+      || value.EndsWith('.'))
+    {
+      return false;
+    }
+
+    try
+    {
+      return string.Equals(
+        Path.GetFullPath(value),
+        value,
+        StringComparison.OrdinalIgnoreCase);
+    }
+    catch (Exception exception) when (exception is ArgumentException
+      or NotSupportedException
+      or PathTooLongException)
+    {
+      return false;
+    }
+  }
 }

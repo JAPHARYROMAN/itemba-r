@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>Itemba.Msaidizi.Companion.Service</AssemblyName>
+    <RootNamespace>Itemba.Msaidizi.Companion.Service</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Msaidizi.Companion.Contracts\Msaidizi.Companion.Contracts.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Recovery runs in a separately installed, signed Windows Service. The
+         friend assembly can compose internal compensators without making them
+         public model/plugin surface. Its deployed copy sits under the immutable
+         supervisor root and is never an autonomous update target. -->
+    <InternalsVisibleTo Include="Itemba.Msaidizi.RecoverySupervisor" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

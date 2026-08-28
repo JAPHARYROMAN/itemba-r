@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Itemba.Msaidizi.Companion.Contracts</AssemblyName>
+    <RootNamespace>Itemba.Msaidizi.Companion.Contracts</RootNamespace>
+    <Description>Versioned contracts and trust primitives for the Msaidizi Windows companion.</Description>
+  </PropertyGroup>
+</Project>

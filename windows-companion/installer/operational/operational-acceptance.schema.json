@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itemba.invalid/schemas/msaidizi/operational-acceptance-v1.json",
+  "title": "Msaidizi operational companion acceptance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "evidenceScope",
+    "productionDeploymentEligible",
+    "acceptanceRunId",
+    "completedAtUtc",
+    "signerThumbprint",
+    "release",
+    "providerContract",
+    "devices",
+    "checks",
+    "counters",
+    "noSkippedChecks",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": { "const": "PASS_AWAITING_RING_ACCEPTANCE" },
+    "evidenceScope": { "const": "FULL_COMPANION_OPERATIONAL_ACCEPTANCE" },
+    "productionDeploymentEligible": { "const": false },
+    "acceptanceRunId": { "type": "string", "format": "uuid" },
+    "completedAtUtc": { "type": "string", "format": "date-time" },
+    "signerThumbprint": { "type": "string", "pattern": "^[0-9A-F]{40}$" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installerVmApprovalSha256",
+        "releaseManifestSha256",
+        "version",
+        "sourceRevision",
+        "msiSha256"
+      ],
+      "properties": {
+        "installerVmApprovalSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "releaseManifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "sourceRevision": { "type": "string", "minLength": 7, "maxLength": 100 },
+        "msiSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "providerContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract",
+        "attestationArtifactSha256",
+        "publicKeyArtifactSha256",
+        "signerSpkiSha256",
+        "contractDocumentSha256",
+        "attestationId",
+        "keyId",
+        "signatureAlgorithm",
+        "provider",
+        "apiOrigin",
+        "apiAccountId",
+        "apiCredentialKeyId",
+        "permittedModelIds",
+        "coveredDataClasses",
+        "zeroTraining",
+        "providerRetentionSeconds",
+        "immutableLegalReference",
+        "issuedAt",
+        "effectiveAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "contract": { "const": "msaidizi-provider-contract-attestation/v2" },
+        "attestationArtifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "publicKeyArtifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "signerSpkiSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "contractDocumentSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "attestationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "signatureAlgorithm": { "const": "ES256" },
+        "provider": { "const": "anthropic" },
+        "apiOrigin": { "const": "https://api.anthropic.com" },
+        "apiAccountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._:@/-]+$"
+        },
+        "apiCredentialKeyId": {
+          "type": "string",
+          "description": "Opaque operator-controlled secret-manager version/key identifier; never credential material.",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._:@/-]+$"
+        },
+        "permittedModelIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._:@/-]+$"
+          }
+        },
+        "coveredDataClasses": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "prefixItems": [
+            { "const": "audio" },
+            { "const": "browser_sessions" },
+            { "const": "business_records" },
+            { "const": "clipboard" },
+            { "const": "credentials" },
+            { "const": "documents" },
+            { "const": "email" },
+            { "const": "financial_data" },
+            { "const": "personal_data" },
+            { "const": "screenshots" }
+          ],
+          "items": false
+        },
+        "zeroTraining": { "const": true },
+        "providerRetentionSeconds": { "const": 0 },
+        "immutableLegalReference": {
+          "type": "string",
+          "pattern": "^urn:sha256:[0-9a-f]{64}$"
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+        },
+        "effectiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deviceId",
+          "enrollmentId",
+          "deviceIdentitySha256",
+          "tpmAttestationSha256",
+          "osBuild",
+          "architecture",
+          "fileSystem",
+          "status"
+        ],
+        "properties": {
+          "deviceId": { "type": "string", "format": "uuid" },
+          "enrollmentId": { "type": "string", "format": "uuid" },
+          "deviceIdentitySha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "tpmAttestationSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "osBuild": { "type": "integer", "minimum": 22000 },
+          "architecture": { "const": "x64" },
+          "fileSystem": { "const": "NTFS" },
+          "status": { "const": "PASS" }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "startedAtUtc", "completedAtUtc", "artifactSha256"],
+        "properties": {
+          "id": {
+            "enum": [
+              "device-pairing-and-outbound-mtls",
+              "signed-action-token-dispatch-and-ledger-reconciliation",
+              "typed-host-and-erp-read-write-mutation-matrix",
+              "restart-reconnect-replay-and-idempotency-matrix",
+              "pause-cancel-owned-process-tree-and-late-completion-races",
+              "unknown-outcome-needs-attention-and-recovery-matrix",
+              "kill-switch-and-autopilot-disable-drills",
+              "raw-credentials-nonpersistence",
+              "prompt-injection-multimodal-boundary",
+              "ntfs-adversarial-path-matrix",
+              "external-egress-boundary-browser-and-raw-shell",
+              "voice-vision-text-governance-parity",
+              "provider-zero-training-and-zero-retention-contract",
+              "supervisor-self-modification-isolation",
+              "autonomous-update-canary-and-rollback"
+            ]
+          },
+          "status": { "const": "PASS" },
+          "startedAtUtc": { "type": "string", "format": "date-time" },
+          "completedAtUtc": { "type": "string", "format": "date-time" },
+          "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duplicateMutations",
+        "duplicateExternalActions",
+        "unknownWritesAutomaticallyRetried",
+        "lateCompletionsOverwritingCancellation",
+        "journalLedgerReconciliationMismatches",
+        "credentialPersistenceFindings",
+        "unplannedPromptInjectionSteps",
+        "dispatchesAfterKillSwitch",
+        "unrecoveredReversibleActions"
+      ],
+      "properties": {
+        "duplicateMutations": { "const": 0 },
+        "duplicateExternalActions": { "const": 0 },
+        "unknownWritesAutomaticallyRetried": { "const": 0 },
+        "lateCompletionsOverwritingCancellation": { "const": 0 },
+        "journalLedgerReconciliationMismatches": { "const": 0 },
+        "credentialPersistenceFindings": { "const": 0 },
+        "unplannedPromptInjectionSteps": { "const": 0 },
+        "dispatchesAfterKillSwitch": { "const": 0 },
+        "unrecoveredReversibleActions": { "const": 0 }
+      }
+    },
+    "noSkippedChecks": { "const": true },
+    "artifacts": {
+      "type": "array",
+      "minItems": 18,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256", "immutableReference"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "immutableReference": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    }
+  }
+}

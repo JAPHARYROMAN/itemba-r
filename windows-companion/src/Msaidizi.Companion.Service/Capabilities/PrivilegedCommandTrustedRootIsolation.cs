@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using Itemba.Msaidizi.Companion.Contracts.Capabilities;
 using Itemba.Msaidizi.Companion.Contracts.Security;
 
 namespace Itemba.Msaidizi.Companion.Service.Capabilities;
@@ -17,7 +19,34 @@ public sealed record PrivilegedCommandIsolationRequestBinding(
   string ActionTokenSha256,
   string InvocationSha256,
   string ExpectedImagePathSha256,
-  string ExpectedImageSha256);
+  string ExpectedImageSha256,
+  [property: JsonIgnore]
+  PrivilegedCommandIsolationEphemeralBinding? EphemeralBinding = null);
+
+/// <summary>
+/// Live-channel-only material. The redacted wrapper prevents record diagnostic
+/// formatting from expanding the compact token, argv, or environment and the
+/// JsonIgnore annotations keep all persistence serializers blind to it.
+/// </summary>
+public sealed class PrivilegedCommandIsolationEphemeralBinding
+{
+  public PrivilegedCommandIsolationEphemeralBinding(
+    EphemeralActionAuthorization actionAuthorization,
+    PrivilegedCommandIsolationInvocationV2 invocation)
+  {
+    ActionAuthorization = actionAuthorization
+      ?? throw new ArgumentNullException(nameof(actionAuthorization));
+    Invocation = invocation ?? throw new ArgumentNullException(nameof(invocation));
+  }
+
+  [JsonIgnore]
+  public EphemeralActionAuthorization ActionAuthorization { get; }
+
+  [JsonIgnore]
+  public PrivilegedCommandIsolationInvocationV2 Invocation { get; }
+
+  public override string ToString() => "[ephemeral-isolation-binding-redacted]";
+}
 
 /// <summary>
 /// Facts the LocalSystem runner independently observes while the primary
@@ -33,6 +62,12 @@ public sealed record PrivilegedCommandSuspendedProcessObservation(
   int PrimaryThreadId,
   string ImagePathSha256,
   string ImageSha256,
+  uint ImageVolumeSerialNumber,
+  ulong ImageFileId,
+  string CommandLineSha256,
+  string WorkingDirectorySha256,
+  string EnvironmentBlockSha256,
+  string InvocationSha256,
   bool CreatedSuspended,
   bool AssignedToJob);
 
@@ -214,7 +249,17 @@ internal static class PrivilegedCommandTrustedRootIsolationVerifier
       && PayloadDigest.IsSha256Hex(action.ServiceMeasurementSha256)
       && action.RequiredFeatures.SequenceEqual(
         PrivilegedCommandIsolationFeatures.Required,
-        StringComparer.Ordinal);
+        StringComparer.Ordinal)
+      && expected.EphemeralBinding is not null
+      && PrivilegedCommandIsolationCanonical.IsValidInvocation(
+        expected.EphemeralBinding.Invocation)
+      && PayloadDigest.FixedTimeEqualsHex(
+        action.InvocationSha256,
+        PrivilegedCommandIsolationCanonical.InvocationSha256(
+          expected.EphemeralBinding.Invocation))
+      && AuthorizationMatches(
+        action.Authorization,
+        expected.EphemeralBinding.ActionAuthorization);
   }
 
   public static bool BindMatches(
@@ -242,6 +287,20 @@ internal static class PrivilegedCommandTrustedRootIsolationVerifier
         process.ImagePathSha256,
         expected.ImagePathSha256)
       && PayloadDigest.FixedTimeEqualsHex(process.ImageSha256, expected.ImageSha256)
+      && process.ImageVolumeSerialNumber == expected.ImageVolumeSerialNumber
+      && process.ImageFileId == expected.ImageFileId
+      && PayloadDigest.FixedTimeEqualsHex(
+        process.CommandLineSha256,
+        expected.CommandLineSha256)
+      && PayloadDigest.FixedTimeEqualsHex(
+        process.WorkingDirectorySha256,
+        expected.WorkingDirectorySha256)
+      && PayloadDigest.FixedTimeEqualsHex(
+        process.EnvironmentBlockSha256,
+        expected.EnvironmentBlockSha256)
+      && PayloadDigest.FixedTimeEqualsHex(
+        process.InvocationSha256,
+        expected.InvocationSha256)
       && Guid.TryParseExact(process.JobObjectId, "D", out _)
       && PayloadDigest.IsSha256Hex(process.JobObjectIdentitySha256);
   }
@@ -287,4 +346,31 @@ internal static class PrivilegedCommandTrustedRootIsolationVerifier
 
   private static bool Exact(string left, string right) =>
     string.Equals(left, right, StringComparison.Ordinal);
+
+  private static bool AuthorizationMatches(
+    PrivilegedCommandIsolationActionAuthorizationV2 actual,
+    EphemeralActionAuthorization ephemeral)
+  {
+    var request = ephemeral.SignedAction.Request;
+    var claims = ephemeral.VerifiedClaims;
+    return Exact(actual.CapabilityId, request.CapabilityId)
+      && Exact(actual.CapabilityVersion, request.CapabilityVersion)
+      && PayloadDigest.FixedTimeEqualsHex(actual.ArgumentsSha256, request.ArgumentsSha256)
+      && OptionalDigest(actual.ExpectedPreStateSha256, request.ExpectedPreStateSha256)
+      && OptionalDigest(actual.InputProvenanceSha256, request.InputProvenanceSha256)
+      && PayloadDigest.FixedTimeEqualsHex(
+        actual.IdempotencyKeySha256,
+        PayloadDigest.Sha256Hex(request.IdempotencyKey))
+      && Exact(actual.LeaseId, request.LeaseId)
+      && Exact(actual.FencingToken, request.FencingToken)
+      && actual.LeaseExpiresAtUnixSeconds == request.LeaseExpiresAt.ToUnixTimeSeconds()
+      && actual.DispatchCount == request.DispatchCount
+      && Exact(actual.ExecutionMode, request.ExecutionMode)
+      && actual.Budgets == claims.Budgets;
+  }
+
+  private static bool OptionalDigest(string? left, string? right) =>
+    left is null || right is null
+      ? left is null && right is null
+      : PayloadDigest.FixedTimeEqualsHex(left, right);
 }

@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(service =>
@@ -31,6 +32,9 @@ builder.Services.AddOptions<HostCapabilityOptions>()
   .Bind(builder.Configuration.GetSection(HostCapabilityOptions.SectionName));
 builder.Services.AddOptions<PrivilegedCommandOptions>()
   .Bind(builder.Configuration.GetSection(PrivilegedCommandOptions.SectionName));
+builder.Services.AddOptions<PrivilegedCommandIsolationClientOptions>()
+  .Bind(builder.Configuration.GetSection(
+    PrivilegedCommandIsolationClientOptions.SectionName));
 builder.Services.AddOptions<SystemPowerOptions>()
   .Bind(builder.Configuration.GetSection(SystemPowerOptions.SectionName));
 builder.Services.AddOptions<ExternalActionOptions>()
@@ -41,6 +45,10 @@ builder.Services.AddOptions<SecretProvisioningOptions>()
   .Bind(builder.Configuration.GetSection(SecretProvisioningOptions.SectionName));
 builder.Services.AddOptions<EgressAttestationTrustOptions>()
   .Bind(builder.Configuration.GetSection(EgressAttestationTrustOptions.SectionName));
+builder.Services.AddOptions<EgressSupervisorClientOptions>()
+  .Bind(builder.Configuration.GetSection(EgressSupervisorClientOptions.SectionName));
+builder.Services.AddOptions<EgressSupervisorFlowClientOptions>()
+  .Bind(builder.Configuration.GetSection(EgressSupervisorFlowClientOptions.SectionName));
 
 builder.Services.AddSingleton<IActionVerificationKeyResolver,
   CertificateStoreActionVerificationKeyResolver>();
@@ -73,7 +81,11 @@ builder.Services.AddSingleton<IActionJournal>(services =>
     services.GetRequiredService<IOptions<CompanionOptions>>().Value.JournalPath));
 builder.Services.AddSingleton<IActionResultStore, FileProtectedActionResultStore>();
 builder.Services.AddSingleton<ITrustedRootGuard, TrustedRootGuard>();
-builder.Services.AddSingleton<IEgressBoundaryClient, DisabledEgressBoundaryClient>();
+builder.Services.AddSingleton<IEgressBoundaryClient>(services =>
+  EgressBoundaryClientFactory.Create(
+    services.GetRequiredService<IOptions<EgressSupervisorClientOptions>>(),
+    services.GetRequiredService<IOptions<CompanionOptions>>(),
+    services.GetRequiredService<IOptions<EgressAttestationTrustOptions>>()));
 builder.Services.AddSingleton<IEgressAttestationKeyResolver>(services =>
 {
   var options = services.GetRequiredService<IOptions<EgressAttestationTrustOptions>>();
@@ -87,10 +99,29 @@ builder.Services.AddSingleton(services => new EgressBoundaryContractVerifier(
   EgressBoundaryVerificationSettings.Strict(
     services.GetRequiredService<IOptions<CompanionOptions>>().Value.DeviceId),
   services.GetRequiredService<IEgressAttestationKeyResolver>()));
+builder.Services.AddSingleton<ICapabilityBoundaryAttestationReplayGuard,
+  InMemoryCapabilityBoundaryAttestationReplayGuard>();
+builder.Services.AddSingleton(services => new CapabilityBoundaryAttestationVerifier(
+  services.GetRequiredService<IOptions<CompanionOptions>>().Value.DeviceId,
+  TimeSpan.FromSeconds(30),
+  TimeSpan.FromSeconds(120),
+  services.GetRequiredService<IEgressAttestationKeyResolver>(),
+  services.GetRequiredService<ICapabilityBoundaryAttestationReplayGuard>()));
+builder.Services.AddSingleton<ICapabilityBoundaryAttestationProvider,
+  CapabilityBoundaryAttestationProvider>();
 builder.Services.AddSingleton<IEgressReceiptReplayStore>(services =>
   new FileEgressReceiptReplayStore(
     services.GetRequiredService<IOptions<CompanionOptions>>()
-      .Value.EgressReceiptReplayPath));
+      .Value.EgressReceiptReplayPath,
+    requireInstallerBoundary: true));
+builder.Services.AddSingleton<EgressBoundaryDispatchLatch>();
+// The coordinator always carries the one-way isolation fuse, even when the
+// packaged configuration exposes no privileged-command adapter. Keeping this
+// registration unconditional makes the default fail-closed host constructible.
+builder.Services.AddSingleton<PrivilegedCommandIsolationDispatchLatch>();
+// Registered before CompanionWorker so corrupt, partial, full, or concurrently
+// owned replay state prevents broker intake before an external effect.
+builder.Services.AddHostedService<EgressReceiptReplayStartupVerifier>();
 builder.Services.AddSingleton<ILocalSystemEgressEvidenceVerifier,
   LocalSystemEgressEvidenceVerifier>();
 builder.Services.AddSingleton<IDeviceIdentityProvisioner, DeviceIdentityProvisioner>();
@@ -118,13 +149,17 @@ builder.Services.AddSingleton<IOutboundCompanionChannel>(services =>
       services.GetRequiredService<IDeviceIdentityProvisioner>(),
       services.GetRequiredService<ILogger<HttpPollingCompanionChannel>>())
     : ActivatorUtilities.CreateInstance<DisabledOutboundCompanionChannel>(services));
+builder.Services.AddSingleton<IJournalReconciliationGate, JournalReconciliationGate>();
 
 builder.Services.AddSingleton<IHostCapabilityAdapter, NoOpCapabilityAdapter>();
 builder.Services.AddSingleton<IHostCapabilityAdapter, SystemStatusCapabilityAdapter>();
 if (builder.Configuration.GetValue<bool>($"{ExternalActionOptions.SectionName}:Enabled"))
 {
   builder.Services.AddSingleton<ExternalActionPolicy>();
-  builder.Services.AddSingleton<IExternalActionTransport, TlsExternalActionTransport>();
+  builder.Services.AddSingleton<IExternalActionTransport>(services =>
+    ExternalActionTransportFactory.Create(
+      services.GetRequiredService<IOptions<EgressSupervisorClientOptions>>(),
+      services.GetRequiredService<IOptions<EgressSupervisorFlowClientOptions>>()));
   builder.Services.AddSingleton<ExternalActionExecutor>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, ExternalEmailSendCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, ExternalMessageSendCapabilityAdapter>();
@@ -172,6 +207,8 @@ if (builder.Configuration.GetValue<bool>($"{HostCapabilityOptions.SectionName}:E
   builder.Services.AddSingleton<ITrustedAdministrativeRecoveryExecutor,
     TrustedAdministrativeRecoveryExecutor>();
   builder.Services.AddSingleton<IHostMutationCommitObserver, NoOpHostMutationCommitObserver>();
+  builder.Services.AddSingleton<IArchiveExtractCommitObserver,
+    NoOpArchiveExtractCommitObserver>();
   builder.Services.AddSingleton<GovernedSystemToolRunner>();
   builder.Services.AddSingleton<OwnedProcessManager>();
   builder.Services.AddSingleton<RegistryTargetPolicy>();
@@ -194,13 +231,16 @@ if (builder.Configuration.GetValue<bool>($"{HostCapabilityOptions.SectionName}:E
   builder.Services.AddSingleton<IWindowsPowerSettingsManager, WindowsPowerSettingsManager>();
   builder.Services.AddSingleton<IWindowsTimeZoneManager, WindowsTimeZoneManager>();
   builder.Services.AddSingleton<IWindowsDisplayInventory, WindowsDisplayInventory>();
+  builder.Services.AddSingleton<IWindowsSystemProcessInventory,
+    WindowsSystemProcessInventory>();
+  builder.Services.AddSingleton<IInstalledSoftwareInventory,
+    WindowsInstalledSoftwareInventory>();
   builder.Services.AddSingleton<IWindowsFileAclManager, WindowsFileAclManager>();
   builder.Services.AddSingleton<IWindowsServiceStartModeManager,
     WindowsServiceStartModeManager>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemEntryStatCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemAclReadCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemAclSetCapabilityAdapter>();
-  builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemFileReadCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemFolderListCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemSearchCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemFileWriteCapabilityAdapter>();
@@ -208,6 +248,8 @@ if (builder.Configuration.GetValue<bool>($"{HostCapabilityOptions.SectionName}:E
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemEntryCopyCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemEntryMoveCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemArchiveCreateCapabilityAdapter>();
+  builder.Services.AddSingleton<IHostCapabilityAdapter,
+    FileSystemArchiveExtractCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, FileSystemEntryQuarantineCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, OwnedProcessLaunchCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, OwnedProcessStatusCapabilityAdapter>();
@@ -249,6 +291,13 @@ if (builder.Configuration.GetValue<bool>($"{HostCapabilityOptions.SectionName}:E
   builder.Services.AddSingleton<IHostCapabilityAdapter, PrinterQueueStatusCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, PrinterQueuePausedSetCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, DisplayInventoryReadCapabilityAdapter>();
+  builder.Services.AddSingleton<IHostCapabilityAdapter,
+    ProcessSystemInventoryReadCapabilityAdapter>();
+  builder.Services.AddSingleton<IHostCapabilityAdapter>(services =>
+    new InstalledSoftwareInventoryReadCapabilityAdapter(
+      services.GetRequiredService<IInstalledSoftwareInventory>(),
+      services.GetRequiredService<IOptions<HostCapabilityOptions>>()
+        .Value.MaximumInstalledSoftwareInventoryEntries));
   builder.Services.AddSingleton<IHostCapabilityAdapter, ActivePowerSchemeReadCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, ActivePowerSchemeSetCapabilityAdapter>();
   builder.Services.AddSingleton<IHostCapabilityAdapter, MonitorTimeoutReadCapabilityAdapter>();
@@ -259,16 +308,11 @@ if (builder.Configuration.GetValue<bool>($"{HostCapabilityOptions.SectionName}:E
     $"{PrivilegedCommandOptions.SectionName}:Enabled"))
   {
     builder.Services.AddSingleton<PrivilegedCommandPolicy>();
-    builder.Services.AddSingleton<RejectingPrivilegedCommandTrustedRootIsolationGate>();
-    builder.Services.AddSingleton<IPrivilegedCommandTrustedRootIsolationGate>(services =>
-      services.GetRequiredService<RejectingPrivilegedCommandTrustedRootIsolationGate>());
-    builder.Services.AddSingleton<IPrivilegedCommandTrustedRootIsolationRecovery>(services =>
-      services.GetRequiredService<RejectingPrivilegedCommandTrustedRootIsolationGate>());
+    PrivilegedCommandIsolationClientFactory.Register(builder.Services);
     builder.Services.AddSingleton<IPrivilegedCommandIsolationReplayStore>(services =>
       new FilePrivilegedCommandIsolationReplayStore(
         services.GetRequiredService<IOptions<PrivilegedCommandOptions>>()
           .Value.IsolationReplayStorePath));
-    builder.Services.AddSingleton<PrivilegedCommandIsolationDispatchLatch>();
     // Registered before CompanionWorker: IHostedService startup is ordered, so
     // pending signed reservation/bind state fences broker intake until it has
     // been durably settled by the trusted supervisor.
@@ -294,23 +338,35 @@ if (builder.Configuration.GetValue<bool>($"{HostCapabilityOptions.SectionName}:E
 }
 if (builder.Configuration.GetValue<bool>($"{SessionBridgeOptions.SectionName}:Enabled"))
 {
+  var browserExternalEffectsRequested = builder.Configuration.GetValue<bool>(
+    $"{SessionBridgeOptions.SectionName}:BrowserExternalEffectsEnabled");
+  var emergencyCommandRequested = builder.Configuration.GetValue<bool>(
+    $"{SessionBridgeOptions.SectionName}:EmergencyCommandEnabled");
+  var capabilityBoundaryAttestation = await CapabilityBoundaryProgramBootstrap
+    .TryResolveAsync(builder.Configuration, CancellationToken.None)
+    .ConfigureAwait(false);
+  var descriptors = StandardUserCapabilityCatalog.DescribeRequestedSurface(
+    browserExternalEffectsRequested,
+    emergencyCommandRequested);
+  builder.Services.AddSingleton<ICapabilityBoundaryActivationState>(
+    new CapabilityBoundaryActivationState(
+      browserExternalEffectsRequested,
+      emergencyCommandRequested,
+      capabilityBoundaryAttestation));
+  builder.Services.AddHostedService<CapabilityBoundaryActivationRenewalService>();
   builder.Services.AddSingleton<NamedPipeSessionBridge>();
   builder.Services.AddSingleton<IUserSessionBridge>(services =>
     services.GetRequiredService<NamedPipeSessionBridge>());
   builder.Services.AddHostedService(services =>
     services.GetRequiredService<NamedPipeSessionBridge>());
-  var descriptors = StandardUserCapabilityCatalog.SelectEnabled(
-    builder.Configuration.GetValue<bool>(
-      $"{SessionBridgeOptions.SectionName}:BrowserExternalEffectsEnabled"),
-    builder.Configuration.GetValue<bool>(
-      $"{SessionBridgeOptions.SectionName}:EmergencyCommandEnabled"));
   foreach (var descriptor in descriptors)
   {
     builder.Services.AddSingleton<IHostCapabilityAdapter>(services =>
       new SessionCapabilityProxyAdapter(
         descriptor,
         services.GetRequiredService<IUserSessionBridge>(),
-        services.GetRequiredService<IHostSecretReferenceVault>()));
+        services.GetRequiredService<IHostSecretReferenceVault>(),
+        services.GetRequiredService<ICapabilityBoundaryActivationState>()));
   }
 }
 builder.Services.AddSingleton<CapabilityRegistry>();
@@ -319,3 +375,210 @@ builder.Services.AddSingleton<CapabilityManifestPublisher>();
 builder.Services.AddHostedService<CompanionWorker>();
 
 await builder.Build().RunAsync().ConfigureAwait(false);
+
+/// <summary>
+/// Selects the independently deployed isolation client only from a complete,
+/// exact, deployment-owned trust bundle. Any disabled, partial, malformed, or
+/// cross-device configuration retains the non-accepting production fallback.
+/// </summary>
+namespace Itemba.Msaidizi.Companion.Service.Capabilities
+{
+  internal static class PrivilegedCommandIsolationClientFactory
+  {
+    internal const string NamedPipeTransport = "named-pipe-v2";
+
+    public static void Register(IServiceCollection services)
+    {
+      ArgumentNullException.ThrowIfNull(services);
+      services.AddSingleton<RejectingPrivilegedCommandTrustedRootIsolationGate>();
+      services.AddSingleton<IPrivilegedCommandTrustedRootIsolationGate>(provider =>
+        Create(
+          provider.GetRequiredService<
+            IOptions<PrivilegedCommandIsolationClientOptions>>().Value,
+          provider.GetRequiredService<IOptions<CompanionOptions>>().Value,
+          provider.GetRequiredService<
+            RejectingPrivilegedCommandTrustedRootIsolationGate>()));
+      services.AddSingleton<IPrivilegedCommandTrustedRootIsolationRecovery>(provider =>
+        (IPrivilegedCommandTrustedRootIsolationRecovery)provider.GetRequiredService<
+          IPrivilegedCommandTrustedRootIsolationGate>());
+    }
+
+    public static IPrivilegedCommandTrustedRootIsolationGate Create(
+      PrivilegedCommandIsolationClientOptions options,
+      CompanionOptions companion,
+      RejectingPrivilegedCommandTrustedRootIsolationGate fallback)
+    {
+      ArgumentNullException.ThrowIfNull(options);
+      ArgumentNullException.ThrowIfNull(companion);
+      ArgumentNullException.ThrowIfNull(fallback);
+      return TryCreate(options, companion, out var client) ? client! : fallback;
+    }
+
+    private static bool TryCreate(
+      PrivilegedCommandIsolationClientOptions options,
+      CompanionOptions companion,
+      out NamedPipePrivilegedCommandTrustedRootIsolationClient? client)
+    {
+      client = null;
+      if (!IsComplete(options, companion))
+      {
+        return false;
+      }
+
+      try
+      {
+        var pins = CreatePins(options);
+        if (pins.Select(pin => pin.KeyId).Distinct(StringComparer.Ordinal).Count() != 4
+          || pins.Select(pin => pin.SubjectPublicKeyInfoBase64)
+            .Distinct(StringComparer.Ordinal).Count() != 4)
+        {
+          return false;
+        }
+
+        var resolver = new ExactPurposeP256PublicKeyResolver(pins);
+        var verification = new PrivilegedCommandIsolationVerificationSettings(
+          options.ExpectedDeviceId,
+          options.ExpectedIsolationPolicySha256,
+          options.ExpectedDriverMeasurementSha256,
+          options.ExpectedServiceMeasurementSha256,
+          TimeSpan.FromSeconds(options.AllowedClockSkewSeconds),
+          TimeSpan.FromSeconds(options.MaximumReservationRequestAgeSeconds),
+          TimeSpan.FromSeconds(options.MaximumReservationLeaseLifetimeSeconds),
+          TimeSpan.FromSeconds(options.MaximumBindAcknowledgementLifetimeSeconds),
+          TimeSpan.FromSeconds(options.MaximumExecutionDurationSeconds),
+          TimeSpan.FromSeconds(options.MaximumReceiptDelaySeconds));
+        _ = new PrivilegedCommandIsolationContractVerifier(verification, resolver);
+
+        client = new NamedPipePrivilegedCommandTrustedRootIsolationClient(
+          new PrivilegedCommandTrustedRootPipeClientOptions
+          {
+            Enabled = true,
+            PipeName = options.PipeName,
+            ExpectedSupervisorImagePath = options.ExpectedSupervisorImagePath,
+            ExpectedSupervisorImageSha256 = options.ExpectedSupervisorImageSha256,
+            ExpectedSupervisorServiceSid = options.ExpectedSupervisorServiceSid,
+            MaximumFrameBytes = options.MaximumFrameBytes,
+            ConnectTimeout = TimeSpan.FromMilliseconds(
+              options.ConnectTimeoutMilliseconds),
+            OperationTimeout = TimeSpan.FromMilliseconds(
+              options.OperationTimeoutMilliseconds),
+            ReservationRequestLifetime = TimeSpan.FromSeconds(
+              options.ReservationRequestLifetimeSeconds),
+            Verification = verification,
+          },
+          resolver);
+        return true;
+      }
+      catch (Exception exception) when (exception is ArgumentException
+        or CryptographicException
+        or InvalidOperationException
+        or NotSupportedException)
+      {
+        client = null;
+        return false;
+      }
+    }
+
+    private static bool IsComplete(
+      PrivilegedCommandIsolationClientOptions options,
+      CompanionOptions companion) =>
+      OperatingSystem.IsWindows()
+      && options.Enabled
+      && string.Equals(options.Transport, NamedPipeTransport, StringComparison.Ordinal)
+      && options.ProtocolVersion == PrivilegedCommandIsolationPipeProtocol.Version
+      && PrivilegedCommandIsolationPipeProtocol.IsSafePipeName(options.PipeName)
+      && IsSafeAbsoluteLocalPath(options.ExpectedSupervisorImagePath)
+      && IsCanonicalSha256(options.ExpectedSupervisorImageSha256)
+      && TrustedSupervisorProcessAccessGrant.IsCanonicalRestrictedServiceSid(
+        options.ExpectedSupervisorServiceSid)
+      && string.Equals(
+        options.ExpectedSupervisorServiceSid,
+        PrivilegedCommandIsolationSupervisorIdentity.ServiceSid,
+        StringComparison.Ordinal)
+      && IsCanonicalGuid(options.ExpectedDeviceId)
+      && string.Equals(
+        options.ExpectedDeviceId,
+        companion.DeviceId,
+        StringComparison.Ordinal)
+      && IsCanonicalSha256(options.ExpectedIsolationPolicySha256)
+      && IsCanonicalSha256(options.ExpectedDriverMeasurementSha256)
+      && IsCanonicalSha256(options.ExpectedServiceMeasurementSha256)
+      && options.MaximumFrameBytes
+        is >= PrivilegedCommandIsolationPipeProtocol.MinimumFrameBytes
+        and <= PrivilegedCommandIsolationPipeProtocol.AbsoluteMaximumFrameBytes
+      && options.ConnectTimeoutMilliseconds is >= 100 and <= 30_000
+      && options.OperationTimeoutMilliseconds is >= 100 and <= 30_000
+      && options.ReservationRequestLifetimeSeconds is >= 1 and <= 120
+      && options.AllowedClockSkewSeconds is >= 0 and <= 120
+      && options.MaximumReservationRequestAgeSeconds is >= 1 and <= 300
+      && options.MaximumReservationLeaseLifetimeSeconds is >= 1 and <= 600
+      && options.MaximumBindAcknowledgementLifetimeSeconds is >= 1 and <= 120
+      && options.MaximumExecutionDurationSeconds is >= 1 and <= 7_200
+      && options.MaximumReceiptDelaySeconds is >= 1 and <= 1_800;
+
+    private static PrivilegedCommandIsolationPublicKeyPin[] CreatePins(
+      PrivilegedCommandIsolationClientOptions options) =>
+    [
+      Pin(
+        options.ReservationLeasePublicKey,
+        PrivilegedCommandIsolationSignaturePurposes.ReservationLease),
+      Pin(
+        options.PreBindReservationReleasePublicKey,
+        PrivilegedCommandIsolationSignaturePurposes.PreBindReservationRelease),
+      Pin(
+        options.SuspendedProcessBindAcknowledgementPublicKey,
+        PrivilegedCommandIsolationSignaturePurposes
+          .SuspendedProcessBindAcknowledgement),
+      Pin(
+        options.TerminalEnforcementReceiptPublicKey,
+        PrivilegedCommandIsolationSignaturePurposes.TerminalEnforcementReceipt),
+    ];
+
+    private static PrivilegedCommandIsolationPublicKeyPin Pin(
+      PrivilegedCommandIsolationPublicKeyOptions options,
+      string signaturePurpose)
+    {
+      ArgumentNullException.ThrowIfNull(options);
+      return new PrivilegedCommandIsolationPublicKeyPin(
+        options.KeyId,
+        signaturePurpose,
+        options.SubjectPublicKeyInfoBase64);
+    }
+
+    private static bool IsCanonicalGuid(string? value) =>
+      value is not null
+      && Guid.TryParseExact(value, "D", out var parsed)
+      && string.Equals(parsed.ToString("D"), value, StringComparison.Ordinal);
+
+    private static bool IsCanonicalSha256(string? value) =>
+      PayloadDigest.IsSha256Hex(value)
+      && string.Equals(value, value?.ToLowerInvariant(), StringComparison.Ordinal);
+
+    private static bool IsSafeAbsoluteLocalPath(string value)
+    {
+      if (string.IsNullOrWhiteSpace(value)
+        || !Path.IsPathFullyQualified(value)
+        || value.StartsWith("\\\\", StringComparison.Ordinal)
+        || value.StartsWith("\\??\\", StringComparison.Ordinal)
+        || value.StartsWith("\\\\?\\", StringComparison.Ordinal)
+        || value.EndsWith(' ')
+        || value.EndsWith('.'))
+      {
+        return false;
+      }
+
+      try
+      {
+        var fullPath = Path.GetFullPath(value);
+        return string.Equals(fullPath, value, StringComparison.OrdinalIgnoreCase)
+          && fullPath.IndexOf(':', 3) < 0;
+      }
+      catch (Exception exception) when (exception is ArgumentException
+        or NotSupportedException
+        or PathTooLongException)
+      {
+        return false;
+      }
+    }
+  }
+}

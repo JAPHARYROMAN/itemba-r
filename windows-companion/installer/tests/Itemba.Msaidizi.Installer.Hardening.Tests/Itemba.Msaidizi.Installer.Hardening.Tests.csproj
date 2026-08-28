@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.22000.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+    <AssemblyName>Itemba.Msaidizi.Installer.Hardening.Tests</AssemblyName>
+    <RootNamespace>Itemba.Msaidizi.Installer.Hardening.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath>$(MSBuildThisFileDirectory)..\..\locks\hardening-tests.packages.lock.json</NuGetLockFilePath>
+    <RestoreLockedMode>true</RestoreLockedMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Itemba.Msaidizi.Installer.Hardening\Itemba.Msaidizi.Installer.Hardening.csproj" />
+    <ProjectReference Include="..\..\src\Itemba.Msaidizi.ProviderContractVerifier\Itemba.Msaidizi.ProviderContractVerifier.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\wix\Package.wxs"
+          Link="Authoring\Package.wxs"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\Itemba.Msaidizi.Installer.Hardening\HandleBoundPathSecurity.cs"
+          Link="Authoring\HandleBoundPathSecurity.cs"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\Itemba.Msaidizi.Installer.Hardening\Itemba.Msaidizi.Installer.Hardening.csproj"
+          Link="Authoring\Itemba.Msaidizi.Installer.Hardening.csproj"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\Itemba.Msaidizi.Installer.Hardening\Program.cs"
+          Link="Authoring\Program.cs"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\vm\Invoke-MsaidiziVmAcceptance.ps1"
+          Link="Authoring\Invoke-MsaidiziVmAcceptance.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

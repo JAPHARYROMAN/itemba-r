@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Itemba.Msaidizi.Companion.Contracts.Capabilities;
@@ -46,6 +47,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
   private readonly ITrustedRootGuard _trustedRoot;
   private readonly IEgressBoundaryClient _egressBoundary;
   private readonly ILocalSystemEgressEvidenceVerifier _egressEvidence;
+  private readonly EgressBoundaryDispatchLatch _egressDispatchLatch;
   private readonly PrivilegedCommandIsolationDispatchLatch _isolationDispatchLatch;
   private readonly IOutboundCompanionChannel _channel;
   private readonly ILogger<ActionExecutionCoordinator> _logger;
@@ -68,6 +70,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
     ITrustedRootGuard trustedRoot,
     IEgressBoundaryClient egressBoundary,
     ILocalSystemEgressEvidenceVerifier egressEvidence,
+    EgressBoundaryDispatchLatch egressDispatchLatch,
     PrivilegedCommandIsolationDispatchLatch isolationDispatchLatch,
     IOutboundCompanionChannel channel,
     ILogger<ActionExecutionCoordinator> logger)
@@ -91,6 +94,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
     _trustedRoot = trustedRoot;
     _egressBoundary = egressBoundary;
     _egressEvidence = egressEvidence;
+    _egressDispatchLatch = egressDispatchLatch;
     _isolationDispatchLatch = isolationDispatchLatch;
     _channel = channel;
     _logger = logger;
@@ -334,6 +338,19 @@ public sealed class ActionExecutionCoordinator : IDisposable
         await HandleNonStartingDispositionAsync(request, begin).ConfigureAwait(false);
         return;
       }
+      var preparedRecord = begin.PreparedRecord;
+      if (preparedRecord is null)
+      {
+        await CompleteKnownFailureAsync(
+          request,
+          ActionOutcome.Failed,
+          "journal_prepared_receipt_missing",
+          mutationCommitted: false,
+          outcomeUncertain: false,
+          budgets: claims.Budgets,
+          actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+        return;
+      }
 
       if (_pendingCancellations.TryRemove(request.ActionId, out var pendingCancellation)
         && string.Equals(pendingCancellation.TaskId, request.TaskId, StringComparison.Ordinal))
@@ -382,7 +399,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
         request,
         ActionProgressState.Accepted,
         "action_accepted",
-        CancellationToken.None)
+        cancellationToken: CancellationToken.None)
         .ConfigureAwait(false);
 
       var capabilityBudgets = claims.Budgets with
@@ -394,6 +411,10 @@ public sealed class ActionExecutionCoordinator : IDisposable
       CancellationTokenSource? leaseHeartbeatCancellation = null;
       Task? leaseHeartbeatTask = null;
       var requiresEgressBoundary = RequiresEgressBoundary(adapter.Descriptor.Id);
+      IEgressBoundarySession? egressSession = null;
+      EgressActionBinding? egressBinding = null;
+      IReadOnlyList<string>? requiredEgressFeatures = null;
+      EgressExecutionEvidence? egressEvidence = null;
       try
       {
         await _concurrencyGate.WaitAsync(actionCancellation.Token).ConfigureAwait(false);
@@ -402,14 +423,23 @@ public sealed class ActionExecutionCoordinator : IDisposable
         // single execution slot. An earlier check could race with the preceding
         // privileged command tripping the fuse while this action waited.
         _isolationDispatchLatch.ThrowIfTripped();
+        if (requiresEgressBoundary)
+        {
+          _egressDispatchLatch.ThrowIfTripped();
+        }
         var startedAcknowledged = await SendProgressSafelyAsync(
           request,
           ActionProgressState.Started,
           "action_started",
+          preparedRecord,
           CancellationToken.None)
           .ConfigureAwait(false);
         if (adapter.Descriptor.IsMutation
-          && (!startedAcknowledged || !_channel.IsCentralLedgerConnected))
+          && (!ExactPreparedAcknowledgement(
+              startedAcknowledged,
+              request,
+              preparedRecord)
+            || !_channel.IsCentralLedgerConnected))
         {
           // The earlier connectivity check can become stale while the action
           // waits for the local concurrency gate. Require one immediately
@@ -431,10 +461,11 @@ public sealed class ActionExecutionCoordinator : IDisposable
         leaseHeartbeatTask = RunLeaseHeartbeatAsync(
           request,
           adapter.Descriptor.IsMutation,
+          preparedRecord,
           actionCancellation,
           leaseHeartbeatCancellation.Token);
 
-        var egressBinding = new EgressActionBinding(
+        egressBinding = new EgressActionBinding(
           actionTokenSha256,
           request.ActionId,
           request.TaskId,
@@ -447,21 +478,27 @@ public sealed class ActionExecutionCoordinator : IDisposable
           request.DispatchCount,
           capabilityBudgets.MaxExternalEgressBytes,
           _options.EgressDestinationPolicySha256,
-          _options.EgressExecutionIdentitySha256);
+          _options.EgressExecutionIdentitySha256,
+          request.ArgumentsSha256.ToLowerInvariant(),
+          request.ExpectedPreStateSha256?.ToLowerInvariant(),
+          PayloadDigest.Sha256Hex(request.IdempotencyKey));
         EgressExecutionAuthorization? egressAuthorization = null;
         if (requiresEgressBoundary)
         {
-          egressAuthorization = await _egressBoundary.TryAcquireAuthorizationAsync(
+          requiredEgressFeatures = RequiredBoundaryFeatures(adapter.Descriptor.Id);
+          egressSession = await _egressBoundary.TryReserveAsync(
             signedAction.CompactToken,
+            request.ArgumentsJsonUtf8,
             egressBinding,
             actionCancellation.Token).ConfigureAwait(false);
+          egressAuthorization = egressSession?.Authorization;
           var authorizationVerification = egressAuthorization is null
             ? EgressVerificationResult.Invalid<VerifiedEgressAuthorization>(
               "egress_boundary_unavailable")
             : _egressEvidence.VerifyAuthorization(
               egressAuthorization,
               egressBinding,
-              RequiredBoundaryFeatures(adapter.Descriptor.Id));
+              requiredEgressFeatures);
           if (!authorizationVerification.IsValid)
           {
             await CompleteKnownFailureAsync(
@@ -473,6 +510,25 @@ public sealed class ActionExecutionCoordinator : IDisposable
               budgets: claims.Budgets,
               uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
               actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+            return;
+          }
+          if (adapter is not IEgressLifecycleCapabilityAdapter)
+          {
+            egressEvidence = await AbortEgressBeforeAdapterAsync(
+              egressSession!,
+              egressBinding,
+              requiredEgressFeatures,
+              request.ActionId,
+              actionCancellation.Token).ConfigureAwait(false);
+            await CompleteKnownFailureAsync(
+              request,
+              ActionOutcome.Failed,
+              "egress_lifecycle_adapter_required",
+              mutationCommitted: false,
+              outcomeUncertain: false,
+              budgets: claims.Budgets,
+              actionTokenSha256: actionTokenSha256,
+              egressEvidence: egressEvidence).ConfigureAwait(false);
             return;
           }
         }
@@ -492,10 +548,21 @@ public sealed class ActionExecutionCoordinator : IDisposable
           request.DispatchCount,
           egressAuthorization,
           _options.EgressDestinationPolicySha256,
-          _options.EgressExecutionIdentitySha256);
+          _options.EgressExecutionIdentitySha256,
+          request.ArgumentsSha256,
+          new EphemeralActionAuthorization(signedAction, claims));
         if (await _journal.IsFencedAsync(request, actionCancellation.Token)
           .ConfigureAwait(false))
         {
+          if (requiresEgressBoundary)
+          {
+            egressEvidence = await AbortEgressBeforeAdapterAsync(
+              egressSession!,
+              egressBinding,
+              requiredEgressFeatures!,
+              request.ActionId,
+              CancellationToken.None).ConfigureAwait(false);
+          }
           await CompleteKnownFailureAsync(
             request,
             ActionOutcome.Failed,
@@ -503,93 +570,140 @@ public sealed class ActionExecutionCoordinator : IDisposable
             mutationCommitted: false,
             outcomeUncertain: false,
             budgets: claims.Budgets,
-            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+            actionTokenSha256: actionTokenSha256,
+            egressEvidence: egressEvidence).ConfigureAwait(false);
           return;
         }
-        var executed = await adapter.ExecuteAsync(
+        var conservativeEgressFloor = ConservativeEgressFloor(
+          adapter.Descriptor,
           executionContext,
-          argumentsDocument.RootElement,
-          actionCancellation.Token).ConfigureAwait(false);
+          argumentsDocument.RootElement);
+        var executed = requiresEgressBoundary
+          ? await ((IEgressLifecycleCapabilityAdapter)adapter).ExecuteWithEgressAsync(
+            executionContext,
+            argumentsDocument.RootElement,
+            egressSession!,
+            actionCancellation.Token).ConfigureAwait(false)
+          : await adapter.ExecuteAsync(
+            executionContext,
+            argumentsDocument.RootElement,
+            actionCancellation.Token).ConfigureAwait(false);
 
-        EgressExecutionEvidence? egressEvidence = null;
+        var settledExternalEgressBytes = Math.Max(
+          Math.Max(0, executed.ExternalEgressBytes),
+          conservativeEgressFloor);
         long receiptUncertainEgressBytes = 0;
         var receiptOutcomeUncertain = false;
         if (requiresEgressBoundary)
         {
-          if (egressAuthorization is null || executed.EgressReceipt is null)
+          if (egressAuthorization is null || egressSession is null)
           {
-            await CompleteKnownFailureAsync(
-              request,
-              ActionOutcome.NeedsAttention,
-              "egress_receipt_missing",
-              mutationCommitted: executed.MutationCommitted,
-              outcomeUncertain: true,
-              budgets: claims.Budgets,
-              localBytesRead: Math.Max(0, executed.LocalBytesRead),
-              localBytesWritten: Math.Max(0, executed.LocalBytesWritten),
-              uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
-              preStateSha256: ValidDigestOrNull(executed.PreStateSha256),
-              recoveryProvenanceSha256: ValidDigestOrNull(
-                executed.RecoveryProvenanceSha256),
-              recoveryHandleSha256: executed.OpaqueRecoveryHandle is null
-                ? null
-                : PayloadDigest.Sha256Hex(executed.OpaqueRecoveryHandle),
-              actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
-            return;
+            _egressDispatchLatch.Trip();
+            throw new EgressBoundaryUnsafeException(
+              "egress_session_missing",
+              mayHaveExecuted: true);
+          }
+          if (!egressSession.HasRegistration)
+          {
+            _egressDispatchLatch.Trip();
+            throw new EgressBoundaryUnsafeException(
+              "egress_registration_missing_after_adapter",
+              mayHaveExecuted: true);
           }
 
+          var disposition = new EgressTerminalDispositionV1(
+            EgressSupervisorLifecycleContract.Version,
+            EgressSupervisorLifecycleCanonical.OperationId(request.ActionId, "settle"),
+            executed.OutcomeUncertain
+              ? EgressSupervisorLifecycleContract.Unknown
+              : EgressSupervisorLifecycleContract.Completed,
+            settledExternalEgressBytes,
+            executed.OutcomeUncertain,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+          var signedReceipt = await egressSession.TrySettleAsync(
+            disposition,
+            actionCancellation.Token).ConfigureAwait(false);
+          if (signedReceipt is null)
+          {
+            _egressDispatchLatch.Trip();
+            throw new EgressBoundaryUnsafeException(
+              "egress_terminal_receipt_missing",
+              mayHaveExecuted: true);
+          }
           egressEvidence = new EgressExecutionEvidence(
             egressAuthorization,
-            executed.EgressReceipt);
+            signedReceipt);
           var receiptVerification = await _egressEvidence.VerifyAndCommitReceiptAsync(
             egressEvidence,
             egressBinding,
-            RequiredBoundaryFeatures(adapter.Descriptor.Id),
+            requiredEgressFeatures!,
             actionCancellation.Token).ConfigureAwait(false);
-          if (!receiptVerification.IsValid
-            || receiptVerification.Value is null
-            || receiptVerification.Value.Evidence.Receipt.Receipt.MeasuredExternalEgressBytes
-              != executed.ExternalEgressBytes)
+          if (!receiptVerification.IsValid || receiptVerification.Value is null)
           {
-            await CompleteKnownFailureAsync(
-              request,
-              ActionOutcome.NeedsAttention,
-              receiptVerification.IsValid
-                ? "egress_receipt_measurement_mismatch"
-                : receiptVerification.ErrorCode ?? "egress_receipt_invalid",
-              mutationCommitted: executed.MutationCommitted,
-              outcomeUncertain: true,
-              budgets: claims.Budgets,
-              localBytesRead: Math.Max(0, executed.LocalBytesRead),
-              localBytesWritten: Math.Max(0, executed.LocalBytesWritten),
-              uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
-              preStateSha256: ValidDigestOrNull(executed.PreStateSha256),
-              recoveryProvenanceSha256: ValidDigestOrNull(
-                executed.RecoveryProvenanceSha256),
-              recoveryHandleSha256: executed.OpaqueRecoveryHandle is null
-                ? null
-                : PayloadDigest.Sha256Hex(executed.OpaqueRecoveryHandle),
-              actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
-            return;
+            _egressDispatchLatch.Trip();
+            throw new EgressBoundaryUnsafeException(
+              receiptVerification.ErrorCode ?? "egress_receipt_invalid",
+              mayHaveExecuted: true);
           }
-
           var receipt = receiptVerification.Value.Evidence.Receipt.Receipt;
+          var receiptUnknown = string.Equals(
+            receipt.Outcome,
+            EgressSupervisorLifecycleContract.Unknown,
+            StringComparison.Ordinal);
+          if (receipt.MeasuredExternalEgressBytes < settledExternalEgressBytes)
+          {
+            _egressDispatchLatch.Trip();
+            throw new EgressBoundaryUnsafeException(
+              "egress_receipt_measurement_mismatch",
+              mayHaveExecuted: true);
+          }
+          // The independently trusted supervisor may observe transport bytes
+          // above the LocalSystem floor. Charge the maximum exactly once: the
+          // receipt's measured field becomes capability usage, while its
+          // separate uncertain field accounts only the remaining reservation.
+          settledExternalEgressBytes = receipt.MeasuredExternalEgressBytes;
+
+          var dispositionSha256 = EgressSupervisorLifecycleCanonical.DispositionSha256(
+            disposition);
+          if (!PayloadDigest.FixedTimeEqualsHex(
+              receipt.DispositionSha256,
+              dispositionSha256)
+            || PayloadDigest.FixedTimeEqualsHex(
+              receipt.RegistrationSha256,
+              EgressSupervisorLifecycleCanonical.ZeroSha256)
+            || (!receiptUnknown
+              && !string.Equals(
+                receipt.Outcome,
+                disposition.Outcome,
+                StringComparison.Ordinal))
+            || (receiptUnknown
+              && receipt.ChargedExternalEgressBytes
+                != receipt.ReservedCapabilityEgressBytes))
+          {
+            _egressDispatchLatch.Trip();
+            throw new EgressBoundaryUnsafeException(
+              "egress_terminal_disposition_mismatch",
+              mayHaveExecuted: true);
+          }
           receiptUncertainEgressBytes = receipt.UncertainExternalEgressBytes;
           receiptOutcomeUncertain = receiptUncertainEgressBytes > 0
             || !string.Equals(receipt.Outcome, "completed", StringComparison.Ordinal);
         }
 
-        if (executed.OutputJson is null
+        if (!CapabilityExecutionResultPolicy.IsValid(
+            adapter.Descriptor,
+            executed,
+            DateTimeOffset.UtcNow)
           || executed.ExternalEgressBytes < 0
           || executed.ExternalEgressBytes > capabilityBudgets.MaxExternalEgressBytes
-          || executed.Provenance.Count > 100
+          || settledExternalEgressBytes > capabilityBudgets.MaxExternalEgressBytes
           || executed.LocalBytesRead < 0
           || executed.LocalBytesWritten < 0
           || executed.LocalBytesRead > claims.Budgets.MaxLocalBytes
           || executed.LocalBytesWritten > claims.Budgets.MaxLocalBytes
           || executed.LocalBytesRead > claims.Budgets.MaxLocalBytes
             - executed.LocalBytesWritten
-          || (!requiresEgressBoundary && executed.EgressReceipt is not null)
+          || executed.EgressReceipt is not null
           || (executed.PreStateSha256 is not null
             && !PayloadDigest.IsSha256Hex(executed.PreStateSha256))
           || (adapter.Descriptor.IsMutation
@@ -599,13 +713,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
                 request.ExpectedPreStateSha256,
                 executed.PreStateSha256)))
           || (executed.RecoveryProvenanceSha256 is not null
-            && !PayloadDigest.IsSha256Hex(executed.RecoveryProvenanceSha256))
-          || executed.Provenance.Any(provenance =>
-            !adapter.Descriptor.ProvenanceOutputs.Contains(
-              provenance.SourceType,
-              StringComparer.Ordinal)
-            || !PayloadDigest.IsSha256Hex(provenance.SourceIdentifierHash)
-            || !PayloadDigest.IsSha256Hex(provenance.ContentSha256)))
+            && !PayloadDigest.IsSha256Hex(executed.RecoveryProvenanceSha256)))
         {
           var committedWrite = adapter.Descriptor.IsMutation && executed.MutationCommitted;
           var resultOutcomeUncertain = committedWrite
@@ -619,7 +727,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
             outcomeUncertain: resultOutcomeUncertain,
             localBytesRead: Math.Max(0, executed.LocalBytesRead),
             localBytesWritten: Math.Max(0, executed.LocalBytesWritten),
-            externalEgressBytes: Math.Max(0, executed.ExternalEgressBytes),
+            externalEgressBytes: settledExternalEgressBytes,
             uncertainExternalEgressBytes: receiptUncertainEgressBytes,
             preStateSha256: ValidDigestOrNull(executed.PreStateSha256),
             recoveryProvenanceSha256: ValidDigestOrNull(
@@ -655,7 +763,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
             outcomeUncertain: resultOutcomeUncertain,
             localBytesRead: executed.LocalBytesRead,
             localBytesWritten: executed.LocalBytesWritten,
-            externalEgressBytes: executed.ExternalEgressBytes,
+            externalEgressBytes: settledExternalEgressBytes,
             uncertainExternalEgressBytes: receiptUncertainEgressBytes,
             preStateSha256: executed.PreStateSha256,
             recoveryProvenanceSha256: executed.RecoveryProvenanceSha256,
@@ -687,7 +795,7 @@ public sealed class ActionExecutionCoordinator : IDisposable
             : PayloadDigest.Sha256Hex(executed.OpaqueRecoveryHandle),
           localBytesRead: executed.LocalBytesRead,
           localBytesWritten: executed.LocalBytesWritten,
-          externalEgressBytes: executed.ExternalEgressBytes,
+          externalEgressBytes: settledExternalEgressBytes,
           uncertainExternalEgressBytes: receiptUncertainEgressBytes,
           actionTokenSha256: actionTokenSha256,
           egressEvidence: egressEvidence);
@@ -706,9 +814,11 @@ public sealed class ActionExecutionCoordinator : IDisposable
             outcomeUncertain: resultCouldBeUncertain,
             localBytesRead: executed.LocalBytesRead,
             localBytesWritten: executed.LocalBytesWritten,
-            externalEgressBytes: executed.ExternalEgressBytes,
+            externalEgressBytes: settledExternalEgressBytes,
             uncertainExternalEgressBytes: requiresEgressBoundary
-              ? capabilityBudgets.MaxExternalEgressBytes
+              ? Math.Max(
+                receiptUncertainEgressBytes,
+                capabilityBudgets.MaxExternalEgressBytes - settledExternalEgressBytes)
               : 0,
             preStateSha256: executed.PreStateSha256,
             recoveryProvenanceSha256: executed.RecoveryProvenanceSha256,
@@ -716,7 +826,8 @@ public sealed class ActionExecutionCoordinator : IDisposable
               ? null
               : PayloadDigest.Sha256Hex(executed.OpaqueRecoveryHandle),
             budgets: claims.Budgets,
-            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+            actionTokenSha256: actionTokenSha256,
+            egressEvidence: egressEvidence).ConfigureAwait(false);
           return;
         }
         await PersistAndSendAsync(
@@ -749,35 +860,120 @@ public sealed class ActionExecutionCoordinator : IDisposable
         // race for an action already queued on the concurrency gate.
         throw;
       }
+      catch (EgressBoundaryUnsafeException exception)
+      {
+        await CompleteKnownFailureAsync(
+          request,
+          exception.MayHaveExecuted ? ActionOutcome.NeedsAttention : ActionOutcome.Failed,
+          exception.ErrorCode,
+          mutationCommitted: adapter.Descriptor.IsMutation && exception.MayHaveExecuted,
+          outcomeUncertain: exception.MayHaveExecuted,
+          uncertainExternalEgressBytes: exception.MayHaveExecuted
+            ? capabilityBudgets.MaxExternalEgressBytes
+            : 0,
+          budgets: claims.Budgets,
+          actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+        // Persist ambiguity before stopping the worker. The one-way latch also
+        // closes the race for an egress action waiting on the execution slot.
+        throw;
+      }
       catch (HostPreconditionException exception)
       {
-        var egressCouldBeUncertain = requiresEgressBoundary;
+        var resolution = await ResolveEgressFailureAsync(
+          egressSession,
+          egressBinding,
+          requiredEgressFeatures,
+          egressEvidence,
+          request.ActionId,
+          EgressSupervisorLifecycleContract.Failed,
+          "host-precondition").ConfigureAwait(false);
+        if (requiresEgressBoundary && !resolution.IsResolved)
+        {
+          await CompleteKnownFailureAsync(
+            request,
+            ActionOutcome.NeedsAttention,
+            resolution.ErrorCode ?? "egress_abort_unresolved",
+            mutationCommitted: false,
+            outcomeUncertain: true,
+            uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+            budgets: claims.Budgets,
+            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          _egressDispatchLatch.Trip();
+          throw new EgressBoundaryUnsafeException(
+            resolution.ErrorCode ?? "egress_abort_unresolved",
+            mayHaveExecuted: egressSession?.HasRegistration == true);
+        }
+        var egressCouldBeUncertain = resolution.OutcomeUncertain;
         await CompleteKnownFailureAsync(
           request,
           egressCouldBeUncertain ? ActionOutcome.NeedsAttention : ActionOutcome.Failed,
           exception.ErrorCode,
           mutationCommitted: false,
           outcomeUncertain: egressCouldBeUncertain,
-          uncertainExternalEgressBytes: egressCouldBeUncertain
-            ? capabilityBudgets.MaxExternalEgressBytes
-            : 0,
+          externalEgressBytes: resolution.MeasuredExternalEgressBytes,
+          uncertainExternalEgressBytes: resolution.UncertainExternalEgressBytes,
           budgets: claims.Budgets,
-          actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          actionTokenSha256: actionTokenSha256,
+          egressEvidence: resolution.Evidence).ConfigureAwait(false);
       }
       catch (OperationCanceledException) when (actionCancellation.IsCancellationRequested)
       {
+        if (!requiresEgressBoundary)
+        {
+          var legacyWriteCouldBeUncertain = adapter.Descriptor.IsMutation;
+          await CompleteKnownFailureAsync(
+            request,
+            ActionOutcome.NeedsAttention,
+            legacyWriteCouldBeUncertain
+              ? "cancelled_write_outcome_unknown"
+              : "cancelled_egress_outcome_unknown",
+            mutationCommitted: false,
+            outcomeUncertain: true,
+            uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+            budgets: claims.Budgets,
+            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          return;
+        }
+        var resolution = await ResolveEgressFailureAsync(
+          egressSession,
+          egressBinding,
+          requiredEgressFeatures,
+          egressEvidence,
+          request.ActionId,
+          EgressSupervisorLifecycleContract.Cancelled,
+          "cancelled").ConfigureAwait(false);
+        if (requiresEgressBoundary && !resolution.IsResolved)
+        {
+          await CompleteKnownFailureAsync(
+            request,
+            ActionOutcome.NeedsAttention,
+            resolution.ErrorCode ?? "cancelled_egress_outcome_unknown",
+            mutationCommitted: false,
+            outcomeUncertain: true,
+            uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+            budgets: claims.Budgets,
+            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          _egressDispatchLatch.Trip();
+          throw new EgressBoundaryUnsafeException(
+            resolution.ErrorCode ?? "cancelled_egress_outcome_unknown",
+            mayHaveExecuted: egressSession?.HasRegistration == true);
+        }
         var writeCouldBeUncertain = adapter.Descriptor.IsMutation;
         await CompleteKnownFailureAsync(
           request,
-          ActionOutcome.NeedsAttention,
-          writeCouldBeUncertain
+          resolution.OutcomeUncertain || writeCouldBeUncertain
+            ? ActionOutcome.NeedsAttention
+            : ActionOutcome.Cancelled,
+          writeCouldBeUncertain || resolution.OutcomeUncertain
             ? "cancelled_write_outcome_unknown"
-            : "cancelled_egress_outcome_unknown",
+            : "cancelled_before_external_effect",
           mutationCommitted: false,
-          outcomeUncertain: true,
-          uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+          outcomeUncertain: writeCouldBeUncertain || resolution.OutcomeUncertain,
+          externalEgressBytes: resolution.MeasuredExternalEgressBytes,
+          uncertainExternalEgressBytes: resolution.UncertainExternalEgressBytes,
           budgets: claims.Budgets,
-          actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          actionTokenSha256: actionTokenSha256,
+          egressEvidence: resolution.Evidence).ConfigureAwait(false);
       }
       catch (Exception exception)
       {
@@ -787,19 +983,67 @@ public sealed class ActionExecutionCoordinator : IDisposable
           request.ActionId,
           exception.GetType().Name,
           exception);
+        if (!requiresEgressBoundary)
+        {
+          var legacyWriteCouldBeUncertain = adapter.Descriptor.IsMutation;
+          await CompleteKnownFailureAsync(
+            request,
+            ActionOutcome.NeedsAttention,
+            legacyWriteCouldBeUncertain
+              ? "write_outcome_unknown"
+              : "capability_egress_outcome_unknown",
+            mutationCommitted: false,
+            outcomeUncertain: true,
+            uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+            budgets: claims.Budgets,
+            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          return;
+        }
+        var resolution = await ResolveEgressFailureAsync(
+          egressSession,
+          egressBinding,
+          requiredEgressFeatures,
+          egressEvidence,
+          request.ActionId,
+          EgressSupervisorLifecycleContract.Failed,
+          "capability-failure").ConfigureAwait(false);
+        if (requiresEgressBoundary && !resolution.IsResolved)
+        {
+          await CompleteKnownFailureAsync(
+            request,
+            ActionOutcome.NeedsAttention,
+            resolution.ErrorCode ?? "capability_egress_outcome_unknown",
+            mutationCommitted: false,
+            outcomeUncertain: true,
+            uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+            budgets: claims.Budgets,
+            actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          _egressDispatchLatch.Trip();
+          throw new EgressBoundaryUnsafeException(
+            resolution.ErrorCode ?? "capability_egress_outcome_unknown",
+            mayHaveExecuted: egressSession?.HasRegistration == true,
+            exception);
+        }
         var writeCouldBeUncertain = adapter.Descriptor.IsMutation;
+        var outcomeUncertain = writeCouldBeUncertain || resolution.OutcomeUncertain;
         await CompleteKnownFailureAsync(
           request,
-          ActionOutcome.NeedsAttention,
+          outcomeUncertain ? ActionOutcome.NeedsAttention : ActionOutcome.Failed,
           writeCouldBeUncertain ? "write_outcome_unknown" : "capability_egress_outcome_unknown",
           mutationCommitted: false,
-          outcomeUncertain: true,
-          uncertainExternalEgressBytes: capabilityBudgets.MaxExternalEgressBytes,
+          outcomeUncertain: outcomeUncertain,
+          externalEgressBytes: resolution.MeasuredExternalEgressBytes,
+          uncertainExternalEgressBytes: resolution.UncertainExternalEgressBytes,
           budgets: claims.Budgets,
-          actionTokenSha256: actionTokenSha256).ConfigureAwait(false);
+          actionTokenSha256: actionTokenSha256,
+          egressEvidence: resolution.Evidence).ConfigureAwait(false);
       }
       finally
       {
+        if (egressSession is not null)
+        {
+          await egressSession.DisposeAsync().ConfigureAwait(false);
+        }
         if (leaseHeartbeatCancellation is not null)
         {
           await leaseHeartbeatCancellation.CancelAsync().ConfigureAwait(false);
@@ -1318,16 +1562,17 @@ public sealed class ActionExecutionCoordinator : IDisposable
     return new SemaphoreLease(_journalActionGate);
   }
 
-  private async Task<bool> SendProgressSafelyAsync(
+  private async Task<ActionProgressAcknowledgement?> SendProgressSafelyAsync(
     ActionRequest request,
     ActionProgressState state,
     string messageCode,
+    JournalRecord? preparedRecord = null,
     CancellationToken cancellationToken = default)
   {
     messageCode = BrokerSafeErrorCode(messageCode);
     try
     {
-      await _channel.SendProgressAsync(new ActionProgress(
+      return await _channel.SendProgressAsync(new ActionProgress(
         request.ActionId,
         request.TaskId,
         request.StepId,
@@ -1338,8 +1583,10 @@ public sealed class ActionExecutionCoordinator : IDisposable
         DateTimeOffset.UtcNow,
         request.LeaseId,
         request.FencingToken,
-        request.LeaseExpiresAt), cancellationToken).ConfigureAwait(false);
-      return true;
+        request.LeaseExpiresAt,
+        preparedRecord?.Sequence,
+        preparedRecord?.PreviousHash,
+        preparedRecord?.EntryHash), cancellationToken).ConfigureAwait(false);
     }
     catch (Exception exception)
     {
@@ -1348,13 +1595,14 @@ public sealed class ActionExecutionCoordinator : IDisposable
         request.ActionId,
         exception.GetType().Name,
         exception);
-      return false;
+      return null;
     }
   }
 
   private async Task RunLeaseHeartbeatAsync(
     ActionRequest request,
     bool requireCentralLedger,
+    JournalRecord preparedRecord,
     CancellationTokenSource actionCancellation,
     CancellationToken cancellationToken)
   {
@@ -1368,8 +1616,11 @@ public sealed class ActionExecutionCoordinator : IDisposable
         request,
         ActionProgressState.Started,
         "lease_heartbeat",
+        preparedRecord,
         deliveryDeadline.Token).ConfigureAwait(false);
-      if (requireCentralLedger && (!delivered || !_channel.IsCentralLedgerConnected))
+      if (requireCentralLedger
+        && (!ExactPreparedAcknowledgement(delivered, request, preparedRecord)
+          || !_channel.IsCentralLedgerConnected))
       {
         // A privileged action may not continue merely because it was connected
         // when it started. Cancellation is cooperative, and its terminal
@@ -1379,6 +1630,249 @@ public sealed class ActionExecutionCoordinator : IDisposable
         return;
       }
     }
+  }
+
+  private static bool ExactPreparedAcknowledgement(
+    ActionProgressAcknowledgement? acknowledgement,
+    ActionRequest request,
+    JournalRecord preparedRecord) => acknowledgement is
+    {
+      Accepted: true,
+      ActionId: not null,
+      DispatchCount: not null,
+      JournalPrepareSequence: not null,
+      JournalPreparePreviousHash: not null,
+      JournalPrepareEntryHash: not null,
+    }
+    && string.Equals(acknowledgement.ActionId, request.ActionId, StringComparison.Ordinal)
+    && acknowledgement.DispatchCount == request.DispatchCount
+    && acknowledgement.JournalPrepareSequence == preparedRecord.Sequence
+    && PayloadDigest.FixedTimeEqualsHex(
+      acknowledgement.JournalPreparePreviousHash,
+      preparedRecord.PreviousHash)
+    && PayloadDigest.FixedTimeEqualsHex(
+      acknowledgement.JournalPrepareEntryHash,
+      preparedRecord.EntryHash);
+
+  private async ValueTask<EgressExecutionEvidence> AbortEgressBeforeAdapterAsync(
+    IEgressBoundarySession session,
+    EgressActionBinding binding,
+    IReadOnlyList<string> requiredFeatures,
+    string actionId,
+    CancellationToken cancellationToken)
+  {
+    var disposition = new EgressTerminalDispositionV1(
+      EgressSupervisorLifecycleContract.Version,
+      EgressSupervisorLifecycleCanonical.OperationId(actionId, "abort-before-adapter"),
+      EgressSupervisorLifecycleContract.Failed,
+      ReportedExternalEgressBytes: 0,
+      OutcomeUncertain: false,
+      OccurredAtUnixMilliseconds: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    var signedReceipt = await session.TryAbortAsync(
+      disposition,
+      cancellationToken).ConfigureAwait(false);
+    if (signedReceipt is null)
+    {
+      _egressDispatchLatch.Trip();
+      throw new EgressBoundaryUnsafeException(
+        "egress_abort_receipt_missing",
+        mayHaveExecuted: false);
+    }
+
+    var evidence = new EgressExecutionEvidence(session.Authorization, signedReceipt);
+    var verified = await _egressEvidence.VerifyAndCommitReceiptAsync(
+      evidence,
+      binding,
+      requiredFeatures,
+      cancellationToken).ConfigureAwait(false);
+    if (!verified.IsValid
+      || verified.Value is null
+      || !PayloadDigest.FixedTimeEqualsHex(
+        verified.Value.Evidence.Receipt.Receipt.RegistrationSha256,
+        EgressSupervisorLifecycleCanonical.ZeroSha256)
+      || !PayloadDigest.FixedTimeEqualsHex(
+        verified.Value.Evidence.Receipt.Receipt.DispositionSha256,
+        EgressSupervisorLifecycleCanonical.DispositionSha256(disposition))
+      || verified.Value.Evidence.Receipt.Receipt.MeasuredExternalEgressBytes != 0
+      || verified.Value.Evidence.Receipt.Receipt.UncertainExternalEgressBytes != 0
+      || verified.Value.Evidence.Receipt.Receipt.ChargedExternalEgressBytes != 0
+      || !string.Equals(
+        verified.Value.Evidence.Receipt.Receipt.Outcome,
+        EgressSupervisorLifecycleContract.Failed,
+        StringComparison.Ordinal))
+    {
+      _egressDispatchLatch.Trip();
+      throw new EgressBoundaryUnsafeException(
+        verified.ErrorCode ?? "egress_abort_receipt_invalid",
+        mayHaveExecuted: true);
+    }
+    return evidence;
+  }
+
+  private async ValueTask<EgressFailureResolution> ResolveEgressFailureAsync(
+    IEgressBoundarySession? session,
+    EgressActionBinding? binding,
+    IReadOnlyList<string>? requiredFeatures,
+    EgressExecutionEvidence? existingEvidence,
+    string actionId,
+    string preEffectOutcome,
+    string purpose)
+  {
+    if (requiredFeatures is null)
+    {
+      return existingEvidence is null
+        ? EgressFailureResolution.NotApplicable
+        : new EgressFailureResolution(
+          true,
+          existingEvidence,
+          existingEvidence.Receipt.Receipt.MeasuredExternalEgressBytes,
+          existingEvidence.Receipt.Receipt.UncertainExternalEgressBytes,
+          existingEvidence.Receipt.Receipt.UncertainExternalEgressBytes > 0
+            || string.Equals(
+              existingEvidence.Receipt.Receipt.Outcome,
+              EgressSupervisorLifecycleContract.Unknown,
+              StringComparison.Ordinal),
+          null);
+    }
+    if (session is null || binding is null)
+    {
+      return EgressFailureResolution.Unresolved("egress_session_unavailable_for_abort");
+    }
+
+    try
+    {
+      var terminalAlreadyExisted = existingEvidence is not null || session.IsTerminal;
+      EgressTerminalDispositionV1? requestedDisposition = null;
+      SignedEgressReceipt? signedReceipt;
+      if (existingEvidence is not null)
+      {
+        signedReceipt = existingEvidence.Receipt;
+      }
+      else if (session.IsTerminal)
+      {
+        signedReceipt = session.TerminalReceipt;
+      }
+      else
+      {
+        var registered = session.HasRegistration;
+        var outcome = registered
+          ? EgressSupervisorLifecycleContract.Unknown
+          : preEffectOutcome;
+        var operationPurpose = registered
+          ? $"abort-unknown:{purpose}"
+          : $"abort-before-effect:{purpose}";
+        var disposition = new EgressTerminalDispositionV1(
+          EgressSupervisorLifecycleContract.Version,
+          EgressSupervisorLifecycleCanonical.OperationId(actionId, operationPurpose),
+          outcome,
+          ReportedExternalEgressBytes: 0,
+          OutcomeUncertain: registered,
+          OccurredAtUnixMilliseconds: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        requestedDisposition = disposition;
+        signedReceipt = await session.TryAbortAsync(
+          disposition,
+          CancellationToken.None).ConfigureAwait(false);
+      }
+
+      if (signedReceipt is null)
+      {
+        return EgressFailureResolution.Unresolved("egress_abort_receipt_missing");
+      }
+
+      var evidence = existingEvidence
+        ?? new EgressExecutionEvidence(session.Authorization, signedReceipt);
+      var verified = await _egressEvidence.VerifyAndCommitReceiptAsync(
+        evidence,
+        binding,
+        requiredFeatures,
+        CancellationToken.None).ConfigureAwait(false);
+      if (!verified.IsValid || verified.Value is null)
+      {
+        return EgressFailureResolution.Unresolved(
+          verified.ErrorCode ?? "egress_abort_receipt_invalid");
+      }
+
+      var receipt = verified.Value.Evidence.Receipt.Receipt;
+      var registeredBoundary = session.HasRegistration;
+      if (requestedDisposition is not null
+        && (!PayloadDigest.FixedTimeEqualsHex(
+            receipt.DispositionSha256,
+            EgressSupervisorLifecycleCanonical.DispositionSha256(requestedDisposition))
+          || !string.Equals(
+            receipt.Outcome,
+            requestedDisposition.Outcome,
+            StringComparison.Ordinal)
+          || registeredBoundary == PayloadDigest.FixedTimeEqualsHex(
+            receipt.RegistrationSha256,
+            EgressSupervisorLifecycleCanonical.ZeroSha256)))
+      {
+        return EgressFailureResolution.Unresolved(
+          "egress_abort_disposition_mismatch");
+      }
+      if (!terminalAlreadyExisted && registeredBoundary)
+      {
+        if (!string.Equals(
+            receipt.Outcome,
+            EgressSupervisorLifecycleContract.Unknown,
+            StringComparison.Ordinal)
+          || receipt.ChargedExternalEgressBytes
+            != receipt.ReservedCapabilityEgressBytes)
+        {
+          return EgressFailureResolution.Unresolved(
+            "egress_unknown_abort_receipt_invalid");
+        }
+      }
+      else if (!terminalAlreadyExisted
+        && (receipt.MeasuredExternalEgressBytes != 0
+        || receipt.UncertainExternalEgressBytes != 0
+        || !string.Equals(receipt.Outcome, preEffectOutcome, StringComparison.Ordinal)))
+      {
+        return EgressFailureResolution.Unresolved(
+          "egress_pre_effect_abort_receipt_invalid");
+      }
+
+      return new EgressFailureResolution(
+        true,
+        verified.Value.Evidence,
+        receipt.MeasuredExternalEgressBytes,
+        receipt.UncertainExternalEgressBytes,
+        receipt.UncertainExternalEgressBytes > 0
+          || string.Equals(
+            receipt.Outcome,
+            EgressSupervisorLifecycleContract.Unknown,
+            StringComparison.Ordinal),
+        null);
+    }
+    catch (Exception exception) when (exception is not TerminalPersistenceException)
+    {
+      return EgressFailureResolution.Unresolved(
+        $"egress_abort_{exception.GetType().Name.ToLowerInvariant()}");
+    }
+  }
+
+  private sealed record EgressFailureResolution(
+    bool IsResolved,
+    EgressExecutionEvidence? Evidence,
+    long MeasuredExternalEgressBytes,
+    long UncertainExternalEgressBytes,
+    bool OutcomeUncertain,
+    string? ErrorCode)
+  {
+    public static EgressFailureResolution NotApplicable { get; } = new(
+      true,
+      null,
+      0,
+      0,
+      false,
+      null);
+
+    public static EgressFailureResolution Unresolved(string errorCode) => new(
+      false,
+      null,
+      0,
+      0,
+      true,
+      errorCode);
   }
 
   private async Task SendJournaledResultSafelyAsync(
@@ -1464,6 +1958,41 @@ public sealed class ActionExecutionCoordinator : IDisposable
     CompanionWireContract.IsSafeIdentifier(value)
       ? value
       : "device_error_code_invalid";
+
+  /// <summary>
+  /// Derives a LocalSystem-owned egress floor from the already token-bound
+  /// argument bytes. The standard-user process may report more, but it cannot
+  /// lower this amount or substitute a different task/device artifact scope.
+  /// </summary>
+  internal static long ConservativeEgressFloor(
+    CapabilityDescriptor descriptor,
+    ActionExecutionContext context,
+    JsonElement arguments)
+  {
+    if (!string.Equals(descriptor.Id, "browser.file.upload", StringComparison.Ordinal)
+      || !arguments.TryGetProperty("artifact", out var artifactValue))
+    {
+      return 0;
+    }
+
+    if (!GovernedArtifactEnvelope.TryDecode(
+        artifactValue,
+        context,
+        requiredKind: "SCREENSHOT",
+        out var artifact,
+        out var content))
+    {
+      throw new HostPreconditionException("browser_artifact_envelope_scope_invalid");
+    }
+    try
+    {
+      return artifact.ByteSize;
+    }
+    finally
+    {
+      CryptographicOperations.ZeroMemory(content);
+    }
+  }
 
   internal static bool RequiresEgressBoundary(string capabilityId) =>
     StandardUserCapabilityCatalog.RequiresEgressBoundary(capabilityId)

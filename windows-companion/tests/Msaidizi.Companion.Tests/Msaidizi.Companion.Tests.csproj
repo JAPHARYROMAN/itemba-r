@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <AssemblyName>Itemba.Msaidizi.Companion.Tests</AssemblyName>
+    <RootNamespace>Itemba.Msaidizi.Companion.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Msaidizi.Companion.Contracts\Msaidizi.Companion.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Msaidizi.Companion.Service\Msaidizi.Companion.Service.csproj" />
+    <ProjectReference Include="..\..\src\Msaidizi.Companion.Agent\Msaidizi.Companion.Agent.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\Msaidizi.Companion.Service\appsettings.json"
+          Link="test-assets\service-appsettings.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\Msaidizi.Companion.Agent\appsettings.json"
+          Link="test-assets\agent-appsettings.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\Msaidizi.RecoverySupervisor\appsettings.json"
+          Link="test-assets\recovery-appsettings.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\fixtures\egress-non-browser-action-result.json"
+          Link="test-assets\egress-non-browser-action-result.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
