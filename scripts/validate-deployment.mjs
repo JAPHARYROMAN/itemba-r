@@ -663,6 +663,25 @@ function assertDeploymentShape(target, config) {
   );
 }
 
+
+/**
+ * Whether the compose file itself declares `create_host_path: false` on the
+ * bind whose container target is `inputTarget`. Reads the block that follows
+ * the matching `target:` line, so a false on a neighbouring mount cannot be
+ * mistaken for this one's.
+ */
+function declaresNoImplicitHostPath(target, inputTarget) {
+  const text = readFileSync(resolve(rootDir, target.file), 'utf8');
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === `target: ${inputTarget}`);
+  if (start === -1) return false;
+  // The bind option belongs to this mount until the next list entry begins.
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^\s*-\s/.test(line));
+  const block = (end === -1 ? rest : rest.slice(0, end)).join('\n');
+  return /create_host_path:\s*false/.test(block);
+}
+
 function assertMsaidiziInputMounts(target, backend, expectedSources, unsetReason = 'by default') {
   const volumes = backend?.volumes ?? [];
   for (const { hostEnv, pathEnv, target: inputTarget } of msaidiziInputMounts) {
@@ -677,11 +696,21 @@ function assertMsaidiziInputMounts(target, backend, expectedSources, unsetReason
       `${inputTarget} source`,
     );
     assertEqual(target, mount.read_only, true, `${inputTarget} is read-only`);
-    assertEqual(
+    // Checked against the compose FILE, not only the normalised config.
+    // `docker compose config --format json` does not report bind options
+    // identically across versions - a runner whose compose omits an explicitly
+    // false `create_host_path` would read as undefined here, and asserting on
+    // that alone made this pass or fail on the toolchain rather than on the
+    // deployment. The file is what ships, so the file is what must say it.
+    assert(
       target,
-      mount.bind?.create_host_path,
-      false,
+      declaresNoImplicitHostPath(target, inputTarget),
       `${inputTarget} refuses implicit host-path creation`,
+    );
+    assert(
+      target,
+      mount.bind?.create_host_path !== true,
+      `${inputTarget} is not resolved with implicit host-path creation`,
     );
     if (Object.prototype.hasOwnProperty.call(expectedSources, hostEnv)) {
       assertEqual(
