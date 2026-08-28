@@ -33,6 +33,7 @@ vi.mock('@/components/msaidizi/msaidizi-task-center', () => ({
     { id: 'routines', label: 'Routines' },
     { id: 'devices', label: 'Devices' },
     { id: 'memory', label: 'Memory' },
+    { id: 'rollout', label: 'Rollout' },
   ],
   MsaidiziTaskCenter: (props: { initialTaskId?: string | null }) => {
     h.taskCenter(props);
@@ -42,12 +43,13 @@ vi.mock('@/components/msaidizi/msaidizi-task-center', () => ({
     workspace: string;
     focusedDeviceId?: string | null;
     focusedRecoveryId?: string | null;
+    focusedCandidateId?: string | null;
   }) => {
     h.workspace(props);
     return (
       <div data-testid="workspace">
         {props.workspace}:{props.focusedDeviceId ?? 'no device'}:
-        {props.focusedRecoveryId ?? 'no recovery'}
+        {props.focusedRecoveryId ?? 'no recovery'}:{props.focusedCandidateId ?? 'no candidate'}
       </div>
     );
   },
@@ -93,11 +95,15 @@ describe('/msaidizi governed deep links', () => {
 
     render(<MsaidiziPage />);
 
-    expect(screen.getByTestId('workspace')).toHaveTextContent(`devices:${deviceId}:no recovery`);
+    expect(screen.getByTestId('workspace')).toHaveTextContent(
+      `devices:${deviceId}:no recovery:no candidate`,
+    );
     expect(h.workspace).toHaveBeenCalledWith({
       workspace: 'devices',
       focusedDeviceId: deviceId,
       focusedRecoveryId: null,
+      focusedCandidateId: null,
+      onOpenTask: expect.any(Function),
     });
     expect(h.chat).not.toHaveBeenCalled();
     expect(h.replace).not.toHaveBeenCalled();
@@ -116,11 +122,15 @@ describe('/msaidizi governed deep links', () => {
 
     render(<MsaidiziPage />);
 
-    expect(screen.getByTestId('workspace')).toHaveTextContent(`devices:${deviceId}:${recoveryId}`);
+    expect(screen.getByTestId('workspace')).toHaveTextContent(
+      `devices:${deviceId}:${recoveryId}:no candidate`,
+    );
     expect(h.workspace).toHaveBeenCalledWith({
       workspace: 'devices',
       focusedDeviceId: deviceId,
       focusedRecoveryId: recoveryId,
+      focusedCandidateId: null,
+      onOpenTask: expect.any(Function),
     });
     expect(h.chat).not.toHaveBeenCalled();
     await waitFor(() =>
@@ -128,6 +138,37 @@ describe('/msaidizi governed deep links', () => {
         `/msaidizi?workspace=devices&deviceId=${deviceId}&recoveryId=${recoveryId}&source=notification`,
         { scroll: false },
       ),
+    );
+  });
+
+  it('passes an exact rollout candidate, and refuses one addressed to another workspace', () => {
+    const candidateId = '33333333-3333-4333-8333-333333333333';
+    h.params.current = new URLSearchParams([
+      ['workspace', 'rollout'],
+      ['candidateId', candidateId],
+    ]);
+
+    render(<MsaidiziPage />);
+
+    expect(h.workspace).toHaveBeenCalledWith({
+      workspace: 'rollout',
+      focusedDeviceId: null,
+      focusedRecoveryId: null,
+      focusedCandidateId: candidateId,
+      onOpenTask: expect.any(Function),
+    });
+  });
+
+  it('ignores a malformed rollout candidate rather than opening on it', () => {
+    h.params.current = new URLSearchParams([
+      ['workspace', 'rollout'],
+      ['candidateId', 'not-a-uuid; drop table'],
+    ]);
+
+    render(<MsaidiziPage />);
+
+    expect(screen.getByTestId('workspace')).toHaveTextContent(
+      'rollout:no device:no recovery:no candidate',
     );
   });
 
@@ -146,6 +187,8 @@ describe('/msaidizi governed deep links', () => {
       workspace: 'devices',
       focusedDeviceId: deviceId,
       focusedRecoveryId: null,
+      focusedCandidateId: null,
+      onOpenTask: expect.any(Function),
     });
     await waitFor(() =>
       expect(h.replace).toHaveBeenCalledWith(`/msaidizi?workspace=devices&deviceId=${deviceId}`, {

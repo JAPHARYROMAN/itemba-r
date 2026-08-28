@@ -47,6 +47,7 @@ import type {
   MsaidiziUpdateCandidateStatus,
 } from '@/lib/msaidizi-update-types';
 import { InlineMessage, controlPlaneError } from './msaidizi-control-plane-detail-ui';
+import { MsaidiziUpdateDetail } from './msaidizi-update-detail';
 
 /**
  * Both permissions are required by the controller. `msaidizi.oversight` is
@@ -126,9 +127,13 @@ function RingProgress({ ring }: { ring: number }) {
 function CandidateRow({
   candidate,
   onChanged,
+  selected,
+  onSelect,
 }: {
   candidate: MsaidiziUpdateCandidate;
   onChanged: (updated: MsaidiziUpdateCandidate) => void;
+  selected: boolean;
+  onSelect: (id: string) => void;
 }) {
   const [busy, setBusy] = useState<null | 'rollout' | 'rollback'>(null);
   const [error, setError] = useState<string | null>(null);
@@ -170,13 +175,21 @@ function CandidateRow({
       className="flex flex-col gap-2 rounded-lg p-3"
       style={{
         background: 'var(--aurora-card)',
-        border: '1px solid var(--aurora-border-subtle)',
+        border: `1px solid ${selected ? 'var(--aurora-border-focus)' : 'var(--aurora-border-subtle)'}`,
       }}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h3 className="m-0 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-            {candidate.name}
+          <h3 className="m-0 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => onSelect(candidate.id)}
+              aria-expanded={selected}
+              className="cursor-pointer bg-transparent p-0 text-sm font-semibold"
+              style={{ color: 'var(--aurora-text)' }}
+            >
+              {candidate.name}
+            </button>
           </h3>
           <span
             className="font-mono text-[11px] tabular-nums"
@@ -305,12 +318,19 @@ function CandidateRow({
   );
 }
 
-export function MsaidiziUpdatesWorkspace() {
+export function MsaidiziUpdatesWorkspace({
+  focusedCandidateId = null,
+  onOpenTask,
+}: {
+  focusedCandidateId?: string | null;
+  onOpenTask?: (taskId: string) => void;
+} = {}) {
   const { hasPermission } = useAuth();
   const [candidates, setCandidates] = useState<MsaidiziUpdateCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<MsaidiziUpdateCandidateStatus | 'ALL'>('ALL');
+  const [selectedId, setSelectedId] = useState<string | null>(focusedCandidateId);
   const loadToken = useRef(0);
 
   const canOversee =
@@ -410,8 +430,22 @@ export function MsaidiziUpdatesWorkspace() {
         ) : (
           <ul className="mt-3 space-y-2">
             {visible.map((candidate) => (
-              <li key={candidate.id}>
-                <CandidateRow candidate={candidate} onChanged={replace} />
+              <li key={candidate.id} className="flex flex-col gap-2">
+                <CandidateRow
+                  candidate={candidate}
+                  onChanged={replace}
+                  selected={selectedId === candidate.id}
+                  onSelect={(id) => setSelectedId((current) => (current === id ? null : id))}
+                />
+                {selectedId === candidate.id ? (
+                  <div className="pl-3">
+                    <MsaidiziUpdateDetail
+                      candidateId={candidate.id}
+                      onClose={() => setSelectedId(null)}
+                      onOpenTask={onOpenTask}
+                    />
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>

@@ -71,6 +71,8 @@ function addressAfterAsk(serialized: string): string {
   if (workspace !== 'devices' || !allowedTargetId(next.get('deviceId'))) next.delete('deviceId');
   if (workspace !== 'devices' || !allowedTargetId(next.get('recoveryId')))
     next.delete('recoveryId');
+  if (workspace !== 'rollout' || !allowedTargetId(next.get('candidateId')))
+    next.delete('candidateId');
 
   const query = next.toString();
   return query ? `${MSAIDIZI_ROUTE}?${query}` : MSAIDIZI_ROUTE;
@@ -124,6 +126,10 @@ function MsaidiziWorkspaceBody() {
     requestedWorkspace === 'devices' && workspace === 'devices'
       ? allowedTargetId(params.get('recoveryId'))
       : null;
+  const candidateId =
+    requestedWorkspace === 'rollout' && workspace === 'rollout'
+      ? allowedTargetId(params.get('candidateId'))
+      : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -160,6 +166,8 @@ function MsaidiziWorkspaceBody() {
           workspace={workspace}
           focusedDeviceId={deviceId}
           focusedRecoveryId={recoveryId}
+          focusedCandidateId={candidateId}
+          onOpenTask={(id) => router.push(`${MSAIDIZI_ROUTE}?workspace=tasks&taskId=${id}`)}
         />
       ) : null}
     </div>

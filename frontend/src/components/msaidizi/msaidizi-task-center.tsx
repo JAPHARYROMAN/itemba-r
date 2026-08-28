@@ -4336,10 +4336,14 @@ export function MsaidiziWorkspacePanel({
   workspace,
   focusedDeviceId = null,
   focusedRecoveryId = null,
+  focusedCandidateId = null,
+  onOpenTask,
 }: {
   workspace: Exclude<MsaidiziWorkspace, 'conversations' | 'tasks'>;
   focusedDeviceId?: string | null;
   focusedRecoveryId?: string | null;
+  focusedCandidateId?: string | null;
+  onOpenTask?: (taskId: string) => void;
 }) {
   if (workspace === 'routines') return <MsaidiziRoutinesWorkspace />;
   if (workspace === 'procedures') return <MsaidiziProceduresWorkspace />;
@@ -4351,7 +4355,10 @@ export function MsaidiziWorkspacePanel({
       />
     );
   if (workspace === 'memory') return <MsaidiziMemoryWorkspace />;
-  if (workspace === 'rollout') return <MsaidiziUpdatesWorkspace />;
+  if (workspace === 'rollout')
+    return (
+      <MsaidiziUpdatesWorkspace focusedCandidateId={focusedCandidateId} onOpenTask={onOpenTask} />
+    );
   if (workspace === 'coverage') return <MsaidiziCoverageWorkspace />;
   return null;
 }
