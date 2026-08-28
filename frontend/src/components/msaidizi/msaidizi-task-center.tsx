@@ -65,8 +65,10 @@ import type {
 import { displayTaskWallTime, formatTaskWallTime } from '@/lib/msaidizi-task-wall-time';
 import { MsaidiziLocalDictationButton, MsaidiziTaskCapture } from './msaidizi-task-capture';
 import { MsaidiziMemoryDetailPanel } from './msaidizi-memory-detail';
+import { MsaidiziCoverageWorkspace } from './msaidizi-coverage';
 import { MsaidiziProceduresWorkspace } from './msaidizi-procedures';
 import { MsaidiziRoutineDetail } from './msaidizi-routine-detail';
+import { MsaidiziUpdatesWorkspace } from './msaidizi-updates';
 
 type MsaidiziWorkspace =
   | 'conversations'
@@ -74,7 +76,9 @@ type MsaidiziWorkspace =
   | 'routines'
   | 'procedures'
   | 'devices'
-  | 'memory';
+  | 'memory'
+  | 'rollout'
+  | 'coverage';
 
 export const MSAIDIZI_WORKSPACES: Array<{ id: MsaidiziWorkspace; label: string }> = [
   { id: 'conversations', label: 'Conversations' },
@@ -83,6 +87,8 @@ export const MSAIDIZI_WORKSPACES: Array<{ id: MsaidiziWorkspace; label: string }
   { id: 'procedures', label: 'Procedures' },
   { id: 'devices', label: 'Devices' },
   { id: 'memory', label: 'Memory' },
+  { id: 'rollout', label: 'Rollout' },
+  { id: 'coverage', label: 'Coverage' },
 ];
 
 const MODE_COPY: Record<MsaidiziTaskMode, { label: string; detail: string }> = {
@@ -4345,5 +4351,7 @@ export function MsaidiziWorkspacePanel({
       />
     );
   if (workspace === 'memory') return <MsaidiziMemoryWorkspace />;
+  if (workspace === 'rollout') return <MsaidiziUpdatesWorkspace />;
+  if (workspace === 'coverage') return <MsaidiziCoverageWorkspace />;
   return null;
 }

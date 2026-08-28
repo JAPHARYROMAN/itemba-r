@@ -153,7 +153,9 @@ function MsaidiziWorkspaceBody() {
       {workspace === 'routines' ||
       workspace === 'procedures' ||
       workspace === 'devices' ||
-      workspace === 'memory' ? (
+      workspace === 'memory' ||
+      workspace === 'rollout' ||
+      workspace === 'coverage' ? (
         <MsaidiziWorkspacePanel
           workspace={workspace}
           focusedDeviceId={deviceId}
