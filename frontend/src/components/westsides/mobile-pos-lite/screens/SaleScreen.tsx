@@ -226,6 +226,7 @@ export function SaleScreen({
                       value={line.quantity}
                       label={t('quantityOf', { name: line.product.name })}
                       onCommit={(next) => setQuantity(line.product.id, next)}
+                      maxDecimalPlaces={2}
                     />
                     <button
                       type="button"

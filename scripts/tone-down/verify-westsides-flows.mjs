@@ -8,7 +8,7 @@
  * records.mjs — then exercises the REAL running API end to end:
  *
  *   login → companies → mobile-pos bootstrap → product search →
- *   customer search → receipt-account auto-provision → CASH quick-sale →
+ *   customer search → explicit receipt-account provisioning → CASH quick-sale →
  *   idempotent replay → CREDIT quick-sale (receivable) → journal entries →
  *   sales-order list — then cleans the fixture up.
  *
@@ -86,6 +86,7 @@ const PERMS = [
   'customers.create',
   'journal_entries.view',
   'cash_accounts.view',
+  'cash_accounts.manage',
   'units.view',
   'reports.view',
   'finance.reports.view',
@@ -345,7 +346,30 @@ async function main() {
     const custRows = Array.isArray(cust.data) ? cust.data : (cust.data?.data ?? []);
     step('customers: server-side search by phone', custRows.some((c) => c.id === f.customer.id));
 
-    // 6. Receipt accounts auto-provision a branch cash drawer
+    // 6. Provision through the explicit, permissioned write path. The receipt
+    // account GET is intentionally read-only and must never create or reactivate
+    // accounts as a side effect.
+    const provisionedAccount = await api('POST', '/cash-accounts', {
+      token,
+      body: {
+        companyId: f.company.id,
+        divisionId: f.division.id,
+        branchId: f.branch.id,
+        accountName: `${f.branch.code} Cash Account`,
+        accountType: 'CASH_ON_HAND',
+        currency: 'TZS',
+        openingBalance: 0,
+        isActive: true,
+        notes: 'Explicitly provisioned by Westsides flow verification.',
+      },
+    });
+    step(
+      'cash-accounts: branch cash drawer explicitly provisioned',
+      provisionedAccount.status === 201 && Boolean(provisionedAccount.data?.id),
+      `status ${provisionedAccount.status}`,
+    );
+    if (!provisionedAccount.data?.id) return;
+
     const accounts = await api(
       'GET',
       `/sales-orders/receipt-accounts?companyId=${f.company.id}&divisionId=${f.division.id}&branchId=${f.branch.id}&paymentMethod=CASH&limit=50`,
@@ -354,8 +378,8 @@ async function main() {
     const accountRows = Array.isArray(accounts.data) ? accounts.data : (accounts.data?.data ?? []);
     const cashAccount = accountRows.find((a) => a.accountType === 'CASH_ON_HAND');
     step(
-      'receipt-accounts: branch cash drawer auto-provisioned',
-      Boolean(cashAccount),
+      'receipt-accounts: read returns the explicitly provisioned drawer',
+      cashAccount?.id === provisionedAccount.data.id,
       cashAccount ? cashAccount.accountName : `status ${accounts.status}`,
     );
     if (!cashAccount) return;

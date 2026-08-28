@@ -70,9 +70,7 @@ function walk(dir, predicate, files = []) {
 const HTTP_DECORATORS = ['Get', 'Post', 'Put', 'Patch', 'Delete', 'All'];
 
 function joinRoute(prefix, sub) {
-  const joined = `/${[prefix, sub]
-    .filter(Boolean)
-    .join('/')}`
+  const joined = `/${[prefix, sub].filter(Boolean).join('/')}`
     .replace(/\/+/g, '/')
     .replace(/\/$/, '');
   return joined === '' ? '/' : joined;
@@ -81,7 +79,11 @@ function joinRoute(prefix, sub) {
 export function collectBackendRoutes() {
   const routes = [];
   const files = walk(backendSrc, (f) => f.endsWith('.controller.ts'));
-  const controllerRe = /@Controller\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/g;
+  // Nest accepts either one controller prefix or an array of aliases. Keep the
+  // capture deliberately literal-only: a computed decorator argument is not a
+  // route this static gate can prove and must not be guessed at.
+  const controllerRe =
+    /@Controller\(\s*((?:['"`][^'"`]*['"`])|(?:\[(?:\s*['"`][^'"`]*['"`]\s*,?)*\]))?\s*\)/g;
   const methodRe = new RegExp(
     `@(${HTTP_DECORATORS.join('|')})\\(\\s*(?:['"\`]([^'"\`]*)['"\`])?\\s*\\)`,
     'g',
@@ -92,7 +94,11 @@ export function collectBackendRoutes() {
     const scopes = [];
     let match;
     while ((match = controllerRe.exec(source)) !== null) {
-      scopes.push({ prefix: match[1] ?? '', start: match.index });
+      const argument = match[1] ?? '';
+      const prefixes = argument
+        ? [...argument.matchAll(/['"`]([^'"`]*)['"`]/g)].map((literal) => literal[1])
+        : [''];
+      scopes.push({ prefixes, start: match.index });
     }
     scopes.forEach((scope, index) => {
       const end = scopes[index + 1]?.start ?? source.length;
@@ -100,11 +106,13 @@ export function collectBackendRoutes() {
       let decorator;
       while ((decorator = methodRe.exec(body)) !== null) {
         const method = decorator[1] === 'All' ? 'ALL' : decorator[1].toUpperCase();
-        routes.push({
-          method,
-          route: joinRoute(scope.prefix, decorator[2] ?? ''),
-          file: path.relative(repoRoot, file),
-        });
+        for (const prefix of scope.prefixes) {
+          routes.push({
+            method,
+            route: joinRoute(prefix, decorator[2] ?? ''),
+            file: path.relative(repoRoot, file),
+          });
+        }
       }
       methodRe.lastIndex = 0;
     });
@@ -355,9 +363,7 @@ function segmentsMatch(callSegs, routeSegs) {
 
 export function findMatches(call, routes) {
   const callSegs = call.route.split('/').filter(Boolean);
-  return routes.filter((route) =>
-    segmentsMatch(callSegs, route.route.split('/').filter(Boolean)),
-  );
+  return routes.filter((route) => segmentsMatch(callSegs, route.route.split('/').filter(Boolean)));
 }
 
 /** Calls with no backend route answering them, at the same method. */

@@ -33,32 +33,132 @@ import { PageHeader, PermissionDeniedState } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { MsaidiziChat } from '@/components/msaidizi/msaidizi-chat';
 import {
+  MSAIDIZI_WORKSPACES,
+  MsaidiziTaskCenter,
+  MsaidiziWorkspacePlaceholder,
+} from '@/components/msaidizi/msaidizi-task-center';
+import {
   MSAIDIZI_ASK_PARAM,
   MSAIDIZI_PERMISSION,
   MSAIDIZI_ROUTE,
 } from '@/components/msaidizi/msaidizi-launcher';
 
-function MsaidiziPageBody() {
+type MsaidiziWorkspaceId = (typeof MSAIDIZI_WORKSPACES)[number]['id'];
+
+const MSAIDIZI_WORKSPACE_IDS = new Set<MsaidiziWorkspaceId>(
+  MSAIDIZI_WORKSPACES.map((workspace) => workspace.id),
+);
+const UUID_LIKE = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function allowedWorkspace(value: string | null): MsaidiziWorkspaceId {
+  return value && MSAIDIZI_WORKSPACE_IDS.has(value as MsaidiziWorkspaceId)
+    ? (value as MsaidiziWorkspaceId)
+    : 'conversations';
+}
+
+function allowedTargetId(value: string | null): string | null {
+  return value && UUID_LIKE.test(value) ? value : null;
+}
+
+function addressAfterAsk(serialized: string): string {
+  const next = new URLSearchParams(serialized);
+  next.delete(MSAIDIZI_ASK_PARAM);
+
+  const rawWorkspace = next.get('workspace');
+  const workspace = allowedWorkspace(rawWorkspace);
+  if (rawWorkspace !== null && workspace !== rawWorkspace) next.delete('workspace');
+  if (workspace !== 'tasks' || !allowedTargetId(next.get('taskId'))) next.delete('taskId');
+  if (workspace !== 'devices' || !allowedTargetId(next.get('deviceId'))) next.delete('deviceId');
+  if (workspace !== 'devices' || !allowedTargetId(next.get('recoveryId')))
+    next.delete('recoveryId');
+
+  const query = next.toString();
+  return query ? `${MSAIDIZI_ROUTE}?${query}` : MSAIDIZI_ROUTE;
+}
+
+function MsaidiziPageBody({ initialQuestion }: { initialQuestion: string | null }) {
+  return <MsaidiziChat initialQuestion={initialQuestion} />;
+}
+
+/**
+ * Durable work lives beside, rather than inside, a conversation. The selected
+ * workspace is local UI state only: opening a task never changes its execution
+ * mode, queues it, or turns prose from a chat into Autopilot authority.
+ */
+function MsaidiziWorkspaceBody() {
   const params = useSearchParams();
   const router = useRouter();
+  const serializedParams = params.toString();
+  const rawWorkspace = params.get('workspace');
+  const requestedWorkspace = allowedWorkspace(rawWorkspace);
+  const [workspace, setWorkspace] = useState<MsaidiziWorkspaceId>(requestedWorkspace);
+  // Deep links are inspection-only. Even if someone appends `ask` to a task or
+  // device incident URL, no prose is handed to chat or any execution surface.
+  const [question] = useState(() =>
+    rawWorkspace === null || rawWorkspace === 'conversations'
+      ? params.get(MSAIDIZI_ASK_PARAM)
+      : null,
+  );
 
-  // A lazy `useState` initialiser, not a read on every render, and not a ref
-  // written during render (which is a lint error in this repo). The question has
-  // to survive the `router.replace` below: once the parameter is gone, reading
-  // it off `params` again would hand `MsaidiziChat` a null on the very next
-  // render, mid-run.
-  const [question] = useState(() => params.get(MSAIDIZI_ASK_PARAM));
+  useEffect(() => {
+    setWorkspace(requestedWorkspace);
+  }, [requestedWorkspace]);
 
   const asked = params.get(MSAIDIZI_ASK_PARAM);
   useEffect(() => {
     if (asked === null) return;
-    // `replace`, not `push`: the URL with the question in it must not become a
-    // history entry either, or Back walks straight into a re-run. `scroll:false`
-    // because this is a URL correction, not a navigation the reader asked for.
-    router.replace(MSAIDIZI_ROUTE, { scroll: false });
-  }, [asked, router]);
+    // Keep validated inspection state and inert query parameters while spending
+    // the one-shot question. `replace` prevents Back or refresh from replaying it.
+    router.replace(addressAfterAsk(serializedParams), { scroll: false });
+  }, [asked, router, serializedParams]);
 
-  return <MsaidiziChat initialQuestion={question} />;
+  const taskId =
+    requestedWorkspace === 'tasks' && workspace === 'tasks'
+      ? allowedTargetId(params.get('taskId'))
+      : null;
+  const deviceId =
+    requestedWorkspace === 'devices' && workspace === 'devices'
+      ? allowedTargetId(params.get('deviceId'))
+      : null;
+  const recoveryId =
+    requestedWorkspace === 'devices' && workspace === 'devices'
+      ? allowedTargetId(params.get('recoveryId'))
+      : null;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <nav aria-label="Msaidizi workspaces" className="mb-4 flex flex-wrap gap-1">
+        {MSAIDIZI_WORKSPACES.map((item) => {
+          const selected = workspace === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setWorkspace(item.id)}
+              aria-current={selected ? 'page' : undefined}
+              className="cursor-pointer rounded-lg px-3 py-1.5 text-[12px] font-medium"
+              style={{
+                color: selected ? 'var(--aurora-accent-text)' : 'var(--aurora-text-secondary)',
+                background: selected ? 'var(--aurora-accent-subtle)' : 'transparent',
+                border: `1px solid ${selected ? 'var(--aurora-border-focus)' : 'transparent'}`,
+              }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+      {workspace === 'conversations' ? <MsaidiziPageBody initialQuestion={question} /> : null}
+      {workspace === 'tasks' ? <MsaidiziTaskCenter initialTaskId={taskId} /> : null}
+      {workspace === 'routines' || workspace === 'devices' || workspace === 'memory' ? (
+        <MsaidiziWorkspacePlaceholder
+          workspace={workspace}
+          focusedDeviceId={deviceId}
+          focusedRecoveryId={recoveryId}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 export default function MsaidiziPage() {
@@ -94,7 +194,7 @@ export default function MsaidiziPage() {
           </p>
         }
       >
-        <MsaidiziPageBody />
+        <MsaidiziWorkspaceBody />
       </Suspense>
     </div>
   );
