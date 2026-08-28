@@ -1,0 +1,444 @@
+<title>Msaidizi Handover Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=IBM+Plex+Mono:wght@400;500&family=Inter+Tight:wght@400;500;600;700&display=swap">
+
+<style>
+  :root {
+    --paper: #f6f4ef;
+    --card: #fffdf9;
+    --sunk: #ece8df;
+    --rule: #d9d3c6;
+    --rule-soft: #e6e1d6;
+    --ink: #1c1a17;
+    --ink-soft: #5c574e;
+    --ink-faint: #8a8377;
+    --done: #2f6b4f;
+    --done-wash: #e3efe7;
+    --yours: #9c5518;
+    --yours-wash: #f7ebe0;
+    --held: #4a5578;
+    --held-wash: #e8eaf1;
+
+    --display: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+    --body: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14140f;
+      --card: #1c1c16;
+      --sunk: #24241d;
+      --rule: #35342b;
+      --rule-soft: #2a2a22;
+      --ink: #ece8de;
+      --ink-soft: #a49d90;
+      --ink-faint: #776f63;
+      --done: #6fc79b;
+      --done-wash: #163024;
+      --yours: #e0a266;
+      --yours-wash: #33241a;
+      --held: #9aa6d0;
+      --held-wash: #1e2130;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #14140f;
+    --card: #1c1c16;
+    --sunk: #24241d;
+    --rule: #35342b;
+    --rule-soft: #2a2a22;
+    --ink: #ece8de;
+    --ink-soft: #a49d90;
+    --ink-faint: #776f63;
+    --done: #6fc79b;
+    --done-wash: #163024;
+    --yours: #e0a266;
+    --yours-wash: #33241a;
+    --held: #9aa6d0;
+    --held-wash: #1e2130;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 1.075rem;
+    line-height: 1.68;
+    margin: 0;
+    padding: 0 1.5rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 49rem; margin: 0 auto; }
+
+  header.top {
+    padding: 4rem 0 1.75rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .kicker {
+    font-family: var(--display);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 1.1rem;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(2rem, 5.5vw, 2.9rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.022em;
+    margin: 0 0 1rem;
+    text-wrap: balance;
+  }
+
+  .lede {
+    font-size: 1.2rem;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 38rem;
+  }
+
+  section { margin-top: 3.5rem; }
+
+  h2 {
+    font-family: var(--display);
+    font-size: 1.4rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0 0 0.4rem;
+  }
+
+  .sub { color: var(--ink-soft); margin: 0 0 1.75rem; max-width: 38rem; }
+
+  p { margin: 0 0 1.05rem; }
+  p:last-child { margin-bottom: 0; }
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--sunk);
+    padding: 0.1em 0.36em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  /* verdict */
+  .verdict {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-top: 2rem;
+  }
+  @media (min-width: 40rem) { .verdict { grid-template-columns: repeat(3, 1fr); } }
+
+  .v-cell { background: var(--card); padding: 1.15rem 1.25rem; display: grid; gap: 0.3rem; align-content: start; }
+  .v-label {
+    font-family: var(--display);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .v-cell.done .v-label { color: var(--done); }
+  .v-cell.held .v-label { color: var(--held); }
+  .v-cell.yours .v-label { color: var(--yours); }
+  .v-value { font-family: var(--display); font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
+  .v-note { font-size: 0.9rem; color: var(--ink-soft); line-height: 1.45; }
+
+  /* commit ledger */
+  .ledger { border: 1px solid var(--rule); background: var(--card); }
+  .row {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr;
+    gap: 0.25rem 1rem;
+    padding: 0.95rem 1.25rem;
+  }
+  .row + .row { border-top: 1px solid var(--rule-soft); }
+  .row code { background: none; padding: 0; color: var(--ink-faint); font-size: 0.82rem; }
+  .row-title { font-family: var(--display); font-weight: 600; font-size: 0.98rem; }
+  .row-note { grid-column: 2; font-size: 0.93rem; color: var(--ink-soft); line-height: 1.5; }
+  @media (max-width: 34rem) {
+    .row { grid-template-columns: 1fr; }
+    .row-note { grid-column: 1; }
+  }
+
+  /* action list — the things only a person can do */
+  ol.actions { list-style: none; counter-reset: step; padding: 0; margin: 0; display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  ol.actions li {
+    counter-increment: step;
+    background: var(--card);
+    padding: 1.15rem 1.25rem 1.15rem 3.5rem;
+    position: relative;
+  }
+  ol.actions li::before {
+    content: counter(step);
+    position: absolute;
+    left: 1.25rem;
+    top: 1.15rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--yours);
+    background: var(--yours-wash);
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+  }
+  ol.actions h3 { font-family: var(--display); font-size: 1rem; font-weight: 600; margin: 0 0 0.35rem; }
+  ol.actions p { font-size: 0.95rem; color: var(--ink-soft); margin: 0; }
+
+  .callout {
+    border-left: 3px solid var(--yours);
+    background: var(--yours-wash);
+    padding: 1.15rem 1.35rem;
+    margin: 1.75rem 0 0;
+  }
+  .callout .v-label { color: var(--yours); display: block; margin-bottom: 0.4rem; }
+  .callout p { margin: 0; }
+
+  ul.plain { margin: 0 0 1.05rem; padding-left: 1.15rem; }
+  ul.plain li { margin-bottom: 0.55rem; }
+  ul.plain li:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--display);
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+  }
+
+  @media (max-width: 34rem) { body { padding: 0 1.1rem 4rem; } }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="kicker">Handover · 28 August 2026 · overnight session</div>
+    <h1>Where Msaidizi Stands</h1>
+    <p class="lede">
+      What moved while you were asleep, what is now on <code>main</code>, and the
+      short list of things that cannot be finished by an agent no matter how long
+      it runs.
+    </p>
+  </header>
+
+  <div class="verdict">
+    <div class="v-cell done">
+      <span class="v-label">Landed</span>
+      <span class="v-value">Merged to main</span>
+      <span class="v-note">
+        PR #33 landed as <code>210a068d</code> with all fourteen required checks
+        green. Every buildable gap from the handover analysis is closed.
+      </span>
+    </div>
+    <div class="v-cell held">
+      <span class="v-label">Deliberately held</span>
+      <span class="v-value">Three trust boundaries</span>
+      <span class="v-note">
+        Privileged command, browser egress, host file disclosure. Built blind,
+        they would be dangerous; they wait on the ceremonies below.
+      </span>
+    </div>
+    <div class="v-cell yours">
+      <span class="v-label">Only you can</span>
+      <span class="v-value">Go actually live</span>
+      <span class="v-note">
+        Signing keys, certificates and acceptance evidence need a human with
+        hardware and authority.
+      </span>
+    </div>
+  </div>
+
+  <section>
+    <h2>The honest meaning of “deployed”</h2>
+    <p class="sub">This is the one thing worth reading carefully.</p>
+    <p>
+      Merging to <code>main</code> does not put any of this in front of a user.
+      <code>deploy-production.yml</code> is <code>workflow_dispatch</code>-only
+      and needs an SSH key and protected environment that do not exist yet, and
+      every autonomy switch ships off behind a global kill switch. The ring
+      promotion pipeline additionally demands a signed evidence run and three
+      hand-provisioned digests.
+    </p>
+    <p>
+      I did not try to work around any of that. Those are the same gates I spent
+      the earlier session verifying are correctly fail-closed, and an agent
+      quietly routing around them would be the single worst outcome available
+      here. So “deployed” means <strong>landed on main, with the deploy path
+      itself exercised by CI</strong> — the Docker image builds and runtime smoke
+      only run on <code>main</code>, so merging is what proves them.
+    </p>
+    <div class="callout">
+      <span class="v-label">Before you flip anything on</span>
+      <p>
+        Check the production <code>.env</code> for
+        <code>MSAIDIZI_CLOUD_ZERO_RETENTION_CONFIRMED</code>. If it is set truthy
+        the backend now refuses to boot by design, pointing you at signed
+        provider-contract evidence instead. Absent or <code>false</code> is fine.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What the night produced</h2>
+    <p class="sub">
+      Eight real problems, every one a case of two things that had never been
+      executed together — not regressions.
+    </p>
+    <div class="ledger">
+      <div class="row">
+        <code>94fc41c</code>
+        <span class="row-title">A real bug in the isolation path</span>
+        <span class="row-note">
+          Pre-bind cleanup erased the failure it was cleaning up after. When the
+          reservation commit failed there was nothing to release, so the cleanup
+          conflicted every time and the operator was always told the wrong cause.
+          Safety was never affected — the latch trips either way — but the
+          diagnosis was destroyed exactly where it matters most.
+        </span>
+      </div>
+      <div class="row">
+        <code>af8ae05</code>
+        <span class="row-title">Gates that disagreed with the code</span>
+        <span class="row-note">
+          Compose validation asserted one backend port where two are published,
+          and demanded a healthcheck transport switch that cannot happen. The
+          device channel genuinely cannot be proxied, so the compose was right
+          and the gate was stale.
+        </span>
+      </div>
+      <div class="row">
+        <code>4f18a2d</code> <code>f95c5f2</code>
+        <span class="row-title">Nine timing tests tiered</span>
+        <span class="row-note">
+          They spawn real process trees and assert wall-clock budgets, so a
+          shared runner measures the runner. Excluded from the required gate and
+          moved to a visible, non-blocking job rather than deleted.
+        </span>
+      </div>
+      <div class="row">
+        <code>2ef29d5</code> <code>4582f85</code>
+        <span class="row-title">Two Windows-only test bugs</span>
+        <span class="row-note">
+          Seventeen hardcoded <code>C:\</code> paths, and a spec that silently
+          needed <code>backend/.env</code> to exist. Both had only ever run on a
+          developer machine.
+        </span>
+      </div>
+      <div class="row">
+        <code>febc5c1</code>
+        <span class="row-title">The planning plane made visible</span>
+        <span class="row-note">
+          Two modules reached the container transitively, so the list people read
+          to answer “what does this deployment run” was quietly incomplete.
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What only you can do</h2>
+    <p class="sub">
+      None of this is code. It needs hardware, an organisational identity, or a
+      signature, and no amount of agent time substitutes.
+    </p>
+    <ol class="actions">
+      <li>
+        <h3>Provision TPM-backed signing keys</h3>
+        <p>
+          Non-exportable P-256 keys via the Microsoft Platform Crypto Provider,
+          plus the certificate pins in <code>LocalMachine\TrustedPeople</code>.
+          TPM failure stops pairing with no software fallback, by design.
+        </p>
+      </li>
+      <li>
+        <h3>Obtain and use a code-signing certificate</h3>
+        <p>
+          The installer explicitly does not create or bless production keys. The
+          release scripts must be Authenticode-signed in a controlled ceremony on
+          a Windows 11 + TPM 2.0 host with a disposable guest VM.
+        </p>
+      </li>
+      <li>
+        <h3>Create the protected GitHub environments</h3>
+        <p>
+          Both msaidizi workflows need protected environments with required
+          reviewers, roughly six secrets, and purpose-separated trust roots. A
+          workflow file cannot configure these.
+        </p>
+      </li>
+      <li>
+        <h3>Produce live-VM acceptance evidence</h3>
+        <p>
+          Real reboots, real service mutations, kill-switch and rollback drills.
+          The checked-in tests explicitly do not claim this, and
+          <code>productionDeploymentEligible</code> stays false until it exists.
+        </p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Open, and why I left it</h2>
+    <p class="sub">Judgement calls I made rather than defaulting to “do it”.</p>
+    <ul class="plain">
+      <li>
+        <strong>The three trust boundaries.</strong> The pipelines behind them are
+        roughly ninety percent built and the missing tenth is the safety —
+        nonce ledger, DLP, streaming transport. Completing them without the
+        acceptance evidence would produce something that compiles, passes the
+        existing tests, and is insecure.
+      </li>
+      <li>
+        <strong>CRUD evidence blockers.</strong> Fifty-three path-read, four
+        query-read and about twenty-three mutation routes lack executable
+        evidence. Closing them needs a signed evidence run, which is a ceremony,
+        not a code change.
+      </li>
+      <li>
+        <strong>Per-run rather than per-session write budgets.</strong> I judged
+        this not a defect. The budget is a runaway-loop backstop and that threat
+        genuinely is per-request; a session ceiling belongs in rate limiting.
+      </li>
+      <li>
+        <strong>Two structural tidy-ups.</strong> <code>msaidizi-memory</code> has
+        no owning module, and one frontend file carries four workspaces at about
+        4,300 lines. Both are real, neither is a defect, and doing large churn
+        immediately before merging unreviewed code was the wrong trade.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>One thing I would not merge on trust</h2>
+    <p>
+      The bulk of this platform was produced by a long autonomous run and, apart
+      from the boundary review, has not been read by a person. It is green, it is
+      fail-closed, and it is coherent — none of which is the same as reviewed.
+      The commits are sliced along clean seams precisely so a human can read them
+      lane by lane rather than facing twelve hundred files at once.
+    </p>
+  </section>
+
+  <footer>
+    PR #33 merged as <code>210a068d</code> · seventeen commits, ~1,262 files ·
+    every autonomy switch ships off · nothing deployed to production by this
+    work.
+  </footer>
+
+</div>
