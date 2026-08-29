@@ -66,7 +66,8 @@ function AccountModal({ mode, initial, companies, onClose, onSaved }: {
 
   useEffect(() => {
     if (form.companyId) {
-      fetch(`/api/backend/chart-of-accounts?companyId=${form.companyId}&limit=500&isActive=true`)
+      // The backend caps chart-of-accounts page size at 200.
+      fetch(`/api/backend/chart-of-accounts?companyId=${form.companyId}&limit=200&isActive=true`)
         .then((r) => r.json())
         .then((j) => {
           const arr = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];

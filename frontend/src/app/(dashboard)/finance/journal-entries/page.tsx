@@ -145,7 +145,8 @@ function JournalModal({ mode, initial, companies, onClose, onSaved }: {
     if (companyId) {
       fetch(`/api/backend/accounting-periods?companyId=${companyId}&status=OPEN`).then((r) => r.json())
         .then((j) => setPeriods(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-      fetch(`/api/backend/chart-of-accounts?companyId=${companyId}&limit=500&isActive=true`).then((r) => r.json())
+      // The backend caps chart-of-accounts page size at 200.
+      fetch(`/api/backend/chart-of-accounts?companyId=${companyId}&limit=200&isActive=true`).then((r) => r.json())
         .then((j) => setAccounts(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
     }
   }, [companyId]);

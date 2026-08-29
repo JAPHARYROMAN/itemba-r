@@ -146,7 +146,8 @@ export default function AuditAdjustmentsPage() {
     Promise.allSettled([
       fetch(`/api/backend/fiscal-years?companyId=${id}&limit=200`).then((r) => r.json()),
       fetch(`/api/backend/accounting-periods?companyId=${id}&limit=500`).then((r) => r.json()),
-      fetch(`/api/backend/chart-of-accounts?companyId=${id}&isActive=true&limit=500`).then((r) =>
+      // The backend caps chart-of-accounts page size at 200.
+      fetch(`/api/backend/chart-of-accounts?companyId=${id}&isActive=true&limit=200`).then((r) =>
         r.json(),
       ),
     ]).then(([fyResult, periodResult, accountResult]) => {
