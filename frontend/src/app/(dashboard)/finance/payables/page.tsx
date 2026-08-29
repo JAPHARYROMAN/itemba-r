@@ -41,7 +41,15 @@ interface SupplierOption {
   name: string;
 }
 
-interface Payable {
+interface CashAccount {
+  id: string;
+  accountName: string;
+  accountType?: string | null;
+  currency?: string | null;
+  isActive?: boolean | null;
+}
+
+export interface Payable {
   id: string;
   payableNumber?: string;
   supplierId?: string | null;
@@ -614,7 +622,7 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
   );
 }
 
-function RecordPaymentModal({
+export function RecordPaymentModal({
   payable,
   onClose,
   onDone,
@@ -625,9 +633,55 @@ function RecordPaymentModal({
 }) {
   const [amount, setAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState('');
+  const [cashAccountId, setCashAccountId] = useState('');
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [cashAccountsFailed, setCashAccountsFailed] = useState(false);
+  const [cashAccountsRetry, setCashAccountsRetry] = useState(0);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Load the payable's company cash / bank accounts so the outflow can be
+  // posted from (and cache-decremented on) the specific account that paid the
+  // supplier. Mirrors the receivables record-payment modal. A failed fetch is
+  // surfaced (not swallowed into an empty list) so the operator can retry or
+  // knowingly fall back to the backend's default cash-on-hand account.
+  useEffect(() => {
+    if (!payable.companyId) {
+      setCashAccounts([]);
+      setCashAccountsFailed(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/backend/cash-accounts/company/${encodeURIComponent(payable.companyId)}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.message ?? 'Failed to load cash accounts');
+        return json.data ?? json;
+      })
+      .then((rows: unknown) => {
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? (rows as CashAccount[]) : [];
+        setCashAccounts(list.filter((a) => a.isActive !== false));
+        setCashAccountsFailed(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCashAccounts([]);
+        setCashAccountsFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [payable.companyId, cashAccountsRetry]);
+
+  // The backend rejects a cash account whose currency differs from the
+  // payable's (the running-balance cache is denominated in the account's own
+  // currency), so only offer matching accounts — and say so in the label.
+  const documentCurrency = payable.currency || 'TZS';
+  const matchingCashAccounts = cashAccounts.filter(
+    (a) => (a.currency || 'TZS') === documentCurrency,
+  );
 
   const handleSubmit = async () => {
     const amt = Number(amount);
@@ -642,6 +696,14 @@ function RecordPaymentModal({
       );
       return;
     }
+    // Only insist on a selection when there are actually options to select.
+    // When the list failed to load (or holds no matching-currency account) the
+    // backend still accepts an omitted cashAccountId and falls back to its
+    // default cash-on-hand account.
+    if (!cashAccountId && matchingCashAccounts.length > 0) {
+      setError('Select the cash / bank account the payment came from');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -651,6 +713,7 @@ function RecordPaymentModal({
         body: JSON.stringify({
           amount: amt,
           paymentDate: paymentDate || undefined,
+          cashAccountId: cashAccountId || undefined,
           notes: notes || undefined,
         }),
       });
@@ -701,6 +764,39 @@ function RecordPaymentModal({
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
         />
+        <FormSelect
+          label="Cash / Bank Account"
+          required
+          placeholder="Select the account the payment came from…"
+          value={cashAccountId}
+          onChange={(e) => setCashAccountId(e.target.value)}
+          options={matchingCashAccounts.map((a) => ({
+            value: a.id,
+            label: `${a.accountName}${a.accountType ? ` · ${a.accountType}` : ''} · ${a.currency || 'TZS'}`,
+          }))}
+          hint={
+            cashAccountsFailed
+              ? undefined
+              : matchingCashAccounts.length === 0
+                ? `No active ${documentCurrency} cash / bank accounts found for this company. The payment will be recorded against the default cash on hand account.`
+                : `Only ${documentCurrency} accounts are listed — the account currency must match the payable.`
+          }
+        />
+        {cashAccountsFailed && (
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <span>
+              Couldn&apos;t load the cash / bank accounts. You can retry, or record the payment
+              against the default cash on hand account.
+            </span>
+            <button
+              type="button"
+              className="shrink-0 font-semibold underline"
+              onClick={() => setCashAccountsRetry((n) => n + 1)}
+            >
+              Retry
+            </button>
+          </div>
+        )}
         <FormInput
           label="Payment Date"
           type="date"

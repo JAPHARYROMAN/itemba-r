@@ -27,13 +27,34 @@ function approvedExpense(overrides: Record<string, unknown> = {}) {
     description: 'Daily wages',
     paymentMethod: null,
     status: 'APPROVED',
+    expenseDate: new Date('2026-03-10'),
+    vendorName: 'Casual Labour Pool',
+    journalEntryId: null,
     expenseCategory: { linkedAccountId: 'expense-ledger-1' },
     ...overrides,
   } as any;
 }
 
+function pendingExpense(overrides: Record<string, unknown> = {}) {
+  return approvedExpense({
+    status: 'PENDING_APPROVAL',
+    approvedById: null,
+    approvedAt: null,
+    ...overrides,
+  });
+}
+
 function makeHarness() {
   const tx = {
+    // approve() re-reads amount/journalEntryId and pay() re-reads status under
+    // a row lock (SELECT ... FOR UPDATE). The default committed row is an
+    // APPROVED, un-accrued expense at the fixture amount; individual tests
+    // override to simulate concurrent commits.
+    $queryRaw: jest
+      .fn()
+      .mockResolvedValue([
+        { id: 'expense-1', status: 'APPROVED', amount: 22500, journalEntryId: null },
+      ]),
     cashAccount: {
       findFirst: jest.fn(),
       update: jest.fn().mockResolvedValue({}),
@@ -42,14 +63,26 @@ function makeHarness() {
       findFirst: jest.fn().mockResolvedValue({ id: 'cash-ledger-1' }),
     },
     expense: {
+      // approve() re-reads status/journalEntryId when its atomic claim loses.
+      findFirst: jest.fn().mockResolvedValue({ journalEntryId: null }),
       update: jest.fn().mockImplementation(async ({ data }: any) => ({
         ...approvedExpense(),
         ...data,
       })),
+      // approve()'s atomic status claim (compare-and-set); default: claim won.
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    payable: {
+      // pay() looks for the Expense-sourced payable opened at approval; the
+      // default (no accrued payable) keeps the legacy cash-basis path.
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: 'payable-1', ...data })),
+      update: jest.fn().mockImplementation(async ({ data }: any) => ({ id: 'payable-1', ...data })),
     },
   };
   const prisma = {
-    expense: { findFirst: jest.fn() },
+    // reject()/update() run their status-guarded compare-and-set outside a tx.
+    expense: { findFirst: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     division: { findFirst: jest.fn() },
     branch: { findFirst: jest.fn() },
     cashAccount: { findMany: jest.fn() },
@@ -60,6 +93,9 @@ function makeHarness() {
   const codes = { next: jest.fn().mockResolvedValue('JE-2026-000001') } as any;
   const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
   const postingEngine = { postLines: jest.fn().mockResolvedValue({ id: 'journal-1' }) } as any;
+  const accountResolver = {
+    resolve: jest.fn(async (_companyId: string, role: string) => ({ id: `${role}-acc` })),
+  } as any;
   const service = new ExpensesService(
     prisma,
     auditLogs,
@@ -67,6 +103,7 @@ function makeHarness() {
     codes,
     companyScope,
     postingEngine,
+    accountResolver,
   );
 
   return {
@@ -78,7 +115,14 @@ function makeHarness() {
     codes,
     companyScope,
     postingEngine,
+    accountResolver,
   };
+}
+
+function sumLegs(lines: any[]) {
+  const totalDebit = lines.reduce((s, l) => s + Number(l.debit), 0);
+  const totalCredit = lines.reduce((s, l) => s + Number(l.credit), 0);
+  return { totalDebit, totalCredit };
 }
 
 describe('ExpensesService detail', () => {
@@ -222,6 +266,388 @@ describe('ExpensesService payment account selection', () => {
 
     await expect(
       service.pay('expense-1', { cashAccountId: 'invalid-account' }, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExpensesService.approve accrual (DR Expense / CR AP at expense date)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('posts a balanced DR Expense / CR AP_CONTROL JE at the expense date and opens an OPEN Expense-sourced payable', async () => {
+    const existing = pendingExpense();
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+
+    await service.approve('expense-1', authUser());
+
+    // One accrual JE was posted.
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+
+    // Booked at the EXPENSE date (accrual accounting), not "now".
+    expect(postingInput.transactionDate).toEqual(new Date(existing.expenseDate));
+
+    const lines = postingInput.lines;
+    // DR the category-linked expense account for the full (gross) amount.
+    const expenseLine = lines.find((l: any) => l.accountId === 'expense-ledger-1');
+    expect(Number(expenseLine.debit)).toBe(22500);
+    expect(Number(expenseLine.credit)).toBe(0);
+    // CR AP_CONTROL for the full amount.
+    const apLine = lines.find((l: any) => l.accountId === 'AP_CONTROL-acc');
+    expect(Number(apLine.credit)).toBe(22500);
+    expect(Number(apLine.debit)).toBe(0);
+    // Exactly two legs (no phantom input-VAT leg), balanced.
+    expect(lines).toHaveLength(2);
+    const { totalDebit, totalCredit } = sumLegs(lines);
+    expect(totalDebit).toBe(totalCredit);
+    expect(totalDebit).toBe(22500);
+
+    // An OPEN Expense-sourced payable was opened for the full gross.
+    expect(tx.payable.create).toHaveBeenCalledTimes(1);
+    const [{ data }] = tx.payable.create.mock.calls[0];
+    expect(data.sourceType).toBe('Expense');
+    expect(data.sourceId).toBe('expense-1');
+    expect(data.status).toBe('OPEN');
+    expect(Number(data.amount)).toBe(22500);
+    expect(Number(data.outstandingAmount)).toBe(22500);
+    expect(Number(data.paidAmount)).toBe(0);
+
+    // Status claimed atomically (compare-and-set, guarded on PENDING_APPROVAL)
+    // BEFORE any posting, so a concurrent approver can never double-post.
+    expect(tx.expense.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'expense-1',
+        companyId: 'company-1',
+        status: 'PENDING_APPROVAL',
+        deletedAt: null,
+      },
+      data: expect.objectContaining({ status: 'APPROVED', approvedById: 'user-1' }),
+    });
+    expect(tx.expense.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      postingEngine.postLines.mock.invocationCallOrder[0],
+    );
+    // The accrual JE is linked in the same transaction.
+    expect(tx.expense.update).toHaveBeenCalledWith({
+      where: { id: 'expense-1' },
+      data: expect.objectContaining({ journalEntryId: 'journal-1' }),
+    });
+  });
+
+  it('falls back to the GENERAL_EXPENSE role when the category has no linked account', async () => {
+    const existing = pendingExpense({ expenseCategory: { linkedAccountId: null } });
+    const { service, postingEngine, accountResolver } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+
+    await service.approve('expense-1', authUser());
+
+    expect(accountResolver.resolve).toHaveBeenCalledWith(
+      'company-1',
+      'GENERAL_EXPENSE',
+      expect.anything(),
+    );
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const expenseLine = postingInput.lines.find(
+      (l: any) => l.accountId === 'GENERAL_EXPENSE-acc',
+    );
+    expect(Number(expenseLine.debit)).toBe(22500);
+  });
+
+  it('does not re-accrue when the expense already carries an accrual JE (idempotent)', async () => {
+    const existing = pendingExpense({ journalEntryId: 'je-accrual' });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    // The locked in-tx re-read shows the accrual JE already linked.
+    tx.$queryRaw.mockResolvedValue([{ amount: 22500, journalEntryId: 'je-accrual' }]);
+
+    await service.approve('expense-1', authUser());
+
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.create).not.toHaveBeenCalled();
+    expect(tx.expense.update).toHaveBeenCalledWith({
+      where: { id: 'expense-1' },
+      data: expect.objectContaining({ journalEntryId: 'je-accrual' }),
+    });
+  });
+});
+
+describe('ExpensesService.approve atomic claim + locked amount (double-approve / stale-amount races)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('no-ops idempotently when a concurrent approval already claimed and accrued the expense', async () => {
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    // The compare-and-set loses: the other approver committed first.
+    tx.expense.updateMany.mockResolvedValue({ count: 0 });
+    tx.expense.findFirst.mockResolvedValue({
+      ...approvedExpense({ journalEntryId: 'je-accrual' }),
+      status: 'APPROVED',
+    });
+
+    const result = await service.approve('expense-1', authUser());
+
+    // The loser posts NOTHING: no second accrual JE, no second payable.
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.create).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
+    expect(result.journalEntryId).toBe('je-accrual');
+  });
+
+  it('throws when the claim fails and the expense was not approved (e.g. rejected concurrently) — no accrual posted', async () => {
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    tx.expense.updateMany.mockResolvedValue({ count: 0 });
+    tx.expense.findFirst.mockResolvedValue({ status: 'REJECTED', journalEntryId: null });
+
+    await expect(service.approve('expense-1', authUser())).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.create).not.toHaveBeenCalled();
+  });
+
+  it('books the accrual and the payable at the COMMITTED (locked) amount, not the stale pre-transaction read', async () => {
+    // Outer findOne read amount 22500, but a concurrent update() committed
+    // amount 50000 before the claim: the accrual must book 50000.
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    tx.$queryRaw.mockResolvedValue([{ amount: 50000, journalEntryId: null }]);
+
+    await service.approve('expense-1', authUser());
+
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const lines = postingInput.lines;
+    const expenseLine = lines.find((l: any) => l.accountId === 'expense-ledger-1');
+    const apLine = lines.find((l: any) => l.accountId === 'AP_CONTROL-acc');
+    expect(Number(expenseLine.debit)).toBe(50000);
+    expect(Number(apLine.credit)).toBe(50000);
+    const { totalDebit, totalCredit } = sumLegs(lines);
+    expect(totalDebit).toBe(totalCredit);
+    expect(totalDebit).toBe(50000);
+
+    // The payable mirrors the same committed amount, so pay() settles exactly
+    // what was accrued.
+    const [{ data }] = tx.payable.create.mock.calls[0];
+    expect(Number(data.amount)).toBe(50000);
+    expect(Number(data.outstandingAmount)).toBe(50000);
+  });
+});
+
+describe('ExpensesService.reject atomic claim', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('rejects via a status-guarded compare-and-set', async () => {
+    const { service, prisma, auditLogs } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    prisma.expense.findFirst.mockResolvedValue(
+      pendingExpense({ status: 'REJECTED', rejectedReason: 'no budget' }),
+    );
+
+    const result = await service.reject('expense-1', { reason: 'no budget' } as any, authUser());
+
+    expect(prisma.expense.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'expense-1',
+        companyId: 'company-1',
+        status: 'PENDING_APPROVAL',
+        deletedAt: null,
+      },
+      data: { status: 'REJECTED', rejectedReason: 'no budget' },
+    });
+    expect(result.status).toBe('REJECTED');
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'EXPENSE_REJECT' }),
+    );
+  });
+
+  it('does not clobber a concurrent approval: a stale reject fails when the expense is no longer PENDING_APPROVAL', async () => {
+    const { service, prisma, auditLogs } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    // Between the outer status read and the write, approve() committed.
+    prisma.expense.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.reject('expense-1', { reason: 'too late' } as any, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExpensesService.update status-guarded write', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('applies the edit through a status-guarded updateMany and returns the fresh row', async () => {
+    const { service, prisma } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    prisma.expense.findFirst.mockResolvedValue(pendingExpense({ amount: 50000 }));
+
+    const result = await service.update('expense-1', { amount: 50000 } as any, authUser());
+
+    expect(prisma.expense.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'expense-1',
+        status: { in: ['DRAFT', 'PENDING_APPROVAL'] },
+        deletedAt: null,
+      },
+      data: { amount: 50000 },
+    });
+    expect(Number(result.amount)).toBe(50000);
+  });
+
+  it('fails cleanly when the guarded write races a concurrent approval (no post-approval amount edit)', async () => {
+    const { service, prisma, auditLogs } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    // approve() committed between the outer status read and this write; the
+    // WHERE re-evaluates against APPROVED and matches nothing.
+    prisma.expense.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.update('expense-1', { amount: 50000 } as any, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExpensesService.pay single settlement path', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function armCashAccount(tx: any) {
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Kisimani Cash Account',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+    });
+  }
+
+  it('settles the accrual once: DR AP_CONTROL / CR Cash, decrements the CashAccount, marks the payable PAID', async () => {
+    const existing = approvedExpense({ journalEntryId: 'je-accrual' });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    armCashAccount(tx);
+    // The linked accrued payable exists and is still OPEN.
+    tx.payable.findFirst.mockResolvedValue({ id: 'payable-1', amount: 22500, status: 'OPEN' });
+
+    await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+
+    // One settlement JE: DR AP_CONTROL / CR Cash ledger, balanced.
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const lines = postingInput.lines;
+    const apLine = lines.find((l: any) => l.accountId === 'AP_CONTROL-acc');
+    const cashLine = lines.find((l: any) => l.accountId === 'cash-ledger-1');
+    expect(Number(apLine.debit)).toBe(22500);
+    expect(Number(apLine.credit)).toBe(0);
+    expect(Number(cashLine.credit)).toBe(22500);
+    expect(Number(cashLine.debit)).toBe(0);
+    // Never re-debits the expense account on settlement.
+    expect(lines.some((l: any) => l.accountId === 'expense-ledger-1')).toBe(false);
+    const { totalDebit, totalCredit } = sumLegs(lines);
+    expect(totalDebit).toBe(totalCredit);
+    expect(totalDebit).toBe(22500);
+
+    // CashAccount subledger decremented once by the amount.
+    expect(tx.cashAccount.update).toHaveBeenCalledTimes(1);
+    expect(tx.cashAccount.update).toHaveBeenCalledWith({
+      where: { id: 'cash-1' },
+      data: { currentBalance: { decrement: 22500 } },
+    });
+
+    // The linked payable is closed (PAID / zero outstanding) in the SAME tx.
+    expect(tx.payable.update).toHaveBeenCalledWith({
+      where: { id: 'payable-1' },
+      data: expect.objectContaining({ status: 'PAID', outstandingAmount: 0 }),
+    });
+
+    // Expense flipped to PAID; the accrual JE link is preserved (the cash JE is
+    // NOT written over it).
+    expect(tx.expense.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'expense-1' },
+        data: expect.objectContaining({ status: 'PAID' }),
+      }),
+    );
+    const [{ data: expenseData }] = tx.expense.update.mock.calls[0];
+    expect(expenseData).not.toHaveProperty('journalEntryId');
+  });
+
+  it('is idempotent: a second pay() on an already-PAID expense posts nothing and does not decrement cash', async () => {
+    const existing = approvedExpense({ status: 'PAID' });
+    const { service, tx, postingEngine, prisma } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+
+    const result = await service.pay('expense-1', {}, authUser());
+
+    expect(result).toBe(existing);
+    // No transaction, no JE, no cash movement, no payable update.
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.cashAccount.update).not.toHaveBeenCalled();
+    expect(tx.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('defensively no-ops inside the tx when the linked payable is already PAID (race guard)', async () => {
+    const existing = approvedExpense();
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    armCashAccount(tx);
+    tx.payable.findFirst.mockResolvedValue({ id: 'payable-1', amount: 22500, status: 'PAID' });
+
+    await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.cashAccount.update).not.toHaveBeenCalled();
+    expect(tx.payable.update).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the in-tx locked status shows a concurrent pay() already settled the expense', async () => {
+    // Double-click race: both callers saw APPROVED outside the tx. The loser
+    // blocks on the FOR UPDATE row lock, then reads the committed PAID status
+    // and must post nothing — no second JE, no second cash decrement.
+    const existing = approvedExpense();
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    armCashAccount(tx);
+    tx.payable.findFirst.mockResolvedValue({ id: 'payable-1', amount: 22500, status: 'OPEN' });
+    tx.$queryRaw.mockResolvedValue([{ status: 'PAID' }]);
+
+    const result = await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+
+    expect(result).toBe(existing);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.cashAccount.update).not.toHaveBeenCalled();
+    expect(tx.payable.update).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
+  });
+
+  it('locks the expense row (FOR UPDATE) inside the settlement transaction', async () => {
+    const existing = approvedExpense({ journalEntryId: 'je-accrual' });
+    const { service, tx } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    armCashAccount(tx);
+    tx.payable.findFirst.mockResolvedValue({ id: 'payable-1', amount: 22500, status: 'OPEN' });
+
+    await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+
+    // The locked status re-read runs before any posting side-effect.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const rawSql = tx.$queryRaw.mock.calls[0][0].join('?');
+    expect(rawSql).toContain('FOR UPDATE');
+  });
+
+  it('requires a linked category ledger account only on the legacy (un-accrued) path', async () => {
+    const existing = approvedExpense({ expenseCategory: { linkedAccountId: null } });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    armCashAccount(tx);
+    // No accrued payable -> legacy cash-basis path -> the link is mandatory.
+    tx.payable.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser()),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     expect(tx.expense.update).not.toHaveBeenCalled();
