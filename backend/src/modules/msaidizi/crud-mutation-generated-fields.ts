@@ -350,6 +350,15 @@ add('ScheduledReportsController.create', 'nextRunAt', {
   kind: 'action-local-calendar-days',
   offsetDays: 1,
 });
+// The record-book service truncates recordDate to the SERVER-LOCAL day start
+// (dayStart uses setHours(0,0,0,0)), so the persisted instant depends on the
+// runner's timezone. A pinned persisted literal only matches in the timezone
+// it was authored in; this validator recomputes the same local truncation at
+// verification time, so the contract holds in any timezone at any run hour.
+add('RecordBookController.createExpense', 'recordDate', {
+  kind: 'local-day-start',
+  value: literal('2026-08-25T00:00:00.000Z'),
+});
 add('SalesCommissionsController.create', 'currency', model('SalesOrder', ['currency']));
 add('PerformanceController.create', 'divisionId', model('Employee', ['divisionId']));
 add('PerformanceController.create', 'branchId', model('Employee', ['branchId']));

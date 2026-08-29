@@ -26,6 +26,7 @@ const EXPECTED_PERMISSIONS = {
   'CustomerPaymentsController.create': 'customer-payments.manage',
   'CustomerPaymentsController.reverse': 'customer-payments.manage',
   'DepreciationController.postEntry': 'depreciation.post_entry',
+  'ExpensesController.approve': 'expenses.approve',
   'ExpensesController.pay': 'expenses.pay',
   'GoodsReceivedNotesController.post': 'grn.post',
   'IntercompanyTransactionsController.post': 'intercompany.post',
@@ -50,13 +51,13 @@ describe('standalone finance/operations positive mutation evidence tranche', () 
   const byId = new Map(manifest.map((capability) => [capability.id, capability]));
   const fixtures = CRUD_FINANCIAL_ACTION_POSITIVE_EVIDENCE_PACK.fixtures;
 
-  it('closes exactly the requested 25 live capabilities with positive controls', () => {
+  it('closes exactly the requested 26 live capabilities with positive controls', () => {
     expect([...CRUD_FINANCIAL_ACTION_POSITIVE_CLOSED_IDS].sort()).toEqual([...EXPECTED_IDS].sort());
     expect(fixtures.map((fixture) => fixture.capabilityId).sort()).toEqual(
       [...EXPECTED_IDS].sort(),
     );
-    expect(fixtures).toHaveLength(25);
-    expect(new Set(fixtures.map((fixture) => fixture.fixtureId)).size).toBe(25);
+    expect(fixtures).toHaveLength(26);
+    expect(new Set(fixtures.map((fixture) => fixture.fixtureId)).size).toBe(26);
     expect(fixtures.every((fixture) => fixture.controlKind === 'positive')).toBe(true);
 
     const coverage = new Map(
