@@ -1,11 +1,61 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, AuditSeverity, ExternalPaymentStatus, Prisma } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  AccessLevel,
+  AuditSeverity,
+  CashAccountType,
+  ExternalPaymentContext,
+  ExternalPaymentMethod,
+  ExternalPaymentStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalPaymentDto } from './dto/create-external-payment.dto';
 import { QueryExternalPaymentDto } from './dto/query-external-payment.dto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import {
+  AccountResolverService,
+  AccountRole,
+} from '../../common/services/account-resolver.service';
+import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+
+/**
+ * Receivable statuses that still carry an outstanding balance and therefore can
+ * be relieved by a confirmed external payment. PAID is settled; WRITTEN_OFF /
+ * CANCELLED are closed and must NOT be relieved (nor resurrected on reverse).
+ */
+const OPEN_RECEIVABLE_STATUSES = ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as const;
+
+/**
+ * paymentContextType values whose paymentContextId points (directly or via a
+ * SalesOrder) at a customer Receivable we should relieve on confirm.
+ */
+const RECEIVABLE_CONTEXTS: ExternalPaymentContext[] = [
+  ExternalPaymentContext.RECEIVABLE,
+  ExternalPaymentContext.SALES_ORDER,
+];
+
+/** Locked snapshot of a receivable row read FOR UPDATE inside the transaction. */
+interface LockedReceivable {
+  id: string;
+  companyId: string;
+  divisionId: string | null;
+  branchId: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  outstandingAmount: Prisma.Decimal;
+  paidAmount: Prisma.Decimal;
+  status: string;
+  currency: string | null;
+  sourceType: string | null;
+  sourceId: string | null;
+}
 
 @Injectable()
 export class ExternalPaymentsService {
@@ -13,6 +63,8 @@ export class ExternalPaymentsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly accountResolver: AccountResolverService,
+    private readonly postingEngine: PostingEngineService,
   ) {}
 
   private buildSelect(includeSensitive: boolean) {
@@ -206,6 +258,7 @@ export class ExternalPaymentsService {
   ) {
     if (!record) throw new NotFoundException('External payment not found');
     if (record.status === ExternalPaymentStatus.SUCCESS) {
+      // Idempotent: already confirmed (and already posted). Do NOT re-post.
       return this.prisma.externalPayment.findUnique({
         where: { id: record.id },
         select: this.buildSelect(false),
@@ -218,47 +271,60 @@ export class ExternalPaymentsService {
       throw new BadRequestException('Payment cannot be confirmed in its current status');
     }
 
-    // ITMB-078: close the check-then-act race with a conditional atomic update
-    // guarded on the current status so concurrent confirms cannot both win.
-    const { count } = await this.prisma.externalPayment.updateMany({
-      where: {
-        id: record.id,
-        status: { in: [ExternalPaymentStatus.INITIATED, ExternalPaymentStatus.PENDING] },
-      },
-      data: {
-        status: ExternalPaymentStatus.SUCCESS,
-        confirmedById: userId ?? null,
-        confirmedAt: new Date(),
-      },
-    });
-    if (count === 0) {
-      // Another request already transitioned the row; return its current state.
-      const current = await this.prisma.externalPayment.findUnique({
-        where: { id: record.id },
+    // Everything — the atomic status claim, the balanced GL posting, the AR
+    // relief, and the CashAccount balance bump — runs in ONE transaction so a
+    // confirmed external payment either lands fully in finance or not at all.
+    const { updated, posted } = await this.prisma.$transaction(async (tx) => {
+      // ITMB-078: close the check-then-act race with a conditional atomic update
+      // guarded on the current status so concurrent confirms cannot both win.
+      // The winner (count === 1) is the ONLY caller that posts the GL below —
+      // this is also the idempotency guard against double-posting on re-confirm.
+      const { count } = await tx.externalPayment.updateMany({
+        where: {
+          id: record.id,
+          status: { in: [ExternalPaymentStatus.INITIATED, ExternalPaymentStatus.PENDING] },
+        },
+        data: {
+          status: ExternalPaymentStatus.SUCCESS,
+          confirmedById: userId ?? null,
+          confirmedAt: new Date(),
+        },
       });
-      if (current?.status === ExternalPaymentStatus.SUCCESS) {
-        return this.prisma.externalPayment.findUnique({
-          where: { id: record.id },
-          select: this.buildSelect(false),
-        });
+      if (count === 0) {
+        // Another request already transitioned the row; return its state and do
+        // NOT post again (the winner already posted).
+        const current = await tx.externalPayment.findUnique({ where: { id: record.id } });
+        if (current?.status === ExternalPaymentStatus.SUCCESS) {
+          const view = await tx.externalPayment.findUnique({
+            where: { id: record.id },
+            select: this.buildSelect(false),
+          });
+          return { updated: view, posted: false };
+        }
+        throw new BadRequestException('Payment cannot be confirmed in its current status');
       }
-      throw new BadRequestException('Payment cannot be confirmed in its current status');
+
+      // We won the claim — post finance in the SAME transaction.
+      await this.postConfirmation(tx, record, userId);
+
+      const view = await tx.externalPayment.findUnique({
+        where: { id: record.id },
+        select: this.buildSelect(false),
+      });
+      return { updated: view, posted: true };
+    });
+
+    if (posted) {
+      await this.auditLogs.log({
+        action: 'EXTERNAL_PAYMENT_CONFIRMED',
+        entityType: 'ExternalPayment',
+        entityId: record.id,
+        userId: userId ?? undefined,
+        companyId: record.companyId,
+        metadata,
+        severity: AuditSeverity.MEDIUM,
+      });
     }
-
-    const updated = await this.prisma.externalPayment.findUnique({
-      where: { id: record.id },
-      select: this.buildSelect(false),
-    });
-
-    await this.auditLogs.log({
-      action: 'EXTERNAL_PAYMENT_CONFIRMED',
-      entityType: 'ExternalPayment',
-      entityId: record.id,
-      userId: userId ?? undefined,
-      companyId: record.companyId,
-      metadata,
-      severity: AuditSeverity.MEDIUM,
-    });
 
     return updated;
   }
@@ -296,44 +362,737 @@ export class ExternalPaymentsService {
       throw new BadRequestException('Only successful payments can be reversed');
     }
 
-    // ITMB-078: close the check-then-act race with a conditional atomic update
-    // guarded on the SUCCESS status so concurrent reversals cannot both win.
-    const { count } = await this.prisma.externalPayment.updateMany({
-      where: {
-        id: record.id,
-        status: ExternalPaymentStatus.SUCCESS,
-      },
-      data: { status: ExternalPaymentStatus.REVERSED },
-    });
-    if (count === 0) {
-      // Another request already transitioned the row; return its current state.
-      const current = await this.prisma.externalPayment.findUnique({
-        where: { id: record.id },
+    // Mirror the confirm posting in reverse — status claim, AR restore, mirror
+    // JE, and CashAccount unwind — all in ONE transaction.
+    const { updated, reversed } = await this.prisma.$transaction(async (tx) => {
+      // ITMB-078: close the check-then-act race with a conditional atomic update
+      // guarded on the SUCCESS status so concurrent reversals cannot both win.
+      const { count } = await tx.externalPayment.updateMany({
+        where: {
+          id: record.id,
+          status: ExternalPaymentStatus.SUCCESS,
+        },
+        data: { status: ExternalPaymentStatus.REVERSED },
       });
-      if (current?.status === ExternalPaymentStatus.REVERSED) {
-        return this.prisma.externalPayment.findUnique({
-          where: { id: record.id },
-          select: this.buildSelect(false),
-        });
+      if (count === 0) {
+        // Another request already transitioned the row; return its state and do
+        // NOT unwind again (the winner already unwound).
+        const current = await tx.externalPayment.findUnique({ where: { id: record.id } });
+        if (current?.status === ExternalPaymentStatus.REVERSED) {
+          const view = await tx.externalPayment.findUnique({
+            where: { id: record.id },
+            select: this.buildSelect(false),
+          });
+          return { updated: view, reversed: false };
+        }
+        throw new BadRequestException('Only successful payments can be reversed');
       }
-      throw new BadRequestException('Only successful payments can be reversed');
+
+      // We won the claim — unwind finance in the SAME transaction.
+      await this.reverseConfirmation(tx, record, userId);
+
+      const view = await tx.externalPayment.findUnique({
+        where: { id: record.id },
+        select: this.buildSelect(false),
+      });
+      return { updated: view, reversed: true };
+    });
+
+    if (reversed) {
+      await this.auditLogs.log({
+        action: 'EXTERNAL_PAYMENT_REVERSED',
+        entityType: 'ExternalPayment',
+        entityId: record.id,
+        userId: userId ?? undefined,
+        companyId: record.companyId,
+        metadata,
+        severity: AuditSeverity.HIGH,
+      });
     }
 
-    const updated = await this.prisma.externalPayment.findUnique({
-      where: { id: record.id },
-      select: this.buildSelect(false),
-    });
-
-    await this.auditLogs.log({
-      action: 'EXTERNAL_PAYMENT_REVERSED',
-      entityType: 'ExternalPayment',
-      entityId: record.id,
-      userId: userId ?? undefined,
-      companyId: record.companyId,
-      metadata,
-      severity: AuditSeverity.HIGH,
-    });
-
     return updated;
+  }
+
+  // ── finance posting ──────────────────────────────────────────────────────────
+
+  /**
+   * Post the confirmation of an external payment to finance, inside the caller's
+   * transaction. Emits a balanced JE and keeps the matching subledgers in step:
+   *
+   *   DR Cash|Bank            amount              (payment method → BANK/CASH role)
+   *   CR AR control           min(amount, outstanding)   [linked receivable]
+   *   CR Customer advance     remainder                  [overpayment / standalone]
+   *
+   * When the payment references a Receivable (context RECEIVABLE, or SALES_ORDER
+   * whose SalesOrder carries a receivableId) that receivable's outstanding is
+   * relieved, the source SalesOrder + customer balance are synced, and the
+   * receiving CashAccount.currentBalance is incremented (and the account id
+   * stamped on the payment row for the reversal to unwind) — all atomically.
+   * When there is no linked receivable — or the receivable is closed, or is
+   * denominated in a different currency than the receipt — the whole amount is
+   * a customer-advance receipt (CR advance / AR credit), so the money is never
+   * dropped from the GL and a receivable is never relieved 1:1 across currencies.
+   */
+  private async postConfirmation(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+    userId: string | null,
+  ): Promise<void> {
+    const amount = new Prisma.Decimal(record.amount).toDecimalPlaces(2);
+    if (amount.lte(0)) {
+      throw new BadRequestException('External payment amount must be greater than zero');
+    }
+
+    // JournalEntry.createdById is a required FK. The integration path posts with
+    // userId=null, so resolve a real posting actor (interactive user →
+    // confirmer/initiator → any active company user) or fail closed.
+    const actorId = await this.resolvePostingActorId(tx, record, userId);
+
+    // Resolve a receiving cash/bank account. External payments carry no
+    // cashAccountId, so we pick a company cash account whose type matches the
+    // payment method (BANK for transfers/cards, else cash-on-hand). If one
+    // exists we bump its denormalised currentBalance and drive the GL cash role
+    // from its type; if none exists we still post the GL cash leg by method.
+    const cashAccount = await this.resolveReceivingCashAccount(
+      tx,
+      record.companyId,
+      record.paymentMethod,
+      record.currency,
+    );
+    const cashRole: AccountRole = cashAccount
+      ? this.cashAccountRole(cashAccount.accountType)
+      : this.methodCashRole(record.paymentMethod);
+
+    // Locate + relieve the linked receivable (if any).
+    const relief = await this.relieveLinkedReceivable(tx, record, amount);
+
+    const divisionId = relief?.divisionId ?? cashAccount?.divisionId ?? null;
+    const branchId = relief?.branchId ?? cashAccount?.branchId ?? null;
+    const customerLabel =
+      relief?.customerName ?? record.payerName ?? record.paymentContextId ?? 'external payer';
+
+    const [cashAcct, arAcct] = await Promise.all([
+      this.accountResolver.resolve(record.companyId, cashRole, tx),
+      this.accountResolver.resolve(record.companyId, 'AR_CONTROL', tx),
+    ]);
+
+    const appliedToAr = relief?.applied ?? new Prisma.Decimal(0);
+    const advanceAmount = amount.minus(appliedToAr).toDecimalPlaces(2);
+
+    const lines: Array<{
+      accountId: string;
+      debit: Prisma.Decimal;
+      credit: Prisma.Decimal;
+      description: string;
+    }> = [
+      {
+        accountId: cashAcct.id,
+        debit: amount,
+        credit: new Prisma.Decimal(0),
+        description: `External payment ${record.paymentNumber} received (${record.paymentMethod ?? 'external'})`,
+      },
+    ];
+
+    if (appliedToAr.gt(0)) {
+      lines.push({
+        accountId: arAcct.id,
+        debit: new Prisma.Decimal(0),
+        credit: appliedToAr,
+        description: `Settle receivable: ${customerLabel}`,
+      });
+    }
+
+    if (advanceAmount.gt(0)) {
+      // Overpayment beyond the linked receivable, OR a standalone / advance
+      // receipt with no receivable at all: park the remainder on a
+      // customer-advance liability (matching customer-payments overpayment
+      // handling); fall back to AR control when no advance account is configured.
+      const advanceAccountId = await this.resolveCustomerAdvanceAccountId(tx, record.companyId);
+      if (advanceAccountId && advanceAccountId === cashAcct.id) {
+        throw new ConflictException(
+          `Customer-advance account resolves to the same account as the cash/bank ` +
+            `receipt account (${cashAcct.id}); refusing to post a self-cancelling ` +
+            `advance line. Fix the chart of accounts mapping.`,
+        );
+      }
+      if (advanceAccountId && advanceAccountId !== arAcct.id) {
+        lines.push({
+          accountId: advanceAccountId,
+          debit: new Prisma.Decimal(0),
+          credit: advanceAmount,
+          description: `Customer advance / credit on account: ${customerLabel}`,
+        });
+      } else {
+        lines.push({
+          accountId: arAcct.id,
+          debit: new Prisma.Decimal(0),
+          credit: advanceAmount,
+          description:
+            `Customer advance held in AR (no customer-advance account configured): ` +
+            `${customerLabel}`,
+        });
+      }
+    }
+
+    await this.postingEngine.postLines(
+      {
+        companyId: record.companyId,
+        divisionId,
+        branchId,
+        transactionDate: record.confirmedAt ?? new Date(),
+        description: `External payment ${record.paymentNumber}`,
+        referenceType: 'ExternalPayment',
+        referenceId: record.id,
+        moduleName: 'external-payments',
+        userId: actorId,
+        lines,
+      },
+      tx,
+    );
+
+    // Keep the denormalised CashAccount.currentBalance (a subledger cache read by
+    // finance dashboards) consistent with the DR Cash/Bank leg we just posted —
+    // incremented by the FULL receipt amount, in the SAME transaction. Stamp the
+    // account we incremented on the payment row (same transaction) so reversal
+    // unwinds exactly this account, immune to roster changes between confirm and
+    // reverse.
+    if (cashAccount) {
+      await tx.externalPayment.update({
+        where: { id: record.id },
+        data: { receivingCashAccountId: cashAccount.id },
+      });
+      await tx.cashAccount.updateMany({
+        where: { id: cashAccount.id, companyId: record.companyId, deletedAt: null },
+        data: { currentBalance: { increment: amount } },
+      });
+    }
+  }
+
+  /**
+   * Unwind a confirmed external payment's finance postings inside the caller's
+   * transaction: restore the linked receivable's outstanding (by exactly the
+   * amount this payment applied on confirm), resync the source SalesOrder +
+   * customer balance, post the mirror-reversing JE (swap Dr/Cr on every original
+   * line), and decrement the CashAccount.currentBalance that confirm incremented.
+   * A payment with no confirmation JE (confirmed before this posting path
+   * existed) is reversed as a pure status flip — nothing to unwind.
+   */
+  private async reverseConfirmation(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+    userId: string | null,
+  ): Promise<void> {
+    const amount = new Prisma.Decimal(record.amount).toDecimalPlaces(2);
+
+    // JournalEntry.createdById on the mirror JE is a required FK — resolve a real
+    // posting actor (integration path has userId=null) before posting anything.
+    const actorId = await this.resolvePostingActorId(tx, record, userId);
+
+    // Find the original confirmation JE by reference (no journalEntryId column on
+    // ExternalPayment; the JE is tagged referenceType/referenceId at post time).
+    const original = await tx.journalEntry.findFirst({
+      where: {
+        companyId: record.companyId,
+        referenceType: 'ExternalPayment',
+        referenceId: record.id,
+        status: { not: 'REVERSED' },
+        deletedAt: null,
+      },
+      include: { lines: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!original || original.lines.length === 0) {
+      // No confirmation JE exists (or it was already reversed). The JE is the
+      // marker that confirm posted subledger relief — postConfirmation posts the
+      // relief and the JE in the SAME transaction — so a payment confirmed
+      // before this posting path existed (legacy: pure status flip, no JE, no
+      // receivable relief, no cash bump) is reversed as a pure status flip too.
+      // Touch NOTHING here: restoring a receivable this payment never relieved
+      // would erase other payments' legitimate relief with no GL counterpart.
+      return;
+    }
+
+    // Restore only what THIS payment actually applied to the receivable on
+    // confirm, derived from the original JE's AR-control "Settle receivable"
+    // credit line(s). The description guard excludes the "Customer advance held
+    // in AR" fallback line, which also credits AR control but never relieved
+    // the receivable. Zero applied (receivable already PAID at confirm — whole
+    // receipt parked as an advance) makes the restore a no-op, so we never
+    // reopen a receivable this payment never relieved, and never over-restore
+    // relief that belongs to other payments.
+    const arAcct = await this.accountResolver.resolve(record.companyId, 'AR_CONTROL', tx);
+    const appliedToAr = original.lines
+      .filter(
+        (line) =>
+          line.accountId === arAcct.id &&
+          (line.description ?? '').startsWith('Settle receivable'),
+      )
+      .reduce(
+        (sum, line) => sum.plus(new Prisma.Decimal(line.credit ?? 0)),
+        new Prisma.Decimal(0),
+      )
+      .toDecimalPlaces(2);
+
+    const restored = appliedToAr.gt(0)
+      ? await this.restoreLinkedReceivable(tx, record, appliedToAr)
+      : null;
+
+    // Claim the original JE as REVERSED so a concurrent reverse posts at most one
+    // mirror. Losing the claim (count !== 1) means someone else already unwound.
+    const claim = await tx.journalEntry.updateMany({
+      where: { id: original.id, status: { not: 'REVERSED' }, deletedAt: null },
+      data: { status: 'REVERSED', reversedAt: new Date(), reversedById: actorId },
+    });
+    if (claim.count !== 1) {
+      throw new ConflictException(
+        'External payment reversal could not claim its journal entry; reversal aborted',
+      );
+    }
+
+    const reversedLines = original.lines.map((line) => ({
+      accountId: line.accountId,
+      debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
+      credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
+      description: `Reversal: ${line.description ?? ''}`.trim(),
+      divisionId: line.divisionId ?? undefined,
+      branchId: line.branchId ?? undefined,
+    }));
+
+    await this.postingEngine.postLines(
+      {
+        companyId: original.companyId,
+        divisionId: original.divisionId,
+        branchId: original.branchId,
+        transactionDate: new Date(),
+        description: `Reversal of external payment ${record.paymentNumber}`,
+        referenceType: 'ExternalPayment',
+        referenceId: record.id,
+        moduleName: 'external-payments',
+        userId: actorId,
+        lines: reversedLines,
+      },
+      tx,
+    );
+
+    // Unwind the CashAccount.currentBalance increment, mirroring the CR Cash/Bank
+    // side of the reversal JE. Confirm stamps the account it actually incremented
+    // (receivingCashAccountId) in the same transaction as the increment, so we
+    // decrement exactly that row — deliberately NOT filtered on isActive, so an
+    // account deactivated since confirm is still unwound rather than pushing the
+    // decrement onto a different account's cache.
+    if (record.receivingCashAccountId) {
+      await tx.cashAccount.updateMany({
+        where: { id: record.receivingCashAccountId, companyId: record.companyId },
+        data: { currentBalance: { decrement: amount } },
+      });
+    } else {
+      // Legacy row confirmed before receivingCashAccountId existed: best-effort
+      // fallback to the same method/currency resolution confirm used. (Rows
+      // confirmed after the column exists always carry the stamp when a cache
+      // was bumped, so a null stamp on a new row means confirm bumped nothing —
+      // but we cannot distinguish that from a legacy row, so we re-resolve.)
+      const cashAccount = await this.resolveReceivingCashAccount(
+        tx,
+        record.companyId,
+        record.paymentMethod,
+        record.currency,
+      );
+      if (cashAccount) {
+        await tx.cashAccount.updateMany({
+          where: { id: cashAccount.id, companyId: record.companyId, deletedAt: null },
+          data: { currentBalance: { decrement: amount } },
+        });
+      }
+    }
+
+    // syncCustomerBalance is a defensive resync in case restoreLinkedReceivable
+    // touched a receivable whose customer balance needs recomputing.
+    if (restored?.customerId) {
+      await this.syncCustomerBalance(tx, record.companyId, restored.customerId);
+    }
+  }
+
+  // ── receivable relief helpers ─────────────────────────────────────────────────
+
+  /**
+   * Resolve, lock, and relieve the Receivable linked to this external payment.
+   * Returns the applied amount (min of payment and outstanding) plus scope so the
+   * caller can post AR + sync. Returns null when the payment is standalone (no
+   * receivable context, or a context that does not resolve to a receivable).
+   */
+  private async relieveLinkedReceivable(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+    amount: Prisma.Decimal,
+  ): Promise<{
+    applied: Prisma.Decimal;
+    divisionId: string | null;
+    branchId: string | null;
+    customerId: string | null;
+    customerName: string | null;
+  } | null> {
+    const receivableId = await this.resolveReceivableId(tx, record);
+    if (!receivableId) return null;
+
+    const locked = await this.lockReceivable(tx, receivableId);
+    if (!locked) throw new NotFoundException(`Receivable ${receivableId} not found`);
+    if (locked.companyId !== record.companyId) {
+      throw new BadRequestException(
+        `Receivable ${receivableId} does not belong to company ${record.companyId}`,
+      );
+    }
+    if (!(OPEN_RECEIVABLE_STATUSES as readonly string[]).includes(locked.status)) {
+      // Closed/settled receivable — treat the whole receipt as an advance rather
+      // than forcing a partial relief onto a PAID/WRITTEN_OFF/CANCELLED row.
+      return null;
+    }
+
+    // Currency guard: never relieve a receivable denominated in a different
+    // currency than the receipt — amounts are stored as bare numbers, so a 1:1
+    // numeric relief would be off by the full exchange rate (USD 100 would
+    // "settle" TZS 100 of a TZS receivable). Unlike customer-payments (which is
+    // user-initiated and can refuse the receipt outright), an external payment
+    // has already been captured by the provider — the money is real and must
+    // land in the GL — so we route the ENTIRE amount to customer advance
+    // (return null → caller posts the full receipt as an advance) for manual
+    // application at a proper exchange rate, leaving the receivable untouched.
+    const paymentCurrency = record.currency ?? 'TZS';
+    if (locked.currency && locked.currency !== paymentCurrency) {
+      return null;
+    }
+
+    const outstanding = new Prisma.Decimal(locked.outstandingAmount).toDecimalPlaces(2);
+    const applied = Prisma.Decimal.min(amount, outstanding).toDecimalPlaces(2);
+    if (applied.lte(0)) return null;
+
+    const nextOutstanding = outstanding.minus(applied).toDecimalPlaces(2);
+    const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(applied).toDecimalPlaces(2);
+    const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
+
+    const updated = await tx.receivable.update({
+      where: { id: receivableId },
+      data: {
+        outstandingAmount: nextOutstanding,
+        paidAmount: nextPaid,
+        status: nextStatus,
+      },
+    });
+    await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+    await this.syncCustomerBalance(tx, record.companyId, updated.customerId);
+
+    return {
+      applied,
+      divisionId: locked.divisionId,
+      branchId: locked.branchId,
+      customerId: locked.customerId,
+      customerName: locked.customerName,
+    };
+  }
+
+  /**
+   * Restore the linked receivable's outstanding on reversal — the exact inverse
+   * of {@link relieveLinkedReceivable}. `cap` is the amount THIS payment
+   * actually applied on confirm (derived by the caller from the original JE's
+   * AR-control "Settle receivable" credit line), further bounded by the current
+   * paid amount, and skipping closed receivables (WRITTEN_OFF / CANCELLED must
+   * not be resurrected).
+   */
+  private async restoreLinkedReceivable(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+    cap: Prisma.Decimal,
+  ): Promise<{ customerId: string | null } | null> {
+    const receivableId = await this.resolveReceivableId(tx, record);
+    if (!receivableId) return null;
+
+    const locked = await this.lockReceivable(tx, receivableId);
+    if (!locked || locked.companyId !== record.companyId) return null;
+    if (locked.status === 'WRITTEN_OFF' || locked.status === 'CANCELLED') return null;
+
+    // Restore only what was actually applied on confirm: min(cap, paidAmount).
+    // The cap is this payment's own AR relief (from the original JE), and the
+    // paid amount further bounds the restore so we never push outstanding above
+    // the original receivable amount.
+    const restoreAmount = Prisma.Decimal.min(
+      cap,
+      new Prisma.Decimal(locked.paidAmount),
+    ).toDecimalPlaces(2);
+    if (restoreAmount.lte(0)) return { customerId: locked.customerId };
+
+    const restoredOutstanding = new Prisma.Decimal(locked.outstandingAmount)
+      .plus(restoreAmount)
+      .toDecimalPlaces(2);
+    const restoredPaid = Prisma.Decimal.max(
+      new Prisma.Decimal(locked.paidAmount).minus(restoreAmount),
+      new Prisma.Decimal(0),
+    ).toDecimalPlaces(2);
+    const restoredStatus = restoredPaid.isZero() ? 'OPEN' : 'PARTIALLY_PAID';
+
+    const updated = await tx.receivable.update({
+      where: { id: receivableId },
+      data: {
+        outstandingAmount: restoredOutstanding,
+        paidAmount: restoredPaid,
+        status: restoredStatus,
+      },
+    });
+    await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+    await this.syncCustomerBalance(tx, record.companyId, updated.customerId);
+
+    return { customerId: updated.customerId };
+  }
+
+  /**
+   * Map an external payment's context to a target Receivable id:
+   *   RECEIVABLE   → paymentContextId IS the receivable id
+   *   SALES_ORDER  → paymentContextId is a SalesOrder id → its receivableId
+   * All other contexts (and missing ids) resolve to null (standalone receipt).
+   */
+  private async resolveReceivableId(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+  ): Promise<string | null> {
+    if (!record.paymentContextId) return null;
+    if (!RECEIVABLE_CONTEXTS.includes(record.paymentContextType)) return null;
+
+    if (record.paymentContextType === ExternalPaymentContext.RECEIVABLE) {
+      return record.paymentContextId;
+    }
+
+    // SALES_ORDER — resolve the order's backing receivable.
+    const order = await tx.salesOrder.findFirst({
+      where: { id: record.paymentContextId, companyId: record.companyId, deletedAt: null },
+      select: { receivableId: true },
+    });
+    return order?.receivableId ?? null;
+  }
+
+  /** Read + row-lock a receivable inside the transaction (mirrors customer-payments). */
+  private async lockReceivable(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<LockedReceivable | undefined> {
+    const [locked] = await tx.$queryRaw<LockedReceivable[]>`
+      SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName",
+             "outstandingAmount", "paidAmount", "status", "currency", "sourceType", "sourceId"
+      FROM "receivables"
+      WHERE "id" = ${id} AND "deletedAt" IS NULL
+      FOR UPDATE`;
+    return locked;
+  }
+
+  /**
+   * Resolve a real User id to stamp on the JournalEntry (createdById is a
+   * required, restrict-on-delete FK). The interactive caller supplies one; the
+   * integration path does not (userId=null), so fall back to the payment's
+   * confirmer, then its initiator, then any active user in the posting company.
+   * Fails closed when no user exists — a JE must be attributable to a person.
+   */
+  private async resolvePostingActorId(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+    userId: string | null,
+  ): Promise<string> {
+    const candidates = [userId, record.confirmedById, record.initiatedById].filter(
+      (id): id is string => !!id,
+    );
+    for (const id of candidates) {
+      const user = await tx.user.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      if (user) return user.id;
+    }
+
+    const fallback = await tx.user.findFirst({
+      where: { companyId: record.companyId, deletedAt: null, status: 'ACTIVE' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (fallback) return fallback.id;
+
+    throw new BadRequestException(
+      `Cannot post external payment ${record.paymentNumber}: no active user found to attribute ` +
+        `the journal entry to on company ${record.companyId}.`,
+    );
+  }
+
+  // ── cash-account resolution ────────────────────────────────────────────────────
+
+  /**
+   * Pick a company cash/bank account to receive this external payment. Because we
+   * increment the account's denormalised `currentBalance`, we only ever bind an
+   * account whose CURRENCY matches the receipt currency (mixing currencies on one
+   * balance cache would corrupt it — mirrors the customer-payments currency
+   * guard). Prefers a payment-method type match (BANK for BANK_TRANSFER/CARD,
+   * MOBILE_MONEY for MOBILE_MONEY, else CASH_ON_HAND) within that currency, then
+   * any active account in that currency. Returns null when none matches — the GL
+   * cash leg still posts (by role) but no balance cache is bumped.
+   */
+  private async resolveReceivingCashAccount(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    method: ExternalPaymentMethod | null | undefined,
+    currency: string | null | undefined,
+  ) {
+    const preferredType = this.methodCashAccountType(method);
+    const cur = (currency ?? 'TZS') as any;
+
+    const select = {
+      id: true,
+      companyId: true,
+      divisionId: true,
+      branchId: true,
+      accountType: true,
+      accountName: true,
+      currency: true,
+    } as const;
+
+    // 1. preferred type + matching currency.
+    let account = await tx.cashAccount.findFirst({
+      where: {
+        companyId,
+        deletedAt: null,
+        isActive: true,
+        accountType: preferredType,
+        currency: cur,
+      },
+      orderBy: { createdAt: 'asc' },
+      select,
+    });
+    if (account) return account;
+
+    // 2. any active account in the matching currency (never mismatched currency).
+    account = await tx.cashAccount.findFirst({
+      where: { companyId, deletedAt: null, isActive: true, currency: cur },
+      orderBy: { createdAt: 'asc' },
+      select,
+    });
+    return account;
+  }
+
+  /** Preferred CashAccount type for a payment method. */
+  private methodCashAccountType(method: ExternalPaymentMethod | null | undefined): CashAccountType {
+    switch (method) {
+      case ExternalPaymentMethod.BANK_TRANSFER:
+      case ExternalPaymentMethod.CARD:
+        return CashAccountType.BANK;
+      case ExternalPaymentMethod.MOBILE_MONEY:
+      case ExternalPaymentMethod.USSD:
+      case ExternalPaymentMethod.QR:
+        return CashAccountType.MOBILE_MONEY;
+      default:
+        return CashAccountType.CASH_ON_HAND;
+    }
+  }
+
+  /** GL cash role from a resolved CashAccount type (BANK vs on-hand). */
+  private cashAccountRole(accountType?: CashAccountType | null): AccountRole {
+    return accountType === CashAccountType.BANK ? 'BANK' : 'CASH_ON_HAND';
+  }
+
+  /** GL cash role from the payment method when no CashAccount row is resolved. */
+  private methodCashRole(method: ExternalPaymentMethod | null | undefined): AccountRole {
+    return method === ExternalPaymentMethod.BANK_TRANSFER || method === ExternalPaymentMethod.CARD
+      ? 'BANK'
+      : 'CASH_ON_HAND';
+  }
+
+  /**
+   * Resolve a customer-advance / unearned-revenue liability account (the typed
+   * AccountRole union has none). Returns null when none is configured — caller
+   * parks the remainder in AR control. Mirrors customer-payments.
+   */
+  private async resolveCustomerAdvanceAccountId(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+  ): Promise<string | null> {
+    const subTypeKeys = [
+      'customer_advances',
+      'customer_advance',
+      'customer_deposits',
+      'customer_deposit',
+      'advances_from_customers',
+      'unearned_revenue',
+      'deferred_revenue',
+      'prepayments_received',
+    ];
+    const codes = ['2150', '2160', '2250', '2600', '2610'];
+
+    const account = await tx.chartOfAccount.findFirst({
+      where: {
+        companyId,
+        deletedAt: null,
+        isActive: true,
+        OR: [
+          { accountSubType: { in: subTypeKeys, mode: 'insensitive' } },
+          { accountCode: { in: codes } },
+        ],
+      },
+      select: { id: true },
+    });
+    return account?.id ?? null;
+  }
+
+  // ── subledger sync (mirrors customer-payments / receivables) ────────────────────
+
+  /**
+   * Recompute a customer's outstanding balance from their still-open
+   * receivables (mirrors receivables.service.syncCustomerBalance).
+   */
+  private async syncCustomerBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    customerId?: string | null,
+  ): Promise<void> {
+    if (!customerId) return;
+    const summary = await tx.receivable.aggregate({
+      where: {
+        companyId,
+        customerId,
+        deletedAt: null,
+        status: { in: OPEN_RECEIVABLE_STATUSES as unknown as string[] } as any,
+      },
+      _sum: { outstandingAmount: true },
+    });
+    await tx.customer.updateMany({
+      where: { id: customerId, companyId, deletedAt: null },
+      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
+    });
+  }
+
+  /**
+   * Keep a source SalesOrder's paid/outstanding/paymentStatus in sync with its
+   * backing receivable (mirrors receivables.service.syncSalesOrderPaymentFromReceivable).
+   */
+  private async syncSalesOrderPaymentFromReceivable(
+    tx: Prisma.TransactionClient,
+    receivable: {
+      id: string;
+      sourceType: string | null;
+      sourceId: string | null;
+      paidAmount: Prisma.Decimal | number | string;
+      outstandingAmount: Prisma.Decimal | number | string;
+    },
+  ): Promise<void> {
+    if (receivable.sourceType !== 'SalesOrder' || !receivable.sourceId) return;
+
+    const paidAmount = new Prisma.Decimal(receivable.paidAmount ?? 0).toDecimalPlaces(2);
+    const outstandingAmount = new Prisma.Decimal(receivable.outstandingAmount ?? 0).toDecimalPlaces(
+      2,
+    );
+    const paymentStatus = outstandingAmount.isZero()
+      ? 'PAID'
+      : paidAmount.gt(0)
+        ? 'PARTIALLY_PAID'
+        : 'UNPAID';
+
+    await tx.salesOrder.updateMany({
+      where: { id: receivable.sourceId, deletedAt: null },
+      data: {
+        receivableId: receivable.id,
+        paidAmount,
+        outstandingAmount,
+        paymentStatus: paymentStatus as any,
+      },
+    });
   }
 }
