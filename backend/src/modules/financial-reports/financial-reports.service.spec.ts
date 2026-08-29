@@ -139,6 +139,101 @@ describe('FinancialReportsService.getCustomerAgingDetail', () => {
 });
 
 /**
+ * Cover for the company-summary <-> aging tie-out finding: getCompanySummary
+ * must aggregate receivables/payables on the SAME open-status basis the aging
+ * endpoints use, so the dashboard summary can never diverge from AR/AP aging by
+ * silently counting PAID / WRITTEN_OFF / CANCELLED rows.
+ */
+const OPEN_STATUS_FILTER = { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] };
+
+function makeSummaryService(
+  opts: {
+    receivableSum?: unknown;
+    payableSum?: unknown;
+  } = {},
+) {
+  const groupBy = jest.fn().mockResolvedValue([{ _sum: { debit: 500, credit: 500 } }]);
+  const cashAggregate = jest.fn().mockResolvedValue({ _sum: { currentBalance: 250 } });
+  const receivableAggregate = jest
+    .fn()
+    .mockResolvedValue({ _sum: { outstandingAmount: opts.receivableSum ?? 100 } });
+  const payableAggregate = jest
+    .fn()
+    .mockResolvedValue({ _sum: { outstandingAmount: opts.payableSum ?? 80 } });
+  const prisma = {
+    journalEntryLine: { groupBy },
+    cashAccount: { aggregate: cashAggregate },
+    receivable: { aggregate: receivableAggregate },
+    payable: { aggregate: payableAggregate },
+  } as any;
+  const companyScope = {
+    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+  } as any;
+  const service = new FinancialReportsService(prisma, companyScope);
+  return { service, receivableAggregate, payableAggregate, companyScope };
+}
+
+describe('FinancialReportsService.getCompanySummary open-status tie-out', () => {
+  it('aggregates receivables and payables on the open-status basis (matching aging)', async () => {
+    const { service, receivableAggregate, payableAggregate } = makeSummaryService();
+
+    await service.getCompanySummary('co-1', user);
+
+    const receivableWhere = receivableAggregate.mock.calls[0][0].where;
+    const payableWhere = payableAggregate.mock.calls[0][0].where;
+
+    // Excludes PAID / WRITTEN_OFF / CANCELLED just like getReceivablesAging /
+    // getPayablesAging so the two finance surfaces always tie out.
+    expect(receivableWhere).toEqual({
+      companyId: 'co-1',
+      deletedAt: null,
+      status: OPEN_STATUS_FILTER,
+    });
+    expect(payableWhere).toEqual({
+      companyId: 'co-1',
+      deletedAt: null,
+      status: OPEN_STATUS_FILTER,
+    });
+  });
+
+  it('uses the SAME open-status filter as getReceivablesAging / getPayablesAging', async () => {
+    const { service, receivableAggregate, payableAggregate } = makeSummaryService();
+
+    // Also drive the aging endpoints against the same mocks and assert the
+    // status filter object is identical across summary and aging.
+    await service.getCompanySummary('co-1', user);
+    await service.getReceivablesAging('co-1', user);
+    await service.getPayablesAging('co-1', user);
+
+    const summaryRecStatus = receivableAggregate.mock.calls[0][0].where.status;
+    const agingRecStatus = receivableAggregate.mock.calls[1][0].where.status;
+    const summaryPayStatus = payableAggregate.mock.calls[0][0].where.status;
+    const agingPayStatus = payableAggregate.mock.calls[1][0].where.status;
+
+    expect(summaryRecStatus).toEqual(agingRecStatus);
+    expect(summaryPayStatus).toEqual(agingPayStatus);
+  });
+
+  it('enforces company scope before returning the summary', async () => {
+    const { service, companyScope } = makeSummaryService();
+
+    await service.getCompanySummary('co-9', user);
+
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'co-9');
+  });
+
+  it('returns outstanding sums (open rows only) for receivables and payables', async () => {
+    const { service } = makeSummaryService({ receivableSum: 320, payableSum: 210 });
+
+    const result = await service.getCompanySummary('co-1', user);
+
+    expect(result.totalReceivables).toBe(320);
+    expect(result.totalPayables).toBe(210);
+    expect(result.companyId).toBe('co-1');
+  });
+});
+
+/**
  * Regression cover for the reversal double-count finding: reports must include
  * REVERSED originals so they net against their POSTED reversal mirror instead
  * of leaving only the (negative) reversal in the totals.

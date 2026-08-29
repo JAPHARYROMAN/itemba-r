@@ -2290,6 +2290,61 @@ describe('MobilePosLiteService saleReceipt', () => {
     expect(Buffer.isBuffer(result.buffer)).toBe(true);
   });
 
+  it('prints the VAT-inclusive unit price for derived net lines so qty x unit price == line total', async () => {
+    const { service, prisma, generatedDocuments } = makeService();
+    // Post inclusive-VAT derivation the persisted unitPrice is NET (ex-VAT)
+    // while lineTotal is the gross amount the customer paid. The receipt must
+    // print the gross per-unit price (sticker price), not the net figure —
+    // otherwise the paper reads 1 x 847 = 1,000 with no explanation.
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      saleRow({
+        totalAmount: '11000',
+        lines: [
+          {
+            description: 'Sukari',
+            quantity: '1',
+            unitPrice: '847.46', // net after 18% carved out of gross 1,000
+            taxAmount: '152.54',
+            lineTotal: '1000',
+            product: { name: 'Sukari' },
+          },
+          {
+            description: 'Mchele',
+            quantity: '2',
+            unitPrice: '4237.29', // net after 18% carved out of gross 5,000/unit
+            taxAmount: '1525.42',
+            lineTotal: '10000',
+            product: { name: 'Mchele' },
+          },
+        ],
+      }),
+    );
+
+    await service.saleReceipt(TERMINAL_CODE, DEVICE_SECRET, 'so-1', repUser());
+
+    // The line query must fetch taxAmount so the renderer can reconstruct the
+    // gross price even when quantity is unusable.
+    expect(prisma.salesOrder.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          lines: expect.objectContaining({
+            select: expect.objectContaining({ taxAmount: true }),
+          }),
+        }),
+      }),
+    );
+
+    const model = generatedDocuments.renderLetterheadPdf.mock.calls[0][1];
+    const items = model.sections.find((s: any) => s.title === 'Bidhaa / Items');
+    // Rows multiply out again: 1 x 1,000 = 1,000 and 2 x 5,000 = 10,000.
+    expect(items.table.rows).toEqual([
+      ['Sukari', '1', 'TZS 1,000', 'TZS 1,000'],
+      ['Mchele', '2', 'TZS 5,000', 'TZS 10,000'],
+    ]);
+    // Receipt totals are untouched by the unit-price fix.
+    expect(items.totals).toEqual([{ label: 'JUMLA / TOTAL', value: 'TZS 11,000', emphasis: true }]);
+  });
+
   it('includes the payment reference when the sale carries one', async () => {
     const { service, prisma, generatedDocuments } = makeService();
     prisma.mobilePosTerminal.findFirst.mockResolvedValue(

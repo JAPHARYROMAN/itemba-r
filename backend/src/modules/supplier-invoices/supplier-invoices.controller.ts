@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { SupplierInvoicesService } from './supplier-invoices.service';
@@ -6,6 +6,7 @@ import { CreateSupplierInvoiceDto } from './dto/create-supplier-invoice.dto';
 import { UpdateSupplierInvoiceDto } from './dto/update-supplier-invoice.dto';
 import { QuerySupplierInvoiceDto } from './dto/query-supplier-invoice.dto';
 import { ApproveSupplierInvoiceDto } from './dto/approve-supplier-invoice.dto';
+import { VoidSupplierInvoiceDto } from './dto/void-supplier-invoice.dto';
 
 @Controller('supplier-invoices')
 export class SupplierInvoicesController {
@@ -53,5 +54,15 @@ export class SupplierInvoicesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.approve(id, dto, user);
+  }
+
+  @Patch(':id/void')
+  @RequirePermissions('supplier_invoices.void')
+  void(
+    @Param('id') id: string,
+    @Body() dto: VoidSupplierInvoiceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.void(id, dto, user);
   }
 }

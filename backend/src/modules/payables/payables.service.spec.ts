@@ -13,9 +13,11 @@ function lockedPayable(overrides: Record<string, unknown> = {}) {
     supplierId: 'supplier-1',
     supplierName: 'Acme',
     payableNumber: 'PAY-2026-000001',
+    sourceType: null,
     outstandingAmount: '500',
     paidAmount: '0',
     status: 'OPEN',
+    currency: 'TZS',
     journalEntryId: 'je-original',
     issueDate: new Date('2026-01-15'),
     ...overrides,
@@ -38,6 +40,17 @@ function makeService(
       groupBy: jest.fn().mockResolvedValue([]),
     },
     supplier: { updateMany: jest.fn() },
+    cashAccount: {
+      // Default: an active CASH_ON_HAND till in the same company and currency.
+      // Individual tests override for BANK / cross-company / cross-currency
+      // scenarios.
+      findFirst: jest.fn().mockResolvedValue({
+        companyId: 'company-1',
+        accountType: 'CASH_ON_HAND',
+        currency: 'TZS',
+      }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     companyProfile: { findUnique: jest.fn().mockResolvedValue({ currency: 'TZS' }) },
     journalEntry: {
       findFirst: jest.fn().mockResolvedValue(opts.originalJe ?? null),
@@ -102,6 +115,243 @@ describe('PayablesService.recordPayment status guard', () => {
       service.recordPayment('pay-1', { amount: 100 } as any, user),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.payable.update).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+});
+
+describe('PayablesService.recordPayment cash subledger + role (cashAccountId)', () => {
+  // Role-aware resolver so we can assert which GL cash account the CR leg hit.
+  function cashRoleResolver() {
+    return jest.fn(async (_companyId: string, role: string) => {
+      const ids: Record<string, string> = {
+        AP_CONTROL: 'ap-acc',
+        CASH_ON_HAND: 'cash-acc',
+        BANK: 'bank-acc',
+      };
+      const id = ids[role];
+      if (!id) throw new BadRequestException(`Cannot resolve role "${role}"`);
+      return { id } as any;
+    });
+  }
+
+  function openPayable(overrides: Record<string, unknown> = {}) {
+    return lockedPayable({
+      status: 'OPEN',
+      outstandingAmount: '500',
+      paidAmount: '0',
+      ...overrides,
+    });
+  }
+
+  it('posts DR AP_CONTROL / CR BANK and decrements the specific CashAccount for a bank payment', async () => {
+    const { service, tx, postingEngine } = makeService(openPayable(), {
+      resolve: cashRoleResolver(),
+    });
+    tx.payable.update.mockResolvedValue({
+      ...openPayable(),
+      outstandingAmount: '300',
+      paidAmount: '200',
+      status: 'PARTIALLY_PAID',
+    });
+    tx.cashAccount.findFirst.mockResolvedValue({ companyId: 'company-1', accountType: 'BANK' });
+
+    await service.recordPayment('pay-1', { amount: 200, cashAccountId: 'bank-1' } as any, user);
+
+    // GL: DR AP_CONTROL 200 / CR BANK 200 (not CASH_ON_HAND).
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const lines = postingInput.lines;
+    const apLine = lines.find((l: any) => l.accountId === 'ap-acc');
+    const bankLine = lines.find((l: any) => l.accountId === 'bank-acc');
+    expect(Number(apLine.debit)).toBe(200);
+    expect(Number(bankLine.credit)).toBe(200);
+    expect(lines.some((l: any) => l.accountId === 'cash-acc')).toBe(false);
+    const totalDebit = lines.reduce((s: number, l: any) => s + Number(l.debit), 0);
+    const totalCredit = lines.reduce((s: number, l: any) => s + Number(l.credit), 0);
+    expect(totalDebit).toBe(totalCredit);
+
+    // Subledger: the chosen CashAccount is decremented by the payment amount,
+    // company-scoped, in the same transaction.
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledWith({
+      where: { id: 'bank-1', companyId: 'company-1', deletedAt: null },
+      data: { currentBalance: { decrement: expect.anything() } },
+    });
+    const [{ data }] = tx.cashAccount.updateMany.mock.calls[0];
+    expect(Number(data.currentBalance.decrement)).toBe(200);
+  });
+
+  it('credits CASH_ON_HAND and decrements the till for a cash payment', async () => {
+    const { service, tx, postingEngine } = makeService(openPayable(), {
+      resolve: cashRoleResolver(),
+    });
+    tx.payable.update.mockResolvedValue({
+      ...openPayable(),
+      outstandingAmount: '400',
+      paidAmount: '100',
+      status: 'PARTIALLY_PAID',
+    });
+    tx.cashAccount.findFirst.mockResolvedValue({
+      companyId: 'company-1',
+      accountType: 'CASH_ON_HAND',
+    });
+
+    await service.recordPayment('pay-1', { amount: 100, cashAccountId: 'till-1' } as any, user);
+
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const cashLine = postingInput.lines.find((l: any) => l.accountId === 'cash-acc');
+    expect(Number(cashLine.credit)).toBe(100);
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledWith({
+      where: { id: 'till-1', companyId: 'company-1', deletedAt: null },
+      data: { currentBalance: { decrement: expect.anything() } },
+    });
+  });
+
+  it('does not touch CashAccount.currentBalance when no cashAccountId is supplied (legacy)', async () => {
+    const { service, tx, postingEngine } = makeService(openPayable(), {
+      resolve: cashRoleResolver(),
+    });
+    tx.payable.update.mockResolvedValue({
+      ...openPayable(),
+      outstandingAmount: '0',
+      paidAmount: '500',
+      status: 'PAID',
+    });
+
+    await service.recordPayment('pay-1', { amount: 500 } as any, user);
+
+    // Legacy path still posts DR AP / CR CASH_ON_HAND but relieves no subledger row.
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    expect(postingInput.lines.find((l: any) => l.accountId === 'cash-acc')).toBeTruthy();
+    expect(tx.cashAccount.findFirst).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cashAccountId that belongs to another company (no journal, no decrement)', async () => {
+    const { service, tx, postingEngine } = makeService(openPayable(), {
+      resolve: cashRoleResolver(),
+    });
+    tx.cashAccount.findFirst.mockResolvedValue({ companyId: 'other-company', accountType: 'BANK' });
+
+    await expect(
+      service.recordPayment('pay-1', { amount: 100, cashAccountId: 'bank-x' } as any, user),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cash account whose currency differs from the payable currency (no journal, no decrement, rollback)', async () => {
+    // USD payable paid from a TZS bank account: the raw USD amount would be
+    // subtracted from a TZS-denominated CashAccount.currentBalance, desyncing
+    // the cash subledger cache from the GL by the full FX spread.
+    const { service, tx, postingEngine, readCommitted } = makeService(
+      openPayable({ currency: 'USD', outstandingAmount: '1000' }),
+      { resolve: cashRoleResolver() },
+    );
+    tx.cashAccount.findFirst.mockResolvedValue({
+      companyId: 'company-1',
+      accountType: 'BANK',
+      currency: 'TZS',
+    });
+
+    await expect(
+      service.recordPayment('pay-1', { amount: 1000, cashAccountId: 'bank-tzs' } as any, user),
+    ).rejects.toThrow(/does not match the payable currency/);
+
+    // No GL posting, no cash-cache decrement, and the subledger mutation rolled
+    // back with the transaction.
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+    expect(readCommitted()).toMatchObject({ status: 'OPEN', outstandingAmount: '1000' });
+  });
+
+  it('accepts a cash account matching the payable currency (USD payable, USD bank account)', async () => {
+    const { service, tx, postingEngine } = makeService(
+      openPayable({ currency: 'USD', outstandingAmount: '1000' }),
+      { resolve: cashRoleResolver() },
+    );
+    tx.cashAccount.findFirst.mockResolvedValue({
+      companyId: 'company-1',
+      accountType: 'BANK',
+      currency: 'USD',
+    });
+
+    await service.recordPayment('pay-1', { amount: 1000, cashAccountId: 'bank-usd' } as any, user);
+
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledWith({
+      where: { id: 'bank-usd', companyId: 'company-1', deletedAt: null },
+      data: { currentBalance: { decrement: expect.anything() } },
+    });
+  });
+});
+
+describe('PayablesService Expense-sourced settlement guards (single settlement path)', () => {
+  it('rejects recordPayment on an Expense-sourced payable (no journal, no subledger move)', async () => {
+    const { service, tx, postingEngine } = makeService(
+      lockedPayable({ sourceType: 'Expense', sourceId: 'expense-1' }),
+    );
+
+    await expect(
+      service.recordPayment('pay-1', { amount: 100 } as any, user),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.payable.update).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('rejects writeOff on an Expense-sourced payable (no forgiveness journal)', async () => {
+    const { service, tx, postingEngine } = makeService(
+      lockedPayable({ sourceType: 'Expense', sourceId: 'expense-1' }),
+    );
+
+    await expect(service.writeOff('pay-1', { reason: 'x' } as any, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(tx.payable.update).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('rejects remove on an Expense-sourced payable (soft-deleting the mirror would resurrect the legacy cash-basis double posting)', async () => {
+    // If the mirror payable disappears, ExpensesService.pay() finds no accrual
+    // and falls back to the legacy DR Expense / CR Cash journal — recognising
+    // the cost twice and stranding the accrual's AP_CONTROL credit forever.
+    const { service, tx, prisma } = makeService(
+      lockedPayable({ sourceType: 'Expense', sourceId: 'expense-1' }),
+    );
+
+    await expect(service.remove('pay-1', user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('still soft-deletes an ordinary manual payable', async () => {
+    const { service, tx } = makeService(lockedPayable());
+
+    await expect(service.remove('pay-1', user)).resolves.toEqual({ success: true });
+    expect(tx.payable.update).toHaveBeenCalledWith({
+      where: { id: 'pay-1' },
+      data: { deletedAt: expect.any(Date) },
+    });
+  });
+
+  it("rejects a manually created payable with the reserved sourceType 'Expense' before posting anything", async () => {
+    // The Expense guards key on sourceType, so a caller-supplied 'Expense'
+    // payable would post a real DR expense / CR AP journal at create yet be
+    // permanently unsettleable (recordPayment and writeOff both reject it).
+    const { service, prisma, postingEngine } = makeService(lockedPayable());
+
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          supplierName: 'Acme',
+          sourceType: 'Expense',
+          sourceId: 'expense-1',
+          amount: 100,
+          issueDate: '2026-01-15',
+        } as any,
+        user,
+      ),
+    ).rejects.toThrow(/reserved for system-generated payables/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(postingEngine.postLines).not.toHaveBeenCalled();
   });
 });

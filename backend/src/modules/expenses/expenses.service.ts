@@ -7,9 +7,13 @@ import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { RejectExpenseDto } from './dto/reject-expense.dto';
 import { AccessLevel, AuditSeverity, CashAccount, Prisma } from '@prisma/client';
-import { AccountingControlService, CompanyScopeService } from '../../common/services';
+import {
+  AccountingControlService,
+  AccountResolverService,
+  CompanyScopeService,
+} from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, PostingLine } from '../accounting-engine/posting-engine.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { PayExpenseDto } from './dto/pay-expense.dto';
 
@@ -22,6 +26,7 @@ export class ExpensesService {
     private readonly codes: EntityCodeGeneratorService,
     private readonly companyScope: CompanyScopeService,
     private readonly postingEngine: PostingEngineService,
+    private readonly accountResolver: AccountResolverService,
   ) {}
 
   private async resolveCashLedgerAccountId(
@@ -54,6 +59,57 @@ export class ExpensesService {
     }
 
     return account.id;
+  }
+
+  /** Whole cents (integer) from a decimal/number money value. */
+  private toCents(value: Prisma.Decimal | number): number {
+    return Math.round(Number(value) * 100);
+  }
+
+  /** Money value from whole cents. */
+  private fromCents(cents: number): number {
+    return cents / 100;
+  }
+
+  /**
+   * Resolve the accounts for the approval accrual JE. Expense account is the
+   * category's linkedAccountId when set, otherwise the GENERAL_EXPENSE role.
+   *
+   * The full (gross) amount is booked to the expense account: DR Expense / CR AP.
+   *
+   * NOTE (input-VAT recovery is a deliberate follow-up): expenses currently
+   * carry NO tax columns on the Expense Prisma model (no isTaxable / taxInclusive
+   * / taxRate / taxAmount), so there is nothing to split. Real Tanzanian input-VAT
+   * recovery — splitting recoverable input VAT to TAX_VAT_RECEIVABLE
+   * (DR net expense + DR input VAT / CR AP) — requires adding
+   * Expense.isTaxable/taxAmount (+ a migration) first. Do not introduce a
+   * VAT-split branch here until those columns exist, or it will silently no-op.
+   */
+  private async resolveAccrualPosting(
+    tx: Prisma.TransactionClient,
+    expense: {
+      companyId: string;
+      amount: Prisma.Decimal;
+      expenseCategory?: { linkedAccountId?: string | null } | null;
+    } & Record<string, any>,
+  ): Promise<{
+    expenseAccountId: string;
+    apAccountId: string;
+    grossCents: number;
+  }> {
+    const grossCents = this.toCents(expense.amount);
+    if (grossCents <= 0) {
+      throw new BadRequestException('Expense amount must be greater than zero to accrue');
+    }
+
+    // Expense account: category link first, GENERAL_EXPENSE fallback.
+    const expenseAccountId =
+      expense.expenseCategory?.linkedAccountId ??
+      (await this.accountResolver.resolve(expense.companyId, 'GENERAL_EXPENSE', tx)).id;
+
+    const apAccount = await this.accountResolver.resolve(expense.companyId, 'AP_CONTROL', tx);
+
+    return { expenseAccountId, apAccountId: apAccount.id, grossCents };
   }
 
   async findAll(query: QueryExpenseDto, user: AuthUser) {
@@ -206,8 +262,14 @@ export class ExpensesService {
       );
     }
 
-    const record = await this.prisma.expense.update({
-      where: { id },
+    // Atomic status guard: an amount edit must never land AFTER a concurrent
+    // approve() has accrued the expense (the accrual + payable would then be
+    // booked at a different amount than pay() later settles). The guarded
+    // updateMany blocks on approve()'s in-transaction row lock and re-evaluates
+    // the WHERE against the committed row, so a racing edit fails cleanly
+    // instead of mutating an APPROVED expense.
+    const guarded = await this.prisma.expense.updateMany({
+      where: { id, status: { in: ['DRAFT', 'PENDING_APPROVAL'] }, deletedAt: null },
       data: {
         ...(dto.vendorName !== undefined && { vendorName: dto.vendorName }),
         ...(dto.amount !== undefined && { amount: dto.amount }),
@@ -221,6 +283,13 @@ export class ExpensesService {
         ...(dto.branchId !== undefined && { branchId: dto.branchId }),
       },
     });
+    if (guarded.count === 0) {
+      throw new BadRequestException(
+        'Expense can only be updated in DRAFT or PENDING_APPROVAL status',
+      );
+    }
+    const record = await this.prisma.expense.findFirst({ where: { id, deletedAt: null } });
+    if (!record) throw new NotFoundException('Expense not found');
 
     await this.auditLogs.log({
       action: 'EXPENSE_UPDATE',
@@ -266,10 +335,158 @@ export class ExpensesService {
     if (existing.status !== 'PENDING_APPROVAL') {
       throw new BadRequestException('Only PENDING_APPROVAL expenses can be approved');
     }
+    // A missing category.linkedAccountId does not block approval: the accrual
+    // resolves the expense account via the GENERAL_EXPENSE role fallback
+    // (resolveAccrualPosting). Only a chart missing BOTH the link and the
+    // GENERAL_EXPENSE role throws — descriptively, from the resolver.
 
-    const record = await this.prisma.expense.update({
-      where: { id },
-      data: { status: 'APPROVED', approvedById: userId, approvedAt: new Date() },
+    // Recognise the cost + obligation at approval (accrual accounting): post a
+    // balanced JE DR Expense / CR AP at the EXPENSE date, and open a payable so
+    // the obligation is visible in AP from approval — independent of when cash
+    // actually leaves. Posted atomically & idempotently.
+    const accrualDate = new Date(existing.expenseDate);
+    await this.accountingControl.assertPostingAllowed({
+      companyId: existing.companyId,
+      transactionDate: accrualDate,
+      moduleName: 'expenses',
+    });
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Atomic claim (first statement of the transaction): exactly one
+      // concurrent approver wins this compare-and-set — Postgres re-evaluates
+      // the WHERE against the latest committed row after any lock wait, so the
+      // loser sees count === 0 and never reaches postLines. This also closes
+      // the approve()/reject() clobber: a stale reject can no longer overwrite
+      // an approval (reject() uses the same guarded CAS).
+      const claimed = await tx.expense.updateMany({
+        where: { id, companyId: existing.companyId, status: 'PENDING_APPROVAL', deletedAt: null },
+        data: { status: 'APPROVED', approvedById: userId, approvedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        const current = await tx.expense.findFirst({
+          where: { id, companyId: existing.companyId, deletedAt: null },
+          select: { status: true, journalEntryId: true },
+        });
+        if (current?.status === 'APPROVED' && current.journalEntryId) {
+          // A prior/concurrent approval already claimed and accrued this
+          // expense (JE + payable committed atomically with the status flip):
+          // idempotent no-op, do not post a second accrual.
+          return (await tx.expense.findFirst({
+            where: { id, companyId: existing.companyId, deletedAt: null },
+          }))!;
+        }
+        throw new BadRequestException('Expense is no longer PENDING_APPROVAL');
+      }
+
+      // Locked re-read: the CAS above holds the row lock, so this reads the
+      // COMMITTED amount (an update() that changed the amount either committed
+      // before our claim — and is read here — or is blocked until we commit and
+      // then fails its own status guard). The accrual and the payable must book
+      // the amount actually being approved, never the stale pre-transaction
+      // snapshot.
+      const [locked] = await tx.$queryRaw<
+        Array<{ amount: Prisma.Decimal; journalEntryId: string | null }>
+      >`SELECT "amount", "journalEntryId"
+        FROM "expenses"
+        WHERE "id" = ${id} AND "companyId" = ${existing.companyId} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Expense not found');
+
+      let journalEntryId = locked.journalEntryId;
+
+      if (!journalEntryId) {
+        const { expenseAccountId, apAccountId, grossCents } = await this.resolveAccrualPosting(
+          tx,
+          { ...existing, amount: locked.amount },
+        );
+
+        // Full (gross) amount to the expense account. No input-VAT split until the
+        // Expense model persists tax columns (see resolveAccrualPosting note).
+        const lines: PostingLine[] = [
+          {
+            accountId: expenseAccountId,
+            description: `Expense: ${existing.description}`,
+            debit: this.fromCents(grossCents),
+            credit: 0,
+          },
+          {
+            accountId: apAccountId,
+            description: `Accrued payable for expense ${existing.expenseNumber}`,
+            debit: 0,
+            credit: this.fromCents(grossCents),
+          },
+        ];
+
+        const jeNumber = await this.codes.next({
+          entityType: 'ExpenseJournal',
+          companyId: existing.companyId,
+          tx,
+        });
+        const je = await this.postingEngine.postLines(
+          {
+            journalNumber: jeNumber,
+            companyId: existing.companyId,
+            divisionId: existing.divisionId,
+            branchId: existing.branchId,
+            transactionDate: accrualDate,
+            description: `Accrual of expense ${existing.expenseNumber}`,
+            referenceType: 'Expense',
+            referenceId: existing.id,
+            moduleName: 'expenses',
+            userId,
+            lines,
+          },
+          tx,
+        );
+        journalEntryId = je.id;
+
+        // Open the payable subledger row so the obligation shows in AP.
+        // Linked back to the expense via sourceType/sourceId (no schema change);
+        // supplierId is null for free-text expense vendors.
+        const existingPayable = await tx.payable.findFirst({
+          where: {
+            companyId: existing.companyId,
+            sourceType: 'Expense',
+            sourceId: existing.id,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!existingPayable) {
+          const gross = new Prisma.Decimal(this.fromCents(grossCents)).toDecimalPlaces(2);
+          await tx.payable.create({
+            data: {
+              payableNumber: await this.codes.next({
+                entityType: 'Payable',
+                companyId: existing.companyId,
+                tx,
+              }),
+              companyId: existing.companyId,
+              divisionId: existing.divisionId,
+              branchId: existing.branchId,
+              supplierName: existing.vendorName?.trim() || 'Expense vendor',
+              sourceType: 'Expense',
+              sourceId: existing.id,
+              amount: gross,
+              paidAmount: 0,
+              outstandingAmount: gross,
+              currency: existing.currency,
+              issueDate: accrualDate,
+              status: 'OPEN',
+              journalEntryId,
+              notes: `Expense ${existing.expenseNumber}`,
+            },
+          });
+        }
+      }
+
+      // Status/approver were already written by the atomic claim above; link
+      // the accrual JE in the same transaction so the claim + posting + payable
+      // + link commit (or roll back) as one unit.
+      return tx.expense.update({
+        where: { id },
+        data: { journalEntryId },
+      });
     });
 
     await this.auditLogs.log({
@@ -277,12 +494,13 @@ export class ExpensesService {
       entityType: 'Expense',
       entityId: id,
       userId,
-      companyId: record.companyId,
+      companyId: result.companyId,
       oldValue: { status: 'PENDING_APPROVAL' } as any,
-      newValue: { status: 'APPROVED' } as any,
+      newValue: { status: 'APPROVED', journalEntryId: result.journalEntryId } as any,
+      severity: AuditSeverity.HIGH,
     });
 
-    return record;
+    return result;
   }
 
   async reject(id: string, dto: RejectExpenseDto, user: AuthUser) {
@@ -292,10 +510,20 @@ export class ExpensesService {
       throw new BadRequestException('Only PENDING_APPROVAL expenses can be rejected');
     }
 
-    const record = await this.prisma.expense.update({
-      where: { id },
+    // Atomic claim (mirror of approve()): a stale reject must not clobber a
+    // concurrent approval that already posted the accrual — that would leave a
+    // REJECTED expense with a posted accrual and an unsettleable OPEN payable.
+    // The guarded compare-and-set re-evaluates the status against the committed
+    // row, so only a genuinely PENDING_APPROVAL expense can be rejected.
+    const claimed = await this.prisma.expense.updateMany({
+      where: { id, companyId: existing.companyId, status: 'PENDING_APPROVAL', deletedAt: null },
       data: { status: 'REJECTED', rejectedReason: dto.reason },
     });
+    if (claimed.count === 0) {
+      throw new BadRequestException('Expense is no longer PENDING_APPROVAL');
+    }
+    const record = await this.prisma.expense.findFirst({ where: { id, deletedAt: null } });
+    if (!record) throw new NotFoundException('Expense not found');
 
     await this.auditLogs.log({
       action: 'EXPENSE_REJECT',
@@ -339,6 +567,16 @@ export class ExpensesService {
   async pay(id: string, dto: PayExpenseDto, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    // Idempotency: a second pay() on an already-PAID expense is a safe no-op —
+    // it must NOT post a second settlement journal or decrement cash again.
+    // Return the settled record unchanged. This, together with the expense being
+    // the SINGLE settlement path for its linked payable (the payable is marked
+    // PAID in the same transaction, and payables.recordPayment/writeOff reject
+    // Expense-sourced payables), guarantees the expense can only ever be
+    // relieved once, from either surface.
+    if (existing.status === 'PAID') {
+      return existing;
+    }
     if (existing.status !== 'APPROVED') {
       throw new BadRequestException('Only APPROVED expenses can be paid');
     }
@@ -346,12 +584,6 @@ export class ExpensesService {
     if (!cashAccountId) {
       throw new BadRequestException('Cash account is required before an expense can be paid');
     }
-    if (!existing.expenseCategory?.linkedAccountId) {
-      throw new BadRequestException(
-        'Expense category must be linked to a ledger account before payment',
-      );
-    }
-    const expenseLedgerAccountId = existing.expenseCategory.linkedAccountId;
 
     const paymentDate = new Date();
     await this.accountingControl.assertPostingAllowed({
@@ -361,6 +593,26 @@ export class ExpensesService {
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent pay() calls on the EXPENSE row itself (covers both
+      // the payable-linked and the legacy no-payable path). The loser of a
+      // double-click blocks on this row lock until the winner commits, then
+      // re-checks the COMMITTED status under the lock and no-ops instead of
+      // double-posting DR AP / CR Cash and double-decrementing cash.
+      const [locked] = await tx.$queryRaw<
+        Array<{ status: string }>
+      >`SELECT "status"
+        FROM "expenses"
+        WHERE "id" = ${id} AND "companyId" = ${existing.companyId} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Expense not found');
+      if (locked.status === 'PAID') {
+        // A concurrent pay() already settled it — idempotent no-op.
+        return existing;
+      }
+      if (locked.status !== 'APPROVED') {
+        throw new BadRequestException('Only APPROVED expenses can be paid');
+      }
+
       const cashAccount = await tx.cashAccount.findFirst({
         where: {
           id: cashAccountId,
@@ -383,11 +635,59 @@ export class ExpensesService {
         cashAccount,
       );
 
+      // Was the cost accrued at approval? If so (the current flow), the expense
+      // was already recognised (DR Expense / CR AP) — settlement only moves the
+      // liability to cash: DR AP / CR Cash|Bank. Do NOT re-debit the expense.
+      const payable = await tx.payable.findFirst({
+        where: {
+          companyId: existing.companyId,
+          sourceType: 'Expense',
+          sourceId: existing.id,
+          deletedAt: null,
+        },
+      });
+
+      // Defensive idempotency: if the linked payable is already settled, the
+      // expense was already paid via this single path — do not post a second
+      // DR AP / CR Cash or decrement cash again. (The FOR UPDATE status claim
+      // at the top of this transaction is what excludes the concurrent-pay
+      // race; this is defense in depth against subledger drift.)
+      if (payable && payable.status === 'PAID') {
+        return existing;
+      }
+
       const jeNumber = await this.codes.next({
         entityType: 'ExpenseJournal',
         companyId: existing.companyId,
         tx,
       });
+
+      let debitLine: PostingLine;
+      if (payable) {
+        const apAccount = await this.accountResolver.resolve(existing.companyId, 'AP_CONTROL', tx);
+        debitLine = {
+          accountId: apAccount.id,
+          description: `Settle accrued payable for expense ${existing.expenseNumber}`,
+          debit: Number(existing.amount),
+          credit: 0,
+        };
+      } else {
+        // Legacy / un-accrued APPROVED expense (created before accrual-on-approve):
+        // fall back to the original single-JE cash-basis posting so the cost is
+        // still recognised and no expense is lost. Requires a linked account.
+        if (!existing.expenseCategory?.linkedAccountId) {
+          throw new BadRequestException(
+            'Expense category must be linked to a ledger account before payment',
+          );
+        }
+        debitLine = {
+          accountId: existing.expenseCategory.linkedAccountId,
+          description: `Expense: ${existing.description}`,
+          debit: Number(existing.amount),
+          credit: 0,
+        };
+      }
+
       const je = await this.postingEngine.postLines(
         {
           journalNumber: jeNumber,
@@ -401,12 +701,7 @@ export class ExpensesService {
           moduleName: 'expenses',
           userId,
           lines: [
-            {
-              accountId: expenseLedgerAccountId,
-              description: `Expense: ${existing.description}`,
-              debit: Number(existing.amount),
-              credit: 0,
-            },
+            debitLine,
             {
               accountId: cashLedgerAccountId,
               description: `Cash payment from ${cashAccount.accountName}`,
@@ -427,13 +722,27 @@ export class ExpensesService {
         },
       });
 
+      // Close out the payable subledger row so AP no longer shows the obligation.
+      if (payable) {
+        await tx.payable.update({
+          where: { id: payable.id },
+          data: {
+            paidAmount: payable.amount,
+            outstandingAmount: 0,
+            status: 'PAID',
+          },
+        });
+      }
+
       return tx.expense.update({
         where: { id },
         data: {
           status: 'PAID',
           paidById: userId,
           paidAt: new Date(),
-          journalEntryId: je.id,
+          // Preserve the accrual JE link when it exists; otherwise record the
+          // cash JE (legacy path) so the expense stays traceable.
+          ...(payable ? {} : { journalEntryId: je.id }),
           cashAccountId: cashAccount.id,
           ...(dto.paymentMethod?.trim() && { paymentMethod: dto.paymentMethod.trim() }),
         },

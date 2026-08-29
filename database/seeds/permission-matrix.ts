@@ -690,7 +690,7 @@ export const ALL_PERMISSIONS: PermDef[] = [
   ...perms('supplier_quotations', ['list', 'view', 'create', 'update', 'accept']),
   ...perms('bid_comparisons', ['list', 'view', 'create', 'approve']),
   ...perms('grn', ['list', 'view', 'create', 'update', 'approve', 'post']),
-  ...perms('supplier_invoices', ['list', 'view', 'create', 'update', 'approve']),
+  ...perms('supplier_invoices', ['list', 'view', 'create', 'update', 'approve', 'void']),
   ...perms('three_way_match', ['list', 'view', 'create', 'approve']),
   ...perms('procurement_plans', ['list', 'view', 'create', 'update', 'approve']),
 

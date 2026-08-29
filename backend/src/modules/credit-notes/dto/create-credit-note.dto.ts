@@ -47,6 +47,31 @@ export class CreateCreditNoteLineDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   taxAmount?: number;
+
+  /**
+   * Physical-return restock opt-in. When > 0 this line is goods physically
+   * returned to stock: issuing the credit note ALSO restocks this quantity
+   * (a SALES_RETURN inventory movement) and posts the reversing
+   * Dr Inventory / Cr COGS for its cost, in the same transaction as the
+   * financial (AR/revenue/VAT) reversal. Omit / leave 0 for a pure price
+   * adjustment or allowance (financial-only — no goods came back, no restock).
+   * Requires productId. Must not exceed the line's credited quantity.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  returnedQuantity?: number;
+
+  /**
+   * Optional per-unit cost the returned stock re-enters at (original COGS
+   * basis). When omitted, issue() derives it from the linked sales-order line
+   * (unitCostAtSale / cogsAmount) or the product's average / default cost, the
+   * same cost basis a sale used — so the COGS reversal matches the original.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  restockUnitCost?: number;
 }
 
 export class CreateCreditNoteDto {

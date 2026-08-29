@@ -86,6 +86,13 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+/**
+ * Tanzania standard output-VAT rate (percentage points). Used as the fallback
+ * rate when a taxable product carries no explicit `taxRate` of its own. Kept as
+ * a percentage value (18, not 0.18) to match Product.taxRate semantics.
+ */
+const STANDARD_VAT_RATE_PERCENT = 18;
+
 function normalizePaymentMethodForSalesType(
   salesType: SalesType,
   paymentMethod?: SalesPaymentMethod | null,
@@ -1433,6 +1440,123 @@ export class SalesOrdersService {
     return this.createAndConfirm(safeDto, user, { mobilePosTerminalId: terminalId });
   }
 
+  /**
+   * Derive per-line output VAT server-side so cash-sale / POS / Quick-Sale /
+   * Kaunta paths (which POST `taxAmount: 0` on every line) still split their
+   * revenue into net + 18% output VAT instead of booking the whole tender as
+   * revenue.
+   *
+   * ITEMBA-R till/shelf prices are VAT-INCLUSIVE (the customer pays the sticker
+   * price), so for a taxable product we back-calculate the tax OUT of the gross
+   * unit price rather than adding it on top:
+   *
+   *   tax   = gross × rate / (100 + rate)
+   *   net   = gross − tax
+   *
+   * We rewrite the line's `unitPrice`/`discountAmount` to their net equivalents
+   * and set a per-line `taxAmount` equal to the carved-out VAT, so the existing
+   * `calculateLineTotals` produces `lineTotal = net − netDiscount + tax ==
+   * grossAfterDiscount`. Net effect on the JE (via postSalesOrderLedger, which
+   * already credits TAX_VAT_PAYABLE when taxAmount > 0 and derives revenue as
+   * total − tax): DR Cash gross / CR Revenue net / CR VAT — totals reconcile
+   * (net + vat == gross). The TaxTransaction ledger needs no extra booking:
+   * confirm() already mirrors per-line taxAmount into TaxTransactions via
+   * taxAutoApply.applyForSalesOrder inside the same transaction, so the derived
+   * VAT flows into the filing reports automatically.
+   *
+   * PROFIT-GUARD POLICY (deliberate): derivation runs BEFORE
+   * profit.assertSaleLinesProfitable, so the guard evaluates the NET (ex-VAT)
+   * unit price against cost. The 18% carved out of the sticker price belongs to
+   * TRA, not the company — comparing the VAT-inclusive gross to cost would let
+   * a below-cost sale pass whenever the margin was thinner than the VAT.
+   * confirm() re-runs the guard on the persisted (already-net) lines, so the
+   * two checks agree.
+   *
+   * Rules:
+   *   - Only lines the caller left UNTAXED (`taxAmount` absent/0) are derived,
+   *     so a normal Sales Order that already sends its own per-line VAT is
+   *     never double-charged. This also makes the derivation idempotent: a
+   *     second pass over already-derived lines is a no-op, so it is safe that
+   *     both createAndConfirm() (ahead of the idempotent-replay matcher) and
+   *     create() apply it.
+   *   - A line flagged `taxManual` is NEVER derived, even at taxAmount 0: the
+   *     operator explicitly set that VAT in the sales-order editor (e.g. a
+   *     deliberate zero for a VAT-relieved/exempt customer buying a taxable
+   *     product), and re-deriving would silently carve 18% back out of the
+   *     entered price. POS/Quick-Sale/Kaunta never send the flag, so their
+   *     hardcoded taxAmount:0 lines keep being derived.
+   *   - Only lines whose product is `isTaxable` are touched; exempt/zero-rated
+   *     products keep the whole tender as revenue.
+   *   - The rate is the product's own `taxRate` (percentage) when set,
+   *     otherwise the Tanzania standard 18%.
+   *   - No taxable-with-derivable-line ⇒ the original array is returned
+   *     unchanged (backward compatible; non-taxable payloads are untouched).
+   */
+  private async deriveInclusiveOutputVat(
+    companyId: string,
+    lines: SalesOrderLineDto[],
+  ): Promise<SalesOrderLineDto[]> {
+    if (!lines?.length) return lines;
+
+    // Which lines are candidates? Caller left them untaxed. A line that already
+    // carries a positive taxAmount — or whose tax was explicitly set by the
+    // operator (taxManual, including an intentional zero) — is trusted as-is.
+    const needsDerivation = lines.some(
+      (line) => !line.taxManual && Number(line.taxAmount ?? 0) <= 0,
+    );
+    if (!needsDerivation) return lines;
+
+    const productIds = Array.from(
+      new Set(lines.map((line) => line.productId).filter((id): id is string => Boolean(id))),
+    );
+    if (!productIds.length) return lines;
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds }, companyId, deletedAt: null },
+      select: { id: true, isTaxable: true, taxRate: true },
+    });
+    const taxById = new Map(products.map((p) => [p.id, p]));
+
+    return lines.map((line) => {
+      // Respect an operator's explicit per-line VAT override (even zero).
+      if (line.taxManual) return line;
+      // Respect an explicit caller-supplied tax; never re-derive or double it.
+      if (Number(line.taxAmount ?? 0) > 0) return line;
+
+      const product = taxById.get(line.productId);
+      if (!product || !product.isTaxable) return line;
+
+      const rate = new Prisma.Decimal(
+        product.taxRate != null ? product.taxRate : STANDARD_VAT_RATE_PERCENT,
+      );
+      // A 0% (zero-rated) taxable product carries no VAT — leave the line net.
+      if (rate.lte(0)) return line;
+
+      const qty = new Prisma.Decimal(line.quantity);
+      const grossUnitPrice = new Prisma.Decimal(line.unitPrice);
+      const grossUnitDiscount = new Prisma.Decimal(line.discountAmount ?? 0);
+
+      // Inclusive back-calc of the tax fraction: net = gross × 100 / (100 + rate).
+      const netFactor = new Prisma.Decimal(100).div(new Prisma.Decimal(100).plus(rate));
+      const netUnitPrice = grossUnitPrice.mul(netFactor).toDecimalPlaces(2);
+      const netUnitDiscount = grossUnitDiscount.mul(netFactor).toDecimalPlaces(2);
+
+      // Whole-line VAT = grossAfterDiscount − netAfterDiscount, computed on the
+      // rounded net figures so the persisted line totals reconcile exactly.
+      const grossLine = grossUnitPrice.minus(grossUnitDiscount).mul(qty);
+      const netLine = netUnitPrice.minus(netUnitDiscount).mul(qty);
+      const taxAmount = grossLine.minus(netLine).toDecimalPlaces(2);
+      if (taxAmount.lte(0)) return line;
+
+      return {
+        ...line,
+        unitPrice: netUnitPrice.toNumber(),
+        discountAmount: netUnitDiscount.toNumber(),
+        taxAmount: taxAmount.toNumber(),
+      };
+    });
+  }
+
   async create(
     dto: CreateSalesOrderDto,
     user: AuthUser,
@@ -1448,8 +1572,16 @@ export class SalesOrdersService {
       cashAccountId,
     });
     const userId = user.id;
+    // Carve output VAT out of VAT-inclusive till/shelf prices for any line the
+    // caller left untaxed (POS / Quick-Sale / Kaunta send taxAmount:0). A normal
+    // Sales Order that already supplies per-line VAT is passed through untouched.
+    // No-op when createAndConfirm() already derived (idempotent by design).
+    const linesWithTax = await this.deriveInclusiveOutputVat(dto.companyId, dto.lines);
     const { computed, subtotal, totalDiscount, totalTax, totalAmount, documentDiscount } =
-      applyDocumentDiscount(calculateLineTotals(dto.lines), dto.documentDiscount);
+      applyDocumentDiscount(calculateLineTotals(linesWithTax), dto.documentDiscount);
+    // NOTE: `computed` carries the post-derivation NET unit prices, so the
+    // profit guard below deliberately evaluates ex-VAT revenue against cost
+    // (see deriveInclusiveOutputVat's PROFIT-GUARD POLICY).
     const profitSnapshots = await this.profit.assertSaleLinesProfitable(
       {
         companyId: dto.companyId,
@@ -1615,12 +1747,36 @@ export class SalesOrdersService {
     // edit doesn't silently drop a previously-applied order-level discount.
     const effectiveDocumentDiscount =
       dto.documentDiscount ?? Number((existing as any).documentDiscount ?? 0);
+    // Re-derive output VAT for edited lines the caller left untaxed, so a DRAFT
+    // edit cannot strip the VAT that create() carved out of an inclusive price
+    // (e.g. a POS draft re-saved with gross lines and taxAmount: 0). Lines
+    // reconstructed from storage already carry their derived taxAmount and are
+    // passed through untouched.
+    const linesWithTax = await this.deriveInclusiveOutputVat(
+      existing.companyId,
+      linesToProcess as SalesOrderLineDto[],
+    );
     const { computed, subtotal, totalDiscount, totalTax, totalAmount, documentDiscount } =
-      applyDocumentDiscount(calculateLineTotals(linesToProcess), effectiveDocumentDiscount);
+      applyDocumentDiscount(calculateLineTotals(linesWithTax), effectiveDocumentDiscount);
+    // Did the derivation actually rewrite a line? deriveInclusiveOutputVat
+    // returns untouched lines by OBJECT IDENTITY (only rewritten lines are new
+    // objects), so a reference comparison detects it exactly.
+    const derivationChangedLines = linesWithTax.some(
+      (line, index) => line !== (linesToProcess as SalesOrderLineDto[])[index],
+    );
     // Refresh the persisted totals when the lines/branch change OR when the
     // caller supplies a new document discount (which alters totalAmount even
     // though the lines are untouched).
-    const shouldRefreshLines = Boolean(dto.lines || dto.branchId !== undefined);
+    //
+    // A derivation pass that rewrote a line must ALSO refresh the stored line
+    // rows: otherwise a documentDiscount-only PATCH on a DRAFT whose stored
+    // lines are still gross/untaxed (legacy row, or product flipped taxable
+    // after creation) would persist derived header totals (net subtotal + VAT)
+    // against line rows still carrying gross unitPrice and taxAmount 0 — and
+    // confirm() would post header VAT to the GL that taxAutoApply (which reads
+    // the LINES) never mirrors into the TaxTransaction filing ledger.
+    const shouldRefreshLines =
+      Boolean(dto.lines || dto.branchId !== undefined) || derivationChangedLines;
     const shouldRefreshTotals = shouldRefreshLines || dto.documentDiscount !== undefined;
     const profitSnapshots = await this.profit.assertSaleLinesProfitable(
       {
@@ -2421,6 +2577,16 @@ export class SalesOrdersService {
       });
       if (branch) safeDto.divisionId = branch.divisionId;
     }
+
+    // Derive output VAT BEFORE the idempotent-replay matcher. create() persists
+    // the DERIVED lines (net unitPrice + carved-out taxAmount), so a retried
+    // checkout carrying the original gross/untaxed payload must be normalized
+    // the same way here — otherwise idempotentSalesOrderMatchesDto would compare
+    // gross signatures against the persisted net lines, false-mismatch, and 409
+    // every legitimate retry. Also covers the Kaunta / Mobile POS Lite path,
+    // whose terminal service builds lines with taxAmount: 0 and routes through
+    // mobilePosLiteQuickSale -> here.
+    safeDto.lines = await this.deriveInclusiveOutputVat(safeDto.companyId, safeDto.lines);
 
     if (safeDto.idempotencyKey) {
       const replay = await this.replayQuickSale(

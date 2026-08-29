@@ -859,6 +859,11 @@ function SalesOrderModal({
           unitPrice: Number(l.unitPrice) || 0,
           discountAmount: Number(l.discount) || 0,
           taxAmount: Number(l.tax) || 0,
+          // Tell the server this tax figure is an explicit operator value
+          // (including a deliberate zero for a VAT-relieved sale), so the
+          // inclusive-VAT derivation never rewrites the entered price. POS
+          // payloads never send this flag and keep being derived.
+          taxManual: !!l.taxManual,
           ...(l.batchId ? { batchId: l.batchId } : {}),
         })),
       };

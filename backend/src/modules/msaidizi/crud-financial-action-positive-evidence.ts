@@ -954,6 +954,11 @@ const definitions: readonly FixtureDefinition[] = [
             netAmount: literal(AMOUNT),
             taxAmount: literal(0),
             lineTotal: literal(AMOUNT),
+            // A request line with no physical-return restock opt-in persists
+            // both restock columns as null: this financial-only allowance never
+            // restocks inventory or reverses COGS.
+            returnedQuantity: literal(null),
+            restockUnitCost: literal(null),
           },
           generatedFields: {},
           allowedFields: ['id', 'createdAt', 'updatedAt'],

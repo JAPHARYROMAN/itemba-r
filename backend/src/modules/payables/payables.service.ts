@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { AccessLevel, CashAccountType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
+import type { AccountRole } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CreatePayableDto } from './dto/create-payable.dto';
@@ -235,6 +236,19 @@ export class PayablesService {
     const amount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2);
     if (amount.lte(0)) throw new BadRequestException('Payable amount must be greater than zero');
 
+    // 'Expense' is a reserved, system-generated sourceType: ExpensesService.approve()
+    // raises the mirror payable itself, and the expense flow is its ONLY settlement
+    // path (recordPayment, writeOff, and remove all reject Expense-sourced rows).
+    // A manually created 'Expense' payable would post a real DR expense / CR AP
+    // journal below yet be permanently unsettleable, stranding the AP_CONTROL
+    // credit. Reject it before anything is persisted.
+    if (dto.sourceType === 'Expense') {
+      throw new BadRequestException(
+        "sourceType 'Expense' is reserved for system-generated payables raised by the " +
+          'Expenses module; create the expense there instead.',
+      );
+    }
+
     const record = await this.prisma.$transaction(async (tx) => {
       const created = await tx.payable.create({
         data: {
@@ -380,17 +394,32 @@ export class PayablesService {
             supplierId: string | null;
             supplierName: string | null;
             payableNumber: string;
+            sourceType: string | null;
             outstandingAmount: Prisma.Decimal;
             paidAmount: Prisma.Decimal;
             status: string;
+            currency: string | null;
           }>
-        >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "outstandingAmount", "paidAmount", "status"
+        >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "sourceType", "outstandingAmount", "paidAmount", "status", "currency"
           FROM "payables"
           WHERE "id" = ${id} AND "deletedAt" IS NULL
           FOR UPDATE`;
 
         if (!locked) throw new NotFoundException('Payable not found');
         await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+
+        // Double-relief guard: an Expense-sourced payable is a subledger mirror
+        // of an Expense; it is settled ONLY through the expense flow
+        // (ExpensesService.pay -> DR AP / CR Cash, which also marks this payable
+        // PAID in the same transaction). Allowing recordPayment here would post
+        // a SECOND DR AP / CR Cash and decrement cash twice. Reject it so the
+        // expense remains the single settlement path.
+        if (locked.sourceType === 'Expense') {
+          throw new BadRequestException(
+            'This payable was raised from an expense and must be settled from the Expenses ' +
+              'module (pay the expense). Paying it here would double-relieve AP and double-pay cash.',
+          );
+        }
 
         // A WRITTEN_OFF (or already-PAID) payable is settled: it must not accept a
         // payment that would post a spurious cash settlement journal. (WRITTEN_OFF
@@ -423,10 +452,22 @@ export class PayablesService {
         });
 
         // ITMB-045: post the balanced settlement entry so AP control reduces.
-        // DR AP_CONTROL (liability down) / CR Cash on hand (asset down).
+        // DR AP_CONTROL (liability down) / CR Cash|Bank (asset down).
+        //
+        // The credit (cash outflow) side is resolved from the optional
+        // cashAccountId: its accountType selects CASH_ON_HAND vs BANK so a bank
+        // transfer credits the BANK GL account rather than petty cash. Legacy
+        // callers that omit it default to CASH_ON_HAND. Mirrors
+        // receivables.recordPayment (DR Cash / CR AR) in the opposite direction.
+        const cashRole = await this.resolvePaymentCashRole(
+          tx,
+          locked.companyId,
+          dto.cashAccountId,
+          locked.currency,
+        );
         const [apAccount, cashAccount] = await Promise.all([
           this.accountResolver.resolve(locked.companyId, 'AP_CONTROL', tx),
-          this.accountResolver.resolve(locked.companyId, 'CASH_ON_HAND', tx),
+          this.accountResolver.resolve(locked.companyId, cashRole, tx),
         ]);
         const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
         await this.postingEngine.postLines(
@@ -457,6 +498,24 @@ export class PayablesService {
           },
           tx,
         );
+
+        // Keep the denormalised CashAccount.currentBalance (a subledger cache of
+        // the GL cash position, read by finance/dashboards) consistent with the
+        // CR Cash|Bank leg we just posted. DECREMENT by the payment amount in the
+        // SAME transaction — mirrors receivables.recordPayment (increment on
+        // collection) in the opposite direction. Only when a company-scoped
+        // cashAccountId is supplied; resolvePaymentCashRole has already validated
+        // it belongs to this company (throws otherwise), and the updateMany is
+        // re-scoped by companyId + deletedAt to stay safe. Legacy callers that
+        // omit cashAccountId credit CASH_ON_HAND in the GL but have no CashAccount
+        // row to relieve.
+        if (dto.cashAccountId) {
+          await tx.cashAccount.updateMany({
+            where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
+            data: { currentBalance: { decrement: paymentAmount } },
+          });
+        }
+
         await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
 
         return {
@@ -486,6 +545,44 @@ export class PayablesService {
     return record;
   }
 
+  /**
+   * Pick the GL cash/bank role for a supplier-payment settlement. When a
+   * cashAccountId is supplied it must belong to the company, be active, and be
+   * denominated in the payable's currency (the caller decrements the account's
+   * running balance by the raw payment amount, so a cross-currency pick would
+   * corrupt the cache — mirrors the customer-payments receipt guard); its
+   * accountType then selects BANK vs CASH_ON_HAND (mirroring
+   * receivables.resolvePaymentCashRole / customer-payments.cashAccountRole).
+   * Legacy callers that omit it fall back to CASH_ON_HAND so the entry still
+   * balances.
+   */
+  private async resolvePaymentCashRole(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    cashAccountId?: string | null,
+    payableCurrency?: string | null,
+  ): Promise<AccountRole> {
+    if (!cashAccountId) return 'CASH_ON_HAND';
+    const cashAccount = await tx.cashAccount.findFirst({
+      where: { id: cashAccountId, deletedAt: null, isActive: true },
+      select: { companyId: true, accountType: true, currency: true },
+    });
+    if (!cashAccount || cashAccount.companyId !== companyId) {
+      throw new BadRequestException('Cash account does not belong to this company');
+    }
+    // Currency guard: CashAccount.currentBalance is decremented by the payment
+    // amount in the PAYABLE's currency, so the two must match or the subledger
+    // cache diverges from the real bank position by the FX spread.
+    const expectedCurrency = payableCurrency ?? 'TZS';
+    if (cashAccount.currency && cashAccount.currency !== expectedCurrency) {
+      throw new BadRequestException(
+        `Cash account currency (${cashAccount.currency}) does not match the payable currency ` +
+          `(${expectedCurrency}). Choose a ${expectedCurrency} cash/bank account.`,
+      );
+    }
+    return cashAccount.accountType === CashAccountType.BANK ? 'BANK' : 'CASH_ON_HAND';
+  }
+
   async writeOff(id: string, dto: WriteOffPayableDto, user: AuthUser) {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
@@ -503,15 +600,28 @@ export class PayablesService {
           supplierId: string | null;
           supplierName: string | null;
           payableNumber: string;
+          sourceType: string | null;
           outstandingAmount: Prisma.Decimal;
           status: string;
         }>
-      >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "outstandingAmount", "status"
+      >`SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName", "payableNumber", "sourceType", "outstandingAmount", "status"
         FROM "payables"
         WHERE "id" = ${id} AND "deletedAt" IS NULL
         FOR UPDATE`;
 
       if (!locked) throw new NotFoundException('Payable not found');
+
+      // Double-relief guard: an Expense-sourced payable is a subledger mirror of
+      // an Expense and is controlled entirely by the expense lifecycle. Writing
+      // it off here would post a forgiveness journal (DR AP / CR write-off
+      // income) that the Expense still expects to settle via cash — desyncing
+      // the two. Reject it; manage the expense from its module.
+      if (locked.sourceType === 'Expense') {
+        throw new BadRequestException(
+          'This payable was raised from an expense and cannot be written off here. ' +
+            'Manage it from the Expenses module.',
+        );
+      }
 
       // A payable that is already settled (PAID), already written off, or
       // cancelled must not be written off again — doing so would post a second
@@ -690,6 +800,17 @@ export class PayablesService {
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
+    // An Expense-sourced payable is a subledger mirror of an Expense; deleting
+    // it would hide the accrual from ExpensesService.pay(), which would then
+    // fall back to the legacy full cash-basis JE (double expense recognition)
+    // and strand the accrual's AP_CONTROL credit forever. Same guard as
+    // recordPayment / writeOff: the expense lifecycle is the single path.
+    if (existing.sourceType === 'Expense') {
+      throw new BadRequestException(
+        'This payable was raised from an expense and cannot be deleted here. ' +
+          'Manage it from the Expenses module.',
+      );
+    }
     const userId = user.id;
     await this.prisma.$transaction(async (tx) => {
       await tx.payable.update({ where: { id }, data: { deletedAt: new Date() } });

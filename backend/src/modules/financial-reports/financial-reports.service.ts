@@ -26,6 +26,18 @@ type ReportScope = {
 export const REPORTABLE_JE_STATUSES = ['POSTED', 'REVERSED'] as const;
 export const REPORTABLE_JE_STATUS_FILTER = { in: [...REPORTABLE_JE_STATUSES] };
 
+/**
+ * Receivable/Payable statuses that represent an OPEN balance still owed.
+ *
+ * Settled/closed rows (PAID, WRITTEN_OFF, CANCELLED) must be excluded from every
+ * outstanding-balance surface: their outstandingAmount should be 0, but if a code
+ * path ever leaves a non-zero residual on a settled row, including it would make
+ * the company summary diverge from the AR/AP aging reports. The aging endpoints
+ * and getCompanySummary share this constant so the two surfaces always tie out.
+ */
+export const OPEN_SUBLEDGER_STATUSES = ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as const;
+export const OPEN_SUBLEDGER_STATUS_FILTER = { in: [...OPEN_SUBLEDGER_STATUSES] };
+
 @Injectable()
 export class FinancialReportsService {
   constructor(
@@ -49,11 +61,15 @@ export class FinancialReportsService {
         _sum: { currentBalance: true },
       }),
       this.prisma.receivable.aggregate({
-        where: { companyId, deletedAt: null },
+        // Match the AR aging basis (open statuses only) so the dashboard summary
+        // ties out to getReceivablesAging and excludes PAID/WRITTEN_OFF/CANCELLED.
+        where: { companyId, deletedAt: null, status: OPEN_SUBLEDGER_STATUS_FILTER },
         _sum: { outstandingAmount: true },
       }),
       this.prisma.payable.aggregate({
-        where: { companyId, deletedAt: null },
+        // Match the AP aging basis (open statuses only) so the dashboard summary
+        // ties out to getPayablesAging and excludes PAID/WRITTEN_OFF/CANCELLED.
+        where: { companyId, deletedAt: null, status: OPEN_SUBLEDGER_STATUS_FILTER },
         _sum: { outstandingAmount: true },
       }),
     ]);
@@ -367,7 +383,7 @@ export class FinancialReportsService {
           where: {
             companyId,
             deletedAt: null,
-            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            status: OPEN_SUBLEDGER_STATUS_FILTER,
             ...extra,
           } as Prisma.ReceivableWhereInput,
           _sum: { outstandingAmount: true },
@@ -385,7 +401,7 @@ export class FinancialReportsService {
           where: {
             companyId,
             deletedAt: null,
-            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            status: OPEN_SUBLEDGER_STATUS_FILTER,
             ...extra,
           } as Prisma.PayableWhereInput,
           _sum: { outstandingAmount: true },
@@ -435,7 +451,7 @@ export class FinancialReportsService {
       where: {
         companyId,
         deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+        status: OPEN_SUBLEDGER_STATUS_FILTER,
       },
       select: { customerId: true, customerName: true, outstandingAmount: true, dueDate: true },
     });
@@ -512,7 +528,7 @@ export class FinancialReportsService {
         companyId,
         customerId,
         deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+        status: OPEN_SUBLEDGER_STATUS_FILTER,
       },
       select: {
         id: true,
@@ -597,7 +613,7 @@ export class FinancialReportsService {
       where: {
         companyId,
         deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+        status: OPEN_SUBLEDGER_STATUS_FILTER,
       },
       select: { supplierId: true, supplierName: true, outstandingAmount: true, dueDate: true },
     });

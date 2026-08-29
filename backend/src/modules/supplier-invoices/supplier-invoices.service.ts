@@ -19,6 +19,7 @@ import {
 import { UpdateSupplierInvoiceDto } from './dto/update-supplier-invoice.dto';
 import { QuerySupplierInvoiceDto } from './dto/query-supplier-invoice.dto';
 import { ApproveSupplierInvoiceDto } from './dto/approve-supplier-invoice.dto';
+import { VoidSupplierInvoiceDto } from './dto/void-supplier-invoice.dto';
 import { computeThreeWayMatch } from '../three-way-matching/three-way-match-calculator';
 
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
@@ -486,6 +487,446 @@ export class SupplierInvoicesService {
     });
 
     return updated;
+  }
+
+  /**
+   * Void / reverse an APPROVED supplier invoice.
+   *
+   * A wrongly-approved invoice (entered against the wrong PO, disputed, etc.)
+   * must be correctable. What "correct" means depends on where the invoice's
+   * payable came from — this system is payable-at-receipt, so there are two
+   * origins:
+   *
+   *  (a) The payable was CREATED by this invoice's own approve() (no PO
+   *      receipt behind it, or the PO settled outside AP). approve() posted
+   *      DR Inventory|Expense / CR AP via postSupplierInvoicePayable and the
+   *      payable exists only because of this invoice. Voiding must fully unwind
+   *      it: mirror-reverse that journal entry and cancel the payable.
+   *
+   *  (b) approve() REUSED a payable created at goods receipt
+   *      (PurchaseOrdersService.receive -> createCreditPurchasePayable posted
+   *      DR Inventory / CR AP and opened the payable the moment stock arrived
+   *      on supplier credit). The receipt obligation is real regardless of this
+   *      invoice — the goods are still in stock, still owed to the supplier —
+   *      so voiding the invoice must NOT cancel the payable or touch the
+   *      receipt accrual JE. It restores the payable to its pre-invoice state
+   *      (amount/outstanding back to the receipt-created amount, source link
+   *      back to the PO) and detaches the invoice from it.
+   *
+   * ORIGIN EVIDENCE (why we branch on the payable's backing journal entry and
+   * not on PO.payableId or payable.sourceType): approve() unconditionally
+   * writes PurchaseOrder.payableId = payable.id for every PO-linked invoice,
+   * and its reuse branch rewrites payable.sourceType/sourceId to
+   * 'SupplierInvoice'/<invoice.id> — so after approval BOTH origins look
+   * identical on those fields. The one durable discriminator is
+   * payable.journalEntryId's referenceType: createCreditPurchasePayable stamps
+   * its receipt accrual with referenceType 'Payable' / referenceId <payable.id>
+   * (moduleName 'purchase-orders'), while postSupplierInvoicePayable stamps
+   * referenceType 'SupplierInvoice' / referenceId <invoice.id>. approve() never
+   * overwrites journalEntryId once set (`if (!payable.journalEntryId)`), so the
+   * backing JE still records who really created the liability.
+   *
+   * In ONE transaction:
+   *   1) atomically claim the invoice APPROVED -> CANCELLED, pinned to the
+   *      exact version read (idempotent: a re-void of an already-CANCELLED
+   *      invoice is a no-op),
+   *   2) block if the linked payable already carries payments (paidAmount > 0)
+   *      — those must be unwound first (a partly-paid liability can't just
+   *      vanish, or Cash and AP drift apart),
+   *   3) branch on the payable's origin as above,
+   *   4) re-sync the supplier balance and append the audit row in-transaction.
+   */
+  async void(id: string, dto: VoidSupplierInvoiceDto | undefined, user: AuthUser) {
+    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+
+    // Idempotent short-circuit: an already-voided (CANCELLED) invoice needs no
+    // work. Return it as-is so a retried void is a safe no-op.
+    if (existing.status === 'CANCELLED') {
+      return existing;
+    }
+    if (existing.status !== 'APPROVED') {
+      throw new BadRequestException('Only an APPROVED supplier invoice can be voided');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Atomic claim pinned to the exact version findOne() read: flip
+      // APPROVED -> CANCELLED under a guarded write so a concurrent void (or a
+      // payment that just moved the invoice) can't race this one into posting a
+      // reversal from a stale snapshot. The loser sees count 0.
+      const claim = await tx.supplierInvoice.updateMany({
+        where: { id, deletedAt: null, status: 'APPROVED', updatedAt: existing.updatedAt },
+        data: { status: 'CANCELLED' },
+      });
+      if (claim.count !== 1) {
+        // Someone else already voided (or otherwise moved) it. Re-read: if it is
+        // now CANCELLED this is an idempotent no-op; otherwise it changed under us.
+        const current = await tx.supplierInvoice.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        if (current?.status === 'CANCELLED') return { alreadyVoided: true } as const;
+        throw new ConflictException(
+          'Supplier invoice was changed by another action and could not be voided',
+        );
+      }
+
+      // Row-lock the payable (SELECT ... FOR UPDATE, mirroring
+      // PayablesService.recordPayment's locked read) so a concurrent
+      // recordPayment cannot interleave between the payments guard below and
+      // the cancel/restore write: either the payment commits first and this
+      // read sees its paidAmount/status (the guard rejects), or the payment
+      // blocks on this lock until the void commits and its own status gate
+      // then sees CANCELLED and rejects. A plain findUnique would let cash go
+      // out against a voided invoice while the full approve JE is reversed
+      // (AP over-relieved). Lock order is deadlock-free: void claims the
+      // invoice row then the payable row; recordPayment takes only the
+      // payable row.
+      const payable = existing.payableId
+        ? ((
+            await tx.$queryRaw<
+              Array<{
+                id: string;
+                companyId: string;
+                supplierId: string | null;
+                status: string;
+                paidAmount: Prisma.Decimal | null;
+                journalEntryId: string | null;
+              }>
+            >`SELECT "id", "companyId", "supplierId", "status", "paidAmount", "journalEntryId"
+              FROM "payables"
+              WHERE "id" = ${existing.payableId} AND "deletedAt" IS NULL
+              FOR UPDATE`
+          )[0] ?? null)
+        : null;
+
+      let reusedReceiptPayable = false;
+      if (payable) {
+        // Block a void once money has moved against the payable. A partly/fully
+        // paid liability can't just be reversed away — the cash side must be
+        // unwound first (void the supplier payment), otherwise Cash and AP drift.
+        if (
+          this.moneyToCents(payable.paidAmount ?? 0) > 0 ||
+          payable.status === 'PAID' ||
+          payable.status === 'PARTIALLY_PAID'
+        ) {
+          throw new BadRequestException(
+            'This invoice’s payable already has payments applied. ' +
+              'Reverse the supplier payment(s) before voiding the invoice.',
+          );
+        }
+
+        // A written-off payable is settled by forgiveness: writeOff() already
+        // posted DR AP / CR write-off income and deliberately left the approve
+        // JE POSTED. Voiding now would mirror-reverse that approve JE — a
+        // SECOND DR AP for the same liability — and clobber the WRITTEN_OFF
+        // audit state to CANCELLED. (paidAmount is 0 on a written-off payable,
+        // so the payments guard above cannot catch this.)
+        if (payable.status === 'WRITTEN_OFF') {
+          throw new BadRequestException(
+            'This invoice’s payable has been written off. ' +
+              'Reverse the write-off before voiding the invoice.',
+          );
+        }
+
+        // The payable's backing journal entry is the origin evidence (see the
+        // method doc): referenceType 'Payable' means the purchase-order receipt
+        // accrual created it; referenceType 'SupplierInvoice' means this
+        // invoice's own approve() did.
+        const backingJournal = payable.journalEntryId
+          ? await tx.journalEntry.findFirst({
+              where: {
+                id: payable.journalEntryId,
+                companyId: existing.companyId,
+                deletedAt: null,
+              },
+              include: { lines: true },
+            })
+          : null;
+        reusedReceiptPayable = backingJournal?.referenceType === 'Payable';
+
+        if (reusedReceiptPayable) {
+          // (b) approve() reused the receipt-created payable. On this path
+          // approve() posts NO incremental JE — postSupplierInvoicePayable is
+          // gated behind `if (!payable.journalEntryId)` and the receipt path
+          // already set journalEntryId — so normally there is nothing to
+          // reverse in the GL and the restore is linkage-only. Reverse an
+          // invoice-referenced POSTED entry defensively if one ever exists.
+          const incremental = await tx.journalEntry.findFirst({
+            where: {
+              companyId: existing.companyId,
+              referenceType: 'SupplierInvoice',
+              referenceId: existing.id,
+              status: 'POSTED',
+              deletedAt: null,
+            },
+            include: { lines: true },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (incremental && incremental.lines.length > 0) {
+            await this.reverseSupplierInvoiceJournal(tx, existing, incremental, dto?.reason, user.id);
+          }
+
+          // Restore the payable to its pre-invoice, receipt-created state. The
+          // receipt accrual JE (still POSTED, untouched) is the authority for
+          // the receipt amount.
+          await this.restoreReceiptPayable(tx, existing, payable, backingJournal!);
+        } else {
+          // (a) The payable exists only because of this invoice: reverse the
+          // approve-time journal entry line-for-line and cancel the payable.
+          const original =
+            backingJournal && backingJournal.referenceType === 'SupplierInvoice'
+              ? backingJournal
+              : await tx.journalEntry.findFirst({
+                  where: {
+                    companyId: existing.companyId,
+                    referenceType: 'SupplierInvoice',
+                    referenceId: existing.id,
+                    deletedAt: null,
+                  },
+                  include: { lines: true },
+                  orderBy: { createdAt: 'desc' },
+                });
+          if (original && original.lines.length > 0) {
+            await this.reverseSupplierInvoiceJournal(tx, existing, original, dto?.reason, user.id);
+          }
+
+          // Cancel the payable subledger row (unless it was already cancelled,
+          // e.g. by a PO cancel that ran first) and zero its outstanding.
+          if (payable.status !== 'CANCELLED') {
+            await tx.payable.update({
+              where: { id: payable.id },
+              data: { status: 'CANCELLED', outstandingAmount: 0 },
+            });
+          }
+
+          // approve() unconditionally pointed the linked PO at this
+          // invoice-created payable. Left in place, that stale backlink makes a
+          // later receive() of a credit-purchase PO skip
+          // createCreditPurchasePayable (it gates on !po.payableId), so goods
+          // would arrive on supplier credit with no payable and no
+          // DR Inventory / CR AP accrual. Re-point the PO at its live
+          // receipt-created payable if one exists (approve() may have
+          // overwritten that link), else clear it so receive() can create one.
+          const linkedPo = await tx.purchaseOrder.findFirst({
+            where: { payableId: payable.id, companyId: existing.companyId, deletedAt: null },
+            select: { id: true },
+          });
+          if (linkedPo) {
+            const receiptPayable = await tx.payable.findFirst({
+              where: {
+                companyId: existing.companyId,
+                sourceType: 'PurchaseOrder',
+                sourceId: linkedPo.id,
+                status: { not: 'CANCELLED' },
+                deletedAt: null,
+              },
+              select: { id: true },
+            });
+            await tx.purchaseOrder.update({
+              where: { id: linkedPo.id },
+              data: { payableId: receiptPayable?.id ?? null },
+            });
+          }
+        }
+
+        await this.syncSupplierBalance(tx, payable.companyId, payable.supplierId);
+      }
+
+      const updated = await tx.supplierInvoice.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          outstandingAmount: 0,
+          // A reused receipt payable survives the void and belongs to the PO
+          // again — detach it from the cancelled invoice so nothing reads the
+          // live obligation through a dead document. An invoice-created payable
+          // is CANCELLED alongside the invoice and the link stays as its trace.
+          ...(reusedReceiptPayable ? { payableId: null } : {}),
+        },
+        include: { lines: true },
+      });
+
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'SUPPLIER_INVOICE_VOID',
+        entityType: 'SupplierInvoice',
+        entityId: id,
+        userId: user.id,
+        companyId: existing.companyId,
+        oldValue: existing as any,
+        newValue: { invoice: updated, reason: dto?.reason ?? null } as any,
+      });
+
+      return { alreadyVoided: false, invoice: updated } as const;
+    });
+
+    if (result.alreadyVoided) {
+      // Concurrent void won the race; return the current (cancelled) invoice.
+      return this.findOne(id, user, AccessLevel.READ);
+    }
+
+    return result.invoice;
+  }
+
+  /**
+   * Post the exact mirror-reversal of a supplier-invoice journal entry (each
+   * debit becomes a credit and vice-versa), flipping the original POSTED entry
+   * to REVERSED under an atomic claim FIRST so the swing posts exactly once,
+   * and linking the reversal back to it. Mirrors
+   * credit-notes.reverseCreditNoteJournal.
+   */
+  private async reverseSupplierInvoiceJournal(
+    tx: Prisma.TransactionClient,
+    invoice: {
+      id: string;
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      supplierInvoiceNumber: string;
+    },
+    original: {
+      id: string;
+      lines: Array<{
+        accountId: string;
+        debit: Prisma.Decimal | number | null;
+        credit: Prisma.Decimal | number | null;
+        description: string | null;
+        divisionId: string | null;
+        branchId: string | null;
+      }>;
+    },
+    reason: string | undefined,
+    userId: string,
+  ) {
+    // Atomic claim: flip the original entry to REVERSED, guarded on it not being
+    // already reversed, BEFORE posting anything. A concurrent void loses here and
+    // must skip. A later failure rolls this back with the transaction.
+    const claim = await tx.journalEntry.updateMany({
+      where: { id: original.id, status: 'POSTED', deletedAt: null },
+      data: {
+        status: 'REVERSED',
+        reversedById: userId,
+        reversedAt: new Date(),
+        reversalReason: reason ?? `Void of supplier invoice ${invoice.supplierInvoiceNumber}`,
+      },
+    });
+    if (claim.count !== 1) {
+      throw new ConflictException(
+        'The supplier invoice journal entry was already reversed by another action',
+      );
+    }
+
+    const reversedLines: PostingLine[] = original.lines.map((line) => ({
+      accountId: line.accountId,
+      // Swap each side: a debit becomes a credit of the same magnitude and
+      // vice-versa. A zero stays zero.
+      debit: this.fromCents(this.moneyToCents(line.credit ?? 0)),
+      credit: this.fromCents(this.moneyToCents(line.debit ?? 0)),
+      description: `Reversal: ${line.description ?? ''}`.trim(),
+      divisionId: line.divisionId ?? undefined,
+      branchId: line.branchId ?? undefined,
+    }));
+
+    const reversal = await this.postingEngine.postLines(
+      {
+        companyId: invoice.companyId,
+        divisionId: invoice.divisionId,
+        branchId: invoice.branchId,
+        transactionDate: new Date(),
+        description: `Void of supplier invoice ${invoice.supplierInvoiceNumber}`,
+        referenceType: 'SupplierInvoice',
+        referenceId: invoice.id,
+        moduleName: 'supplier_invoices',
+        userId,
+        lines: reversedLines,
+      },
+      tx,
+    );
+
+    // Link the reversal to the original (already flipped to REVERSED) so
+    // reconciliation can pair them.
+    await tx.journalEntry.update({
+      where: { id: reversal.id },
+      data: { reversalOfId: original.id },
+    });
+
+    return reversal;
+  }
+
+  /**
+   * Restore a receipt-created payable to its pre-invoice state after the
+   * supplier invoice that reused it is voided. The receipt obligation itself
+   * stands — goods were received on supplier credit and its accrual JE
+   * (DR Inventory / CR AP, referenceType 'Payable') remains POSTED — so this
+   * only rewinds what approve() overwrote on the subledger row: amount and
+   * outstanding back to the receipt-created amount (read from the receipt JE's
+   * own AP_CONTROL credit, so an approve that re-stated the amount to the
+   * invoice total is exactly undone), and the source link back to the purchase
+   * order that created it.
+   */
+  private async restoreReceiptPayable(
+    tx: Prisma.TransactionClient,
+    invoice: { companyId: string; purchaseOrderId?: string | null },
+    payable: { id: string; paidAmount: Prisma.Decimal | number | null },
+    receiptJournal: {
+      transactionDate: Date;
+      lines: Array<{ accountId: string; credit: Prisma.Decimal | number | null }>;
+    },
+  ) {
+    // The PO that received on credit still points at this payable — approve()
+    // writes PurchaseOrder.payableId for PO-linked invoices, and the receipt
+    // path set it first, so looking the PO up BY payableId is authoritative
+    // even if the invoice was (wrongly) linked to a different PO.
+    const receiptPo = await tx.purchaseOrder.findFirst({
+      where: { payableId: payable.id, companyId: invoice.companyId, deletedAt: null },
+      select: {
+        id: true,
+        purchaseOrderNumber: true,
+        divisionId: true,
+        branchId: true,
+        expectedDate: true,
+        totalAmount: true,
+      },
+    });
+
+    // Receipt-created amount: the AP_CONTROL credit on the receipt accrual JE
+    // (createCreditPurchasePayable posts exactly amount = PO total there).
+    const apAccount = await this.accountResolver.resolve(invoice.companyId, 'AP_CONTROL', tx);
+    let receiptCents = 0;
+    for (const line of receiptJournal.lines) {
+      if (line.accountId === apAccount.id) {
+        receiptCents += this.moneyToCents(line.credit ?? 0);
+      }
+    }
+    if (receiptCents <= 0) {
+      receiptCents = this.moneyToCents(receiptPo?.totalAmount ?? 0);
+    }
+    if (receiptCents <= 0) {
+      throw new ConflictException(
+        'Cannot determine the receipt-created payable amount to restore; void aborted',
+      );
+    }
+
+    const receiptAmount = new Prisma.Decimal(this.fromCents(receiptCents)).toDecimalPlaces(2);
+    await tx.payable.update({
+      where: { id: payable.id },
+      data: {
+        amount: receiptAmount,
+        // paidAmount is guaranteed 0 by the void guard, but derive outstanding
+        // from it anyway so the arithmetic can never resurrect paid money.
+        outstandingAmount: receiptAmount.minus(payable.paidAmount ?? 0).toDecimalPlaces(2),
+        sourceType: 'PurchaseOrder',
+        sourceId: receiptPo?.id ?? invoice.purchaseOrderId ?? null,
+        issueDate: receiptJournal.transactionDate,
+        dueDate: receiptPo?.expectedDate ?? null,
+        ...(receiptPo
+          ? {
+              divisionId: receiptPo.divisionId,
+              branchId: receiptPo.branchId,
+              notes: `Auto-created from credit purchase ${receiptPo.purchaseOrderNumber}`,
+            }
+          : {}),
+      },
+    });
   }
 
   private buildInvoiceLines(lines: SupplierInvoiceLineDto[], submittedTotal?: number) {

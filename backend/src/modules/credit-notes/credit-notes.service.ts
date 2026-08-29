@@ -11,6 +11,8 @@ import { AccountResolverService, AccountRole, CompanyScopeService } from '../../
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { ProfitService } from '../profit/profit.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { pagination } from '../../common/utils/pagination';
 import { CreateCreditNoteDto } from './dto/create-credit-note.dto';
@@ -37,9 +39,18 @@ const ZERO = new Prisma.Decimal(0);
  * (receivableId) or only via the sales order (salesOrderId → the SO's
  * receivable), so the GL AR control never drifts from the AR subledger.
  *
- * SCOPE (this slice): financial reversal only. We do NOT create inventory
- * movements / restock — that is a deliberate future enhancement (a returned
- * physical good would additionally Dr Inventory / Cr COGS). See TODO in issue().
+ * PHYSICAL RETURNS (opt-in per line): a credit-note line MAY carry a
+ * `returnedQuantity` > 0 to mark goods physically coming back into stock. For
+ * those lines issue() ALSO, in the SAME transaction as the AR/revenue/VAT
+ * reversal:
+ *   (a) creates an inbound SALES_RETURN inventory movement (restocks the
+ *       subledger — quantityOnHand / totalValue), and
+ *   (b) posts the reversing  Dr Inventory (INVENTORY_ASSET) / Cr COGS
+ *       (COST_OF_GOODS_SOLD)  for the returned cost,
+ * mirroring the SALES_RETURN + COGS/Inventory reversal in sales-orders.cancel.
+ * void() unwinds both legs. A line with no `returnedQuantity` (a pure price
+ * adjustment / allowance) is financial-only and never restocks — so
+ * financial-only credit notes are unchanged.
  */
 @Injectable()
 export class CreditNotesService {
@@ -50,6 +61,8 @@ export class CreditNotesService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly inventoryMovements: InventoryMovementsService,
+    private readonly profit: ProfitService,
   ) {}
 
   // ─── Queries ───────────────────────────────────────────────────────────────
@@ -186,6 +199,34 @@ export class CreditNotesService {
         throw new BadRequestException('Credit note line amounts cannot be negative');
       }
       const lineTotal = net.plus(tax).toDecimalPlaces(2);
+
+      // Physical-return restock (opt-in). A returnedQuantity > 0 flags goods
+      // physically coming back into stock; issue() restocks + reverses COGS for
+      // it. Guard it here so a bad restock request never persists onto a DRAFT.
+      const returnedRaw = new Prisma.Decimal(line.returnedQuantity ?? 0).toDecimalPlaces(4);
+      let returnedQuantity: Prisma.Decimal | null = null;
+      let restockUnitCost: Prisma.Decimal | null = null;
+      if (returnedRaw.gt(0)) {
+        if (!line.productId) {
+          throw new BadRequestException(
+            'returnedQuantity requires a productId — only stock lines can be restocked',
+          );
+        }
+        if (returnedRaw.gt(quantity)) {
+          throw new BadRequestException(
+            'returnedQuantity cannot exceed the credited quantity on the line',
+          );
+        }
+        returnedQuantity = returnedRaw;
+        if (line.restockUnitCost != null) {
+          const cost = new Prisma.Decimal(line.restockUnitCost).toDecimalPlaces(4);
+          if (cost.lte(0)) {
+            throw new BadRequestException('restockUnitCost must be greater than zero');
+          }
+          restockUnitCost = cost;
+        }
+      }
+
       return {
         productId: line.productId || null,
         unitId: line.unitId || null,
@@ -195,6 +236,8 @@ export class CreditNotesService {
         netAmount: net,
         taxAmount: tax,
         lineTotal,
+        returnedQuantity,
+        restockUnitCost,
       };
     });
 
@@ -250,6 +293,8 @@ export class CreditNotesService {
           netAmount: l.netAmount,
           taxAmount: l.taxAmount,
           lineTotal: l.lineTotal,
+          returnedQuantity: l.returnedQuantity,
+          restockUnitCost: l.restockUnitCost,
         })),
       });
 
@@ -387,9 +432,14 @@ export class CreditNotesService {
         tx,
       );
 
-      // TODO(future): if this credit note represents a physical return, also post
-      //   Dr Inventory / Cr COGS and create the inventory movement. Out of scope
-      //   for this financial-reversal slice.
+      // Physical-return restock (opt-in per line). For every line that carries a
+      // returnedQuantity > 0, put the goods back into the inventory subledger and
+      // reverse their COGS in the SAME transaction as the financial reversal
+      // above — mirroring sales-orders.cancel (SALES_RETURN movement + Dr
+      // Inventory / Cr COGS). Lines with no returnedQuantity (price adjustments /
+      // allowances) are financial-only and untouched here. The DRAFT->ISSUED claim
+      // guards this whole block, so the restock + its JE post exactly once.
+      await this.restockReturnedLines(tx, existing, userId);
 
       // If a receivable is linked (directly, or resolved from the sales order),
       // atomically reduce its outstanding — but never drive it negative. Any
@@ -521,6 +571,28 @@ export class CreditNotesService {
         );
       }
 
+      // Unwind any physical-return restock: remove the returned stock again
+      // (outbound ADJUSTMENT_OUT) and reverse the restock's Dr Inventory / Cr
+      // COGS at its STORED amounts. No-ops for financial-only credit notes (no
+      // returnedQuantity lines). The lines come from the pre-lock detail read —
+      // credit-note lines are immutable after create, so they cannot have
+      // changed; the lifecycle fields all come from the locked `current` row.
+      //
+      // [LOCK ORDER — deadlock avoidance] This MUST run BEFORE restoreReceivable.
+      // issue() acquires the inventory-side locks first (the per-company
+      // InventoryMovement number-sequence row and the inventory_balances row,
+      // via restockReturnedLines) and the receivable FOR UPDATE second (via
+      // applyToReceivable). void() has to take the same locks in the SAME order
+      // — inventory before receivable — or a concurrent issue() of one note and
+      // void() of another sharing a receivable (or merely the same company's
+      // movement sequence row) form an ABBA cycle and Postgres kills one with a
+      // 40P01 deadlock. The per-note pg_advisory_xact_lock above does NOT
+      // serialize different notes, so ordering is the only protection. The two
+      // steps are independent (unwindRestock reads only lines + the restock JE;
+      // restoreReceivable reads only receivableId/appliedAmount), so the order
+      // swap is behavior-preserving.
+      await this.unwindRestock(tx, { ...current, lines: existing.lines }, userId);
+
       // Give back the outstanding we previously took off the linked receivable.
       const applied = new Prisma.Decimal(current.appliedAmount ?? 0).toDecimalPlaces(2);
       if (current.receivableId && applied.gt(0)) {
@@ -597,6 +669,386 @@ export class CreditNotesService {
       select: { id: true },
     });
     return rec?.id ?? null;
+  }
+
+  /**
+   * Physical-return restock for issue(). For every credit-note line carrying a
+   * returnedQuantity > 0 (opt-in per line — set at create time), put the goods
+   * back into the inventory subledger via an inbound SALES_RETURN movement and
+   * post the reversing  Dr Inventory (INVENTORY_ASSET) / Cr COGS  for the
+   * returned cost — the mirror of the sale's original DR COGS / CR Inventory.
+   * Lines with no returnedQuantity (price adjustments / allowances) are skipped:
+   * a financial-only credit note behaves exactly as before.
+   *
+   * Runs inside issue()'s DRAFT->ISSUED-claimed transaction, so it posts exactly
+   * once alongside the AR/revenue/VAT reversal. Balanced + Decimal throughout.
+   */
+  private async restockReturnedLines(
+    tx: Prisma.TransactionClient,
+    note: {
+      id: string;
+      companyId: string;
+      creditNoteNumber: string;
+      divisionId: string | null;
+      branchId: string | null;
+      issueDate: Date;
+      salesOrderId: string | null;
+      lines?: Array<{
+        productId: string | null;
+        unitId: string | null;
+        quantity: Prisma.Decimal | number | string;
+        returnedQuantity: Prisma.Decimal | number | string | null;
+        restockUnitCost: Prisma.Decimal | number | string | null;
+      }>;
+    },
+    userId: string,
+  ): Promise<Prisma.Decimal> {
+    const lines = note.lines ?? [];
+    const returnLines = lines.filter(
+      (l) => l.productId && new Prisma.Decimal(l.returnedQuantity ?? 0).gt(0),
+    );
+    if (returnLines.length === 0) return ZERO;
+
+    // A restock lands physical stock at a location; without a branch there is no
+    // subledger row to credit. create() defaults branchId from the customer, so a
+    // return credit note must be scoped to a branch to restock.
+    if (!note.branchId) {
+      throw new BadRequestException(
+        'A credit note that restocks returned goods must have a branch/location',
+      );
+    }
+
+    let cogsTotal = ZERO;
+
+    for (const line of returnLines) {
+      const productId = line.productId as string;
+      const product = await tx.product.findUnique({ where: { id: productId } });
+      // Only stock-tracked products carry inventory + COGS. A returnedQuantity on a
+      // service / non-stock line has nothing to restock or reverse — skip it (its
+      // original sale posted no COGS either), so we never inject phantom stock.
+      if (!product || !this.profit.isStockProduct(product)) continue;
+
+      if (!line.unitId) {
+        throw new BadRequestException(
+          `Returned line for product "${product.name}" is missing a unit and cannot be restocked`,
+        );
+      }
+
+      const returnedQty = new Prisma.Decimal(line.returnedQuantity ?? 0).toDecimalPlaces(4);
+      if (returnedQty.lte(0)) continue;
+
+      const unitCost = await this.resolveRestockUnitCost(tx, note, line, product);
+      if (unitCost.lte(0)) {
+        throw new BadRequestException(
+          `Cannot restock returned product "${product.name}": no positive unit cost is available`,
+        );
+      }
+
+      // Inbound SALES_RETURN movement — restocks quantityOnHand / totalValue in the
+      // subledger (same movement type sales-orders.cancel uses to unwind a sale).
+      await this.inventoryMovements.createMovement({
+        companyId: note.companyId,
+        productId,
+        movementType: 'SALES_RETURN',
+        quantity: returnedQty.toNumber(),
+        unitId: line.unitId,
+        unitCost: unitCost.toNumber(),
+        movementDate: note.issueDate,
+        createdById: userId,
+        referenceType: 'CreditNote',
+        referenceId: note.id,
+        notes: `Return restock: credit note ${note.creditNoteNumber}`,
+        divisionId: note.divisionId ?? undefined,
+        branchId: note.branchId,
+        tx,
+      });
+
+      cogsTotal = cogsTotal.plus(returnedQty.mul(unitCost)).toDecimalPlaces(2);
+    }
+
+    if (cogsTotal.lte(0)) return ZERO;
+
+    // Reversing COGS leg (mirror of the sale's DR COGS / CR Inventory):
+    //   Dr Inventory asset (INVENTORY_ASSET)  — returned stock re-enters the books
+    //   Cr Cost of goods sold (COST_OF_GOODS_SOLD) — unwind the profit hit
+    // Posted as its OWN balanced JE referenced to the credit note, so it is
+    // separable from the AR/revenue/VAT reversal and void() can find & reverse it.
+    const accounts = await this.accountResolver.resolveMany(
+      note.companyId,
+      ['INVENTORY_ASSET', 'COST_OF_GOODS_SOLD'],
+      tx,
+    );
+    await this.postingEngine.postLines(
+      {
+        companyId: note.companyId,
+        divisionId: note.divisionId,
+        branchId: note.branchId,
+        transactionDate: note.issueDate,
+        description: `Credit note ${note.creditNoteNumber} — returned goods restock`,
+        referenceType: 'CreditNote',
+        referenceId: note.id,
+        moduleName: 'credit-notes',
+        userId,
+        lines: [
+          {
+            accountId: accounts.INVENTORY_ASSET.id,
+            description: 'Inventory returned to stock',
+            debit: cogsTotal,
+            credit: ZERO,
+          },
+          {
+            accountId: accounts.COST_OF_GOODS_SOLD.id,
+            description: 'COGS reversal on returned goods',
+            debit: ZERO,
+            credit: cogsTotal,
+          },
+        ],
+      },
+      tx,
+    );
+
+    return cogsTotal;
+  }
+
+  /**
+   * Per-unit cost the returned stock re-enters at, in priority order:
+   *   1. restockUnitCost frozen on the line at create time (explicit operator cost),
+   *   2. the matching sales-order line's frozen cost (unitCostAtSale, then
+   *      cogsAmount / quantity) — the exact basis the original sale used,
+   *   3. the product's branch average cost, then its defaultPurchasePrice.
+   * Mirrors the fallback chain in sales-orders.cancel so a return re-enters stock
+   * at the same cost the sale relieved it, keeping the COGS reversal exact.
+   */
+  private async resolveRestockUnitCost(
+    tx: Prisma.TransactionClient,
+    note: { companyId: string; branchId: string | null; salesOrderId: string | null },
+    line: {
+      productId: string | null;
+      restockUnitCost: Prisma.Decimal | number | string | null;
+    },
+    product: { defaultPurchasePrice?: Prisma.Decimal | number | string | null },
+  ): Promise<Prisma.Decimal> {
+    if (line.restockUnitCost != null) {
+      const frozen = new Prisma.Decimal(line.restockUnitCost).toDecimalPlaces(4);
+      if (frozen.gt(0)) return frozen;
+    }
+
+    // Sales-order line cost basis (the sale's frozen per-unit cost).
+    if (note.salesOrderId && line.productId) {
+      const soLine = await tx.salesOrderLine.findFirst({
+        where: { salesOrderId: note.salesOrderId, productId: line.productId },
+        orderBy: { createdAt: 'asc' },
+        select: { quantity: true, unitCostAtSale: true, cogsAmount: true },
+      });
+      if (soLine?.unitCostAtSale != null) {
+        const c = new Prisma.Decimal(soLine.unitCostAtSale).toDecimalPlaces(4);
+        if (c.gt(0)) return c;
+      }
+      if (soLine?.cogsAmount != null && soLine.quantity != null) {
+        const qty = new Prisma.Decimal(soLine.quantity);
+        if (qty.gt(0)) {
+          const c = new Prisma.Decimal(soLine.cogsAmount).dividedBy(qty).toDecimalPlaces(4);
+          if (c.gt(0)) return c;
+        }
+      }
+    }
+
+    // Product cost: branch average, then the product's default purchase price.
+    if (note.branchId && line.productId) {
+      const balance = await tx.inventoryBalance.findFirst({
+        where: { companyId: note.companyId, productId: line.productId, branchId: note.branchId },
+        select: { averageCost: true },
+      });
+      if (balance?.averageCost != null) {
+        const c = new Prisma.Decimal(balance.averageCost).toDecimalPlaces(4);
+        if (c.gt(0)) return c;
+      }
+    }
+    const def = new Prisma.Decimal(product.defaultPurchasePrice ?? 0).toDecimalPlaces(4);
+    return def.gt(0) ? def : ZERO;
+  }
+
+  /**
+   * Void-time unwind of a physical-return restock. Two GL-review fixes are baked
+   * in here:
+   *
+   * [FINDING 1 — cost asymmetry] The GL leg is NOT recomputed at void time. We
+   *   find the ORIGINAL restock JE (Dr Inventory / Cr COGS, linked to the credit
+   *   note) and post its exact mirror by swapping every stored line's
+   *   debit<->credit at the STORED amounts — the same reverse-by-stored-lines
+   *   pattern as reverseCreditNoteJournal / reverseSalesOrderJournal. This nets
+   *   the restock to EXACTLY zero even if the cost basis (WAC, product default,
+   *   SO line) has drifted between issue and void. The original restock JE is
+   *   claimed REVERSED under a guarded update first, so a re-void is a no-op.
+   *
+   * [FINDING 2 — stock guards] The physical stock is removed with an
+   *   ADJUSTMENT_OUT movement, NOT a SALE_ISSUE, and the movement escapes BOTH
+   *   availability guards in applyMovementToBalance:
+   *     - the reserved-availability guard gates ONLY SALE_ISSUE, so using
+   *       ADJUSTMENT_OUT (a real physical depletion) never blocks on
+   *       quantityReserved; and
+   *     - the negative-stock guard is explicitly bypassed via
+   *       `allowNegativeOnHand: true`, because interim sales may have consumed
+   *       the restocked units — the compensating movement must still post (the
+   *       restock never really happened, so negative on-hand is the truthful
+   *       position and the resale was the over-issue).
+   *   So voiding a return is never blocked just because the restocked stock was
+   *   since re-sold, consumed, or reserved. The subledger is still reduced by
+   *   the returned qty at the same cost, matching the reversing GL leg.
+   *
+   * Idempotent PER NOTE: the whole physical unwind runs inside void()'s single
+   * transaction, so a prior void left either ALL compensating movements or none.
+   * A re-void detects any compensating movement tagged CreditNoteVoid for this
+   * note and skips the entire physical loop (the GL reversal carries its own
+   * separate REVERSED-claim guard). The probe is deliberately NOT per product:
+   * a per-product probe would break multi-line same-product notes, because line
+   * 1's ADJUSTMENT_OUT (created earlier in this same transaction) would satisfy
+   * line 2's probe and line 2 would never unwind, while the GL leg reverses the
+   * ENTIRE stored restock JE.
+   */
+  private async unwindRestock(
+    tx: Prisma.TransactionClient,
+    note: {
+      id: string;
+      companyId: string;
+      creditNoteNumber: string;
+      divisionId: string | null;
+      branchId: string | null;
+      salesOrderId: string | null;
+      lines?: Array<{
+        productId: string | null;
+        unitId: string | null;
+        returnedQuantity: Prisma.Decimal | number | string | null;
+        restockUnitCost: Prisma.Decimal | number | string | null;
+      }>;
+    },
+    userId: string,
+  ): Promise<void> {
+    const returnLines = (note.lines ?? []).filter(
+      (l) => l.productId && new Prisma.Decimal(l.returnedQuantity ?? 0).gt(0),
+    );
+    if (returnLines.length === 0) return;
+    if (!note.branchId) return; // could not have restocked without a branch
+
+    // ── Physical subledger unwind ────────────────────────────────────────────
+    // Remove the returned stock again, one ADJUSTMENT_OUT per return line. We use
+    // ADJUSTMENT_OUT (not SALE_ISSUE) so the reserved-availability guard in
+    // applyMovementToBalance can never block the void when the restocked stock
+    // has since been re-sold / reserved. The unwind qty comes from the line's
+    // returnedQuantity; the cost keeps the subledger valuation consistent.
+    //
+    // Idempotency is PER NOTE, not per line/product: all compensating movements
+    // below post inside void()'s single transaction, so a prior (re-)void left
+    // either every movement or none. One probe up front — keyed on the note,
+    // WITHOUT productId — decides for the whole loop. Probing inside the loop
+    // per product would find line 1's just-created ADJUSTMENT_OUT (same-tx
+    // own-writes visibility) and silently skip line 2 of a same-product note,
+    // under-unwinding the stock while the GL leg reverses the full restock JE.
+    const alreadyUnwound = await tx.inventoryMovement.findFirst({
+      where: {
+        companyId: note.companyId,
+        movementType: 'ADJUSTMENT_OUT',
+        referenceType: 'CreditNoteVoid',
+        referenceId: note.id,
+      },
+      select: { id: true },
+    });
+    if (!alreadyUnwound) {
+      for (const line of returnLines) {
+        const productId = line.productId as string;
+        const product = await tx.product.findUnique({ where: { id: productId } });
+        if (!product || !this.profit.isStockProduct(product) || !line.unitId) continue;
+
+        const returnedQty = new Prisma.Decimal(line.returnedQuantity ?? 0).toDecimalPlaces(4);
+        if (returnedQty.lte(0)) continue;
+
+        const unitCost = await this.resolveRestockUnitCost(tx, note, line, product);
+
+        await this.inventoryMovements.createMovement({
+          companyId: note.companyId,
+          productId,
+          // ADJUSTMENT_OUT: real physical depletion, NOT gated by the reserved
+          // guard (only SALE_ISSUE is) — so the void isn't blocked by later
+          // reservations on the restocked stock.
+          movementType: 'ADJUSTMENT_OUT',
+          quantity: returnedQty.toNumber(),
+          unitId: line.unitId,
+          unitCost: unitCost.gt(0) ? unitCost.toNumber() : undefined,
+          movementDate: new Date(),
+          createdById: userId,
+          referenceType: 'CreditNoteVoid',
+          referenceId: note.id,
+          notes: `Void reversal of return restock: credit note ${note.creditNoteNumber}`,
+          divisionId: note.divisionId ?? undefined,
+          branchId: note.branchId,
+          // COMPENSATING movement: the restock being unwound never really
+          // happened, so this ADJUSTMENT_OUT must post even when interim sales
+          // already consumed the restocked units and would drive on-hand
+          // negative. Without the bypass, the negative-stock guard would make
+          // an erroneous ISSUED note permanently un-voidable (the whole void
+          // transaction — AR/revenue/VAT reversal included — would roll back).
+          allowNegativeOnHand: true,
+          tx,
+        });
+      }
+    }
+
+    // ── GL unwind (reverse the ORIGINAL restock JE by its STORED lines) ───────
+    // Find the original restock JE (Dr Inventory / Cr COGS) posted at issue time,
+    // linked to this credit note, and reverse it by swapping each stored line's
+    // debit<->credit at the STORED amounts. This nets the restock to exactly zero
+    // regardless of any cost-basis change since issue. Claim it REVERSED under an
+    // atomic guard first so a re-void does not double-post.
+    const restockJe = await tx.journalEntry.findFirst({
+      where: {
+        companyId: note.companyId,
+        referenceType: 'CreditNote',
+        referenceId: note.id,
+        description: { contains: 'returned goods restock' },
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { lines: true },
+    });
+    if (!restockJe || restockJe.lines.length === 0) return;
+
+    const claim = await tx.journalEntry.updateMany({
+      where: { id: restockJe.id, status: { not: 'REVERSED' }, deletedAt: null },
+      data: { status: 'REVERSED', reversedAt: new Date(), reversedById: userId },
+    });
+    if (claim.count !== 1) return; // already reversed — do not double-post
+
+    // Mirror of the original restock: each debit becomes a credit of the same
+    // magnitude and vice-versa, at the STORED amounts (no recompute).
+    const reversedLines = restockJe.lines.map((line) => ({
+      accountId: line.accountId,
+      debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
+      credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
+      description: `Reversal: ${line.description ?? ''}`.trim(),
+      divisionId: line.divisionId ?? undefined,
+      branchId: line.branchId ?? undefined,
+    }));
+
+    const reversal = await this.postingEngine.postLines(
+      {
+        companyId: restockJe.companyId,
+        divisionId: restockJe.divisionId,
+        branchId: restockJe.branchId,
+        transactionDate: new Date(),
+        description: `Void of credit note ${note.creditNoteNumber} — restock reversal`,
+        referenceType: 'CreditNote',
+        referenceId: note.id,
+        moduleName: 'credit-notes',
+        userId,
+        lines: reversedLines,
+      },
+      tx,
+    );
+
+    await tx.journalEntry.update({
+      where: { id: reversal.id },
+      data: { reversalOfId: restockJe.id },
+    });
   }
 
   /**
@@ -841,12 +1293,16 @@ export class CreditNotesService {
       lines: {
         select: {
           id: true,
+          productId: true,
+          unitId: true,
           description: true,
           quantity: true,
           unitPrice: true,
           netAmount: true,
           taxAmount: true,
           lineTotal: true,
+          returnedQuantity: true,
+          restockUnitCost: true,
           product: { select: { id: true, productCode: true, sku: true, name: true } },
           unit: { select: { id: true, name: true, symbol: true } },
         },

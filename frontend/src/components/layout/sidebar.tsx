@@ -374,6 +374,12 @@ export const NAV: NavItem[] = [
         permission: 'expenses.view',
       },
       {
+        href: '/finance/expense-categories',
+        label: 'Expense Categories',
+        iconKey: 'fileText',
+        permission: 'expenses.view',
+      },
+      {
         href: '/finance/receivables',
         label: 'Receivables',
         iconKey: 'scale',
