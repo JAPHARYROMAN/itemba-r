@@ -3902,6 +3902,12 @@ model Expense {
   expenseDate       DateTime
   description       String
   paymentMethod     String?
+  // Input-VAT recovery: `taxAmount` is the recoverable input VAT INCLUDED in
+  // `amount` (gross). Nullable on purpose — NULL means "never assessed" (all
+  // legacy rows), while 0 means "assessed and exempt/zero-rated". The accrual
+  // split at approval only fires when isTaxable && taxAmount > 0.
+  isTaxable         Boolean       @default(false)
+  taxAmount         Decimal?      @db.Decimal(18, 2)
   status            ExpenseStatus @default(DRAFT)
   approvedById      String?
   approvedAt        DateTime?

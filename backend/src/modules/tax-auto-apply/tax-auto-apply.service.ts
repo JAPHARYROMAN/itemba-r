@@ -117,12 +117,46 @@ export class TaxAutoApplyService {
   }
 
   /**
+   * Capture an expense's recoverable input VAT into the TaxTransaction ledger.
+   *
+   * Expenses have no lines, so the core pass runs over ONE synthetic line
+   * derived from the expense header (id = the expense id, taxAmount = the
+   * recoverable input VAT included in the gross, lineTotal = the gross
+   * amount). The line-keyed idempotency key therefore collapses to one stable
+   * key per expense.
+   *
+   * See {@link applyForSalesOrder} for the `user` company-scope contract.
+   */
+  async applyForExpense(
+    expenseId: string,
+    userId: string,
+    tx?: Prisma.TransactionClient,
+    user?: AuthUser,
+  ): Promise<TaxApplyResult> {
+    const result = !this.isEnabled()
+      ? { skipped: 0, booked: 0, total: 0, disabled: true }
+      : await this.apply({
+          sourceType: 'EXPENSE',
+          direction: 'INPUT',
+          appliesTo: 'PURCHASES',
+          sourceId: expenseId,
+          userId,
+          tx,
+          user,
+        });
+    if (user) {
+      await this.auditManualApply('EXPENSE', expenseId, user, result);
+    }
+    return result;
+  }
+
+  /**
    * Manual agent/API invocations are first-class governed mutations even when
    * the rollout flag makes them a no-op. Internal order-confirm callers omit
    * `user`, so they retain their parent workflow's single audit boundary.
    */
   private async auditManualApply(
-    sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER',
+    sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER' | 'EXPENSE',
     sourceId: string,
     user: AuthUser,
     result: TaxApplyResult,
@@ -133,17 +167,29 @@ export class TaxAutoApplyService {
             where: { id: sourceId },
             select: { companyId: true },
           })
-        : await this.prisma.purchaseOrder.findUnique({
-            where: { id: sourceId },
-            select: { companyId: true },
-          });
+        : sourceType === 'PURCHASE_ORDER'
+          ? await this.prisma.purchaseOrder.findUnique({
+              where: { id: sourceId },
+              select: { companyId: true },
+            })
+          : await this.prisma.expense.findUnique({
+              where: { id: sourceId },
+              select: { companyId: true },
+            });
     if (!source) return;
     await this.auditLogs.logStrict({
       action:
         sourceType === 'SALES_ORDER'
           ? 'TAX_AUTO_APPLY_SALES_ORDER'
-          : 'TAX_AUTO_APPLY_PURCHASE_ORDER',
-      entityType: sourceType === 'SALES_ORDER' ? 'SalesOrder' : 'PurchaseOrder',
+          : sourceType === 'PURCHASE_ORDER'
+            ? 'TAX_AUTO_APPLY_PURCHASE_ORDER'
+            : 'TAX_AUTO_APPLY_EXPENSE',
+      entityType:
+        sourceType === 'SALES_ORDER'
+          ? 'SalesOrder'
+          : sourceType === 'PURCHASE_ORDER'
+            ? 'PurchaseOrder'
+            : 'Expense',
       entityId: sourceId,
       userId: user.id,
       companyId: source.companyId,
@@ -184,7 +230,7 @@ export class TaxAutoApplyService {
         });
         if (!o) throw new NotFoundException(`SalesOrder ${input.sourceId} not found`);
         order = { ...o, transactionDate: o.orderDate };
-      } else {
+      } else if (input.sourceType === 'PURCHASE_ORDER') {
         const o = await client.purchaseOrder.findUnique({
           where: { id: input.sourceId },
           select: {
@@ -197,6 +243,37 @@ export class TaxAutoApplyService {
         });
         if (!o) throw new NotFoundException(`PurchaseOrder ${input.sourceId} not found`);
         order = { ...o, transactionDate: o.orderDate };
+      } else {
+        // EXPENSE: no lines — synthesize ONE line from the expense header so
+        // the shared per-line pass (zero-tax skip, idempotency key, booking)
+        // applies unchanged. `taxAmount` only counts when the expense is
+        // flagged taxable; NULL/exempt rows fall through as a zero-tax skip.
+        const e = await client.expense.findUnique({
+          where: { id: input.sourceId },
+          select: {
+            companyId: true,
+            divisionId: true,
+            branchId: true,
+            expenseDate: true,
+            amount: true,
+            isTaxable: true,
+            taxAmount: true,
+          },
+        });
+        if (!e) throw new NotFoundException(`Expense ${input.sourceId} not found`);
+        order = {
+          companyId: e.companyId,
+          divisionId: e.divisionId,
+          branchId: e.branchId,
+          transactionDate: e.expenseDate,
+          lines: [
+            {
+              id: input.sourceId,
+              taxAmount: e.isTaxable ? e.taxAmount : 0,
+              lineTotal: e.amount,
+            },
+          ],
+        };
       }
     } catch (err) {
       // Hard failure to determine the source order: this is NOT "nothing to
@@ -409,7 +486,7 @@ export class TaxAutoApplyService {
 }
 
 interface ApplyInput {
-  sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER';
+  sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER' | 'EXPENSE';
   direction: 'OUTPUT' | 'INPUT';
   appliesTo: 'SALES' | 'PURCHASES';
   sourceId: string;
