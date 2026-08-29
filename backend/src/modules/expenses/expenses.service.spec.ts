@@ -94,7 +94,21 @@ function makeHarness() {
   const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
   const postingEngine = { postLines: jest.fn().mockResolvedValue({ id: 'journal-1' }) } as any;
   const accountResolver = {
-    resolve: jest.fn(async (_companyId: string, role: string) => ({ id: `${role}-acc` })),
+    // Resolved accounts carry the role's canonical subtype (the seeded shape);
+    // the approve() path verifies it before debiting recoverable VAT.
+    resolve: jest.fn(async (_companyId: string, role: string) => ({
+      id: `${role}-acc`,
+      accountCode: '0000',
+      accountName: `${role} account`,
+      accountSubType: role.toLowerCase(),
+    })),
+  } as any;
+  // Input-VAT compliance mirror (TaxTransaction ledger). Disabled-by-default
+  // no-op, mirroring the env-gated service.
+  const taxAutoApply = {
+    applyForExpense: jest
+      .fn()
+      .mockResolvedValue({ skipped: 0, booked: 0, total: 0, disabled: true }),
   } as any;
   const service = new ExpensesService(
     prisma,
@@ -104,6 +118,7 @@ function makeHarness() {
     companyScope,
     postingEngine,
     accountResolver,
+    taxAutoApply,
   );
 
   return {
@@ -116,6 +131,7 @@ function makeHarness() {
     companyScope,
     postingEngine,
     accountResolver,
+    taxAutoApply,
   };
 }
 
@@ -757,5 +773,352 @@ describe('ExpensesService.pay branch custody guard (shared cash-account-scope he
 
     const result = await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
     expect(result.status).toBe('PAID');
+  });
+});
+
+describe('ExpensesService.approve input-VAT split (DR net Expense + DR TAX_VAT_RECEIVABLE / CR gross AP)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('splits recoverable input VAT out of the gross: three balanced legs, payable still at gross', async () => {
+    const existing = pendingExpense({ isTaxable: true, taxAmount: 3430 });
+    const { service, tx, postingEngine, accountResolver } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.$queryRaw.mockResolvedValue([
+      { amount: 22500, journalEntryId: null, isTaxable: true, taxAmount: 3430 },
+    ]);
+
+    await service.approve('expense-1', authUser());
+
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const lines = postingInput.lines;
+
+    // Exactly three legs: net expense + input VAT + gross AP.
+    expect(lines).toHaveLength(3);
+    const expenseLine = lines.find((l: any) => l.accountId === 'expense-ledger-1');
+    expect(Number(expenseLine.debit)).toBe(19070);
+    expect(Number(expenseLine.credit)).toBe(0);
+    const vatLine = lines.find((l: any) => l.accountId === 'TAX_VAT_RECEIVABLE-acc');
+    expect(Number(vatLine.debit)).toBe(3430);
+    expect(Number(vatLine.credit)).toBe(0);
+    expect(vatLine.description).toContain('Input VAT');
+    const apLine = lines.find((l: any) => l.accountId === 'AP_CONTROL-acc');
+    expect(Number(apLine.credit)).toBe(22500);
+    expect(Number(apLine.debit)).toBe(0);
+    const { totalDebit, totalCredit } = sumLegs(lines);
+    expect(totalDebit).toBe(totalCredit);
+    expect(totalDebit).toBe(22500);
+
+    // The VAT receivable role was resolved (first GL consumer of this role).
+    expect(accountResolver.resolve).toHaveBeenCalledWith(
+      'company-1',
+      'TAX_VAT_RECEIVABLE',
+      expect.anything(),
+    );
+
+    // The payable stays at GROSS: pay() settles the full obligation and needs
+    // no knowledge of the split.
+    const [{ data }] = tx.payable.create.mock.calls[0];
+    expect(Number(data.amount)).toBe(22500);
+    expect(Number(data.outstandingAmount)).toBe(22500);
+  });
+
+  it('never resolves TAX_VAT_RECEIVABLE on an untaxed approval (missing-account charts keep working)', async () => {
+    const { service, accountResolver } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+
+    await service.approve('expense-1', authUser());
+
+    expect(accountResolver.resolve).not.toHaveBeenCalledWith(
+      'company-1',
+      'TAX_VAT_RECEIVABLE',
+      expect.anything(),
+    );
+  });
+
+  it('posts the legacy two-leg gross shape for an assessed-exempt expense (isTaxable, taxAmount 0)', async () => {
+    const existing = pendingExpense({ isTaxable: true, taxAmount: 0 });
+    const { service, tx, postingEngine, accountResolver } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    // The locked re-read drives the split: assessed but exempt (tax 0).
+    tx.$queryRaw.mockResolvedValue([
+      { amount: 22500, journalEntryId: null, isTaxable: true, taxAmount: 0 },
+    ]);
+
+    await service.approve('expense-1', authUser());
+
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    expect(postingInput.lines).toHaveLength(2);
+    const expenseLine = postingInput.lines.find((l: any) => l.accountId === 'expense-ledger-1');
+    expect(Number(expenseLine.debit)).toBe(22500);
+    expect(accountResolver.resolve).not.toHaveBeenCalledWith(
+      'company-1',
+      'TAX_VAT_RECEIVABLE',
+      expect.anything(),
+    );
+  });
+
+  it('splits from the COMMITTED (locked) amount+tax pair, not the stale pre-transaction snapshot', async () => {
+    // Outer findOne read 22500/3430, but a concurrent update() committed
+    // 50000/5000 before the claim: the accrual must split the committed pair.
+    const existing = pendingExpense({ isTaxable: true, taxAmount: 3430 });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.$queryRaw.mockResolvedValue([
+      { amount: 50000, journalEntryId: null, isTaxable: true, taxAmount: 5000 },
+    ]);
+
+    await service.approve('expense-1', authUser());
+
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    const lines = postingInput.lines;
+    expect(Number(lines.find((l: any) => l.accountId === 'expense-ledger-1').debit)).toBe(45000);
+    expect(Number(lines.find((l: any) => l.accountId === 'TAX_VAT_RECEIVABLE-acc').debit)).toBe(
+      5000,
+    );
+    expect(Number(lines.find((l: any) => l.accountId === 'AP_CONTROL-acc').credit)).toBe(50000);
+    const [{ data }] = tx.payable.create.mock.calls[0];
+    expect(Number(data.amount)).toBe(50000);
+  });
+
+  it('rejects a locked tax at or above the gross amount — nothing posted, no payable', async () => {
+    const existing = pendingExpense({ isTaxable: true, taxAmount: 22500 });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.$queryRaw.mockResolvedValue([
+      { amount: 22500, journalEntryId: null, isTaxable: true, taxAmount: 22500 },
+    ]);
+
+    await expect(service.approve('expense-1', authUser())).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unassessed taxable row (isTaxable, taxAmount NULL) at approval — never books the gross legacy shape', async () => {
+    // Reachable only via API writes (the FE enforces the pairing): silently
+    // booking DR Expense(gross)/CR AP(gross) would absorb the operator-flagged
+    // recoverable VAT with no split, no mirror, and no way to assess it later.
+    const existing = pendingExpense({ isTaxable: true, taxAmount: null });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.$queryRaw.mockResolvedValue([
+      { amount: 22500, journalEntryId: null, isTaxable: true, taxAmount: null },
+    ]);
+
+    await expect(service.approve('expense-1', authUser())).rejects.toThrow(
+      'no assessed input VAT amount',
+    );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.create).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly when the VAT receivable resolves to an untagged bare-code account (e.g. 1400 = Prepaid Rent)', async () => {
+    // The resolver's fallback matches ANY active 1400/1410; without the
+    // subtype guard, recoverable VAT would silently accumulate in whatever
+    // account happens to hold that code.
+    const existing = pendingExpense({ isTaxable: true, taxAmount: 3430 });
+    const { service, tx, postingEngine, accountResolver } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.$queryRaw.mockResolvedValue([
+      { amount: 22500, journalEntryId: null, isTaxable: true, taxAmount: 3430 },
+    ]);
+    accountResolver.resolve.mockImplementation(async (_companyId: string, role: string) =>
+      role === 'TAX_VAT_RECEIVABLE'
+        ? {
+            id: 'prepaid-rent-acc',
+            accountCode: '1400',
+            accountName: 'Prepaid Rent',
+            accountSubType: null,
+          }
+        : {
+            id: `${role}-acc`,
+            accountCode: '0000',
+            accountName: role,
+            accountSubType: role.toLowerCase(),
+          },
+    );
+
+    await expect(service.approve('expense-1', authUser())).rejects.toThrow('tax_vat_receivable');
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.payable.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExpensesService.approve tax-auto-apply mirror (TaxTransaction compliance ledger)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('mirrors the expense into the TaxTransaction ledger inside the accrual transaction', async () => {
+    const { service, tx, taxAutoApply } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+
+    await service.approve('expense-1', authUser());
+
+    expect(taxAutoApply.applyForExpense).toHaveBeenCalledTimes(1);
+    expect(taxAutoApply.applyForExpense).toHaveBeenCalledWith('expense-1', 'user-1', tx);
+  });
+
+  it('does not re-mirror on the idempotent already-accrued path', async () => {
+    const existing = pendingExpense({ journalEntryId: 'je-accrual' });
+    const { service, tx, taxAutoApply } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.$queryRaw.mockResolvedValue([{ amount: 22500, journalEntryId: 'je-accrual' }]);
+
+    await service.approve('expense-1', authUser());
+
+    expect(taxAutoApply.applyForExpense).not.toHaveBeenCalled();
+  });
+
+  it('soft-fails: a throwing tax mirror never rolls back a legitimate approval', async () => {
+    const { service, postingEngine, taxAutoApply } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+    taxAutoApply.applyForExpense.mockRejectedValue(new Error('ledger offline'));
+
+    const result = await service.approve('expense-1', authUser());
+
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    expect(result.journalEntryId).toBe('journal-1');
+  });
+});
+
+describe('ExpensesService input-VAT write validation and legacy-path guard', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('create() rejects a tax amount at or above the gross amount', async () => {
+    const { service, prisma } = makeHarness();
+    prisma.expense.create = jest.fn();
+
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          expenseCategoryId: 'category-1',
+          amount: 22500,
+          expenseDate: '2026-03-10',
+          description: 'Daily wages',
+          isTaxable: true,
+          taxAmount: 22500,
+        } as any,
+        authUser(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
+  });
+
+  it('update() rejects a tax amount at or above the (unchanged) gross amount', async () => {
+    const { service, prisma } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense());
+
+    await expect(
+      service.update('expense-1', { taxAmount: 30000 } as any, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.expense.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('create() rejects a taxable expense with no assessed tax amount (cross-field pairing)', async () => {
+    const { service, prisma } = makeHarness();
+    prisma.expense.create = jest.fn();
+
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          expenseCategoryId: 'category-1',
+          amount: 118000,
+          expenseDate: '2026-03-10',
+          description: 'Supplier invoice with VAT',
+          isTaxable: true,
+          // taxAmount omitted: the flagged recoverable VAT was never assessed.
+        } as any,
+        authUser(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
+  });
+
+  it('update() rejects flipping isTaxable on when the row has no tax amount (effective post-edit pair)', async () => {
+    const { service, prisma } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense({ taxAmount: null }));
+
+    await expect(
+      service.update('expense-1', { isTaxable: true } as any, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.expense.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update() rejects explicitly nulling the tax amount on a taxable row', async () => {
+    const { service, prisma } = makeHarness();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(pendingExpense({ isTaxable: true, taxAmount: 3430 }));
+
+    await expect(
+      service.update('expense-1', { taxAmount: null } as any, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.expense.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update() still accepts turning the tax on with a paired amount in the same edit', async () => {
+    const { service, prisma } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(pendingExpense({ taxAmount: null }));
+    prisma.expense.findFirst.mockResolvedValue(
+      pendingExpense({ isTaxable: true, taxAmount: 3430 }),
+    );
+
+    const result = await service.update(
+      'expense-1',
+      { isTaxable: true, taxAmount: 3430 } as any,
+      authUser(),
+    );
+
+    expect(prisma.expense.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ isTaxable: true, taxAmount: 3430 }),
+      }),
+    );
+    expect(result.isTaxable).toBe(true);
+  });
+
+  it('pay() also blocks the legacy path for a taxable row whose tax was never assessed (NULL)', async () => {
+    const existing = approvedExpense({ isTaxable: true, taxAmount: null });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Kisimani Cash Account',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+    });
+    tx.payable.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
+  });
+
+  it('pay() refuses to settle a taxable expense through the legacy un-accrued path (input VAT would be absorbed)', async () => {
+    const existing = approvedExpense({ isTaxable: true, taxAmount: 3430 });
+    const { service, tx, postingEngine } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(existing);
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Kisimani Cash Account',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+    });
+    // No accrued payable -> the legacy cash-basis branch would silently absorb
+    // the recoverable VAT into the expense account: must fail loudly instead.
+    tx.payable.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
   });
 });

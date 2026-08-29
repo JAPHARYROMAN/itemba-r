@@ -2,13 +2,32 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import {
+  Card,
+  PageHeader,
+  PageToolbar,
+  StatCard,
+  StatusBadge,
+  Modal,
+  Btn,
+  PageSpinner,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { downloadTablePdf } from '@/lib/export-download';
 import { DocumentArtifactButton } from '@/components/documents/DocumentArtifactButton';
 
-interface Company { id: string; name: string; code: string }
-interface ExpenseCategory { id: string; name: string }
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
+interface ExpenseCategory {
+  id: string;
+  name: string;
+}
 interface CashAccount {
   id: string;
   accountName: string;
@@ -28,6 +47,10 @@ interface Expense {
   description: string;
   amount: number;
   currency: string;
+  // Input-VAT recovery: taxAmount is the recoverable input VAT INCLUDED in the
+  // gross amount. null/undefined = never assessed (legacy rows).
+  isTaxable?: boolean;
+  taxAmount?: number | string | null;
   status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'PAID' | 'VOIDED';
   paymentMethod?: string | null;
   companyId: string;
@@ -72,7 +95,12 @@ interface ExpenseDetail extends Expense {
   } | null;
 }
 
-interface Paginated<T> { data: T[]; total: number; page: number; totalPages: number }
+interface Paginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
 
 interface ExpenseForm {
   companyId: string;
@@ -84,11 +112,22 @@ interface ExpenseForm {
   vendorName: string;
   paymentMethod: string;
   cashAccountId: string;
+  isTaxable: boolean;
+  taxAmount: number | '';
 }
 
 const BLANK_FORM: ExpenseForm = {
-  companyId: '', expenseCategoryId: '', amount: '', currency: 'TZS',
-  expenseDate: '', description: '', vendorName: '', paymentMethod: '', cashAccountId: '',
+  companyId: '',
+  expenseCategoryId: '',
+  amount: '',
+  currency: 'TZS',
+  expenseDate: '',
+  description: '',
+  vendorName: '',
+  paymentMethod: '',
+  cashAccountId: '',
+  isTaxable: false,
+  taxAmount: '',
 };
 
 const PAYMENT_METHODS = ['CASH', 'BANK_TRANSFER', 'MOBILE_MONEY', 'CHEQUE', 'CREDIT_CARD', 'OTHER'];
@@ -96,13 +135,21 @@ const CURRENCIES = ['TZS', 'USD', 'EUR', 'KES', 'UGX', 'GBP'];
 
 function fmtDate(d?: string | null) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 function fmtDateTime(d?: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -110,25 +157,42 @@ function fmtMoney(currency: string, amount: number | string) {
   return `${currency} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number(amount))}`;
 }
 
-function RejectDialog({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
+function RejectDialog({
+  expense,
+  onClose,
+  onDone,
+}: {
+  expense: Expense;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async () => {
-    if (!reason.trim()) { setError('Rejection reason is required'); return; }
-    setSaving(true); setError('');
+    if (!reason.trim()) {
+      setError('Rejection reason is required');
+      return;
+    }
+    setSaving(true);
+    setError('');
     try {
       const res = await fetch(`/api/backend/expenses/${expense.id}/reject`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Rejection failed'); }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message ?? 'Rejection failed');
+      }
       onDone();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -138,10 +202,30 @@ function RejectDialog({ expense, onClose, onDone }: { expense: Expense; onClose:
       title="Reject Expense"
       subtitle={`Rejecting expense ${expense.expenseNumber ?? expense.id.slice(0, 8)}`}
       size="md"
-      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={handleSubmit} loading={saving}>Reject</Btn></>}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="danger" onClick={handleSubmit} loading={saving}>
+            Reject
+          </Btn>
+        </>
+      }
     >
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
-      <FormTextarea label="Rejection Reason" required rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for rejection…" />
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      <FormTextarea
+        label="Rejection Reason"
+        required
+        rows={3}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Reason for rejection…"
+      />
     </Modal>
   );
 }
@@ -315,8 +399,12 @@ function PayExpenseDialog({
 function DetailField({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs font-medium uppercase" style={{ color: 'var(--aurora-text-muted)' }}>{label}</p>
-      <p className="mt-1 break-words text-sm font-medium" style={{ color: 'var(--aurora-text)' }}>{value || '—'}</p>
+      <p className="text-xs font-medium uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+        {label}
+      </p>
+      <p className="mt-1 break-words text-sm font-medium" style={{ color: 'var(--aurora-text)' }}>
+        {value || '—'}
+      </p>
     </div>
   );
 }
@@ -350,12 +438,15 @@ function ExpenseDetailDialog({
         if (!cancelled) setExpense(detail);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load expense details');
+        if (!cancelled)
+          setError(err instanceof Error ? err.message : 'Could not load expense details');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [expenseId]);
 
   return (
@@ -367,12 +458,18 @@ function ExpenseDetailDialog({
       size="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Close</Btn>
+          <Btn variant="secondary" onClick={onClose}>
+            Close
+          </Btn>
           {expense?.status === 'DRAFT' && canEdit && (
-            <Btn variant="danger" onClick={() => onDelete(expense)}>Delete</Btn>
+            <Btn variant="danger" onClick={() => onDelete(expense)}>
+              Delete
+            </Btn>
           )}
           {expense && ['DRAFT', 'PENDING_APPROVAL'].includes(expense.status) && canEdit && (
-            <Btn variant="secondary" onClick={() => onEdit(expense)}>Edit</Btn>
+            <Btn variant="secondary" onClick={() => onEdit(expense)}>
+              Edit
+            </Btn>
           )}
           {expense && (
             <DocumentArtifactButton
@@ -384,15 +481,30 @@ function ExpenseDetailDialog({
         </>
       }
     >
-      {loading ? <PageSpinner /> : error && !expense ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      {loading ? (
+        <PageSpinner />
+      ) : error && !expense ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
       ) : expense ? (
         <div className="space-y-5">
-          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--aurora-border)' }}>
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <div
+            className="flex flex-wrap items-start justify-between gap-4 border-b pb-4"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
             <div>
-              <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>Recorded amount</p>
-              <p className="mt-1 text-2xl font-semibold">{fmtMoney(expense.currency, expense.amount)}</p>
+              <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                Recorded amount
+              </p>
+              <p className="mt-1 text-2xl font-semibold">
+                {fmtMoney(expense.currency, expense.amount)}
+              </p>
             </div>
             <StatusBadge status={expense.status} />
           </div>
@@ -404,26 +516,66 @@ function ExpenseDetailDialog({
               <DetailField label="Expense date" value={fmtDate(expense.expenseDate)} />
               <DetailField label="Category" value={expense.expenseCategory?.name} />
               <DetailField label="Vendor / payee" value={expense.vendorName} />
-              <div className="sm:col-span-2"><DetailField label="Description" value={expense.description} /></div>
+              {expense.isTaxable && Number(expense.taxAmount ?? 0) > 0 && (
+                <>
+                  <DetailField
+                    label="Input VAT (recoverable)"
+                    value={fmtMoney(expense.currency, Number(expense.taxAmount))}
+                  />
+                  <DetailField
+                    label="Net of VAT"
+                    value={fmtMoney(
+                      expense.currency,
+                      Number(expense.amount) - Number(expense.taxAmount),
+                    )}
+                  />
+                </>
+              )}
+              <div className="sm:col-span-2">
+                <DetailField label="Description" value={expense.description} />
+              </div>
             </div>
           </section>
 
           <section className="border-t pt-4" style={{ borderColor: 'var(--aurora-border)' }}>
             <h3 className="mb-3 text-sm font-semibold">Scope</h3>
             <div className="grid gap-4 sm:grid-cols-3">
-              <DetailField label="Company" value={expense.company ? `${expense.company.name} (${expense.company.code})` : null} />
-              <DetailField label="Division" value={expense.division ? `${expense.division.name} (${expense.division.code})` : 'All divisions'} />
-              <DetailField label="Branch" value={expense.branch ? `${expense.branch.name} (${expense.branch.code})` : 'All branches'} />
+              <DetailField
+                label="Company"
+                value={expense.company ? `${expense.company.name} (${expense.company.code})` : null}
+              />
+              <DetailField
+                label="Division"
+                value={
+                  expense.division
+                    ? `${expense.division.name} (${expense.division.code})`
+                    : 'All divisions'
+                }
+              />
+              <DetailField
+                label="Branch"
+                value={
+                  expense.branch
+                    ? `${expense.branch.name} (${expense.branch.code})`
+                    : 'All branches'
+                }
+              />
             </div>
           </section>
 
           <section className="border-t pt-4" style={{ borderColor: 'var(--aurora-border)' }}>
             <h3 className="mb-3 text-sm font-semibold">Payment & Accounting</h3>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <DetailField label="Payment method" value={expense.paymentMethod?.replace(/_/g, ' ')} />
+              <DetailField
+                label="Payment method"
+                value={expense.paymentMethod?.replace(/_/g, ' ')}
+              />
               <DetailField label="Payment account" value={expense.cashAccount?.accountName} />
               <DetailField label="Journal entry" value={expense.journalEntry?.journalNumber} />
-              <DetailField label="Journal status" value={expense.journalEntry?.status?.replace(/_/g, ' ')} />
+              <DetailField
+                label="Journal status"
+                value={expense.journalEntry?.status?.replace(/_/g, ' ')}
+              />
             </div>
           </section>
 
@@ -435,8 +587,19 @@ function ExpenseDetailDialog({
               <DetailField label="Last updated" value={fmtDateTime(expense.updatedAt)} />
               <DetailField label="Approved by" value={expense.approvedBy?.fullName} />
               <DetailField label="Approved at" value={fmtDateTime(expense.approvedAt)} />
-              <DetailField label="Paid by / at" value={expense.paidBy ? `${expense.paidBy.fullName} · ${fmtDateTime(expense.paidAt)}` : null} />
-              {expense.rejectedReason && <div className="sm:col-span-2 lg:col-span-3"><DetailField label="Rejection reason" value={expense.rejectedReason} /></div>}
+              <DetailField
+                label="Paid by / at"
+                value={
+                  expense.paidBy
+                    ? `${expense.paidBy.fullName} · ${fmtDateTime(expense.paidAt)}`
+                    : null
+                }
+              />
+              {expense.rejectedReason && (
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <DetailField label="Rejection reason" value={expense.rejectedReason} />
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -446,7 +609,11 @@ function ExpenseDetailDialog({
 }
 
 function ExpenseModal({
-  mode, initial, companies, onClose, onSaved,
+  mode,
+  initial,
+  companies,
+  onClose,
+  onSaved,
 }: {
   mode: 'create' | 'edit';
   initial?: Expense;
@@ -455,63 +622,126 @@ function ExpenseModal({
   onSaved: () => void;
 }) {
   const [form, setForm] = useState<ExpenseForm>(() =>
-    initial ? {
-      companyId: initial.companyId,
-      expenseCategoryId: initial.expenseCategoryId,
-      amount: initial.amount,
-      currency: initial.currency,
-      expenseDate: initial.expenseDate.split('T')[0],
-      description: initial.description,
-      vendorName: initial.vendorName ?? '',
-      paymentMethod: initial.paymentMethod ?? '',
-      cashAccountId: initial.cashAccountId ?? '',
-    } : { ...BLANK_FORM }
+    initial
+      ? {
+          companyId: initial.companyId,
+          expenseCategoryId: initial.expenseCategoryId,
+          amount: initial.amount,
+          currency: initial.currency,
+          expenseDate: initial.expenseDate.split('T')[0],
+          description: initial.description,
+          vendorName: initial.vendorName ?? '',
+          paymentMethod: initial.paymentMethod ?? '',
+          cashAccountId: initial.cashAccountId ?? '',
+          isTaxable: initial.isTaxable ?? false,
+          taxAmount:
+            initial.taxAmount != null && Number(initial.taxAmount) > 0
+              ? Number(initial.taxAmount)
+              : '',
+        }
+      : { ...BLANK_FORM },
   );
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const set = (k: keyof ExpenseForm, v: string | number) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof ExpenseForm, v: string | number | boolean) =>
+    setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
     fetch('/api/backend/expense-categories?limit=200')
       .then((r) => r.json())
-      .then((j) => setCategories(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+      .then((j) =>
+        setCategories(
+          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
+        ),
+      );
   }, []);
 
   useEffect(() => {
     if (form.companyId) {
       fetch(`/api/backend/cash-accounts?companyId=${form.companyId}&isActive=true`)
         .then((r) => r.json())
-        .then((j) => setCashAccounts(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+        .then((j) =>
+          setCashAccounts(
+            Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
+          ),
+        );
     }
   }, [form.companyId]);
 
   const handleSubmit = async () => {
-    if (!form.companyId) { setError('Company is required'); return; }
-    if (!form.expenseCategoryId) { setError('Category is required'); return; }
-    if (!form.amount || Number(form.amount) <= 0) { setError('Valid amount is required'); return; }
-    if (!form.expenseDate) { setError('Expense date is required'); return; }
-    if (!form.description.trim()) { setError('Description is required'); return; }
-    setSaving(true); setError('');
+    if (!form.companyId) {
+      setError('Company is required');
+      return;
+    }
+    if (!form.expenseCategoryId) {
+      setError('Category is required');
+      return;
+    }
+    if (!form.amount || Number(form.amount) <= 0) {
+      setError('Valid amount is required');
+      return;
+    }
+    if (!form.expenseDate) {
+      setError('Expense date is required');
+      return;
+    }
+    if (!form.description.trim()) {
+      setError('Description is required');
+      return;
+    }
+    if (form.isTaxable) {
+      const tax = Number(form.taxAmount);
+      if (!form.taxAmount || !(tax > 0)) {
+        setError('Input VAT amount is required for a taxable expense');
+        return;
+      }
+      if (tax >= Number(form.amount)) {
+        setError('Input VAT must be less than the gross amount (VAT is included in the amount)');
+        return;
+      }
+    }
+    setSaving(true);
+    setError('');
     try {
+      // When the taxable flag is cleared on a record that previously carried
+      // VAT, send taxAmount 0 (assessed-exempt) so the stored tax cannot
+      // silently re-trigger the split; a plain untaxed create omits it (never
+      // assessed).
+      const initialHadTax = initial?.isTaxable || Number(initial?.taxAmount ?? 0) > 0;
       const body = {
         ...form,
         amount: Number(form.amount),
         vendorName: form.vendorName || undefined,
         paymentMethod: form.paymentMethod || undefined,
         cashAccountId: form.cashAccountId || undefined,
+        isTaxable: form.isTaxable,
+        taxAmount: form.isTaxable
+          ? Number(form.taxAmount)
+          : mode === 'edit' && initialHadTax
+            ? 0
+            : undefined,
       };
       const res = await fetch(
         mode === 'create' ? '/api/backend/expenses' : `/api/backend/expenses/${initial!.id}`,
-        { method: mode === 'create' ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        {
+          method: mode === 'create' ? 'POST' : 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
       );
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Save failed'); }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message ?? 'Save failed');
+      }
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -520,35 +750,166 @@ function ExpenseModal({
       onClose={onClose}
       title={mode === 'create' ? 'Create Expense' : 'Edit Expense'}
       size="xl"
-      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>{mode === 'create' ? 'Create' : 'Save Changes'}</Btn></>}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="primary" onClick={handleSubmit} loading={saving}>
+            {mode === 'create' ? 'Create' : 'Save Changes'}
+          </Btn>
+        </>
+      }
     >
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && (
+        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <FormSelect label="Company" required disabled={mode === 'edit'} value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select company…">
-            {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+          <FormSelect
+            label="Company"
+            required
+            disabled={mode === 'edit'}
+            value={form.companyId}
+            onChange={(e) => set('companyId', e.target.value)}
+            placeholder="Select company…"
+          >
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.code})
+              </option>
+            ))}
           </FormSelect>
-          <FormSelect label="Category" required value={form.expenseCategoryId} onChange={(e) => set('expenseCategoryId', e.target.value)} placeholder="Select category…">
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <FormSelect
+            label="Category"
+            required
+            value={form.expenseCategoryId}
+            onChange={(e) => set('expenseCategoryId', e.target.value)}
+            placeholder="Select category…"
+          >
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
           </FormSelect>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <FormInput label="Amount" required type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => set('amount', e.target.value === '' ? '' : Number(e.target.value))} placeholder="0.00" />
-          <FormSelect label="Currency" value={form.currency} onChange={(e) => set('currency', e.target.value)}>
-            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          <FormInput
+            label="Amount"
+            required
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={form.amount}
+            onChange={(e) => set('amount', e.target.value === '' ? '' : Number(e.target.value))}
+            placeholder="0.00"
+          />
+          <FormSelect
+            label="Currency"
+            value={form.currency}
+            onChange={(e) => set('currency', e.target.value)}
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
           </FormSelect>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <FormInput label="Expense Date" required type="date" value={form.expenseDate} onChange={(e) => set('expenseDate', e.target.value)} />
-          <FormInput label="Vendor Name" value={form.vendorName} onChange={(e) => set('vendorName', e.target.value)} placeholder="Supplier / vendor" />
+        <div
+          className="rounded-lg border px-3 py-3"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
+          <label
+            className="flex items-center gap-2 text-sm"
+            style={{ color: 'var(--aurora-text)' }}
+          >
+            <input
+              type="checkbox"
+              checked={form.isTaxable}
+              onChange={(e) => set('isTaxable', e.target.checked)}
+              className="rounded"
+            />
+            Includes recoverable input VAT
+          </label>
+          <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+            The amount above stays VAT-inclusive; on approval the VAT portion is booked to the VAT
+            receivable account instead of the expense.
+          </p>
+          {form.isTaxable && (
+            <div className="mt-3">
+              <FormInput
+                label="Input VAT Amount (included in amount)"
+                required
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={form.taxAmount}
+                onChange={(e) =>
+                  set('taxAmount', e.target.value === '' ? '' : Number(e.target.value))
+                }
+                placeholder="0.00"
+                hint={
+                  form.amount !== '' &&
+                  form.taxAmount !== '' &&
+                  Number(form.taxAmount) < Number(form.amount)
+                    ? `Net expense: ${fmtMoney(form.currency, Number(form.amount) - Number(form.taxAmount))}`
+                    : undefined
+                }
+              />
+            </div>
+          )}
         </div>
-        <FormTextarea label="Description" required rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Expense description…" />
         <div className="grid grid-cols-2 gap-3">
-          <FormSelect label="Payment Method" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)} placeholder="Select method…">
-            {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}
+          <FormInput
+            label="Expense Date"
+            required
+            type="date"
+            value={form.expenseDate}
+            onChange={(e) => set('expenseDate', e.target.value)}
+          />
+          <FormInput
+            label="Vendor Name"
+            value={form.vendorName}
+            onChange={(e) => set('vendorName', e.target.value)}
+            placeholder="Supplier / vendor"
+          />
+        </div>
+        <FormTextarea
+          label="Description"
+          required
+          rows={2}
+          value={form.description}
+          onChange={(e) => set('description', e.target.value)}
+          placeholder="Expense description…"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <FormSelect
+            label="Payment Method"
+            value={form.paymentMethod}
+            onChange={(e) => set('paymentMethod', e.target.value)}
+            placeholder="Select method…"
+          >
+            {PAYMENT_METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m.replace(/_/g, ' ')}
+              </option>
+            ))}
           </FormSelect>
-          <FormSelect label="Cash Account (optional)" value={form.cashAccountId} onChange={(e) => set('cashAccountId', e.target.value)} placeholder="None">
-            {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.accountName}</option>)}
+          <FormSelect
+            label="Cash Account (optional)"
+            value={form.cashAccountId}
+            onChange={(e) => set('cashAccountId', e.target.value)}
+            placeholder="None"
+          >
+            {cashAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.accountName}
+              </option>
+            ))}
           </FormSelect>
         </div>
       </div>
@@ -556,7 +917,15 @@ function ExpenseModal({
   );
 }
 
-function DeleteConfirm({ expense, onClose, onDeleted }: { expense: Expense; onClose: () => void; onDeleted: () => void }) {
+function DeleteConfirm({
+  expense,
+  onClose,
+  onDeleted,
+}: {
+  expense: Expense;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const confirm = async () => {
@@ -579,11 +948,30 @@ function DeleteConfirm({ expense, onClose, onDeleted }: { expense: Expense; onCl
       onClose={onClose}
       title="Delete Expense"
       size="md"
-      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={confirm} loading={deleting}>Delete</Btn></>}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="danger" onClick={confirm} loading={deleting}>
+            Delete
+          </Btn>
+        </>
+      }
     >
-      {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>Delete expense <span className="font-medium">{expense.expenseNumber ?? expense.id.slice(0, 8)}</span>?</p>
-      <p className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Only draft expenses can be deleted. Submitted, approved, and paid records remain in the audit trail.</p>
+      {error && (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
+        Delete expense{' '}
+        <span className="font-medium">{expense.expenseNumber ?? expense.id.slice(0, 8)}</span>?
+      </p>
+      <p className="mt-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+        Only draft expenses can be deleted. Submitted, approved, and paid records remain in the
+        audit trail.
+      </p>
     </Modal>
   );
 }
@@ -618,10 +1006,18 @@ export default function ExpensesPage() {
   useEffect(() => {
     fetch('/api/backend/companies?limit=100')
       .then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+      .then((j) =>
+        setCompanies(
+          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
+        ),
+      );
     fetch('/api/backend/expense-categories?limit=200')
       .then((r) => r.json())
-      .then((j) => setCategories(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
+      .then((j) =>
+        setCategories(
+          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
+        ),
+      );
   }, []);
 
   const load = useCallback(async () => {
@@ -637,20 +1033,34 @@ export default function ExpensesPage() {
       const res = await fetch(`/api/backend/expenses?${params}`);
       const json = await res.json();
       setData(json.data ?? null);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [canView, page, companyId, status, categoryId, dateFrom, dateTo]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleAction = async (id: string, action: string) => {
-    setActionMsg(''); setActionLoading(id + action);
+    setActionMsg('');
+    setActionLoading(id + action);
     try {
-      const res = await fetch(`/api/backend/expenses/${id}/${action}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.message ?? 'Action failed'); }
+      const res = await fetch(`/api/backend/expenses/${id}/${action}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message ?? 'Action failed');
+      }
       load();
     } catch (err: unknown) {
       setActionMsg(err instanceof Error ? err.message : 'Action failed');
-    } finally { setActionLoading(null); }
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const exportRegisterPdf = async () => {
@@ -691,7 +1101,16 @@ export default function ExpensesPage() {
         subtitle: filterParts.join(' · '),
         orientation: 'portrait',
         companyId: companyId || undefined,
-        columns: ['Expense #', 'Date', 'Vendor', 'Category', 'Amount', 'Status', 'Method', 'Account'],
+        columns: [
+          'Expense #',
+          'Date',
+          'Vendor',
+          'Category',
+          'Amount',
+          'Status',
+          'Method',
+          'Account',
+        ],
         rows: expenses.map((expense) => [
           expense.expenseNumber ?? expense.id.slice(0, 8),
           fmtDate(expense.expenseDate),
@@ -723,61 +1142,161 @@ export default function ExpensesPage() {
     }
   };
 
-  const reset = (setter: (v: string) => void) => (v: string) => { setter(v); setPage(1); };
+  const reset = (setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    setPage(1);
+  };
 
   if (!canView) {
     return (
       <div className="p-6">
         <PageHeader title="Expenses" subtitle="Manage expenses" />
-        <div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div>
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
       </div>
     );
   }
 
-  const filterSelectCls = 'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
-  const filterStyle = { borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' } as const;
+  const filterSelectCls =
+    'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+  const filterStyle = {
+    borderColor: 'var(--aurora-border)',
+    background: 'var(--aurora-card)',
+    color: 'var(--aurora-text)',
+  } as const;
 
   return (
     <div className="p-6 space-y-6">
-      {creating && <ExpenseModal mode="create" companies={companies} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />}
+      {creating && (
+        <ExpenseModal
+          mode="create"
+          companies={companies}
+          onClose={() => setCreating(false)}
+          onSaved={() => {
+            setCreating(false);
+            load();
+          }}
+        />
+      )}
       {viewingId && (
         <ExpenseDetailDialog
           expenseId={viewingId}
           canEdit={canCreate}
           onClose={() => setViewingId(null)}
-          onEdit={(expense) => { setViewingId(null); setEditing(expense); }}
-          onDelete={(expense) => { setViewingId(null); setDeleting(expense); }}
+          onEdit={(expense) => {
+            setViewingId(null);
+            setEditing(expense);
+          }}
+          onDelete={(expense) => {
+            setViewingId(null);
+            setDeleting(expense);
+          }}
         />
       )}
-      {editing && <ExpenseModal mode="edit" initial={editing} companies={companies} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
-      {deleting && <DeleteConfirm expense={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); load(); }} />}
-      {rejecting && <RejectDialog expense={rejecting} onClose={() => setRejecting(null)} onDone={() => { setRejecting(null); load(); }} />}
-      {paying && <PayExpenseDialog expense={paying} onClose={() => setPaying(null)} onPaid={() => { setPaying(null); load(); }} />}
+      {editing && (
+        <ExpenseModal
+          mode="edit"
+          initial={editing}
+          companies={companies}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteConfirm
+          expense={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            load();
+          }}
+        />
+      )}
+      {rejecting && (
+        <RejectDialog
+          expense={rejecting}
+          onClose={() => setRejecting(null)}
+          onDone={() => {
+            setRejecting(null);
+            load();
+          }}
+        />
+      )}
+      {paying && (
+        <PayExpenseDialog
+          expense={paying}
+          onClose={() => setPaying(null)}
+          onPaid={() => {
+            setPaying(null);
+            load();
+          }}
+        />
+      )}
 
       <PageHeader title="Expenses" subtitle="Track and manage company expenses" />
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <StatCard label="Total" value={data?.total ?? 0} />
-        <StatCard label="Draft" value={data?.data.filter((e) => e.status === 'DRAFT').length ?? 0} />
-        <StatCard label="Pending" value={data?.data.filter((e) => e.status === 'PENDING_APPROVAL').length ?? 0} />
-        <StatCard label="Approved" value={data?.data.filter((e) => e.status === 'APPROVED').length ?? 0} />
+        <StatCard
+          label="Draft"
+          value={data?.data.filter((e) => e.status === 'DRAFT').length ?? 0}
+        />
+        <StatCard
+          label="Pending"
+          value={data?.data.filter((e) => e.status === 'PENDING_APPROVAL').length ?? 0}
+        />
+        <StatCard
+          label="Approved"
+          value={data?.data.filter((e) => e.status === 'APPROVED').length ?? 0}
+        />
         <StatCard label="Paid" value={data?.data.filter((e) => e.status === 'PAID').length ?? 0} />
       </div>
 
-      {actionMsg && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{actionMsg}</div>}
+      {actionMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">
+          {actionMsg}
+        </div>
+      )}
 
       <PageToolbar
         filters={
           <>
-            <select value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select
+              value={companyId}
+              onChange={(e) => reset(setCompanyId)(e.target.value)}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
               <option value="">All Companies</option>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
-            <select value={categoryId} onChange={(e) => reset(setCategoryId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select
+              value={categoryId}
+              onChange={(e) => reset(setCategoryId)(e.target.value)}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
               <option value="">All Categories</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
-            <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select
+              value={status}
+              onChange={(e) => reset(setStatus)(e.target.value)}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
               <option value="">All Status</option>
               <option value="DRAFT">Draft</option>
               <option value="PENDING_APPROVAL">Pending</option>
@@ -785,14 +1304,34 @@ export default function ExpensesPage() {
               <option value="REJECTED">Rejected</option>
               <option value="PAID">Paid</option>
             </select>
-            <input type="date" value={dateFrom} onChange={(e) => reset(setDateFrom)(e.target.value)} className={filterSelectCls} style={filterStyle} title="From date" />
-            <input type="date" value={dateTo} onChange={(e) => reset(setDateTo)(e.target.value)} className={filterSelectCls} style={filterStyle} title="To date" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => reset(setDateFrom)(e.target.value)}
+              className={filterSelectCls}
+              style={filterStyle}
+              title="From date"
+            />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => reset(setDateTo)(e.target.value)}
+              className={filterSelectCls}
+              style={filterStyle}
+              title="To date"
+            />
           </>
         }
         actions={
           <div className="flex items-center gap-2">
-            <Btn variant="secondary" onClick={exportRegisterPdf} loading={exportingPdf}>Export PDF</Btn>
-            {canCreate && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Expense</Btn>}
+            <Btn variant="secondary" onClick={exportRegisterPdf} loading={exportingPdf}>
+              Export PDF
+            </Btn>
+            {canCreate && (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Expense
+              </Btn>
+            )}
           </div>
         }
       />
@@ -801,7 +1340,10 @@ export default function ExpensesPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[800px]">
             <thead>
-              <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
+              <tr
+                className="text-left text-xs uppercase bg-gray-50"
+                style={{ color: 'var(--aurora-text-muted)' }}
+              >
                 <th className="px-4 py-3">Expense #</th>
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Vendor</th>
@@ -813,53 +1355,123 @@ export default function ExpensesPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={7}><PageSpinner /></td></tr>
-              ) : !data?.data.length ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No expenses found</td></tr>
-              ) : data.data.map((exp) => (
-                <tr key={exp.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs">{exp.expenseNumber ?? exp.id.slice(0, 8)}</td>
-                  <td className="px-4 py-3">{fmtDate(exp.expenseDate)}</td>
-                  <td className="px-4 py-3">{exp.vendorName ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{exp.expenseCategory?.name ?? '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono">{exp.currency} {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(exp.amount)}</td>
-                  <td className="px-4 py-3"><StatusBadge status={exp.status} /></td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <Btn variant="secondary" size="xs" onClick={() => setViewingId(exp.id)}>View</Btn>
-                      {exp.status === 'DRAFT' && canCreate && (
-                        <>
-                          <Btn variant="primary" size="xs" onClick={() => handleAction(exp.id, 'submit')} loading={actionLoading === exp.id + 'submit'}>Submit</Btn>
-                          <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>Edit</Btn>
-                          <Btn variant="danger" size="xs" onClick={() => setDeleting(exp)}>Delete</Btn>
-                        </>
-                      )}
-                      {exp.status === 'PENDING_APPROVAL' && canApprove && (
-                        <>
-                          <Btn variant="success" size="xs" onClick={() => handleAction(exp.id, 'approve')} loading={actionLoading === exp.id + 'approve'}>Approve</Btn>
-                          <Btn variant="danger" size="xs" onClick={() => setRejecting(exp)}>Reject</Btn>
-                        </>
-                      )}
-                      {exp.status === 'PENDING_APPROVAL' && canCreate && (
-                        <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>Edit</Btn>
-                      )}
-                      {exp.status === 'APPROVED' && canPay && (
-                        <Btn variant="primary" size="xs" onClick={() => setPaying(exp)}>Pay</Btn>
-                      )}
-                    </div>
+                <tr>
+                  <td colSpan={7}>
+                    <PageSpinner />
                   </td>
                 </tr>
-              ))}
+              ) : !data?.data.length ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-4 py-10 text-center text-sm"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    No expenses found
+                  </td>
+                </tr>
+              ) : (
+                data.data.map((exp) => (
+                  <tr key={exp.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {exp.expenseNumber ?? exp.id.slice(0, 8)}
+                    </td>
+                    <td className="px-4 py-3">{fmtDate(exp.expenseDate)}</td>
+                    <td className="px-4 py-3">{exp.vendorName ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                      {exp.expenseCategory?.name ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {exp.currency}{' '}
+                      {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(
+                        exp.amount,
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={exp.status} />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Btn variant="secondary" size="xs" onClick={() => setViewingId(exp.id)}>
+                          View
+                        </Btn>
+                        {exp.status === 'DRAFT' && canCreate && (
+                          <>
+                            <Btn
+                              variant="primary"
+                              size="xs"
+                              onClick={() => handleAction(exp.id, 'submit')}
+                              loading={actionLoading === exp.id + 'submit'}
+                            >
+                              Submit
+                            </Btn>
+                            <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>
+                              Edit
+                            </Btn>
+                            <Btn variant="danger" size="xs" onClick={() => setDeleting(exp)}>
+                              Delete
+                            </Btn>
+                          </>
+                        )}
+                        {exp.status === 'PENDING_APPROVAL' && canApprove && (
+                          <>
+                            <Btn
+                              variant="success"
+                              size="xs"
+                              onClick={() => handleAction(exp.id, 'approve')}
+                              loading={actionLoading === exp.id + 'approve'}
+                            >
+                              Approve
+                            </Btn>
+                            <Btn variant="danger" size="xs" onClick={() => setRejecting(exp)}>
+                              Reject
+                            </Btn>
+                          </>
+                        )}
+                        {exp.status === 'PENDING_APPROVAL' && canCreate && (
+                          <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>
+                            Edit
+                          </Btn>
+                        )}
+                        {exp.status === 'APPROVED' && canPay && (
+                          <Btn variant="primary" size="xs" onClick={() => setPaying(exp)}>
+                            Pay
+                          </Btn>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
 
         {data && data.totalPages > 1 && (
-          <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Page {data.page} of {data.totalPages} · {data.total} total</span>
+          <div
+            className="px-5 py-3 border-t flex items-center justify-between"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              Page {data.page} of {data.totalPages} · {data.total} total
+            </span>
             <div className="flex gap-2">
-              <Btn variant="secondary" size="xs" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Btn>
-              <Btn variant="secondary" size="xs" disabled={page >= data.totalPages} onClick={() => setPage((p) => p + 1)}>Next</Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page >= data.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Btn>
             </div>
           </div>
         )}

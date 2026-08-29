@@ -1350,6 +1350,108 @@ const definitions: readonly FixtureDefinition[] = [
     audit: companyAudit('TAX_AUTO_APPLY_PURCHASE_ORDER', 'PurchaseOrder'),
   },
   {
+    capabilityId: 'TaxAutoApplyController.applyExpense',
+    operation: 'action',
+    description:
+      'Recover one taxable expense input-VAT capture under the fixture-only rollout flag, prove the exact posted input-tax transaction keyed by the full expense id and the manual audit, then restore it.',
+    request: { path: { id: idOf('Expense') } },
+    testEnvironment: { TAX_AUTO_APPLY: 'true' },
+    preStates: [
+      {
+        // The recovery lever targets an APPROVED taxable expense whose
+        // approval-time capture was skipped (flag off or no active PURCHASES
+        // TaxCode yet): the pass synthesizes ONE line from this header
+        // (taxAmount 2 recoverable input VAT inside the 12 gross).
+        model: 'Expense',
+        id: idOf('Expense'),
+        fields: {
+          companyId: companyA,
+          divisionId: divisionA,
+          branchId: branchA,
+          expenseDate: literal(FIXED_DATE),
+          amount: literal(12),
+          currency: literal('TZS'),
+          isTaxable: literal(true),
+          taxAmount: literal(2),
+          status: literal('APPROVED'),
+          deletedAt: literal(null),
+        },
+      },
+      {
+        model: 'TaxCode',
+        id: idOf('TaxCode'),
+        fields: {
+          companyId: companyA,
+          taxTypeId: idOf('TaxType'),
+          taxRateId: literal(null),
+          appliesTo: literal('PURCHASES'),
+          isDefault: literal(true),
+          status: literal('ACTIVE'),
+          deletedAt: literal(null),
+        },
+      },
+    ],
+    effect: {
+      kind: 'compound',
+      effects: [
+        {
+          effectId: 'taxTransaction',
+          kind: 'scoped-row-create',
+          model: 'TaxTransaction',
+          scope: {
+            equals: {
+              companyId: companyA,
+              sourceType: literal('EXPENSE'),
+              sourceId: idOf('Expense'),
+            },
+            identityFields: ['id'],
+          },
+          expectedFields: {
+            companyId: companyA,
+            taxTypeId: idOf('TaxType'),
+            taxCodeId: idOf('TaxCode'),
+            taxRateId: literal(null),
+            sourceType: literal('EXPENSE'),
+            sourceId: idOf('Expense'),
+            transactionDate: literal(FIXED_DATE),
+            taxableAmount: literal(10),
+            taxAmount: literal(2),
+            currency: literal('TZS'),
+            direction: literal('INPUT'),
+            status: literal('POSTED'),
+            createdById: userA,
+            postedById: userA,
+            journalEntryId: literal(null),
+            deletedAt: literal(null),
+          },
+          generatedFields: {
+            // Expense idempotency keys carry the FULL source UUID
+            // (TX-EXPENSE-<expense id>): the synthetic line id IS the expense
+            // id, so the truncated SO/PO two-fragment form would collapse the
+            // key to 32 bits of entropy and let cross-expense prefix
+            // collisions silently drop recoverable VAT.
+            taxTransactionNumber: {
+              kind: 'value-with-prefix',
+              prefix: 'TX-EXPENSE-',
+              value: idOf('Expense'),
+            },
+            postedAt: { kind: 'action-time' },
+            notes: {
+              kind: 'value-with-prefix',
+              prefix: 'Auto-captured from line ',
+              value: idOf('Expense'),
+            },
+          },
+          allowedFields: ['id', 'createdAt', 'updatedAt'],
+          recovery: 'restore-scope',
+          recoveryOrder: 10,
+        },
+      ],
+      auditEntityId: idOf('Expense'),
+    },
+    audit: companyAudit('TAX_AUTO_APPLY_EXPENSE', 'Expense'),
+  },
+  {
     capabilityId: 'SupplierOrderDraftsController.create',
     operation: 'create',
     description:

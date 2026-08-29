@@ -2551,7 +2551,21 @@ const hrAndOperationsDefinitions: readonly FixtureDefinition[] = [
     },
     'EXPENSE_CREATE',
     'Expense',
-    { companyPath: ['companyId'] },
+    {
+      companyPath: ['companyId'],
+      persistedFields: {
+        amount: literal(100),
+        companyId: companyA,
+        description: unique('CRUD expense'),
+        expenseCategoryId: idOf('ExpenseCategory'),
+        expenseDate: literal('2026-08-25T00:00:00.000Z'),
+        // A request with no input-VAT assessment persists isTaxable=false and
+        // taxAmount=NULL ("never assessed"): this untaxed evidence expense
+        // must never trigger the approval-time VAT split.
+        isTaxable: literal(false),
+        taxAmount: literal(null),
+      },
+    },
   ),
   updateFixture(
     'ExpensesController.update',

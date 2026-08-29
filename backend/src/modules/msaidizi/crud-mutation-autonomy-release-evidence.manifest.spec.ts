@@ -53,6 +53,10 @@ const EXPECTED_PERMISSIONS = {
     permissions: ['finance.reports.view'],
     anyPermissions: [],
   },
+  'TaxAutoApplyController.applyExpense': {
+    permissions: ['finance.reports.view'],
+    anyPermissions: [],
+  },
   'SupplierOrderDraftsController.create': {
     permissions: ['supplier_order_drafts.create'],
     anyPermissions: [],
@@ -123,15 +127,15 @@ describe('standalone autonomy release positive mutation evidence tranche', () =>
   const byId = new Map(manifest.map((capability) => [capability.id, capability]));
   const fixtures = CRUD_MUTATION_AUTONOMY_RELEASE_EVIDENCE_PACK.fixtures;
 
-  it('provides exactly 23 executable positive controls for the requested 24-route tranche', () => {
+  it('provides exactly 24 executable positive controls for the requested 25-route tranche', () => {
     expect([...CRUD_MUTATION_AUTONOMY_RELEASE_POSITIVE_IDS].sort()).toEqual(
       [...EXPECTED_IDS].sort(),
     );
     expect(fixtures.map((candidate) => candidate.capabilityId).sort()).toEqual(
       [...EXPECTED_IDS].sort(),
     );
-    expect(fixtures).toHaveLength(23);
-    expect(new Set(fixtures.map((candidate) => candidate.fixtureId)).size).toBe(23);
+    expect(fixtures).toHaveLength(24);
+    expect(new Set(fixtures.map((candidate) => candidate.fixtureId)).size).toBe(24);
     expect(fixtures.every((candidate) => candidate.controlKind === 'positive')).toBe(true);
 
     const coverage = new Map(
@@ -403,10 +407,14 @@ describe('standalone autonomy release positive mutation evidence tranche', () =>
   });
 
   it('pins fixture-only tax enablement, exact tax audits and the one-row closed delta', () => {
-    for (const capabilityId of [
-      'TaxAutoApplyController.applyPurchaseOrder',
-      'TaxAutoApplyController.applySalesOrder',
-    ] as const) {
+    const taxAuditActions = {
+      'TaxAutoApplyController.applyExpense': 'TAX_AUTO_APPLY_EXPENSE',
+      'TaxAutoApplyController.applyPurchaseOrder': 'TAX_AUTO_APPLY_PURCHASE_ORDER',
+      'TaxAutoApplyController.applySalesOrder': 'TAX_AUTO_APPLY_SALES_ORDER',
+    } as const;
+    for (const [capabilityId, action] of Object.entries(taxAuditActions) as ReadonlyArray<
+      [keyof typeof taxAuditActions, string]
+    >) {
       const candidate = fixture(capabilityId);
       expect(candidate.testEnvironment).toEqual({ TAX_AUTO_APPLY: 'true' });
       expect(candidate.effect).toMatchObject({
@@ -415,13 +423,29 @@ describe('standalone autonomy release positive mutation evidence tranche', () =>
       });
       expect(candidate.effect.kind === 'compound' && candidate.effect.effects).toHaveLength(1);
       expect(candidate.audit).toMatchObject({
-        action:
-          capabilityId === 'TaxAutoApplyController.applySalesOrder'
-            ? 'TAX_AUTO_APPLY_SALES_ORDER'
-            : 'TAX_AUTO_APPLY_PURCHASE_ORDER',
+        action,
         scopeKind: 'COMPANY',
       });
     }
+
+    // The expense capture keys idempotency by the FULL expense UUID
+    // (TX-EXPENSE-<id>), never the truncated SO/PO two-fragment form.
+    const expenseCapture = fixture('TaxAutoApplyController.applyExpense');
+    if (expenseCapture.effect.kind !== 'compound') throw new Error('tax fixture contract drifted');
+    expect(expenseCapture.effect.effects[0]).toMatchObject({
+      kind: 'scoped-row-create',
+      generatedFields: {
+        taxTransactionNumber: {
+          kind: 'value-with-prefix',
+          prefix: 'TX-EXPENSE-',
+          value: { binding: 'model:Expense' },
+        },
+      },
+      expectedFields: {
+        sourceType: { literal: 'EXPENSE' },
+        direction: { literal: 'INPUT' },
+      },
+    });
 
     const valid = fixture('TaxAutoApplyController.applySalesOrder');
     if (valid.effect.kind !== 'compound') throw new Error('tax fixture contract drifted');

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -21,7 +22,16 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
  *   - **Idempotent**: a TaxTransaction keyed by (companyId, sourceType,
  *     sourceId, taxCodeId) is only created if one doesn't already exist.
  *     Re-running on the same order is safe and a no-op for already-booked
- *     lines.
+ *     lines. The pre-check filters on sourceType/sourceId (a key collision
+ *     from a DIFFERENT source can never masquerade as "already booked"), and
+ *     the ledger insert itself is INSERT ... ON CONFLICT DO NOTHING so a
+ *     concurrent duplicate surfaces as a clean skip, not a statement error.
+ *   - **Transaction-safe inside a caller's tx**: when invoked with a caller's
+ *     TransactionClient (order confirm, expense approval), each per-line
+ *     write runs under a SAVEPOINT. A failed SQL statement is rolled back to
+ *     the savepoint instead of aborting the caller's whole Postgres
+ *     transaction — without this, the JS-level catch below would "swallow"
+ *     the error while every later statement in the approval died with 25P02.
  *   - **Hard failures are flagged, not failed-open**: a failure to *determine*
  *     tax (source order lookup error, tax-code lookup error, or no active
  *     default TaxCode) is logged at ERROR and returned with `failed: true` +
@@ -117,12 +127,47 @@ export class TaxAutoApplyService {
   }
 
   /**
+   * Capture an expense's recoverable input VAT into the TaxTransaction ledger.
+   *
+   * Expenses have no lines, so the core pass runs over ONE synthetic line
+   * derived from the expense header (id = the expense id, taxAmount = the
+   * recoverable input VAT included in the gross, lineTotal = the gross
+   * amount). The idempotency key is one stable key per expense, built from
+   * the FULL expense UUID (truncating it would collapse the key to 32 bits
+   * of entropy and let cross-expense prefix collisions silently drop VAT).
+   *
+   * See {@link applyForSalesOrder} for the `user` company-scope contract.
+   */
+  async applyForExpense(
+    expenseId: string,
+    userId: string,
+    tx?: Prisma.TransactionClient,
+    user?: AuthUser,
+  ): Promise<TaxApplyResult> {
+    const result = !this.isEnabled()
+      ? { skipped: 0, booked: 0, total: 0, disabled: true }
+      : await this.apply({
+          sourceType: 'EXPENSE',
+          direction: 'INPUT',
+          appliesTo: 'PURCHASES',
+          sourceId: expenseId,
+          userId,
+          tx,
+          user,
+        });
+    if (user) {
+      await this.auditManualApply('EXPENSE', expenseId, user, result);
+    }
+    return result;
+  }
+
+  /**
    * Manual agent/API invocations are first-class governed mutations even when
    * the rollout flag makes them a no-op. Internal order-confirm callers omit
    * `user`, so they retain their parent workflow's single audit boundary.
    */
   private async auditManualApply(
-    sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER',
+    sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER' | 'EXPENSE',
     sourceId: string,
     user: AuthUser,
     result: TaxApplyResult,
@@ -133,17 +178,29 @@ export class TaxAutoApplyService {
             where: { id: sourceId },
             select: { companyId: true },
           })
-        : await this.prisma.purchaseOrder.findUnique({
-            where: { id: sourceId },
-            select: { companyId: true },
-          });
+        : sourceType === 'PURCHASE_ORDER'
+          ? await this.prisma.purchaseOrder.findUnique({
+              where: { id: sourceId },
+              select: { companyId: true },
+            })
+          : await this.prisma.expense.findUnique({
+              where: { id: sourceId },
+              select: { companyId: true },
+            });
     if (!source) return;
     await this.auditLogs.logStrict({
       action:
         sourceType === 'SALES_ORDER'
           ? 'TAX_AUTO_APPLY_SALES_ORDER'
-          : 'TAX_AUTO_APPLY_PURCHASE_ORDER',
-      entityType: sourceType === 'SALES_ORDER' ? 'SalesOrder' : 'PurchaseOrder',
+          : sourceType === 'PURCHASE_ORDER'
+            ? 'TAX_AUTO_APPLY_PURCHASE_ORDER'
+            : 'TAX_AUTO_APPLY_EXPENSE',
+      entityType:
+        sourceType === 'SALES_ORDER'
+          ? 'SalesOrder'
+          : sourceType === 'PURCHASE_ORDER'
+            ? 'PurchaseOrder'
+            : 'Expense',
       entityId: sourceId,
       userId: user.id,
       companyId: source.companyId,
@@ -168,6 +225,7 @@ export class TaxAutoApplyService {
       branchId?: string | null;
       orderDate?: Date;
       transactionDate?: Date;
+      currency?: string | null;
       lines: Array<{ id: string; taxAmount: any; lineTotal: any }>;
     } | null = null;
     try {
@@ -183,8 +241,10 @@ export class TaxAutoApplyService {
           },
         });
         if (!o) throw new NotFoundException(`SalesOrder ${input.sourceId} not found`);
-        order = { ...o, transactionDate: o.orderDate };
-      } else {
+        // Orders carry no explicit currency column here — keep the historical
+        // TZS labelling for SO/PO ledger rows.
+        order = { ...o, transactionDate: o.orderDate, currency: 'TZS' };
+      } else if (input.sourceType === 'PURCHASE_ORDER') {
         const o = await client.purchaseOrder.findUnique({
           where: { id: input.sourceId },
           select: {
@@ -196,7 +256,43 @@ export class TaxAutoApplyService {
           },
         });
         if (!o) throw new NotFoundException(`PurchaseOrder ${input.sourceId} not found`);
-        order = { ...o, transactionDate: o.orderDate };
+        order = { ...o, transactionDate: o.orderDate, currency: 'TZS' };
+      } else {
+        // EXPENSE: no lines — synthesize ONE line from the expense header so
+        // the shared per-line pass (zero-tax skip, idempotency key, booking)
+        // applies unchanged. `taxAmount` only counts when the expense is
+        // flagged taxable; NULL/exempt rows fall through as a zero-tax skip.
+        const e = await client.expense.findUnique({
+          where: { id: input.sourceId },
+          select: {
+            companyId: true,
+            divisionId: true,
+            branchId: true,
+            expenseDate: true,
+            amount: true,
+            currency: true,
+            isTaxable: true,
+            taxAmount: true,
+          },
+        });
+        if (!e) throw new NotFoundException(`Expense ${input.sourceId} not found`);
+        order = {
+          companyId: e.companyId,
+          divisionId: e.divisionId,
+          branchId: e.branchId,
+          transactionDate: e.expenseDate,
+          // Expenses are explicitly multi-currency (TZS/USD/EUR/...): the
+          // compliance row must carry the expense's own currency, or a USD
+          // 180 input VAT would be summed as 180 TZS by the filing engine.
+          currency: e.currency,
+          lines: [
+            {
+              id: input.sourceId,
+              taxAmount: e.isTaxable ? e.taxAmount : 0,
+              lineTotal: e.amount,
+            },
+          ],
+        };
       }
     } catch (err) {
       // Hard failure to determine the source order: this is NOT "nothing to
@@ -300,9 +396,28 @@ export class TaxAutoApplyService {
       // taxCodeId, sourceLineId-in-notes). The TaxTransaction model has no
       // line FK, so we encode the source line in `notes` and use a unique
       // (companyId, taxTransactionNumber) namespacing pattern derived from it.
-      const txNumber = `TX-${input.sourceType.split('_')[0]}-${input.sourceId.slice(0, 8)}-${line.id.slice(0, 8)}`;
+      //
+      // Expenses use the FULL source UUID: the synthetic line id IS the
+      // expense id, so the truncated two-slice form would repeat the same 8
+      // hex chars (32 bits of entropy) and a cross-expense prefix collision
+      // would silently drop recoverable VAT from the filing ledger. SO/PO
+      // keep the historical truncated two-id key so rows already booked
+      // under it stay idempotent.
+      const txNumber =
+        input.sourceType === 'EXPENSE'
+          ? `TX-EXPENSE-${input.sourceId}`
+          : `TX-${input.sourceType.split('_')[0]}-${input.sourceId.slice(0, 8)}-${line.id.slice(0, 8)}`;
+      // The pre-check filters on sourceType/sourceId as well as the key: a
+      // number collision from a DIFFERENT source must never masquerade as
+      // "already booked" for THIS source.
       const existing = await client.taxTransaction.findFirst({
-        where: { companyId: order.companyId, taxTransactionNumber: txNumber, deletedAt: null },
+        where: {
+          companyId: order.companyId,
+          taxTransactionNumber: txNumber,
+          sourceType: input.sourceType as any,
+          sourceId: input.sourceId,
+          deletedAt: null,
+        },
         select: { id: true },
       });
       if (existing) {
@@ -311,45 +426,102 @@ export class TaxAutoApplyService {
       }
 
       const taxableAmount = Math.max(round2(lineTotal - taxAmount), 0);
+      // When we run inside a caller's transaction (order confirm / expense
+      // approval), a failed SQL statement aborts the WHOLE Postgres
+      // transaction — the JS catch below cannot undo that, and the caller's
+      // next statement would die with 25P02, rolling back a legitimate
+      // approval. A savepoint makes the per-line write independently
+      // abortable: ROLLBACK TO SAVEPOINT restores the enclosing transaction
+      // to health before we swallow the error. Standalone (non-tx) calls
+      // need no savepoint — each statement is its own transaction.
+      const inCallerTx = Boolean(input.tx);
+      if (inCallerTx) {
+        await client.$executeRaw`SAVEPOINT tax_auto_apply_line`;
+      }
       try {
-        const taxTransaction = await client.taxTransaction.create({
-          data: {
+        // INSERT ... ON CONFLICT DO NOTHING (createMany + skipDuplicates): a
+        // duplicate key — concurrent apply, soft-deleted row, or a genuine
+        // collision — surfaces as count === 0 instead of a 23505 statement
+        // error that would poison the caller's transaction.
+        const taxTransactionId = randomUUID();
+        const created = await client.taxTransaction.createMany({
+          data: [
+            {
+              id: taxTransactionId,
+              taxTransactionNumber: txNumber,
+              companyId: order.companyId,
+              taxTypeId: defaultCode.taxTypeId,
+              taxCodeId: defaultCode.id,
+              taxRateId: defaultCode.taxRateId,
+              sourceType: input.sourceType as any,
+              sourceId: input.sourceId,
+              transactionDate: order.transactionDate ?? new Date(),
+              taxableAmount,
+              taxAmount: round2(taxAmount),
+              currency: order.currency ?? 'TZS',
+              direction: input.direction as any,
+              status: 'DRAFT',
+              createdById: input.userId,
+              notes: `Auto-captured from line ${line.id}`,
+            },
+          ],
+          skipDuplicates: true,
+        });
+        if (created.count === 0) {
+          // The key is already taken (the pre-check missed it: a concurrent
+          // apply, or a soft-deleted row). Same source: a legitimate
+          // idempotent skip. A DIFFERENT source holding the key is a genuine
+          // collision — flag it for reconciliation, never count it as booked.
+          const holder = await client.taxTransaction.findFirst({
+            where: { companyId: order.companyId, taxTransactionNumber: txNumber },
+            select: { sourceType: true, sourceId: true },
+          });
+          if (
+            holder &&
+            (holder.sourceType !== (input.sourceType as any) || holder.sourceId !== input.sourceId)
+          ) {
+            result.error = `Tax transaction number collision: ${txNumber} is already booked for ${holder.sourceType} ${holder.sourceId}`;
+            result.failed = true;
+            this.logger.error(
+              `Tax auto-apply FAILED (key collision) for ${input.sourceType} ${input.sourceId}: ${result.error}`,
+            );
+          }
+          result.skipped += 1;
+        } else {
+          await this.postTaxTransaction({
+            tx: input.tx,
+            taxTransactionId,
             taxTransactionNumber: txNumber,
             companyId: order.companyId,
-            taxTypeId: defaultCode.taxTypeId,
-            taxCodeId: defaultCode.id,
-            taxRateId: defaultCode.taxRateId,
-            sourceType: input.sourceType as any,
+            divisionId: order.divisionId,
+            branchId: order.branchId,
+            direction: input.direction,
+            taxCategory: defaultCode.taxType.taxCategory,
+            taxTypeCode: defaultCode.taxType.taxTypeCode,
+            sourceType: input.sourceType,
             sourceId: input.sourceId,
             transactionDate: order.transactionDate ?? new Date(),
-            taxableAmount,
-            taxAmount: round2(taxAmount),
-            currency: 'TZS',
-            direction: input.direction as any,
-            status: 'DRAFT',
-            createdById: input.userId,
-            notes: `Auto-captured from line ${line.id}`,
-          },
-        });
-        await this.postTaxTransaction({
-          tx: input.tx,
-          taxTransactionId: taxTransaction.id,
-          taxTransactionNumber: taxTransaction.taxTransactionNumber,
-          companyId: order.companyId,
-          divisionId: order.divisionId,
-          branchId: order.branchId,
-          direction: input.direction,
-          taxCategory: defaultCode.taxType.taxCategory,
-          taxTypeCode: defaultCode.taxType.taxTypeCode,
-          sourceType: input.sourceType,
-          sourceId: input.sourceId,
-          transactionDate: order.transactionDate ?? new Date(),
-          amount: round2(taxAmount),
-          userId: input.userId,
-        });
-        result.booked += 1;
-        result.total += taxAmount;
+            amount: round2(taxAmount),
+            userId: input.userId,
+          });
+          result.booked += 1;
+          result.total += taxAmount;
+        }
+        if (inCallerTx) {
+          await client.$executeRaw`RELEASE SAVEPOINT tax_auto_apply_line`;
+        }
       } catch (err) {
+        if (inCallerTx) {
+          // Restore the enclosing transaction so the caller's approval can
+          // still commit — the soft-fail contract at the SQL level.
+          try {
+            await client.$executeRaw`ROLLBACK TO SAVEPOINT tax_auto_apply_line`;
+          } catch (rollbackErr) {
+            this.logger.error(
+              `Tax auto-apply: ROLLBACK TO SAVEPOINT failed for ${input.sourceType} ${input.sourceId}: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+            );
+          }
+        }
         // Don't bring down the whole call for one bad line.
         this.logger.warn(
           `Tax auto-apply: failed to create TaxTransaction for line ${line.id} on ${input.sourceType} ${input.sourceId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -409,7 +581,7 @@ export class TaxAutoApplyService {
 }
 
 interface ApplyInput {
-  sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER';
+  sourceType: 'SALES_ORDER' | 'PURCHASE_ORDER' | 'EXPENSE';
   direction: 'OUTPUT' | 'INPUT';
   appliesTo: 'SALES' | 'PURCHASES';
   sourceId: string;

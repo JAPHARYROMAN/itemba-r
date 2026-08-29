@@ -2375,6 +2375,12 @@ const DEFAULT_COA: AccountSeed[] = [
     subType: 'Current Asset',
   },
   { code: '1200', name: 'Inventory', type: AccountType.ASSET, subType: 'inventory_asset' },
+  {
+    code: '1400',
+    name: 'VAT Receivable (Input VAT)',
+    type: AccountType.ASSET,
+    subType: 'tax_vat_receivable',
+  },
   { code: '1500', name: 'Fixed Assets', type: AccountType.ASSET, subType: 'fixed_asset' },
   {
     code: '1599',

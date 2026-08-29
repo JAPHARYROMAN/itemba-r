@@ -27,11 +27,11 @@ describe('T-Z mutation evidence against the live capability manifest', () => {
   const capabilityById = new Map(manifest.map((capability) => [capability.id, capability]));
   const prismaModels = new Set(Prisma.dmmf.datamodel.models.map((model) => model.name));
 
-  it('partitions the exact 65-route live T-Z mutation inventory', () => {
+  it('partitions the exact 66-route live T-Z mutation inventory', () => {
     const registered = fixtures.map((fixture) => fixture.capabilityId);
     const blocked = CRUD_MUTATION_TZ_BLOCKERS.map((blocker) => blocker.capabilityId);
 
-    expect(tranche).toHaveLength(65);
+    expect(tranche).toHaveLength(66);
     expect(new Set(tranche.map((capability) => capability.controller)).size).toBe(19);
     expect(
       CRUD_MUTATION_TZ_EVIDENCE_PACKS.map((pack) => [pack.packId, pack.fixtures.length]),
@@ -41,7 +41,7 @@ describe('T-Z mutation evidence against the live capability manifest', () => {
       ['mutation-tz-users-integrations', 10],
     ]);
     expect(fixtures).toHaveLength(55);
-    expect(CRUD_MUTATION_TZ_BLOCKERS).toHaveLength(10);
+    expect(CRUD_MUTATION_TZ_BLOCKERS).toHaveLength(11);
     expect(new Set(registered).size).toBe(registered.length);
     expect(new Set(blocked).size).toBe(blocked.length);
     expect(registered.filter((capabilityId) => blocked.includes(capabilityId))).toEqual([]);
