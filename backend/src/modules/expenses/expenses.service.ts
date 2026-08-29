@@ -115,6 +115,20 @@ export class ExpensesService {
       throw new BadRequestException('Expense amount must be greater than zero to accrue');
     }
 
+    // Unassessed-taxable guard (authoritative — approve() feeds this from the
+    // FOR UPDATE locked row): a row flagged taxable with NO assessed VAT
+    // amount must never silently book the legacy gross posting. That would
+    // absorb the operator-flagged recoverable input VAT into the expense
+    // account with no split, no TaxTransaction mirror, and no way to assess
+    // it after approval locks the row. Fail loudly instead — the feature's
+    // design principle. Legacy rows (isTaxable=false, taxAmount NULL) and
+    // assessed-exempt rows (taxAmount 0) are untouched.
+    if (expense.isTaxable && expense.taxAmount == null) {
+      throw new BadRequestException(
+        'Taxable expense has no assessed input VAT amount; set the VAT amount (or 0 for an exempt/zero-rated expense) before approval',
+      );
+    }
+
     // Recoverable input VAT included in the gross. NULL taxAmount (legacy /
     // never-assessed) and non-taxable rows split nothing.
     const taxCents =
@@ -139,10 +153,30 @@ export class ExpensesService {
     // Resolve the input-VAT receivable ONLY when there is tax to split — the
     // resolver throws hard when the chart lacks the account, and untaxed
     // expenses must never be blocked by that.
-    const taxAccountId =
-      taxCents > 0
-        ? (await this.accountResolver.resolve(expense.companyId, 'TAX_VAT_RECEIVABLE', tx)).id
-        : null;
+    //
+    // This is the first GL consumer of the TAX_VAT_RECEIVABLE role, and the
+    // resolver's bare-code fallback matches ANY active 1400/1410 account with
+    // no type verification. A chart that uses 1400 for something unrelated
+    // (e.g. Prepaid Rent) would silently accumulate recoverable VAT there —
+    // so require the tax_vat_receivable subtype before debiting into it,
+    // converting the silent mis-resolution into the promised fail-loud
+    // behaviour. Seed + backfill migration guarantee the tagged account on
+    // charts that had no 1400 at all.
+    let taxAccountId: string | null = null;
+    if (taxCents > 0) {
+      const taxAccount = await this.accountResolver.resolve(
+        expense.companyId,
+        'TAX_VAT_RECEIVABLE',
+        tx,
+      );
+      if ((taxAccount.accountSubType ?? '').toLowerCase() !== 'tax_vat_receivable') {
+        throw new BadRequestException(
+          `Account ${taxAccount.accountCode} (${taxAccount.accountName}) resolved for the input-VAT receivable is not tagged accountSubType="tax_vat_receivable". ` +
+            'Tag your VAT receivable account (or create one with code 1400) before approving taxable expenses, so recoverable input VAT is never posted into an unrelated account.',
+        );
+      }
+      taxAccountId = taxAccount.id;
+    }
 
     return {
       expenseAccountId,
@@ -273,6 +307,14 @@ export class ExpensesService {
 
   async create(dto: CreateExpenseDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    // Cross-field pairing (defense in depth behind the DTO validator, for
+    // direct service callers): flagging recoverable VAT without assessing it
+    // would otherwise approve as an unsplittable gross posting.
+    if (dto.isTaxable && dto.taxAmount == null) {
+      throw new BadRequestException(
+        'A taxable expense requires a tax amount (the recoverable input VAT included in the gross; use 0 for an exempt/zero-rated expense)',
+      );
+    }
     if (dto.taxAmount != null) {
       this.assertTaxWithinAmount(dto.amount, dto.taxAmount);
     }
@@ -328,6 +370,17 @@ export class ExpensesService {
       // when the amount is not part of this edit). approve() re-validates the
       // pair from the FOR UPDATE locked row, which closes the racing-edit gap.
       this.assertTaxWithinAmount(dto.amount ?? Number(existing.amount), dto.taxAmount);
+    }
+    // Cross-field pairing on the EFFECTIVE post-edit row (partial updates can
+    // flip isTaxable on, or explicitly null the tax, independently): a
+    // taxable expense must always carry an assessed tax amount. approve()
+    // re-asserts this from the locked row as the authoritative guard.
+    const effectiveIsTaxable = dto.isTaxable ?? existing.isTaxable;
+    const effectiveTaxAmount = dto.taxAmount === undefined ? existing.taxAmount : dto.taxAmount;
+    if (effectiveIsTaxable && effectiveTaxAmount == null) {
+      throw new BadRequestException(
+        'A taxable expense requires a tax amount (the recoverable input VAT included in the gross; use 0 for an exempt/zero-rated expense)',
+      );
     }
 
     // Atomic status guard: an amount edit must never land AFTER a concurrent
@@ -575,8 +628,14 @@ export class ExpensesService {
         // Mirror the recoverable input VAT into the TaxTransaction compliance
         // ledger so VAT returns can net input against output — same pattern as
         // the purchase-order confirm path. Soft-fails: errors are logged and do
-        // NOT roll back a legitimate approval. Env-flag gated inside the
-        // service (TAX_AUTO_APPLY), idempotent per expense.
+        // NOT roll back a legitimate approval — the service wraps its per-line
+        // writes in a SAVEPOINT and inserts ON CONFLICT DO NOTHING, so even a
+        // failed SQL statement inside this shared transaction is rolled back
+        // to the savepoint instead of aborting the approval (a bare statement
+        // error would otherwise poison the tx and 25P02 every later write).
+        // Env-flag gated inside the service (TAX_AUTO_APPLY), idempotent per
+        // expense; a soft failure here is recoverable later via the manual
+        // POST /tax-auto-apply/expense/:id backfill endpoint.
         try {
           const taxResult = await this.taxAutoApply.applyForExpense(id, userId, tx);
           if (taxResult.error) {
@@ -800,10 +859,12 @@ export class ExpensesService {
         // approval). This branch would silently absorb the recoverable input
         // VAT into the expense account with no recoverable-VAT record. It
         // should be unreachable for taxable rows (they are always accrued at
-        // approval), so fail loudly rather than lose the VAT.
-        if (existing.isTaxable && Number(existing.taxAmount ?? 0) > 0) {
+        // approval), so fail loudly rather than lose the VAT. An unassessed
+        // (NULL) tax amount on a taxable row blocks too — the VAT it flags
+        // was never quantified, so this path would silently forfeit it.
+        if (existing.isTaxable && (existing.taxAmount == null || Number(existing.taxAmount) > 0)) {
           throw new BadRequestException(
-            'Taxable expense has no accrued payable to settle; approve it (which splits the recoverable input VAT) before payment',
+            'Taxable expense has no accrued payable to settle; approve it (which validates and splits the recoverable input VAT) before payment',
           );
         }
         if (!existing.expenseCategory?.linkedAccountId) {

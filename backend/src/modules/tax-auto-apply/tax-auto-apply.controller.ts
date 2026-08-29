@@ -31,4 +31,15 @@ export class TaxAutoApplyController {
   applyPurchaseOrder(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.applyForPurchaseOrder(id, user.id, undefined, user);
   }
+
+  // Recovery lever for expenses: approve() runs the capture pass exactly once
+  // (inside the first-accrual block), so a soft-failed capture (no active
+  // PURCHASES TaxCode yet) or one skipped while TAX_AUTO_APPLY was off would
+  // otherwise be permanently unrecoverable — approvals cannot re-run. Same
+  // idempotency as the auto-call: already-captured expenses are a no-op.
+  @Post('expense/:id')
+  @RequirePermissions('finance.reports.view')
+  applyExpense(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.applyForExpense(id, user.id, undefined, user);
+  }
 }
