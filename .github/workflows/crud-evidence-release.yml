@@ -226,6 +226,16 @@ jobs:
           fi
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
+      - name: Prepare a buildx builder that supports attestations
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The default `docker` driver cannot emit provenance/SBOM attestations
+          # ("Attestation is not supported for the docker driver"); the
+          # docker-container driver can. Created here, used only by this job.
+          docker buildx create --name evidence-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
       - name: Build and push the exact backend image
         id: image
         shell: bash
