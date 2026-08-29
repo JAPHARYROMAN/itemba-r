@@ -41,7 +41,8 @@
     "prisma:deploy": "prisma migrate deploy --schema=../database/prisma/schema.prisma",
     "prisma:studio": "prisma studio --schema=../database/prisma/schema.prisma",
     "prisma:reset": "prisma migrate reset --schema=../database/prisma/schema.prisma",
-    "db:seed": "cross-env NODE_PATH=./node_modules ts-node --project tsconfig.json --transpile-only ../database/seeds/seed.ts"
+    "db:seed": "cross-env NODE_PATH=./node_modules ts-node --project tsconfig.json --transpile-only ../database/seeds/seed.ts",
+    "attestation:create": "ts-node --transpile-only scripts/create-provider-contract-attestation.ts"
   },
   "prisma": {
     "schema": "../database/prisma/schema.prisma",
