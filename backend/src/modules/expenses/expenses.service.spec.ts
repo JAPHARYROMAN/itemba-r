@@ -348,9 +348,7 @@ describe('ExpensesService.approve accrual (DR Expense / CR AP at expense date)',
       expect.anything(),
     );
     const [postingInput] = postingEngine.postLines.mock.calls[0];
-    const expenseLine = postingInput.lines.find(
-      (l: any) => l.accountId === 'GENERAL_EXPENSE-acc',
-    );
+    const expenseLine = postingInput.lines.find((l: any) => l.accountId === 'GENERAL_EXPENSE-acc');
     expect(Number(expenseLine.debit)).toBe(22500);
   });
 

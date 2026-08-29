@@ -33,9 +33,21 @@ const PAYABLE_USD: Payable = { ...PAYABLE_TZS, id: 'pay-2', currency: 'USD' };
 const CASH_ACCOUNTS = {
   success: true,
   data: [
-    { id: 'ca-tzs', accountName: 'Petty Cash', accountType: 'CASH', currency: 'TZS', isActive: true },
+    {
+      id: 'ca-tzs',
+      accountName: 'Petty Cash',
+      accountType: 'CASH',
+      currency: 'TZS',
+      isActive: true,
+    },
     { id: 'ca-usd', accountName: 'USD Bank', accountType: 'BANK', currency: 'USD', isActive: true },
-    { id: 'ca-dead', accountName: 'Closed Till', accountType: 'CASH', currency: 'TZS', isActive: false },
+    {
+      id: 'ca-dead',
+      accountName: 'Closed Till',
+      accountType: 'CASH',
+      currency: 'TZS',
+      isActive: false,
+    },
   ],
 };
 
@@ -52,7 +64,8 @@ function mockFetch(handler: (url: string, init?: RequestInit) => any) {
 
 beforeEach(() => {
   if (!globalThis.requestAnimationFrame) {
-    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0)) as any;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 0)) as any;
     globalThis.cancelAnimationFrame = ((id: number) => clearTimeout(id)) as any;
   }
 });
@@ -91,9 +104,7 @@ describe('Payables RecordPaymentModal — cash-account handling', () => {
     expect(
       await screen.findByText('Select the cash / bank account the payment came from'),
     ).toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some((c) => String(c[0]).includes('/record-payment')),
-    ).toBe(false);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/record-payment'))).toBe(false);
   });
 
   it('surfaces a cash-account fetch failure, offers retry, and still allows payment without an account', async () => {

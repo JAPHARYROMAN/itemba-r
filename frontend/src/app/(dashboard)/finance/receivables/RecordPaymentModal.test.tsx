@@ -31,7 +31,13 @@ const RECEIVABLE_USD: Receivable = {
 const CASH_ACCOUNTS = {
   success: true,
   data: [
-    { id: 'ca-tzs', accountName: 'Petty Cash', accountType: 'CASH', currency: 'TZS', isActive: true },
+    {
+      id: 'ca-tzs',
+      accountName: 'Petty Cash',
+      accountType: 'CASH',
+      currency: 'TZS',
+      isActive: true,
+    },
     { id: 'ca-usd', accountName: 'USD Bank', accountType: 'BANK', currency: 'USD', isActive: true },
   ],
 };
@@ -48,7 +54,8 @@ function mockFetch(handler: (url: string, init?: RequestInit) => any) {
 
 beforeEach(() => {
   if (!globalThis.requestAnimationFrame) {
-    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0)) as any;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 0)) as any;
     globalThis.cancelAnimationFrame = ((id: number) => clearTimeout(id)) as any;
   }
 });

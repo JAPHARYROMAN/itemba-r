@@ -29,10 +29,38 @@ const COA_CO1 = {
   success: true,
   data: {
     data: [
-      { id: 'acc-exp-1', accountCode: '6000', accountName: 'Office Supplies', accountType: 'EXPENSE', isActive: true, companyId: 'co-1' },
-      { id: 'acc-cogs-1', accountCode: '5000', accountName: 'Cost of Goods', accountType: 'COST_OF_GOODS_SOLD', isActive: true, companyId: 'co-1' },
-      { id: 'acc-asset-1', accountCode: '1000', accountName: 'Cash', accountType: 'ASSET', isActive: true, companyId: 'co-1' },
-      { id: 'acc-liab-1', accountCode: '2000', accountName: 'Accounts Payable', accountType: 'LIABILITY', isActive: true, companyId: 'co-1' },
+      {
+        id: 'acc-exp-1',
+        accountCode: '6000',
+        accountName: 'Office Supplies',
+        accountType: 'EXPENSE',
+        isActive: true,
+        companyId: 'co-1',
+      },
+      {
+        id: 'acc-cogs-1',
+        accountCode: '5000',
+        accountName: 'Cost of Goods',
+        accountType: 'COST_OF_GOODS_SOLD',
+        isActive: true,
+        companyId: 'co-1',
+      },
+      {
+        id: 'acc-asset-1',
+        accountCode: '1000',
+        accountName: 'Cash',
+        accountType: 'ASSET',
+        isActive: true,
+        companyId: 'co-1',
+      },
+      {
+        id: 'acc-liab-1',
+        accountCode: '2000',
+        accountName: 'Accounts Payable',
+        accountType: 'LIABILITY',
+        isActive: true,
+        companyId: 'co-1',
+      },
     ],
   },
 };
@@ -59,7 +87,8 @@ function mockFetch(handler: (url: string, init?: RequestInit) => any) {
 beforeEach(() => {
   // Ensure requestAnimationFrame exists for the Modal focus handling.
   if (!globalThis.requestAnimationFrame) {
-    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0)) as any;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 0)) as any;
     globalThis.cancelAnimationFrame = ((id: number) => clearTimeout(id)) as any;
   }
 });
@@ -75,7 +104,9 @@ describe('CategoryModal — GL account linkage', () => {
       return {};
     });
 
-    render(<CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(
+      <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />,
+    );
 
     // Choose a company — this triggers the COA fetch.
     fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
@@ -90,7 +121,9 @@ describe('CategoryModal — GL account linkage', () => {
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
     expect(screen.getByRole('option', { name: '5000 — Cost of Goods' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '1000 — Cash' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: '2000 — Accounts Payable' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: '2000 — Accounts Payable' }),
+    ).not.toBeInTheDocument();
   });
 
   it('POSTs create with the chosen linkedAccountId and companyId', async () => {
@@ -100,18 +133,26 @@ describe('CategoryModal — GL account linkage', () => {
     });
     const onSaved = vi.fn();
 
-    render(<CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />);
+    render(
+      <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />,
+    );
 
     fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
 
-    fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), { target: { value: 'Office Supplies' } });
-    fireEvent.change(selectByOptionText('6000 — Office Supplies'), { target: { value: 'acc-exp-1' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), {
+      target: { value: 'Office Supplies' },
+    });
+    fireEvent.change(selectByOptionText('6000 — Office Supplies'), {
+      target: { value: 'acc-exp-1' },
+    });
     fireEvent.click(screen.getByText('Create'));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        (c) => String(c[0]) === '/api/backend/expense-categories' && (c[1] as RequestInit)?.method === 'POST',
+        (c) =>
+          String(c[0]) === '/api/backend/expense-categories' &&
+          (c[1] as RequestInit)?.method === 'POST',
       );
       expect(call).toBeTruthy();
       const body = JSON.parse((call![1] as RequestInit).body as string);
@@ -140,15 +181,27 @@ describe('CategoryModal — GL account linkage', () => {
       createdAt: new Date().toISOString(),
     };
 
-    render(<CategoryModal mode="edit" initial={existing} companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(
+      <CategoryModal
+        mode="edit"
+        initial={existing}
+        companies={COMPANIES}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
 
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    fireEvent.change(selectByOptionText('5000 — Cost of Goods'), { target: { value: 'acc-cogs-1' } });
+    fireEvent.change(selectByOptionText('5000 — Cost of Goods'), {
+      target: { value: 'acc-cogs-1' },
+    });
     fireEvent.click(screen.getByText('Save Changes'));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        (c) => String(c[0]) === '/api/backend/expense-categories/cat-1' && (c[1] as RequestInit)?.method === 'PATCH',
+        (c) =>
+          String(c[0]) === '/api/backend/expense-categories/cat-1' &&
+          (c[1] as RequestInit)?.method === 'PATCH',
       );
       expect(call).toBeTruthy();
       const body = JSON.parse((call![1] as RequestInit).body as string);
@@ -172,7 +225,15 @@ describe('CategoryModal — GL account linkage', () => {
       createdAt: new Date().toISOString(),
     };
 
-    render(<CategoryModal mode="edit" initial={existing} companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(
+      <CategoryModal
+        mode="edit"
+        initial={existing}
+        companies={COMPANIES}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
 
     // Once accounts load, the pre-linked account is still selected.
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
@@ -184,7 +245,9 @@ describe('CategoryModal — GL account linkage', () => {
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        (c) => String(c[0]) === '/api/backend/expense-categories/cat-1' && (c[1] as RequestInit)?.method === 'PATCH',
+        (c) =>
+          String(c[0]) === '/api/backend/expense-categories/cat-1' &&
+          (c[1] as RequestInit)?.method === 'PATCH',
       );
       expect(call).toBeTruthy();
       const body = JSON.parse((call![1] as RequestInit).body as string);
@@ -211,7 +274,15 @@ describe('CategoryModal — GL account linkage', () => {
       createdAt: new Date().toISOString(),
     };
 
-    render(<CategoryModal mode="edit" initial={existing} companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(
+      <CategoryModal
+        mode="edit"
+        initial={existing}
+        companies={COMPANIES}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
 
     // Accounts load; the missing link is kept selectable via a synthetic option.
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
@@ -222,12 +293,16 @@ describe('CategoryModal — GL account linkage', () => {
     expect(selectByOptionText('6000 — Office Supplies').value).toBe('acc-deactivated-1');
 
     // Unrelated edit: rename only, then save.
-    fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), { target: { value: 'Fuel & Oils' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), {
+      target: { value: 'Fuel & Oils' },
+    });
     fireEvent.click(screen.getByText('Save Changes'));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        (c) => String(c[0]) === '/api/backend/expense-categories/cat-1' && (c[1] as RequestInit)?.method === 'PATCH',
+        (c) =>
+          String(c[0]) === '/api/backend/expense-categories/cat-1' &&
+          (c[1] as RequestInit)?.method === 'PATCH',
       );
       expect(call).toBeTruthy();
       const body = JSON.parse((call![1] as RequestInit).body as string);
@@ -243,11 +318,15 @@ describe('CategoryModal — GL account linkage', () => {
       return {};
     });
 
-    render(<CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(
+      <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />,
+    );
 
     fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    fireEvent.change(selectByOptionText('6000 — Office Supplies'), { target: { value: 'acc-exp-1' } });
+    fireEvent.change(selectByOptionText('6000 — Office Supplies'), {
+      target: { value: 'acc-exp-1' },
+    });
     expect(selectByOptionText('6000 — Office Supplies').value).toBe('acc-exp-1');
 
     // Switching company invalidates the account choice — it belongs to co-1.
@@ -265,15 +344,22 @@ describe('CategoryModal — GL account linkage', () => {
     mockFetch((url) => {
       if (url.includes('/chart-of-accounts')) return COA_CO1;
       // Save fails.
-      return { __override: { ok: false, status: 409 }, message: 'An expense category with this name already exists for this company' };
+      return {
+        __override: { ok: false, status: 409 },
+        message: 'An expense category with this name already exists for this company',
+      };
     });
     const onSaved = vi.fn();
 
-    render(<CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />);
+    render(
+      <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />,
+    );
 
     fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
     await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), { target: { value: 'Office Supplies' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), {
+      target: { value: 'Office Supplies' },
+    });
     fireEvent.click(screen.getByText('Create'));
 
     expect(await screen.findByText(/already exists/)).toBeInTheDocument();
@@ -286,7 +372,9 @@ describe('CategoryModal — GL account linkage', () => {
       return {};
     });
 
-    render(<CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(
+      <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />,
+    );
 
     fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
     fireEvent.click(screen.getByText('Create'));

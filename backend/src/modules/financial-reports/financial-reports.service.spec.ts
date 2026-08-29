@@ -146,10 +146,12 @@ describe('FinancialReportsService.getCustomerAgingDetail', () => {
  */
 const OPEN_STATUS_FILTER = { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] };
 
-function makeSummaryService(opts: {
-  receivableSum?: unknown;
-  payableSum?: unknown;
-} = {}) {
+function makeSummaryService(
+  opts: {
+    receivableSum?: unknown;
+    payableSum?: unknown;
+  } = {},
+) {
   const groupBy = jest.fn().mockResolvedValue([{ _sum: { debit: 500, credit: 500 } }]);
   const cashAggregate = jest.fn().mockResolvedValue({ _sum: { currentBalance: 250 } });
   const receivableAggregate = jest

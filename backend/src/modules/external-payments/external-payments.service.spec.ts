@@ -88,7 +88,11 @@ describe('ExternalPaymentsService idempotency (ITMB-AUDIT-31)', () => {
     prisma.externalPayment.create.mockRejectedValueOnce(p2002());
 
     await expect(
-      service.createForCompany({ companyId: 'company-1', amount: 5 } as any, 'actor-1', 'company-1'),
+      service.createForCompany(
+        { companyId: 'company-1', amount: 5 } as any,
+        'actor-1',
+        'company-1',
+      ),
     ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
     expect(prisma.externalPayment.findFirst).not.toHaveBeenCalled();
   });
@@ -897,8 +901,7 @@ describe('ExternalPaymentsService reverse → mirror unwind', () => {
           accountId: AR_ACCT.id,
           debit: new Prisma.Decimal(0),
           credit: new Prisma.Decimal(700),
-          description:
-            'Customer advance held in AR (no customer-advance account configured): Zeta',
+          description: 'Customer advance held in AR (no customer-advance account configured): Zeta',
           divisionId: null,
           branchId: null,
         },

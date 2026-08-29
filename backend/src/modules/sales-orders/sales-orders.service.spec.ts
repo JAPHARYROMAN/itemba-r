@@ -876,9 +876,7 @@ describe('SalesOrdersService POS / cash-sale output VAT', () => {
 
     expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [
-          expect.objectContaining({ unitPrice: 1000, taxAmount: 180, lineTotal: 1180 }),
-        ],
+        data: [expect.objectContaining({ unitPrice: 1000, taxAmount: 180, lineTotal: 1180 })],
       }),
     );
     expect(prisma.salesOrder.update).toHaveBeenCalledWith(

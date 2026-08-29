@@ -44,9 +44,11 @@ function makeService(
       // Default: an active CASH_ON_HAND till in the same company and currency.
       // Individual tests override for BANK / cross-company / cross-currency
       // scenarios.
-      findFirst: jest
-        .fn()
-        .mockResolvedValue({ companyId: 'company-1', accountType: 'CASH_ON_HAND', currency: 'TZS' }),
+      findFirst: jest.fn().mockResolvedValue({
+        companyId: 'company-1',
+        accountType: 'CASH_ON_HAND',
+        currency: 'TZS',
+      }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     companyProfile: { findUnique: jest.fn().mockResolvedValue({ currency: 'TZS' }) },

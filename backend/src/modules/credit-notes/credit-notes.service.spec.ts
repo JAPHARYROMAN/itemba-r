@@ -252,7 +252,10 @@ function makeService(opts?: {
   // distinguishable in assertions; also feeds reversalOfId updates.
   let jeCounter = 0;
   const postingEngine = {
-    postLines: jest.fn(async () => ({ id: `je-${++jeCounter}`, journalNumber: `JE-CN-${jeCounter}` })),
+    postLines: jest.fn(async () => ({
+      id: `je-${++jeCounter}`,
+      journalNumber: `JE-CN-${jeCounter}`,
+    })),
   } as any;
   const codes = { next: jest.fn(async () => 'CN-2026-00001') } as any;
 
@@ -1198,9 +1201,7 @@ describe('CreditNotesService.void — unwinds the restock', () => {
     });
 
     // Must not throw — the unwind uses the ungated ADJUSTMENT_OUT path.
-    await expect(
-      service.void('cn-1', { reason: 'Issued in error' }, user),
-    ).resolves.toBeDefined();
+    await expect(service.void('cn-1', { reason: 'Issued in error' }, user)).resolves.toBeDefined();
 
     const mv = inventoryMovements.createMovement.mock.calls[0][0];
     expect(mv.movementType).toBe('ADJUSTMENT_OUT');
@@ -1422,9 +1423,7 @@ describe('CreditNotesService.void — unwinds the restock', () => {
     });
 
     // The void must complete — not roll back the AR/revenue/VAT reversal.
-    await expect(
-      service.void('cn-1', { reason: 'Issued in error' }, user),
-    ).resolves.toBeDefined();
+    await expect(service.void('cn-1', { reason: 'Issued in error' }, user)).resolves.toBeDefined();
 
     const mv = (inventoryMovements.createMovement as jest.Mock).mock.calls[0][0];
     expect(mv.movementType).toBe('ADJUSTMENT_OUT');

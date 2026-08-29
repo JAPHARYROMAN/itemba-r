@@ -486,7 +486,10 @@ export default function ExpenseCategoriesPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active" value={data?.data.filter((c) => c.isActive).length ?? 0} />
-        <StatCard label="Linked" value={data?.data.filter((c) => !!c.linkedAccountId).length ?? 0} />
+        <StatCard
+          label="Linked"
+          value={data?.data.filter((c) => !!c.linkedAccountId).length ?? 0}
+        />
         <StatCard
           label="Not Linked"
           value={data?.data.filter((c) => !c.linkedAccountId).length ?? 0}
@@ -626,7 +629,12 @@ export default function ExpenseCategoriesPage() {
               Page {data.page} of {data.totalPages} · {data.total} total
             </span>
             <div className="flex gap-2">
-              <Btn variant="secondary" size="xs" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <Btn
+                variant="secondary"
+                size="xs"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
                 Previous
               </Btn>
               <Btn
