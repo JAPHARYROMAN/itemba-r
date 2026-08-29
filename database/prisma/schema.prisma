@@ -4266,6 +4266,15 @@ model CreditNoteLine {
   netAmount    Decimal  @db.Decimal(18, 2)
   taxAmount    Decimal  @default(0) @db.Decimal(18, 2)
   lineTotal    Decimal  @db.Decimal(18, 2)
+  // Physical-return restock (opt-in). When > 0 the line represents goods coming
+  // back into stock: issue() creates a SALES_RETURN inventory movement for this
+  // quantity and posts the reversing Dr Inventory / Cr COGS at restockUnitCost.
+  // Left null/0 for a pure financial credit (price adjustment / allowance), which
+  // touches only AR / revenue / VAT and never restocks. `restockUnitCost` is the
+  // per-unit cost the returned stock re-enters at (original COGS basis), frozen at
+  // create time so a later cost drift cannot skew the reversal.
+  returnedQuantity Decimal? @db.Decimal(18, 4)
+  restockUnitCost  Decimal? @db.Decimal(18, 4)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -13401,6 +13410,11 @@ model ExternalPayment {
   rawProviderResponse Json?
   /// Client-supplied idempotency token to prevent duplicate payment initiations.
   idempotencyKey      String?
+  /// CashAccount whose denormalised currentBalance the confirm posting actually
+  /// incremented, stamped in the same transaction as the increment. Reversal
+  /// unwinds exactly this account. Null = confirm bumped no balance cache (no
+  /// currency-matching account existed) or the row predates this column.
+  receivingCashAccountId String?
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
   deletedAt           DateTime?
