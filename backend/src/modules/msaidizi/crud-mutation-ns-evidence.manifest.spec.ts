@@ -99,12 +99,12 @@ describe('N-S mutation evidence against the live capability manifest', () => {
     const remediated = remediatedBodySchemaFixtures.map((fixture) => fixture.capabilityId);
     const controllers = new Set(tranche.map((capability) => capability.controller));
 
-    expect(tranche).toHaveLength(221);
+    expect(tranche).toHaveLength(223);
     expect(controllers.size).toBe(50);
     expect(CRUD_MUTATION_NS_EVIDENCE_PACKS.map((pack) => pack.fixtures.length)).toEqual([
-      48, 26, 29, 44, 27,
+      48, 27, 29, 44, 28,
     ]);
-    expect(registered).toHaveLength(174);
+    expect(registered).toHaveLength(176);
     expect(blocked).toHaveLength(45);
     expect(remediated.sort()).toEqual([...REMEDIATED_BODY_SCHEMA_IDS].sort());
     expect(blockers.filter((blocker) => blocker.reason === 'body_schema_not_strict')).toHaveLength(

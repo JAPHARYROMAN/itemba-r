@@ -913,3 +913,542 @@ describe('SupplierInvoicesService postSupplierInvoicePayable inventory-receipt g
     expect(lines.some((l: any) => l.accountId === 'acc-INVENTORY_ASSET')).toBe(false);
   });
 });
+
+describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
+  function voidableInvoice(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'si-1',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      supplierInvoiceNumber: 'SI-2026-000001',
+      status: 'APPROVED',
+      purchaseOrderId: null,
+      payableId: 'pay-1',
+      totalAmount: 10000,
+      paidAmount: 0,
+      outstandingAmount: 10000,
+      currency: 'TZS',
+      invoiceDate: new Date('2026-05-30T00:00:00.000Z'),
+      dueDate: null,
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      updatedAt: new Date('2026-05-30T12:00:00.000Z'),
+      lines: [],
+      ...overrides,
+    };
+  }
+
+  // The JE main's approve() posts via postSupplierInvoicePayable for a mixed
+  // stock+expense invoice: DR Inventory 8,000 / DR Expense 2,000 / CR AP 10,000.
+  function approveJournal(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'je-approve-1',
+      companyId: 'company-1',
+      status: 'POSTED',
+      referenceType: 'SupplierInvoice',
+      referenceId: 'si-1',
+      transactionDate: new Date('2026-05-30T00:00:00.000Z'),
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      lines: [
+        {
+          accountId: 'acc-INVENTORY_ASSET',
+          debit: new Prisma.Decimal(8000),
+          credit: new Prisma.Decimal(0),
+          description: 'Inventory from supplier invoice SI-2026-000001',
+          divisionId: null,
+          branchId: null,
+        },
+        {
+          accountId: 'acc-GENERAL_EXPENSE',
+          debit: new Prisma.Decimal(2000),
+          credit: new Prisma.Decimal(0),
+          description: 'Supplier invoice expense SI-2026-000001',
+          divisionId: null,
+          branchId: null,
+        },
+        {
+          accountId: 'acc-AP_CONTROL',
+          debit: new Prisma.Decimal(0),
+          credit: new Prisma.Decimal(10000),
+          description: 'Accounts payable for supplier invoice SI-2026-000001',
+          divisionId: null,
+          branchId: null,
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  // The receipt accrual createCreditPurchasePayable posts when a credit-purchase
+  // PO is received: DR Inventory / CR AP, stamped referenceType 'Payable'. This
+  // referenceType is the origin evidence void() branches on.
+  function receiptJournal(amount = 12000) {
+    return {
+      id: 'je-receipt-1',
+      companyId: 'company-1',
+      status: 'POSTED',
+      referenceType: 'Payable',
+      referenceId: 'pay-1',
+      transactionDate: new Date('2026-05-20T00:00:00.000Z'),
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      lines: [
+        {
+          accountId: 'acc-INVENTORY_ASSET',
+          debit: new Prisma.Decimal(amount),
+          credit: new Prisma.Decimal(0),
+          description: 'Inventory received on supplier credit',
+          divisionId: null,
+          branchId: null,
+        },
+        {
+          accountId: 'acc-AP_CONTROL',
+          debit: new Prisma.Decimal(0),
+          credit: new Prisma.Decimal(amount),
+          description: 'Accounts payable: Acme',
+          divisionId: null,
+          branchId: null,
+        },
+      ],
+    };
+  }
+
+  function makeVoidService(
+    opts: {
+      invoice?: Record<string, unknown>;
+      payable?: any;
+      backingJournal?: any;
+      invoiceJournal?: any;
+      receiptPo?: any;
+      receiptPayable?: any;
+      overrides?: Record<string, any>;
+    } = {},
+  ) {
+    const invoice = voidableInvoice(opts.invoice);
+    const payable =
+      opts.payable === undefined
+        ? {
+            id: 'pay-1',
+            companyId: 'company-1',
+            supplierId: 'supplier-1',
+            status: 'OPEN',
+            paidAmount: new Prisma.Decimal(0),
+            journalEntryId: 'je-approve-1',
+          }
+        : opts.payable;
+    const backingJournal =
+      opts.backingJournal === undefined ? approveJournal() : opts.backingJournal;
+    const invoiceJournal = opts.invoiceJournal === undefined ? null : opts.invoiceJournal;
+
+    const captured: any = { payableUpdates: [] as any[] };
+    const prisma: any = {
+      supplierInvoice: {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findUnique: jest.fn(async () => ({ status: 'CANCELLED' })),
+        update: jest.fn(async ({ data }: any) => ({ ...invoice, ...data, lines: [] })),
+      },
+      payable: {
+        // Live receipt payable candidate for the branch-(a) PO backlink reset;
+        // default none.
+        findFirst: jest.fn(async () => opts.receiptPayable ?? null),
+        update: jest.fn(async ({ data }: any) => {
+          captured.payableUpdates.push(data);
+          return { id: 'pay-1', ...data };
+        }),
+      },
+      // void() reads the payable via SELECT ... FOR UPDATE (row lock).
+      $queryRaw: jest.fn(async () => (payable ? [payable] : [])),
+      journalEntry: {
+        // The by-id lookup fetches the payable's backing JE; the by-reference
+        // lookup finds a JE this invoice's approve posted (if any).
+        findFirst: jest.fn(async ({ where }: any) => (where?.id ? backingJournal : invoiceJournal)),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        update: jest.fn(async () => ({ id: 'je-rev-1' })),
+      },
+      purchaseOrder: {
+        findFirst: jest.fn(
+          async () =>
+            opts.receiptPo ?? {
+              id: 'po-1',
+              purchaseOrderNumber: 'PO-2026-000009',
+              divisionId: 'division-1',
+              branchId: 'branch-1',
+              expectedDate: new Date('2026-06-15T00:00:00.000Z'),
+              totalAmount: new Prisma.Decimal(12000),
+            },
+        ),
+        update: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data })),
+      },
+      $transaction: jest.fn(async (fn: any) => fn(prisma)),
+      ...opts.overrides,
+    };
+    const auditLogs = {
+      log: jest.fn().mockResolvedValue(undefined),
+      logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const companyScope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) } as any;
+    const accountResolver = {
+      resolve: jest.fn(async (_companyId: string, role: string) => ({ id: `acc-${role}` })),
+    } as any;
+    const postingEngine = {
+      postLines: jest.fn(async () => ({ id: 'je-rev-1', journalNumber: 'JE-REV-1' })),
+    } as any;
+    const service = new SupplierInvoicesService(
+      prisma,
+      auditLogs,
+      companyScope,
+      accountResolver,
+      postingEngine,
+      { next: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+    jest.spyOn(service, 'findOne').mockResolvedValue(invoice as any);
+    return { service, prisma, postingEngine, auditLogs, captured, invoice };
+  }
+
+  it('rejects voiding a non-APPROVED invoice', async () => {
+    const { service, postingEngine } = makeVoidService({ invoice: { status: 'DRAFT' } });
+    await expect(service.void('si-1', undefined, user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('is an idempotent no-op when the invoice is already CANCELLED', async () => {
+    const { service, prisma, postingEngine } = makeVoidService({
+      invoice: { status: 'CANCELLED' },
+    });
+    const res = await service.void('si-1', undefined, user);
+    expect(res).toEqual(expect.objectContaining({ status: 'CANCELLED' }));
+    // No transaction, no claim, no reversal posted.
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('blocks the void when the payable already has payments applied', async () => {
+    const { service, prisma, postingEngine } = makeVoidService({
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'PARTIALLY_PAID',
+        paidAmount: new Prisma.Decimal(5000),
+        journalEntryId: 'je-approve-1',
+      },
+    });
+    await expect(service.void('si-1', undefined, user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects voiding when the payable is WRITTEN_OFF (double AP relief otherwise) (#18)', async () => {
+    // writeOff() posted DR AP / CR write-off income and left the approve JE
+    // POSTED; paidAmount is 0, so only a status gate can stop the void from
+    // mirror-reversing the approve JE (a SECOND DR AP) and clobbering the
+    // WRITTEN_OFF audit state to CANCELLED.
+    const { service, prisma, postingEngine } = makeVoidService({
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'WRITTEN_OFF',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-approve-1',
+      },
+    });
+
+    const err = await service.void('si-1', undefined, user).catch((e) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(err.message).toMatch(/written off/i);
+    // No second AP relief, no status clobber.
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.journalEntry.updateMany).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('reads the payable with a row-locking SELECT ... FOR UPDATE inside the void transaction (#19)', async () => {
+    // A plain findUnique lets a concurrent recordPayment (which locks the row
+    // FOR UPDATE) settle the payable between void's guard and its cancel
+    // write. The locked read serializes the two: the payment either commits
+    // first (guard sees paidAmount/status and rejects) or blocks until the
+    // void commits (its own gate then sees CANCELLED).
+    const { service, prisma } = makeVoidService();
+    await service.void('si-1', undefined, user);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const [strings, ...values] = prisma.$queryRaw.mock.calls[0];
+    const sql = Array.from(strings).join('?');
+    expect(sql).toContain('FROM "payables"');
+    expect(sql).toContain('"deletedAt" IS NULL');
+    expect(sql).toContain('FOR UPDATE');
+    expect(values).toContain('pay-1');
+  });
+
+  it('clears the PO backlink to the cancelled invoice-created payable so a later receive() recreates the receipt payable (#17)', async () => {
+    // approve() pointed the PO at the invoice-created payable; void cancels
+    // that payable. The stale backlink would make receive() (gated on
+    // !po.payableId) skip createCreditPurchasePayable — goods received on
+    // supplier credit with no payable and no DR Inventory / CR AP accrual.
+    const { service, prisma } = makeVoidService({ invoice: { purchaseOrderId: 'po-1' } });
+    await service.void('si-1', undefined, user);
+
+    // The PO is found BY the cancelled payable's id (authoritative even if the
+    // invoice was linked to a different PO) and, with no live receipt payable
+    // behind it, the backlink is cleared so receive() can create one.
+    expect(prisma.purchaseOrder.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          payableId: 'pay-1',
+          companyId: 'company-1',
+          deletedAt: null,
+        }),
+      }),
+    );
+    expect(prisma.purchaseOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'po-1' }, data: { payableId: null } }),
+    );
+  });
+
+  it('re-points the PO at its live receipt payable after cancelling the invoice payable (already-received variant) (#17)', async () => {
+    // approve() overwrote PO.payableId from the receipt payable to the
+    // invoice-created one; after the void cancels the latter, the PO must go
+    // back to the still-live receipt obligation, not to null (receive()
+    // already ran — recreating a payable would double the accrual).
+    const { service, prisma } = makeVoidService({
+      invoice: { purchaseOrderId: 'po-1' },
+      receiptPayable: { id: 'pay-receipt-1' },
+    });
+    await service.void('si-1', undefined, user);
+
+    expect(prisma.payable.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company-1',
+          sourceType: 'PurchaseOrder',
+          sourceId: 'po-1',
+          status: { not: 'CANCELLED' },
+          deletedAt: null,
+        }),
+      }),
+    );
+    expect(prisma.purchaseOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'po-1' }, data: { payableId: 'pay-receipt-1' } }),
+    );
+  });
+
+  it('leaves the PO backlink alone on the reuse path (the restored receipt payable still backs the PO) (#17)', async () => {
+    const { service, prisma } = makeVoidService({
+      invoice: { purchaseOrderId: 'po-1' },
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-receipt-1',
+      },
+      backingJournal: receiptJournal(12000),
+    });
+    await service.void('si-1', undefined, user);
+
+    // Branch (b): the payable is restored, not cancelled, and the PO keeps
+    // pointing at it — no backlink rewrite.
+    expect(prisma.purchaseOrder.update).not.toHaveBeenCalled();
+  });
+
+  it('mirror-reverses the approve JE and cancels an invoice-created payable', async () => {
+    const { service, prisma, postingEngine, captured } = makeVoidService();
+    await service.void('si-1', { reason: 'entered in error' }, user);
+
+    // Atomic APPROVED -> CANCELLED claim pinned to the version findOne() read.
+    expect(prisma.supplierInvoice.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'si-1',
+          deletedAt: null,
+          status: 'APPROVED',
+          updatedAt: new Date('2026-05-30T12:00:00.000Z'),
+        },
+        data: { status: 'CANCELLED' },
+      }),
+    );
+
+    // Original JE flipped to REVERSED under a guarded claim, reason persisted.
+    expect(prisma.journalEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'je-approve-1', status: 'POSTED', deletedAt: null }),
+        data: expect.objectContaining({ status: 'REVERSED', reversalReason: 'entered in error' }),
+      }),
+    );
+
+    // Reversal JE swaps every leg of the original approve posting.
+    const revCall = postingEngine.postLines.mock.calls[0][0];
+    expect(revCall).toEqual(
+      expect.objectContaining({
+        companyId: 'company-1',
+        referenceType: 'SupplierInvoice',
+        referenceId: 'si-1',
+        moduleName: 'supplier_invoices',
+      }),
+    );
+    const revLines = revCall.lines;
+    const inventory = revLines.find((l: any) => l.accountId === 'acc-INVENTORY_ASSET');
+    const expense = revLines.find((l: any) => l.accountId === 'acc-GENERAL_EXPENSE');
+    const ap = revLines.find((l: any) => l.accountId === 'acc-AP_CONTROL');
+    // Inventory 8,000 debit -> 8,000 credit; expense 2,000 debit -> 2,000 credit.
+    expect(Number(inventory.credit)).toBe(8000);
+    expect(Number(inventory.debit)).toBe(0);
+    expect(Number(expense.credit)).toBe(2000);
+    // AP 10,000 credit -> 10,000 debit (relieves the payable in the GL).
+    expect(Number(ap.debit)).toBe(10000);
+    // Still a balanced JE.
+    const debits = revLines.reduce((s: number, l: any) => s + Number(l.debit ?? 0), 0);
+    const credits = revLines.reduce((s: number, l: any) => s + Number(l.credit ?? 0), 0);
+    expect(debits).toBe(credits);
+
+    // Reversal linked back to the original.
+    expect(prisma.journalEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ reversalOfId: 'je-approve-1' }) }),
+    );
+
+    // Payable cancelled + outstanding zeroed (it exists only because of this invoice).
+    expect(captured.payableUpdates).toEqual([
+      expect.objectContaining({ status: 'CANCELLED', outstandingAmount: 0 }),
+    ]);
+
+    // Invoice marked CANCELLED; the link to its (now cancelled) payable remains.
+    const finalUpdate = prisma.supplierInvoice.update.mock.calls.at(-1)?.[0];
+    expect(finalUpdate.data).toEqual(
+      expect.objectContaining({ status: 'CANCELLED', outstandingAmount: 0 }),
+    );
+    expect(finalUpdate.data.payableId).toBeUndefined();
+  });
+
+  it('finds the approve JE by invoice reference when the payable has no journalEntryId', async () => {
+    const { service, prisma, postingEngine } = makeVoidService({
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: null,
+      },
+      invoiceJournal: approveJournal(),
+    });
+    await service.void('si-1', undefined, user);
+
+    expect(prisma.journalEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ referenceType: 'SupplierInvoice', referenceId: 'si-1' }),
+      }),
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores a reused receipt-created payable instead of cancelling it (payable-at-receipt)', async () => {
+    // approve() reused the payable createCreditPurchasePayable opened at goods
+    // receipt (12,000) and re-stated its amount to the invoice total (11,500).
+    // The origin evidence is the backing JE's referenceType 'Payable'; note the
+    // payable's own sourceType was rewritten to 'SupplierInvoice' by approve()
+    // and so proves nothing.
+    const { service, prisma, postingEngine, captured } = makeVoidService({
+      invoice: { purchaseOrderId: 'po-1', totalAmount: 11500, outstandingAmount: 11500 },
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-receipt-1',
+      },
+      backingJournal: receiptJournal(12000),
+    });
+    await service.void('si-1', undefined, user);
+
+    // The receipt obligation stands: no reversal posted, the receipt accrual JE
+    // stays POSTED (approve() posted no incremental JE for a reused payable —
+    // postSupplierInvoicePayable is gated on !payable.journalEntryId).
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.journalEntry.updateMany).not.toHaveBeenCalled();
+
+    // Payable restored to its pre-invoice state, NOT cancelled: amount and
+    // outstanding back to the receipt JE's AP credit (12,000), source link back
+    // to the purchase order that created it.
+    expect(captured.payableUpdates).toHaveLength(1);
+    const restore = captured.payableUpdates[0];
+    expect(restore.status).toBeUndefined();
+    expect(Number(restore.amount)).toBe(12000);
+    expect(Number(restore.outstandingAmount)).toBe(12000);
+    expect(restore.sourceType).toBe('PurchaseOrder');
+    expect(restore.sourceId).toBe('po-1');
+
+    // The cancelled invoice is detached from the live receipt obligation.
+    const finalUpdate = prisma.supplierInvoice.update.mock.calls.at(-1)?.[0];
+    expect(finalUpdate.data).toEqual(
+      expect.objectContaining({ status: 'CANCELLED', outstandingAmount: 0, payableId: null }),
+    );
+  });
+
+  it('defensively reverses an invoice-referenced POSTED JE on the reuse path, leaving the receipt JE alone', async () => {
+    const incremental = approveJournal({ id: 'je-incremental-1' });
+    const { service, prisma, postingEngine } = makeVoidService({
+      invoice: { purchaseOrderId: 'po-1' },
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-receipt-1',
+      },
+      backingJournal: receiptJournal(12000),
+      invoiceJournal: incremental,
+    });
+    await service.void('si-1', undefined, user);
+
+    // Only the incremental (invoice-referenced) entry is claimed and reversed.
+    expect(prisma.journalEntry.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.journalEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'je-incremental-1' }) }),
+    );
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the already-cancelled invoice when a concurrent void wins the claim', async () => {
+    const { service, prisma, postingEngine } = makeVoidService();
+    prisma.supplierInvoice.updateMany.mockResolvedValue({ count: 0 });
+    prisma.supplierInvoice.findUnique.mockResolvedValue({ status: 'CANCELLED' });
+
+    const res = await service.void('si-1', undefined, user);
+
+    expect(res).toBeDefined();
+    // The loser posts nothing and touches no payable.
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('conflicts when the invoice changed under the void to a non-cancelled state', async () => {
+    const { service, prisma } = makeVoidService();
+    prisma.supplierInvoice.updateMany.mockResolvedValue({ count: 0 });
+    prisma.supplierInvoice.findUnique.mockResolvedValue({ status: 'PARTIALLY_PAID' });
+
+    await expect(service.void('si-1', undefined, user)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('appends the audit row strictly inside the transaction and fails the void when it fails', async () => {
+    const failure = new Error('audit append unavailable');
+    const { service, prisma, auditLogs } = makeVoidService();
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(failure);
+
+    await expect(service.void('si-1', { reason: 'dup' }, user)).rejects.toBe(failure);
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        action: 'SUPPLIER_INVOICE_VOID',
+        entityId: 'si-1',
+        newValue: expect.objectContaining({ reason: 'dup' }),
+      }),
+    );
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+});

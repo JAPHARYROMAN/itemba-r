@@ -4,6 +4,7 @@ import {
   CrudMutationAnyFixtureRegistration,
   CrudMutationBlocker,
   CrudMutationAuditContract,
+  CrudMutationEffectValue,
   CrudMutationValue,
   crudMutationAuditScopeKind,
 } from './crud-mutation-evidence';
@@ -37,11 +38,17 @@ const nowIso: CrudMutationValue = { now: 'iso' };
 
 const companyA = binding('companyA');
 const userA = binding('userA');
+const divisionA = binding('divisionA');
+const branchA = binding('branchA');
+const accountingPeriodA = binding('accountingPeriodA');
+const debitAccountA = binding('debitChartOfAccountA');
+const creditAccountA = binding('creditChartOfAccountA');
 const notificationActorASecond = binding('notificationActorASecond');
 const receivableRemoveCustomer = binding('receivableRemoveCustomer');
 const receivableRemoveTarget = binding('receivableRemoveTarget');
 const idOf = (model: string) => binding(`model:${model}`);
 const pathId = (model: string): ValueMap => ({ id: idOf(model) });
+const effectRef = (effectId: string): CrudMutationEffectValue => ({ effectRef: { effectId } });
 
 const REVIEWED_AUDIT_COMPANY: Readonly<Record<string, CrudMutationAuditContract['companyId']>> =
   Object.freeze({
@@ -1072,6 +1079,14 @@ const productAndProcurementDefinitions: readonly FixtureDefinition[] = [
     'PROFORMA_INVOICE_SENT',
     'ProformaInvoice',
     { preState: { status: literal('DRAFT') } },
+  ),
+  transitionFixture(
+    'ProformaInvoicesController.accept',
+    'ProformaInvoice',
+    { status: literal('ACCEPTED') },
+    'PROFORMA_INVOICE_ACCEPTED',
+    'ProformaInvoice',
+    { preState: { status: literal('SENT') } },
   ),
   softDeleteFixture(
     'ProformaInvoicesController.remove',
@@ -2114,6 +2129,293 @@ const stockAndSupplierDefinitions: readonly FixtureDefinition[] = [
     'SupplierInvoice',
     { status: literal('DRAFT') },
   ),
+  {
+    // Compound-effect fixture for the REACHABLE post-approve state (approve()
+    // unconditionally writes payableId, so APPROVED + payableId null cannot
+    // occur through application code). Seeds an approved invoice whose payable
+    // is backed by its own POSTED approve-time journal (referenceType
+    // 'SupplierInvoice', balanced DR expense / CR AP) and proves the real
+    // branch-(a) unwind: original journal flipped to REVERSED, an exact
+    // swapped-line mirror reversal posted and linked back, the payable
+    // cancelled to zero outstanding, the supplier balance re-synced, and the
+    // invoice cancelled with its payable trace retained.
+    capabilityId: 'SupplierInvoicesController.void',
+    operation: 'action',
+    description:
+      'Void an approved supplier invoice with an invoice-created payable and prove the original journal reversal claim, the exact swapped-line mirror posting, the payable cancellation, the supplier balance sync, and the cancelled invoice retaining its payable trace.',
+    request: {
+      path: pathId('SupplierInvoice'),
+      body: { reason: literal('CRUD evidence supplier invoice void') },
+    },
+    target: { model: 'SupplierInvoice', id: idOf('SupplierInvoice') },
+    preStates: [
+      {
+        model: 'Supplier',
+        id: idOf('Supplier'),
+        fields: {
+          companyId: companyA,
+          currentBalance: literal(125),
+          status: literal('ACTIVE'),
+          deletedAt: literal(null),
+        },
+      },
+      {
+        // The harness-seeded journal already carries the exact balanced pair
+        // DR 125 debitChartOfAccountA / CR 125 creditChartOfAccountA. Pin it
+        // to the approve-time shape: POSTED, referenced to this invoice.
+        model: 'JournalEntry',
+        id: idOf('JournalEntry'),
+        fields: {
+          companyId: companyA,
+          accountingPeriodId: accountingPeriodA,
+          divisionId: literal(null),
+          branchId: literal(null),
+          transactionDate: literal('2026-08-25T12:00:00.000Z'),
+          referenceType: literal('SupplierInvoice'),
+          referenceId: idOf('SupplierInvoice'),
+          status: literal('POSTED'),
+          totalDebit: literal(125),
+          totalCredit: literal(125),
+          postedById: userA,
+          postedAt: literal('2026-08-25T12:00:01.000Z'),
+          reversalOfId: literal(null),
+          reversalReason: literal(null),
+          reversedAt: literal(null),
+          reversedById: literal(null),
+          deletedAt: literal(null),
+        },
+      },
+      {
+        model: 'Payable',
+        id: idOf('Payable'),
+        fields: {
+          companyId: companyA,
+          supplierId: idOf('Supplier'),
+          sourceType: literal('SupplierInvoice'),
+          sourceId: idOf('SupplierInvoice'),
+          amount: literal(125),
+          paidAmount: literal(0),
+          outstandingAmount: literal(125),
+          currency: literal('TZS'),
+          status: literal('OPEN'),
+          journalEntryId: idOf('JournalEntry'),
+          deletedAt: literal(null),
+        },
+      },
+      {
+        model: 'SupplierInvoice',
+        id: idOf('SupplierInvoice'),
+        fields: {
+          supplierInvoiceNumber: literal('FIXTURE-SI-VOID'),
+          companyId: companyA,
+          divisionId: divisionA,
+          branchId: branchA,
+          supplierId: idOf('Supplier'),
+          purchaseOrderId: literal(null),
+          goodsReceivedNoteId: literal(null),
+          subtotal: literal(125),
+          taxAmount: literal(0),
+          discountAmount: literal(0),
+          totalAmount: literal(125),
+          paidAmount: literal(0),
+          outstandingAmount: literal(125),
+          currency: literal('TZS'),
+          status: literal('APPROVED'),
+          payableId: idOf('Payable'),
+          approvedById: userA,
+          approvedAt: literal('2026-08-25T12:00:02.000Z'),
+          deletedAt: literal(null),
+        },
+      },
+    ],
+    effect: {
+      kind: 'compound',
+      effects: [
+        {
+          effectId: 'reversalJournal',
+          kind: 'scoped-row-create',
+          model: 'JournalEntry',
+          scope: {
+            equals: { reversalOfId: idOf('JournalEntry') },
+            identityFields: ['id'],
+          },
+          expectedFields: {
+            companyId: companyA,
+            divisionId: divisionA,
+            branchId: branchA,
+            accountingPeriodId: accountingPeriodA,
+            transactionDate: nowIso,
+            description: literal('Void of supplier invoice FIXTURE-SI-VOID'),
+            referenceType: literal('SupplierInvoice'),
+            referenceId: idOf('SupplierInvoice'),
+            status: literal('POSTED'),
+            totalDebit: literal(125),
+            totalCredit: literal(125),
+            createdById: userA,
+            postedById: userA,
+            postedAt: nowIso,
+            reversalOfId: idOf('JournalEntry'),
+            reversalReason: literal(null),
+            reversedAt: literal(null),
+            reversedById: literal(null),
+            deletedAt: literal(null),
+          },
+          generatedFields: {
+            journalNumber: {
+              kind: 'timestamp-id',
+              prefix: 'JE-SUPPLIER_INVOICES-',
+              timestampEncoding: 'base36-upper',
+            },
+          },
+          allowedFields: ['id', 'createdAt', 'updatedAt'],
+          recovery: 'restore-scope',
+          recoveryOrder: 20,
+        },
+        {
+          // Mirror of the seeded CR 125 line: the credit becomes the debit.
+          effectId: 'reversalDebitLine',
+          kind: 'scoped-row-create',
+          model: 'JournalEntryLine',
+          scope: {
+            equals: { accountId: creditAccountA, description: literal('Reversal:') },
+            identityFields: ['id'],
+          },
+          expectedFields: {
+            journalEntryId: effectRef('reversalJournal'),
+            accountId: creditAccountA,
+            description: literal('Reversal:'),
+            debit: literal(125),
+            credit: literal(0),
+            companyId: companyA,
+            divisionId: divisionA,
+            branchId: branchA,
+          },
+          generatedFields: {},
+          allowedFields: ['id', 'createdAt', 'updatedAt'],
+          recovery: 'restore-scope',
+          recoveryOrder: 0,
+        },
+        {
+          // Mirror of the seeded DR 125 line: the debit becomes the credit.
+          effectId: 'reversalCreditLine',
+          kind: 'scoped-row-create',
+          model: 'JournalEntryLine',
+          scope: {
+            equals: { accountId: debitAccountA, description: literal('Reversal:') },
+            identityFields: ['id'],
+          },
+          expectedFields: {
+            journalEntryId: effectRef('reversalJournal'),
+            accountId: debitAccountA,
+            description: literal('Reversal:'),
+            debit: literal(0),
+            credit: literal(125),
+            companyId: companyA,
+            divisionId: divisionA,
+            branchId: branchA,
+          },
+          generatedFields: {},
+          allowedFields: ['id', 'createdAt', 'updatedAt'],
+          recovery: 'restore-scope',
+          recoveryOrder: 10,
+        },
+        {
+          effectId: 'originalJournal',
+          kind: 'row-update',
+          model: 'JournalEntry',
+          id: idOf('JournalEntry'),
+          expectedFields: {
+            status: literal('REVERSED'),
+            reversalReason: literal('CRUD evidence supplier invoice void'),
+            reversedAt: nowIso,
+            reversedById: userA,
+            updatedAt: nowIso,
+          },
+          forbiddenFields: [
+            'accountingPeriodId',
+            'companyId',
+            'createdById',
+            'deletedAt',
+            'journalNumber',
+            'postedAt',
+            'postedById',
+            'referenceId',
+            'referenceType',
+            'reversalOfId',
+            'totalCredit',
+            'totalDebit',
+            'transactionDate',
+          ],
+          recovery: 'restore-row',
+          recoveryOrder: 30,
+        },
+        {
+          effectId: 'payable',
+          kind: 'row-update',
+          model: 'Payable',
+          id: idOf('Payable'),
+          expectedFields: {
+            status: literal('CANCELLED'),
+            outstandingAmount: literal(0),
+            updatedAt: nowIso,
+          },
+          forbiddenFields: [
+            'amount',
+            'companyId',
+            'deletedAt',
+            'journalEntryId',
+            'paidAmount',
+            'sourceId',
+            'sourceType',
+            'supplierId',
+          ],
+          recovery: 'restore-row',
+          recoveryOrder: 40,
+        },
+        {
+          effectId: 'supplierBalance',
+          kind: 'row-update',
+          model: 'Supplier',
+          id: idOf('Supplier'),
+          expectedFields: { currentBalance: literal(0), updatedAt: nowIso },
+          forbiddenFields: ['companyId', 'name', 'status', 'deletedAt'],
+          recovery: 'restore-row',
+          recoveryOrder: 50,
+        },
+        {
+          effectId: 'invoice',
+          kind: 'row-update',
+          model: 'SupplierInvoice',
+          id: idOf('SupplierInvoice'),
+          expectedFields: {
+            status: literal('CANCELLED'),
+            outstandingAmount: literal(0),
+            updatedAt: nowIso,
+          },
+          forbiddenFields: [
+            'approvedAt',
+            'approvedById',
+            'companyId',
+            'deletedAt',
+            'paidAmount',
+            'payableId',
+            'supplierId',
+            'supplierInvoiceNumber',
+            'totalAmount',
+          ],
+          recovery: 'restore-row',
+          recoveryOrder: 60,
+        },
+      ],
+      auditEntityId: idOf('SupplierInvoice'),
+    },
+    audit: {
+      required: true,
+      action: 'SUPPLIER_INVOICE_VOID',
+      entityType: 'SupplierInvoice',
+      companyId: { kind: 'exact', value: companyA },
+    },
+  },
   transitionFixture(
     'SupplierOrderDraftsController.send',
     'SupplierOrderDraft',
