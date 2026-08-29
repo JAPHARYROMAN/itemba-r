@@ -42,7 +42,8 @@
     "prisma:studio": "prisma studio --schema=../database/prisma/schema.prisma",
     "prisma:reset": "prisma migrate reset --schema=../database/prisma/schema.prisma",
     "db:seed": "cross-env NODE_PATH=./node_modules ts-node --project tsconfig.json --transpile-only ../database/seeds/seed.ts",
-    "attestation:create": "ts-node --transpile-only scripts/create-provider-contract-attestation.ts"
+    "attestation:create": "ts-node --transpile-only scripts/create-provider-contract-attestation.ts",
+    "test:msaidizi-task-event-cursor-migration": "prisma db execute --schema=../database/prisma/schema.prisma --file=../database/prisma/migrations/20260829120000_msaidizi_task_event_cursor_allocated_under_lock/regression.sql"
   },
   "prisma": {
     "schema": "../database/prisma/schema.prisma",

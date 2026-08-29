@@ -79,7 +79,12 @@ try {
     })),
   });
 
-  await Promise.all([
+  // Two writers appending at once. This is the case the ledger exists to
+  // survive, and for a while it did not: the cursor came from a sequence drawn
+  // BEFORE the chain lock was taken, so whichever writer drew the lower number
+  // but reached the lock second was rejected for an ordinary append. Both must
+  // succeed, and they must land on consecutive positions.
+  const concurrent = await Promise.all([
     writerA.msaidiziTaskEvent.create({
       data: {
         taskId,
@@ -97,6 +102,8 @@ try {
       },
     }),
   ]);
+  const concurrentCursors = concurrent.map((event) => BigInt(event.cursor)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  assert.equal(concurrentCursors[1] - concurrentCursors[0], 1n);
 
   const brokenLinks = await prisma.$queryRaw`
     WITH ordered AS (
@@ -142,15 +149,24 @@ try {
     prisma.$executeRawUnsafe('TRUNCATE TABLE "msaidizi_task_events" CASCADE'),
     /append-only/,
   );
-  await assert.rejects(
-    prisma.$executeRawUnsafe(
-      `INSERT INTO "msaidizi_task_events" (` +
-        `"cursor", "taskId", "type", "actorType", "payload") ` +
-        `VALUES (1, $1, 'ledger.out-of-order', 'SYSTEM', '{}'::jsonb)`,
-      taskId,
-    ),
-    /does not extend chain head/,
+  // A supplied cursor is not honoured. It used to be REJECTED - which read as a
+  // security property but was indistinguishable from the honest concurrent
+  // writer above, because BIGSERIAL fires for every insert and both arrive
+  // carrying a value that no longer extends the head. The ledger now allocates
+  // under the same lock it reads the head with, so a chosen position is simply
+  // ignored: an attempt to insert at position 1 is appended at the head, hash
+  // linked, rather than either honoured or refused.
+  const [beforeSupplied] = await prisma.$queryRaw`
+    SELECT COALESCE(MAX("cursor"), 0)::BIGINT AS head FROM "msaidizi_task_events"
+  `;
+  const [suppliedCursorRow] = await prisma.$queryRawUnsafe(
+    `INSERT INTO "msaidizi_task_events" (` +
+      `"cursor", "taskId", "type", "actorType", "payload") ` +
+      `VALUES (1, $1, 'ledger.supplied-cursor-ignored', 'SYSTEM', '{}'::jsonb) ` +
+      `RETURNING "cursor", "previousHash"`,
+    taskId,
   );
+  assert.equal(BigInt(suppliedCursorRow.cursor), BigInt(beforeSupplied.head) + 1n);
 
   const runEvents = await prisma.$queryRaw`
     SELECT
@@ -162,7 +178,16 @@ try {
     WHERE "taskId" = ${taskId}
     ORDER BY "cursor" ASC
   `;
-  assert.equal(runEvents.length, 6);
+  // Seven, not six: the supplied-cursor insert above is now appended rather
+  // than refused, so it leaves a row behind. That extra row is the point - the
+  // ledger recorded the write honestly at the head instead of discarding it.
+  assert.equal(runEvents.length, 7);
+  // Positions are contiguous from the first event of this run, which is the
+  // property the whole allocation change exists to hold under concurrency.
+  const cursors = runEvents.map((event) => BigInt(event.cursor));
+  cursors.forEach((cursor, index) => {
+    if (index > 0) assert.equal(cursor - cursors[index - 1], 1n);
+  });
   assert.ok(runEvents.every((event) => event.integrityVersion === 1));
   assert.ok(runEvents.every((event) => /^[0-9a-f]{64}$/.test(event.eventHash)));
 
