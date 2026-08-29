@@ -1,7 +1,11 @@
 # Concurrent appends to the Msaidizi task-event chain fail non-deterministically
 
 **Found:** 2026-08-29, from an intermittent CI failure in `Backend — E2E Smoke`.
-**Status:** diagnosed, deliberately **not fixed** — see *Why this is not fixed here*.
+**Status:** **FIXED** in migration `20260829120000_msaidizi_task_event_cursor_allocated_under_lock`.
+Reproduced and verified against a real PostgreSQL 16: with the old trigger, 8
+concurrent writers gave 4 successes and 4 failures; with the fix, 8 and then 24
+concurrent writers all succeed on contiguous cursors, repeatedly. The migration's
+`regression.sql` fails against the old trigger and passes against the new one.
 **Severity:** fail-closed. Nothing is corrupted; legitimate writes are rejected.
 
 ---
@@ -109,14 +113,23 @@ Alternatively, keep the sequence and make the exception retryable
 (`ERRCODE = '40001'`) so callers back off and retry, which is the smaller change
 but leaves a spurious failure in the hot path.
 
-## Why this is not fixed here
+## What the fix does
 
-Changing the trigger that governs an append-only audit ledger means a new
-migration against a production database, altering the semantics of the thing
-that proves the ledger has not been tampered with. The failure is fail-closed,
-so nothing is corrupt and nothing is urgent. That combination — high blast
-radius, no time pressure — is the case for a reviewed change rather than an
-autonomous one at three in the morning.
+The chosen option is the first one above: the cursor is assigned inside the
+lock, so allocation and validation are atomic with respect to each other.
+
+It carries one deliberate semantic change, which is why the option was not taken
+without asking. Before, a caller-supplied cursor that did not extend the head was
+*rejected*. Now it is *not honoured at all* — any insert lands at head + 1,
+correctly linked. That is strictly stronger: a caller could previously choose a
+position and be refused only for a bad choice, and can now not choose at all.
+Forged history was impossible before and remains impossible; an attempt to insert
+at an earlier position is appended honestly at the head rather than accepted.
+
+The change was unavoidable rather than preferred. BIGSERIAL fires for every
+insert, so the trigger genuinely cannot tell a caller-supplied value from a
+sequence-supplied one — the honest concurrent writer and the backdating attacker
+arrive looking identical. Rejecting one meant rejecting both.
 
 The test that exposed it is correct and should stay as it is. It is currently
 the only thing in the repository that appends to this chain concurrently, which

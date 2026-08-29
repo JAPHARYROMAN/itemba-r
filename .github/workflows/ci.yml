@@ -287,6 +287,7 @@ jobs:
           npm run test:msaidizi-update-rollout-migration
           npm run test:msaidizi-wall-time-migration
           npm run test:msaidizi-update-evaluation-migration
+          npm run test:msaidizi-task-event-cursor-migration
 
   frontend-test:
     name: Frontend — Test
