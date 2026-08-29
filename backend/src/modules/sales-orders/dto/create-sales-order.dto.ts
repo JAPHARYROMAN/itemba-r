@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -46,6 +47,18 @@ export class SalesOrderLineDto {
   @IsNumber()
   @Min(0)
   taxAmount?: number;
+
+  /**
+   * The operator explicitly set (or overrode) this line's VAT in the sales-order
+   * editor — including an intentional ZERO for a VAT-relieved/exempt sale of a
+   * taxable product. When true the server trusts `taxAmount` verbatim and never
+   * derives inclusive output VAT out of the unit price. POS / Quick-Sale /
+   * Kaunta payloads never send this flag, so their hardcoded `taxAmount: 0`
+   * lines still get the 18% carved out server-side.
+   */
+  @IsOptional()
+  @IsBoolean()
+  taxManual?: boolean;
 
   /** Optional FK to a specific ProductBatch — for FIFO/expiry tracking. */
   @IsOptional()

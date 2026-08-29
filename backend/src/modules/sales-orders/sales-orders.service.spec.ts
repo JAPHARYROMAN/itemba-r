@@ -577,6 +577,515 @@ describe('SalesOrdersService document (order-level) discount', () => {
   });
 });
 
+describe('SalesOrdersService POS / cash-sale output VAT', () => {
+  // A CASH_SALE that mimics the Mobile POS / Quick-Sale / Kaunta front ends,
+  // which POST every line with taxAmount: 0. The server must carve 18% output
+  // VAT OUT of the VAT-inclusive shelf price instead of booking the whole
+  // tender as revenue.
+  function posDto(overrides: Record<string, unknown> = {}) {
+    return createDto({
+      salesType: 'CASH_SALE',
+      paymentMethod: 'CASH',
+      cashAccountId: 'cash-account-1',
+      lines: [
+        {
+          productId: 'product-1',
+          description: 'Item',
+          quantity: 1,
+          unitId: 'unit-1',
+          unitPrice: 1180, // VAT-inclusive till price
+          discountAmount: 0,
+          taxAmount: 0, // hardcoded by POS front ends
+        },
+      ],
+      ...overrides,
+    });
+  }
+
+  function primeCashSale(prisma: any, product: Record<string, unknown>) {
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+    // Shared by the company-ownership line check AND the VAT derivation lookup.
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', companyId: 'company-1', ...product },
+    ]);
+  }
+
+  it('carves 18% output VAT out of the inclusive price for a taxable product (1180 -> 1000 net + 180 VAT)', async () => {
+    const { service, prisma } = makeService();
+    primeCashSale(prisma, { isTaxable: true, taxRate: null }); // null rate => standard 18%
+
+    await service.create(posDto(), user);
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 1000, // net revenue base
+          taxAmount: 180, // carved-out output VAT
+          totalAmount: 1180, // gross tendered — net + vat == gross
+        }),
+      }),
+    );
+    // Line persists the NET unit price with the VAT broken out.
+    expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            unitPrice: 1000,
+            taxAmount: 180,
+            lineTotal: 1180,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('uses the product-specific taxRate when set instead of the 18% default', async () => {
+    const { service, prisma } = makeService();
+    // 5% inclusive: net = 1050 / 1.05 = 1000, tax = 50.
+    primeCashSale(prisma, { isTaxable: true, taxRate: 5 });
+
+    await service.create(
+      posDto({
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1050,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
+        ],
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subtotal: 1000, taxAmount: 50, totalAmount: 1050 }),
+      }),
+    );
+  });
+
+  it('leaves a non-taxable product entirely as revenue (no VAT booked)', async () => {
+    const { service, prisma } = makeService();
+    primeCashSale(prisma, { isTaxable: false, taxRate: null });
+
+    await service.create(posDto(), user);
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subtotal: 1180, taxAmount: 0, totalAmount: 1180 }),
+      }),
+    );
+  });
+
+  it('treats a 0%-rated taxable product as VAT-free (whole tender is revenue)', async () => {
+    const { service, prisma } = makeService();
+    primeCashSale(prisma, { isTaxable: true, taxRate: 0 });
+
+    await service.create(posDto(), user);
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subtotal: 1180, taxAmount: 0, totalAmount: 1180 }),
+      }),
+    );
+  });
+
+  it('does NOT re-derive or double VAT when the caller already supplied a per-line taxAmount', async () => {
+    const { service, prisma } = makeService();
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+
+    // Caller (a normal SO) sends net price 1000 + explicit VAT 180 on top.
+    await service.create(
+      posDto({
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1000,
+            discountAmount: 0,
+            taxAmount: 180,
+          },
+        ],
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // taxAmount stays exactly what the caller supplied; unitPrice untouched.
+        data: expect.objectContaining({ subtotal: 1000, taxAmount: 180, totalAmount: 1180 }),
+      }),
+    );
+  });
+
+  it('posts DR Cash gross / CR Revenue net / CR VAT on confirm of a taxable cash sale', async () => {
+    const { service, prisma } = makeService();
+    // DRAFT cash sale already carved to net 1000 + VAT 180 at create time.
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'DRAFT',
+        subtotal: 1000,
+        taxAmount: 180,
+        totalAmount: 1180,
+        paidAmount: 0,
+        outstandingAmount: 1180,
+        paymentStatus: 'UNPAID',
+        lines: [
+          {
+            id: 'line-1',
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1000,
+            discountAmount: 0,
+            taxAmount: 180,
+            lineTotal: 1180,
+            batchId: null,
+          },
+        ],
+      }),
+    );
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: false });
+    (service as any).accountResolver.resolveMany.mockResolvedValue({
+      CASH_ON_HAND: { id: 'acct-cash' },
+      SALES_REVENUE: { id: 'acct-rev' },
+      TAX_VAT_PAYABLE: { id: 'acct-vat' },
+    });
+
+    await service.confirm('so-1', user);
+
+    const jeCall = (service as any).postingEngine.postLines.mock.calls[0][0];
+    expect(jeCall.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ accountId: 'acct-cash', debit: 1180, credit: 0 }),
+        expect.objectContaining({ accountId: 'acct-rev', debit: 0, credit: 1000 }),
+        expect.objectContaining({ accountId: 'acct-vat', debit: 0, credit: 180 }),
+      ]),
+    );
+    const sumDebit = jeCall.lines.reduce((s: number, l: any) => s + l.debit, 0);
+    const sumCredit = jeCall.lines.reduce((s: number, l: any) => s + l.credit, 0);
+    expect(sumDebit).toBe(sumCredit);
+    expect(sumDebit).toBe(1180);
+    // Cash account credited with the GROSS tender.
+    expect(prisma.cashAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { currentBalance: { increment: 1180 } } }),
+    );
+  });
+
+  it('replays an idempotent POS retry whose original gross payload was persisted as derived net + VAT', async () => {
+    const { service, prisma } = makeService();
+    const confirmSpy = jest.spyOn(service, 'confirm');
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+    // First attempt persisted the DERIVED figures: net 1000 + VAT 180 == gross 1180.
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        subtotal: 1000,
+        taxAmount: 180,
+        totalAmount: 1180,
+        paidAmount: 1180,
+        outstandingAmount: 0,
+        lines: [
+          {
+            id: 'line-1',
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1000,
+            discountAmount: 0,
+            taxAmount: 180,
+            lineTotal: 1180,
+            batchId: null,
+          },
+        ],
+      }),
+    );
+
+    // The retry carries the ORIGINAL gross/untaxed payload; the derivation must
+    // run before the replay matcher so the signatures line up with the stored
+    // net lines instead of 409ing every legitimate retry.
+    const result = await service.mobilePosQuickSale(posDto({ idempotencyKey: 'idem-1' }), user);
+
+    expect(result).toEqual(expect.objectContaining({ id: 'so-1' }));
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('derives VAT on the Kaunta / Mobile POS Lite path (lines built server-side with taxAmount: 0)', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+    // Replay pre-check misses (fresh key); later findFirst calls serve findOne.
+    prisma.salesOrder.findFirst.mockResolvedValueOnce(null);
+
+    await service.mobilePosLiteQuickSale(
+      posDto({ idempotencyKey: 'kaunta-idem-1' }),
+      user,
+      'terminal-1',
+      'KAUNTA-01',
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 1000,
+          taxAmount: 180,
+          totalAmount: 1180,
+          mobilePosTerminalId: 'terminal-1',
+        }),
+      }),
+    );
+  });
+
+  it('re-derives VAT when a DRAFT is updated with gross untaxed lines (edit cannot strip VAT)', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(persistedOrder({ status: 'DRAFT' }));
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+
+    await service.update(
+      'so-1',
+      {
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1180,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
+        ],
+      } as any,
+      user,
+    );
+
+    expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({ unitPrice: 1000, taxAmount: 180, lineTotal: 1180 }),
+        ],
+      }),
+    );
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subtotal: 1000, taxAmount: 180, totalAmount: 1180 }),
+      }),
+    );
+  });
+
+  it('rewrites stored lines on a documentDiscount-only update when derivation nets them (header and lines stay reconciled)', async () => {
+    const { service, prisma } = makeService();
+    // Legacy DRAFT: stored line is still GROSS/untaxed (created before the
+    // inclusive-VAT derivation existed, or while the product was non-taxable).
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'DRAFT',
+        subtotal: 1180,
+        taxAmount: 0,
+        totalAmount: 1180,
+        documentDiscount: 0,
+        lines: [
+          {
+            id: 'line-1',
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1180,
+            discountAmount: 0,
+            taxAmount: 0,
+            lineTotal: 1180,
+            batchId: null,
+          },
+        ],
+      }),
+    );
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+
+    // PATCH carries ONLY a document discount — no lines, no branch.
+    await service.update('so-1', { documentDiscount: 100 } as any, user);
+
+    // The derivation netted the reconstructed line, so the stored line rows
+    // MUST be rewritten too — otherwise the header would say 1000 net + 180
+    // VAT while the rows still said gross 1180 / tax 0, and confirm() would
+    // post VAT to the GL that taxAutoApply (reading the lines) never mirrors
+    // into the TaxTransaction filing ledger.
+    expect(prisma.salesOrderLine.deleteMany).toHaveBeenCalledWith({
+      where: { salesOrderId: 'so-1' },
+    });
+    expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ unitPrice: 1000, taxAmount: 180, lineTotal: 1180 })],
+      }),
+    );
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 1000,
+          taxAmount: 180,
+          documentDiscount: 100,
+          discountAmount: 100,
+          totalAmount: 1080,
+        }),
+      }),
+    );
+  });
+
+  it('does not touch stored lines on a documentDiscount-only update when nothing needed deriving', async () => {
+    const { service, prisma } = makeService();
+    // Already-derived DRAFT: stored line carries its VAT, derivation is a no-op.
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'DRAFT',
+        subtotal: 1000,
+        taxAmount: 180,
+        totalAmount: 1180,
+        documentDiscount: 0,
+        lines: [
+          {
+            id: 'line-1',
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1000,
+            discountAmount: 0,
+            taxAmount: 180,
+            lineTotal: 1180,
+            batchId: null,
+          },
+        ],
+      }),
+    );
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+
+    await service.update('so-1', { documentDiscount: 100 } as any, user);
+
+    expect(prisma.salesOrderLine.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.salesOrderLine.createMany).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 1000,
+          taxAmount: 180,
+          documentDiscount: 100,
+          totalAmount: 1080,
+        }),
+      }),
+    );
+  });
+
+  it('honours an explicit operator zero-VAT override (taxManual) on a taxable product', async () => {
+    const { service, prisma } = makeService();
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+
+    // Sales-order editor flow: VAT-relieved customer, operator manually set the
+    // line tax to 0 on a taxable product. The server must NOT carve 18% back
+    // out of the entered price.
+    await service.create(
+      posDto({
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Item',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1000,
+            discountAmount: 0,
+            taxAmount: 0,
+            taxManual: true,
+          },
+        ],
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subtotal: 1000, taxAmount: 0, totalAmount: 1000 }),
+      }),
+    );
+    expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ unitPrice: 1000, taxAmount: 0, lineTotal: 1000 })],
+      }),
+    );
+  });
+
+  it('still derives VAT for unflagged taxAmount:0 lines alongside a taxManual override', async () => {
+    const { service, prisma } = makeService();
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'product-1', companyId: 'company-1', isTaxable: true, taxRate: null },
+      { id: 'product-2', companyId: 'company-1', isTaxable: true, taxRate: null },
+    ]);
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+    prisma.unitOfMeasure.findMany.mockResolvedValue([{ id: 'unit-1', companyId: 'company-1' }]);
+
+    await service.create(
+      posDto({
+        lines: [
+          {
+            productId: 'product-1',
+            description: 'Exempt line',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1000,
+            discountAmount: 0,
+            taxAmount: 0,
+            taxManual: true, // operator's explicit zero — trusted verbatim
+          },
+          {
+            productId: 'product-2',
+            description: 'POS line',
+            quantity: 1,
+            unitId: 'unit-1',
+            unitPrice: 1180,
+            discountAmount: 0,
+            taxAmount: 0, // unflagged — still derived (net 1000 + VAT 180)
+          },
+        ],
+      }),
+      user,
+    );
+
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subtotal: 2000, taxAmount: 180, totalAmount: 2180 }),
+      }),
+    );
+    expect(prisma.salesOrderLine.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({ unitPrice: 1000, taxAmount: 0, lineTotal: 1000 }),
+          expect.objectContaining({ unitPrice: 1000, taxAmount: 180, lineTotal: 1180 }),
+        ],
+      }),
+    );
+  });
+});
+
 describe('SalesOrdersService walk-in customer mastering', () => {
   it('creates and links a customer master for a named walk-in sales order customer', async () => {
     const { service, prisma } = makeService();

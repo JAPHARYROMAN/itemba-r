@@ -2720,6 +2720,7 @@ export class MobilePosLiteService {
             description: true,
             quantity: true,
             unitPrice: true,
+            taxAmount: true,
             lineTotal: true,
             product: { select: { name: true } },
           },
@@ -2758,12 +2759,24 @@ export class MobilePosLiteService {
           headers: ['Bidhaa / Item', 'Idadi / Qty', 'Bei / Unit Price', 'Jumla / Total'],
           numericColumns: [1, 2, 3],
           columnWeights: [3, 1, 1.5, 1.5],
-          rows: sale.lines.map((line) => [
-            line.description || line.product?.name || 'N/A',
-            receiptQty(line.quantity),
-            tzsWhole(line.unitPrice),
-            tzsWhole(line.lineTotal),
-          ]),
+          rows: sale.lines.map((line) => {
+            // The persisted unitPrice is the NET (ex-VAT) figure after the
+            // server carved output VAT out of the VAT-inclusive sticker price;
+            // lineTotal is still the gross amount the customer paid. Print the
+            // VAT-INCLUSIVE per-unit price so the paper multiplies out
+            // (qty x unit price == line total) and matches the shelf price.
+            const quantity = Number(line.quantity);
+            const grossUnitPrice =
+              quantity > 0
+                ? Number(line.lineTotal) / quantity
+                : Number(line.unitPrice) + Number(line.taxAmount ?? 0);
+            return [
+              line.description || line.product?.name || 'N/A',
+              receiptQty(line.quantity),
+              tzsWhole(grossUnitPrice),
+              tzsWhole(line.lineTotal),
+            ];
+          }),
         },
         totals: [{ label: 'JUMLA / TOTAL', value: tzsWhole(sale.totalAmount), emphasis: true }],
       },
