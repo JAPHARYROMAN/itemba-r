@@ -18,7 +18,11 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalPaymentDto } from './dto/create-external-payment.dto';
 import { QueryExternalPaymentDto } from './dto/query-external-payment.dto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import {
+  applyCompanyScopeWhere,
+  CompanyScopeService,
+  resolveCashAccountForScope,
+} from '../../common/services';
 import {
   AccountResolverService,
   AccountRole,
@@ -456,15 +460,22 @@ export class ExternalPaymentsService {
     const actorId = await this.resolvePostingActorId(tx, record, userId);
 
     // Resolve a receiving cash/bank account. External payments carry no
-    // cashAccountId, so we pick a company cash account whose type matches the
-    // payment method (BANK for transfers/cards, else cash-on-hand). If one
-    // exists we bump its denormalised currentBalance and drive the GL cash role
-    // from its type; if none exists we still post the GL cash leg by method.
+    // cashAccountId and no branch of their own, so the linked receivable's
+    // division/branch (peeked under the same row lock relief takes below) is
+    // the branch context: the drawer/float that physically collected the
+    // money. We pick a company cash account whose type matches the payment
+    // method (BANK for transfers/cards, else cash-on-hand), preferring that
+    // branch's account and never one scoped to a DIFFERENT branch. If one
+    // exists we bump its denormalised currentBalance and drive the GL cash
+    // role from its type; if none exists we still post the GL cash leg by
+    // method.
+    const linkedScope = await this.peekLinkedReceivableScope(tx, record);
     const cashAccount = await this.resolveReceivingCashAccount(
       tx,
       record.companyId,
       record.paymentMethod,
       record.currency,
+      linkedScope,
     );
     const cashRole: AccountRole = cashAccount
       ? this.cashAccountRole(cashAccount.accountType)
@@ -712,15 +723,19 @@ export class ExternalPaymentsService {
       });
     } else {
       // Legacy row confirmed before receivingCashAccountId existed: best-effort
-      // fallback to the same method/currency resolution confirm used. (Rows
-      // confirmed after the column exists always carry the stamp when a cache
-      // was bumped, so a null stamp on a new row means confirm bumped nothing —
-      // but we cannot distinguish that from a legacy row, so we re-resolve.)
+      // fallback to the same method/currency/branch resolution confirm uses —
+      // including the linked receivable's branch context, so the re-resolution
+      // stays consistent with the confirm path. (Rows confirmed after the
+      // column exists always carry the stamp when a cache was bumped, so a
+      // null stamp on a new row means confirm bumped nothing — but we cannot
+      // distinguish that from a legacy row, so we re-resolve.)
+      const linkedScope = await this.peekLinkedReceivableScope(tx, record);
       const cashAccount = await this.resolveReceivingCashAccount(
         tx,
         record.companyId,
         record.paymentMethod,
         record.currency,
+        linkedScope,
       );
       if (cashAccount) {
         await tx.cashAccount.updateMany({
@@ -953,47 +968,49 @@ export class ExternalPaymentsService {
    * MOBILE_MONEY for MOBILE_MONEY, else CASH_ON_HAND) within that currency, then
    * any active account in that currency. Returns null when none matches — the GL
    * cash leg still posts (by role) but no balance cache is bumped.
+   *
+   * `scope` is the linked receivable's division/branch (see
+   * {@link peekLinkedReceivableScope}). When present, resolution is
+   * branch-aware via the shared helper: within each type tier the exact-branch
+   * account wins, then an unscoped (NULL-branch) company account — an account
+   * scoped to a DIFFERENT branch is never chosen, because its currentBalance
+   * feeds that branch's Funga Siku close. A standalone payment (no receivable
+   * context) keeps the historical company-wide oldest-first behaviour.
    */
   private async resolveReceivingCashAccount(
     tx: Prisma.TransactionClient,
     companyId: string,
     method: ExternalPaymentMethod | null | undefined,
     currency: string | null | undefined,
+    scope?: { divisionId: string | null; branchId: string | null } | null,
   ) {
-    const preferredType = this.methodCashAccountType(method);
-    const cur = (currency ?? 'TZS') as any;
-
-    const select = {
-      id: true,
-      companyId: true,
-      divisionId: true,
-      branchId: true,
-      accountType: true,
-      accountName: true,
-      currency: true,
-    } as const;
-
-    // 1. preferred type + matching currency.
-    let account = await tx.cashAccount.findFirst({
-      where: {
-        companyId,
-        deletedAt: null,
-        isActive: true,
-        accountType: preferredType,
-        currency: cur,
-      },
-      orderBy: { createdAt: 'asc' },
-      select,
+    return resolveCashAccountForScope(tx, {
+      companyId,
+      currency: currency ?? 'TZS',
+      preferredTypes: [this.methodCashAccountType(method)],
+      divisionId: scope?.divisionId ?? null,
+      branchId: scope?.branchId ?? null,
     });
-    if (account) return account;
+  }
 
-    // 2. any active account in the matching currency (never mismatched currency).
-    account = await tx.cashAccount.findFirst({
-      where: { companyId, deletedAt: null, isActive: true, currency: cur },
-      orderBy: { createdAt: 'asc' },
-      select,
-    });
-    return account;
+  /**
+   * Peek the division/branch scope of the receivable this payment is linked to
+   * (via RECEIVABLE / SALES_ORDER context) so cash-account resolution can
+   * prefer the branch that actually collected the money. Takes the same row
+   * lock relieve/restore take later in this transaction, so the scope cannot
+   * shift between the peek and the relief. Null when the payment is standalone
+   * or the context does not resolve to a same-company receivable — resolution
+   * then falls back to the company-wide behaviour.
+   */
+  private async peekLinkedReceivableScope(
+    tx: Prisma.TransactionClient,
+    record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
+  ): Promise<{ divisionId: string | null; branchId: string | null } | null> {
+    const receivableId = await this.resolveReceivableId(tx, record);
+    if (!receivableId) return null;
+    const locked = await this.lockReceivable(tx, receivableId);
+    if (!locked || locked.companyId !== record.companyId) return null;
+    return { divisionId: locked.divisionId ?? null, branchId: locked.branchId ?? null };
   }
 
   /** Preferred CashAccount type for a payment method. */

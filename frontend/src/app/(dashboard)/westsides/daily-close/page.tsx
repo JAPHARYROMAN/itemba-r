@@ -73,6 +73,58 @@ interface SavedClose {
   closedByName: string;
   closedAt: string;
 }
+interface TerminalMethodLine {
+  paymentMethod: string;
+  cashAccountId: string | null;
+  cashAccountName: string | null;
+  cashAccountType: string | null;
+  methodLabel: string | null;
+  count: number;
+  expected: number;
+  paid: number;
+}
+interface TerminalDayReport {
+  submittedAt: string;
+  repUserId: string;
+  repName: string;
+  salesCount: number;
+  grossTotal: number;
+  byMethod: { paymentMethod: string; label: string | null; count: number; amount: number }[];
+  declaredHeldCount: number;
+  declaredHeldAmount: number;
+  reportCount: number;
+  /**
+   * Cashiers whose latest (cumulative rep-day) closes are summed into the
+   * figures above — a shift handover sums both shifts. Absent on older
+   * backends, which sent only the newest report.
+   */
+  repCount?: number;
+}
+interface TerminalRow {
+  terminalId: string | null;
+  kind: 'TERMINAL' | 'COUNTER';
+  terminalCode: string | null;
+  terminalName: string | null;
+  tillLabel: string | null;
+  cashier: {
+    userId: string | null;
+    name: string | null;
+    source: 'DAY_REPORT' | 'TERMINAL_ASSIGNED' | null;
+  };
+  salesCount: number;
+  expectedTotal: number;
+  paidTotal: number;
+  expectedByMethod: TerminalMethodLine[];
+  /**
+   * Expected receipts over the terminal's own business-day window — the SAME
+   * window its close covers, which can differ from this Z-report's window.
+   * The reported-vs-expected delta compares against this figure; absent on
+   * older backends (which fall back to `expectedTotal`).
+   */
+  businessDayExpectedTotal?: number;
+  businessDaySalesCount?: number;
+  dayReport: TerminalDayReport | null;
+}
 
 interface DailyClose {
   date: string;
@@ -90,6 +142,8 @@ interface DailyClose {
   };
   yesterday: { salesCount: number; totalSales: number };
   byMethod: MethodLine[];
+  /** Additive per-till custody breakdown; absent on older backends. */
+  byTerminal?: TerminalRow[];
   bySalesType: SalesTypeLine[];
   bySalesperson: SalespersonLine[];
   topProducts: ProductLine[];
@@ -441,6 +495,22 @@ export default function DailyClosePage() {
     }
   };
 
+  // Per-till custody rows are additive: older backend responses without
+  // `byTerminal` simply render no panel. The counter remainder row (kind
+  // COUNTER) is always last, per the report contract.
+  const terminalRows = useMemo<TerminalRow[]>(() => data?.byTerminal ?? [], [data]);
+  const terminalTillCount = useMemo(
+    () => terminalRows.filter((row) => row.kind === 'TERMINAL').length,
+    [terminalRows],
+  );
+  const terminalHasCounter = useMemo(
+    () => terminalRows.some((row) => row.kind === 'COUNTER'),
+    [terminalRows],
+  );
+  const terminalUnclosedCount = useMemo(
+    () => terminalRows.filter((row) => row.kind === 'TERMINAL' && !row.dayReport).length,
+    [terminalRows],
+  );
 
   const mobileMoneyStats = useMemo(() => {
     const refs = data?.mobileMoneyReferences ?? [];
@@ -1157,6 +1227,216 @@ export default function DailyClosePage() {
             </div>
           </Card>
 
+          {terminalRows.length > 0 && (
+            <Card className="overflow-hidden p-0">
+              <div
+                className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3"
+                style={borderStyle}
+              >
+                <div>
+                  <h3 className="text-sm font-semibold">Cash by till</h3>
+                  <p className="mt-0.5 text-xs" style={textMutedStyle}>
+                    Expected receipts attributed to the terminal that rang them, with each
+                    terminal&apos;s own close and declared held cash shown beside the expected
+                    figures.
+                  </p>
+                </div>
+                <StatusBadge
+                  label={`${terminalTillCount} till${terminalTillCount === 1 ? '' : 's'}${
+                    terminalHasCounter ? ' + counter' : ''
+                  }`}
+                  tone={terminalUnclosedCount > 0 ? 'warning' : 'info'}
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1080px] text-sm">
+                  <thead>
+                    <tr style={tableHeadStyle}>
+                      <Th>Till</Th>
+                      <Th>Cashier</Th>
+                      <Th align="right">Txns</Th>
+                      <Th>Expected by method</Th>
+                      <Th align="right">Expected (close window)</Th>
+                      <Th>Terminal close</Th>
+                      <Th align="right">Reported vs expected (business day)</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {terminalRows.map((row) => {
+                      // The terminal's close covers its BUSINESS-day window,
+                      // so the delta compares like against like; the Expected
+                      // column keeps the close window so rows sum to the
+                      // reconciliation above. Older backends send no
+                      // business-day figure — fall back to the close window.
+                      const comparableExpected = row.businessDayExpectedTotal ?? row.expectedTotal;
+                      const reportDelta = row.dayReport
+                        ? row.dayReport.grossTotal - comparableExpected
+                        : null;
+                      return (
+                        <tr
+                          key={row.terminalId ?? 'COUNTER'}
+                          className="transition hover:bg-white/5"
+                          style={{ borderBottom: '1px solid var(--aurora-border)' }}
+                        >
+                          <Td>
+                            <div className="font-medium">
+                              {row.kind === 'COUNTER'
+                                ? (row.terminalName ?? 'Counter / quick sale')
+                                : (row.terminalCode ?? row.terminalName ?? 'Terminal')}
+                            </div>
+                            {row.kind === 'TERMINAL' && row.terminalCode && row.terminalName && (
+                              <div className="text-[11px]" style={textMutedStyle}>
+                                {row.terminalName}
+                              </div>
+                            )}
+                            {row.tillLabel && (
+                              <div className="text-[11px]" style={textMutedStyle}>
+                                Till: {row.tillLabel}
+                              </div>
+                            )}
+                          </Td>
+                          <Td>
+                            {row.cashier.name ? (
+                              <>
+                                <div className="font-medium">{row.cashier.name}</div>
+                                <div className="text-[11px]" style={textMutedStyle}>
+                                  {row.cashier.source === 'DAY_REPORT'
+                                    ? 'from terminal close'
+                                    : 'assigned to terminal'}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="italic" style={textMutedStyle}>
+                                unattributed
+                              </span>
+                            )}
+                          </Td>
+                          <Td align="right" mono>
+                            {row.salesCount}
+                          </Td>
+                          <Td>
+                            <div className="space-y-0.5">
+                              {row.expectedByMethod.map((m) => (
+                                <div
+                                  key={`${m.paymentMethod}|${m.cashAccountId ?? ''}`}
+                                  className="flex items-baseline justify-between gap-3"
+                                >
+                                  <span className="text-xs" style={textSecondaryStyle}>
+                                    {m.methodLabel ?? displayMethod(m.paymentMethod)}
+                                    {m.cashAccountName ? ` · ${m.cashAccountName}` : ''}
+                                  </span>
+                                  <span className="text-xs font-semibold tabular-nums">
+                                    {fmt(m.expected)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </Td>
+                          <Td align="right" mono strong>
+                            {fmt(row.expectedTotal)}
+                          </Td>
+                          <Td>
+                            {row.dayReport ? (
+                              <>
+                                <div className="font-medium tabular-nums">
+                                  TZS {fmt(row.dayReport.grossTotal)}
+                                </div>
+                                <div className="text-[11px]" style={textMutedStyle}>
+                                  Declared held: {row.dayReport.declaredHeldCount} · TZS{' '}
+                                  {fmt(row.dayReport.declaredHeldAmount)}
+                                </div>
+                                <div className="text-[11px]" style={textMutedStyle}>
+                                  by {row.dayReport.repName} at {fmtTime(row.dayReport.submittedAt)}
+                                  {(row.dayReport.repCount ?? 1) > 1
+                                    ? ` · latest close per cashier summed (${row.dayReport.reportCount} filed)`
+                                    : row.dayReport.reportCount > 1
+                                      ? ` · latest of ${row.dayReport.reportCount} closes`
+                                      : ''}
+                                </div>
+                                {row.businessDayExpectedTotal != null &&
+                                  row.businessDayExpectedTotal !== row.expectedTotal && (
+                                    <div className="text-[11px]" style={textMutedStyle}>
+                                      Business-day expected: TZS {fmt(row.businessDayExpectedTotal)}
+                                    </div>
+                                  )}
+                              </>
+                            ) : row.kind === 'TERMINAL' ? (
+                              <span
+                                className="italic"
+                                style={{ color: 'var(--aurora-warning-text)' }}
+                              >
+                                no terminal close filed
+                              </span>
+                            ) : (
+                              <span className="italic" style={textMutedStyle}>
+                                counted at branch close
+                              </span>
+                            )}
+                          </Td>
+                          <Td
+                            align="right"
+                            mono
+                            strong
+                            tone={
+                              reportDelta == null
+                                ? 'muted'
+                                : isBalanced(reportDelta)
+                                  ? 'success'
+                                  : reportDelta < 0
+                                    ? 'danger'
+                                    : 'warning'
+                            }
+                          >
+                            {reportDelta == null ? '-' : fmtSigned(reportDelta)}
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={tableHeadStyle}>
+                      <Td strong colSpan={2}>
+                        Totals
+                      </Td>
+                      <Td align="right" mono strong>
+                        {terminalRows.reduce((s, row) => s + row.salesCount, 0)}
+                      </Td>
+                      <Td>{''}</Td>
+                      <Td align="right" mono strong>
+                        {fmt(terminalRows.reduce((s, row) => s + row.expectedTotal, 0))}
+                      </Td>
+                      <Td>
+                        <span className="text-[11px]" style={textMutedStyle}>
+                          Declared held total: TZS{' '}
+                          {fmt(
+                            terminalRows.reduce(
+                              (s, row) => s + (row.dayReport?.declaredHeldAmount ?? 0),
+                              0,
+                            ),
+                          )}
+                        </span>
+                      </Td>
+                      <Td>{''}</Td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div
+                className="border-t px-4 py-2 text-xs"
+                style={{ ...borderStyle, ...textMutedStyle }}
+              >
+                Expected figures reuse this close&apos;s day window, so the till rows always sum to
+                the method reconciliation above. A terminal&apos;s reported total and declared held
+                cash come from its own close — a close covers the terminal&apos;s business day
+                (midnight to midnight, East Africa Time), which is not always this close&apos;s
+                window — so the reported-vs-expected delta compares the close against expected
+                receipts over that same business-day window, and the figures are shown beside the
+                expected column, never folded into it. When a till closed more than once, the latest
+                close per cashier is summed so a shift handover&apos;s first shift is never dropped.
+              </div>
+            </Card>
+          )}
+
           <Card className="overflow-hidden p-0">
             <div
               className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3"
@@ -1513,12 +1793,15 @@ export default function DailyClosePage() {
               <div className="text-xs" style={textMutedStyle}>
                 {data.savedClose ? (
                   <span>
-                    Close saved by <span className="font-semibold">{data.savedClose.closedByName}</span>{' '}
-                    on {new Date(data.savedClose.closedAt).toLocaleString('en-GB')} — saving again
+                    Close saved by{' '}
+                    <span className="font-semibold">{data.savedClose.closedByName}</span> on{' '}
+                    {new Date(data.savedClose.closedAt).toLocaleString('en-GB')} — saving again
                     replaces it.
                   </span>
                 ) : (
-                  <span>Nothing saved yet for this date — counts are lost on reload until saved.</span>
+                  <span>
+                    Nothing saved yet for this date — counts are lost on reload until saved.
+                  </span>
                 )}
               </div>
               {canSaveClose && (
@@ -1527,7 +1810,11 @@ export default function DailyClosePage() {
                   onClick={() => void saveClose()}
                   disabled={savingClose || invalidCountedCount > 0 || countedMethodCount === 0}
                 >
-                  {savingClose ? 'Saving...' : data.savedClose ? 'Save Close Again' : 'Save & Sign Off Close'}
+                  {savingClose
+                    ? 'Saving...'
+                    : data.savedClose
+                      ? 'Save Close Again'
+                      : 'Save & Sign Off Close'}
                 </Btn>
               )}
             </div>

@@ -35,6 +35,11 @@ interface NormalizedReport {
   summary?: Record<string, unknown>;
   generatedAt?: string;
   scope?: ReportScope;
+  /**
+   * Honesty note the report must carry everywhere its numbers go (screen,
+   * print, CSV/PDF/Excel): row caps, scan caps, missing-cost disclosures.
+   */
+  notice?: string;
 }
 
 const REPORTS: ReportDef[] = [
@@ -270,6 +275,37 @@ const REPORTS: ReportDef[] = [
     ],
   },
   {
+    key: 'undelivered-confirmed-orders',
+    title: 'Undelivered Confirmed Orders',
+    description:
+      'Revenue cutoff exposure: confirmed credit orders whose delivery notes do not fully cover the ordered quantities as of the To date.',
+    endpoint: '/api/backend/westsides/reports/undelivered-confirmed-orders',
+    category: 'Controls',
+    columns: [
+      'orderDate',
+      'salesOrderNumber',
+      'customerName',
+      'customerCode',
+      'deliveryState',
+      'daysSinceOrder',
+      'orderedQuantity',
+      'deliveredQuantity',
+      'undeliveredQuantity',
+      'inTransitQuantity',
+      'coveragePercent',
+      'undeliveredRevenue',
+      'undeliveredCost',
+      'undeliveredGrossProfit',
+      'cogsMissing',
+      'netRevenue',
+      'cogsAmount',
+      'grossProfit',
+      'outstandingAmount',
+      'paymentStatus',
+      'deliveryNoteRefs',
+    ],
+  },
+  {
     key: 'batch-status',
     title: 'Batch Status',
     description: 'Batch stock, expiry, and remaining quantity.',
@@ -428,6 +464,84 @@ function normalizePayload(payload: unknown, report: ReportDef): NormalizedReport
       raw,
       summary: close.totals as Record<string, unknown> | undefined,
       generatedAt: close.generatedAt as string | undefined,
+    };
+  }
+
+  if (
+    report.key === 'undelivered-confirmed-orders' &&
+    raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw)
+  ) {
+    const cutoff = raw as Record<string, unknown>;
+    const sourceRows = Array.isArray(cutoff.rows) ? (cutoff.rows as Record<string, unknown>[]) : [];
+    // The exposure fields are renamed to money-suffixed keys so MONEY_RE picks
+    // them up, and the delivery-note objects are flattened to a readable
+    // reference list for the table and the CSV/PDF/Excel exports. The raw
+    // payload (JSON export) keeps the backend field names.
+    const rows = sourceRows.map((row) => {
+      const {
+        netRevenueExposure,
+        cogsExposure,
+        grossProfitExposure,
+        coverageRatio,
+        deliveryNotes,
+        ...rest
+      } = row;
+      return {
+        ...rest,
+        coveragePercent: Math.round(toNumber(coverageRatio) * 1000) / 10,
+        undeliveredRevenue: netRevenueExposure,
+        undeliveredCost: cogsExposure,
+        undeliveredGrossProfit: grossProfitExposure,
+        deliveryNoteRefs: Array.isArray(deliveryNotes)
+          ? (deliveryNotes as Record<string, unknown>[])
+              .map(
+                (note) =>
+                  `${note.deliveryNoteNumber ?? note.id} (${String(note.status ?? '').replace(/_/g, ' ')})`,
+              )
+              .join('; ')
+          : '',
+      };
+    });
+    const totals = (cutoff.totals ?? {}) as Record<string, unknown>;
+    // The backend's honesty flags must survive normalization: a document
+    // whose summary covers more orders than its row section, or whose totals
+    // cover only a capped scan, has to say so on the document itself.
+    const notices: string[] = [];
+    if (cutoff.truncated === true) {
+      notices.push(
+        `Showing the ${formatNumber(cutoff.rowCap)} largest exposures of ${formatNumber(
+          totals.orderCount,
+        )} flagged orders; the summary totals cover all flagged orders.`,
+      );
+    }
+    if (cutoff.scanTruncated === true) {
+      notices.push(
+        `Order scan stopped at the ${formatNumber(
+          cutoff.scanCap,
+        )}-candidate cap - totals cover only the scanned orders and are incomplete.`,
+      );
+    }
+    if (toNumber(totals.ordersMissingCost) > 0) {
+      const missing = toNumber(totals.ordersMissingCost);
+      notices.push(
+        `${formatNumber(missing)} flagged order${missing === 1 ? ' has' : 's have'} stock lines with no snapshotted cost (COGS): their cost exposure is understated and gross-profit exposure overstated.`,
+      );
+    }
+    return {
+      rows,
+      raw,
+      summary: {
+        orderCount: totals.orderCount,
+        undeliveredRevenue: totals.netRevenueExposure,
+        undeliveredCost: totals.cogsExposure,
+        undeliveredGrossProfit: totals.grossProfitExposure,
+        undeliveredQuantity: totals.undeliveredQuantity,
+        orderedQuantity: totals.orderedQuantity,
+      },
+      generatedAt: cutoff.generatedAt as string | undefined,
+      notice: notices.length > 0 ? notices.join(' ') : undefined,
     };
   }
 
@@ -914,6 +1028,8 @@ export default function WestsideReportsPage() {
       columns.map(csvEscape).join(','),
       ...reportResult.rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
     ];
+    // The honesty note travels with the file, not just the screen.
+    if (reportResult.notice) lines.push('', csvEscape(`Note: ${reportResult.notice}`));
     downloadText(`${reportFilename(activeReport)}.csv`, 'text/csv;charset=utf-8', lines.join('\n'));
   }
 
@@ -930,16 +1046,19 @@ export default function WestsideReportsPage() {
         rows: reportResult.rows.map((row) =>
           columns.map((column) => formatValue(column, row[column])),
         ),
-        meta: scope?.dailyClose
-          ? [
-              { label: 'Mode', value: 'Daily close' },
-              { label: 'Date', value: scope.date },
-            ]
-          : [
-              { label: 'Mode', value: 'Range' },
-              { label: 'Date From', value: scope?.dateFrom || 'Open' },
-              { label: 'Date To', value: scope?.dateTo || 'Open' },
-            ],
+        meta: [
+          ...(scope?.dailyClose
+            ? [
+                { label: 'Mode', value: 'Daily close' },
+                { label: 'Date', value: scope.date },
+              ]
+            : [
+                { label: 'Mode', value: 'Range' },
+                { label: 'Date From', value: scope?.dateFrom || 'Open' },
+                { label: 'Date To', value: scope?.dateTo || 'Open' },
+              ]),
+          ...(reportResult.notice ? [{ label: 'Note', value: reportResult.notice }] : []),
+        ],
         numericColumns: columns.flatMap((column, index) => (MONEY_RE.test(column) ? [index] : [])),
         baseName: reportFilename(activeReport),
       });
@@ -982,6 +1101,7 @@ export default function WestsideReportsPage() {
       <h3>${escapeHtml(activeReport.title)}</h3>
       <p>${escapeHtml(currentBranchLabel ?? 'All branches')} | ${escapeHtml(dateFrom || 'Open')} to ${escapeHtml(dateTo || 'Open')}</p>
       <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+      ${reportResult.notice ? `<p>Note: ${escapeHtml(reportResult.notice)}</p>` : ''}
     </body></html>`;
     downloadText(`${reportFilename(activeReport)}.xls`, 'application/vnd.ms-excel', html);
   }
@@ -1016,11 +1136,13 @@ export default function WestsideReportsPage() {
             >
               {categories.map((category) => (
                 <optgroup key={category} label={category}>
-                  {NON_INVENTORY_REPORTS.filter((report) => report.category === category).map((report) => (
-                    <option key={report.key} value={report.key}>
-                      {report.title}
-                    </option>
-                  ))}
+                  {NON_INVENTORY_REPORTS.filter((report) => report.category === category).map(
+                    (report) => (
+                      <option key={report.key} value={report.key}>
+                        {report.title}
+                      </option>
+                    ),
+                  )}
                 </optgroup>
               ))}
             </select>
@@ -1264,6 +1386,16 @@ export default function WestsideReportsPage() {
                 </div>
               ))}
             </div>
+            {reportResult.notice && (
+              // Deliberately NOT `no-print`: the caveat must sit on the
+              // printed document next to the totals it qualifies.
+              <div
+                className="mx-5 mb-4 rounded-lg border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-sm"
+                style={{ color: 'var(--aurora-text)' }}
+              >
+                {reportResult.notice}
+              </div>
+            )}
             <ReportTable rows={reportResult.rows} report={activeReport} />
           </>
         )}

@@ -11,6 +11,7 @@ import {
   AccountingControlService,
   AccountResolverService,
   CompanyScopeService,
+  assertCashAccountScopeCompatible,
 } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService, PostingLine } from '../accounting-engine/posting-engine.service';
@@ -395,10 +396,10 @@ export class ExpensesService {
       let journalEntryId = locked.journalEntryId;
 
       if (!journalEntryId) {
-        const { expenseAccountId, apAccountId, grossCents } = await this.resolveAccrualPosting(
-          tx,
-          { ...existing, amount: locked.amount },
-        );
+        const { expenseAccountId, apAccountId, grossCents } = await this.resolveAccrualPosting(tx, {
+          ...existing,
+          amount: locked.amount,
+        });
 
         // Full (gross) amount to the expense account. No input-VAT split until the
         // Expense model persists tax columns (see resolveAccrualPosting note).
@@ -598,9 +599,7 @@ export class ExpensesService {
       // double-click blocks on this row lock until the winner commits, then
       // re-checks the COMMITTED status under the lock and no-ops instead of
       // double-posting DR AP / CR Cash and double-decrementing cash.
-      const [locked] = await tx.$queryRaw<
-        Array<{ status: string }>
-      >`SELECT "status"
+      const [locked] = await tx.$queryRaw<Array<{ status: string }>>`SELECT "status"
         FROM "expenses"
         WHERE "id" = ${id} AND "companyId" = ${existing.companyId} AND "deletedAt" IS NULL
         FOR UPDATE`;
@@ -628,6 +627,18 @@ export class ExpensesService {
           `Select an active ${existing.currency} cash or bank account for this expense company`,
         );
       }
+
+      // Branch custody guard (shared with sales-orders/customer-payments):
+      // when the expense is scoped to a division/branch, the paying account
+      // must not be scoped to a DIFFERENT one — paying one branch's expense
+      // out of another branch's drawer corrupts both branches' daily-close
+      // balances. Lenient: unscoped (NULL-branch) accounts and unscoped
+      // expenses keep the historical behaviour; BANK accounts may serve the
+      // whole company.
+      assertCashAccountScopeCompatible(cashAccount, {
+        divisionId: existing.divisionId,
+        branchId: existing.branchId,
+      });
 
       const cashLedgerAccountId = await this.resolveCashLedgerAccountId(
         tx,

@@ -12,7 +12,12 @@ import { InventoryMovementsService } from '../inventory-movements/inventory-move
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
-import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
+import {
+  AccountResolverService,
+  AccountRole,
+  CompanyScopeService,
+  assertCashAccountForScope,
+} from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateSalesOrderDto, SalesOrderLineDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
@@ -583,10 +588,7 @@ export class SalesOrdersService {
       SalesOrderStatus.PARTIALLY_PAID,
       SalesOrderStatus.PAID,
     ];
-    const deadStatuses: SalesOrderStatus[] = [
-      SalesOrderStatus.CANCELLED,
-      SalesOrderStatus.VOIDED,
-    ];
+    const deadStatuses: SalesOrderStatus[] = [SalesOrderStatus.CANCELLED, SalesOrderStatus.VOIDED];
     // Live = everything except CANCELLED/VOIDED. Reused for every money rollup
     // and the count predicates below so the exclusion stays consistent.
     const liveWhere = { ...where, status: { notIn: deadStatuses } };
@@ -618,9 +620,7 @@ export class SalesOrdersService {
       }),
     ]);
 
-    const countByStatus = new Map(
-      statusGroups.map((group) => [group.status, group._count._all]),
-    );
+    const countByStatus = new Map(statusGroups.map((group) => [group.status, group._count._all]));
     const sumStatuses = (statuses: SalesOrderStatus[]) =>
       statuses.reduce((sum, status) => sum + (countByStatus.get(status) ?? 0), 0);
     const totalOrders = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
@@ -680,8 +680,9 @@ export class SalesOrdersService {
       );
       const day = dateKey(order.orderDate) ?? 'unknown-date';
       const manualName = normalizeCustomerName(order.customerName);
-      const customerName = order.customer?.name
-        ?? (manualName && !isGenericWalkInName(manualName) ? manualName : 'Walk-in Customer');
+      const customerName =
+        order.customer?.name ??
+        (manualName && !isGenericWalkInName(manualName) ? manualName : 'Walk-in Customer');
       const customerKey = order.customerId
         ? `customer:${order.customerId}`
         : `manual:${customerName.toLowerCase()}`;
@@ -865,12 +866,24 @@ export class SalesOrdersService {
         },
         proformaInvoices: {
           where: { deletedAt: null },
-          select: { id: true, proformaNumber: true, status: true, totalAmount: true, createdAt: true },
+          select: {
+            id: true,
+            proformaNumber: true,
+            status: true,
+            totalAmount: true,
+            createdAt: true,
+          },
           orderBy: { createdAt: 'desc' },
         },
         quotations: {
           where: { deletedAt: null },
-          select: { id: true, quotationNumber: true, status: true, totalAmount: true, createdAt: true },
+          select: {
+            id: true,
+            quotationNumber: true,
+            status: true,
+            totalAmount: true,
+            createdAt: true,
+          },
           orderBy: { createdAt: 'desc' },
         },
       },
@@ -966,7 +979,9 @@ export class SalesOrdersService {
             include: {
               lines: {
                 include: {
-                  account: { select: { id: true, accountCode: true, accountName: true, accountType: true } },
+                  account: {
+                    select: { id: true, accountCode: true, accountName: true, accountType: true },
+                  },
                 },
               },
               createdBy: { select: { id: true, fullName: true } },
@@ -983,7 +998,9 @@ export class SalesOrdersService {
             include: {
               lines: {
                 include: {
-                  account: { select: { id: true, accountCode: true, accountName: true, accountType: true } },
+                  account: {
+                    select: { id: true, accountCode: true, accountName: true, accountType: true },
+                  },
                 },
               },
               createdBy: { select: { id: true, fullName: true } },
@@ -1001,7 +1018,12 @@ export class SalesOrdersService {
                   lines: {
                     include: {
                       account: {
-                        select: { id: true, accountCode: true, accountName: true, accountType: true },
+                        select: {
+                          id: true,
+                          accountCode: true,
+                          accountName: true,
+                          accountType: true,
+                        },
                       },
                     },
                   },
@@ -1023,7 +1045,12 @@ export class SalesOrdersService {
                   lines: {
                     include: {
                       account: {
-                        select: { id: true, accountCode: true, accountName: true, accountType: true },
+                        select: {
+                          id: true,
+                          accountCode: true,
+                          accountName: true,
+                          accountType: true,
+                        },
                       },
                     },
                   },
@@ -1076,8 +1103,8 @@ export class SalesOrdersService {
           : statuses.some((status) => ['DELIVERED', 'CLOSED'].includes(status))
             ? 'DELIVERED'
             : statuses.some((status) =>
-                ['DISPATCHED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT'].includes(status),
-              )
+                  ['DISPATCHED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT'].includes(status),
+                )
               ? 'IN_PROGRESS'
               : 'OPEN';
 
@@ -1088,7 +1115,10 @@ export class SalesOrdersService {
         deliveryNoteCount: order.deliveryNotes.length,
         inventoryMovementCount: inventoryMovements.length,
         issuedQuantity: roundMoney(
-          inventoryMovements.reduce((sum, movement) => sum + Math.abs(moneyValue(movement.quantity)), 0),
+          inventoryMovements.reduce(
+            (sum, movement) => sum + Math.abs(moneyValue(movement.quantity)),
+            0,
+          ),
         ),
       },
       deliveryNotes: order.deliveryNotes,
@@ -1101,7 +1131,10 @@ export class SalesOrdersService {
     const lines = order.lines.map((line) => {
       const revenueExTax = moneyValue(line.lineTotal) - moneyValue(line.taxAmount);
       const cogs = moneyValue(line.cogsAmount);
-      const grossProfit = line.grossProfitAmount == null ? roundMoney(revenueExTax - cogs) : moneyValue(line.grossProfitAmount);
+      const grossProfit =
+        line.grossProfitAmount == null
+          ? roundMoney(revenueExTax - cogs)
+          : moneyValue(line.grossProfitAmount);
       return {
         id: line.id,
         product: line.product,
@@ -1121,7 +1154,9 @@ export class SalesOrdersService {
       };
     });
     const revenueExTax = roundMoney(lines.reduce((sum, line) => sum + line.revenueExTax, 0));
-    const cogsAmount = roundMoney(lines.reduce((sum, line) => sum + moneyValue(line.cogsAmount), 0));
+    const cogsAmount = roundMoney(
+      lines.reduce((sum, line) => sum + moneyValue(line.cogsAmount), 0),
+    );
     const grossProfitAmount = roundMoney(
       lines.reduce((sum, line) => sum + line.computedGrossProfit, 0),
     );
@@ -1132,8 +1167,7 @@ export class SalesOrdersService {
         revenueExTax,
         cogsAmount,
         grossProfitAmount,
-        grossMarginPct:
-          revenueExTax > 0 ? roundMoney((grossProfitAmount / revenueExTax) * 100) : 0,
+        grossMarginPct: revenueExTax > 0 ? roundMoney((grossProfitAmount / revenueExTax) * 100) : 0,
         lineCount: lines.length,
       },
       lines,
@@ -1557,11 +1591,7 @@ export class SalesOrdersService {
     });
   }
 
-  async create(
-    dto: CreateSalesOrderDto,
-    user: AuthUser,
-    context: SalesOrderCreateContext = {},
-  ) {
+  async create(dto: CreateSalesOrderDto, user: AuthUser, context: SalesOrderCreateContext = {}) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
     const cashAccountId =
@@ -1738,7 +1768,9 @@ export class SalesOrdersService {
           quantity,
           unitPrice: Number(line.unitPrice ?? 0),
           discountAmount:
-            quantity > 0 ? Number(line.discountAmount ?? 0) / quantity : Number(line.discountAmount ?? 0),
+            quantity > 0
+              ? Number(line.discountAmount ?? 0) / quantity
+              : Number(line.discountAmount ?? 0),
           taxAmount: Number(line.taxAmount ?? 0),
         };
       });
@@ -1945,38 +1977,20 @@ export class SalesOrdersService {
     }
 
     if (refs.cashAccountId) {
-      const cashAccount = await this.prisma.cashAccount.findFirst({
-        where: { id: refs.cashAccountId, deletedAt: null, isActive: true },
-        select: { companyId: true, divisionId: true, branchId: true, accountType: true },
+      // Company + payment-method-type + division/branch custody guard, shared
+      // with the other cash-receiving modules (cash-account-scope.helper.ts).
+      // Sales orders use STRICT mode: a non-BANK receipt account must match
+      // the order's division AND branch exactly (BANK accounts may be
+      // company-wide). Behaviour and error wording are unchanged — this block
+      // is where the shared guard was extracted FROM.
+      await assertCashAccountForScope(this.prisma, {
+        cashAccountId: refs.cashAccountId,
+        companyId,
+        divisionId: refs.divisionId ?? null,
+        branchId: refs.branchId ?? null,
+        allowedTypes: accountTypesForPaymentMethod(refs.paymentMethod),
+        requireScopeForNonBank: true,
       });
-      if (!cashAccount || cashAccount.companyId !== companyId) {
-        throw new BadRequestException('Cash account does not belong to this company');
-      }
-
-      const allowedTypes = accountTypesForPaymentMethod(refs.paymentMethod);
-      if (allowedTypes.length && !allowedTypes.includes(cashAccount.accountType)) {
-        throw new BadRequestException('Cash account type does not match payment method');
-      }
-
-      if (cashAccount.accountType === CashAccountType.BANK) {
-        if (
-          cashAccount.divisionId &&
-          refs.divisionId &&
-          cashAccount.divisionId !== refs.divisionId
-        ) {
-          throw new BadRequestException('Bank account does not belong to the selected division');
-        }
-        if (cashAccount.branchId && refs.branchId && cashAccount.branchId !== refs.branchId) {
-          throw new BadRequestException('Bank account does not belong to the selected branch');
-        }
-      } else {
-        if (!refs.divisionId || cashAccount.divisionId !== refs.divisionId) {
-          throw new BadRequestException('Cash account does not belong to the selected division');
-        }
-        if (!refs.branchId || cashAccount.branchId !== refs.branchId) {
-          throw new BadRequestException('Cash account does not belong to the selected branch');
-        }
-      }
     }
 
     await this.assertLineReferencesBelongToCompany(companyId, refs.lines, refs.branchId);
@@ -2353,6 +2367,27 @@ export class SalesOrdersService {
     });
   }
 
+  /**
+   * ACCOUNTING POLICY — revenue is recognised at CONFIRMATION, in this one JE.
+   *
+   * Revenue, COGS and output VAT all post here, atomically with confirm():
+   *   DR AR|Cash / CR Sales revenue, CR VAT payable; DR COGS / CR Inventory.
+   * Confirmation is the Tanzanian tax point (the fiscal invoice/receipt is
+   * issued at confirm, and tax-auto-apply mirrors the line VAT into the filing
+   * ledger in the same transaction), and stock physically issues at confirm
+   * (SALE_ISSUE movements). Delivery notes are documentary only —
+   * DeliveryNotesService is deliberately inventory- and ledger-inert (a
+   * source-level spec asserts this).
+   *
+   * The cutoff exposure this creates — confirmed-but-undelivered orders carry
+   * recognised revenue — is monitored rather than deferred: the undelivered
+   * confirmed-orders report (the awaiting-delivery predicate in
+   * westsides-dashboard.service.ts, `deliveryNotes: { none: ... }` over open
+   * confirmed orders) is the exposure monitor to check at period close. Do not
+   * move recognition to the delivery event without revisiting the VAT tax
+   * point, every reversal path (cancel, credit notes), and the delivery-note
+   * inertness spec.
+   */
   private async postSalesOrderLedger(input: {
     order: {
       id: string;
@@ -2468,7 +2503,13 @@ export class SalesOrdersService {
    */
   private async reverseSalesOrderJournal(
     tx: Prisma.TransactionClient,
-    order: { id: string; companyId: string; salesOrderNumber: string; journalEntryId?: string | null; orderDate: Date },
+    order: {
+      id: string;
+      companyId: string;
+      salesOrderNumber: string;
+      journalEntryId?: string | null;
+      orderDate: Date;
+    },
     userId: string,
   ): Promise<{ id: string; journalNumber: string } | null> {
     const original = order.journalEntryId

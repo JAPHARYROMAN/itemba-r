@@ -1093,3 +1093,273 @@ describe('ExternalPaymentsService reverse → mirror unwind', () => {
     expect(data.currentBalance.decrement.toString()).toBe('500');
   });
 });
+
+// ── branch-aware receiving-account resolution (shared cash-account-scope helper) ─
+
+/**
+ * Replace the harness's scope-blind cashAccount.findFirst with one that
+ * actually interprets the where clause over a roster (companyId, currency,
+ * accountType.in, branchId, divisionId, OR — oldest createdAt first), and
+ * capture updateMany calls, so tier ordering and never-cross-branch behaviour
+ * are exercised against real filter semantics.
+ */
+function armCashAccountRoster(tx: any, roster: any[]) {
+  const matches = (row: any, where: any): boolean => {
+    if (where.companyId && row.companyId !== where.companyId) return false;
+    if (where.currency && row.currency !== where.currency) return false;
+    if (where.accountType?.in && !where.accountType.in.includes(row.accountType)) return false;
+    if ('branchId' in where && row.branchId !== where.branchId) return false;
+    if ('divisionId' in where && row.divisionId !== where.divisionId) return false;
+    if (where.OR && !where.OR.some((clause: any) => matches(row, clause))) return false;
+    return true;
+  };
+  tx.cashAccount.findFirst = jest.fn(async ({ where }: any) => {
+    const hit = roster
+      .filter((row) => matches(row, where))
+      .sort((a, b) => a.createdAt - b.createdAt)[0];
+    return hit ? { ...hit } : null;
+  });
+  tx.cashAccount.updateMany = jest.fn(async () => ({ count: 1 }));
+}
+
+function rosterAccount(overrides: Record<string, any> = {}) {
+  return {
+    id: 'cash-x',
+    companyId: 'company-1',
+    accountType: 'MOBILE_MONEY',
+    accountName: 'Float',
+    currency: 'TZS',
+    divisionId: null,
+    branchId: null,
+    createdAt: 1,
+    ...overrides,
+  };
+}
+
+describe('ExternalPaymentsService branch-aware receiving-account resolution', () => {
+  const scopedPayment = (overrides: Record<string, any> = {}) => ({
+    id: 'pay-br',
+    paymentNumber: 'PAY-BR',
+    companyId: 'company-1',
+    amount: new Prisma.Decimal(300),
+    currency: 'TZS',
+    paymentMethod: 'MOBILE_MONEY',
+    paymentContextType: ExternalPaymentContext.RECEIVABLE,
+    paymentContextId: 'rec-br',
+    status: ExternalPaymentStatus.INITIATED,
+    confirmedById: null,
+    initiatedById: null,
+    confirmedAt: null,
+    payerName: 'Mwanza Walk-in',
+    ...overrides,
+  });
+  const mwanzaReceivable = (overrides: Record<string, any> = {}) => ({
+    id: 'rec-br',
+    companyId: 'company-1',
+    divisionId: 'division-1',
+    branchId: 'branch-mwanza',
+    customerId: 'cust-mw',
+    customerName: 'Mwanza Customer',
+    outstandingAmount: new Prisma.Decimal(300),
+    paidAmount: new Prisma.Decimal(0),
+    status: 'OPEN',
+    currency: 'TZS',
+    sourceType: null,
+    sourceId: null,
+    ...overrides,
+  });
+
+  it("prefers the receivable's branch account over the company's OLDER cross-branch account", async () => {
+    const { prisma, tx, state } = makeFinanceHarness({
+      payment: scopedPayment(),
+      receivable: mwanzaReceivable(),
+      fallbackUserId: 'user-sys',
+    });
+    armCashAccountRoster(tx, [
+      // The company's oldest float belongs to Kariakoo — the pre-fix
+      // resolution (company-wide oldest-first) would have bumped it, giving
+      // Kariakoo a phantom surplus at that night's close.
+      rosterAccount({
+        id: 'kariakoo-float',
+        divisionId: 'division-1',
+        branchId: 'branch-kariakoo',
+        createdAt: 1,
+      }),
+      rosterAccount({
+        id: 'mwanza-float',
+        divisionId: 'division-1',
+        branchId: 'branch-mwanza',
+        createdAt: 2,
+      }),
+    ]);
+    const { service, postingEngine, accountResolver } = makeService({ prisma });
+    wireResolver(accountResolver);
+    postingEngine.postLines.mockResolvedValue({ id: 'je-br', journalNumber: 'JE-BR' });
+
+    await service.confirmForCompany('pay-br', 'actor-1', 'company-1');
+
+    expect(state.payment.status).toBe(ExternalPaymentStatus.SUCCESS);
+    // The Mwanza float was stamped and bumped — not the older Kariakoo one.
+    expect(state.payment.receivingCashAccountId).toBe('mwanza-float');
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.cashAccount.updateMany.mock.calls[0][0].where.id).toBe('mwanza-float');
+  });
+
+  it('falls back to an unscoped company account — never a different branch — when the branch has none', async () => {
+    const { prisma, tx, state } = makeFinanceHarness({
+      payment: scopedPayment(),
+      receivable: mwanzaReceivable(),
+      fallbackUserId: 'user-sys',
+    });
+    armCashAccountRoster(tx, [
+      rosterAccount({
+        id: 'kariakoo-float',
+        divisionId: 'division-1',
+        branchId: 'branch-kariakoo',
+        createdAt: 1,
+      }),
+      rosterAccount({ id: 'company-float', divisionId: null, branchId: null, createdAt: 3 }),
+    ]);
+    const { service, postingEngine, accountResolver } = makeService({ prisma });
+    wireResolver(accountResolver);
+    postingEngine.postLines.mockResolvedValue({ id: 'je-br', journalNumber: 'JE-BR' });
+
+    await service.confirmForCompany('pay-br', 'actor-1', 'company-1');
+
+    expect(state.payment.receivingCashAccountId).toBe('company-float');
+    // Every issued query constrained branchId to the context branch or NULL.
+    for (const call of (tx.cashAccount.findFirst as jest.Mock).mock.calls) {
+      expect(['branch-mwanza', null]).toContain(call[0].where.branchId);
+    }
+  });
+
+  it('bumps NO balance cache when only cross-branch accounts exist (GL still posts by method role)', async () => {
+    const { prisma, tx, state } = makeFinanceHarness({
+      payment: scopedPayment(),
+      receivable: mwanzaReceivable(),
+      fallbackUserId: 'user-sys',
+    });
+    armCashAccountRoster(tx, [
+      rosterAccount({
+        id: 'kariakoo-float',
+        divisionId: 'division-1',
+        branchId: 'branch-kariakoo',
+        createdAt: 1,
+      }),
+    ]);
+    const { service, postingEngine, accountResolver } = makeService({ prisma });
+    wireResolver(accountResolver);
+    postingEngine.postLines.mockResolvedValue({ id: 'je-br', journalNumber: 'JE-BR' });
+
+    await service.confirmForCompany('pay-br', 'actor-1', 'company-1');
+
+    // Confirm still lands and the GL cash leg still posts (by method role)…
+    expect(state.payment.status).toBe(ExternalPaymentStatus.SUCCESS);
+    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
+    // …but no cross-branch cache was silently inflated.
+    expect(state.payment.receivingCashAccountId).toBeUndefined();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps the legacy company-wide oldest-first behaviour for a standalone payment (no receivable)', async () => {
+    const { prisma, tx, state } = makeFinanceHarness({
+      payment: scopedPayment({
+        paymentContextType: ExternalPaymentContext.GENERAL,
+        paymentContextId: null,
+      }),
+      receivable: undefined,
+      fallbackUserId: 'user-sys',
+    });
+    armCashAccountRoster(tx, [
+      rosterAccount({
+        id: 'kariakoo-float',
+        divisionId: 'division-1',
+        branchId: 'branch-kariakoo',
+        createdAt: 1,
+      }),
+      rosterAccount({ id: 'company-float', divisionId: null, branchId: null, createdAt: 3 }),
+    ]);
+    const { service, postingEngine, accountResolver } = makeService({ prisma });
+    wireResolver(accountResolver);
+    postingEngine.postLines.mockResolvedValue({ id: 'je-br', journalNumber: 'JE-BR' });
+
+    await service.confirmForCompany('pay-br', 'actor-1', 'company-1');
+
+    // No branch context — oldest company-wide account wins, exactly as before…
+    expect(state.payment.receivingCashAccountId).toBe('kariakoo-float');
+    // …because no query carried a branch constraint at all.
+    for (const call of (tx.cashAccount.findFirst as jest.Mock).mock.calls) {
+      expect('branchId' in call[0].where).toBe(false);
+    }
+  });
+
+  it('reverse of an unstamped row re-resolves with the SAME branch context confirm now uses', async () => {
+    // A SUCCESS row with a confirmation JE but no receivingCashAccountId stamp
+    // (legacy). The best-effort fallback must re-resolve branch-aware, exactly
+    // like the confirm path, so the decrement lands on the branch float.
+    const { prisma, tx, state } = makeFinanceHarness({
+      payment: scopedPayment({
+        status: ExternalPaymentStatus.SUCCESS,
+        confirmedById: 'user-1',
+        confirmedAt: new Date(),
+        receivingCashAccountId: null,
+      }),
+      receivable: mwanzaReceivable({
+        outstandingAmount: new Prisma.Decimal(0),
+        paidAmount: new Prisma.Decimal(300),
+        status: 'PAID',
+      }),
+      fallbackUserId: 'user-sys',
+    });
+    state.journalEntries.push({
+      id: 'je-old',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-mwanza',
+      status: 'POSTED',
+      lines: [
+        {
+          accountId: CASH_ACCT.id,
+          debit: new Prisma.Decimal(300),
+          credit: new Prisma.Decimal(0),
+          description: 'External payment PAY-BR received (MOBILE_MONEY)',
+          divisionId: 'division-1',
+          branchId: 'branch-mwanza',
+        },
+        {
+          accountId: AR_ACCT.id,
+          debit: new Prisma.Decimal(0),
+          credit: new Prisma.Decimal(300),
+          description: 'Settle receivable: Mwanza Customer',
+          divisionId: 'division-1',
+          branchId: 'branch-mwanza',
+        },
+      ],
+    });
+    armCashAccountRoster(tx, [
+      rosterAccount({
+        id: 'kariakoo-float',
+        divisionId: 'division-1',
+        branchId: 'branch-kariakoo',
+        createdAt: 1,
+      }),
+      rosterAccount({
+        id: 'mwanza-float',
+        divisionId: 'division-1',
+        branchId: 'branch-mwanza',
+        createdAt: 2,
+      }),
+    ]);
+    const { service, postingEngine, accountResolver } = makeService({ prisma });
+    wireResolver(accountResolver);
+    postingEngine.postLines.mockResolvedValue({ id: 'je-rev', journalNumber: 'JE-REV' });
+
+    await service.reverseForCompany('pay-br', 'actor-1', 'company-1');
+
+    expect(state.payment.status).toBe(ExternalPaymentStatus.REVERSED);
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledTimes(1);
+    const { where, data } = tx.cashAccount.updateMany.mock.calls[0][0];
+    expect(where.id).toBe('mwanza-float');
+    expect(data.currentBalance.decrement.toString()).toBe('300');
+  });
+});

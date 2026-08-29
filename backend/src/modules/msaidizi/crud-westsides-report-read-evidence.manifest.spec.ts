@@ -9,7 +9,7 @@ describe('manifest-bound Westsides derived-report read evidence', () => {
   const manifest = extractCapabilities(loadAllControllers());
   const byId = new Map(manifest.map((capability) => [capability.id, capability]));
 
-  it('keeps the complete 24-route controller inventory exact', () => {
+  it('keeps the complete 25-route controller inventory exact', () => {
     const liveTargets = manifest
       .filter(
         (capability) =>
@@ -18,8 +18,8 @@ describe('manifest-bound Westsides derived-report read evidence', () => {
       .map((capability) => capability.id)
       .sort();
 
-    expect(CRUD_WESTSIDES_REPORT_READ_TARGETS).toHaveLength(24);
-    expect(new Set(CRUD_WESTSIDES_REPORT_READ_TARGETS).size).toBe(24);
+    expect(CRUD_WESTSIDES_REPORT_READ_TARGETS).toHaveLength(25);
+    expect(new Set(CRUD_WESTSIDES_REPORT_READ_TARGETS).size).toBe(25);
     expect([...CRUD_WESTSIDES_REPORT_READ_TARGETS].sort()).toEqual(liveTargets);
   });
 
@@ -28,9 +28,9 @@ describe('manifest-bound Westsides derived-report read evidence', () => {
 
     expect(pack.packId).toBe('westsides-derived-report-reads');
     expect(pack.packVersion).toBe(2);
-    expect(pack.fixtures).toHaveLength(24);
-    expect(new Set(pack.fixtures.map((fixture) => fixture.fixtureId)).size).toBe(24);
-    expect(new Set(pack.fixtures.map((fixture) => fixture.capabilityId)).size).toBe(24);
+    expect(pack.fixtures).toHaveLength(25);
+    expect(new Set(pack.fixtures.map((fixture) => fixture.fixtureId)).size).toBe(25);
+    expect(new Set(pack.fixtures.map((fixture) => fixture.capabilityId)).size).toBe(25);
 
     for (const fixture of pack.fixtures) {
       const capability = byId.get(fixture.capabilityId)!;
@@ -85,6 +85,6 @@ describe('manifest-bound Westsides derived-report read evidence', () => {
     expect(dailyClose.map((fixture) => fixture.capabilityId)).toEqual([
       'WestsidesReportsController.dailyClose',
     ]);
-    expect(fixtures.filter((fixture) => fixture.requestKind === 'report-range')).toHaveLength(23);
+    expect(fixtures.filter((fixture) => fixture.requestKind === 'report-range')).toHaveLength(24);
   });
 });
