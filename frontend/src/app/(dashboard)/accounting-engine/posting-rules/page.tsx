@@ -147,7 +147,8 @@ export default function PostingRulesPage() {
       setAccounts([]);
       return;
     }
-    fetch(`/api/backend/chart-of-accounts?companyId=${companyId}&limit=500`)
+    // The backend caps chart-of-accounts page size at 200.
+    fetch(`/api/backend/chart-of-accounts?companyId=${companyId}&limit=200`)
       .then((r) => r.json())
       .then((j) => setAccounts(unwrapList<Account>(j)))
       .catch(() => setAccounts([]));
