@@ -637,6 +637,11 @@ const blocker = (
 
 export const CRUD_MUTATION_TZ_BLOCKERS: readonly CrudMutationBlocker[] = Object.freeze([
   blocker(
+    'TaxAutoApplyController.applyExpense',
+    'exact_effect_not_represented',
+    'the feature-flagged recovery action books a dynamically identified ledger row (or none) and has no single exact target effect contract.',
+  ),
+  blocker(
     'TaxAutoApplyController.applyPurchaseOrder',
     'exact_effect_not_represented',
     'the feature-flagged action may create zero-to-many ledger rows and has no single exact target effect contract.',

@@ -1,14 +1,12 @@
 import {
   IsBoolean,
   IsDateString,
-  IsDefined,
   IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Min,
-  ValidateIf,
 } from 'class-validator';
 import { CurrencyCode } from '@prisma/client';
 
@@ -54,15 +52,16 @@ export class CreateExpenseDto {
    * Cross-field rule: REQUIRED whenever `isTaxable` is true — flagging
    * recoverable VAT without assessing it would silently book the gross
    * posting and forfeit the claim (0 means "assessed exempt/zero-rated").
-   * Skipped entirely (optional) when the expense is not taxable. Partial
-   * updates validate the effective post-edit pair in the service, and
-   * approve() re-asserts it from the locked row.
+   *
+   * The pairing rule is deliberately NOT a `@ValidateIf` conditional here: a
+   * conditional validator marks the DTO-derived request schema `partial`,
+   * which would evict ExpensesController.create/update from the msaidizi
+   * strict-manifest inventory. The service owns the rule instead — create()
+   * and update() reject a taxable payload with no assessed tax amount, and
+   * approve() re-asserts the pair from the FOR UPDATE locked row, which stays
+   * the authoritative guard against racing edits.
    */
-  @ValidateIf((dto: CreateExpenseDto) => dto.isTaxable === true || dto.taxAmount != null)
-  @IsDefined({
-    message:
-      'taxAmount is required for a taxable expense (the recoverable input VAT included in the gross; use 0 for an exempt/zero-rated expense)',
-  })
+  @IsOptional()
   @IsNumber()
   @Min(0)
   taxAmount?: number;
