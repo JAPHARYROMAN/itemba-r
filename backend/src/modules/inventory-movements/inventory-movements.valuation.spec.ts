@@ -302,3 +302,80 @@ describe('InventoryMovementsService reserved-stock guard (#25)', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('InventoryMovementsService negative-stock bypass for compensating movements', () => {
+  // A void that unwinds a prior inbound (e.g. a credit-note return restock)
+  // must post its compensating ADJUSTMENT_OUT even when interim sales already
+  // consumed the restocked units — otherwise the reversal (and the whole void
+  // transaction it belongs to) becomes permanently impossible. The bypass is
+  // explicit opt-in per call; nothing changes for ordinary callers.
+  it('allows a compensating ADJUSTMENT_OUT to drive on-hand negative when allowNegativeOnHand is set', async () => {
+    const { service } = makeService();
+    // Restock +3 happened at issue time, then the 3 units were re-sold: on-hand 0.
+    const { tx, updateCalls } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(0),
+        quantityReserved: new Prisma.Decimal(0),
+        averageCost: new Prisma.Decimal(5),
+        totalValue: new Prisma.Decimal(0),
+      }),
+    );
+
+    await service.createMovement({
+      ...base,
+      quantity: 3,
+      movementType: 'ADJUSTMENT_OUT' as InventoryMovementType,
+      allowNegativeOnHand: true,
+      tx,
+    });
+
+    const written = updateCalls[0].data;
+    // The truthful position: the compensated restock never happened, so the
+    // interim sale was the over-issue — on-hand goes negative.
+    expect(Number(written.quantityOnHand)).toBe(-3);
+    // Value is floored at zero once quantity is non-positive.
+    expect(Number(written.totalValue)).toBe(0);
+  });
+
+  it('still blocks the same movement without the flag (guard intact by default)', async () => {
+    const { service } = makeService();
+    const { tx } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(0),
+        averageCost: new Prisma.Decimal(5),
+        totalValue: new Prisma.Decimal(0),
+      }),
+    );
+
+    await expect(
+      service.createMovement({
+        ...base,
+        quantity: 3,
+        movementType: 'ADJUSTMENT_OUT' as InventoryMovementType,
+        tx,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('does not leak allowNegativeOnHand into the persisted movement row', async () => {
+    const { service } = makeService();
+    const { tx } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(0),
+        averageCost: new Prisma.Decimal(5),
+        totalValue: new Prisma.Decimal(0),
+      }),
+    );
+
+    await service.createMovement({
+      ...base,
+      quantity: 3,
+      movementType: 'ADJUSTMENT_OUT' as InventoryMovementType,
+      allowNegativeOnHand: true,
+      tx,
+    });
+
+    const createArgs = (tx.inventoryMovement.create as jest.Mock).mock.calls[0][0];
+    expect(createArgs.data).not.toHaveProperty('allowNegativeOnHand');
+  });
+});

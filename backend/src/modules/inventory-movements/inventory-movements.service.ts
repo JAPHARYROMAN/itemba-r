@@ -205,6 +205,15 @@ export class InventoryMovementsService {
     notes?: string;
     divisionId?: string;
     branchId?: string;
+    /**
+     * Escape hatch for COMPENSATING outbound movements only (e.g. a credit-note
+     * void unwinding a restock after interim sales already consumed the stock).
+     * When true, the outbound movement may drive quantityOnHand below zero —
+     * the physically correct state, since the inbound being compensated never
+     * really happened. Defaults to false; every ordinary caller keeps the
+     * negative-stock guard.
+     */
+    allowNegativeOnHand?: boolean;
     tx?: Prisma.TransactionClient;
   }): Promise<InventoryMovement> {
     this.validateMovementDirection(data.movementType);
@@ -246,7 +255,9 @@ export class InventoryMovementsService {
         },
       });
 
-      await this.applyMovementToBalance(movement, db);
+      await this.applyMovementToBalance(movement, db, {
+        allowNegativeOnHand: data.allowNegativeOnHand,
+      });
       return movement;
     };
 
@@ -273,7 +284,11 @@ export class InventoryMovementsService {
     return movement;
   }
 
-  private async applyMovementToBalance(movement: InventoryMovement, db: Prisma.TransactionClient) {
+  private async applyMovementToBalance(
+    movement: InventoryMovement,
+    db: Prisma.TransactionClient,
+    opts?: { allowNegativeOnHand?: boolean },
+  ) {
     const isInbound = INBOUND_TYPES.includes(movement.movementType);
     const isOutbound = OUTBOUND_TYPES.includes(movement.movementType);
     if (!isInbound && !isOutbound) {
@@ -327,7 +342,14 @@ export class InventoryMovementsService {
     const delta = isInbound ? quantity : -quantity;
     const newQty = currentQty + delta;
 
-    if (isOutbound && newQty < 0) {
+    // Negative-stock guard for all outbound movements. `allowNegativeOnHand`
+    // bypasses it for COMPENSATING movements only: when a void unwinds a prior
+    // inbound (e.g. a credit-note return restock) whose stock was since re-sold,
+    // blocking the unwind would leave the reversal permanently impossible and
+    // strand the GL/subledger in the un-reversed state. Driving on-hand negative
+    // is then the truthful position — the compensated inbound never happened, so
+    // the interim sale was over-issued.
+    if (isOutbound && newQty < 0 && !opts?.allowNegativeOnHand) {
       throw new BadRequestException(
         `Insufficient stock at branch/location ${movement.branchId}: requested ${quantity}, available ${currentQty}`,
       );
