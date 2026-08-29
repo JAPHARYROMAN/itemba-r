@@ -285,6 +285,58 @@ export class ProformaInvoicesService {
     return record;
   }
 
+  async accept(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
+    // Replaying an accept is a no-op success, mirroring convertToSalesOrder's
+    // idempotent replay of an already-converted proforma.
+    if (existing.status === 'ACCEPTED') return existing;
+    // SENT is the only valid pre-state: create() starts every proforma at
+    // DRAFT and send() is the sole DRAFT -> SENT transition, so a customer can
+    // only accept a document that was actually issued to them. (The
+    // ProformaStatus enum has no ISSUED state.)
+    if (existing.status !== 'SENT')
+      throw new BadRequestException('Only SENT proforma invoices can be accepted');
+
+    await this.prisma.$transaction(async (tx) => {
+      // Claim the transition with one conditional write so concurrent accepts
+      // (or a racing convert/cancel) cannot both own SENT -> ACCEPTED.
+      const claim = await tx.proformaInvoice.updateMany({
+        where: {
+          id,
+          companyId: existing.companyId,
+          status: 'SENT' as any,
+          deletedAt: null,
+        },
+        data: { status: 'ACCEPTED' as any },
+      });
+
+      if (claim.count !== 1) {
+        const current = await tx.proformaInvoice.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        // A concurrent accept already landed the same outcome — replay is fine.
+        if (current?.status === 'ACCEPTED') return;
+        throw new BadRequestException('Proforma acceptance state changed; refresh and retry');
+      }
+
+      // The transition and its audit attribution commit together: a failed
+      // append rolls back the claim instead of reporting an unaudited
+      // business mutation as successful.
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'PROFORMA_INVOICE_ACCEPTED',
+        entityType: 'ProformaInvoice',
+        entityId: id,
+        userId: user.id,
+        companyId: existing.companyId,
+        newValue: { status: 'ACCEPTED' } as any,
+      });
+    });
+
+    return this.findOne(id, user);
+  }
+
   async convertToSalesOrder(id: string, user: AuthUser) {
     const proforma = await this.findOne(id, user);
     assertCanAccessCompanyFromUser(user, proforma.companyId, AccessLevel.WRITE);

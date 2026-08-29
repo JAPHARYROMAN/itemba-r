@@ -40,6 +40,13 @@ export class ProformaInvoicesController {
     return this.service.send(id, user.id);
   }
 
+  @Patch(':id/accept')
+  @RequirePermissions('proformas.update')
+  @ApiOperation({ summary: 'Accept proforma (SENT → ACCEPTED)' })
+  accept(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.accept(id, user);
+  }
+
   @Patch(':id/convert-to-sales-order')
   @RequirePermissions('proformas.convert')
   @ApiOperation({ summary: 'Convert proforma to sales order (ACCEPTED → CONVERTED)' })
