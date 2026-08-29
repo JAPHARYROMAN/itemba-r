@@ -824,3 +824,109 @@ describe('CustomerPaymentsService — CashAccount.currentBalance maintenance', (
     expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
   });
 });
+
+describe('CustomerPaymentsService.create — branch custody guard (shared cash-account-scope helper)', () => {
+  const baseDto = (overrides: Record<string, any> = {}) => ({
+    companyId: 'company-1',
+    customerId: 'customer-1',
+    amount: 150,
+    method: 'CASH',
+    paymentDate: '2026-06-01',
+    cashAccountId: 'cash-1',
+    allocations: [{ receivableId: 'rec-1', amount: 100 }],
+    ...overrides,
+  });
+
+  it('rejects a cash account scoped to a DIFFERENT branch than the payment', async () => {
+    const { service, prisma } = makeService({
+      cashAccount: {
+        id: 'cash-1',
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-2', // payment names branch-1
+        accountType: 'CASH_ON_HAND',
+        accountName: 'Kariakoo Cash',
+        currency: 'TZS',
+      },
+    });
+
+    await expect(
+      service.create(baseDto({ divisionId: 'division-1', branchId: 'branch-1' }) as any, user),
+    ).rejects.toThrow('Cash account does not belong to the selected branch');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cash account scoped to a DIFFERENT division than the payment', async () => {
+    const { service } = makeService({
+      cashAccount: {
+        id: 'cash-1',
+        companyId: 'company-1',
+        divisionId: 'division-2',
+        branchId: 'branch-2',
+        accountType: 'CASH_ON_HAND',
+        accountName: 'Other Division Cash',
+        currency: 'TZS',
+      },
+    });
+
+    await expect(
+      service.create(baseDto({ divisionId: 'division-1', branchId: 'branch-1' }) as any, user),
+    ).rejects.toThrow('Cash account does not belong to the selected division');
+  });
+
+  it('accepts an unscoped (NULL-branch) legacy account for a branch-scoped payment', async () => {
+    // Accounts created before the branch-scoping migration carry NULL scope;
+    // they must keep receiving payments exactly as before.
+    const { service, cashAccountUpdates } = makeService();
+
+    const result = await service.create(
+      baseDto({ divisionId: 'division-1', branchId: 'branch-1' }) as any,
+      user,
+    );
+
+    expect(result).toBeTruthy();
+    expect(cashAccountUpdates).toHaveLength(1);
+    expect(Number(cashAccountUpdates[0].currentBalance.increment)).toBe(150);
+  });
+
+  it('accepts a branch-scoped account when the payment carries no branch context (legacy caller)', async () => {
+    const { service, cashAccountUpdates } = makeService({
+      cashAccount: {
+        id: 'cash-1',
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        accountType: 'CASH_ON_HAND',
+        accountName: 'Branch Cash',
+        currency: 'TZS',
+      },
+    });
+
+    const result = await service.create(baseDto() as any, user);
+
+    expect(result).toBeTruthy();
+    expect(cashAccountUpdates).toHaveLength(1);
+  });
+
+  it('accepts a company-wide (NULL-scope) BANK account regardless of the payment branch', async () => {
+    const { service, cashAccountUpdates } = makeService({
+      cashAccount: {
+        id: 'cash-1',
+        companyId: 'company-1',
+        divisionId: null,
+        branchId: null,
+        accountType: 'BANK',
+        accountName: 'Main Bank',
+        currency: 'TZS',
+      },
+    });
+
+    const result = await service.create(
+      baseDto({ method: 'BANK_TRANSFER', divisionId: 'division-1', branchId: 'branch-1' }) as any,
+      user,
+    );
+
+    expect(result).toBeTruthy();
+    expect(cashAccountUpdates).toHaveLength(1);
+  });
+});

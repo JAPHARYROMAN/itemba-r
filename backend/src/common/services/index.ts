@@ -21,6 +21,13 @@ export { ObservabilityBudgetService } from './observability-budget.service';
 export { WebhookSignatureService } from './webhook-signature.service';
 export { AccountResolverService } from './account-resolver.service';
 export type { AccountRole } from './account-resolver.service';
+export {
+  CASH_ACCOUNT_SCOPE_SELECT,
+  assertCashAccountForScope,
+  assertCashAccountScopeCompatible,
+  resolveCashAccountForScope,
+} from './cash-account-scope.helper';
+export type { CashAccountScopeExpectation, ScopedCashAccount } from './cash-account-scope.helper';
 export { EphemeralSecretFingerprintRegistry } from './ephemeral-secret-fingerprint-registry.service';
 export type { EphemeralSecretRedaction } from './ephemeral-secret-fingerprint-registry.service';
 export { PersistenceSecretGuard } from './persistence-secret-guard.service';

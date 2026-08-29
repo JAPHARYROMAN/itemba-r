@@ -7,7 +7,7 @@ import {
 import { AccessLevel, CashAccountType, CurrencyCode, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, assertCashAccountForScope } from '../../common/services';
 import {
   AccountResolverService,
   AccountRole,
@@ -172,11 +172,16 @@ export class CustomerPaymentsService {
       throw new BadRequestException('Customer does not belong to this company');
     }
 
-    // Cash/bank account belongs to the company; type drives the GL debit role.
+    // Cash/bank account belongs to the company (and to the payment's
+    // division/branch when the dto names one); type drives the GL debit role.
     const cashAccount = await this.resolveCashAccount(
       this.prisma,
       dto.companyId,
       dto.cashAccountId,
+      {
+        divisionId: dto.divisionId ?? null,
+        branchId: dto.branchId ?? null,
+      },
     );
 
     // Guard against mixing currencies on the cash ledger: we increment the cash
@@ -703,28 +708,28 @@ export class CustomerPaymentsService {
     return locked;
   }
 
-  /** Cash/bank account belongs to the company and is active. */
+  /**
+   * Cash/bank account belongs to the company, is active, and — when the
+   * payment carries an explicit division/branch context — is not scoped to a
+   * DIFFERENT division/branch (shared guard, mirroring the sales-orders
+   * receipt-account wording). Its currentBalance feeds the branch daily close,
+   * so receiving one branch's cash on another branch's account manufactures a
+   * phantom surplus there. Lenient on missing scope: unscoped (NULL-branch)
+   * legacy accounts and payments without a branch context behave exactly as
+   * before.
+   */
   private async resolveCashAccount(
     db: PrismaService | Prisma.TransactionClient,
     companyId: string,
     cashAccountId: string,
+    expectedScope: { divisionId?: string | null; branchId?: string | null } = {},
   ) {
-    const cashAccount = await (db as PrismaService).cashAccount.findFirst({
-      where: { id: cashAccountId, deletedAt: null, isActive: true },
-      select: {
-        id: true,
-        companyId: true,
-        divisionId: true,
-        branchId: true,
-        accountType: true,
-        accountName: true,
-        currency: true,
-      },
+    return assertCashAccountForScope(db, {
+      cashAccountId,
+      companyId,
+      divisionId: expectedScope.divisionId ?? null,
+      branchId: expectedScope.branchId ?? null,
     });
-    if (!cashAccount || cashAccount.companyId !== companyId) {
-      throw new BadRequestException('Cash account does not belong to this company');
-    }
-    return cashAccount;
   }
 
   private cashAccountRole(accountType?: CashAccountType | null): AccountRole {

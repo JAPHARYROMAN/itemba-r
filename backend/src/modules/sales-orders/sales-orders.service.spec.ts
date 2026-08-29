@@ -396,6 +396,77 @@ describe('SalesOrdersService per-unit discounts', () => {
   });
 });
 
+describe('SalesOrdersService receipt-account branch guard (shared cash-account-scope helper)', () => {
+  it('rejects a cash receipt account scoped to a DIFFERENT branch than the order', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-2', // order is on branch-1
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create(
+        createDto({
+          salesType: 'CASH_SALE',
+          paymentMethod: 'CASH',
+          cashAccountId: 'cash-account-1',
+        }),
+        user,
+      ),
+    ).rejects.toThrow('Cash account does not belong to the selected branch');
+    expect(prisma.salesOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unscoped (NULL-branch) cash account — strict mode requires the exact branch', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: null,
+      branchId: null,
+      accountType: 'CASH_ON_HAND',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create(
+        createDto({
+          salesType: 'CASH_SALE',
+          paymentMethod: 'CASH',
+          cashAccountId: 'cash-account-1',
+        }),
+        user,
+      ),
+    ).rejects.toThrow('Cash account does not belong to the selected division');
+  });
+
+  it('accepts a company-wide (NULL-scope) BANK account for a bank-settled sale', async () => {
+    const { service, prisma } = makeService();
+    prisma.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-account-1',
+      companyId: 'company-1',
+      divisionId: null,
+      branchId: null,
+      accountType: 'BANK',
+    });
+    prisma.customer.findFirst.mockResolvedValue(null);
+
+    await service.create(
+      createDto({
+        salesType: 'CASH_SALE',
+        paymentMethod: 'BANK_TRANSFER',
+        cashAccountId: 'cash-account-1',
+      }),
+      user,
+    );
+    expect(prisma.salesOrder.create).toHaveBeenCalled();
+  });
+});
+
 describe('SalesOrdersService document (order-level) discount', () => {
   it('reduces the order total by the document discount and folds it into discountAmount (create)', async () => {
     const { service, prisma } = makeService();

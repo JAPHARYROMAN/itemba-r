@@ -651,3 +651,111 @@ describe('ExpensesService.pay single settlement path', () => {
     expect(tx.expense.update).not.toHaveBeenCalled();
   });
 });
+
+describe('ExpensesService.pay branch custody guard (shared cash-account-scope helper)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('rejects a cash account scoped to a DIFFERENT branch than the expense', async () => {
+    const { service, tx, postingEngine } = makeHarness();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvedExpense({ divisionId: 'division-1', branchId: 'branch-1' }));
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Mwanza Cash',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+      divisionId: 'division-1',
+      branchId: 'branch-2',
+    });
+
+    await expect(service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser())).rejects.toThrow(
+      'Cash account does not belong to the selected branch',
+    );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.cashAccount.update).not.toHaveBeenCalled();
+    expect(tx.expense.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cash account scoped to a DIFFERENT division than the expense', async () => {
+    const { service, tx, postingEngine } = makeHarness();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvedExpense({ divisionId: 'division-1', branchId: 'branch-1' }));
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Other Division Cash',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+      divisionId: 'division-2',
+      branchId: 'branch-9',
+    });
+
+    await expect(service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser())).rejects.toThrow(
+      'Cash account does not belong to the selected division',
+    );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('still pays from an unscoped (NULL-branch) legacy account when the expense is branch-scoped', async () => {
+    const { service, tx } = makeHarness();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvedExpense({ divisionId: 'division-1', branchId: 'branch-1' }));
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Company Till',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+      divisionId: null,
+      branchId: null,
+    });
+
+    const result = await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+
+    expect(result.status).toBe('PAID');
+    expect(tx.cashAccount.update).toHaveBeenCalledWith({
+      where: { id: 'cash-1' },
+      data: { currentBalance: { decrement: 22500 } },
+    });
+  });
+
+  it('still pays an unscoped legacy expense from a branch-scoped account (no context, no guard)', async () => {
+    const { service, tx } = makeHarness();
+    jest.spyOn(service, 'findOne').mockResolvedValue(approvedExpense()); // NULL scope
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Branch Cash',
+      accountType: 'CASH_ON_HAND',
+      currency: 'TZS',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+    });
+
+    const result = await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+    expect(result.status).toBe('PAID');
+  });
+
+  it('pays from a company-wide BANK account regardless of the expense branch', async () => {
+    const { service, tx } = makeHarness();
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvedExpense({ divisionId: 'division-1', branchId: 'branch-1' }));
+    tx.cashAccount.findFirst.mockResolvedValue({
+      id: 'cash-1',
+      companyId: 'company-1',
+      accountName: 'Main Bank',
+      accountType: 'BANK',
+      currency: 'TZS',
+      divisionId: null,
+      branchId: null,
+    });
+
+    const result = await service.pay('expense-1', { cashAccountId: 'cash-1' }, authUser());
+    expect(result.status).toBe('PAID');
+  });
+});
