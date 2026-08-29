@@ -59,7 +59,7 @@ describe('closed-world create generated-field evidence', () => {
         }).length
       );
     }, 0);
-    expect(requiredGeneratedFieldCount).toBe(107);
+    expect(requiredGeneratedFieldCount).toBe(108);
   });
 
   it('keeps request aliases out of persisted field declarations', () => {

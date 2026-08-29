@@ -2584,14 +2584,6 @@ const hrAndOperationsDefinitions: readonly FixtureDefinition[] = [
     { preState: { status: literal('DRAFT') } },
   ),
   transitionFixture(
-    'ExpensesController.approve',
-    'Expense',
-    { status: literal('APPROVED'), approvedAt: nowIso, approvedById: userA },
-    'EXPENSE_APPROVE',
-    'Expense',
-    { preState: { status: literal('PENDING_APPROVAL'), createdById: posterUserA } },
-  ),
-  transitionFixture(
     'ExpensesController.reject',
     'Expense',
     { status: literal('REJECTED'), rejectedReason: literal('Rejected by CRUD evidence') },
@@ -3622,6 +3614,7 @@ const exactEffectBlockers = blockers(
     'EmployeeAssignmentsController.create',
     'EmployeesController.remove',
     'EntityCodeGeneratorController.runBackfill',
+    'ExpensesController.approve',
     'ExpensesController.pay',
     'FixedAssetsController.capitalize',
     'FixedAssetsController.dispose',

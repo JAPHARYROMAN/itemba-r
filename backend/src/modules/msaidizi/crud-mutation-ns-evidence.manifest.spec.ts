@@ -607,14 +607,27 @@ describe('N-S mutation evidence against the live capability manifest', () => {
       expectedFields: { status: { literal: 'DRAFT' }, cancelledAt: { literal: null } },
       forbiddenFields: ['acceptedAt', 'declinedAt', 'sentAt'],
     });
-    expect(
-      fixtures.find((fixture) => fixture.capabilityId === 'RecordBookController.createExpense'),
-    ).toMatchObject({
+    const recordBookExpenseCreate = fixtures.find(
+      (fixture) => fixture.capabilityId === 'RecordBookController.createExpense',
+    );
+    // The service truncates recordDate to the SERVER-LOCAL day start, so the
+    // persisted instant is proven by a timezone-independent local-day-start
+    // validator rather than a literal that only matches in one timezone.
+    expect(recordBookExpenseCreate).toMatchObject({
       request: { body: { recordDate: { literal: '2026-08-25T00:00:00.000Z' } } },
       effect: {
-        expectedFields: { recordDate: { literal: '2026-08-24T21:00:00.000Z' } },
+        generatedFields: {
+          recordDate: {
+            kind: 'local-day-start',
+            value: { literal: '2026-08-25T00:00:00.000Z' },
+          },
+        },
       },
     });
+    if (recordBookExpenseCreate?.effect.kind !== 'create') {
+      throw new Error('record-book expense fixture drifted');
+    }
+    expect(recordBookExpenseCreate.effect.expectedFields).not.toHaveProperty('recordDate');
     for (const capabilityId of [
       'RecordBookController.updateExpense',
       'SuppliersController.update',

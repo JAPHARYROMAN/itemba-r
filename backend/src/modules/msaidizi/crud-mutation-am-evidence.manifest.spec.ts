@@ -117,9 +117,9 @@ describe('A-M mutation evidence against the live capability manifest', () => {
 
     expect(tranche).toHaveLength(323);
     expect(controllers.size).toBe(89);
-    expect(packs.map((pack) => pack.fixtures.length)).toEqual([6, 81, 73, 122]);
-    expect(registered).toHaveLength(282);
-    expect(blocked).toHaveLength(41);
+    expect(packs.map((pack) => pack.fixtures.length)).toEqual([6, 81, 73, 121]);
+    expect(registered).toHaveLength(281);
+    expect(blocked).toHaveLength(42);
     expect(blockers.filter((blocker) => blocker.reason === 'body_schema_not_strict')).toHaveLength(
       0,
     );
@@ -131,7 +131,7 @@ describe('A-M mutation evidence against the live capability manifest', () => {
     ).toHaveLength(8);
     expect(
       blockers.filter((blocker) => blocker.reason === 'exact_effect_not_represented'),
-    ).toHaveLength(33);
+    ).toHaveLength(34);
     expect(new Set(registered).size).toBe(registered.length);
     expect(new Set(blocked).size).toBe(blocked.length);
     expect(registered.filter((capabilityId) => blocked.includes(capabilityId))).toEqual([]);

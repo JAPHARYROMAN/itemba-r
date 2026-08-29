@@ -1513,12 +1513,15 @@ const revenueAndRecordsDefinitions: readonly FixtureDefinition[] = [
     'RecordBookExpense',
     {
       companyPath: ['companyId'],
+      // recordDate is deliberately NOT declared here: the service truncates it
+      // to the SERVER-LOCAL day start, so its persisted instant is proven by
+      // the capability's local-day-start generated-field validator instead of
+      // a timezone-dependent literal.
       persistedFields: {
         amount: literal(12),
         companyId: companyA,
         description: unique('CRUD record expense'),
         expenseCategoryId: idOf('RecordBookExpenseCategory'),
-        recordDate: literal('2026-08-24T21:00:00.000Z'),
       },
     },
   ),
