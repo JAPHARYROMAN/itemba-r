@@ -125,6 +125,16 @@ export class WestsidesReportsController {
     return this.service.deliveryPerformance(query, user);
   }
 
+  @Get('undelivered-confirmed-orders')
+  @RequirePermissions('westsides.reports.view')
+  @ApiOperation({
+    summary:
+      'Revenue cutoff exposure: confirmed CREDIT orders whose delivery notes do not fully cover the ordered quantities as of a cutoff date (dateTo), valued at net revenue and snapshotted COGS',
+  })
+  undeliveredConfirmedOrders(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+    return this.service.undeliveredConfirmedOrders(query, user);
+  }
+
   @Get('price-list-report')
   @RequirePermissions('westsides.reports.view')
   @ApiOperation({ summary: 'Price lists with item counts' })
@@ -188,7 +198,9 @@ export class WestsidesReportsController {
 
   @Post('daily-close')
   @RequirePermissions('westsides.daily_close.manage')
-  @ApiOperation({ summary: 'Persist the daily cash close: counted amounts, variance, and sign-off' })
+  @ApiOperation({
+    summary: 'Persist the daily cash close: counted amounts, variance, and sign-off',
+  })
   saveDailyClose(@Body() dto: SaveDailyCloseDto, @CurrentUser() user: AuthUser) {
     return this.service.saveDailyClose(dto, user);
   }

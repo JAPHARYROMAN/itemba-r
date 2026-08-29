@@ -76,7 +76,7 @@ const row = (
 });
 
 /**
- * All 24 permission-governed GET operations on WestsidesReportsController.
+ * All 25 permission-governed GET operations on WestsidesReportsController.
  *
  * Every definition is backed by two conflicting, real business transactions
  * in the disposable database. The harness executes both companies and also
@@ -272,6 +272,18 @@ const WESTSIDES_REPORT_DEFINITIONS: readonly WestsidesReportDefinition[] = Objec
     ['status'],
     'deliveryStatus',
     [{ path: ['deliveryCount'], binding: 'deliveryStatusCount' }],
+  ),
+  row(
+    'WestsidesReportsController.undeliveredConfirmedOrders',
+    'westsides/reports/undelivered-confirmed-orders',
+    ['salesOrderNumber'],
+    'undeliveredOrderNumber',
+    [
+      { path: ['undeliveredQuantity'], binding: 'undeliveredQuantity' },
+      { path: ['netRevenueExposure'], binding: 'undeliveredNetRevenue' },
+      { path: ['cogsExposure'], binding: 'undeliveredCogs' },
+    ],
+    { collectionPath: ['rows'] },
   ),
   row(
     'WestsidesReportsController.priceListReport',

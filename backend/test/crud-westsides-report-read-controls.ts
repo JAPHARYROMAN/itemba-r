@@ -207,6 +207,9 @@ async function seedCompanyHistory(
   const salesLineAveragePrice = input.salesLineAmount / input.salesLineQuantity;
   const purchaseLineUnitCost = input.purchaseLineAmount / input.purchaseLineQuantity;
   const salesMonth = input.salesDate.slice(0, 7);
+  // The COGS snapshot the profit guard would have written at confirm. Also
+  // the oracle for the undelivered-confirmed-orders COGS exposure.
+  const profitTotalCost = input.batchUnitCost * input.salesLineQuantity;
 
   const [unit, category, customer, supplier, salesperson] = await Promise.all([
     prisma.unitOfMeasure.create({
@@ -315,6 +318,9 @@ async function seedCompanyHistory(
             unitId: unit.id,
             unitPrice: salesLineAveragePrice,
             lineTotal: input.salesLineAmount,
+            // Snapshotted at confirm in production; seeded here so the
+            // undelivered-orders report has a nonzero COGS oracle.
+            cogsAmount: profitTotalCost,
           },
         },
       },
@@ -487,7 +493,6 @@ async function seedCompanyHistory(
     }),
   ]);
 
-  const profitTotalCost = input.batchUnitCost * input.salesLineQuantity;
   const profitGrossProfit = input.salesLineAmount - profitTotalCost;
   const profitGrossMargin = (profitGrossProfit / input.salesLineAmount) * 100;
 
@@ -548,6 +553,16 @@ async function seedCompanyHistory(
       convertedQuotationCount: 0,
       deliveryStatus: input.deliveryStatus,
       deliveryStatusCount: 1,
+      // Undelivered-confirmed-orders cutoff oracle: the seeded CONFIRMED
+      // CREDIT order's delivery note carries NO lines, so delivered coverage
+      // is zero and the whole order is exposure — undelivered quantity is the
+      // full line quantity, net revenue is lineTotal (line taxAmount is
+      // null), and COGS is the snapshotted cogsAmount, matching the service's
+      // per-product coverage math exactly.
+      undeliveredOrderNumber: salesOrderNumber,
+      undeliveredQuantity: input.salesLineQuantity,
+      undeliveredNetRevenue: input.salesLineAmount,
+      undeliveredCogs: profitTotalCost,
       priceListName,
       priceListStatus: input.priceListStatus,
       priceListItemCount: 1,
