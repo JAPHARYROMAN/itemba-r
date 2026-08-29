@@ -8,6 +8,7 @@ import {
   StatCard,
   StatusBadge,
   PermissionDeniedState,
+  ProductPicker,
   showToast,
 } from '@/components/ui';
 import { Modal, ConfirmDialog } from '@/components/aurora/overlays';
@@ -29,7 +30,7 @@ import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-cl
 
 // ─── Types (shapes mirror the credit-notes controller / service includes) ─────
 
-interface Company {
+export interface Company {
   id: string;
   name: string;
   code?: string | null;
@@ -55,6 +56,12 @@ interface CreditNoteLine {
   netAmount: number | string;
   taxAmount: number | string;
   lineTotal: number | string;
+  /**
+   * Physical-return restock opt-in captured at create time. When > 0, issuing
+   * the note restocked (or will restock) this quantity and reverse its COGS.
+   */
+  returnedQuantity?: number | string | null;
+  restockUnitCost?: number | string | null;
   product?: {
     id?: string | null;
     productCode?: string | null;
@@ -141,6 +148,10 @@ interface CreditNoteFormLine {
   quantity: number | '';
   unitPrice: number | '';
   taxAmount: number | '';
+  /** Opt-in: goods physically came back — issuing restocks + reverses COGS. */
+  returnToStock: boolean;
+  returnedQuantity: number | '';
+  restockUnitCost: number | '';
 }
 
 interface CreditNoteForm {
@@ -168,6 +179,9 @@ const blankLine = (): CreditNoteFormLine => ({
   quantity: 1,
   unitPrice: '',
   taxAmount: '',
+  returnToStock: false,
+  returnedQuantity: '',
+  restockUnitCost: '',
 });
 
 const blankForm = (): CreditNoteForm => ({
@@ -229,16 +243,24 @@ function fmtDateTime(value?: string | null) {
 // mandatory product on a credit note, so the heavy shared OrderLineEditor does
 // not fit. A focused editor keeps the create form aligned 1:1 with the backend
 // CreateCreditNoteLineDto and computes the same net/tax/gross totals.
+//
+// Physical returns are an opt-in per line ("Return to stock"): picking a
+// product and a returnedQuantity (<= the credited quantity) makes issue() ALSO
+// restock the goods and reverse COGS; the restock unit cost is optional — left
+// blank, the backend falls back to the linked sales-order line's cost, then the
+// product's average / default cost (the same basis the original sale used).
 
 function LineEditor({
   lines,
   currency,
+  companyId,
   onAdd,
   onRemove,
   onChange,
 }: {
   lines: CreditNoteFormLine[];
   currency: string;
+  companyId: string;
   onAdd: () => void;
   onRemove: (index: number) => void;
   onChange: (index: number, patch: Partial<CreditNoteFormLine>) => void;
@@ -271,6 +293,23 @@ function LineEditor({
         {lines.map((line, index) => {
           const net = round2(num(line.quantity) * num(line.unitPrice));
           const lineTotal = round2(net + round2(num(line.taxAmount)));
+          // Inline validation mirroring CreateCreditNoteLineDto / service checks:
+          // returnedQuantity must be > 0 and <= the credited quantity; an
+          // explicit restock cost (when given) must be > 0.
+          const qtyCap = num(line.quantity);
+          const returnedQty = num(line.returnedQuantity);
+          const returnedError =
+            line.returnToStock && line.returnedQuantity !== ''
+              ? returnedQty <= 0
+                ? 'Returned quantity must be greater than zero'
+                : returnedQty > qtyCap
+                  ? `Returned quantity cannot exceed the credited quantity (${qty(qtyCap)})`
+                  : ''
+              : '';
+          const costError =
+            line.returnToStock && line.restockUnitCost !== '' && num(line.restockUnitCost) <= 0
+              ? 'Restock unit cost must be greater than zero'
+              : '';
           return (
             <div
               key={index}
@@ -399,6 +438,153 @@ function LineEditor({
                 >
                   Net: {money(net, currency)}
                 </div>
+
+                <div className="sm:col-span-2">
+                  <label
+                    className="flex cursor-pointer items-center gap-2 text-[12px] font-medium"
+                    style={{ color: 'var(--aurora-text-secondary)' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={line.returnToStock}
+                      onChange={(e) =>
+                        onChange(
+                          index,
+                          e.target.checked
+                            ? { returnToStock: true }
+                            : { returnToStock: false, returnedQuantity: '', restockUnitCost: '' },
+                        )
+                      }
+                      className="h-4 w-4 rounded"
+                      style={{ accentColor: 'var(--aurora-primary)' }}
+                      aria-label={`Line ${index + 1} return to stock`}
+                    />
+                    <span>Return to stock (goods physically came back)</span>
+                  </label>
+
+                  {line.returnToStock && (
+                    <div
+                      className="mt-2 space-y-3 rounded-lg border p-3"
+                      style={{
+                        borderColor: 'var(--aurora-border)',
+                        background: 'var(--aurora-card)',
+                      }}
+                    >
+                      <label className="block">
+                        <span
+                          className="mb-1 block text-[12px] font-medium"
+                          style={{ color: 'var(--aurora-text-secondary)' }}
+                        >
+                          Returned product *
+                        </span>
+                        <ProductPicker
+                          value={line.productId}
+                          onChange={(productId, product) =>
+                            onChange(index, {
+                              productId,
+                              ...(product?.defaultUnitId ? { unitId: product.defaultUnitId } : {}),
+                            })
+                          }
+                          companyId={companyId || undefined}
+                          ariaLabel={`Line ${index + 1} returned product`}
+                          placeholder="Search the product being returned"
+                        />
+                        {!line.productId && (
+                          <p
+                            className="mt-1 text-[11px]"
+                            style={{ color: 'var(--aurora-text-muted)' }}
+                          >
+                            Only product-linked lines can be restocked.
+                          </p>
+                        )}
+                      </label>
+
+                      {line.productId && (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block">
+                            <span
+                              className="mb-1 block text-[12px] font-medium"
+                              style={{ color: 'var(--aurora-text-secondary)' }}
+                            >
+                              Returned quantity *
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.0001"
+                              max={qtyCap > 0 ? qtyCap : undefined}
+                              value={line.returnedQuantity}
+                              onChange={(e) =>
+                                onChange(index, {
+                                  returnedQuantity:
+                                    e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              className={fieldClass}
+                              aria-label={`Line ${index + 1} returned quantity`}
+                              aria-invalid={Boolean(returnedError)}
+                            />
+                            {returnedError && (
+                              <p
+                                role="alert"
+                                className="mt-1 text-[11px]"
+                                style={{ color: 'var(--aurora-danger)' }}
+                              >
+                                {returnedError}
+                              </p>
+                            )}
+                          </label>
+                          <label className="block">
+                            <span
+                              className="mb-1 block text-[12px] font-medium"
+                              style={{ color: 'var(--aurora-text-secondary)' }}
+                            >
+                              Restock unit cost
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.0001"
+                              value={line.restockUnitCost}
+                              onChange={(e) =>
+                                onChange(index, {
+                                  restockUnitCost:
+                                    e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              className={fieldClass}
+                              placeholder="Auto — original sale / average cost"
+                              aria-label={`Line ${index + 1} restock unit cost`}
+                              aria-invalid={Boolean(costError)}
+                            />
+                            {costError ? (
+                              <p
+                                role="alert"
+                                className="mt-1 text-[11px]"
+                                style={{ color: 'var(--aurora-danger)' }}
+                              >
+                                {costError}
+                              </p>
+                            ) : (
+                              <p
+                                className="mt-1 text-[11px]"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                Optional — blank reuses the cost basis of the original sale.
+                              </p>
+                            )}
+                          </label>
+                        </div>
+                      )}
+
+                      <p className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Issuing this credit note will restock the returned quantity (a sales-return
+                        inventory movement) and reverse COGS (Dr Inventory / Cr COGS) for this line.
+                        Leave unchecked for a pure price adjustment or allowance.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -435,7 +621,7 @@ function LineEditor({
 
 // ─── Create modal ─────────────────────────────────────────────────────────────
 
-function CreateModal({
+export function CreateModal({
   companies,
   onClose,
   onSaved,
@@ -507,6 +693,31 @@ function CreateModal({
       setError('Each line needs a positive quantity and a non-negative unit price');
       return;
     }
+    // Mirror the backend's return-to-stock rules (CreateCreditNoteLineDto +
+    // service): a returned line needs a product, a positive returned quantity
+    // capped at the credited quantity, and any explicit restock cost > 0.
+    for (let i = 0; i < form.lines.length; i += 1) {
+      const l = form.lines[i];
+      if (!l.returnToStock) continue;
+      if (!l.productId) {
+        setError(
+          `Line ${i + 1}: select the returned product — only product-linked lines can be restocked`,
+        );
+        return;
+      }
+      if (num(l.returnedQuantity) <= 0) {
+        setError(`Line ${i + 1}: returned quantity must be greater than zero`);
+        return;
+      }
+      if (num(l.returnedQuantity) > num(l.quantity)) {
+        setError(`Line ${i + 1}: returned quantity cannot exceed the credited quantity`);
+        return;
+      }
+      if (l.restockUnitCost !== '' && num(l.restockUnitCost) <= 0) {
+        setError(`Line ${i + 1}: restock unit cost must be greater than zero`);
+        return;
+      }
+    }
     const total = form.lines.reduce(
       (sum, l) => sum + round2(num(l.quantity) * num(l.unitPrice)) + round2(num(l.taxAmount)),
       0,
@@ -530,6 +741,14 @@ function CreateModal({
           taxAmount: num(l.taxAmount),
           ...(l.productId ? { productId: l.productId } : {}),
           ...(l.unitId ? { unitId: l.unitId } : {}),
+          // Restock fields ride along ONLY when the operator opted the line in —
+          // an omitted returnedQuantity keeps the line a pure financial credit.
+          ...(l.returnToStock
+            ? {
+                returnedQuantity: num(l.returnedQuantity),
+                ...(l.restockUnitCost !== '' ? { restockUnitCost: num(l.restockUnitCost) } : {}),
+              }
+            : {}),
         })),
       };
       if (form.customerId) body.customerId = form.customerId;
@@ -656,6 +875,7 @@ function CreateModal({
           <LineEditor
             lines={form.lines}
             currency={form.currency}
+            companyId={form.companyId}
             onAdd={addLine}
             onRemove={removeLine}
             onChange={setLine}
@@ -790,6 +1010,10 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
   }, [id]);
 
   const currency = detail?.currency || 'TZS';
+  // Show the Returned column only when at least one line was flagged as a
+  // physical return (returnedQuantity > 0) — pure financial notes keep the
+  // original compact table.
+  const hasReturns = Boolean(detail?.lines?.some((l) => num(l.returnedQuantity) > 0));
 
   return (
     <Modal
@@ -875,6 +1099,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     >
                       <th className="px-3 py-2">Description</th>
                       <th className="px-3 py-2 text-right">Qty</th>
+                      {hasReturns && <th className="px-3 py-2 text-right">Returned</th>}
                       <th className="px-3 py-2 text-right">Unit Price</th>
                       <th className="px-3 py-2 text-right">Net</th>
                       <th className="px-3 py-2 text-right">VAT</th>
@@ -896,6 +1121,11 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                           )}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">{qty(line.quantity)}</td>
+                        {hasReturns && (
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {num(line.returnedQuantity) > 0 ? qty(line.returnedQuantity) : '—'}
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-right tabular-nums">
                           {money(line.unitPrice, currency)}
                         </td>
@@ -913,7 +1143,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     {!detail.lines?.length && (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={hasReturns ? 7 : 6}
                           className="px-3 py-4 text-center text-sm"
                           style={{ color: 'var(--aurora-text-muted)' }}
                         >
@@ -924,6 +1154,12 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                   </tbody>
                 </table>
               </div>
+              {hasReturns && (
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Returned quantities are restocked (and their COGS reversed) when the credit note
+                  is issued.
+                </p>
+              )}
             </div>
 
             <div>

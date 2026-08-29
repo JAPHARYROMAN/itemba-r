@@ -16,10 +16,18 @@ import {
   SkeletonTable,
   StatCard,
   StatusBadge,
+  showToast,
 } from '@/components/ui';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
+import {
+  backendGet,
+  backendList,
+  backendPage,
+  backendPatch,
+  backendPost,
+  backendPut,
+} from '@/lib/api-client';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
 
@@ -96,7 +104,7 @@ interface SupplierInvoiceLine {
   lineTotal: number | string;
 }
 
-interface SupplierInvoice {
+export interface SupplierInvoice {
   id: string;
   supplierInvoiceNumber: string;
   companyId: string;
@@ -820,6 +828,91 @@ function InvoiceModal({
   );
 }
 
+// ─── Void modal (danger confirm with an optional reason) ─────────────────────
+//
+// Voiding is only offered for APPROVED invoices — mirrors the backend void()
+// guard, which rejects every other status, is idempotent on CANCELLED, and
+// refuses to void once payments were applied or the payable was WRITTEN_OFF.
+// Those backend messages are surfaced verbatim in the dialog (which stays open
+// on failure), following the credit-notes VoidModal convention.
+export function VoidInvoiceModal({
+  invoice,
+  onClose,
+  onDone,
+}: {
+  invoice: SupplierInvoice;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const trimmed = reason.trim();
+      await backendPatch(
+        `/supplier-invoices/${invoice.id}/void`,
+        trimmed ? { reason: trimmed } : {},
+      );
+      showToast(
+        'info',
+        'Supplier invoice voided',
+        `Invoice ${invoice.supplierInvoiceNumber} was cancelled and its Accounts Payable posting reversed.`,
+      );
+      onDone();
+    } catch (err) {
+      // Surface the backend guard message verbatim and keep the dialog open.
+      setError(err instanceof Error ? err.message : 'Failed to void supplier invoice');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Void invoice ${invoice.supplierInvoiceNumber}`}
+      size="md"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Btn>
+          <Btn variant="danger" onClick={handleConfirm} loading={saving}>
+            Void Invoice
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div
+          role="alert"
+          className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
+          {error}
+        </div>
+      )}
+      <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+        Voiding cancels this approved invoice and unwinds its Accounts Payable posting: the payable
+        it created is cancelled and a reversing journal entry is posted. This cannot be undone.
+      </p>
+      <FormTextarea
+        className="mt-3"
+        label="Reason (optional)"
+        rows={3}
+        maxLength={500}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Why is this invoice being voided? (recorded on the reversing entry and audit log)"
+      />
+    </Modal>
+  );
+}
+
 export default function SupplierInvoicesPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -841,6 +934,7 @@ export default function SupplierInvoicesPage() {
     invoice: SupplierInvoice;
     action: 'approve' | 'approveVariance';
   } | null>(null);
+  const [voiding, setVoiding] = useState<SupplierInvoice | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const canView =
@@ -848,6 +942,7 @@ export default function SupplierInvoicesPage() {
   const canCreate = hasPermission('supplier_invoices.create');
   const canUpdate = hasPermission('supplier_invoices.update');
   const canApprove = hasPermission('supplier_invoices.approve');
+  const canVoid = hasPermission('supplier_invoices.void');
 
   useEffect(() => {
     if (!canView) return;
@@ -1019,6 +1114,16 @@ export default function SupplierInvoicesPage() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
+            void load();
+          }}
+        />
+      )}
+      {voiding && (
+        <VoidInvoiceModal
+          invoice={voiding}
+          onClose={() => setVoiding(null)}
+          onDone={() => {
+            setVoiding(null);
             void load();
           }}
         />
@@ -1301,6 +1406,16 @@ export default function SupplierInvoicesPage() {
                             onClick={() => setPending({ invoice, action: 'approveVariance' })}
                           >
                             Approve Variance
+                          </Btn>
+                        )}
+                        {canVoid && invoice.status === 'APPROVED' && (
+                          <Btn
+                            variant="danger"
+                            size="xs"
+                            aria-label={`Void invoice ${invoice.supplierInvoiceNumber}`}
+                            onClick={() => setVoiding(invoice)}
+                          >
+                            Void
                           </Btn>
                         )}
                       </div>
