@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Btn, Card, FormSelect, PageHeader, PageSpinner, StatusBadge } from '@/components/ui';
+import { downloadTablePdf } from '@/lib/export-download';
 
 type ReturnKey = 'paye' | 'nssf' | 'psssf' | 'wcf' | 'sdl' | 'nhif' | 'heslb';
 
@@ -69,6 +70,7 @@ export default function StatutoryReturnsPage() {
   const [activeTab, setActiveTab] = useState<ReturnKey>('paye');
   const [data, setData] = useState<BaseReturn | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState('');
 
   // Years range — current year ± 5
@@ -119,6 +121,41 @@ export default function StatutoryReturnsPage() {
   }, [activeTab]);
 
   const activeMeta = TABS.find(t => t.key === activeTab)!;
+
+  const exportPdf = async () => {
+    if (!data) return;
+    const cols = COLUMNS[activeTab];
+    setExportingPdf(true);
+    setError('');
+    try {
+      await downloadTablePdf({
+        title: `${activeMeta.label} Return`,
+        subtitle: `${data.formCode} — ${data.formName}`,
+        companyId: data.header.companyId,
+        columns: cols.map(c => c.label),
+        rows: data.rows.map(r =>
+          cols.map(c => (c.format ? c.format(r[c.key]) : String(r[c.key] ?? '—'))),
+        ),
+        numericColumns: cols.flatMap((c, i) => (c.align === 'right' ? [i] : [])),
+        meta: [
+          { label: 'Period', value: data.header.periodLabel },
+          { label: 'Portal', value: activeMeta.portal },
+          ...Object.entries(data.summary)
+            .filter(([, v]) => typeof v !== 'boolean')
+            .slice(0, 6)
+            .map(([k, v]) => ({
+              label: humanize(k),
+              value: isCurrencyKey(k) ? `TZS ${fmt(v as number)}` : String(v),
+            })),
+        ],
+        baseName: data.file.filename.replace(/\.csv$/i, ''),
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'PDF export failed');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   return (
     <div className="p-6 space-y-4">
@@ -192,9 +229,12 @@ export default function StatutoryReturnsPage() {
                 </div>
                 <div className="text-xs text-slate-500">Period: {data.header.periodLabel}</div>
               </div>
-              <div>
+              <div className="flex gap-2">
                 <Btn variant="primary" size="sm" onClick={() => downloadCsv(data.file)}>
                   Download CSV ({data.file.rowCount} rows)
+                </Btn>
+                <Btn variant="secondary" size="sm" onClick={exportPdf} loading={exportingPdf}>
+                  Export PDF
                 </Btn>
               </div>
             </div>
