@@ -274,7 +274,7 @@ export class ExternalPaymentsService {
     // Everything — the atomic status claim, the balanced GL posting, the AR
     // relief, and the CashAccount balance bump — runs in ONE transaction so a
     // confirmed external payment either lands fully in finance or not at all.
-    const { updated, posted } = await this.prisma.$transaction(async (tx) => {
+    const { updated, posted, financePosted } = await this.prisma.$transaction(async (tx) => {
       // ITMB-078: close the check-then-act race with a conditional atomic update
       // guarded on the current status so concurrent confirms cannot both win.
       // The winner (count === 1) is the ONLY caller that posts the GL below —
@@ -299,19 +299,22 @@ export class ExternalPaymentsService {
             where: { id: record.id },
             select: this.buildSelect(false),
           });
-          return { updated: view, posted: false };
+          return { updated: view, posted: false, financePosted: false };
         }
         throw new BadRequestException('Payment cannot be confirmed in its current status');
       }
 
-      // We won the claim — post finance in the SAME transaction.
-      await this.postConfirmation(tx, record, userId);
+      // We won the claim — post finance in the SAME transaction. financePosted
+      // is false only when the company has no resolvable chart of accounts: the
+      // confirm still lands (the provider already captured the money) but the
+      // audit entry below flags the unposted receipt so it is never invisible.
+      const financePosted = await this.postConfirmation(tx, record, userId);
 
       const view = await tx.externalPayment.findUnique({
         where: { id: record.id },
         select: this.buildSelect(false),
       });
-      return { updated: view, posted: true };
+      return { updated: view, posted: true, financePosted };
     });
 
     if (posted) {
@@ -321,8 +324,12 @@ export class ExternalPaymentsService {
         entityId: record.id,
         userId: userId ?? undefined,
         companyId: record.companyId,
-        metadata,
-        severity: AuditSeverity.MEDIUM,
+        metadata: {
+          ...((metadata as Record<string, unknown>) ?? {}),
+          financePosted,
+          ...(financePosted ? {} : { unpostedReason: 'chart-of-accounts-not-configured' }),
+        },
+        severity: financePosted ? AuditSeverity.MEDIUM : AuditSeverity.HIGH,
       });
     }
 
@@ -437,7 +444,7 @@ export class ExternalPaymentsService {
     tx: Prisma.TransactionClient,
     record: NonNullable<Awaited<ReturnType<PrismaService['externalPayment']['findFirst']>>>,
     userId: string | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const amount = new Prisma.Decimal(record.amount).toDecimalPlaces(2);
     if (amount.lte(0)) {
       throw new BadRequestException('External payment amount must be greater than zero');
@@ -463,6 +470,31 @@ export class ExternalPaymentsService {
       ? this.cashAccountRole(cashAccount.accountType)
       : this.methodCashRole(record.paymentMethod);
 
+    // Resolve the required ledger accounts BEFORE touching any row. A company
+    // that has not configured its chart of accounts (no cash/AR-control entry)
+    // must still be able to confirm — the provider has already captured the
+    // money, so failing the confirm would only strand provider truth in a retry
+    // loop. In that case we skip the posting entirely (the caller records
+    // financePosted=false in the audit trail so the money is never silently
+    // invisible) and the reverse path treats the payment as a legacy no-JE
+    // confirm. Any other posting failure still fails the whole confirm.
+    let cashAcct: { id: string };
+    let arAcct: { id: string };
+    try {
+      [cashAcct, arAcct] = await Promise.all([
+        this.accountResolver.resolve(record.companyId, cashRole, tx),
+        this.accountResolver.resolve(record.companyId, 'AR_CONTROL', tx),
+      ]);
+    } catch (err) {
+      if (
+        err instanceof BadRequestException &&
+        String(err.message).startsWith('Cannot resolve chart-of-accounts entry')
+      ) {
+        return false;
+      }
+      throw err;
+    }
+
     // Locate + relieve the linked receivable (if any).
     const relief = await this.relieveLinkedReceivable(tx, record, amount);
 
@@ -470,11 +502,6 @@ export class ExternalPaymentsService {
     const branchId = relief?.branchId ?? cashAccount?.branchId ?? null;
     const customerLabel =
       relief?.customerName ?? record.payerName ?? record.paymentContextId ?? 'external payer';
-
-    const [cashAcct, arAcct] = await Promise.all([
-      this.accountResolver.resolve(record.companyId, cashRole, tx),
-      this.accountResolver.resolve(record.companyId, 'AR_CONTROL', tx),
-    ]);
 
     const appliedToAr = relief?.applied ?? new Prisma.Decimal(0);
     const advanceAmount = amount.minus(appliedToAr).toDecimalPlaces(2);
@@ -566,6 +593,7 @@ export class ExternalPaymentsService {
         data: { currentBalance: { increment: amount } },
       });
     }
+    return true;
   }
 
   /**
@@ -625,13 +653,9 @@ export class ExternalPaymentsService {
     const appliedToAr = original.lines
       .filter(
         (line) =>
-          line.accountId === arAcct.id &&
-          (line.description ?? '').startsWith('Settle receivable'),
+          line.accountId === arAcct.id && (line.description ?? '').startsWith('Settle receivable'),
       )
-      .reduce(
-        (sum, line) => sum.plus(new Prisma.Decimal(line.credit ?? 0)),
-        new Prisma.Decimal(0),
-      )
+      .reduce((sum, line) => sum.plus(new Prisma.Decimal(line.credit ?? 0)), new Prisma.Decimal(0))
       .toDecimalPlaces(2);
 
     const restored = appliedToAr.gt(0)
@@ -898,7 +922,10 @@ export class ExternalPaymentsService {
       (id): id is string => !!id,
     );
     for (const id of candidates) {
-      const user = await tx.user.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      const user = await tx.user.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
       if (user) return user.id;
     }
 

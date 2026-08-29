@@ -348,6 +348,50 @@ describe('ExternalPaymentsService confirm → finance posting', () => {
     expect(state.payment.receivingCashAccountId).toBe('cash-1');
   });
 
+  it('confirms without posting when the company has no chart of accounts, flagging the audit entry', async () => {
+    const payment = {
+      id: 'pay-nocoa',
+      paymentNumber: 'PAY-NOCOA',
+      companyId: 'company-bare',
+      amount: new Prisma.Decimal(80),
+      currency: 'TZS',
+      paymentMethod: 'MOBILE_MONEY',
+      paymentContextType: null,
+      paymentContextId: null,
+      status: ExternalPaymentStatus.INITIATED,
+      confirmedById: null,
+      initiatedById: 'integration-user',
+      confirmedAt: null,
+      payerName: 'Integration Payer',
+    };
+    const { prisma, state } = makeFinanceHarness({ payment, fallbackUserId: 'user-sys' });
+    const { service, postingEngine, accountResolver, auditLogs } = makeService({ prisma });
+    accountResolver.resolve.mockRejectedValue(
+      new BadRequestException(
+        'Cannot resolve chart-of-accounts entry for role "CASH_ON_HAND" on company company-bare. ' +
+          'Set accountSubType="cash_on_hand" on the relevant account, or create one with code in [1000].',
+      ),
+    );
+
+    await service.confirmForCompany('pay-nocoa', 'actor-1', 'company-bare');
+
+    // the confirm still lands — the provider already captured the money
+    expect(state.payment.status).toBe(ExternalPaymentStatus.SUCCESS);
+    // but nothing was posted, relieved, stamped, or bumped
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(state.payment.receivingCashAccountId).toBeUndefined();
+    // and the audit entry makes the unposted receipt visible at raised severity
+    expect(auditLogs.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'EXTERNAL_PAYMENT_CONFIRMED',
+        metadata: expect.objectContaining({
+          financePosted: false,
+          unpostedReason: 'chart-of-accounts-not-configured',
+        }),
+      }),
+    );
+  });
+
   it('is idempotent: re-confirming a SUCCESS payment posts nothing', async () => {
     const payment = {
       id: 'pay-2',
