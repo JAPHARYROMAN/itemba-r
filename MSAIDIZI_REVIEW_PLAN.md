@@ -1,5 +1,10 @@
 # Msaidizi Platform — Human Review Plan
 
+> **This review was completed on 2026-08-30. Read `MSAIDIZI_REVIEW_OUTCOME_2026-08-30.md` first** —
+> it records what was found against `main` tip `050a8ecb`, the five judgment calls and how they were
+> ruled, and the Lane 1 sign-off. This plan remains the statement of *what to look for*; the outcome
+> document is the statement of *what was found and decided*.
+
 **Why this document exists.** The bulk of the Msaidizi Windows autonomy platform (PR #33, ~1,262 files) was produced by a long autonomous run and — apart from a targeted trust-boundary verification — has not been read by a person. It is green, fail-closed, and coherent; none of that is the same as reviewed. The commits were deliberately sliced along clean seams so a person can review lane by lane. This plan orders those lanes by risk, tells you exactly what to scrutinize in each, records the **already-verified findings** (so you confirm they still hold rather than rediscover them), and flags the places where the *documentation misdescribes the mechanism* — the trap a reviewer is most likely to fall into.
 
 **Scope.** PR #33 (`210a068d`, 17 commits) plus the follow-ups already merged: #35 (timing-test tiering), #36 (test runner), #37 (provider-contract attestation tool + runbook), #38 (task-event cursor allocation fix). Everything is on `main`; nothing is deployed; all autonomy switches ship off.
