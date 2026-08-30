@@ -631,7 +631,10 @@ if (Test-ScopeSelected 'BuildHost') {
                 $certificateOk = $certificate.HasPrivateKey -and
                     $certificate.NotBefore.ToUniversalTime() -le $now.UtcDateTime -and
                     $certificate.NotAfter.ToUniversalTime() -gt $now.UtcDateTime -and
-                    ($certificate.EnhancedKeyUsageList.ObjectId.Value -contains '1.3.6.1.5.5.7.3.3')
+                    # ObjectId is already a string on EnhancedKeyUsageRepresentation.
+                    # Reaching for .Value threw into the catch below, which reported a
+                    # valid signing certificate as missing-or-invalid.
+                    (@($certificate.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId }) -contains '1.3.6.1.5.5.7.3.3')
             }
         }
         catch { $certificateOk = $false }

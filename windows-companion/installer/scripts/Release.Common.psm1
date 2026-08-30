@@ -363,7 +363,12 @@ function Get-ExactSigningCertificate {
         $certificate.NotAfter.ToUniversalTime() -le $now.UtcDateTime) {
         throw "Code-signing certificate $normalized is not currently valid."
     }
-    if (-not ($certificate.EnhancedKeyUsageList.ObjectId.Value -contains '1.3.6.1.5.5.7.3.3')) {
+    # EnhancedKeyUsageList yields EnhancedKeyUsageRepresentation, whose ObjectId is
+    # already a string. Reaching for .Value on it throws under this module's
+    # Set-StrictMode -Version Latest, so the guard below rejected every certificate
+    # it was handed, including ones carrying this exact EKU.
+    $enhancedKeyUsageIds = @($certificate.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId })
+    if (-not ($enhancedKeyUsageIds -contains '1.3.6.1.5.5.7.3.3')) {
         throw "Certificate $normalized is not valid for code signing."
     }
 

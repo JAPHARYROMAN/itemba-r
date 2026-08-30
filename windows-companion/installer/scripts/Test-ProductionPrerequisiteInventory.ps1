@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $inventoryPath = Join-Path $PSScriptRoot 'Test-ProductionPrerequisites.ps1'
 $policyPath = Join-Path $PSScriptRoot '..\release-policy.json'
 $pwsh = (Get-Command pwsh.exe -ErrorAction Stop).Source
-$expectedInventorySha256 = '5E60C48457517C643984638C8B95B5B44058ABB3F4DFC1881054E05E72BAA3A8'
+$expectedInventorySha256 = '1E821086572EBFBFE5276325E9CF22D2C602DE7CD38D467915F34DD1FFEFDB13'
 $actualInventorySha256 = (Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash
 if ($actualInventorySha256 -cne $expectedInventorySha256) {
     throw 'Production-prerequisite inventory bytes differ from the reviewed dynamic harness binding.'
