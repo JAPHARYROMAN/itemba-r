@@ -199,11 +199,18 @@ if (-not $vmEvidence.vm.localHypervisorEvidence -or
     [string]$vmEvidence.vm.disposition -ne 'PENDING_EXTERNAL_ORCHESTRATOR_ATTESTATION') {
     throw 'VM evidence does not truthfully report a hypervisor guest and pending external disposition.'
 }
+# This list must stay in step with Add-PassedCheck in the guest script (vm/Invoke-MsaidiziVmAcceptance.ps1),
+# because the count is compared exactly below. It named ten checks while the guest emitted
+# twelve, so the cardinality throw fired on every honest run: 'install.adversarial-preplant'
+# and 'reinstall.provenance-preservation' were absent. The guest CMS-signs its evidence and
+# the orchestrator hash-binds it, so this could not be worked around at ceremony time -- it
+# surfaced only at approval, after the VM run and its 24-hour window had been spent.
 $requiredChecks = @(
     'candidate.integrity', 'candidate.authenticode', 'vm.prerequisites',
+    'install.adversarial-preplant',
     'services.install-state', 'configuration.fail-closed', 'agent.standard-integrity',
     'acl.trust-separation', 'network.inbound-blocked', 'runtime.no-listener',
-    'uninstall.preservation'
+    'uninstall.preservation', 'reinstall.provenance-preservation'
 )
 $checkIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 foreach ($check in @($vmEvidence.checks)) {
