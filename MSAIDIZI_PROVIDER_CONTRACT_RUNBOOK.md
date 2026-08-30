@@ -9,6 +9,13 @@ stops the next disclosure rather than waiting for a restart.
 This is a paperwork-and-signature exercise, not a coding one. Budget an
 afternoon, most of it spent deciding what the document says.
 
+The signed attestation **replaced** the old
+`MSAIDIZI_CLOUD_ZERO_RETENTION_CONFIRMED` flag — this ceremony does not
+"satisfy" that boot gate, it is what exists instead of it. The backend now
+rejects the flag outright: setting it fails boot with "no longer accepted;
+configure signed provider-contract evidence". If an older checklist tells you
+to set it, delete that line.
+
 ---
 
 ## What the attestation actually is
@@ -22,7 +29,7 @@ are operating under with the model provider:
 | `apiOrigin` | `https://api.anthropic.com` | Must match the origin the SDK is pinned to. |
 | `zeroTraining` | `true` | Refuses to run if the contract does not prohibit training. |
 | `providerRetentionSeconds` | `0` | Refuses any non-zero retention. |
-| `permittedModelIds` | sorted, no duplicates | Must cover `MSAIDIZI_MODEL` **and** `MSAIDIZI_CLASSIFIER_MODEL`. |
+| `permittedModelIds` | sorted, no duplicates | Must exactly equal the set `{MSAIDIZI_MODEL, MSAIDIZI_CLASSIFIER_MODEL}`. |
 | `coveredDataClasses` | all ten | credentials, documents, financial_data, personal_data, screenshots, clipboard, audio, email, browser_sessions, business_records. |
 | `contractDocumentSha256` | digest of the real agreement | Binds the attestation to one exact document. |
 | `immutableLegalReference` | `urn:sha256:<that digest>` | Content-addressed, so the reference cannot drift from the document. |
@@ -86,10 +93,14 @@ On success it prints the seven environment variables, digests already computed.
 
 ### Notes on the arguments
 
-- `--models` must include both `MSAIDIZI_MODEL` and `MSAIDIZI_CLASSIFIER_MODEL`.
-  The classifier model is attested even though no pre-filter calls it yet;
-  changing it without a matching contract fails attestation and stops the agent.
-  The tool sorts and dedupes for you.
+- `--models` must **exactly equal** the set `{MSAIDIZI_MODEL,
+  MSAIDIZI_CLASSIFIER_MODEL}` — the verifier demands set equality, not
+  coverage. An extra model signs fine and passes the tool's self-verification,
+  but the runtime refuses the attestation with
+  `PROVIDER_CONTRACT_MODEL_SCOPE_MISMATCH`. The classifier model is attested
+  even though no pre-filter calls it yet; changing it without a matching
+  contract fails attestation and stops the agent. The tool sorts and dedupes
+  for you.
 - `--credential-key-id` is a *label* for the API key in your secret manager,
   never the key itself. The runtime releases the credential only when this
   matches `MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID`.
@@ -98,21 +109,35 @@ On success it prints the seven environment variables, digests already computed.
 
 ## Step 4 — Install on the host
 
-Copy **the artifact and the public key only** to the droplet, somewhere the
-container mounts read-only. The compose file already expects them under
-`/run/msaidizi-provider-contract/`:
-
-```
-/run/msaidizi-provider-contract/attestation.json
-/run/msaidizi-provider-contract/public.pem
-```
-
-Both are mounted with `create_host_path: false`, so a missing file fails the
-deploy rather than being silently created as an empty directory.
+Copy **the artifact and the public key only** to the droplet, to a host path
+you choose (the example env file uses
+`/etc/itemba-r/msaidizi/provider-contract/`). You do not create
+`/run/msaidizi-provider-contract/` yourself: the compose file bind-mounts the
+two host files you name in Step 5 onto those fixed container paths, read-only.
+Both mounts use `create_host_path: false`, so a missing file fails the deploy
+rather than being silently created as an empty directory.
 
 ## Step 5 — Set the environment and restart
 
-Add to `/opt/itemba-r/.env.production` the seven variables the tool printed,
+The tool prints seven variables, but the two `*_PATH` ones are the
+**container-side** names — the backend service in
+`docker-compose.production.yml` has no `env_file:`, and compose derives the
+container paths itself, so putting `MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_PATH`
+or `MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_PATH` in `.env.production` does
+nothing. Add to `/opt/itemba-r/.env.production` the other five variables as
+printed, plus the two operator-owned `*_HOST_PATH` variables pointing at the
+files from Step 4:
+
+```
+MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_HOST_PATH=<host path to attestation.json>
+MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_HOST_PATH=<host path to the .pub.pem>
+MSAIDIZI_PROVIDER_CONTRACT_KEY_ID=<as printed>
+MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256=<as printed>
+MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256=<as printed>
+MSAIDIZI_PROVIDER_ACCOUNT_ID=<as printed>
+MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID=<as printed>
+```
+
 plus the three that actually switch it on:
 
 ```
