@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 import {
   activateMsaidiziMandate,
   cancelMsaidiziTask,
@@ -2534,6 +2535,8 @@ const CONTROL_INPUT_STYLE = {
 };
 
 function MsaidiziRoutinesWorkspace() {
+  const { hasPermission } = useAuth();
+  const canActivate = hasPermission('msaidizi.oversight');
   const [mandates, setMandates] = useState<MsaidiziMandate[]>([]);
   const [schedules, setSchedules] = useState<MsaidiziSchedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
@@ -2937,7 +2940,7 @@ function MsaidiziRoutinesWorkspace() {
                   <ControlPlaneStatus status={mandate.status} />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {mandate.status === 'DRAFT' || mandate.status === 'SUSPENDED' ? (
+                  {(mandate.status === 'DRAFT' || mandate.status === 'SUSPENDED') && canActivate ? (
                     <ActionButton
                       busy={busy === `activate-mandate-${mandate.id}`}
                       disabled={busy !== null}
@@ -2945,6 +2948,12 @@ function MsaidiziRoutinesWorkspace() {
                     >
                       Activate mandate
                     </ActionButton>
+                  ) : null}
+                  {(mandate.status === 'DRAFT' || mandate.status === 'SUSPENDED') &&
+                  !canActivate ? (
+                    <p className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                      Activation requires Msaidizi oversight permission.
+                    </p>
                   ) : null}
                   {mandate.status === 'ACTIVE' ? (
                     <ActionButton
@@ -3910,6 +3919,8 @@ function MsaidiziDevicesWorkspace({
   focusedDeviceId?: string | null;
   focusedRecoveryId?: string | null;
 }) {
+  const { hasPermission } = useAuth();
+  const canOversee = hasPermission('msaidizi.oversight');
   const [devices, setDevices] = useState<MsaidiziDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -4059,14 +4070,20 @@ function MsaidiziDevicesWorkspace({
             <ActionButton busy={loading} disabled={busy !== null} onClick={() => void load()}>
               Refresh devices
             </ActionButton>
-            <ActionButton
-              danger
-              busy={busy === 'kill-all'}
-              disabled={busy !== null}
-              onClick={() => setConfirmation({ kind: 'killAll' })}
-            >
-              Emergency stop all devices
-            </ActionButton>
+            {canOversee ? (
+              <ActionButton
+                danger
+                busy={busy === 'kill-all'}
+                disabled={busy !== null}
+                onClick={() => setConfirmation({ kind: 'killAll' })}
+              >
+                Emergency stop all devices
+              </ActionButton>
+            ) : (
+              <p className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                Emergency stop requires Msaidizi oversight permission.
+              </p>
+            )}
           </div>
         </div>
 
@@ -4150,7 +4167,21 @@ function MsaidiziDevicesWorkspace({
         </ul>
       </section>
 
-      <MsaidiziRecoveryRequestForm onRequested={onRecoveryRequested} />
+      {canOversee ? (
+        <MsaidiziRecoveryRequestForm onRequested={onRecoveryRequested} />
+      ) : (
+        <section
+          className="rounded-xl p-4"
+          style={{ background: 'var(--aurora-card)', border: '1px solid var(--aurora-border)' }}
+        >
+          <h3 className="text-[13px] font-semibold" style={{ color: 'var(--aurora-text)' }}>
+            Authorize an exact trusted recovery
+          </h3>
+          <p className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+            Authorizing a recovery requires Msaidizi oversight permission.
+          </p>
+        </section>
+      )}
 
       <section
         className="rounded-xl p-4"
@@ -4162,28 +4193,34 @@ function MsaidiziDevicesWorkspace({
         <p className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
           The code is shown once and is never placed in browser storage, a URL, or the device list.
         </p>
-        <form
-          className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
-          onSubmit={createPairingChallenge}
-          aria-label="Create device pairing code"
-        >
-          <div className="min-w-0 flex-1">
-            <CompactField label="Device name">
-              <input
-                required
-                maxLength={120}
-                value={pairingName}
-                onChange={(event) => setPairingName(event.target.value)}
-                className={CONTROL_INPUT_CLASS}
-                style={CONTROL_INPUT_STYLE}
-                autoComplete="off"
-              />
-            </CompactField>
-          </div>
-          <ActionButton type="submit" busy={busy === 'create-pairing'} disabled={busy !== null}>
-            Create pairing code
-          </ActionButton>
-        </form>
+        {canOversee ? (
+          <form
+            className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
+            onSubmit={createPairingChallenge}
+            aria-label="Create device pairing code"
+          >
+            <div className="min-w-0 flex-1">
+              <CompactField label="Device name">
+                <input
+                  required
+                  maxLength={120}
+                  value={pairingName}
+                  onChange={(event) => setPairingName(event.target.value)}
+                  className={CONTROL_INPUT_CLASS}
+                  style={CONTROL_INPUT_STYLE}
+                  autoComplete="off"
+                />
+              </CompactField>
+            </div>
+            <ActionButton type="submit" busy={busy === 'create-pairing'} disabled={busy !== null}>
+              Create pairing code
+            </ActionButton>
+          </form>
+        ) : (
+          <p className="mt-3 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+            Creating a pairing code requires Msaidizi oversight permission.
+          </p>
+        )}
 
         {pairing ? (
           <div
@@ -4260,7 +4297,7 @@ function MsaidiziDevicesWorkspace({
         </ul>
       </section>
 
-      {confirmation ? (
+      {confirmation && canOversee ? (
         <section
           role="alertdialog"
           aria-modal="true"
