@@ -189,11 +189,22 @@ switch, central-ledger requirements, or active-user consent requirements.
 ## First-trust pairing
 
 When no certificate thumbprint is configured, the LocalSystem service creates
-one non-exportable P-256 key and self-signed client certificate. It tries the
-Microsoft Platform Crypto Provider first (TPM-backed) and falls back to the
-Microsoft Software Key Storage Provider only when the platform provider is not
-available. The DPAPI-protected identity record contains identifiers and public
-certificate material, never an exportable private key.
+one non-exportable P-256 key and self-signed client certificate. Which provider
+it may use is decided by policy, not by availability. Every shipped
+configuration sets `RequireHardwareBackedDeviceIdentity`, and that narrows the
+provider list to the Microsoft Platform Crypto Provider alone
+(`DeviceIdentityProvisioner.ProvisioningProviders`): if the TPM cannot mint the
+key, creation throws, and no certificate and no identity record are written.
+There is no software fallback to degrade into. The Microsoft Software Key
+Storage Provider is reachable only from a development configuration that
+explicitly clears that flag, and a software-backed identity that was persisted
+earlier is refused once the production policy is on. The DPAPI-protected
+identity record contains identifiers and public certificate material, never an
+exportable private key.
+
+On a host without a usable TPM, pairing therefore does not happen at all. That
+refusal is the intended behaviour and is what the provisioning ceremony's
+negative test looks for — it is not a degraded mode and not a defect.
 
 An operator first creates a short-lived one-time pairing code in Itemba and
 places it in supervisor-owned bootstrap configuration. The companion presents
