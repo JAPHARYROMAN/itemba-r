@@ -644,15 +644,7 @@ class SimplePdf {
     if (panelHeight > this.pageHeight - MARGIN * 2) {
       for (const paragraph of paragraphs) {
         this.y =
-          this.wrappedText(
-            paragraph,
-            MARGIN,
-            this.y,
-            9,
-            this.contentWidth,
-            'F1',
-            TEXT_DARK,
-          ) + 8;
+          this.wrappedText(paragraph, MARGIN, this.y, 9, this.contentWidth, 'F1', TEXT_DARK) + 8;
       }
       return;
     }

@@ -7,5 +7,16 @@ import { WorkspaceController } from './workspace.controller';
 import { WorkspaceService } from './workspace.service';
 import { WorkspaceDraftsService } from './workspace-drafts.service';
 import { WorkspaceDraftPolicy } from './workspace-draft-policy';
-@Module({ imports: [PrismaModule], controllers: [WorkspaceController], providers: [WorkspaceService, WorkspaceDraftsService, WorkspaceDraftPolicy, EncryptionService, CompanyScopeService, OrganizationScopeService] })
+@Module({
+  imports: [PrismaModule],
+  controllers: [WorkspaceController],
+  providers: [
+    WorkspaceService,
+    WorkspaceDraftsService,
+    WorkspaceDraftPolicy,
+    EncryptionService,
+    CompanyScopeService,
+    OrganizationScopeService,
+  ],
+})
 export class WorkspaceModule {}
