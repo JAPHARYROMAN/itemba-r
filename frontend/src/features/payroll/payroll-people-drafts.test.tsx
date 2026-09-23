@@ -270,6 +270,9 @@ describe('Payroll people workflow continuity', () => {
     const user = userEvent.setup();
     render(<App initial="/hr/attendance" />);
     let form = await openAttendance(user);
+    // The editor keeps its fields disabled until the record loads; under CI
+    // load the dialog can appear before that, so wait as choosePerson does.
+    await waitFor(() => expect(form.getByLabelText('Notes')).toBeEnabled());
     await user.clear(form.getByLabelText('Notes'));
     await user.type(form.getByLabelText('Notes'), 'My correction');
     await keep(user);
