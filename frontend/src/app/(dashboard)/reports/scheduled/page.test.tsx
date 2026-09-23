@@ -257,7 +257,7 @@ describe('Scheduled reports in a companion app', () => {
   it('does not fetch schedules when the user lacks permission', () => {
     state.permissions = new Set(['cash_desk.view']);
     render(<Harness />);
-    expect(screen.getByText('You do not have permission to view scheduled reports.')).toBeVisible();
+    expect(screen.getByText('Access Restricted')).toBeVisible();
     expect(state.page).not.toHaveBeenCalled();
   });
 });

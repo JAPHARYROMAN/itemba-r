@@ -4,6 +4,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 const backendGet = vi.fn();
 
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'quote-1' }) }));
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({ hasPermission: () => true, loading: false }),
+}));
 vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>

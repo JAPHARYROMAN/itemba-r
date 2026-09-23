@@ -480,7 +480,10 @@
   overflow: auto;
   overscroll-behavior: contain;
   position: relative;
-  container-type: inline-size;
+  /* Named so app CSS written as `@container os-workspace (...)` responds to
+     this window's width, not the viewport's (POS_REMAKE_PLAN §3 P4). The name
+     was previously only on the split pane, which DesktopShell never renders. */
+  container: os-workspace / inline-size;
 }
 .desktop-app-content {
   min-height: 100%;

@@ -45,8 +45,14 @@ import { SuccessScreen } from './screens/SuccessScreen';
 
 export function MobilePosLite() {
   const router = useRouter();
-  const { logout, hasPermission, loading: authLoading } = useAuth();
-  const canUse = hasPermission('mobile_pos_lite.use');
+  const { user, authOffline, logout, hasPermission, loading: authLoading } = useAuth();
+  // Offline cold start (invariant 8): with the server unreachable there is no
+  // user to ask, so the permission check would refuse a bound rep their till.
+  // The dashboard AuthGate already grants this grace on POS paths; here the
+  // terminal binding and the cached IndexedDB session decide instead, and the
+  // server still enforces mobile_pos_lite.use on every request it receives.
+  const posOfflineGrace = !user && authOffline;
+  const canUse = posOfflineGrace || hasPermission('mobile_pos_lite.use');
   const { lang, setLang, t } = usePosLang();
   const [screen, setScreen] = useState<PosScreen>('home');
   const [paymentMethod, setPaymentMethod] = useState('CASH');

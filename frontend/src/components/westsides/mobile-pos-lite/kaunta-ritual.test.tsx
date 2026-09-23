@@ -196,7 +196,15 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/lib/api-client', () => ({ backendGet: h.backendGet, backendPost: h.backendPost }));
 vi.mock('@/lib/mobile-pos-lite-store', () => ({ ...h.store }));
-vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ logout: h.logout }) }));
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({
+    logout: h.logout,
+    user: { permissions: ['mobile_pos_lite.use'] },
+    loading: false,
+    authOffline: false,
+    hasPermission: (...perms: string[]) => perms.every((p) => p === 'mobile_pos_lite.use'),
+  }),
+}));
 vi.mock('@/components/ui', () => ({ showToast: h.showToast }));
 
 /* ------------------------------------------------------------------------ *

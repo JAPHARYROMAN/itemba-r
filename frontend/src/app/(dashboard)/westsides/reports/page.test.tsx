@@ -15,6 +15,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const downloadTablePdf = vi.fn();
 
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({ hasPermission: () => true, loading: false }),
+}));
 vi.mock('@/hooks/use-org-scope', () => ({
   useOrgScope: () => ({
     companyOptions: [{ value: 'company-1', label: 'Westsides Trading' }],
