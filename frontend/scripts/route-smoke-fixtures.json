@@ -1,4 +1,5 @@
 {
+  "/apps/[appId]": "/apps/fuel-grid",
   "/companies/[id]": "/companies/e2e-company",
   "/group-control/contracts/[id]": "/group-control/contracts/e2e-contract",
   "/group-control/documents/[id]": "/group-control/documents/e2e-document",

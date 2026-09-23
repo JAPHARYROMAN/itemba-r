@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -12,8 +13,9 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import { PageHeader, showToast } from '@/components/ui';
+import { Btn, FormDateField, PageHeader, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendList } from '@/lib/api-client';
 import { downloadBinaryGet } from '@/lib/export-download';
 
@@ -232,6 +234,7 @@ function Metric({ label, value, help }: { label: string; value: string; help?: s
 export default function SupplierReportsPage() {
   const { hasPermission } = useAuth();
   const canView = hasPermission('operations.reports.view');
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [divisions, setDivisions] = useState<ScopeOption[]>([]);
@@ -242,6 +245,7 @@ export default function SupplierReportsPage() {
   const [page, setPage] = useState(1);
   const [report, setReport] = useState<Supplier360Report | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [exporting, setExporting] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [initialSupplierId, setInitialSupplierId] = useState('');
@@ -338,24 +342,28 @@ export default function SupplierReportsPage() {
   const loadReport = useCallback(async () => {
     if (!canView || !applied.companyId || !applied.supplierId) {
       setReport(null);
+      setError('');
       return;
     }
+    const request = beginRequest();
     setLoading(true);
+    setError('');
     try {
       const data = await backendGet<Supplier360Report>(
         `/operations-reports/supplier-360?${requestParams(section).toString()}`,
+        { signal: request.signal },
       );
+      if (!request.current()) return;
       setReport(data);
-    } catch (error) {
-      showToast(
-        'error',
-        'Could not load Supplier 360 report',
-        error instanceof Error ? error.message : undefined,
-      );
+    } catch (cause) {
+      if (!request.current()) return;
+      const message = cause instanceof Error ? cause.message : 'Could not load Supplier 360 report';
+      setError(message);
+      showToast('error', 'Could not load Supplier 360 report', message);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [applied.companyId, applied.supplierId, canView, requestParams, section]);
+  }, [applied.companyId, applied.supplierId, beginRequest, canView, requestParams, section]);
 
   useEffect(() => {
     void loadReport();
@@ -529,30 +537,20 @@ export default function SupplierReportsPage() {
         </div>
 
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <label className="grid gap-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-            From
-            <input
-              type="date"
-              className={controlClass}
-              style={controlStyle}
-              value={filters.dateFrom}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, dateFrom: event.target.value }))
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-            To
-            <input
-              type="date"
-              className={controlClass}
-              style={controlStyle}
-              value={filters.dateTo}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, dateTo: event.target.value }))
-              }
-            />
-          </label>
+          <FormDateField
+            label="From"
+            value={filters.dateFrom}
+            onChange={(value) =>
+              setFilters((current) => ({ ...current, dateFrom: value }))
+            }
+          />
+          <FormDateField
+            label="To"
+            value={filters.dateTo}
+            onChange={(value) =>
+              setFilters((current) => ({ ...current, dateTo: value }))
+            }
+          />
           <label className="grid gap-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
             Purchase status
             <select
@@ -651,6 +649,18 @@ export default function SupplierReportsPage() {
           </div>
         </div>
       </section>
+
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void loadReport()}>
+            Try again
+          </Btn>
+        </div>
+      )}
 
       {report ? (
         <>
@@ -826,7 +836,7 @@ export default function SupplierReportsPage() {
                 </div>
               ) : section === 'PURCHASES' ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1180px] text-sm">
+                  <WorkspaceTable className="w-full min-w-[1180px] text-sm">
                     <thead
                       style={{
                         background: 'var(--aurora-bg-subtle)',
@@ -863,11 +873,11 @@ export default function SupplierReportsPage() {
                         />
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               ) : section === 'PRODUCTS' ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[980px] text-sm">
+                  <WorkspaceTable className="w-full min-w-[980px] text-sm">
                     <thead
                       style={{
                         background: 'var(--aurora-bg-subtle)',
@@ -921,11 +931,11 @@ export default function SupplierReportsPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1080px] text-sm">
+                  <WorkspaceTable className="w-full min-w-[1080px] text-sm">
                     <thead
                       style={{
                         background: 'var(--aurora-bg-subtle)',
@@ -993,7 +1003,7 @@ export default function SupplierReportsPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               )}
             </section>
@@ -1104,7 +1114,7 @@ function PurchaseRow({
               className="overflow-x-auto rounded border"
               style={{ borderColor: 'var(--aurora-border)' }}
             >
-              <table className="w-full min-w-[720px] text-sm">
+              <WorkspaceTable className="w-full min-w-[720px] text-sm">
                 <thead style={{ color: 'var(--aurora-text-muted)' }}>
                   <tr>
                     {['Product', 'Code / SKU', 'Quantity', 'Unit', 'Unit cost', 'Line total'].map(
@@ -1136,7 +1146,7 @@ function PurchaseRow({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </td>
         </tr>

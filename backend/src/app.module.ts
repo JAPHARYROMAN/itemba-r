@@ -10,6 +10,11 @@ import { PrismaModule } from './prisma/prisma.module';
 import { redisConfig } from './common/config/redis.config';
 
 import { AuthModule } from './modules/auth/auth.module';
+import { FuelReportingModule } from './modules/fuel-reporting/fuel-reporting.module';
+import { SalesDeskModule } from './modules/sales-desk/sales-desk.module';
+import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
+import { CashDeskModule } from './modules/cash-desk/cash-desk.module';
+import { InvoiceDeskModule } from './modules/invoice-desk/invoice-desk.module';
 import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
@@ -40,6 +45,7 @@ import { ReportsCatalogModule } from './modules/reports-catalog/reports-catalog.
 import { GlobalSearchModule } from './modules/global-search/global-search.module';
 import { SettingsCatalogModule } from './modules/settings-catalog/settings-catalog.module';
 import { UserPreferencesModule } from './modules/user-preferences/user-preferences.module';
+import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { TaxAutoApplyModule } from './modules/tax-auto-apply/tax-auto-apply.module';
 import { TaxFilingEngineModule } from './modules/tax-filing-engine/tax-filing-engine.module';
 import { TaxAnomalyDetectionModule } from './modules/tax-anomaly-detection/tax-anomaly-detection.module';
@@ -243,6 +249,11 @@ import { RolesGuard } from './common/guards/roles.guard';
     }),
     PrismaModule,
     AuthModule,
+    FuelReportingModule,
+    InvoiceDeskModule,
+    CashDeskModule,
+    SalesDeskModule,
+    DeskReportsModule,
     UsersModule,
     RolesModule,
     PermissionsModule,
@@ -273,6 +284,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     GlobalSearchModule,
     SettingsCatalogModule,
     UserPreferencesModule,
+    WorkspaceModule,
     TaxAutoApplyModule,
     TaxFilingEngineModule,
     TaxAnomalyDetectionModule,

@@ -1,10 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, StatCard, SkeletonCardGrid, showToast } from '@/components/ui';
+import { Btn, Card, PageHeader, StatCard, SkeletonCardGrid, showToast } from '@/components/ui';
 import { ProgressRing } from '@/components/aurora/charts/ProgressRing';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendList } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -121,6 +123,7 @@ export default function OperationsDashboardPage() {
   const [error, setError] = useState('');
 
   const canView = hasPermission('operations.dashboard.view');
+  const beginRequest = useRequestGuard();
 
   useEffect(() => {
     if (!canView) return;
@@ -147,21 +150,25 @@ export default function OperationsDashboardPage() {
 
   const loadDashboard = useCallback(async () => {
     if (!canView || !companyId) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
       const payload = await backendGet<DashboardSummary>('/operations-dashboard/summary', {
         query: { companyId },
+        signal: request.signal,
       });
+      if (!request.current()) return;
       setData(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null);
     } catch (err: unknown) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Error loading dashboard';
       setError(message);
       showToast('error', 'Could not load operations dashboard', message);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, companyId]);
+  }, [beginRequest, canView, companyId]);
 
   useEffect(() => {
     loadDashboard();
@@ -211,7 +218,7 @@ export default function OperationsDashboardPage() {
             </div>
           }
         />
-        <select
+        <select aria-label="— Select a Company —"
           value={companyId}
           onChange={(e) => setCompanyId(e.target.value)}
           className="text-sm border border-slate-200 rounded-md px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
@@ -232,8 +239,14 @@ export default function OperationsDashboardPage() {
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
-          {error}
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void loadDashboard()}>
+            Try again
+          </Btn>
         </div>
       )}
 
@@ -510,7 +523,7 @@ export default function OperationsDashboardPage() {
                 <p className="text-sm text-slate-400 py-4 text-center">No data</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <WorkspaceTable className="w-full">
                     <thead>
                       <tr className="border-b border-slate-100">
                         <th className={thCls}>Name</th>
@@ -527,7 +540,7 @@ export default function OperationsDashboardPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               )}
             </Card>
@@ -540,7 +553,7 @@ export default function OperationsDashboardPage() {
                 <p className="text-sm text-slate-400 py-4 text-center">No low stock items</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <WorkspaceTable className="w-full">
                     <thead>
                       <tr className="border-b border-slate-100">
                         <th className={thCls}>Name</th>
@@ -571,7 +584,7 @@ export default function OperationsDashboardPage() {
                         );
                       })}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               )}
             </Card>

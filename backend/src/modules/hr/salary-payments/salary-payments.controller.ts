@@ -10,7 +10,7 @@ import {
   UseGuards,
   Patch,
 } from '@nestjs/common';
-import { EmployeeStatusQueryDto } from '../../../common/dto/resource-query.dto';
+import { SalaryPaymentsQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -27,7 +27,7 @@ export class SalaryPaymentsController {
 
   @Get()
   @RequirePermissions('salary_payments.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: EmployeeStatusQueryDto) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: SalaryPaymentsQueryDto) {
     return this.service.findAll(user, query);
   }
 

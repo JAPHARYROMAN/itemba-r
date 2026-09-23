@@ -1,0 +1,146 @@
+.accounting-controls,
+.accounting-control-detail {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.accounting-control-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.accounting-control-nav a {
+  padding: 10px 14px;
+  min-height: 44px;
+  border-radius: 10px;
+  color: var(--aurora-text-secondary);
+  font-size: 13px;
+}
+.accounting-control-nav a[aria-current='page'] {
+  background: var(--aurora-bg-elevated);
+  color: var(--aurora-text);
+  box-shadow: inset 0 0 0 1px var(--aurora-border);
+}
+.accounting-controls .accounting-control-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  padding: 18px;
+}
+.accounting-control-filters > div {
+  flex: 1 1 170px;
+}
+.accounting-control-pagination,
+.accounting-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.accounting-control-pagination {
+  justify-content: space-between;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+}
+.accounting-controls button,
+.accounting-control-editor button {
+  min-height: 44px;
+}
+.accounting-controls .os-split-detail > [data-workspace-card] {
+  padding: 22px;
+}
+.accounting-control-detail header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.accounting-control-detail h2 {
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.accounting-control-detail h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.accounting-control-detail p {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--aurora-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.accounting-control-facts {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+.accounting-control-facts > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 1.3fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--aurora-border);
+  font-size: 13px;
+}
+.accounting-control-facts dt {
+  color: var(--aurora-text-muted);
+}
+.accounting-control-facts dd {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.accounting-control-line {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+  background: var(--aurora-bg-elevated);
+}
+.accounting-control-line-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.accounting-control-editor {
+  display: grid;
+  gap: 24px;
+}
+.accounting-control-editor fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 24px;
+}
+.accounting-control-editor fieldset:disabled {
+  opacity: 0.75;
+}
+.accounting-control-lines {
+  display: grid;
+  gap: 12px;
+}
+.accounting-control-empty {
+  padding: 28px;
+  color: var(--aurora-text-secondary);
+  font-size: 14px;
+}
+@media (max-width: 600px) {
+  .accounting-control-line-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .accounting-control-filters > button {
+    flex: 1 1 auto;
+  }
+}
+@container os-workspace (max-width: 600px) {
+  .accounting-control-line-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .accounting-control-filters > button {
+    flex: 1 1 auto;
+  }
+}

@@ -1,0 +1,47 @@
+# Opt-in overlay for governed, read-only live chat benchmarks on staging.
+# Use ONLY after docker-compose.staging.yml; see the provider-contract runbook.
+services:
+  backend:
+    environment:
+      MSAIDIZI_ENABLED: "true"
+      MSAIDIZI_TOOL_SEARCH: "true"
+      MSAIDIZI_WRITE_MODE: read-only
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?A staging provider credential is required}
+      MSAIDIZI_MODEL: ${MSAIDIZI_MODEL:?An attested staging model is required}
+      MSAIDIZI_CLASSIFIER_MODEL: ${MSAIDIZI_CLASSIFIER_MODEL:?An attested classifier model is required}
+      MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_PATH: /run/msaidizi-provider-contract/attestation.json
+      MSAIDIZI_PROVIDER_CONTRACT_PUBLIC_KEY_PATH: /run/msaidizi-provider-contract/public.pem
+      MSAIDIZI_PROVIDER_CONTRACT_KEY_ID: ${MSAIDIZI_PROVIDER_CONTRACT_KEY_ID:?A contract signer key ID is required}
+      MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256: ${MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256:?The approved attestation digest is required}
+      MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256: ${MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256:?The approved signer digest is required}
+      MSAIDIZI_PROVIDER_ACCOUNT_ID: ${MSAIDIZI_PROVIDER_ACCOUNT_ID:?The contracted provider account is required}
+      MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID: ${MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID:?The contracted credential key ID is required}
+      # Literal ceilings: inherited operator flags cannot enable autonomy here.
+      MSAIDIZI_AUTONOMY_ENABLED: "false"
+      MSAIDIZI_TASK_WORKER_ENABLED: "false"
+      MSAIDIZI_AUTOPILOT_ENABLED: "false"
+      MSAIDIZI_HOST_EXECUTION_ENABLED: "false"
+      MSAIDIZI_ADAPTIVE_REASONING_ENABLED: "false"
+      MSAIDIZI_DEVICE_PAIRING_ENABLED: "false"
+      MSAIDIZI_DEVICE_CHANNEL_ENABLED: "false"
+      MSAIDIZI_DIRECT_MTLS_ENABLED: "false"
+      MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED: "false"
+      MSAIDIZI_UPDATE_SUPERVISOR_ENABLED: "false"
+      MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED: "false"
+      MSAIDIZI_UPDATE_EVALUATOR_ENABLED: "false"
+      MSAIDIZI_EVALUATOR_MTLS_ENABLED: "false"
+      MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED: "false"
+      MSAIDIZI_AUDIT_SIGNER_ENABLED: "false"
+    volumes:
+      - type: bind
+        source: ${MSAIDIZI_STAGING_CONTRACT_ATTESTATION_HOST_PATH:?An existing staging attestation file is required}
+        target: /run/msaidizi-provider-contract/attestation.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSAIDIZI_STAGING_CONTRACT_PUBLIC_KEY_HOST_PATH:?An existing staging verification key is required}
+        target: /run/msaidizi-provider-contract/public.pem
+        read_only: true
+        bind:
+          create_host_path: false

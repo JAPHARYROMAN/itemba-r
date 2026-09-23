@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PageHeader,
@@ -15,6 +16,7 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,11 +63,12 @@ const SCOPE_BADGE: Record<RoleScope, string> = {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RolesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canRead = hasPermission('roles.read');
   const canCreate = hasPermission('roles.create');
   const canUpdate = hasPermission('roles.update');
   const canDelete = hasPermission('roles.delete');
+  const beginRequest = useRequestGuard();
 
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,16 +79,20 @@ export default function RolesPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(async () => {
-    if (!canRead) return;
+    if (authLoading || !canRead) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/backend/roles');
+      const res = await fetch('/api/backend/roles', { signal: request.signal });
+      if (!request.current()) return;
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
+        if (!request.current()) return;
         throw new Error(`HTTP ${res.status}: ${errJson?.message ?? 'Failed to load roles'}`);
       }
       const json = await res.json();
+      if (!request.current()) return;
       const list: Role[] = Array.isArray(json.data?.data)
         ? json.data.data
         : Array.isArray(json.data)
@@ -95,11 +102,12 @@ export default function RolesPage() {
         : [];
       setRoles(list);
     } catch (e) {
+      if (!request.current()) return;
       setError(e instanceof Error ? e.message : 'Failed to load roles');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canRead]);
+  }, [authLoading, beginRequest, canRead]);
 
   useEffect(() => {
     void load();
@@ -129,13 +137,10 @@ export default function RolesPage() {
     }
   }
 
-  if (!canRead) {
+  if (authLoading || !canRead) {
     return (
       <main className="p-6">
-        <PageHeader title="Roles" subtitle="Manage role definitions and permission assignments" />
-        <Card className="p-6">
-          <p className="text-sm text-slate-600">You do not have permission to view roles.</p>
-        </Card>
+        <PageHeader title="Roles" subtitle={authLoading ? 'Loading' : 'Access Restricted'} />
       </main>
     );
   }
@@ -171,7 +176,7 @@ export default function RolesPage() {
         </Card>
       ) : (
         <Card className="p-0 overflow-hidden">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left bg-slate-50 border-b border-slate-200" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-5 py-3 text-xs uppercase tracking-wide">Role</th>
@@ -232,13 +237,15 @@ export default function RolesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </Card>
       )}
 
       {editorOpen && (
         <RoleEditorModal
           role={editing}
+          canCreate={canCreate}
+          canUpdate={canUpdate}
           onClose={() => setEditorOpen(false)}
           onSaved={() => { setEditorOpen(false); void load(); }}
         />
@@ -270,12 +277,15 @@ export default function RolesPage() {
 
 interface RoleEditorModalProps {
   role: Role | null; // null = creating
+  canCreate: boolean;
+  canUpdate: boolean;
   onClose: () => void;
   onSaved: () => void;
 }
 
-function RoleEditorModal({ role, onClose, onSaved }: RoleEditorModalProps) {
+function RoleEditorModal({ role, canCreate, canUpdate, onClose, onSaved }: RoleEditorModalProps) {
   const isCreate = !role;
+  const canEditPermissions = isCreate ? canCreate : canUpdate;
   const [form, setForm] = useState({
     name: role?.name ?? '',
     displayName: role?.displayName ?? '',
@@ -295,19 +305,26 @@ function RoleEditorModal({ role, onClose, onSaved }: RoleEditorModalProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [permFilter, setPermFilter] = useState('');
 
-  // Load all permissions once when the modal opens.
+  // Load all permissions once when the modal opens — only for create/update editors.
   useEffect(() => {
-    let cancelled = false;
+    if (!canEditPermissions) {
+      setLoadingPerms(false);
+      return;
+    }
+    const controller = new AbortController();
     (async () => {
       setLoadingPerms(true);
       setPermError(null);
       try {
-        const res = await fetch('/api/backend/permissions');
+        const res = await fetch('/api/backend/permissions', { signal: controller.signal });
+        if (controller.signal.aborted) return;
         if (!res.ok) {
           const errJson = await res.json().catch(() => ({}));
+          if (controller.signal.aborted) return;
           throw new Error(`HTTP ${res.status}: ${errJson?.message ?? 'Failed to load permissions'}`);
         }
         const json = await res.json();
+        if (controller.signal.aborted) return;
         const list: Permission[] = Array.isArray(json.data?.data)
           ? json.data.data
           : Array.isArray(json.data)
@@ -315,17 +332,18 @@ function RoleEditorModal({ role, onClose, onSaved }: RoleEditorModalProps) {
           : Array.isArray(json)
           ? json
           : [];
-        if (!cancelled) setPermissions(list);
+        setPermissions(list);
       } catch (e) {
-        if (!cancelled) setPermError(e instanceof Error ? e.message : 'Failed to load permissions');
+        if (controller.signal.aborted) return;
+        setPermError(e instanceof Error ? e.message : 'Failed to load permissions');
       } finally {
-        if (!cancelled) setLoadingPerms(false);
+        if (!controller.signal.aborted) setLoadingPerms(false);
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, []);
+  }, [canEditPermissions]);
 
   // Group permissions by module so the picker is navigable.
   const groupedPermissions = useMemo(() => {
@@ -465,7 +483,7 @@ function RoleEditorModal({ role, onClose, onSaved }: RoleEditorModalProps) {
         <div>
           <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
             <h4 className="text-sm font-semibold text-slate-800">Permissions</h4>
-            <input
+            <input aria-label="Filter (e.g. payroll, view, finance)…"
               type="search"
               value={permFilter}
               onChange={(e) => setPermFilter(e.target.value)}

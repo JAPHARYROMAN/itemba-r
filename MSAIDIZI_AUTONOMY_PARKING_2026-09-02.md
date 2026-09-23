@@ -293,3 +293,29 @@ _Add a dated line here when a trigger condition is judged met, when a cheap cere
 completed, or when the stand-down rule fires._
 
 - 2026-09-02 — Document created. C1, C2, C3 not yet started. No trigger condition met.
+- 2026-09-04 — C3 local implementation progress, not a rollout amendment: #51's
+  egress/device separation is documented in `windows-companion/docs/EGRESS-BOUNDARY.md`
+  and the driver README, including the required restricted-service-token denial
+  and privileged-supervisor positive control for VM acceptance. That VM drill has
+  not run. For #53's non-zero-pin hardening, four regression cases first reproduced
+  acceptance of all-zero active privileged-supervisor measurement/policy pins;
+  those configuration pins now use shared `PayloadDigest.IsProvisionedSha256`.
+  Generic digest and journal-genesis validation is unchanged. All 1,152 Windows
+  solution tests pass using the checksum-verified .NET 8.0.400 SDK; static verification
+  passes with `-RequireRoslyn`. These are local source/test results, not signed
+  installer, driver, VM or ring evidence. #53's health-expression and browser-provider
+  static pins remain outstanding. No activation switch, driver DACL, attestation
+  source, trust key or un-parking trigger changed.
+- 2026-09-04 — C3 follow-up source work: #53's ready-health comparison block,
+  sole rejecting browser registration and rejecting constructor default now have
+  static pins. Eleven authentic-but-unacceptable health responses are covered by
+  runtime tests, including rejection before policy mutation and a latched session;
+  browser DI/default behavior is also tested. A new Windows CI negative-control
+  harness accepts the untouched source and rejects seven weakened copies in an
+  isolated temporary directory. The LF-normalized verifier → protected runner →
+  release-constructor hash chain is updated and checked. All 1,165 solution tests
+  pass, and the complete protected verification runner passes (Release formatting,
+  builds/tests, 54 installer-hardening tests, static checks, dynamic policy checks,
+  and 63 native protocol/source checks). WDK was unavailable; no kernel build,
+  Authenticode ceremony, driver installation, live VM test or rollout is claimed.
+  These local changes remain subject to review; the parking decision is unchanged.

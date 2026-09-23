@@ -1,25 +1,16 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useFormGuard, useGuardedRouter } from '@/components/workspace/unsaved-work-provider';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
+
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+
 import { DocumentPreviewLink } from '@/components/documents';
-import {
-  Card,
-  PageHeader,
-  PageToolbar,
-  StatCard,
-  StatusBadge,
-  Modal,
-  ConfirmDialog,
-  Btn,
-  SkeletonTable,
-  EmptyState,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  CustomerPicker,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, ConfirmDialog, CustomerPicker, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, showToast, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
 import type { BusinessPartyPickerOption } from '@/components/ui';
 import {
   backendDelete,
@@ -481,7 +472,7 @@ function SalesOrderModal({
   mode,
   initial,
   companies,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   mode: 'create' | 'edit';
@@ -547,6 +538,8 @@ function SalesOrderModal({
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   // Once the user hand-edits the due date, auto due-date stops overwriting it.
@@ -737,8 +730,10 @@ function SalesOrderModal({
     selectedProductIdKey,
   ]);
 
-  const setField = <K extends keyof SalesOrderForm>(k: K, v: SalesOrderForm[K]) =>
+  const setField = <K extends keyof SalesOrderForm>(k: K, v: SalesOrderForm[K]) => {
+    draft.touch();
     setForm((f) => ({ ...f, [k]: v }));
+  };
   const setLine = (i: number, patch: Partial<SalesOrderLine>) =>
     setForm((f) => ({
       ...f,
@@ -891,6 +886,7 @@ function SalesOrderModal({
         await backendPatch(`/sales-orders/${initial!.id}`, body);
         showToast('success', 'Sales order updated');
       }
+      draft.markSaved();
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -901,6 +897,7 @@ function SalesOrderModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title={mode === 'create' ? 'Create Sales Order' : 'Edit Sales Order'}
@@ -922,12 +919,13 @@ function SalesOrderModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
+      <div className="workspace-form space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <h3 className="workspace-form-heading">Order context</h3>
           <FormSelect
             label="Company"
             required
@@ -1055,6 +1053,7 @@ function SalesOrderModal({
               </option>
             ))}
           </FormSelect>
+          <h3 className="workspace-form-heading">Customer and dates</h3>
           <CustomerPicker
             label="Customer"
             value={form.customerId}
@@ -1082,20 +1081,18 @@ function SalesOrderModal({
             onChange={(e) => setField('customerName', e.target.value)}
             placeholder="If no customer selected"
           />
-          <FormInput
+          <FormDateField
             label="Order Date"
             required
-            type="date"
             value={form.orderDate}
-            onChange={(e) => setField('orderDate', e.target.value)}
+            onChange={(value) => setField('orderDate', value)}
           />
-          <FormInput
+          <FormDateField
             label="Due Date"
-            type="date"
             value={form.dueDate}
-            onChange={(e) => {
+            onChange={(value) => {
               setDueDateTouched(true);
-              setField('dueDate', e.target.value);
+              setField('dueDate', value);
             }}
             hint={
               autoDueDateInfo
@@ -1125,6 +1122,7 @@ function SalesOrderModal({
               );
             })}
           </FormSelect>
+          <h3 className="workspace-form-heading">Payment details</h3>
           <FormSelect
             label="Payment Method"
             required
@@ -1263,9 +1261,9 @@ function SalesOrderModal({
           autoTax
           documentDiscount={form.documentDiscount}
           onDocumentDiscountChange={(value) => setField('documentDiscount', value)}
-          onAddLine={addLine}
-          onRemoveLine={removeLine}
-          onLineChange={setLine}
+          onAddLine={() => draft.change(addLine)}
+          onRemoveLine={(index) => draft.change(() => removeLine(index))}
+          onLineChange={(index, patch) => draft.change(() => setLine(index, patch))}
           onProductSearch={handleProductSearch}
           onValidationChange={setLineValidation}
         />
@@ -1315,7 +1313,7 @@ function DeleteConfirm({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -1327,17 +1325,19 @@ function DeleteConfirm({
 }
 
 export default function SalesOrdersPage() {
-  const router = useRouter();
+  const router = useGuardedRouter();
   const { hasPermission } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<WorkbenchSummary>(blankSummary);
   const [data, setData] = useState<Paginated<SalesOrder> | null>(null);
   const [customerDayData, setCustomerDayData] = useState<Paginated<CustomerDaySummary> | null>(
     null,
   );
-  const [viewMode, setViewMode] = useState<'summary' | 'orders'>('summary');
+  const [viewMode, setViewMode] = useState<'summary' | 'orders'>('orders');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [layout, setLayout] = useWorkspaceLayout('/operations/sales-orders');
   const [searchInput, setSearchInput] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -1389,6 +1389,7 @@ export default function SalesOrdersPage() {
 
   const load = useCallback(async () => {
     if (!canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     try {
@@ -1404,10 +1405,18 @@ export default function SalesOrdersPage() {
         viewMode === 'summary'
           ? backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
               query: { ...query, page, limit: 20 },
+              signal: request.signal,
             })
-          : backendPage<SalesOrder>('/sales-orders', { query: { ...query, page, limit: 20 } }),
-        backendGet<WorkbenchSummary>('/sales-orders/workbench-summary', { query }),
+          : backendPage<SalesOrder>('/sales-orders', {
+              query: { ...query, page, limit: 20 },
+              signal: request.signal,
+            }),
+        backendGet<WorkbenchSummary>('/sales-orders/workbench-summary', {
+          query,
+          signal: request.signal,
+        }),
       ]);
+      if (!request.current()) return;
       if (viewMode === 'summary') {
         setCustomerDayData(pageResult as Paginated<CustomerDaySummary>);
       } else {
@@ -1415,14 +1424,16 @@ export default function SalesOrdersPage() {
       }
       setSummary(summaryResult);
     } catch (err: unknown) {
+      if (!request.current()) return;
       setData(emptyPaginated<SalesOrder>());
       setCustomerDayData(emptyPaginated<CustomerDaySummary>());
       setSummary(blankSummary());
       setLoadError(err instanceof Error ? err.message : 'Failed to load sales orders');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
   }, [
+    beginRequest,
     canView,
     page,
     filterSearch,
@@ -1712,6 +1723,93 @@ export default function SalesOrdersPage() {
     );
   }
 
+  const renderOrderActions = (o: SalesOrder) => {
+    const orderRef = o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
+    return (
+      <>
+        <Btn
+          variant="secondary"
+          size="xs"
+          aria-label={`View order ${orderRef}`}
+          onClick={() => router.push(`/operations/sales-orders/${o.id}`)}
+        >
+          View
+        </Btn>
+        <DocumentPreviewLink
+          href={`/operations/sales-orders/${o.id}/print`}
+          label={`View / Print / PDF order ${orderRef}`}
+        />
+        {canRecordPayment &&
+          (o.receivableId ?? o.receivable?.id) &&
+          Number(o.outstandingAmount ?? 0) > 0 &&
+          ['CONFIRMED', 'PARTIALLY_PAID'].includes(o.status) && (
+            <Btn
+              variant="primary"
+              size="xs"
+              aria-label={`Record payment for order ${orderRef}`}
+              onClick={() =>
+                setRecordingPayment({
+                  id: o.id,
+                  salesOrderNumber: o.salesOrderNumber,
+                  orderNumber: o.orderNumber,
+                  receivableId: o.receivableId ?? o.receivable?.id ?? null,
+                  companyId: o.companyId,
+                  divisionId: o.divisionId,
+                  branchId: o.branchId,
+                  currency: o.currency,
+                  outstandingAmount: o.outstandingAmount,
+                })
+              }
+            >
+              Pay
+            </Btn>
+          )}
+        {o.status === 'DRAFT' && canCreate && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`Edit order ${orderRef}`}
+            onClick={() => setEditing(o)}
+          >
+            Edit
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canConfirm && (
+          <Btn
+            variant="primary"
+            size="xs"
+            aria-label={`Confirm order ${orderRef}`}
+            loading={actionLoading === `${o.id}:confirm`}
+            onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
+          >
+            Confirm
+          </Btn>
+        )}
+        {o.status === 'CONFIRMED' && canCancel && (
+          <Btn
+            variant="danger"
+            size="xs"
+            aria-label={`Cancel order ${orderRef}`}
+            loading={actionLoading === `${o.id}:cancel`}
+            onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
+          >
+            Cancel
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canCreate && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`Delete order ${orderRef}`}
+            onClick={() => setDeleting(o)}
+          >
+            Delete
+          </Btn>
+        )}
+      </>
+    );
+  };
+
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
   const filterStyle = {
@@ -1721,7 +1819,7 @@ export default function SalesOrdersPage() {
   } as const;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace space-y-6">
       {creating && (
         <SalesOrderModal
           mode="create"
@@ -1803,9 +1901,12 @@ export default function SalesOrdersPage() {
       {loadError && (
         <div
           role="alert"
-          className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
         >
-          {loadError}
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
       {actionError && (
@@ -1818,6 +1919,17 @@ export default function SalesOrdersPage() {
       )}
 
       <PageToolbar
+        collapsibleFilters
+        activeFilterCount={
+          [
+            filterCompany,
+            filterType,
+            filterStatus,
+            filterPayment,
+            filterDateFrom,
+            filterDateTo,
+          ].filter(Boolean).length
+        }
         search={searchInput}
         onSearch={(v) => setSearchInput(v)}
         searchPlaceholder="Order # or customer…"
@@ -1891,27 +2003,23 @@ export default function SalesOrdersPage() {
                 </option>
               ))}
             </select>
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter from date"
               value={filterDateFrom}
-              onChange={(e) => {
-                setFilterDateFrom(e.target.value);
+              onChange={(value) => {
+                setFilterDateFrom(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter to date"
               value={filterDateTo}
-              onChange={(e) => {
-                setFilterDateTo(e.target.value);
+              onChange={(value) => {
+                setFilterDateTo(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
             <div className="flex flex-wrap gap-1">
               <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('today')}>
@@ -1981,384 +2089,353 @@ export default function SalesOrdersPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          {viewMode === 'summary' ? (
-            <table className="w-full text-sm min-w-[1100px]" aria-label="Sales by customer and day">
-              <caption className="sr-only">Sales by customer and day</caption>
-              <thead>
-                <tr
-                  className="text-left text-xs uppercase bg-gray-50"
-                  style={{ color: 'var(--aurora-text-muted)' }}
-                >
-                  <th scope="col" className="px-4 py-3">
-                    Date
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Customer
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Orders
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Total
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Paid
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Outstanding
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Status Mix
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Payment Mix
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan={9}>
-                      <SkeletonTable rows={6} cols={9} />
-                    </td>
+      <div className="workspace-view-bar">
+        <p>
+          {viewMode === 'summary'
+            ? 'Customer totals grouped by day'
+            : 'Select a record to review details and actions.'}
+        </p>
+        {viewMode === 'orders' && <WorkspaceViewSwitch value={layout} onChange={setLayout} />}
+      </div>
+      {viewMode === 'orders' && layout === 'focus' ? (
+        <RecordBrowser
+          title="Sales orders"
+          records={data?.data ?? []}
+          name={(o) => o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8)}
+          reference={(o) => o.customer?.name ?? o.customerName ?? 'Walk-in'}
+          status={(o) => o.status}
+          fields={[
+            { label: 'Date', value: (o) => new Date(o.orderDate).toLocaleDateString('en-GB') },
+            { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
+          ]}
+          details={[
+            { label: 'Customer', value: (o) => o.customer?.name ?? o.customerName ?? 'Walk-in' },
+            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Notes', value: (o) => o.notes || '—' },
+          ]}
+          actions={renderOrderActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={data?.total ?? 0}
+          onPage={setPage}
+          empty="No orders match your filters. Adjust the date range or search to see more."
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            {viewMode === 'summary' ? (
+              <WorkspaceTable
+                className="w-full text-sm min-w-[1100px]"
+                aria-label="Sales by customer and day"
+              >
+                <caption className="sr-only">Sales by customer and day</caption>
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Customer
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Orders
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Total
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Paid
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Outstanding
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status Mix
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Payment Mix
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
                   </tr>
-                ) : !customerDayData?.data.length ? (
-                  <tr>
-                    <td colSpan={9}>
-                      <EmptyState
-                        title="No sales for this view"
-                        description="No customer-day sales groups match the current filters."
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  customerDayData.data.map((group) => {
-                    const expanded = !!expandedGroups[group.id];
-                    return (
-                      <Fragment key={group.id}>
-                        <tr className="hover:bg-slate-50">
-                          <td className="px-4 py-3 text-xs">{formatDateOnly(group.date)}</td>
-                          <td className="px-4 py-3">
-                            <div className="font-medium">{group.customer.name}</div>
-                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                              {group.customer.customerCode ??
-                                (group.customer.isWalkIn ? 'Walk-in/manual' : '')}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">{group.orderCount}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            {fmtMoney(group.totalAmount, group.currency)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            {fmtMoney(group.paidAmount, group.currency)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            {fmtMoney(group.outstandingAmount, group.currency)}
-                          </td>
-                          <td className="px-4 py-3 text-xs">
-                            {compactCounts(group.statusCounts) || '—'}
-                          </td>
-                          <td className="px-4 py-3 text-xs">
-                            {compactCounts(group.paymentStatusCounts) || '—'}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <Btn
-                              variant="secondary"
-                              size="xs"
-                              onClick={() =>
-                                setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))
-                              }
-                            >
-                              {expanded ? 'Hide Orders' : 'View Orders'}
-                            </Btn>
-                          </td>
-                        </tr>
-                        {expanded && (
-                          <tr key={`${group.id}:orders`}>
-                            <td colSpan={9} className="px-4 py-3 bg-slate-950/5">
-                              <div className="space-y-2">
-                                {group.orders.map((order) => {
-                                  const orderRef =
-                                    order.salesOrderNumber ??
-                                    order.orderNumber ??
-                                    order.id.slice(0, 8);
-                                  return (
-                                    <div
-                                      key={order.id}
-                                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                                      style={{ borderColor: 'var(--aurora-border)' }}
-                                    >
-                                      <div className="min-w-0">
-                                        <div className="font-mono text-xs">{orderRef}</div>
-                                        <div
-                                          className="text-xs"
-                                          style={{ color: 'var(--aurora-text-muted)' }}
-                                        >
-                                          {order.branch?.name ?? 'No branch'} ·{' '}
-                                          {order.salesType.replace(/_/g, ' ')}
-                                        </div>
-                                      </div>
-                                      <div className="text-right tabular-nums">
-                                        <div>{fmtMoney(order.totalAmount, order.currency)}</div>
-                                        <div
-                                          className="text-xs"
-                                          style={{ color: 'var(--aurora-text-muted)' }}
-                                        >
-                                          Outstanding{' '}
-                                          {fmtMoney(order.outstandingAmount, order.currency)}
-                                        </div>
-                                      </div>
-                                      <div className="flex flex-wrap items-center gap-1">
-                                        <StatusBadge value={order.status} />
-                                        <StatusBadge value={order.paymentStatus} />
-                                        {canRecordPayment &&
-                                          order.receivableId &&
-                                          Number(order.outstandingAmount ?? 0) > 0 &&
-                                          ['CONFIRMED', 'PARTIALLY_PAID'].includes(
-                                            order.status,
-                                          ) && (
-                                            <Btn
-                                              variant="primary"
-                                              size="xs"
-                                              aria-label={`Record payment for order ${orderRef}`}
-                                              onClick={() => setRecordingPayment(order)}
-                                            >
-                                              Pay
-                                            </Btn>
-                                          )}
-                                        <Btn
-                                          variant="secondary"
-                                          size="xs"
-                                          aria-label={`View order ${orderRef}`}
-                                          onClick={() =>
-                                            router.push(`/operations/sales-orders/${order.id}`)
-                                          }
-                                        >
-                                          View
-                                        </Btn>
-                                        <DocumentPreviewLink
-                                          href={`/operations/sales-orders/${order.id}/print`}
-                                          label={`View / Print / PDF order ${orderRef}`}
-                                        />
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <SkeletonTable rows={6} cols={9} />
+                      </td>
+                    </tr>
+                  ) : !customerDayData?.data.length ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <EmptyState
+                          title="No sales for this view"
+                          description="No customer-day sales groups match the current filters."
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    customerDayData.data.map((group) => {
+                      const expanded = !!expandedGroups[group.id];
+                      return (
+                        <Fragment key={group.id}>
+                          <tr className="hover:bg-slate-50">
+                            <td className="px-4 py-3 text-xs">{formatDateOnly(group.date)}</td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{group.customer.name}</div>
+                              <div
+                                className="text-xs"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {group.customer.customerCode ??
+                                  (group.customer.isWalkIn ? 'Walk-in/manual' : '')}
                               </div>
                             </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          ) : (
-            <table className="w-full text-sm min-w-[1100px]" aria-label="Sales orders">
-              <caption className="sr-only">Sales orders</caption>
-              <thead>
-                <tr
-                  className="text-left text-xs uppercase bg-gray-50"
-                  style={{ color: 'var(--aurora-text-muted)' }}
-                >
-                  <th scope="col" className="px-4 py-3">
-                    Number
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Date
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Customer
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Type
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Total
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Outstanding
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Status
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Payment
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan={9}>
-                      <SkeletonTable rows={6} cols={9} />
-                    </td>
-                  </tr>
-                ) : !data?.data.length ? (
-                  <tr>
-                    <td colSpan={9}>
-                      <EmptyState
-                        title="No orders"
-                        description="No sales orders match the current filters."
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  data.data.map((o) => {
-                    const orderRef = o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
-                    return (
-                      <tr key={o.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-mono text-xs">{orderRef}</td>
-                        <td className="px-4 py-3 text-xs">
-                          {new Date(o.orderDate).toLocaleDateString('en-GB')}
-                        </td>
-                        <td className="px-4 py-3">
-                          {o.customer?.name ?? o.customerName ?? (
-                            <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
-                              Walk-in
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-xs">{o.salesType.replace(/_/g, ' ')}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtMoney(o.totalAmount, o.currency)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {fmtMoney(o.outstandingAmount, o.currency)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge value={o.status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge value={o.paymentStatus} />
-                        </td>
-                        <td className="px-4 py-3 text-right space-x-1">
-                          <Btn
-                            variant="secondary"
-                            size="xs"
-                            aria-label={`View order ${orderRef}`}
-                            onClick={() => router.push(`/operations/sales-orders/${o.id}`)}
-                          >
-                            View
-                          </Btn>
-                          <DocumentPreviewLink
-                            href={`/operations/sales-orders/${o.id}/print`}
-                            label={`View / Print / PDF order ${orderRef}`}
-                          />
-                          {canRecordPayment &&
-                            (o.receivableId ?? o.receivable?.id) &&
-                            Number(o.outstandingAmount ?? 0) > 0 &&
-                            ['CONFIRMED', 'PARTIALLY_PAID'].includes(o.status) && (
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {group.orderCount}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(group.totalAmount, group.currency)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(group.paidAmount, group.currency)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(group.outstandingAmount, group.currency)}
+                            </td>
+                            <td className="px-4 py-3 text-xs">
+                              {compactCounts(group.statusCounts) || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-xs">
+                              {compactCounts(group.paymentStatusCounts) || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
                               <Btn
-                                variant="primary"
+                                variant="secondary"
                                 size="xs"
-                                aria-label={`Record payment for order ${orderRef}`}
                                 onClick={() =>
-                                  setRecordingPayment({
-                                    id: o.id,
-                                    salesOrderNumber: o.salesOrderNumber,
-                                    orderNumber: o.orderNumber,
-                                    receivableId: o.receivableId ?? o.receivable?.id ?? null,
-                                    companyId: o.companyId,
-                                    divisionId: o.divisionId,
-                                    branchId: o.branchId,
-                                    currency: o.currency,
-                                    outstandingAmount: o.outstandingAmount,
-                                  })
+                                  setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))
                                 }
                               >
-                                Pay
+                                {expanded ? 'Hide Orders' : 'View Orders'}
                               </Btn>
+                            </td>
+                          </tr>
+                          {expanded && (
+                            <tr key={`${group.id}:orders`}>
+                              <td colSpan={9} className="px-4 py-3 bg-slate-950/5">
+                                <div className="space-y-2">
+                                  {group.orders.map((order) => {
+                                    const orderRef =
+                                      order.salesOrderNumber ??
+                                      order.orderNumber ??
+                                      order.id.slice(0, 8);
+                                    return (
+                                      <div
+                                        key={order.id}
+                                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                                        style={{ borderColor: 'var(--aurora-border)' }}
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="font-mono text-xs">{orderRef}</div>
+                                          <div
+                                            className="text-xs"
+                                            style={{ color: 'var(--aurora-text-muted)' }}
+                                          >
+                                            {order.branch?.name ?? 'No branch'} ·{' '}
+                                            {order.salesType.replace(/_/g, ' ')}
+                                          </div>
+                                        </div>
+                                        <div className="text-right tabular-nums">
+                                          <div>{fmtMoney(order.totalAmount, order.currency)}</div>
+                                          <div
+                                            className="text-xs"
+                                            style={{ color: 'var(--aurora-text-muted)' }}
+                                          >
+                                            Outstanding{' '}
+                                            {fmtMoney(order.outstandingAmount, order.currency)}
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                          <StatusBadge value={order.status} />
+                                          <StatusBadge value={order.paymentStatus} />
+                                          {canRecordPayment &&
+                                            order.receivableId &&
+                                            Number(order.outstandingAmount ?? 0) > 0 &&
+                                            ['CONFIRMED', 'PARTIALLY_PAID'].includes(
+                                              order.status,
+                                            ) && (
+                                              <Btn
+                                                variant="primary"
+                                                size="xs"
+                                                aria-label={`Record payment for order ${orderRef}`}
+                                                onClick={() => setRecordingPayment(order)}
+                                              >
+                                                Pay
+                                              </Btn>
+                                            )}
+                                          <Btn
+                                            variant="secondary"
+                                            size="xs"
+                                            aria-label={`View order ${orderRef}`}
+                                            onClick={() =>
+                                              router.push(`/operations/sales-orders/${order.id}`)
+                                            }
+                                          >
+                                            View
+                                          </Btn>
+                                          <DocumentPreviewLink
+                                            href={`/operations/sales-orders/${order.id}/print`}
+                                            label={`View / Print / PDF order ${orderRef}`}
+                                          />
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </WorkspaceTable>
+            ) : (
+              <WorkspaceTable className="w-full text-sm min-w-[1100px]" aria-label="Sales orders">
+                <caption className="sr-only">Sales orders</caption>
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Number
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Customer
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Type
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Total
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Outstanding
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Payment
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <SkeletonTable rows={6} cols={9} />
+                      </td>
+                    </tr>
+                  ) : !data?.data.length ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <EmptyState
+                          title="No orders"
+                          description="No sales orders match the current filters."
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    data.data.map((o) => {
+                      const orderRef = o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
+                      return (
+                        <tr key={o.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-mono text-xs">{orderRef}</td>
+                          <td className="px-4 py-3 text-xs">
+                            {new Date(o.orderDate).toLocaleDateString('en-GB')}
+                          </td>
+                          <td className="px-4 py-3">
+                            {o.customer?.name ?? o.customerName ?? (
+                              <span
+                                className="italic"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                Walk-in
+                              </span>
                             )}
-                          {o.status === 'DRAFT' && canCreate && (
-                            <Btn
-                              variant="ghost"
-                              size="xs"
-                              aria-label={`Edit order ${orderRef}`}
-                              onClick={() => setEditing(o)}
-                            >
-                              Edit
-                            </Btn>
-                          )}
-                          {o.status === 'DRAFT' && canConfirm && (
-                            <Btn
-                              variant="primary"
-                              size="xs"
-                              aria-label={`Confirm order ${orderRef}`}
-                              loading={actionLoading === `${o.id}:confirm`}
-                              onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
-                            >
-                              Confirm
-                            </Btn>
-                          )}
-                          {o.status === 'CONFIRMED' && canCancel && (
-                            <Btn
-                              variant="danger"
-                              size="xs"
-                              aria-label={`Cancel order ${orderRef}`}
-                              loading={actionLoading === `${o.id}:cancel`}
-                              onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
-                            >
-                              Cancel
-                            </Btn>
-                          )}
-                          {o.status === 'DRAFT' && canCreate && (
-                            <Btn
-                              variant="ghost"
-                              size="xs"
-                              aria-label={`Delete order ${orderRef}`}
-                              onClick={() => setDeleting(o)}
-                            >
-                              Delete
-                            </Btn>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-        {activePage && activePage.totalPages > 1 && (
-          <div
-            className="px-5 py-3 border-t flex items-center justify-between"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Page {activePage.page} of {activePage.totalPages} · {activePage.total} total
-            </span>
-            <div className="flex gap-2">
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Btn>
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page >= activePage.totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Btn>
-            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs">{o.salesType.replace(/_/g, ' ')}</td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(o.totalAmount, o.currency)}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(o.outstandingAmount, o.currency)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge value={o.status} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge value={o.paymentStatus} />
+                          </td>
+                          <td className="px-4 py-3 text-right space-x-1">
+                            {renderOrderActions(o)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </WorkspaceTable>
+            )}
           </div>
-        )}
-      </Card>
+          {activePage && activePage.totalPages > 1 && (
+            <div
+              className="px-5 py-3 border-t flex items-center justify-between"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Page {activePage.page} of {activePage.totalPages} · {activePage.total} total
+              </span>
+              <div className="flex gap-2">
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Previous
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page >= activePage.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

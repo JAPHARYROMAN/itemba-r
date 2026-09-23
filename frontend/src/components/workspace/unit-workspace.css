@@ -1,0 +1,83 @@
+.unit-workspace {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+}
+.unit-workspace .workspace-summary > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.unit-workspace .workspace-summary strong {
+  overflow-wrap: anywhere;
+}
+.unit-workspace > [data-page-header],
+.unit-workspace > [data-page-toolbar] {
+  margin-bottom: 0;
+}
+.unit-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--aurora-border);
+}
+.unit-sections button {
+  padding: 12px 18px;
+  color: var(--aurora-text-secondary);
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+.unit-sections button[aria-pressed='true'] {
+  color: var(--aurora-primary);
+  border-color: var(--aurora-primary);
+}
+.unit-sections button:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: -3px;
+}
+.unit-workspace .record-inspector dl > div {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  gap: 12px;
+}
+.unit-workspace .record-inspector dt {
+  margin: 0;
+}
+.unit-workspace .record-inspector dd {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.unit-workspace .record-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.unit-editor {
+  display: grid;
+  gap: 20px;
+}
+.unit-help {
+  color: var(--aurora-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.unit-equation {
+  padding: 18px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  background: var(--aurora-bg-subtle);
+  color: var(--aurora-text);
+  font-size: 17px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.unit-check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.unit-check input {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}

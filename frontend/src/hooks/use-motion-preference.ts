@@ -20,6 +20,22 @@ export function useMotionPreference() {
   }, []);
 
   useEffect(() => {
+    const onChange = (event: Event) => setModeState((event as CustomEvent<MotionMode>).detail);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'aurora-motion') return;
+      const next = getStoredMotionPreference();
+      setModeState(next);
+      applyMotionPreference(next);
+    };
+    window.addEventListener('itemba-motion-changed', onChange);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('itemba-motion-changed', onChange);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     if (mode !== 'system') return;
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     const onChange = () => applyMotionPreference('system');
@@ -31,6 +47,7 @@ export function useMotionPreference() {
     setModeState(next);
     setStoredMotionPreference(next);
     applyMotionPreference(next);
+    window.dispatchEvent(new CustomEvent('itemba-motion-changed', { detail: next }));
   }, []);
 
   return { mode, setMode, hydrated };

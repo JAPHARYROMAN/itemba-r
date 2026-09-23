@@ -11,7 +11,9 @@ import { UpdateLoanDto } from './dto/update-loan.dto';
 import { QueryLoanDto } from './dto/query-loan.dto';
 import { RecordRepaymentDto } from './dto/record-repayment.dto';
 import { MarkLoanStatusDto } from './dto/mark-loan-status.dto';
-import { AccessLevel, BorrowerLevel, LoanStatus, Prisma } from '@prisma/client';
+import { LoanLedgerService } from './loan-ledger.service';
+import { LoanLifecycleService } from './loan-lifecycle.service';
+import { AccessLevel, LoanStatus, Prisma } from '@prisma/client';
 
 @Injectable()
 export class LoansService {
@@ -22,29 +24,9 @@ export class LoansService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly lifecycle: LoanLifecycleService,
+    private readonly ledger: LoanLedgerService,
   ) {}
-
-  /**
-   * Resolve the cash-side ledger account for a loan disbursement/repayment.
-   * A loan draws down into / is repaid from a bank account when `bankAccountId`
-   * is set, so prefer the BANK role in that case; otherwise use CASH_ON_HAND.
-   * BANK is resolved DEFENSIVELY: on charts that do not carry a distinct BANK
-   * account we fall back to CASH_ON_HAND rather than failing the posting.
-   */
-  private async resolveCashSideAccount(
-    companyId: string,
-    hasBankAccount: boolean,
-    tx: Prisma.TransactionClient,
-  ) {
-    if (hasBankAccount) {
-      try {
-        return await this.accountResolver.resolve(companyId, 'BANK', tx);
-      } catch {
-        // Chart has no dedicated BANK account — fall back to cash-on-hand.
-      }
-    }
-    return this.accountResolver.resolve(companyId, 'CASH_ON_HAND', tx);
-  }
 
   // ─── List ──────────────────────────────────────────────────────────────────
 
@@ -66,7 +48,10 @@ export class LoansService {
     const skip = (page - 1) * limit;
 
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
-    const where: Prisma.LoanWhereInput = { deletedAt: null };
+    const where: Prisma.LoanWhereInput = {
+      deletedAt: null,
+      ...(await this.ledger.readWhere(user, companyId)),
+    };
     if (companyId) {
       await this.companyScope.assertCanAccessCompany(user, companyId);
       where.companyId = companyId;
@@ -120,14 +105,14 @@ export class LoansService {
         division: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true } },
         group: { select: { id: true, name: true, code: true } },
-        repayments: { orderBy: { repaymentDate: 'desc' } },
+        repayments: { orderBy: { repaymentDate: 'desc' }, include: { financialEvent: true } },
         documents: { where: { deletedAt: null } },
       },
     });
     if (!record) throw new NotFoundException('Loan not found');
 
     if (user) {
-      await this.companyScope.assertCanAccessCompany(user, record.companyId);
+      await this.ledger.scope(user, record, false);
       await this.auditLogs.log({
         action: 'loan.view',
         entityType: 'Loan',
@@ -143,446 +128,165 @@ export class LoansService {
   // ─── Create ────────────────────────────────────────────────────────────────
 
   async create(dto: CreateLoanDto, user: AuthUser) {
-    const borrowerLevel = dto.borrowerLevel ?? BorrowerLevel.COMPANY;
-    if (borrowerLevel === BorrowerLevel.COMPANY && !dto.companyId) {
-      throw new BadRequestException('companyId is required when borrowerLevel is COMPANY');
-    }
-    if (borrowerLevel === BorrowerLevel.GROUP && !dto.groupId) {
-      throw new BadRequestException('groupId is required when borrowerLevel is GROUP');
-    }
-    // Creating a loan is a mutation, so require WRITE-level access to the target
-    // company (matches expenses.create / fixed-assets.create and the other
-    // mutating loan methods). A user with only READ access must not create a
-    // financial record scoped to that company.
-    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-
-    // ITMB-105: amounts are validated as non-negative numeric strings by the DTO.
-    // Enforce the cross-field invariant that the opening outstanding balance
-    // cannot exceed the principal, and reject a non-positive principal.
-    const principalDecimal = new Prisma.Decimal(dto.principalAmount);
-    const outstandingDecimal = new Prisma.Decimal(dto.outstandingBalance);
-    if (principalDecimal.lte(0)) {
-      throw new BadRequestException('principalAmount must be greater than zero');
-    }
-    if (outstandingDecimal.gt(principalDecimal)) {
-      throw new BadRequestException('outstandingBalance cannot exceed principalAmount');
-    }
-
-    const scope = await this.resolveLoanScope({
-      companyId: dto.companyId,
-      divisionId: dto.divisionId || null,
-      branchId: dto.branchId || null,
-      bankAccountId: dto.bankAccountId || null,
-      borrowerLevel,
-    });
-
-    const createdById = user.id;
-    const disbursementDate = new Date(dto.disbursementDate);
-
-    // GL FIX (audit MED: "full-principal disbursement JE double-books opening
-    // balances"). Only a genuinely new drawdown funded THROUGH this system moves
-    // cash: DR Cash/Bank, CR Loan Principal Payable for the full principal. An
-    // opening-balance / migrated loan (outstandingBalance < principalAmount) was
-    // NOT disbursed here — its cash already landed (and was partly repaid) before
-    // this record existed, so posting a full-principal disbursement JE would
-    // double-book cash and the liability. A new drawdown is identified by an
-    // outstanding balance equal to the full principal (nothing repaid yet).
-    // Opening-balance loans are recognised in the ledger via a separate
-    // opening-balance / trial-balance import, not through this endpoint.
-    const isNewDrawdown = outstandingDecimal.equals(principalDecimal);
-
-    // Create the loan and post the disbursement journal entry ATOMICALLY so the
-    // liability cannot exist in the subledger without a matching GL swing.
-    const { record, journalEntryId } = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.loan.create({
-        data: {
-          obligationType: dto.obligationType,
-          borrowerLevel,
-          companyId: dto.companyId,
-          divisionId: scope.divisionId,
-          branchId: scope.branchId,
-          groupId: dto.groupId,
-          loanReference: dto.loanReference,
-          lenderName: dto.lenderName,
-          lenderType: dto.lenderType,
-          lenderContact: dto.lenderContact,
-          principalAmount: principalDecimal,
-          currency: dto.currency,
-          interestRate: new Prisma.Decimal(dto.interestRate),
-          disbursementDate,
-          maturityDate: new Date(dto.maturityDate),
-          repaymentFrequency: dto.repaymentFrequency,
-          repaymentAmount: dto.repaymentAmount ? new Prisma.Decimal(dto.repaymentAmount) : undefined,
-          outstandingBalance: outstandingDecimal,
-          // ITMB-105: status is server-controlled at creation; ignore client input.
-          status: LoanStatus.ACTIVE,
-          riskLevel: dto.riskLevel,
-          purpose: dto.purpose,
-          collateralDescription: dto.collateralDescription,
-          linkedAssetIds: dto.linkedAssetIds ?? [],
-          guarantorName: dto.guarantorName,
-          guarantorContact: dto.guarantorContact,
-          guaranteeDetails: dto.guaranteeDetails,
-          bankAccountId: dto.bankAccountId,
-          notes: dto.notes,
-          createdById,
-        },
-      });
-
-      // GL FIX (audit: "No loan disbursement JE"). Post the drawdown so the loan
-      // liability is recognised BEFORE any repayment debits it:
-      //   DR  Cash/Bank                (BANK if bankAccountId else CASH_ON_HAND)
-      //   CR  Loan Principal Payable   (LOAN_PRINCIPAL_PAYABLE)
-      // Only company-scoped loans carry a GL (GROUP-level obligations have no
-      // companyId to resolve a chart against — mirrors the schedule generator).
-      // Skip for opening-balance loans (see `isNewDrawdown` above) so a migrated
-      // loan does not double-book cash/liability.
-      let jeId: string | null = null;
-      if (created.companyId && isNewDrawdown) {
-        const cashAccount = await this.resolveCashSideAccount(
-          created.companyId,
-          Boolean(dto.bankAccountId),
-          tx,
-        );
-        const loanPayableAccount = await this.accountResolver.resolve(
-          created.companyId,
-          'LOAN_PRINCIPAL_PAYABLE',
-          tx,
-        );
-        const journalNumber = await this.codes.next({
-          entityType: 'LoanJournal',
-          companyId: created.companyId,
-          tx,
-        });
-        const description = `Loan disbursement ${created.loanReference ?? created.lenderName}`;
-        const je = await this.postingEngine.postLines(
-          {
-            journalNumber,
-            companyId: created.companyId,
-            divisionId: created.divisionId,
-            branchId: created.branchId,
-            transactionDate: disbursementDate,
-            description,
-            referenceType: 'Loan',
-            referenceId: created.id,
-            status: 'POSTED',
-            userId: createdById,
-            moduleName: 'loans',
-            lines: [
-              {
-                accountId: cashAccount.id,
-                description: 'Loan proceeds received',
-                debit: principalDecimal,
-                credit: 0,
-              },
-              {
-                accountId: loanPayableAccount.id,
-                description: 'Loan principal payable',
-                debit: 0,
-                credit: principalDecimal,
-              },
-            ],
-          },
-          tx,
-        );
-        jeId = je.id;
-      }
-
-      return { record: created, journalEntryId: jeId };
-    });
-
-    await this.auditLogs.log({
-      action: 'loan.create',
-      entityType: 'Loan',
-      entityId: record.id,
-      userId: createdById,
-      companyId: record.companyId ?? undefined,
-      newValue: record as any,
-      metadata: { journalEntryId },
-    });
-
-    return record;
+    return this.lifecycle.create(dto, user);
   }
 
   // ─── Update ────────────────────────────────────────────────────────────────
 
+  private async mutate<T>(
+    id: string,
+    user: AuthUser,
+    work: (
+      tx: Prisma.TransactionClient,
+      loan: NonNullable<Awaited<ReturnType<PrismaService['loan']['findFirst']>>>,
+    ) => Promise<T>,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM loans WHERE id = ${id} AND "deletedAt" IS NULL FOR UPDATE`;
+      const loan = await tx.loan.findFirst({ where: { id, deletedAt: null } });
+      if (!loan) throw new NotFoundException('Loan not found');
+      await this.ledger.scope(user, loan);
+      return work(tx, loan);
+    });
+  }
   async update(id: string, dto: UpdateLoanDto, user: AuthUser) {
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
-    const actorId = user.id;
-    const scope = await this.resolveLoanScope({
-      companyId: dto.companyId !== undefined ? dto.companyId : existing.companyId,
-      divisionId:
-        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
-      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
-      bankAccountId:
-        dto.bankAccountId !== undefined
-          ? dto.bankAccountId || null
-          : existing.bankAccountId || null,
-      borrowerLevel: dto.borrowerLevel ?? existing.borrowerLevel,
+    return this.mutate(id, user, async (tx, existing) => {
+      const controlled = [
+        'companyId',
+        'divisionId',
+        'branchId',
+        'groupId',
+        'borrowerLevel',
+        'obligationType',
+        'principalAmount',
+        'outstandingBalance',
+        'disbursementDate',
+        'currency',
+        'status',
+        'bankAccountId',
+        'fundingMode',
+        'principalLedgerAccountId',
+        'cashDeskAccountId',
+        'openingOffsetAccountId',
+        'recognitionDate',
+        'fees',
+        'feeAccountId',
+        'requestId',
+      ];
+      for (const field of controlled) {
+        const value = (dto as Record<string, unknown>)[field];
+        const current = (existing as unknown as Record<string, unknown>)[field];
+        const display = (v: unknown) =>
+          v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '');
+        if (value !== undefined && display(value) !== display(current))
+          throw new BadRequestException(
+            'Posted loan identity and balances cannot be edited. Reverse the incorrect loan event instead.',
+          );
+      }
+      const terms = ['interestRate', 'maturityDate', 'repaymentFrequency', 'repaymentAmount'];
+      if (
+        terms.some((field) => (dto as Record<string, unknown>)[field] !== undefined) &&
+        (await tx.loanRepaymentSchedule.count({ where: { loanDebtId: id, deletedAt: null } }))
+      )
+        throw new BadRequestException(
+          'This loan has a schedule. Its terms require a reviewed restructuring.',
+        );
+      if (dto.maturityDate && new Date(dto.maturityDate) <= existing.disbursementDate)
+        throw new BadRequestException('Maturity must follow disbursement.');
+      const rate =
+        dto.interestRate === undefined ? undefined : new Prisma.Decimal(dto.interestRate);
+      if (
+        rate &&
+        (!rate.isFinite() || rate.lt(0) || rate.gt('99.9999') || rate.decimalPlaces() > 4)
+      )
+        throw new BadRequestException('Invalid annual interest rate.');
+      const data: Prisma.LoanUpdateInput = {};
+      for (const key of [
+        'lenderName',
+        'loanReference',
+        'lenderType',
+        'lenderContact',
+        'riskLevel',
+        'purpose',
+        'collateralDescription',
+        'linkedAssetIds',
+        'guarantorName',
+        'guarantorContact',
+        'guaranteeDetails',
+        'notes',
+      ] as const) {
+        if (dto[key] !== undefined) Object.assign(data, { [key]: dto[key] });
+      }
+      if (rate !== undefined) data.interestRate = rate;
+      if (dto.maturityDate) data.maturityDate = new Date(dto.maturityDate);
+      if (dto.repaymentFrequency) data.repaymentFrequency = dto.repaymentFrequency;
+      if (dto.repaymentAmount !== undefined)
+        data.repaymentAmount = dto.repaymentAmount ? new Prisma.Decimal(dto.repaymentAmount) : null;
+      const record = await tx.loan.update({ where: { id }, data });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'loan.update',
+        entityType: 'Loan',
+        entityId: id,
+        userId: user.id,
+        companyId: record.companyId,
+        oldValue: existing as any,
+        newValue: record as any,
+      });
+      return record;
     });
-    const record = await this.prisma.loan.update({
-      where: { id },
-      data: {
-        divisionId: scope.divisionId,
-        branchId: scope.branchId,
-        ...(dto.obligationType && { obligationType: dto.obligationType }),
-        ...(dto.lenderName && { lenderName: dto.lenderName }),
-        ...(dto.lenderType !== undefined && { lenderType: dto.lenderType }),
-        ...(dto.lenderContact !== undefined && { lenderContact: dto.lenderContact }),
-        ...(dto.principalAmount && { principalAmount: new Prisma.Decimal(dto.principalAmount) }),
-        ...(dto.interestRate && { interestRate: new Prisma.Decimal(dto.interestRate) }),
-        ...(dto.disbursementDate && { disbursementDate: new Date(dto.disbursementDate) }),
-        ...(dto.maturityDate && { maturityDate: new Date(dto.maturityDate) }),
-        ...(dto.repaymentFrequency && { repaymentFrequency: dto.repaymentFrequency }),
-        ...(dto.repaymentAmount !== undefined && {
-          repaymentAmount: dto.repaymentAmount ? new Prisma.Decimal(dto.repaymentAmount) : null,
-        }),
-        ...(dto.outstandingBalance && {
-          outstandingBalance: new Prisma.Decimal(dto.outstandingBalance),
-        }),
-        ...(dto.status && { status: dto.status }),
-        ...(dto.riskLevel && { riskLevel: dto.riskLevel }),
-        ...(dto.purpose !== undefined && { purpose: dto.purpose }),
-        ...(dto.collateralDescription !== undefined && {
-          collateralDescription: dto.collateralDescription,
-        }),
-        ...(dto.linkedAssetIds && { linkedAssetIds: dto.linkedAssetIds }),
-        ...(dto.guarantorName !== undefined && { guarantorName: dto.guarantorName }),
-        ...(dto.guarantorContact !== undefined && { guarantorContact: dto.guarantorContact }),
-        ...(dto.guaranteeDetails !== undefined && { guaranteeDetails: dto.guaranteeDetails }),
-        ...(dto.bankAccountId !== undefined && { bankAccountId: dto.bankAccountId || null }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-      },
-    });
-
-    await this.auditLogs.log({
-      action: 'loan.update',
-      entityType: 'Loan',
-      entityId: id,
-      userId: actorId,
-      companyId: record.companyId ?? undefined,
-      oldValue: existing as any,
-      newValue: record as any,
-    });
-
-    return record;
   }
 
   // ─── Record Repayment ──────────────────────────────────────────────────────
 
   async recordRepayment(loanId: string, dto: RecordRepaymentDto, user: AuthUser) {
-    const loan = await this.findOne(loanId);
-    await this.companyScope.assertCanAccessCompany(user, loan.companyId, AccessLevel.WRITE);
-    if (loan.status === LoanStatus.SETTLED || loan.status === LoanStatus.FULLY_PAID) {
-      throw new BadRequestException('Cannot record repayment on a settled loan');
-    }
-
-    // GL FIX (audit: "Two loan repayment paths both decrement outstandingBalance").
-    // If this loan is managed by an amortization schedule, the schedule path
-    // (loan-repayment-schedules.recordPayment) is the single authoritative
-    // repayment path: it relieves principal AND posts the JE, keyed to each
-    // installment. Recording an ad-hoc repayment here as well would relieve the
-    // same principal twice against the SAME Loan.outstandingBalance. Refuse so
-    // one real cash event can only be booked through one path.
-    const scheduleCount = await this.prisma.loanRepaymentSchedule.count({
-      where: { loanDebtId: loanId, deletedAt: null },
-    });
-    if (scheduleCount > 0) {
-      throw new BadRequestException(
-        'This loan has an amortization schedule; record repayments against the schedule ' +
-          'installments (loan-repayment-schedules) so principal is not relieved twice.',
-      );
-    }
-
-    const actorId = user.id;
-    const amount = new Prisma.Decimal(dto.amount);
-    if (amount.lte(0)) throw new BadRequestException('Repayment amount must be greater than zero');
-
-    const repayment = await this.prisma.$transaction(async (tx) => {
-      // ITMB-063: lock the loan row and read the authoritative prior balance.
-      const rows = await tx.$queryRaw<Array<{ outstandingBalance: Prisma.Decimal }>>`
-        SELECT "outstandingBalance" FROM "loans" WHERE "id" = ${loanId} AND "deletedAt" IS NULL FOR UPDATE`;
-      if (rows.length === 0) throw new NotFoundException('Loan not found');
-      const priorBalance = new Prisma.Decimal(rows[0].outstandingBalance);
-
-      // Derive the principal portion server-side (default the full amount to
-      // principal when the caller does not split it out), and clamp the new
-      // outstanding balance to >= 0. The client cannot set the balance directly.
-      const principalPortion = dto.principal ? new Prisma.Decimal(dto.principal) : amount;
-      if (principalPortion.lt(0)) {
-        throw new BadRequestException('Principal portion cannot be negative');
-      }
-      if (principalPortion.gt(amount)) {
-        throw new BadRequestException('Principal portion cannot exceed the repayment amount');
-      }
-      // The non-principal remainder (interest + penalties/finance charges) is
-      // expensed. It is the balancing figure so the JE always ties to `amount`.
-      const financeCharge = amount.minus(principalPortion);
-      let newBalance = priorBalance.minus(principalPortion);
-      if (newBalance.lt(0)) newBalance = new Prisma.Decimal(0);
-
-      const repaymentDate = new Date(dto.repaymentDate);
-
-      const created = await tx.loanRepayment.create({
-        data: {
-          loanId,
-          repaymentDate,
-          amount,
-          currency: dto.currency,
-          principal: dto.principal ? new Prisma.Decimal(dto.principal) : undefined,
-          interest: dto.interest ? new Prisma.Decimal(dto.interest) : undefined,
-          penalties: dto.penalties ? new Prisma.Decimal(dto.penalties) : undefined,
-          // Record the server-derived remaining balance (not client-controlled).
-          remainingBalance: newBalance,
-          paymentMethod: dto.paymentMethod,
-          referenceNumber: dto.referenceNumber,
-          notes: dto.notes,
-          recordedById: actorId,
-        },
-      });
-
-      // Always update the outstanding balance from the server-side derivation.
-      await tx.loan.update({
-        where: { id: loanId },
-        data: { outstandingBalance: newBalance },
-      });
-
-      // GL FIX: post a balanced JE for the cash repayment (mirrors the schedule
-      // path's repayment posting) so the loans-module repayment path is itself
-      // GL-correct:
-      //   DR  Loan Principal Payable  (LOAN_PRINCIPAL_PAYABLE)   principalPortion
-      //   DR  Loan Interest Expense   (LOAN_INTEREST_EXPENSE)    interest+penalties
-      //   CR  Cash/Bank               (BANK|CASH_ON_HAND)        amount
-      let journalEntryId: string | null = null;
-      if (loan.companyId) {
-        const loanPayableAccount = await this.accountResolver.resolve(
-          loan.companyId,
-          'LOAN_PRINCIPAL_PAYABLE',
-          tx,
-        );
-        const cashAccount = await this.resolveCashSideAccount(
-          loan.companyId,
-          Boolean(loan.bankAccountId),
-          tx,
-        );
-        const lines = [
-          {
-            accountId: loanPayableAccount.id,
-            description: 'Principal portion',
-            debit: principalPortion,
-            credit: new Prisma.Decimal(0),
-          },
-          {
-            accountId: cashAccount.id,
-            description: 'Cash paid',
-            debit: new Prisma.Decimal(0),
-            credit: amount,
-          },
-        ];
-        // Only add the interest/finance-charge line when non-zero; a zero line
-        // would be rejected by the posting engine.
-        if (financeCharge.gt(0)) {
-          const interestAccount = await this.accountResolver.resolve(
-            loan.companyId,
-            'LOAN_INTEREST_EXPENSE',
-            tx,
-          );
-          lines.splice(1, 0, {
-            accountId: interestAccount.id,
-            description: 'Interest / finance charge portion',
-            debit: financeCharge,
-            credit: new Prisma.Decimal(0),
-          });
-        }
-        const journalNumber = await this.codes.next({
-          entityType: 'LoanJournal',
-          companyId: loan.companyId,
-          tx,
-        });
-        const je = await this.postingEngine.postLines(
-          {
-            journalNumber,
-            companyId: loan.companyId,
-            divisionId: loan.divisionId,
-            branchId: loan.branchId,
-            transactionDate: repaymentDate,
-            description: `Loan repayment ${loan.loanReference ?? loan.lenderName}`,
-            referenceType: 'LoanRepayment',
-            referenceId: created.id,
-            status: 'POSTED',
-            userId: actorId,
-            moduleName: 'loans',
-            lines,
-          },
-          tx,
-        );
-        journalEntryId = je.id;
-      }
-
-      return { created, journalEntryId };
-    });
-
-    await this.auditLogs.log({
-      action: 'loan.repayment_recorded',
-      entityType: 'Loan',
-      entityId: loanId,
-      userId: actorId,
-      companyId: loan.companyId ?? undefined,
-      newValue: repayment.created as any,
-      metadata: {
-        amount: dto.amount,
-        lenderName: loan.lenderName,
-        journalEntryId: repayment.journalEntryId,
-      },
-    });
-
-    return repayment.created;
+    return this.lifecycle.repay(loanId, dto, user);
   }
 
   // ─── Mark Status ───────────────────────────────────────────────────────────
 
   async markStatus(id: string, dto: MarkLoanStatusDto, user: AuthUser) {
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
-    const actorId = user.id;
-    const record = await this.prisma.loan.update({
-      where: { id },
-      data: { status: dto.status },
+    if (!['ACTIVE', 'DEFAULTED', 'RESTRUCTURED'].includes(dto.status))
+      throw new BadRequestException(
+        'Settlement and cancellation are controlled by repayments and reversals.',
+      );
+    return this.mutate(id, user, async (tx, existing) => {
+      await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
+      if (!['ACTIVE', 'DEFAULTED', 'RESTRUCTURED'].includes(existing.status))
+        throw new BadRequestException('A closed loan cannot be reopened by changing its status.');
+      const record = await tx.loan.update({ where: { id }, data: { status: dto.status } });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'loan.status_changed',
+        entityType: 'Loan',
+        entityId: id,
+        userId: user.id,
+        companyId: existing.companyId,
+        oldValue: { status: existing.status },
+        newValue: { status: dto.status },
+      });
+      return record;
     });
-
-    await this.auditLogs.log({
-      action: `loan.status_changed.${dto.status.toLowerCase()}`,
-      entityType: 'Loan',
-      entityId: id,
-      userId: actorId,
-      companyId: record.companyId ?? undefined,
-      oldValue: { status: existing.status },
-      newValue: { status: dto.status },
-      metadata: { lenderName: existing.lenderName },
-    });
-
-    return record;
   }
-
-  // ─── Soft Delete ───────────────────────────────────────────────────────────
-
   async remove(id: string, user: AuthUser) {
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
-    const actorId = user.id;
-    await this.prisma.loan.update({ where: { id }, data: { deletedAt: new Date() } });
-
-    await this.auditLogs.log({
-      action: 'loan.delete',
-      entityType: 'Loan',
-      entityId: id,
-      userId: actorId,
-      companyId: existing.companyId ?? undefined,
-      oldValue: existing as any,
+    return this.mutate(id, user, async (tx, existing) => {
+      await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
+      if (
+        (await tx.loanFinancialEvent.count({ where: { loanId: id } })) ||
+        (await tx.loanRepayment.count({ where: { loanId: id } })) ||
+        (await tx.loanRepaymentSchedule.count({ where: { loanDebtId: id } }))
+      )
+        throw new BadRequestException(
+          'Loans with financial or schedule history cannot be deleted. Reverse incorrect financial events instead.',
+        );
+      await tx.loan.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'loan.delete',
+        entityType: 'Loan',
+        entityId: id,
+        userId: user.id,
+        companyId: existing.companyId,
+      });
+      return { success: true };
     });
-
-    return { success: true };
   }
 
   // ─── Summary ───────────────────────────────────────────────────────────────
@@ -591,8 +295,15 @@ export class LoansService {
     const accessibleIds = await this.companyScope.accessibleCompanyIds(user);
     const scopeFilter: Prisma.LoanWhereInput =
       accessibleIds === null ? {} : { companyId: { in: accessibleIds } };
-    const baseFilter: Prisma.LoanWhereInput = { deletedAt: null, ...scopeFilter };
-    const activeFilter: Prisma.LoanWhereInput = { ...baseFilter, status: LoanStatus.ACTIVE };
+    const baseFilter: Prisma.LoanWhereInput = {
+      deletedAt: null,
+      ...scopeFilter,
+      ...(await this.ledger.readWhere(user)),
+    };
+    const activeFilter: Prisma.LoanWhereInput = {
+      ...baseFilter,
+      status: { in: [LoanStatus.ACTIVE, LoanStatus.DEFAULTED, LoanStatus.RESTRUCTURED] },
+    };
 
     const [
       totalCount,
@@ -677,6 +388,7 @@ export class LoansService {
       deletedAt: null,
       status: LoanStatus.ACTIVE,
       maturityDate: { lte: this.daysFromNow(days) },
+      ...(await this.ledger.readWhere(user)),
       ...(accessibleIds === null ? {} : { companyId: { in: accessibleIds } }),
     };
     return this.prisma.loan.findMany({
@@ -699,6 +411,7 @@ export class LoansService {
       deletedAt: null,
       status: LoanStatus.ACTIVE,
       maturityDate: { lt: new Date() },
+      ...(await this.ledger.readWhere(user)),
       ...(accessibleIds === null ? {} : { companyId: { in: accessibleIds } }),
     };
     return this.prisma.loan.findMany({
@@ -730,67 +443,5 @@ export class LoansService {
     const d = new Date();
     d.setDate(d.getDate() + days);
     return d;
-  }
-
-  private async resolveLoanScope(input: {
-    companyId?: string | null;
-    divisionId?: string | null;
-    branchId?: string | null;
-    bankAccountId?: string | null;
-    borrowerLevel?: BorrowerLevel;
-  }) {
-    let divisionId = input.divisionId || null;
-    let branchId = input.branchId || null;
-
-    if (input.borrowerLevel === BorrowerLevel.GROUP) {
-      return { divisionId: null, branchId: null };
-    }
-
-    if (input.bankAccountId) {
-      const bankAccount = await this.prisma.bankAccount.findFirst({
-        where: { id: input.bankAccountId, deletedAt: null },
-        select: { companyId: true, divisionId: true, branchId: true },
-      });
-      if (!bankAccount) throw new BadRequestException('Bank account not found');
-      if (input.companyId && bankAccount.companyId && bankAccount.companyId !== input.companyId) {
-        throw new BadRequestException('Bank account does not belong to this company');
-      }
-      if (!divisionId && bankAccount.divisionId) divisionId = bankAccount.divisionId;
-      if (!branchId && bankAccount.branchId) branchId = bankAccount.branchId;
-      if (divisionId && bankAccount.divisionId && bankAccount.divisionId !== divisionId) {
-        throw new BadRequestException('Bank account does not belong to the selected division');
-      }
-      if (branchId && bankAccount.branchId && bankAccount.branchId !== branchId) {
-        throw new BadRequestException(
-          'Bank account does not belong to the selected branch/location',
-        );
-      }
-    }
-
-    if (branchId) {
-      const branch = await this.prisma.branch.findFirst({
-        where: { id: branchId, deletedAt: null },
-        select: { divisionId: true, division: { select: { companyId: true } } },
-      });
-      if (!branch || (input.companyId && branch.division.companyId !== input.companyId)) {
-        throw new BadRequestException('Branch/location does not belong to this company');
-      }
-      if (!divisionId) divisionId = branch.divisionId;
-      if (divisionId && branch.divisionId !== divisionId) {
-        throw new BadRequestException('Branch/location does not belong to the selected division');
-      }
-    }
-
-    if (divisionId) {
-      const division = await this.prisma.division.findFirst({
-        where: { id: divisionId, deletedAt: null },
-        select: { companyId: true },
-      });
-      if (!division || (input.companyId && division.companyId !== input.companyId)) {
-        throw new BadRequestException('Division does not belong to this company');
-      }
-    }
-
-    return { divisionId, branchId };
   }
 }

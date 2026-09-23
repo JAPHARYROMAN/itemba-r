@@ -16,6 +16,8 @@ function makeService(opts: { grouped: any[]; totals: any; companyWhere?: any }) 
     inventoryMovement: {
       groupBy: jest.fn().mockResolvedValue(opts.grouped),
       aggregate: jest.fn().mockResolvedValue(opts.totals),
+      findMany: jest.fn().mockResolvedValue([{ id: 'movement' }]),
+      count: jest.fn().mockResolvedValue(31),
     },
   } as any;
   const auditLogs = { log: jest.fn() } as any;
@@ -41,6 +43,75 @@ const groupedRow = (
 
 describe('InventoryMovementsService.summary', () => {
   const user = { id: 'user-1' } as any;
+
+  it('uses the same complete scope, source and inclusive UTC dates for the register and totals', async () => {
+    const { service, prisma } = makeService({
+      grouped: [],
+      totals: { _sum: {}, _count: { _all: 31 } },
+      companyWhere: { companyId: 'company-A' },
+    });
+    const query = {
+      companyId: 'company-A',
+      divisionId: 'division',
+      locationId: 'legacy-branch',
+      productId: 'product',
+      movementType: InventoryMovementType.SALE_ISSUE,
+      referenceType: 'SalesOrder',
+      referenceId: 'order',
+      dateFrom: '2026-09-01',
+      dateTo: '2026-09-18',
+      page: 2,
+      limit: 20,
+    };
+    const result = await service.findAll(query, user);
+    await service.summary(query, user);
+    const where = {
+      companyId: 'company-A',
+      divisionId: 'division',
+      branchId: 'legacy-branch',
+      productId: 'product',
+      movementType: 'SALE_ISSUE',
+      referenceType: 'SalesOrder',
+      referenceId: 'order',
+      movementDate: {
+        gte: new Date('2026-09-01T00:00:00.000Z'),
+        lte: new Date('2026-09-18T23:59:59.999Z'),
+      },
+    };
+    expect(prisma.inventoryMovement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where,
+        skip: 20,
+        take: 20,
+        include: expect.objectContaining({
+          unit: { select: { id: true, name: true, symbol: true } },
+          division: { select: { id: true, name: true, code: true } },
+        }),
+      }),
+    );
+    expect(prisma.inventoryMovement.count).toHaveBeenCalledWith({ where });
+    expect(prisma.inventoryMovement.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where }),
+    );
+    expect(prisma.inventoryMovement.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where }),
+    );
+    expect(prisma.inventoryMovement.aggregate.mock.calls[0][0]).not.toHaveProperty('take');
+    expect(result).toMatchObject({ total: 31, totalPages: 2, page: 2 });
+  });
+
+  it('rejects inaccessible companies before register or summary queries', async () => {
+    const { service, prisma, companyScope } = makeService({ grouped: [], totals: {} });
+    companyScope.companyWhereFor.mockRejectedValue(new Error('Company access denied'));
+    await expect(service.findAll({ companyId: 'denied' }, user)).rejects.toThrow(
+      'Company access denied',
+    );
+    await expect(service.summary({ companyId: 'denied' }, user)).rejects.toThrow(
+      'Company access denied',
+    );
+    for (const query of Object.values(prisma.inventoryMovement))
+      expect(query).not.toHaveBeenCalled();
+  });
 
   it('classifies direction and rolls up inbound/outbound + net quantity', async () => {
     const { service } = makeService({

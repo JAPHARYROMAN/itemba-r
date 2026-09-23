@@ -1,0 +1,221 @@
+.os-login {
+  min-height: 100dvh;
+  background: #eeece7 url('/brand/itemba-os-wallpaper.png') center/cover;
+  color: #2b2d34;
+  display: flex;
+  flex-direction: column;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+.os-login > header {
+  padding: 22px 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.os-login > header > a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.os-login > header img {
+  mix-blend-mode: multiply;
+}
+.os-login > header > span {
+  font-size: 11px;
+  color: #74757e;
+}
+.os-login-body {
+  width: min(1080px, 100%);
+  margin: auto;
+  display: grid;
+  grid-template-columns: 1fr 410px;
+  gap: 90px;
+  align-items: center;
+  padding: 45px 35px 65px;
+}
+.os-login-intro > p {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  color: #74757e;
+}
+.os-login-intro h1 {
+  font-size: 64px;
+  letter-spacing: -0.065em;
+  line-height: 1.1;
+  font-weight: 550;
+  margin: 24px 0;
+}
+.os-login-intro > span {
+  font-size: 14px;
+  line-height: 1.9;
+  color: #74757e;
+}
+.os-login-products {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  font-size: 10px;
+  color: #777982;
+  margin-top: 45px;
+}
+.os-login-products i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #a3a5ad;
+}
+.os-login-panel {
+  padding: 32px;
+  background: #ffffffbb;
+  border: 1px solid #ffffffd9;
+  box-shadow: 0 16px 55px #47423110;
+  backdrop-filter: blur(22px);
+  border-radius: 20px;
+}
+.os-login-panel h2 {
+  font-size: 23px !important;
+  font-weight: 550;
+  letter-spacing: -0.035em;
+  margin-top: 0 !important;
+}
+.os-login-panel > div:first-child > div:first-child {
+  display: none;
+}
+.os-login-panel p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.os-login-panel label {
+  font-size: 11px;
+  font-weight: 500;
+}
+.os-login-panel input {
+  border-radius: 9px !important;
+  border-color: #dedfe4 !important;
+  background: #ffffffab !important;
+  box-shadow: none !important;
+  font-size: 13px;
+}
+.os-login-panel button[type='submit'] {
+  background: #2969d9 !important;
+  border-radius: 9px !important;
+  box-shadow: 0 2px 4px #2669d924 !important;
+  font-size: 12px;
+}
+.os-login-panel button[type='submit']:hover {
+  background: #245fc5 !important;
+}
+.os-login-panel .os-login-access {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 10px;
+  color: #777982;
+}
+.os-login-access a {
+  color: #2969d9;
+  margin-left: 3px;
+}
+.os-login > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 42px;
+  font-size: 10px;
+  color: #74757e;
+}
+.os-login > footer > span {
+  letter-spacing: 0.13em;
+  font-size: 9px;
+}
+.os-login > footer nav {
+  display: flex;
+  gap: 25px;
+}
+.os-login > footer a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.os-login a:focus-visible,
+.os-login button:focus-visible {
+  outline: 2px solid #2969d9;
+  outline-offset: 4px;
+}
+@media (max-width: 900px) {
+  .os-login-body {
+    gap: 40px;
+    grid-template-columns: 1fr 370px;
+  }
+  .os-login-intro h1 {
+    font-size: 47px;
+  }
+  .os-login-products {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .os-login-panel {
+    padding: 25px;
+  }
+}
+@media (max-width: 700px) {
+  .os-login > header {
+    padding: 14px 20px;
+  }
+  .os-login > header > span {
+    display: none;
+  }
+  .os-login-body {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    padding: 25px 22px 40px;
+    max-width: 445px;
+  }
+  .os-login-intro {
+    text-align: center;
+  }
+  .os-login-intro h1 {
+    font-size: 36px;
+    margin: 15px 0;
+  }
+  .os-login-intro h1 br {
+    display: none;
+  }
+  .os-login-intro > span {
+    font-size: 12px;
+  }
+  .os-login-intro > p,
+  .os-login-products {
+    display: none;
+  }
+  .os-login-panel {
+    width: 100%;
+    padding: 25px;
+  }
+  .os-login > footer {
+    padding: 20px;
+    justify-content: center;
+  }
+  .os-login > footer > span {
+    display: none;
+  }
+  .os-login > footer nav {
+    gap: 20px;
+    font-size: 9px;
+  }
+}
+.os-login.auth-light,
+.dark .os-login.auth-light {
+  background: #eeece7 url('/brand/itemba-os-wallpaper.png') center/cover !important;
+  color: #2b2d34 !important;
+}

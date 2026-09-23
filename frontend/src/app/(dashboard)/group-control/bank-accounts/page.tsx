@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string; code: string }
 
@@ -107,7 +109,7 @@ function AccountModal({ mode, initial, companies, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Bank Account' : 'Edit Bank Account'} size="xl"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>{mode === 'create' ? 'Create' : 'Save'}</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Bank Name" required value={form.bankName} onChange={(e) => setField('bankName', e.target.value)} />
         <FormInput label="Branch Name" value={form.branchName} onChange={(e) => setField('branchName', e.target.value)} />
@@ -119,7 +121,7 @@ function AccountModal({ mode, initial, companies, onClose, onSaved }: {
         <FormSelect label="Currency" value={form.currency} onChange={(e) => setField('currency', e.target.value)}>
           {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </FormSelect>
-        <FormInput label="Opened Date" type="date" value={form.openedDate} onChange={(e) => setField('openedDate', e.target.value)} />
+        <FormDateField label="Opened Date" value={form.openedDate} onChange={(value) => setField('openedDate', value)} />
         <FormInput label="SWIFT Code" value={form.swiftCode} onChange={(e) => setField('swiftCode', e.target.value)} />
         <FormSelect label="Owning Company" value={form.companyId} onChange={(e) => setField('companyId', e.target.value)} placeholder="Group-level">
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -152,18 +154,20 @@ function DeleteConfirm({ account, onClose, onConfirmed }: { account: BankAccount
   return (
     <Modal open onClose={onClose} title="Delete Account" size="md"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="danger" onClick={handleDelete} loading={saving}>Delete</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>Delete <strong>{account.bankName}</strong> account <strong>{account.accountNumber}</strong>?</p>
     </Modal>
   );
 }
 
 export default function BankAccountsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<BankAccount> | null>(null);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -183,16 +187,38 @@ export default function BankAccountsPage() {
   const canManage = hasPermission('bank-accounts.create');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    fetch('/api/backend/companies?limit=100', { signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      })
+      .catch(() => undefined);
+    fetch('/api/backend/bank-accounts/summary', { signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!signal.aborted) setSummary(j.data ?? null);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const loadSummary = useCallback(() => {
-    fetch('/api/backend/bank-accounts/summary').then((r) => r.json()).then((j) => setSummary(j.data ?? null));
-  }, []);
+    if (authLoading || !canView) return;
+    fetch('/api/backend/bank-accounts/summary')
+      .then((r) => r.json())
+      .then((j) => setSummary(j.data ?? null))
+      .catch(() => undefined);
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search.trim()) params.set('search', search.trim());
@@ -200,14 +226,26 @@ export default function BankAccountsPage() {
       if (filterType) params.set('accountType', filterType);
       if (filterCurrency) params.set('currency', filterCurrency);
       if (filterActive) params.set('isActive', filterActive);
-      const res = await fetch(`/api/backend/bank-accounts?${params}`);
+      const res = await fetch(`/api/backend/bank-accounts?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(`Failed to load bank accounts (${res.status})`);
       const json = await res.json();
+      if (!request.current()) return;
       setData(json.data ?? null);
-    } finally { setLoading(false); }
-  }, [page, search, filterCompany, filterType, filterCurrency, filterActive]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load bank accounts');
+      setData(null);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, search, filterCompany, filterType, filterCurrency, filterActive]);
 
-  useEffect(() => { loadSummary(); }, [loadSummary]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+
+  if (authLoading) {
+    return <div className="p-6"><PageHeader title="Bank Accounts" subtitle="Loading" /></div>;
+  }
 
   if (!canView) {
     return <div className="p-6"><PageHeader title="Bank Accounts" subtitle="Group bank account registry" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
@@ -216,7 +254,7 @@ export default function BankAccountsPage() {
   const filterSelectCls = 'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
   const filterStyle = { borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' } as const;
 
-  const refresh = () => { load(); loadSummary(); };
+  const refresh = () => { void load(); loadSummary(); };
 
   return (
     <div className="p-6 space-y-6">
@@ -252,19 +290,19 @@ export default function BankAccountsPage() {
         searchPlaceholder="Bank, account name, number…"
         filters={
           <>
-            <select value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterCurrency} onChange={(e) => { setFilterCurrency(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Currencies" value={filterCurrency} onChange={(e) => { setFilterCurrency(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Currencies</option>
               {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={filterActive} onChange={(e) => { setFilterActive(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={filterActive} onChange={(e) => { setFilterActive(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               <option value="true">Active</option>
               <option value="false">Inactive</option>
@@ -276,7 +314,7 @@ export default function BankAccountsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
+          <WorkspaceTable className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Bank</th>
@@ -292,6 +330,7 @@ export default function BankAccountsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan={canManage ? 9 : 8}><PageSpinner /></td></tr>
+                : loadError ? <tr><td colSpan={canManage ? 9 : 8}><ErrorState message={loadError} onRetry={() => void load()} /></td></tr>
                 : !data?.data.length ? <tr><td colSpan={canManage ? 9 : 8} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No accounts</td></tr>
                 : data.data.map((a) => (
                   <tr key={a.id} className="hover:bg-slate-50">
@@ -319,7 +358,7 @@ export default function BankAccountsPage() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
         {data && data.totalPages > 1 && (
           <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>

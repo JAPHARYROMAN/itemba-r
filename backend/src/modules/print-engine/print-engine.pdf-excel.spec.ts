@@ -1,3 +1,4 @@
+import { buildBusinessPdf } from '../generated-documents/pdf-builder';
 import { PrintEngineService } from './print-engine.service';
 
 function makeService() {
@@ -23,7 +24,12 @@ function makeService() {
   const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
   const companyScope: any = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
   return {
-    service: new PrintEngineService(prisma, audit, companyScope),
+    service: new PrintEngineService(prisma, audit, companyScope, {
+      letterhead: jest.fn(async () => ({ name: 'Company Letterhead' })),
+      renderLetterheadPdf: jest.fn(async (_source, model) =>
+        buildBusinessPdf({ ...model, organization: { name: 'Company Letterhead' } }),
+      ),
+    } as any),
     prisma,
     generatedRecords,
     companyScope,

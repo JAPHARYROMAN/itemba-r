@@ -16,6 +16,24 @@ namespace Itemba.Msaidizi.PrivilegedCommandSupervisor.Tests;
 public sealed class SupervisorBoundaryTests
 {
   [Fact]
+  public void ProvisionedPinsRejectSentinelsWithoutChangingGenericDigestSemantics()
+  {
+    var zero = new string('0', 64);
+    Assert.True(PayloadDigest.IsSha256Hex(zero));
+    foreach (var value in new string?[]
+    {
+      null, string.Empty, zero, new('0', 63), new('a', 65),
+      new('A', 64), new('g', 64), new string('a', 63) + " ",
+    })
+    {
+      Assert.False(PayloadDigest.IsProvisionedSha256(value));
+    }
+    Assert.True(PayloadDigest.IsProvisionedSha256(new string('a', 64)));
+    Assert.True(PayloadDigest.IsProvisionedSha256(new string('0', 63) + "1"));
+    Assert.True(PayloadDigest.IsProvisionedSha256("f" + new string('0', 63)));
+  }
+
+  [Fact]
   public void PackagedConfigurationCanRemainStableAndSafeOff()
   {
     var options = new PrivilegedCommandSupervisorOptions
@@ -57,6 +75,39 @@ public sealed class SupervisorBoundaryTests
     var options = CompleteOptions();
 
     options.Validate();
+  }
+
+  [Theory]
+  [InlineData(nameof(PrivilegedCommandSupervisorOptions.ExpectedCompanionImageSha256))]
+  [InlineData(nameof(PrivilegedCommandSupervisorOptions.ExpectedSupervisorImageSha256))]
+  [InlineData(nameof(PrivilegedCommandSupervisorOptions.IsolationPolicySha256))]
+  [InlineData(nameof(PrivilegedCommandSupervisorOptions.DriverMeasurementSha256))]
+  public void ActiveConfigurationRejectsZeroMeasurementPins(string property)
+  {
+    var valid = CompleteOptions();
+    valid.Validate();
+    var options = property switch
+    {
+      nameof(valid.ExpectedCompanionImageSha256) => valid with
+      {
+        ExpectedCompanionImageSha256 = new('0', 64),
+      },
+      nameof(valid.ExpectedSupervisorImageSha256) => valid with
+      {
+        ExpectedSupervisorImageSha256 = new('0', 64),
+      },
+      nameof(valid.IsolationPolicySha256) => valid with
+      {
+        IsolationPolicySha256 = new('0', 64),
+      },
+      nameof(valid.DriverMeasurementSha256) => valid with
+      {
+        DriverMeasurementSha256 = new('0', 64),
+      },
+      _ => throw new ArgumentOutOfRangeException(nameof(property)),
+    };
+
+    Assert.Throws<InvalidOperationException>(options.Validate);
   }
 
   [Fact]

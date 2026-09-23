@@ -1,20 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Btn,
-  Card,
-  EmptyState,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  Modal,
-  PageHeader,
-  SkeletonTable,
-  StatCard,
-} from '@/components/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Btn, Card, EmptyState, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, SkeletonTable, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import {
   BACKEND_PROXY_URL,
   backendDelete,
@@ -418,12 +409,11 @@ function SaleModal({
             </option>
           ))}
         </FormSelect>
-        <FormInput
+        <FormDateField
           label="Record Date"
           required
-          type="date"
           value={form.recordDate}
-          onChange={(e) => setForm((f) => ({ ...f, recordDate: e.target.value }))}
+          onChange={(value) => setForm((f) => ({ ...f, recordDate: value }))}
         />
         <FormSelect
           label="Currency"
@@ -706,12 +696,11 @@ function ExpenseModal({
             </option>
           ))}
         </FormSelect>
-        <FormInput
+        <FormDateField
           label="Record Date"
           required
-          type="date"
           value={form.recordDate}
-          onChange={(e) => setForm((f) => ({ ...f, recordDate: e.target.value }))}
+          onChange={(value) => setForm((f) => ({ ...f, recordDate: value }))}
         />
         <FormSelect
           label="Category"
@@ -902,7 +891,7 @@ function CategoryModal({
 }
 
 export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('record_book.view');
   const canCreate = hasPermission('record_book.create');
   const canUpdate = hasPermission('record_book.update');
@@ -911,6 +900,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const canVoid = hasPermission('record_book.void');
   const canAdmin = hasPermission('record_book.admin');
   const canExport = hasPermission('record_book.export');
+  const beginRequest = useRequestGuard();
 
   const [filters, setFilters] = useState<Filters>({ ...BLANK_FILTERS });
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -922,6 +912,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [expenses, setExpenses] = useState<PaginatedResult<RecordExpense> | null>(null);
   const [categoryPage, setCategoryPage] = useState<PaginatedResult<Category> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [saleModal, setSaleModal] = useState<DailySale | null | 'new'>(null);
   const [expenseModal, setExpenseModal] = useState<RecordExpense | null | 'new'>(null);
@@ -933,7 +924,6 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmReason, setConfirmReason] = useState('');
   const [confirmBusy, setConfirmBusy] = useState(false);
-  const requestIdRef = useRef(0);
   const debouncedSearch = useDebouncedValue(filters.search);
   const effectiveFilters = useMemo(
     () => ({
@@ -976,33 +966,45 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     [branches, filters.divisionId, scopedDivisionIds],
   );
 
-  const loadRefs = useCallback(async () => {
-    const scope = await backendGet<ScopeOptions>('/record-book/scope-options');
-    setCompanies(scope.companies);
-    setDivisions(scope.divisions);
-    setBranches(scope.branches);
-    setFilters((current) =>
-      current.companyId || !scope.companies[0]
-        ? current
-        : { ...current, companyId: scope.companies[0].id },
-    );
-  }, []);
+  useEffect(() => {
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendGet<ScopeOptions>('/record-book/scope-options', { signal: controller.signal })
+      .then((scope) => {
+        if (controller.signal.aborted) return;
+        setCompanies(scope.companies);
+        setDivisions(scope.divisions);
+        setBranches(scope.branches);
+        setFilters((current) =>
+          current.companyId || !scope.companies[0]
+            ? current
+            : { ...current, companyId: scope.companies[0].id },
+        );
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : 'Could not load scope data');
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const loadData = useCallback(async () => {
-    if (!canView) return;
-    const requestId = ++requestIdRef.current;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const query = buildFilterQuery(effectiveFilters);
       const [summaryData, salesData, expenseData, categoryData, categoryOptions] =
         await Promise.all([
-          backendGet<Summary>('/record-book/summary', { query }),
+          backendGet<Summary>('/record-book/summary', { query, signal: request.signal }),
           backendPage<DailySale>('/record-book/daily-sales', {
             query: { ...query, page: salesPage, limit: 20 },
+            signal: request.signal,
           }),
           backendPage<RecordExpense>('/record-book/expenses', {
             query: { ...query, page: expensePage, limit: 20 },
+            signal: request.signal,
           }),
           backendPage<Category>('/record-book/expense-categories', {
             query: {
@@ -1011,33 +1013,37 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
               page: categoryPageNumber,
               limit: 20,
             },
+            signal: request.signal,
           }),
           backendList<Category>('/record-book/expense-categories', {
             query: { companyId: effectiveFilters.companyId, limit: 500 },
+            signal: request.signal,
           }),
         ]);
-      if (requestId !== requestIdRef.current) return;
+      if (!request.current()) return;
       setSummary(summaryData);
       setSales(salesData);
       setExpenses(expenseData);
       setCategoryPage(categoryData);
       setCategories(categoryOptions);
     } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setError(err instanceof Error ? err.message : 'Could not load Records Book');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Could not load Records Book');
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, categoryPageNumber, effectiveFilters, expensePage, salesPage]);
+  }, [
+    authLoading,
+    beginRequest,
+    canView,
+    categoryPageNumber,
+    effectiveFilters,
+    expensePage,
+    salesPage,
+  ]);
 
   useEffect(() => {
-    loadRefs().catch((err) =>
-      setError(err instanceof Error ? err.message : 'Could not load scope data'),
-    );
-  }, [loadRefs]);
-
-  useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   useEffect(() => {
@@ -1137,16 +1143,21 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+        <PageHeader title="Records Book" subtitle="Loading" />
+      </div>
+    );
+  }
+
   if (!canView) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader title="Records Book" subtitle="Manual daily sales and money-out records" />
-        <Card>
-          <EmptyState
-            title="Permission required"
-            description="You need record_book.view to use Records Book."
-          />
-        </Card>
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
       </div>
     );
   }
@@ -1219,17 +1230,15 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
               </option>
             ))}
           </FormSelect>
-          <FormInput
+          <FormDateField
             label="From"
-            type="date"
             value={filters.dateFrom}
-            onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
+            onChange={(value) => setFilters((f) => ({ ...f, dateFrom: value }))}
           />
-          <FormInput
+          <FormDateField
             label="To"
-            type="date"
             value={filters.dateTo}
-            onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
+            onChange={(value) => setFilters((f) => ({ ...f, dateTo: value }))}
           />
           <FormSelect
             label="Status"
@@ -1308,6 +1317,10 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
 
       {loading ? (
         <SkeletonTable rows={6} cols={6} />
+      ) : loadError ? (
+        <Card>
+          <ErrorState message={loadError} onRetry={() => void loadData()} />
+        </Card>
       ) : (
         <>
           {(initialTab === 'dashboard' || !summary) && (
@@ -1396,7 +1409,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                 />
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-800/80">
-                  <table className="w-full text-sm">
+                  <WorkspaceTable className="w-full text-sm">
                     <thead className="bg-slate-900/70 text-left text-slate-400">
                       <tr>
                         <th className="px-3 py-3">Date</th>
@@ -1538,7 +1551,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               )}
               {sales && (
@@ -1571,7 +1584,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                 />
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-800/80">
-                  <table className="w-full text-sm">
+                  <WorkspaceTable className="w-full text-sm">
                     <thead className="bg-slate-900/70 text-left text-slate-400">
                       <tr>
                         <th className="px-3 py-3">Date</th>
@@ -1709,7 +1722,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               )}
               {expenses && (
@@ -1742,7 +1755,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                 />
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-800/80">
-                  <table className="w-full text-sm">
+                  <WorkspaceTable className="w-full text-sm">
                     <thead className="bg-slate-900/70 text-left text-slate-400">
                       <tr>
                         <th className="px-3 py-3">Name</th>
@@ -1798,7 +1811,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               )}
               {categoryPage && (

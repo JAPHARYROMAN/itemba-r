@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Btn } from '@/components/ui';
+import { Btn, FormDateField } from '@/components/ui';
 
 export interface OrderProductOption {
   id: string;
@@ -1302,23 +1302,19 @@ export function OrderLineEditor<TLine extends EditableOrderLine>({
                             aria-label={`Line ${index + 1} batch`}
                           />
                         </label>
-                        <label className="block">
+                        <div className="block">
                           <span
                             className="mb-1 block text-[12px] font-medium"
                             style={{ color: 'var(--aurora-text-secondary)' }}
                           >
                             Expiry
                           </span>
-                          <input
-                            type="date"
-                            value={line.expiryDate ?? ''}
-                            onChange={(event) =>
-                              patchLine(index, { expiryDate: event.target.value })
-                            }
-                            className={fieldClass}
+                          <FormDateField
                             aria-label={`Line ${index + 1} expiry date`}
+                            value={line.expiryDate ?? ''}
+                            onChange={(value) => patchLine(index, { expiryDate: value })}
                           />
-                        </label>
+                        </div>
                       </>
                     ) : (
                       <label className="col-span-2 block">

@@ -2,10 +2,36 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Image from 'next/image';
-import { Building2, Eye, FileText, Landmark, MapPin, RefreshCw, RotateCcw, Save, Upload } from 'lucide-react';
-import { Card, PageHeader, FormInput, FormSelect, FormTextarea, DateInput, Btn } from '@/components/ui';
+import {
+  Building2,
+  Eye,
+  FileText,
+  Landmark,
+  MapPin,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Upload,
+} from 'lucide-react';
+import {
+  Card,
+  PageHeader,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  FormDateField,
+  Btn,
+  EmptyState,
+  LoadingState,
+  ErrorState,
+  PermissionDeniedState,
+} from '@/components/ui';
 import { backendGet, backendPage, backendPatch, backendPut, backendUpload } from '@/lib/api-client';
 import { documentOrganization } from '@/components/documents';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useFormGuard, useUnsavedWork } from '@/components/workspace/unsaved-work-provider';
+import '@/components/workspace/workspace.css';
 
 interface CompanySummary {
   id: string;
@@ -137,6 +163,13 @@ const EMPTY_PROFILE: CompanyProfile = {
 };
 
 export default function CompanyProfilePage() {
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('companies.read');
+  const canEdit = hasPermission('companies.update') && hasPermission('company-profiles.update');
+  const canEditBranch = hasPermission('branches.update');
+  const canUpload = canEdit && hasPermission('documents.manage');
+  const protect = useUnsavedWork();
+  const startRequest = useRequestGuard();
   const [companies, setCompanies] = useState<CompanySummary[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -151,20 +184,41 @@ export default function CompanyProfilePage() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [isNewProfile, setIsNewProfile] = useState(false);
+  const [companiesError, setCompaniesError] = useState('');
+  const draft = useFormGuard({ companyForm, profile }, (baseline) => {
+    setCompanyForm({
+      ...baseline.companyForm,
+      logoUrl: company?.logoUrl ?? baseline.companyForm.logoUrl,
+    });
+    setProfile(baseline.profile);
+  });
+  const branchDraft = useFormGuard(branchForm, setBranchForm);
 
+  const loadCompanies = useCallback(async () => {
+    if (!canRead) return;
+    setCompaniesError('');
+    try {
+      const result = await backendPage<CompanySummary>('/companies', { query: { limit: 100 } });
+      setCompanies(result.data);
+    } catch {
+      setCompaniesError('Companies could not be loaded. Please try again.');
+    }
+  }, [canRead]);
   useEffect(() => {
-    backendPage<CompanySummary>('/companies', { query: { limit: 100 } })
-      .then((page) => setCompanies(page.data))
-      .catch(() => setCompanies([]));
-  }, []);
+    void loadCompanies();
+  }, [loadCompanies]);
 
   const loadLetterhead = useCallback(async () => {
-    if (!companyId) return;
+    const request = startRequest();
+    if (!companyId || !canRead) return;
     setLoading(true);
     setError('');
     setInfo('');
     try {
-      const detail = await backendGet<CompanyDetail>(`/companies/${companyId}`);
+      const detail = await backendGet<CompanyDetail>(`/companies/${companyId}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       const flattenedBranches = (detail.divisions ?? [])
         .flatMap((division) => division.branches ?? [])
         .filter((branch) => branch.id);
@@ -183,16 +237,18 @@ export default function CompanyProfilePage() {
       setBranches(flattenedBranches);
       setBranchId(firstBranch?.id ?? '');
       setBranchForm(toBranchForm(firstBranch));
-      if (!detail.profile) setInfo('Fill the letterhead fields and save to create this company profile.');
+      if (!detail.profile)
+        setInfo('Fill the letterhead fields and save to create this company profile.');
     } catch (err) {
+      if (!request.current()) return;
       setCompany(null);
       setBranches([]);
       setBranchId('');
       setError(err instanceof Error ? err.message : 'Failed to load company letterhead');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, canRead, startRequest]);
 
   useEffect(() => {
     loadLetterhead();
@@ -208,35 +264,43 @@ export default function CompanyProfilePage() {
     [company, companyForm, profile],
   );
   const previewBranch = useMemo(
-    () => selectedBranch ? { ...selectedBranch, ...branchForm } : null,
+    () => (selectedBranch ? { ...selectedBranch, ...branchForm } : null),
     [branchForm, selectedBranch],
   );
   const organization = documentOrganization(previewCompany, previewBranch);
   const selectedCompanyName = companyForm.name || company?.name || 'No company selected';
   const requiredComplete = Boolean(
-    companyForm.name.trim()
-      && profile.registeredName.trim()
-      && profile.brelaRegNumber.trim()
-      && profile.tin.trim()
-      && profile.registeredAddress.trim(),
+    companyForm.name.trim() &&
+    profile.registeredName.trim() &&
+    profile.brelaRegNumber.trim() &&
+    profile.tin.trim() &&
+    profile.registeredAddress.trim(),
   );
   const letterheadStatus = !companyId
     ? 'Select a company'
     : requiredComplete
-      ? isNewProfile ? 'Ready to create' : 'Ready'
+      ? isNewProfile
+        ? 'Ready to create'
+        : 'Ready'
       : 'Needs required fields';
 
-  function updateCompany<K extends keyof CompanyIdentityForm>(key: K, value: CompanyIdentityForm[K]) {
+  function updateCompany<K extends keyof CompanyIdentityForm>(
+    key: K,
+    value: CompanyIdentityForm[K],
+  ) {
+    draft.touch();
     setCompanyForm((current) => ({ ...current, [key]: value }));
     setInfo('');
   }
 
   function updateProfile<K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) {
+    draft.touch();
     setProfile((current) => ({ ...current, [key]: value }));
     setInfo('');
   }
 
   function updateBranch<K extends keyof BranchForm>(key: K, value: BranchForm[K]) {
+    branchDraft.touch();
     setBranchForm((current) => ({ ...current, [key]: value }));
     setInfo('');
   }
@@ -263,7 +327,7 @@ export default function CompanyProfilePage() {
   }
 
   async function uploadLogo(file: File | null) {
-    if (!file || !companyId) return;
+    if (!file || !companyId || !canUpload) return;
     if (!['image/png', 'image/jpeg'].includes(file.type)) {
       setError('Logo must be a PNG or JPEG image.');
       return;
@@ -288,9 +352,9 @@ export default function CompanyProfilePage() {
 
       const document = await backendUpload<UploadedDocument>('/documents/upload', formData);
       const logoUrl = `/api/backend/documents/${document.id}/download?inline=1`;
-      setCompanyForm((current) => ({ ...current, logoUrl }));
-      setCompany((current) => current ? { ...current, logoUrl } : current);
       await backendPatch(`/companies/${companyId}`, { logoUrl });
+      setCompanyForm((current) => ({ ...current, logoUrl }));
+      setCompany((current) => (current ? { ...current, logoUrl } : current));
       setInfo('Logo uploaded and linked to this company.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload logo');
@@ -300,12 +364,17 @@ export default function CompanyProfilePage() {
   }
 
   async function save() {
-    if (!companyId) return;
+    if (!companyId || !canEdit) return;
     if (!companyForm.name.trim()) {
       setError('Company name is required.');
       return;
     }
-    if (!profile.registeredName.trim() || !profile.brelaRegNumber.trim() || !profile.tin.trim() || !profile.registeredAddress.trim()) {
+    if (
+      !profile.registeredName.trim() ||
+      !profile.brelaRegNumber.trim() ||
+      !profile.tin.trim() ||
+      !profile.registeredAddress.trim()
+    ) {
       setError('Registered name, BRELA number, TIN, and registered address are required.');
       return;
     }
@@ -344,7 +413,7 @@ export default function CompanyProfilePage() {
         notes: cleanOptional(profile.notes),
       });
 
-      if (branchId) {
+      if (branchId && canEditBranch) {
         await backendPatch(`/branches/${branchId}`, {
           name: cleanRequired(branchForm.name),
           location: cleanOptional(branchForm.location),
@@ -353,9 +422,14 @@ export default function CompanyProfilePage() {
         });
       }
 
-      setInfo(isNewProfile ? 'Letterhead profile created.' : 'Letterhead settings saved.');
+      draft.markSaved();
+      branchDraft.markSaved();
+      const savedMessage = isNewProfile
+        ? 'Letterhead profile created.'
+        : 'Letterhead settings saved.';
       setIsNewProfile(false);
       await loadLetterhead();
+      setInfo(savedMessage);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save letterhead settings');
     } finally {
@@ -363,34 +437,40 @@ export default function CompanyProfilePage() {
     }
   }
 
+  if (!canRead) return <PermissionDeniedState />;
+
   return (
-    <div className="space-y-5 p-6">
+    <div className="business-workspace company-profile-workspace space-y-5">
       <PageHeader
-        title="Company Letterhead"
-        subtitle="Edit the identity used by document previews, generated PDFs, invoices, orders, and print views."
+        title="Company identity"
+        subtitle="Your company, clearly represented on every document."
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'Company Letterhead' }]}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Btn
               variant="secondary"
               icon={<RefreshCw className="h-3.5 w-3.5" />}
-              onClick={loadLetterhead}
-              disabled={!companyId || loading}
+              onClick={() =>
+                protect.request(() => {
+                  void loadLetterhead();
+                })
+              }
+              disabled={!companyId || loading || saving || uploadingLogo}
             >
               Reload
             </Btn>
             <Btn
               variant="secondary"
               icon={<RotateCcw className="h-3.5 w-3.5" />}
-              onClick={resetDraft}
-              disabled={!companyId || loading || saving || !company}
+              onClick={() => protect.request(resetDraft)}
+              disabled={!companyId || loading || saving || uploadingLogo || !company}
             >
               Reset form
             </Btn>
             <Btn
               icon={<Save className="h-3.5 w-3.5" />}
               onClick={save}
-              disabled={!companyId || saving || loading}
+              disabled={!canEdit || !companyId || !company || saving || loading || uploadingLogo}
             >
               {saving ? 'Saving...' : 'Save letterhead'}
             </Btn>
@@ -398,53 +478,88 @@ export default function CompanyProfilePage() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <ProfileSummary
-          icon={<Building2 className="h-4 w-4" />}
-          label="Selected company"
-          value={selectedCompanyName}
-          note={company?.code ? `Code ${company.code}` : 'Choose a company to edit its documents.'}
-        />
-        <ProfileSummary
-          icon={<FileText className="h-4 w-4" />}
-          label="Letterhead status"
-          value={letterheadStatus}
-          note="Used on invoices, orders, reports, PDFs, and print views."
-        />
-        <ProfileSummary
-          icon={<MapPin className="h-4 w-4" />}
-          label="Branch line"
-          value={previewBranch?.name || 'No branch selected'}
-          note={branchId ? 'Branch details appear on matching documents.' : 'Optional for group/company documents.'}
-        />
+      <div className="workspace-summary">
+        <div>
+          <span>Company</span>
+          <strong>{selectedCompanyName}</strong>
+        </div>
+        <div>
+          <span>Letterhead</span>
+          <strong>{letterheadStatus}</strong>
+        </div>
+        <div>
+          <span>Branch</span>
+          <strong>{previewBranch?.name || 'Company-wide'}</strong>
+        </div>
       </div>
-
+      {!canEdit && (
+        <p role="status" className="text-sm">
+          You can preview this company. Editing requires company and legal-profile access.
+        </p>
+      )}
+      {companiesError && <ErrorState message={companiesError} onRetry={loadCompanies} />}
       <Card className="p-5">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] lg:items-end">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start here</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Start here
+            </div>
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              Pick the company whose legal identity, logo, contact line, and document header should be maintained.
+              Pick the company whose legal identity, logo, contact line, and document header should
+              be maintained.
             </p>
           </div>
           <FormSelect
             label="Company"
             value={companyId}
-            onChange={(event) => setCompanyId(event.target.value)}
+            disabled={saving || uploadingLogo}
+            onChange={(event) => {
+              const next = event.target.value;
+              protect.request(() => {
+                setCompanyId(next);
+                setCompany(null);
+                setCompanyForm(EMPTY_COMPANY);
+                setProfile(EMPTY_PROFILE);
+                setBranches([]);
+                setBranchId('');
+                setBranchForm(EMPTY_BRANCH);
+                setError('');
+              });
+            }}
             required
             placeholder="- Select Company -"
-            options={companies.map((item) => ({ value: item.id, label: `${item.name} (${item.code})` }))}
+            options={companies.map((item) => ({
+              value: item.id,
+              label: `${item.name} (${item.code})`,
+            }))}
           />
         </div>
       </Card>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-      {info && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{info}</div>}
-      {loading && <div className="flex justify-center py-10"><div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /></div>}
+      {error && (
+        <div role="alert" className="workspace-error">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div
+          role="status"
+          className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+        >
+          {info}
+        </div>
+      )}
+      {loading && <LoadingState label="Loading company identity" />}
+      {!companyId && !companiesError && (
+        <EmptyState
+          title="Choose a company"
+          description="Review its identity, legal details and document preview here."
+        />
+      )}
 
-      {companyId && !loading && (
+      {companyId && company && !loading && (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-5">
+          <fieldset disabled={!canEdit || saving || uploadingLogo} className="space-y-5 min-w-0">
             <Card className="space-y-4 p-5">
               <SectionTitle
                 icon={<Landmark className="h-4 w-4" />}
@@ -479,7 +594,7 @@ export default function CompanyProfilePage() {
                     type="file"
                     accept="image/png,image/jpeg"
                     className="sr-only"
-                    disabled={uploadingLogo}
+                    disabled={!canUpload || uploadingLogo}
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null;
                       event.currentTarget.value = '';
@@ -575,10 +690,10 @@ export default function CompanyProfilePage() {
                   onChange={(event) => updateProfile('businessLicenseNumber', event.target.value)}
                   placeholder="XXX XXX XXX"
                 />
-                <DateInput
+                <FormDateField
                   label="Incorporation Date"
                   value={profile.incorporationDate ?? ''}
-                  onChange={(event) => updateProfile('incorporationDate', event.target.value)}
+                  onChange={(value) => updateProfile('incorporationDate', value)}
                 />
                 <FormInput
                   label="Tax Office"
@@ -649,36 +764,42 @@ export default function CompanyProfilePage() {
                 <FormSelect
                   label="Branch"
                   value={branchId}
-                  onChange={(event) => selectBranch(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    branchDraft.requestClose(() => selectBranch(next));
+                  }}
                   placeholder="- No branch -"
-                  options={branches.map((branch) => ({ value: branch.id, label: branch.name ?? branch.code ?? branch.id }))}
+                  options={branches.map((branch) => ({
+                    value: branch.id,
+                    label: branch.name ?? branch.code ?? branch.id,
+                  }))}
                 />
                 <FormInput
                   label="Branch Name"
                   value={branchForm.name}
                   onChange={(event) => updateBranch('name', event.target.value)}
-                  disabled={!branchId}
+                  disabled={!branchId || !canEditBranch}
                   placeholder="Tunduma Main Branch"
                 />
                 <FormInput
                   label="Branch Location"
                   value={branchForm.location}
                   onChange={(event) => updateBranch('location', event.target.value)}
-                  disabled={!branchId}
+                  disabled={!branchId || !canEditBranch}
                   placeholder="Tunduma"
                 />
                 <FormInput
                   label="Branch Phone"
                   value={branchForm.phone}
                   onChange={(event) => updateBranch('phone', event.target.value)}
-                  disabled={!branchId}
+                  disabled={!branchId || !canEditBranch}
                   placeholder="+255 XXX XXX XXX"
                 />
                 <FormTextarea
                   label="Branch Address"
                   value={branchForm.address}
                   onChange={(event) => updateBranch('address', event.target.value)}
-                  disabled={!branchId}
+                  disabled={!branchId || !canEditBranch}
                   rows={2}
                   className="md:col-span-2"
                   placeholder="Tunduma - Mpemba Area, Songwe, Tanzania"
@@ -699,7 +820,7 @@ export default function CompanyProfilePage() {
                 placeholder="Internal notes"
               />
             </Card>
-          </div>
+          </fieldset>
 
           <div className="xl:sticky xl:top-5 xl:self-start">
             <LetterheadPreview organization={organization} />
@@ -710,7 +831,11 @@ export default function CompanyProfilePage() {
   );
 }
 
-function LetterheadPreview({ organization }: { organization: ReturnType<typeof documentOrganization> }) {
+function LetterheadPreview({
+  organization,
+}: {
+  organization: ReturnType<typeof documentOrganization>;
+}) {
   return (
     <Card className="p-5">
       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -734,53 +859,46 @@ function LetterheadPreview({ organization }: { organization: ReturnType<typeof d
             )}
           </div>
           <div className="min-w-0 text-xs leading-5">
-            <div className="text-lg font-extrabold uppercase leading-tight text-slate-900">{organization.groupName}</div>
-            <div className="mt-0.5 text-sm font-bold leading-tight text-slate-900">{organization.name}</div>
-            {organization.branchName && <div className="mt-0.5 text-sm text-slate-700">{organization.branchName}</div>}
-            {organization.address && <div className="mt-2 text-slate-600">Address: {organization.address}</div>}
+            <div className="text-lg font-extrabold uppercase leading-tight text-slate-900">
+              {organization.groupName}
+            </div>
+            <div className="mt-0.5 text-sm font-bold leading-tight text-slate-900">
+              {organization.name}
+            </div>
+            {organization.branchName && (
+              <div className="mt-0.5 text-sm text-slate-700">{organization.branchName}</div>
+            )}
+            {organization.address && (
+              <div className="mt-2 text-slate-600">Address: {organization.address}</div>
+            )}
             {(organization.phone || organization.email) && (
               <div className="text-slate-600">
-                {[organization.phone ? `Tel: ${organization.phone}` : null, organization.email ? `Email: ${organization.email}` : null].filter(Boolean).join(' | ')}
+                {[
+                  organization.phone ? `Tel: ${organization.phone}` : null,
+                  organization.email ? `Email: ${organization.email}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' | ')}
               </div>
             )}
             {(organization.tin || organization.vrn) && (
               <div className="text-slate-600">
-                {[organization.tin ? `TIN: ${organization.tin}` : null, organization.vrn ? `VRN: ${organization.vrn}` : null].filter(Boolean).join(' | ')}
+                {[
+                  organization.tin ? `TIN: ${organization.tin}` : null,
+                  organization.vrn ? `VRN: ${organization.vrn}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' | ')}
               </div>
             )}
           </div>
         </div>
         <div className="mt-5">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Document</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Document
+          </div>
           <div className="mt-1 text-2xl font-bold text-slate-900">Sales Order</div>
           <div className="mt-1 text-sm text-slate-500">SO-2026-000001</div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function ProfileSummary({
-  icon,
-  label,
-  value,
-  note,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  note: string;
-}) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-          <div className="mt-1 truncate text-sm font-semibold text-slate-900">{value}</div>
-          <div className="mt-1 text-xs leading-5 text-slate-500">{note}</div>
         </div>
       </div>
     </Card>
@@ -798,12 +916,19 @@ function SectionTitle({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+      <div
+        className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
+        style={{ background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-secondary)' }}
+      >
         {icon}
       </div>
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
-        <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
+          {title}
+        </h2>
+        <p className="mt-1 text-sm leading-6" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {description}
+        </p>
       </div>
     </div>
   );
@@ -817,11 +942,16 @@ function toProfileForm(profile: CompanyProfile | null | undefined): CompanyProfi
     tradingName: profile.tradingName ?? '',
     vrn: profile.vrn ?? '',
     businessLicenseNumber: profile.businessLicenseNumber ?? '',
-    incorporationDate: profile.incorporationDate ? String(profile.incorporationDate).slice(0, 10) : '',
+    incorporationDate: profile.incorporationDate
+      ? String(profile.incorporationDate).slice(0, 10)
+      : '',
     postalAddress: profile.postalAddress ?? '',
     taxOffice: profile.taxOffice ?? '',
     natureOfBusiness: profile.natureOfBusiness ?? '',
-    authorizedCapital: profile.authorizedCapital !== null && profile.authorizedCapital !== undefined ? String(profile.authorizedCapital) : '',
+    authorizedCapital:
+      profile.authorizedCapital !== null && profile.authorizedCapital !== undefined
+        ? String(profile.authorizedCapital)
+        : '',
     currency: profile.currency ?? 'TZS',
     status: profile.status ?? 'ACTIVE',
     notes: profile.notes ?? '',

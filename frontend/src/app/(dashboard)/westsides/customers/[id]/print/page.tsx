@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   DocumentActions,
@@ -14,7 +14,9 @@ import {
   EmptyDocumentState,
   documentOrganization,
 } from '@/components/documents';
-import { Card, PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Customer {
   id: string;
@@ -119,38 +121,48 @@ const fmt = (n: number | string | undefined | null) =>
 export default function CustomerPrintPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id as string;
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('customers.view');
+  const beginRequest = useRequestGuard();
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const generatedAt = useMemo(() => new Date(), []);
 
-  useEffect(() => {
-    if (!id) return;
+  const load = useCallback(async () => {
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
-    fetch(`/api/backend/customers/${id}/profile`, { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(body?.message ?? `HTTP ${response.status}`);
-        }
-        return response.json();
-      })
-      .then((body) => setProfile(body.data ?? body))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Load failed'))
-      .finally(() => setLoading(false));
-  }, [id]);
+    try {
+      const response = await fetch(`/api/backend/customers/${id}/profile`, {
+        cache: 'no-store',
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.message ?? `HTTP ${response.status}`);
+      }
+      const body = await response.json();
+      if (!request.current()) return;
+      setProfile(body.data ?? body);
+    } catch (err) {
+      if (!request.current()) return;
+      setError(err instanceof Error ? err.message : 'Load failed');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, id]);
 
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (authLoading) return <PageSpinner />;
+  if (!canView) return <ErrorState message="Access Restricted" />;
   if (loading) return <PageSpinner />;
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</Card>
-      </div>
-    );
-  }
-
+  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!profile) return null;
 
   const {

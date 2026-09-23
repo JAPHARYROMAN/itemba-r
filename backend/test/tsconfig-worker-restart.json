@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "incremental": false, "declaration": false },
+  "include": [
+    "fixtures/msaidizi-worker-process.ts",
+    "fixtures/msaidizi-api-process.ts",
+    "fixtures/msaidizi-artifact-process.ts",
+    "msaidizi-artifact-restart.e2e-spec.ts",
+    "msaidizi-task-api-restart.e2e-spec.ts",
+    "fixtures/postgres-interruption-proxy.ts",
+    "fixtures/disposable-postgres-restart.ts",
+    "disposable-postgres-restart.e2e-spec.ts",
+    "msaidizi-worker-restart.e2e-spec.ts",
+    "msaidizi-task-persistence.e2e-spec.ts"
+  ],
+  "exclude": ["../node_modules", "../dist"]
+}

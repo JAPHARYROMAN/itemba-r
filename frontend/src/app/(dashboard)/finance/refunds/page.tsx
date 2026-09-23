@@ -1,21 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import {
-  Card,
-  PageHeader,
-  PageToolbar,
-  StatCard,
-  StatusBadge,
-  Modal,
-  Btn,
-  PageSpinner,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, showToast, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -306,7 +295,10 @@ function RefundCreateModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -440,12 +432,11 @@ function RefundCreateModal({
           </FormSelect>
         </div>
 
-        <FormInput
+        <FormDateField
           label="Refund Date"
           required
-          type="date"
           value={form.refundDate}
-          onChange={(e) => set('refundDate', e.target.value)}
+          onChange={(value) => set('refundDate', value)}
         />
 
         <FormInput
@@ -526,7 +517,10 @@ function PayRefundModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -535,11 +529,10 @@ function PayRefundModal({
         this refund to PAID. This action releases the customer credit in cash.
       </p>
       <div className="space-y-3">
-        <FormInput
+        <FormDateField
           label="Payment Date"
-          type="date"
           value={paymentDate}
-          onChange={(e) => setPaymentDate(e.target.value)}
+          onChange={(value) => setPaymentDate(value)}
         />
         <FormTextarea
           label="Notes"
@@ -612,7 +605,10 @@ function VoidRefundModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -718,10 +714,12 @@ function RefundDetailModal({ refund, onClose }: { refund: Refund; onClose: () =>
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export default function RefundsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<Refund> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
@@ -734,29 +732,43 @@ export default function RefundsPage() {
   const canManage = hasPermission('refunds.manage');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(parseList<Company>(j)))
-      .catch(() => setCompanies([]));
-  }, []);
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(parseList<Company>(j));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
-      const res = await fetch(`/api/backend/refunds?${params}`);
+      const res = await fetch(`/api/backend/refunds?${params}`, { signal: request.signal });
       const json = await res.json();
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(json.message ?? 'Unable to load refunds');
       setData((json.data ?? json) as Paginated<Refund>);
-    } catch {
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Unable to load refunds');
       showToast('error', 'Could not load refunds', 'Please try again.');
       setData(null);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status]);
+  }, [authLoading, beginRequest, canView, page, companyId, status]);
 
   useEffect(() => {
     load();
@@ -777,12 +789,12 @@ export default function RefundsPage() {
   const draftCount = data?.data.filter((r) => r.status === 'DRAFT').length ?? 0;
   const paidCount = data?.data.filter((r) => r.status === 'PAID').length ?? 0;
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Refunds" subtitle="Customer refunds against credit notes" />
         <div className="mt-8 text-center">
-          <p className="text-sm text-slate-500">Access Restricted</p>
+          <p className="text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</p>
         </div>
       </div>
     );
@@ -832,6 +844,13 @@ export default function RefundsPage() {
 
       <PageHeader title="Refunds" subtitle="Customer refunds against ISSUED credit notes" />
 
+      {loadError && (
+        <div role="alert" className="workspace-load-error">
+          {loadError}
+          <button onClick={() => void load()}>Try again</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Draft" value={draftCount} hint="Awaiting payment" />
@@ -843,6 +862,7 @@ export default function RefundsPage() {
         filters={
           <>
             <select
+              aria-label="All Companies"
               value={companyId}
               onChange={(e) => resetTo(setCompanyId)(e.target.value)}
               className={filterSelectCls}
@@ -856,6 +876,7 @@ export default function RefundsPage() {
               ))}
             </select>
             <select
+              aria-label="All Status"
               value={status}
               onChange={(e) => resetTo(setStatus)(e.target.value)}
               className={filterSelectCls}
@@ -879,7 +900,7 @@ export default function RefundsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[820px]">
+          <WorkspaceTable className="w-full text-sm min-w-[820px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -957,7 +978,7 @@ export default function RefundsPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
 
         {data && data.totalPages > 1 && (

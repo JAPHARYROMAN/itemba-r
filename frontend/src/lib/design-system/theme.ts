@@ -1,4 +1,5 @@
 'use client';
+import { safeLocalStorageSet } from '@/lib/safe-storage';
 
 // ITEMBA-R Aurora Design System — Theme Management
 
@@ -48,13 +49,18 @@ export function initTheme(): void {
 
 export function getStoredMotionPreference(): MotionMode {
   if (typeof window === 'undefined') return 'system';
-  const stored = localStorage.getItem(MOTION_KEY);
-  return stored === 'full' || stored === 'reduced' || stored === 'system' ? stored : 'system';
+  try {
+    const stored = localStorage.getItem(MOTION_KEY);
+    return stored === 'full' || stored === 'reduced' || stored === 'system' ? stored : 'system';
+  } catch {
+    return 'system';
+  }
 }
 
 export function setStoredMotionPreference(mode: MotionMode): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(MOTION_KEY, mode);
+  // The hook also applies this in memory when storage is unavailable.
+  safeLocalStorageSet(MOTION_KEY, mode);
 }
 
 export function systemPrefersReducedMotion(): boolean {
@@ -66,4 +72,5 @@ export function applyMotionPreference(mode: MotionMode): void {
   if (typeof window === 'undefined') return;
   const reduce = mode === 'reduced' || (mode === 'system' && systemPrefersReducedMotion());
   document.documentElement.classList.toggle('motion-reduced', reduce);
+  document.documentElement.classList.toggle('motion-full', mode === 'full');
 }

@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccessLevel, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
@@ -147,7 +152,7 @@ export class EmployeesService {
 
   async findOne(id: string, user: any) {
     const record = await this.prisma.employee.findFirst({
-      where: { id, deletedAt: null, ...this.companyFilter(user) },
+      where: { AND: [{ id, deletedAt: null }, applyCompanyScopeWhere({}, user)] },
       include: {
         company: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
@@ -424,9 +429,14 @@ export class EmployeesService {
     user: any,
   ) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     if ((existing as any).employmentStatus === 'TERMINATED') {
       throw new BadRequestException('Employee is already terminated');
     }
+    if (existing.terminationRequestedAt)
+      throw new ConflictException(
+        'A termination request is already awaiting approval. Refresh the employee to review it.',
+      );
     if (!body.reason?.trim()) {
       throw new BadRequestException('Termination reason is required');
     }
@@ -436,8 +446,14 @@ export class EmployeesService {
     if (Number.isNaN(pendingTerminationDate.getTime())) {
       throw new BadRequestException('Invalid termination date');
     }
-    const record = await this.prisma.employee.update({
-      where: { id },
+    const written = await this.prisma.employee.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        terminationRequestedAt: null,
+        companyId: existing.companyId,
+        employmentStatus: { not: 'TERMINATED' },
+      },
       data: {
         pendingTerminationDate,
         terminationReason: body.reason.trim(),
@@ -449,6 +465,11 @@ export class EmployeesService {
         terminationGmApprovedAt: null,
       } as any,
     });
+    if (written.count !== 1)
+      throw new ConflictException(
+        'The employee changed before this request was saved. Refresh the employee to review it.',
+      );
+    const record = await this.findOne(id, user);
     await this.audit.log({
       userId: user.id,
       action: 'TERMINATION_REQUEST',
@@ -469,9 +490,17 @@ export class EmployeesService {
    */
   async approveTermination(id: string, user: any) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     this.assertTerminationPending(existing, user.id);
-    const record = await this.prisma.employee.update({
-      where: { id },
+    const written = await this.prisma.employee.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        companyId: existing.companyId,
+        terminationRequestedAt: existing.terminationRequestedAt,
+        terminationRequestedById: existing.terminationRequestedById,
+        employmentStatus: { not: 'TERMINATED' },
+      },
       data: {
         terminationHrApprovedById: user.id,
         terminationHrApprovedAt: new Date(),
@@ -479,6 +508,11 @@ export class EmployeesService {
         terminationDate: (existing as any).pendingTerminationDate ?? new Date(),
       } as any,
     });
+    if (written.count !== 1)
+      throw new ConflictException(
+        'The termination request changed or was already approved. Refresh the employee to review it.',
+      );
+    const record = await this.findOne(id, user);
     await this.audit.log({
       userId: user.id,
       action: 'TERMINATION_APPROVE',

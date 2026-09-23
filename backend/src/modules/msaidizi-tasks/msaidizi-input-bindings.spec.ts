@@ -5,6 +5,9 @@ import {
   MsaidiziToolAttemptStatus,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import { exactActionEnvelopeDigest } from '../../common/utils/action-envelope';
+import { actionArgumentDigest } from '../../common/utils/canonical-digest';
+import { persistedUntrustedObservation } from '../msaidizi-task-runtime/persisted-observation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MsaidiziInputBindingDto, MsaidiziPlanStepDto } from './dto/msaidizi-task.dto';
 import {
@@ -117,7 +120,7 @@ function dependencyFixture(
     taskId: TASK_ID,
     planVersionId: PLAN_ID,
     stepKey: 'consumer',
-    target: MsaidiziExecutionTarget.HOST,
+    target: MsaidiziExecutionTarget.HOST as MsaidiziExecutionTarget,
     capability: 'email.send',
     capabilityVersion: '1',
     arguments: { body: null, destination: 'ops@example.test' } as Record<string, unknown>,
@@ -189,6 +192,229 @@ function expectBindingError(action: () => unknown, code: string): void {
 }
 
 describe('Msaidizi typed immutable input bindings', () => {
+  const outputValue = {
+    z: 1,
+    data: [{ id: 'expense-1', approved: false }, { id: 'expense-2' }],
+    a: { z: 'tail', a: 2 },
+  };
+  function outputFixture(observation: Record<string, unknown>) {
+    return dependencyFixture(
+      identityBinding({
+        source: { kind: 'DEPENDENCY_OUTPUT', dependencyStepKey: 'source', path: '/data/0/id' },
+      }),
+      {
+        toolAttempts: [
+          {
+            id: SOURCE_ATTEMPT_ID,
+            status: MsaidiziToolAttemptStatus.SUCCEEDED,
+            resultSummary: { responseSha256: RESULT_DIGEST, observation },
+          },
+        ],
+      },
+    );
+  }
+
+  it('resolves a verified output after JSONB-style recursive object-key reordering', async () => {
+    const observation: Record<string, unknown> = {
+      ...persistedUntrustedObservation(outputValue, 'ERP_RESULT'),
+    };
+    observation.value = {
+      a: { a: 2, z: 'tail' },
+      data: [{ approved: false, id: 'expense-1' }, { id: 'expense-2' }],
+      z: 1,
+    };
+    expect(sha256Text(JSON.stringify(observation.value))).not.toBe(observation.sourceSha256);
+    const fixture = outputFixture(observation);
+    const result = await resolveStepInputs(
+      fixture.prisma,
+      TASK_ID,
+      CONSUMER_STEP_ID,
+      CONSUMER_ATTEMPT_ID,
+    );
+    expect(result.arguments.body).toBe('expense-1');
+    expect(result.provenance).toMatchObject({
+      bindings: [
+        {
+          instructionAuthority: false,
+          trustLevel: 'UNTRUSTED',
+          source: {
+            outputValueDigestAlgorithm: 'canonical-json-sha256-v1',
+            outputValueSha256: sha256Canonical(outputValue),
+            resultSha256: RESULT_DIGEST,
+          },
+        },
+      ],
+    });
+  });
+
+  it.each([
+    'selected-value',
+    'other-value',
+    'array-order',
+    'value-type',
+    'algorithm',
+    'missing-digest',
+    'bad-digest',
+    'null-protocol',
+    'redacted',
+  ])('rejects changed dependency output or verification metadata: %s', async (change) => {
+    const observation: Record<string, unknown> = {
+      ...persistedUntrustedObservation(outputValue, 'ERP_RESULT'),
+    };
+    if (change === 'selected-value')
+      observation.value = {
+        ...outputValue,
+        data: [{ id: 'expense-3', approved: false }, outputValue.data[1]],
+      };
+    if (change === 'other-value') observation.value = { ...outputValue, z: 2 };
+    if (change === 'array-order')
+      observation.value = { ...outputValue, data: [...outputValue.data].reverse() };
+    if (change === 'value-type') observation.value = { ...outputValue, z: '1' };
+    if (change === 'algorithm')
+      observation.valueDigest = { algorithm: 'unknown', sha256: sha256Canonical(outputValue) };
+    if (change === 'missing-digest')
+      observation.valueDigest = { algorithm: 'canonical-json-sha256-v1' };
+    if (change === 'bad-digest')
+      observation.valueDigest = { algorithm: 'canonical-json-sha256-v1', sha256: 'a'.repeat(64) };
+    if (change === 'null-protocol') observation.valueDigest = null;
+    if (change === 'redacted') observation.redactionsApplied = true;
+    const fixture = outputFixture(observation);
+    await expect(
+      resolveStepInputs(fixture.prisma, TASK_ID, CONSUMER_STEP_ID, CONSUMER_ATTEMPT_ID),
+    ).rejects.toMatchObject({
+      code:
+        change === 'redacted'
+          ? 'INPUT_BINDING_DEPENDENCY_OUTPUT_UNAVAILABLE'
+          : 'INPUT_BINDING_DEPENDENCY_DIGEST_MISMATCH',
+    });
+  });
+
+  it('retains legacy exact-byte verification without inventing evidence for reordered old observations', async () => {
+    const observation: Record<string, unknown> = {
+      ...persistedUntrustedObservation(outputValue, 'ERP_RESULT'),
+    };
+    delete observation.valueDigest;
+    const fixture = outputFixture(observation);
+    const result = await resolveStepInputs(
+      fixture.prisma,
+      TASK_ID,
+      CONSUMER_STEP_ID,
+      CONSUMER_ATTEMPT_ID,
+    );
+    expect(result.arguments.body).toBe('expense-1');
+    expect(result.provenance).toMatchObject({
+      bindings: [{ source: { outputValueDigestAlgorithm: 'json-encoding-sha256-v1' } }],
+    });
+    observation.value = { a: outputValue.a, data: outputValue.data, z: 1 };
+    await expect(
+      resolveStepInputs(fixture.prisma, TASK_ID, CONSUMER_STEP_ID, CONSUMER_ATTEMPT_ID),
+    ).rejects.toMatchObject({ code: 'INPUT_BINDING_DEPENDENCY_DIGEST_MISMATCH' });
+  });
+
+  it('normalizes static ERP path/query scalars but preserves JSON body types and host digests', () => {
+    const args = { path: { id: 41 }, query: { active: true }, body: { quantity: 1.25 } };
+    const resolved = staticStepInputs(
+      TASK_ID,
+      PLAN_ID,
+      CONSUMER_STEP_ID,
+      CONSUMER_ATTEMPT_ID,
+      args,
+      MsaidiziExecutionTarget.ERP,
+    );
+    expect(resolved.argumentsSha256).toBe(
+      exactActionEnvelopeDigest({
+        path: { id: '41' },
+        query: { active: 'true' },
+        body: { quantity: 1.25 },
+      }),
+    );
+    expect(resolved.argumentsSha256).not.toBe(
+      exactActionEnvelopeDigest({
+        path: { id: '41' },
+        query: { active: 'true' },
+        body: { quantity: '1.25' },
+      }),
+    );
+    expect(resolved.arguments).toEqual(args);
+    const host = staticStepInputs(TASK_ID, PLAN_ID, CONSUMER_STEP_ID, CONSUMER_ATTEMPT_ID, args);
+    expect(host.argumentsSha256).toBe(actionArgumentDigest(args));
+    expect(host.argumentsJsonSha256).toBe(resolved.argumentsJsonSha256);
+    expect(host.provenanceSha256).toBe(resolved.provenanceSha256);
+  });
+
+  it('rejects a malformed ERP envelope rather than falling back to a host digest', () => {
+    expectBindingError(
+      () =>
+        staticStepInputs(
+          TASK_ID,
+          PLAN_ID,
+          CONSUMER_STEP_ID,
+          CONSUMER_ATTEMPT_ID,
+          { page: 1 },
+          MsaidiziExecutionTarget.ERP,
+        ),
+      'INPUT_BINDING_ARGUMENT_TEMPLATE_INVALID',
+    );
+  });
+
+  it('binds ERP inputs to their exact HTTP envelope without changing typed provenance', async () => {
+    const fixture = dependencyFixture(
+      identityBinding({
+        targetPath: '/query/page',
+        source: { kind: 'PLAN_INPUT', path: '/page' },
+        expectedType: 'integer',
+        expectedSchema: { type: 'integer', minimum: 1 },
+      }),
+    );
+    fixture.consumer.target = MsaidiziExecutionTarget.ERP;
+    fixture.consumer.capability = 'ExpensesController.findAll';
+    fixture.consumer.arguments = { path: {}, query: { page: null, active: true } };
+    fixture.consumer.planVersion.inputs = { page: 1 };
+    const resolved = await resolveStepInputs(
+      fixture.prisma,
+      TASK_ID,
+      CONSUMER_STEP_ID,
+      CONSUMER_ATTEMPT_ID,
+    );
+    const args = { path: {}, query: { page: 1, active: true } };
+    expect(resolved.arguments).toEqual(args);
+    expect(resolved.argumentsSha256).toBe(
+      exactActionEnvelopeDigest({
+        path: {},
+        query: { page: '1', active: 'true' },
+      }),
+    );
+    expect(resolved.argumentsJsonSha256).toBe(sha256Canonical(args));
+    expect(resolved.provenance.resolvedArgumentsSha256).toBe(sha256Canonical(args));
+    expect(resolved.argumentsSha256).not.toBe(
+      exactActionEnvelopeDigest({
+        path: {},
+        query: { page: '2', active: 'true' },
+      }),
+    );
+  });
+
+  it('keeps host argument digests typed even for an HTTP-shaped capability payload', async () => {
+    const fixture = dependencyFixture(
+      identityBinding({
+        targetPath: '/query/page',
+        source: { kind: 'PLAN_INPUT', path: '/page' },
+        expectedType: 'integer',
+        expectedSchema: { type: 'integer' },
+      }),
+    );
+    fixture.consumer.arguments = { path: {}, query: { page: null } };
+    fixture.consumer.planVersion.inputs = { page: 1 };
+    const resolved = await resolveStepInputs(
+      fixture.prisma,
+      TASK_ID,
+      CONSUMER_STEP_ID,
+      CONSUMER_ATTEMPT_ID,
+    );
+    expect(resolved.argumentsSha256).toBe(actionArgumentDigest(resolved.arguments));
+    expect(resolved.argumentsSha256).not.toBe(exactActionEnvelopeDigest(resolved.arguments));
+  });
+
   it('keeps legacy static plans byte-equivalent while creating an empty provenance graph', () => {
     const args = { path: { id: 'expense-1' }, query: { includeLines: true } };
 

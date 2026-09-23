@@ -239,6 +239,19 @@ export class JournalEntriesService {
   }
 
   async create(dto: CreateJournalEntryDto, user: AuthUser) {
+    if (
+      [
+        'DeskCash',
+        'DeskSale',
+        'DeskPurchase',
+        'LoanLifecycle',
+        'DeskIntercompany',
+        'PayrollRunPayment',
+      ].includes(dto.referenceType ?? '')
+    )
+      throw new BadRequestException(
+        'Desk source references are created through Reports → Accounting.',
+      );
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const { totalDebit, totalCredit } = this.validateLines(dto.lines);
     const transactionDate = new Date(dto.transactionDate);
@@ -307,7 +320,22 @@ export class JournalEntriesService {
   }
 
   async update(id: string, dto: UpdateJournalEntryDto, user: AuthUser) {
+    if (
+      [
+        'DeskCash',
+        'DeskSale',
+        'DeskPurchase',
+        'LoanLifecycle',
+        'DeskIntercompany',
+        'PayrollRunPayment',
+      ].includes(dto.referenceType ?? '')
+    )
+      throw new BadRequestException(
+        'Desk source references are created through Reports → Accounting.',
+      );
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.referenceType === 'PayrollRunPayment')
+      throw new BadRequestException('Manage payroll payment journals through Payroll.');
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT journal entries can be updated');
     }
@@ -395,6 +423,8 @@ export class JournalEntriesService {
 
   async post(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.referenceType === 'PayrollRunPayment')
+      throw new BadRequestException('Manage payroll payment journals through Payroll.');
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT journal entries can be posted');
     }
@@ -464,6 +494,20 @@ export class JournalEntriesService {
 
   async reverse(id: string, dto: ReverseJournalEntryDto, user: AuthUser) {
     const original = await this.findOne(id, user, AccessLevel.WRITE);
+    if (original.referenceType === 'PayrollRun')
+      throw new BadRequestException('Cancel the unpaid run in Payroll to reverse its accrual.');
+    if (original.referenceType === 'PayrollRunPayment')
+      throw new BadRequestException(
+        'Reverse the payment in Payroll so cash, payroll and journal balances stay together.',
+      );
+    if (['LoanLifecycle', 'DeskIntercompany'].includes(original.referenceType || ''))
+      throw new BadRequestException(
+        'Reverse the linked loan event or intercompany cash movement so loan, cash and journal balances stay together.',
+      );
+    if (original.referenceType === 'DeskCash')
+      throw new BadRequestException(
+        'Reverse this transaction in Cash Desk so cash, invoice and ledger balances stay together.',
+      );
     if (original.status !== 'POSTED') {
       throw new BadRequestException('Only POSTED journal entries can be reversed');
     }
@@ -479,6 +523,27 @@ export class JournalEntriesService {
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (
+        original.referenceId &&
+        ['DeskSale', 'DeskPurchase'].includes(original.referenceType ?? '')
+      ) {
+        if (original.referenceType === 'DeskSale')
+          await tx.$queryRaw`SELECT id FROM sales_desk_sales WHERE id = ${original.referenceId} FOR UPDATE`;
+        else
+          await tx.$queryRaw`SELECT id FROM invoice_desk_invoices WHERE id = ${original.referenceId} FOR UPDATE`;
+        const payments = await tx.cashDeskMovement.count({
+          where: {
+            reversedAt: null,
+            ...(original.referenceType === 'DeskSale'
+              ? { salesPayment: { saleId: original.referenceId } }
+              : { invoicePayment: { invoiceId: original.referenceId } }),
+          },
+        });
+        if (payments)
+          throw new BadRequestException(
+            'Reverse linked Cash Desk payments before reversing the invoice journal.',
+          );
+      }
       // Serialize against period close/lock before making the authoritative
       // posting decision. If a close committed first, this revalidation sees
       // CLOSED; if this lock wins, the close waits until the reversal commits.
@@ -586,6 +651,8 @@ export class JournalEntriesService {
 
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.referenceType === 'PayrollRunPayment')
+      throw new BadRequestException('Manage payroll payment journals through Payroll.');
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT journal entries can be deleted');
     }

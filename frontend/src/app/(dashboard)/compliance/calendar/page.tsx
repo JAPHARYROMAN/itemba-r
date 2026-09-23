@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, StatCard, StatusBadge, PageSpinner } from '@/components/ui';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card, ErrorState, PageHeader, StatCard, StatusBadge, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 interface Obligation {
@@ -25,29 +27,56 @@ function daysUntil(d: string) {
 }
 
 export default function ComplianceCalendarPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('compliance_calendar.view');
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [items, setItems] = useState<Obligation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<'all' | 'overdue' | 'upcoming'>('all');
   const [companyId, setCompanyId] = useState('');
   const [priority, setPriority] = useState('');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!controller.signal.aborted) setCompanies(j.data?.data ?? j.data ?? []);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ limit: '200' });
     if (companyId) params.set('companyId', companyId);
     if (priority) params.set('priority', priority);
-    setLoading(true);
-    fetch(`/api/backend/compliance/obligations?${params}`).then((r) => r.json())
-      .then((j) => setItems(j.data?.data ?? j.data ?? []))
-      .finally(() => setLoading(false));
-  }, [companyId, priority]);
+    try {
+      const res = await fetch(`/api/backend/compliance/obligations?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load the compliance calendar');
+      const j = await res.json();
+      if (!request.current()) return;
+      setItems(j.data?.data ?? j.data ?? []);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load the compliance calendar');
+      setItems([]);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, companyId, priority]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const filtered = useMemo(() => {
     if (tab === 'overdue') return items.filter((o) => o.status === 'OVERDUE' || (o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && daysUntil(o.dueDate) < 0));
@@ -61,6 +90,7 @@ export default function ComplianceCalendarPage() {
     upcoming: items.filter((o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && daysUntil(o.dueDate) >= 0 && daysUntil(o.dueDate) <= 30).length,
   }), [items]);
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Compliance Calendar" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Compliance Calendar" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -84,22 +114,22 @@ export default function ComplianceCalendarPage() {
           ))}
         </div>
         <div className="flex-1" />
-        <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+        <select aria-label="All Companies" value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
           <option value="">All Companies</option>
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select value={priority} onChange={(e) => setPriority(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+        <select aria-label="All Priorities" value={priority} onChange={(e) => setPriority(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
           <option value="">All Priorities</option>
           {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
       </div>
 
       <Card className="p-0 overflow-hidden">
-        {loading ? <PageSpinner /> : filtered.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : filtered.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No obligations</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase" style={{ color: 'var(--aurora-text-muted)', borderBottom: '1px solid var(--aurora-border)' }}>
                   <th className="p-3">Code</th>
@@ -129,7 +159,7 @@ export default function ComplianceCalendarPage() {
                   );
                 })}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Card>

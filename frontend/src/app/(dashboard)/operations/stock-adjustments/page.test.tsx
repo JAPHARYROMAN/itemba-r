@@ -5,6 +5,9 @@ import { InventoryWorkspaceProvider } from '@/features/inventory/inventory-works
 
 const backendList = vi.fn();
 const backendPage = vi.fn();
+const backendGet = vi.fn();
+
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
 
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: () => true }),
@@ -12,7 +15,7 @@ vi.mock('@/hooks/use-auth', () => ({
 
 vi.mock('@/lib/api-client', () => ({
   backendDelete: vi.fn(),
-  backendGet: vi.fn(),
+  backendGet: (path: string) => backendGet(path),
   backendList: (path: string, options?: unknown) => backendList(path, options),
   backendPage: (path: string, options?: unknown) => backendPage(path, options),
   backendPatch: vi.fn(),
@@ -29,6 +32,7 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
   beforeEach(() => {
     backendList.mockReset();
     backendPage.mockReset();
+    backendGet.mockResolvedValue({ data: [], total: 0 });
     backendList.mockImplementation((path: string) => {
       if (path === '/companies') {
         return Promise.resolve([{ id: 'company-1', name: 'Westsides', code: 'WESTSIDES' }]);
@@ -46,7 +50,10 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
       }
       return Promise.resolve([]);
     });
-    backendPage.mockResolvedValue({ data: [], total: 0, page: 1, totalPages: 1 });
+    backendPage.mockImplementation(async (path: string) => {
+      const data = await backendList(path);
+      return { data, total: data.length, page: 1, totalPages: 1 };
+    });
     vi.stubGlobal(
       'matchMedia',
       vi.fn().mockReturnValue({
@@ -72,9 +79,9 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
     expect(createButton).toBeEnabled();
     await user.click(createButton);
 
-    expect(await screen.findByText('Create Stock Adjustment')).toBeInTheDocument();
-    const branchSelect = screen.getByLabelText(/branch \/ location/i);
-    expect(branchSelect).toBeEnabled();
+    expect(await screen.findByRole('dialog', { name: 'New stock adjustment' })).toBeInTheDocument();
+    const branchSelect = screen.getByLabelText(/^Adjustment branch/);
+    await waitFor(() => expect(branchSelect).toBeEnabled());
 
     await waitFor(() =>
       expect(screen.getByRole('option', { name: /kisimani/i })).toBeInTheDocument(),
@@ -82,7 +89,7 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
     await user.selectOptions(branchSelect, 'branch-1');
     expect(branchSelect).toHaveValue('branch-1');
 
-    await user.click(screen.getByRole('combobox', { name: 'Search product, line 1' }));
+    await user.click(screen.getByRole('combobox', { name: 'Product, line 1' }));
     await waitFor(() =>
       expect(backendList).toHaveBeenCalledWith('/products', {
         query: {

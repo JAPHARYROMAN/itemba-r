@@ -61,6 +61,63 @@ const companyPrincipal: any = {
   companyAccess: [{ companyId: 'company-1', accessLevel: 'MANAGE' }],
 };
 
+describe('Scheduled report editor choices', () => {
+  it('restricts company choices and report definitions to the caller and identifies supported snapshots', async () => {
+    const { service, prisma } = makeService({
+      company: { findMany: jest.fn().mockResolvedValue([{ id: 'company-1', name: 'Westsides' }]) },
+      reportDefinition: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'aging', name: 'Supplier aging', datasetKey: 'payables_aging' },
+          { id: 'custom', name: 'Custom report', datasetKey: 'custom_dataset' },
+        ]),
+      },
+    });
+    const result = await service.options({
+      ...companyPrincipal,
+      permissions: ['finance.reports.view'],
+    });
+    expect(prisma.company.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { deletedAt: null, id: { in: ['company-1'] } } }),
+    );
+    expect(prisma.reportDefinition.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          deletedAt: null,
+          isActive: true,
+          OR: [
+            { requiredPermission: null },
+            { requiredPermission: { in: ['finance.reports.view'] } },
+          ],
+        },
+      }),
+    );
+    expect(result).toEqual({
+      companies: [{ id: 'company-1', name: 'Westsides' }],
+      canUseGroupScope: false,
+      canUseSavedViews: false,
+      reports: [
+        { id: 'aging', name: 'Supplier aging', snapshotSupported: true },
+        { id: 'custom', name: 'Custom report', snapshotSupported: false },
+      ],
+    });
+  });
+  it('only offers group scope to a group-scoped user and reflects saved-view permission', async () => {
+    const { service, prisma } = makeService({
+      company: { findMany: jest.fn().mockResolvedValue([]) },
+      reportDefinition: { findMany: jest.fn().mockResolvedValue([]) },
+    });
+    const result = await service.options({
+      ...groupPrincipal,
+      permissions: ['saved_report_views.view'],
+    });
+    expect(result.canUseGroupScope).toBe(true);
+    expect(result.canUseSavedViews).toBe(true);
+    expect(prisma.company.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { deletedAt: null } }),
+    );
+  });
+});
+
 describe('ScheduledReportsService — nextRunAt initialization', () => {
   it('create() arms nextRunAt from the frequency for an active schedule', async () => {
     const { service, prisma } = makeService({

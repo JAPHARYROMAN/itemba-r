@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface IntegrationMapping {
   id: string;
@@ -22,6 +25,10 @@ interface Provider {
 const EMPTY_FORM = { mappingCode: '', internalEntityType: '', internalEntityId: '', externalEntityType: '', externalEntityId: '', providerId: '' };
 
 export default function IntegrationMappingsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('integration_mappings.view');
+  const beginRequest = useRequestGuard();
+
   const [mappings, setMappings] = useState<IntegrationMapping[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,21 +38,38 @@ export default function IntegrationMappingsPage() {
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    fetch('/api/backend/integration-mappings?limit=50')
-      .then(r => r.json())
-      .then(data => setMappings(unwrapList(data)))
-      .catch(() => { setMappings([]); setLoadError('Failed to load integration mappings.'); })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const res = await fetch('/api/backend/integration-mappings?limit=50', { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load integration mappings.');
+      setMappings(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setMappings([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load integration mappings.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
+
   useEffect(() => {
-    // optional lookup — on failure the provider dropdown simply stays empty
-    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => undefined);
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/integration-providers?limit=100', { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => { if (!controller.signal.aborted) setProviders(unwrapList(data)); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   async function save() {
     setSaving(true); setError('');
@@ -57,6 +81,9 @@ export default function IntegrationMappingsPage() {
     finally { setSaving(false); }
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Integration Mappings" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Integration Mappings" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader title="Integration Mappings" subtitle="Map internal entities to external provider entities" />
@@ -67,7 +94,7 @@ export default function IntegrationMappingsPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -92,7 +119,7 @@ export default function IntegrationMappingsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -108,7 +135,7 @@ export default function IntegrationMappingsPage() {
           </>
         }
       >
-        {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="space-y-3">
           <FormInput label="Mapping Code" required value={form.mappingCode} onChange={e => setForm(f => ({ ...f, mappingCode: e.target.value }))} />
           <FormInput label="Internal Entity Type" required value={form.internalEntityType} onChange={e => setForm(f => ({ ...f, internalEntityType: e.target.value }))} placeholder="e.g. CUSTOMER, PRODUCT" />

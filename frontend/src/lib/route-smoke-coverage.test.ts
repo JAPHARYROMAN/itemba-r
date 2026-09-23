@@ -6,6 +6,9 @@ const fixtureFile = path.join(process.cwd(), 'scripts', 'route-smoke-fixtures.js
 const navigationSourceFiles = [
   path.join(process.cwd(), 'src', 'components', 'layout', 'sidebar.tsx'),
   path.join(process.cwd(), 'src', 'components', 'aurora', 'command', 'CommandPalette.tsx'),
+  path.join(process.cwd(), 'src', 'lib', 'apps.ts'),
+  path.join(process.cwd(), 'src', 'lib', 'payroll-app.ts'),
+  path.join(process.cwd(), 'src', 'features', 'reports', 'reports-app.tsx'),
 ];
 const minPageRoutes = 190;
 
@@ -37,7 +40,7 @@ function loadDynamicFixtures(): Map<string, string> {
 
 function hrefsFromSource(file: string) {
   const source = readFileSync(file, 'utf8');
-  return [...source.matchAll(/href:\s*['"]([^'"]+)['"]/g)]
+  return [...source.matchAll(/href\s*[:=]\s*['"]([^'"]+)['"]/g)]
     .map((match) => match[1])
     .filter((href) => href.startsWith('/'))
     .map((href) => href.split(/[?#]/)[0])
@@ -108,6 +111,12 @@ describe('route smoke coverage manifest', () => {
     // admin/engineering tooling and the not-yet-live integrations surface stay
     // reachable by URL only until the business needs them.
     const intentionallyHidden = new Set([
+      // The OS desktop is the shell itself, not a destination inside it. The shell
+      // navigates here when the last window closes, and the menubar toggles it in
+      // place, so it is reached without ever being an href in a navigation list.
+      '/desktop',
+      // The standalone Fuel Reporting portal owns its sign-in flow, outside ERP navigation.
+      '/fuel-reporting/login',
       // Legacy inventory URLs redirect into the consolidated Inventory workspace.
       // They remain on disk only to preserve live bookmarks and shared links.
       '/operations/inventory',

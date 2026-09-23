@@ -109,7 +109,10 @@ export class UnitsService {
       throw new BadRequestException('System units cannot be modified');
     }
 
-    if (dto.isBaseUnit) {
+    if (
+      (dto.isBaseUnit ?? existing.isBaseUnit) &&
+      (dto.isBaseUnit !== undefined || dto.unitType !== undefined)
+    ) {
       const unitType = dto.unitType ?? existing.unitType;
       await this.assertNoExistingBaseUnit(existing.companyId, unitType, id);
     }
@@ -165,12 +168,22 @@ export class UnitsService {
   // ─── Unit Conversions ────────────────────────────────────────────────────
 
   async findAllConversions(query: QueryUnitDto, user?: any) {
-    const { page = 1, limit = 20, companyId } = query;
+    const { page = 1, limit = 20, companyId, search, status } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UnitConversionWhereInput = {
       deletedAt: null,
       AND: [await this.companyOrSystemConversionWhere(user, companyId)],
+      ...(status && { isActive: status === 'ACTIVE' }),
+      ...(search && {
+        OR: [
+          { description: { contains: search, mode: 'insensitive' as const } },
+          { fromUnit: { name: { contains: search, mode: 'insensitive' as const } } },
+          { fromUnit: { symbol: { contains: search, mode: 'insensitive' as const } } },
+          { toUnit: { name: { contains: search, mode: 'insensitive' as const } } },
+          { toUnit: { symbol: { contains: search, mode: 'insensitive' as const } } },
+        ],
+      }),
     };
 
     const [data, total] = await Promise.all([
@@ -391,9 +404,7 @@ export class UnitsService {
       decimals = (text.split('.')[1] ?? '').length;
     }
     if (decimals > 6) {
-      throw new BadRequestException(
-        'conversionFactor must have at most 6 decimal places',
-      );
+      throw new BadRequestException('conversionFactor must have at most 6 decimal places');
     }
   }
 

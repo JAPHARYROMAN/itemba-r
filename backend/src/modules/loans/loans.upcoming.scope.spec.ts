@@ -14,6 +14,8 @@ describe('LoansService.getUpcomingRepayments scope', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
+      { readWhere: jest.fn().mockResolvedValue({ AND: [{ branchId: 'branch-a' }] }) } as any,
     );
     const user = { id: 'user-a', companyId: 'company-a' } as any;
 
@@ -27,6 +29,7 @@ describe('LoansService.getUpcomingRepayments scope', () => {
           deletedAt: null,
           status: LoanStatus.ACTIVE,
           companyId: { in: ['company-a'] },
+          AND: [{ branchId: 'branch-a' }],
         }),
       }),
     );

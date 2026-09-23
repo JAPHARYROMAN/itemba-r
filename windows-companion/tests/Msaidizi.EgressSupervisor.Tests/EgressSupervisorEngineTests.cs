@@ -1365,6 +1365,18 @@ public sealed partial class EgressSupervisorEngineTests : IDisposable
   }
 
   [Fact]
+  public void ActiveRegistrationSelectsOnlyTheRejectingBrowserProvider()
+  {
+    var services = new ServiceCollection();
+    services.AddEgressSupervisor(new EgressSupervisorOptions { Enabled = true });
+    var registration = Assert.Single(services,
+      entry => entry.ServiceType == typeof(IBrowserBoundaryEvidenceProvider));
+    Assert.Equal(typeof(RejectingBrowserBoundaryEvidenceProvider), registration.ImplementationType);
+    using var provider = services.BuildServiceProvider();
+    Assert.False(provider.GetRequiredService<IBrowserBoundaryEvidenceProvider>().IsAvailable);
+  }
+
+  [Fact]
   public async Task SafeDisabledHostStartsWithoutRegisteringAnyActiveBoundary()
   {
     var options = new EgressSupervisorOptions

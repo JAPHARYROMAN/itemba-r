@@ -1,18 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  ConfirmDialog,
-  FormInput,
-  FormSelect,
-  Modal,
-  PageHeader,
-  PageSpinner,
-  PageToolbar,
-  StatusBadge,
-} from '@/components/ui';
+import { Btn, Card, ConfirmDialog, ErrorState, FormDateField, FormInput, FormSelect, Modal, PageHeader, PageSpinner, PageToolbar, StatusBadge } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company {
   id: string;
@@ -111,6 +103,10 @@ function daysUntil(d: string): number {
 }
 
 export default function OshaRegistrationsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('compliance.dashboard.view');
+  const canManage = hasPermission('compliance_obligations.manage');
+  const beginRequest = useRequestGuard();
   const [rows, setRows] = useState<OshaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -122,42 +118,63 @@ export default function OshaRegistrationsPage() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) =>
+      .then((j) => {
+        if (controller.signal.aborted) return;
         setCompanies(
           Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setCompanies([]));
-  }, []);
+        );
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    if (!form.companyId) {
+    if (authLoading || !canView || !form.companyId) {
       setBranches([]);
       return;
     }
-    fetch(`/api/backend/branches?companyId=${form.companyId}&limit=200`)
+    const controller = new AbortController();
+    fetch(`/api/backend/branches?companyId=${form.companyId}&limit=200`, { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) =>
+      .then((j) => {
+        if (controller.signal.aborted) return;
         setBranches(
           Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setBranches([]));
-  }, [form.companyId]);
+        );
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView, form.companyId]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams();
     if (filterCompany) params.set('companyId', filterCompany);
-    const r = await fetch(`/api/backend/hr/osha-registrations?${params}`);
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  }, [filterCompany]);
+    try {
+      const r = await fetch(`/api/backend/hr/osha-registrations?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!r.ok) throw new Error('Failed to load OSHA registrations');
+      const j = await r.json();
+      if (!request.current()) return;
+      setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load OSHA registrations');
+      setRows([]);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterCompany]);
   useEffect(() => {
     load();
   }, [load]);
@@ -254,6 +271,25 @@ export default function OshaRegistrationsPage() {
     load();
   };
 
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="OSHA Registrations" subtitle="Loading" />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="OSHA Registrations" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -292,22 +328,26 @@ export default function OshaRegistrationsPage() {
           />
         }
         actions={
-          <Btn variant="primary" onClick={openCreate}>
-            + New registration
-          </Btn>
+          canManage ? (
+            <Btn variant="primary" onClick={openCreate}>
+              + New registration
+            </Btn>
+          ) : null
         }
       />
 
       <Card className="overflow-hidden">
         {loading ? (
           <PageSpinner />
+        ) : loadError ? (
+          <ErrorState message={loadError} onRetry={() => void load()} />
         ) : rows.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate-400">
             No OSHA registrations on file.
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <WorkspaceTable className="w-full">
               <thead
                 className="bg-slate-50 border-b border-slate-100"
                 style={{ color: 'var(--aurora-text-muted)' }}
@@ -367,18 +407,22 @@ export default function OshaRegistrationsPage() {
                         <StatusBadge status={r.status} />
                       </td>
                       <td className="px-4 py-2 text-right whitespace-nowrap">
+                        {canManage && (
+                          <>
                         <Btn variant="ghost" size="xs" onClick={() => openEdit(r)}>
                           Edit
                         </Btn>
                         <Btn variant="ghost" size="xs" onClick={() => setDeleteId(r.id)}>
                           Delete
                         </Btn>
+                          </>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Card>
@@ -401,7 +445,7 @@ export default function OshaRegistrationsPage() {
       >
         <form id="osha-form" onSubmit={submit} className="space-y-3">
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+            <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
               {error}
             </div>
           )}
@@ -434,17 +478,15 @@ export default function OshaRegistrationsPage() {
               onChange={(e) => setForm((p) => ({ ...p, registrationType: e.target.value }))}
               options={TYPE_OPTIONS}
             />
-            <FormInput
+            <FormDateField
               label="Issued date"
-              type="date"
               value={form.issuedAt}
-              onChange={(e) => setForm((p) => ({ ...p, issuedAt: e.target.value }))}
+              onChange={(value) => setForm((p) => ({ ...p, issuedAt: value }))}
             />
-            <FormInput
+            <FormDateField
               label="Expires *"
-              type="date"
               value={form.expiresAt}
-              onChange={(e) => setForm((p) => ({ ...p, expiresAt: e.target.value }))}
+              onChange={(value) => setForm((p) => ({ ...p, expiresAt: value }))}
               required
             />
             <FormInput

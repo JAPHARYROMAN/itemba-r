@@ -211,6 +211,8 @@ try {
         configuredWithSubstitution.services?.backend,
         configuredMsaidiziHostInputs,
       );
+    } else {
+      assertStagingChatOverlay(target, config);
     }
     console.log(`OK ${target.name}: compose fail-fast and deployment shape verified`);
   }
@@ -248,6 +250,7 @@ function composeConfig(target, extraEnv = {}) {
       emptyEnvFile,
       '-f',
       resolve(rootDir, target.file),
+      ...(target.overlay ? ['-f', resolve(rootDir, target.overlay)] : []),
       '--profile',
       'seed',
       'config',
@@ -273,6 +276,80 @@ function validateMissingSecretsFail(target) {
   if (result.status === 0) {
     fail(`${target.name}: compose accepted missing required secrets`);
   }
+}
+
+function assertStagingChatOverlay(baseTarget, baseline) {
+  const target = {
+    ...baseTarget,
+    name: 'staging read-only chat overlay',
+    overlay: 'docker-compose.staging-msaidizi-chat.yml',
+  };
+  // Synthetic configuration only: no provider request or signature is created.
+  const inputs = {
+    ANTHROPIC_API_KEY: 'synthetic-compose-validation-not-a-credential',
+    MSAIDIZI_MODEL: 'attested-test-model',
+    MSAIDIZI_CLASSIFIER_MODEL: 'attested-test-classifier',
+    MSAIDIZI_PROVIDER_CONTRACT_KEY_ID: 'test-signer',
+    MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256: 'a'.repeat(64),
+    MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256: 'b'.repeat(64),
+    MSAIDIZI_PROVIDER_ACCOUNT_ID: 'test-account',
+    MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID: 'test-credential',
+    MSAIDIZI_STAGING_CONTRACT_ATTESTATION_HOST_PATH: '/operator/staging/attestation.json',
+    MSAIDIZI_STAGING_CONTRACT_PUBLIC_KEY_HOST_PATH: '/operator/staging/public.pem',
+  };
+  for (const key of Object.keys(inputs)) {
+    const result = composeConfig(target, { ...sampleEnv, ...inputs, [key]: '' });
+    assert(target, !result.error && result.status !== 0, `missing ${key} fails closed`);
+    assert(target, result.stderr?.includes(key), `missing-input error identifies ${key}`);
+  }
+  // Hostile inherited values must not raise the overlay's execution ceiling.
+  const config = validateConfigPasses(target, {
+    ...configuredMsaidiziHostInputs,
+    ...substitutedMsaidiziContainerPaths,
+    ...Object.fromEntries(msaidiziEnableSwitches.map((key) => [key, 'true'])),
+    MSAIDIZI_ENABLED: 'false',
+    MSAIDIZI_TOOL_SEARCH: 'false',
+    MSAIDIZI_WRITE_MODE: 'full',
+    MSAIDIZI_GLOBAL_KILL_SWITCH: 'true',
+    ...inputs,
+  });
+  assertEqual(target, config.name, baseline.name, 'staging project is preserved');
+  for (const [name, service] of Object.entries(baseline.services)) {
+    if (name !== 'backend') {
+      assertEqual(target, JSON.stringify(config.services[name]), JSON.stringify(service), `${name} is unchanged`);
+    }
+  }
+  const backend = config.services.backend;
+  for (const key of msaidiziEnableSwitches) {
+    assertEqual(target, backend.environment[key], key === 'MSAIDIZI_ENABLED' ? 'true' : 'false', `${key} is fixed`);
+  }
+  assertEqual(target, backend.environment.MSAIDIZI_TOOL_SEARCH, 'true', 'tool search enabled');
+  assertEqual(target, backend.environment.MSAIDIZI_WRITE_MODE, 'read-only', 'writes remain disabled');
+  assertEqual(target, backend.environment.MSAIDIZI_GLOBAL_KILL_SWITCH, 'true', 'operator kill switch remains effective');
+  for (const [key, value] of Object.entries(inputs)) {
+    if (!key.endsWith('_HOST_PATH')) {
+      assertEqual(target, backend.environment[key], value, `${key} is forwarded`);
+    }
+  }
+  const providerMounts = msaidiziInputMounts.slice(0, 2);
+  const expectedSources = [
+    inputs.MSAIDIZI_STAGING_CONTRACT_ATTESTATION_HOST_PATH,
+    inputs.MSAIDIZI_STAGING_CONTRACT_PUBLIC_KEY_HOST_PATH,
+  ];
+  for (const [index, input] of providerMounts.entries()) {
+    const mounts = backend.volumes.filter((mount) => mount.target === input.target);
+    assertEqual(target, mounts.length, 1, `exactly one ${input.target} mount`);
+    const mount = mounts[0];
+    assertEqual(target, mount.type, 'bind', `${input.target} uses bind`);
+    assertEqual(target, mount.source, expectedSources[index], `${input.target} uses staging source`);
+    assertEqual(target, mount.read_only, true, `${input.target} is read-only`);
+    assert(target, declaresNoImplicitHostPath({ file: target.overlay }, input.target), `${input.target} refuses implicit host-path creation`);
+    assert(target, mount.bind?.create_host_path !== true, `${input.target} does not create host paths`);
+    assertEqual(target, backend.environment[input.pathEnv], input.target, `${input.pathEnv} cannot be substituted`);
+  }
+  const remainingVolumes = backend.volumes.filter((mount) => !providerMounts.some((input) => input.target === mount.target));
+  assertEqual(target, JSON.stringify(remainingVolumes), JSON.stringify(baseline.services.backend.volumes), 'only two provider mounts are added');
+  console.log('OK staging read-only chat overlay: required inputs, fixed ceiling and isolated mounts verified');
 }
 
 function validateConfigPasses(target, extraEnv = {}) {

@@ -7,6 +7,7 @@ export class QueryStockAdjustmentDto {
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() search?: string;
   @IsOptional() @IsEnum(StockAdjustmentStatus) status?: StockAdjustmentStatus;
   @IsOptional() @IsString() dateFrom?: string;
   @IsOptional() @IsString() dateTo?: string;

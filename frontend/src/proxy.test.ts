@@ -9,6 +9,21 @@ function request(path: string, cookie?: string) {
 }
 
 describe('middleware route protection', () => {
+  it('keeps Fuel Reporting authentication in its standalone portal', () => {
+    const res = proxy(request('/fuel-reporting?shift=NIGHT'));
+    expect(res.headers.get('location')).toBe(
+      'http://localhost/fuel-reporting/login?from=%2Ffuel-reporting%3Fshift%3DNIGHT',
+    );
+    expect(proxy(request('/fuel-reporting/login')).headers.get('x-middleware-next')).toBe('1');
+    expect(proxy(request('/fuel-reporting', 'itemba_auth=1')).status).toBe(307);
+    expect(
+      proxy(request('/fuel-reporting', 'itemba_access=token')).headers.get('x-middleware-next'),
+    ).toBe('1');
+    expect(proxy(request('/fuel-reporting/history')).headers.get('location')).toContain(
+      '/fuel-reporting/login?',
+    );
+    expect(proxy(request('/fuel-reporting/login-extra')).status).toBe(307);
+  });
   it('redirects unauthenticated dashboard requests to login with return path', () => {
     const res = proxy(request('/dashboard'));
 

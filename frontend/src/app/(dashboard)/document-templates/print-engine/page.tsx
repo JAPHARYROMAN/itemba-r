@@ -1,8 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 export default function PrintEnginePage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canRender = hasPermission('print_engine.render');
+  const beginRequest = useRequestGuard();
   const [form, setForm] = useState({ templateId: '', entityType: '', entityId: '', data: '{}' });
   const [preview, setPreview] = useState('');
   const [loading, setLoading] = useState(false);
@@ -10,7 +15,7 @@ export default function PrintEnginePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
+    if (authLoading || !canRender) return;
     setError('');
     setPreview('');
 
@@ -19,14 +24,16 @@ export default function PrintEnginePage() {
       parsedData = JSON.parse(form.data);
     } catch {
       setError('Invalid JSON in the data field.');
-      setLoading(false);
       return;
     }
 
+    const request = beginRequest();
+    setLoading(true);
     try {
       const res = await fetch('/api/backend/print-engine/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: request.signal,
         body: JSON.stringify({
           templateId: form.templateId,
           entityType: form.entityType,
@@ -34,17 +41,29 @@ export default function PrintEnginePage() {
           data: parsedData,
         }),
       });
+      if (!request.current()) return;
       const json = await res.json();
+      if (!request.current()) return;
       if (res.ok) {
         setPreview(json.html ?? json.renderedHtml ?? JSON.stringify(json, null, 2));
       } else {
         setError(json.message ?? 'Render failed.');
       }
     } catch {
+      if (!request.current()) return;
       setError('An error occurred while rendering.');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
+  }
+
+  if (authLoading || !canRender) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Print Engine</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
   }
 
   return (
@@ -60,7 +79,7 @@ export default function PrintEnginePage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Template ID</label>
-              <input
+              <input aria-label="Template ID"
                 type="text"
                 value={form.templateId}
                 onChange={e => setForm(f => ({ ...f, templateId: e.target.value }))}
@@ -71,7 +90,7 @@ export default function PrintEnginePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Entity Type</label>
-              <input
+              <input aria-label="Entity Type"
                 type="text"
                 value={form.entityType}
                 onChange={e => setForm(f => ({ ...f, entityType: e.target.value }))}
@@ -82,7 +101,7 @@ export default function PrintEnginePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Entity ID</label>
-              <input
+              <input aria-label="Entity ID"
                 type="text"
                 value={form.entityId}
                 onChange={e => setForm(f => ({ ...f, entityId: e.target.value }))}
@@ -93,7 +112,7 @@ export default function PrintEnginePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Data (JSON)</label>
-              <textarea
+              <textarea aria-label="Data (JSON)"
                 value={form.data}
                 onChange={e => setForm(f => ({ ...f, data: e.target.value }))}
                 rows={6}

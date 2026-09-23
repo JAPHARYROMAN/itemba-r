@@ -1449,7 +1449,8 @@ describe('KIKARATASI-14: no backend English ever reaches the shelf', () => {
     await openPokea(user);
     await pickSupplier(user);
     await addLine(user, 'soda', /^Soda Baridi/);
-    await waitForAutosave(() => expect(harness.slip()).toBeDefined());
+    // Wait for this line's autosave, not an earlier supplier-only draft/key.
+    await waitForAutosave(() => expect(harness.slip()?.lines).toHaveLength(1));
     const sentKey = harness.slip()?.idempotencyKey;
 
     await user.click(screen.getByRole('button', { name: 'POKEA' }));
@@ -1475,7 +1476,9 @@ describe('KIKARATASI-13: the slip badge is the LAST write, not the best one', ()
     await openPokea(user);
     await pickSupplier(user);
     await addLine(user, 'soda', /^Soda Baridi/);
-    await waitForAutosave(() => expect(harness.slip()).toBeDefined());
+    // An earlier supplier-only autosave can exist before the new line is saved.
+    // Refuse later writes only once the exact draft under test is on the phone.
+    await waitForAutosave(() => expect(harness.slip()?.lines).toHaveLength(1));
 
     // The phone really is holding this much: five lines, one save, one claim.
     expect(

@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Btn, Card, PageHeader, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
@@ -7,6 +8,7 @@ import { backendGet, backendPage } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { PurchaseOrderTabs } from '../_components/PurchaseOrderTabs';
 
 type AnyRecord = Record<string, any>;
@@ -71,9 +73,11 @@ export default function PurchaseOrderDetailPage() {
   const [error, setError] = useState('');
 
   const canView = hasPermission('purchases.view');
+  const beginRequest = useRequestGuard();
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     setGrns([]);
@@ -81,7 +85,8 @@ export default function PurchaseOrderDetailPage() {
     setMatches([]);
     setPayable(null);
     try {
-      const po = await backendGet<AnyRecord>(`/purchase-orders/${id}`);
+      const po = await backendGet<AnyRecord>(`/purchase-orders/${id}`, { signal: request.signal });
+      if (!request.current()) return;
       setOrder(po);
 
       const companyId = po?.companyId as string | undefined;
@@ -93,17 +98,21 @@ export default function PurchaseOrderDetailPage() {
         const [grnRes, invoiceRes, matchRes, payableRes] = await Promise.allSettled([
           backendPage<AnyRecord>('/goods-received-notes', {
             query: { companyId, limit: 200 },
+            signal: request.signal,
           }),
           backendPage<AnyRecord>('/supplier-invoices', {
             query: { companyId, purchaseOrderId: id, limit: 100 },
+            signal: request.signal,
           }),
           backendPage<AnyRecord>('/three-way-matching', {
             query: { companyId, limit: 200 },
+            signal: request.signal,
           }),
           po?.payableId
-            ? backendGet<AnyRecord>(`/payables/${po.payableId}`)
+            ? backendGet<AnyRecord>(`/payables/${po.payableId}`, { signal: request.signal })
             : Promise.resolve(null),
         ]);
+        if (!request.current()) return;
 
         if (grnRes.status === 'fulfilled') {
           setGrns(grnRes.value.data.filter((g) => g.purchaseOrderId === id));
@@ -119,11 +128,12 @@ export default function PurchaseOrderDetailPage() {
         }
       }
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load purchase order');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [id]);
+  }, [beginRequest, canView, id]);
 
   useEffect(() => {
     load();
@@ -343,7 +353,10 @@ export default function PurchaseOrderDetailPage() {
       <PurchaseOrderTabs />
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
           {error}
         </div>
       )}
@@ -423,7 +436,10 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Line Items' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-sm" aria-label="Purchase order line items">
+            <WorkspaceTable
+              className="w-full min-w-[1000px] text-sm"
+              aria-label="Purchase order line items"
+            >
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
                   <th scope="col" className="px-4 py-3">
@@ -484,7 +500,7 @@ export default function PurchaseOrderDetailPage() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
       )}
@@ -492,7 +508,10 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Goods Receipts' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-sm" aria-label="Goods received notes">
+            <WorkspaceTable
+              className="w-full min-w-[800px] text-sm"
+              aria-label="Goods received notes"
+            >
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
                   <th scope="col" className="px-4 py-3">
@@ -532,7 +551,7 @@ export default function PurchaseOrderDetailPage() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
       )}
@@ -540,7 +559,10 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Supplier Invoice' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-sm" aria-label="Supplier invoices">
+            <WorkspaceTable
+              className="w-full min-w-[1000px] text-sm"
+              aria-label="Supplier invoices"
+            >
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
                   <th scope="col" className="px-4 py-3">
@@ -618,7 +640,7 @@ export default function PurchaseOrderDetailPage() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
       )}
@@ -626,7 +648,10 @@ export default function PurchaseOrderDetailPage() {
       {activeTab === 'Three-Way Match' && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm" aria-label="Three-way match results">
+            <WorkspaceTable
+              className="w-full min-w-[900px] text-sm"
+              aria-label="Three-way match results"
+            >
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
                   <th scope="col" className="px-4 py-3">
@@ -670,7 +695,7 @@ export default function PurchaseOrderDetailPage() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
       )}

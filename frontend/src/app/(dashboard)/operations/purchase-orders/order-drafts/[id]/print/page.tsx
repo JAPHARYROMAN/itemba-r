@@ -6,12 +6,16 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Printer, Share2 } from 'lucide-react';
 import { DocumentArtifactButton } from '@/components/documents';
-import { Btn } from '@/components/ui';
+import { Btn, ErrorState, PageSpinner } from '@/components/ui';
 import { backendGet, backendPost } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
 import type { SupplierOrderDraft } from '../../../_components/supplier-order-draft-types';
 import { dateOnly, money } from '../../../_components/supplier-order-draft-types';
 import { SupplierOrderDraftShareDialog } from '../../../_components/SupplierOrderDraftShareDialog';
+import { DraftLineTable } from './draft-line-table';
+import { splitDraftLines } from './page-budget';
 
 function text(...values: Array<string | null | undefined>) {
   return values.find((value) => value?.trim()) ?? '';
@@ -19,17 +23,33 @@ function text(...values: Array<string | null | undefined>) {
 
 export default function SupplierOrderDraftPrintPage() {
   const params = useParams<{ id: string }>();
+  const { hasPermission } = useAuth();
+  const canView = hasPermission('supplier_order_drafts.view');
+  const canExport = hasPermission('supplier_order_drafts.export');
+  const beginRequest = useRequestGuard();
   const [draft, setDraft] = useState<SupplierOrderDraft | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async () => {
+    if (!canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
     try {
-      setDraft(await backendGet<SupplierOrderDraft>(`/supplier-order-drafts/${params.id}`));
+      const next = await backendGet<SupplierOrderDraft>(`/supplier-order-drafts/${params.id}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setDraft(next);
     } catch (cause) {
+      if (!request.current()) return;
       setError(cause instanceof Error ? cause.message : 'Could not load supplier order draft');
+    } finally {
+      if (request.current()) setLoading(false);
     }
-  }, [params.id]);
+  }, [beginRequest, canView, params.id]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -41,9 +61,9 @@ export default function SupplierOrderDraftPrintPage() {
     window.print();
   }
 
-  if (error) return <div className="p-8 text-red-700">{error}</div>;
-  if (!draft)
-    return <div className="p-8 text-sm text-slate-500">Loading supplier order draft...</div>;
+  if (!canView) return <ErrorState message="Access Restricted" />;
+  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
+  if (loading || !draft) return <PageSpinner />;
 
   const company = draft.company;
   const profile = company?.profile;
@@ -61,6 +81,10 @@ export default function SupplierOrderDraftPrintPage() {
   );
   const email = text(company?.email, company?.group?.email, ITEMBA_DOCUMENT_LETTERHEAD.email);
   const logo = text(company?.logoUrl, '/brand/itemba-group-logo.png');
+  const split = splitDraftLines(draft.lines, {
+    hasTitle: Boolean(draft.title?.trim()),
+    unpriced: Boolean(draft.hasUnpricedLines),
+  });
 
   return (
     <div className="document-print-root supplier-order-draft-print-root min-h-screen bg-slate-100 px-4 py-5 text-slate-950">
@@ -77,20 +101,24 @@ export default function SupplierOrderDraftPrintPage() {
           Back to draft
         </Link>
         <div className="flex flex-wrap gap-2">
-          <Btn
-            size="sm"
-            variant="secondary"
-            icon={<Share2 className="h-3.5 w-3.5" />}
-            onClick={() => setSharing(true)}
-          >
-            Share
-          </Btn>
-          <DocumentArtifactButton
-            entityType="SUPPLIER_ORDER_DRAFT"
-            entityId={draft.id}
-            buttonLabel="Generate PDF"
-            compact
-          />
+          {canExport && (
+            <>
+              <Btn
+                size="sm"
+                variant="secondary"
+                icon={<Share2 className="h-3.5 w-3.5" />}
+                onClick={() => setSharing(true)}
+              >
+                Share
+              </Btn>
+              <DocumentArtifactButton
+                entityType="SUPPLIER_ORDER_DRAFT"
+                entityId={draft.id}
+                buttonLabel="Generate PDF"
+                compact
+              />
+            </>
+          )}
           <Btn size="sm" icon={<Printer className="h-3.5 w-3.5" />} onClick={printDocument}>
             Print / Save PDF
           </Btn>
@@ -124,12 +152,12 @@ export default function SupplierOrderDraftPrintPage() {
               </div>
               <div>Email: {email}</div>
               <div>
-                TIN: {text(profile?.tin, ITEMBA_DOCUMENT_LETTERHEAD.tin)} | VRN:{' '}
-                {text(profile?.vrn, ITEMBA_DOCUMENT_LETTERHEAD.vrn)}
+                TIN: {text(profile?.tin, '—')} | VRN:{' '}
+                {text(profile?.vrn, '—')}
               </div>
               <div>
                 Reg No:{' '}
-                {text(profile?.brelaRegNumber, ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber)}
+                {text(profile?.brelaRegNumber, '—')}
               </div>
             </div>
           </div>
@@ -188,76 +216,13 @@ export default function SupplierOrderDraftPrintPage() {
               marked “Price to be confirmed”.
             </div>
           )}
-          <table className="supplier-order-draft-table w-full table-fixed border-collapse text-[7pt] leading-[1.25]">
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="w-[5%] border border-slate-400 px-[1mm] py-[1.2mm]">#</th>
-                <th className="w-[31%] border border-slate-400 px-[1mm] py-[1.2mm] text-left">
-                  Description
-                </th>
-                <th className="w-[10%] border border-slate-400 px-[1mm] py-[1.2mm] text-left">
-                  Code
-                </th>
-                <th className="w-[8%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">
-                  Qty
-                </th>
-                <th className="w-[8%] border border-slate-400 px-[1mm] py-[1.2mm]">Unit</th>
-                <th className="w-[13%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">
-                  Unit Price
-                </th>
-                <th className="w-[10%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">
-                  Disc/Tax
-                </th>
-                <th className="w-[15%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">
-                  Amount
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.lines.map((line) => (
-                <tr key={line.id ?? line.lineNumber} className="break-inside-avoid">
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] text-center align-top">
-                    {line.lineNumber}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] align-top">
-                    <b>{line.description}</b>
-                    {line.notes && (
-                      <div className="mt-[0.5mm] text-[6.4pt] text-slate-600">{line.notes}</div>
-                    )}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] align-top">
-                    {line.itemCode || '-'}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] text-right align-top">
-                    {Number(line.quantity).toLocaleString()}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] text-center align-top">
-                    {line.unitLabel}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] text-right align-top">
-                    {line.unitPrice === null ? (
-                      <span className="font-semibold text-amber-700">Price to be confirmed</span>
-                    ) : (
-                      money(line.unitPrice, draft.currency)
-                    )}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] text-right align-top">
-                    {line.unitPrice === null ? (
-                      '-'
-                    ) : (
-                      <>
-                        <div>-{money(line.discountAmount, draft.currency)}</div>
-                        <div>+{money(line.taxAmount, draft.currency)}</div>
-                      </>
-                    )}
-                  </td>
-                  <td className="border border-slate-300 px-[1mm] py-[1.2mm] text-right font-semibold align-top">
-                    {line.lineTotal === null ? 'Pending' : money(line.lineTotal, draft.currency)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DraftLineTable lines={split.firstPageLines} currency={draft.currency} />
+          {split.overflowLines.length > 0 && (
+            <p className="mt-[2mm] text-[7.5pt] font-semibold">
+              {split.overflowLines.length} further item(s) continue overleaf. Totals below cover
+              every line.
+            </p>
+          )}
 
           <div className="mt-[2mm] ml-auto w-[72mm] text-[7.5pt]">
             <div className="flex justify-between py-[0.6mm]">
@@ -327,6 +292,18 @@ export default function SupplierOrderDraftPrintPage() {
           <span>{draft.draftNumber}</span>
         </footer>
       </article>
+      {split.overflowLines.length > 0 && (
+        <article className="document-page supplier-order-draft-document mx-auto mt-4 min-h-[297mm] w-full max-w-[210mm] bg-white px-[12mm] py-[12mm] shadow-sm ring-1 ring-slate-200">
+          <header className="mb-[3mm] flex items-end justify-between border-b border-slate-950 pb-[2mm] text-[8pt]">
+            <div className="text-[11pt] font-bold uppercase">Line items (continued)</div>
+            <div>{draft.draftNumber}</div>
+          </header>
+          <DraftLineTable lines={split.overflowLines} currency={draft.currency} />
+          <p className="mt-[3mm] text-[7.5pt] text-slate-600">
+            Totals for all {draft.lines.length} items are stated on page 1.
+          </p>
+        </article>
+      )}
     </div>
   );
 }

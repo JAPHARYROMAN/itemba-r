@@ -4,6 +4,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
+import { renderDocument } from '../generated-documents/document-renderer';
+import { BusinessPdfModel } from '../generated-documents/pdf-builder';
 
 @Injectable()
 export class PrintEngineService {
@@ -11,6 +14,7 @@ export class PrintEngineService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly generatedDocuments: GeneratedDocumentsService,
   ) {}
 
   async render(dto: any, user: any) {
@@ -28,7 +32,7 @@ export class PrintEngineService {
 
     const renderedContent =
       outputFormat === 'PDF'
-        ? (await this.htmlToPdf({ title: template.name, bodyText: this.stripHtml(html) })).toString(
+        ? (await this.templatePdf(template, this.stripHtml(html), undefined, user)).toString(
             'base64',
           )
         : outputFormat === 'TEXT'
@@ -84,11 +88,7 @@ export class PrintEngineService {
       entityId,
       data,
     );
-    const buffer = await this.htmlToPdf({
-      title: template.name,
-      bodyText: this.stripHtml(html),
-      sections: pdfSections,
-    });
+    const buffer = await this.templatePdf(template, this.stripHtml(html), pdfSections, user);
     const filename = `${this.safeFilename(template.name)}_${Date.now()}.pdf`;
 
     const generated = await this.prisma.generatedDocument.create({
@@ -123,14 +123,43 @@ export class PrintEngineService {
     user: any,
   ): Promise<{ id: string; filename: string; buffer: Buffer; mimeType: string }> {
     const { templateId, entityType, entityId, data, sheetData, sheetName } = dto;
-    const { template } = await this.loadAndFillTemplate(templateId, user, entityType, entityId, data);
+    const { template } = await this.loadAndFillTemplate(
+      templateId,
+      user,
+      entityType,
+      entityId,
+      data,
+    );
     const rows: Array<Record<string, unknown>> = Array.isArray(sheetData) ? sheetData : [];
-    const buffer = await this.dataToExcel({
-      sheetName: sheetName ?? template.name ?? 'Report',
-      title: template.name,
-      metadata: data ?? {},
-      rows,
-    });
+    const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+    const buffer = await renderDocument(
+      {
+        title: template.name,
+        reference: entityId ?? template.id,
+        generatedAt: new Date(),
+        organization: await this.generatedDocuments.letterhead(
+          template.companyId ?? undefined,
+          user,
+        ),
+        meta: Object.entries(data ?? {}).map(([label, value]) => ({
+          label,
+          value: String(value ?? ''),
+        })),
+        sections: [
+          {
+            title: sheetName ?? 'Report',
+            table: {
+              headers,
+              rows: rows.map((row) => headers.map((header) => String(row[header] ?? ''))),
+              numericColumns: headers.flatMap((header, index) =>
+                rows.every((row) => typeof row[header] === 'number') ? [index] : [],
+              ),
+            },
+          },
+        ],
+      },
+      'xlsx',
+    );
     const filename = `${this.safeFilename(template.name)}_${Date.now()}.xlsx`;
 
     const generated = await this.prisma.generatedDocument.create({
@@ -214,108 +243,35 @@ export class PrintEngineService {
       .trim();
   }
 
-  private async htmlToPdf(input: {
-    title: string;
-    bodyText: string;
-    sections?: Array<{ heading?: string; paragraph?: string; rows?: string[][] }>;
-  }): Promise<Buffer> {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const PDFDocument = require('pdfkit');
-    return new Promise<Buffer>((resolve, reject) => {
-      try {
-        const doc = new PDFDocument({ size: 'A4', margin: 48 });
-        const chunks: Buffer[] = [];
-        doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-        doc.on('end', () => resolve(Buffer.concat(chunks)));
-        doc.on('error', reject);
-
-        doc.fontSize(18).text(input.title);
-        doc.moveDown(0.5);
-        doc.fontSize(10).fillColor('gray').text(`Generated ${new Date().toISOString()}`);
-        doc.fillColor('black').moveDown(1);
-
-        if (input.sections?.length) {
-          for (const section of input.sections) {
-            if (section.heading) {
-              doc.fontSize(13).font('Helvetica-Bold').text(section.heading);
-              doc.font('Helvetica').moveDown(0.3);
-            }
-            if (section.paragraph) {
-              doc.fontSize(11).text(section.paragraph, { align: 'left' });
-              doc.moveDown(0.5);
-            }
-            if (section.rows?.length) {
-              doc.fontSize(10);
-              for (const row of section.rows) doc.text(row.join('   '));
-              doc.moveDown(0.5);
-            }
-          }
-        } else {
-          doc.fontSize(11).text(input.bodyText || '(no content)', { align: 'left' });
-        }
-
-        doc.end();
-      } catch (err) {
-        reject(err);
-      }
-    });
-  }
-
-  private async dataToExcel(input: {
-    sheetName: string;
-    title: string;
-    metadata: Record<string, unknown>;
-    rows: Array<Record<string, unknown>>;
-  }): Promise<Buffer> {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'ITEMBA-R';
-    workbook.created = new Date();
-    const worksheet = workbook.addWorksheet(input.sheetName.slice(0, 31) || 'Report');
-
-    worksheet.addRow([input.title]).font = { bold: true, size: 14 };
-    worksheet.addRow([`Generated ${new Date().toISOString()}`]).font = { italic: true };
-    worksheet.addRow([]);
-    for (const [key, value] of Object.entries(input.metadata)) {
-      worksheet.addRow([this.neutralizeFormula(key), this.neutralizeFormula(String(value ?? ''))]);
-    }
-    worksheet.addRow([]);
-
-    if (input.rows.length > 0) {
-      const headers = Object.keys(input.rows[0]);
-      const headerRow = worksheet.addRow(headers.map((header) => this.neutralizeFormula(header)));
-      headerRow.font = { bold: true };
-      headerRow.eachCell((cell: any) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
-      });
-      for (const row of input.rows) {
-        worksheet.addRow(headers.map((header) => this.neutralizeFormula(row[header] ?? '')));
-      }
-      headers.forEach((header, index) => {
-        worksheet.getColumn(index + 1).width = Math.max(header.length + 2, 14);
-      });
-    } else {
-      worksheet.addRow(['(no data rows supplied)']);
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buffer);
+  private async templatePdf(
+    template: { id: string; name: string; companyId?: string | null },
+    bodyText: string,
+    sections: Array<{ heading?: string; paragraph?: string; rows?: string[][] }> | undefined,
+    user: AuthUser,
+  ) {
+    const model: Omit<BusinessPdfModel, 'organization'> = {
+      title: template.name,
+      reference: template.id,
+      generatedAt: new Date(),
+      meta: [],
+      sections: sections?.length
+        ? sections.map((section) => ({
+            title: section.heading ?? 'Details',
+            paragraphs: [
+              section.paragraph ?? '',
+              ...(section.rows ?? []).map((row) => row.join('   ')),
+            ],
+          }))
+        : [{ title: 'Details', paragraphs: [bodyText || '(no content)'] }],
+    };
+    return this.generatedDocuments.renderLetterheadPdf(
+      { companyId: template.companyId ?? user.companyId },
+      model,
+      user,
+    );
   }
 
   private safeFilename(value: string): string {
     return value.replace(/[^a-z0-9-]+/gi, '_').replace(/^_+|_+$/g, '') || 'document';
-  }
-
-  /**
-   * Neutralize spreadsheet formula injection (CSV/Excel). If a string cell value
-   * begins with a formula trigger (= + - @, TAB or CR), prefix it with a single
-   * quote so the spreadsheet treats it as literal text. Non-string values are
-   * returned unchanged so numbers/dates keep their native cell type.
-   */
-  private neutralizeFormula(value: unknown): unknown {
-    if (typeof value !== 'string') return value;
-    if (/^[=+\-@\t\r]/.test(value)) return `'${value}`;
-    return value;
   }
 }

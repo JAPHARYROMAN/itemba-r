@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Btn,
@@ -7,6 +8,7 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  FormDateField,
   Modal,
   PageHeader,
   PageToolbar,
@@ -18,6 +20,7 @@ import {
 import { Stepper } from '@/components/aurora/overlays/Stepper';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { ApiError, backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
@@ -493,7 +496,7 @@ function ReceiveGoodsWizard({
                         description="Confirm a purchase order before receiving goods against it."
                       />
                     ) : (
-                      <table className="w-full text-sm">
+                      <WorkspaceTable className="w-full text-sm">
                         <caption className="sr-only">Receivable purchase orders</caption>
                         <thead>
                           <tr
@@ -539,7 +542,7 @@ function ReceiveGoodsWizard({
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </WorkspaceTable>
                     )}
                   </div>
                 </div>
@@ -568,7 +571,7 @@ function ReceiveGoodsWizard({
                   />
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[860px] text-sm">
+                    <WorkspaceTable className="w-full min-w-[860px] text-sm">
                       <caption className="sr-only">Receiving lines</caption>
                       <thead>
                         <tr
@@ -691,7 +694,7 @@ function ReceiveGoodsWizard({
                           );
                         })}
                       </tbody>
-                    </table>
+                    </WorkspaceTable>
                   </div>
                 )}
                 <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -705,21 +708,11 @@ function ReceiveGoodsWizard({
             {ctx.index === 2 && selectedPo && (
               <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block">
-                    <span
-                      className="mb-1 block text-xs font-medium"
-                      style={{ color: 'var(--aurora-text-muted)' }}
-                    >
-                      Received date
-                    </span>
-                    <input
-                      type="date"
-                      value={receivedDate}
-                      onChange={(event) => setReceivedDate(event.target.value)}
-                      className={inputCls}
-                      style={inputStyle}
-                    />
-                  </label>
+                  <FormDateField
+                    label="Received date"
+                    value={receivedDate}
+                    onChange={setReceivedDate}
+                  />
                   <div className="block">
                     <span
                       className="mb-1 block text-xs font-medium"
@@ -763,7 +756,7 @@ function ReceiveGoodsWizard({
                     className="overflow-hidden rounded-lg border"
                     style={{ borderColor: 'var(--aurora-border)' }}
                   >
-                    <table className="w-full text-sm">
+                    <WorkspaceTable className="w-full text-sm">
                       <caption className="sr-only">Lines to receive</caption>
                       <thead>
                         <tr
@@ -800,7 +793,7 @@ function ReceiveGoodsWizard({
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </WorkspaceTable>
                   </div>
                 )}
                 <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -997,7 +990,7 @@ function GrnDetailModal({ grn, onClose, companyLabel, canGeneratePdf }: GrnDetai
               style={{ borderColor: 'var(--aurora-border)' }}
             >
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
+                <WorkspaceTable className="w-full min-w-[640px] text-sm">
                   <caption className="sr-only">Goods received note lines</caption>
                   <thead>
                     <tr
@@ -1059,7 +1052,7 @@ function GrnDetailModal({ grn, onClose, companyLabel, canGeneratePdf }: GrnDetai
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             </div>
           )}
@@ -1216,22 +1209,12 @@ function GrnEditModal({ grn, onClose, onSaved }: GrnEditModalProps) {
           {!editable && <ErrorState message="Only DRAFT goods received notes can be edited." />}
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span
-                className="mb-1 block text-xs font-medium"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                Received date
-              </span>
-              <input
-                type="date"
-                value={receivedDate}
-                onChange={(event) => setReceivedDate(event.target.value)}
-                className={inputCls}
-                style={inputStyle}
-                disabled={!editable}
-              />
-            </label>
+            <FormDateField
+              label="Received date"
+              value={receivedDate}
+              onChange={setReceivedDate}
+              disabled={!editable}
+            />
             <label className="block">
               <span
                 className="mb-1 block text-xs font-medium"
@@ -1258,7 +1241,7 @@ function GrnEditModal({ grn, onClose, onSaved }: GrnEditModalProps) {
             />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
+              <WorkspaceTable className="w-full min-w-[820px] text-sm">
                 <caption className="sr-only">Goods received note lines</caption>
                 <thead>
                   <tr
@@ -1380,7 +1363,7 @@ function GrnEditModal({ grn, onClose, onSaved }: GrnEditModalProps) {
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
           <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -1394,7 +1377,8 @@ function GrnEditModal({ grn, onClose, onSaved }: GrnEditModalProps) {
 }
 
 export default function GRNsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const canView = hasPermission('grn.list');
   // Permission codes mirror goods-received-notes.controller.ts (grn.view / grn.update).
   const canViewDetail = hasPermission('grn.view');
@@ -1426,19 +1410,19 @@ export default function GRNsPage() {
   }, [companies]);
 
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<Company>('/companies', { query: { limit: 100 } })
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { query: { limit: 100 }, signal: controller.signal })
       .then((items) => {
-        if (!cancelled) setCompanies(items);
+        if (!controller.signal.aborted) setCompanies(items);
       })
       .catch(() => {
-        if (!cancelled) setCompanies([]);
+        if (!controller.signal.aborted) setCompanies([]);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [canView]);
+  }, [authLoading, canView]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -1449,14 +1433,13 @@ export default function GRNsPage() {
   }, [searchInput]);
 
   const load = useCallback(async () => {
-    if (!canView) {
-      setLoading(false);
-      return;
-    }
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
       const result = await backendPage<Grn>('/goods-received-notes', {
+        signal: request.signal,
         query: {
           page,
           limit: 20,
@@ -1465,14 +1448,16 @@ export default function GRNsPage() {
           search: search.trim() || undefined,
         },
       });
+      if (!request.current()) return;
       setData(result);
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load goods received notes');
       setData(emptyPage<Grn>(page));
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, companyId, page, search, status]);
+  }, [authLoading, beginRequest, canView, companyId, page, search, status]);
 
   useEffect(() => {
     void load();
@@ -1495,6 +1480,17 @@ export default function GRNsPage() {
     },
     [load],
   );
+
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Goods Received Notes" subtitle="Record and track goods received from suppliers" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Loading</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!canView) {
     return (
@@ -1707,7 +1703,7 @@ export default function GRNsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-sm">
+          <WorkspaceTable className="w-full min-w-[1000px] text-sm">
             <caption className="sr-only">Goods received notes</caption>
             <thead>
               <tr
@@ -1810,7 +1806,7 @@ export default function GRNsPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
         {data && data.totalPages > 1 && (
           <div

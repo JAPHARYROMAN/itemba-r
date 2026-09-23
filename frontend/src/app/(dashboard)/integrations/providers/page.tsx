@@ -1,10 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ConfirmDialog, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 import { backendPost, backendPatch, backendDelete } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Provider {
   id: string;
@@ -25,8 +27,10 @@ const STATUSES = ['ACTIVE', 'INACTIVE', 'TESTING', 'DEPRECATED'];
 const EMPTY_FORM = { providerCode: '', name: '', providerType: 'CUSTOM', status: 'ACTIVE', supportsWebhooks: false, supportsSandbox: false, description: '', baseUrl: '', documentationUrl: '' };
 
 export default function IntegrationProvidersPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('integration_providers.view');
   const canManage = hasPermission('integration_providers.manage');
+  const beginRequest = useRequestGuard();
 
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,18 +45,29 @@ export default function IntegrationProvidersPage() {
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterType) params.set('providerType', filterType);
     if (filterStatus) params.set('status', filterStatus);
-    fetch(`/api/backend/integration-providers?${params}`)
-      .then(r => r.json())
-      .then(data => setProviders(unwrapList(data)))
-      .catch(() => { setProviders([]); setLoadError('Failed to load integration providers.'); })
-      .finally(() => setLoading(false));
-  }, [filterType, filterStatus]);
+    try {
+      const res = await fetch(`/api/backend/integration-providers?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load integration providers.');
+      setProviders(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setProviders([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load integration providers.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterType, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -92,6 +107,9 @@ export default function IntegrationProvidersPage() {
     }
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Integration Providers" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Integration Providers" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader title="Integration Providers" subtitle="Manage available integration providers" />
@@ -99,11 +117,11 @@ export default function IntegrationProvidersPage() {
       <PageToolbar
         filters={
           <>
-            <select value={filterType} onChange={e => setFilterType(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Types" value={filterType} onChange={e => setFilterType(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Types</option>
               {PROVIDER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Status</option>
               {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -112,11 +130,11 @@ export default function IntegrationProvidersPage() {
         actions={canManage ? <Btn variant="primary" onClick={openCreate}>+ New Provider</Btn> : null}
       />
 
-      {actionError && <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{actionError}</div>}
+      {actionError && <div role="alert" className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{actionError}</div>}
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -148,7 +166,7 @@ export default function IntegrationProvidersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -164,7 +182,7 @@ export default function IntegrationProvidersPage() {
           </>
         }
       >
-        {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="space-y-3">
           <FormInput label="Provider Code" required value={form.providerCode} onChange={e => setForm(f => ({ ...f, providerCode: e.target.value }))} placeholder="e.g. MPESA" />
           <FormInput label="Name" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Provider name" />

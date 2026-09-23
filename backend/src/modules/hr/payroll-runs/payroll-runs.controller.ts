@@ -18,7 +18,11 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { PayrollRunsService } from './payroll-runs.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import { UpdatePayrollRunDto } from './dto/update-payroll-run.dto';
-import { CancelPayrollRunDto, PayPayrollRunDto } from './dto/payroll-run-action.dto';
+import {
+  CancelPayrollRunDto,
+  PayPayrollRunDto,
+  ReversePayrollPaymentDto,
+} from './dto/payroll-run-action.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('hr/payroll-runs')
@@ -83,6 +87,16 @@ export class PayrollRunsController {
   @RequirePermissions('payroll.pay')
   pay(@Param('id') id: string, @Body() body: PayPayrollRunDto, @CurrentUser() user: AuthUser) {
     return this.service.pay(id, user, body);
+  }
+
+  @Patch(':id/reverse-payment')
+  @RequirePermissions('payroll.pay')
+  reversePayment(
+    @Param('id') id: string,
+    @Body() body: ReversePayrollPaymentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.reversePayment(id, user, body);
   }
 
   @Patch(':id/cancel')

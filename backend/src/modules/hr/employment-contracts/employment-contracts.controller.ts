@@ -10,7 +10,7 @@ import {
   UseGuards,
   Patch,
 } from '@nestjs/common';
-import { EmployeeStatusQueryDto } from '../../../common/dto/resource-query.dto';
+import { EmploymentContractsQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
@@ -33,7 +33,7 @@ export class EmploymentContractsController {
 
   @Get()
   @RequirePermissions('employment_contracts.view')
-  findAll(@CurrentUser() user: AuthUser, @Query() query: EmployeeStatusQueryDto) {
+  findAll(@CurrentUser() user: AuthUser, @Query() query: EmploymentContractsQueryDto) {
     return this.service.findAll(user, query);
   }
 

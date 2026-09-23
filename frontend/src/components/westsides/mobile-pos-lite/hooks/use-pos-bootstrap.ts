@@ -29,6 +29,8 @@ type UsePosBootstrapArgs = {
   setPaymentMethod: (code: string) => void;
   setNotice: (notice: string) => void;
   t: PosTranslate;
+  /** When false, skip binding/session/catalog network reads (auth loading or no permission). */
+  enabled?: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ export function usePosBootstrap({
   setPaymentMethod,
   setNotice,
   t,
+  enabled = true,
 }: UsePosBootstrapArgs): {
   binding: MobilePosLiteBinding | null;
   session: Session | null;
@@ -51,12 +54,14 @@ export function usePosBootstrap({
   online: boolean;
   updateCatalog: (terminalCode: string, products: MobilePosLiteProduct[]) => void;
   syncCatalog: (current: MobilePosLiteBinding) => Promise<void>;
+  retryBoot: () => void;
 } {
   const router = useRouter();
   const [binding, setBinding] = useState<MobilePosLiteBinding | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [catalog, setCatalog] = useState<MobilePosLiteProduct[]>([]);
   const [online, setOnline] = useState(true);
+  const [bootAttempt, setBootAttempt] = useState(0);
   // When the session came from the offline cache, refresh it as soon as the
   // network returns so config changes (payment methods, suspension) apply.
   const sessionFromCacheRef = useRef(false);
@@ -71,27 +76,37 @@ export function usePosBootstrap({
 
   // Dep array preserved verbatim from the monolith ([]): `setPaymentMethod` is
   // stable by the args contract above, so the closure never goes stale.
-  const loadSession = useCallback(async (current: MobilePosLiteBinding) => {
-    const currentSession = await backendGet<Session>('/mobile-pos-lite/session', {
-      headers: terminalHeaders(current),
-    });
-    sessionFromCacheRef.current = false;
-    setSession(currentSession);
-    setPaymentMethod(currentSession.paymentMethods[0]?.code ?? 'CASH');
-    void saveMobilePosLiteSession(current.terminalCode, currentSession);
+  const loadSession = useCallback(
+    async (current: MobilePosLiteBinding, isCurrent: () => boolean = () => true) => {
+      const currentSession = await backendGet<Session>('/mobile-pos-lite/session', {
+        headers: terminalHeaders(current),
+      });
+      if (!isCurrent()) return;
+      sessionFromCacheRef.current = false;
+      setSession(currentSession);
+      setPaymentMethod(currentSession.paymentMethods[0]?.code ?? 'CASH');
+      void saveMobilePosLiteSession(current.terminalCode, currentSession);
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    [],
+  );
 
   const syncCatalog = useCallback(
-    async (current: MobilePosLiteBinding) => {
+    async (current: MobilePosLiteBinding, isCurrent: () => boolean = () => true) => {
       if (!navigator.onLine) return;
       const products = await backendGet<MobilePosLiteProduct[]>('/mobile-pos-lite/catalog', {
         headers: terminalHeaders(current),
       });
+      if (!isCurrent()) return;
       updateCatalog(current.terminalCode, products);
     },
     [updateCatalog],
   );
+
+  const retryBoot = useCallback(() => {
+    setNotice('');
+    setBootAttempt((n) => n + 1);
+  }, [setNotice]);
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -114,32 +129,40 @@ export function usePosBootstrap({
   // returns a stable singleton today, which is what keeps this a one-shot
   // boot; these dependency semantics are preserved verbatim from the monolith.
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
+    const isCurrent = () => !cancelled;
     getMobilePosLiteBinding()
       .then(async (stored) => {
-        if (cancelled) return;
+        if (!isCurrent()) return;
         if (!stored) {
           router.replace('/mobile-pos/activate');
           return;
         }
         setBinding(stored);
         const savedCatalog = await getMobilePosLiteCatalog(stored.terminalCode);
-        if (!cancelled) setCatalog(savedCatalog);
+        if (!isCurrent()) return;
+        setCatalog(savedCatalog);
         void getMobilePosLiteFrequents(stored.terminalCode).then((counts) => {
-          if (!cancelled) setFrequents(counts);
+          if (isCurrent()) setFrequents(counts);
         });
         try {
-          await loadSession(stored);
+          await loadSession(stored, isCurrent);
+          if (!isCurrent()) return;
           await refreshPendingSales(stored);
-          void syncCatalog(stored);
+          if (!isCurrent()) return;
+          void syncCatalog(stored, isCurrent).catch((error) => {
+            if (!isCurrent()) return;
+            setNotice(error instanceof Error ? error.message : t('terminalUnavailable'));
+          });
           void syncPendingSales(stored);
         } catch (error) {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           // Offline cold start: sell from the cached session rather than
           // dead-ending on the splash screen — offline selling is the point.
           if (isConnectionProblem(error)) {
             const cached = await getMobilePosLiteSession(stored.terminalCode);
-            if (cancelled) return;
+            if (!isCurrent()) return;
             if (cached) {
               sessionFromCacheRef.current = true;
               setSession(cached);
@@ -151,21 +174,28 @@ export function usePosBootstrap({
           setNotice(error instanceof Error ? error.message : t('terminalUnavailable'));
         }
       })
-      .catch(() => router.replace('/mobile-pos/activate'));
+      .catch(() => {
+        if (isCurrent()) router.replace('/mobile-pos/activate');
+      });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadSession, refreshPendingSales, router, syncCatalog, syncPendingSales]);
+  }, [bootAttempt, enabled, loadSession, refreshPendingSales, router, syncCatalog, syncPendingSales]);
 
   useEffect(() => {
-    if (!binding || !online) return;
+    if (!enabled || !binding || !online) return;
+    let cancelled = false;
+    const isCurrent = () => !cancelled;
     void syncPendingSales(binding);
     if (sessionFromCacheRef.current) {
-      void loadSession(binding).catch(() => undefined);
-      void syncCatalog(binding).catch(() => undefined);
+      void loadSession(binding, isCurrent).catch(() => undefined);
+      void syncCatalog(binding, isCurrent).catch(() => undefined);
     }
-  }, [binding, loadSession, online, syncCatalog, syncPendingSales]);
+    return () => {
+      cancelled = true;
+    };
+  }, [binding, enabled, loadSession, online, syncCatalog, syncPendingSales]);
 
-  return { binding, session, catalog, online, updateCatalog, syncCatalog };
+  return { binding, session, catalog, online, updateCatalog, syncCatalog, retryBoot };
 }

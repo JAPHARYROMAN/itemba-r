@@ -34,6 +34,7 @@ export class DisciplinaryActionsController {
       employeeId: q.employeeId,
       status: q.status,
       type: q.type,
+      search: q.search,
     });
   }
 

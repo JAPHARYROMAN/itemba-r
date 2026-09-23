@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 interface Requirement { id: string; title: string }
@@ -67,7 +69,7 @@ function StatusModal({ mode, initial, companies, requirements, onClose, onSaved 
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Doc Status' : 'Edit Doc Status'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormSelect label="Company" required value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…">
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -79,8 +81,8 @@ function StatusModal({ mode, initial, companies, requirements, onClose, onSaved 
         <FormSelect label="Status" value={form.status} onChange={(e) => set('status', e.target.value)}>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </FormSelect>
-        <FormInput label="Expiry Date" type="date" value={form.expiryDate} onChange={(e) => set('expiryDate', e.target.value)} />
-        <FormInput label="Renewal Date" type="date" value={form.renewalDate} onChange={(e) => set('renewalDate', e.target.value)} />
+        <FormDateField label="Expiry Date" value={form.expiryDate} onChange={(value) => set('expiryDate', value)} />
+        <FormDateField label="Renewal Date" value={form.renewalDate} onChange={(value) => set('renewalDate', value)} />
         <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
       </div>
     </Modal>
@@ -88,9 +90,10 @@ function StatusModal({ mode, initial, companies, requirements, onClose, onSaved 
 }
 
 export default function DocStatusPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('compliance_document_status.manage');
   const canView = hasPermission('compliance_document_status.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<DocStatus[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -99,6 +102,7 @@ export default function DocStatusPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
@@ -106,20 +110,43 @@ export default function DocStatusPage() {
   const [deleting, setDeleting] = useState<DocStatus | null>(null);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-    fetch('/api/backend/compliance/document-requirements?limit=100').then((r) => r.json()).then((j) => setRequirements(j.data?.data ?? j.data ?? []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const read = (url: string, apply: (j: any) => void) => {
+      fetch(url, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((j) => { if (!controller.signal.aborted) apply(j); })
+        .catch(() => undefined);
+    };
+    read('/api/backend/companies?limit=100', (j) => { setCompanies(j.data?.data ?? j.data ?? []); });
+    read('/api/backend/compliance/document-requirements?limit=100', (j) => { setRequirements(j.data?.data ?? j.data ?? []); });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (companyId) params.set('companyId', companyId);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/document-status?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<DocStatus> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
-  }, [page, companyId, status]);
+        try {
+      const res = await fetch(`/api/backend/compliance/document-status?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load document status');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<DocStatus> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load document status');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, companyId, status]);
 
   useEffect(() => { load(); }, [load]);
   const reset = (fn: (v: string) => void) => (v: string) => { fn(v); setPage(1); };
@@ -134,6 +161,7 @@ export default function DocStatusPage() {
   const missingCount = items.filter((s) => s.status === 'MISSING').length;
   const expiringCount = items.filter((s) => s.status === 'EXPIRING_SOON').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Document Status" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Document Status" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -150,11 +178,11 @@ export default function DocStatusPage() {
       <PageToolbar
         filters={
           <>
-            <select value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -164,11 +192,11 @@ export default function DocStatusPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No records</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Company</th>
@@ -200,7 +228,7 @@ export default function DocStatusPage() {
                   );
                 })}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
         {totalPages > 1 && (

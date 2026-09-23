@@ -21,6 +21,17 @@ export class EmployeeAllowancesService {
     applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
     if (allowanceTypeId) where.allowanceTypeId = allowanceTypeId;
+    if (query.status) where.status = query.status;
+    const search = query.search?.trim();
+    if (search) where.AND = [
+      ...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []),
+      { OR: [
+        { employee: { fullName: { contains: search, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains: search, mode: 'insensitive' } } },
+        { allowanceType: { name: { contains: search, mode: 'insensitive' } } },
+        { allowanceType: { code: { contains: search, mode: 'insensitive' } } },
+      ] },
+    ];
     const [data, total] = await Promise.all([
       this.prisma.employeeAllowance.findMany({
         where, skip, take: Number(limit), orderBy: { createdAt: 'desc' },
@@ -37,7 +48,7 @@ export class EmployeeAllowancesService {
 
   async findOne(id: string, user: any) {
     const record = await this.prisma.employeeAllowance.findFirst({
-      where: { id, deletedAt: null, ...this.companyFilter(user) },
+      where: { AND: [{ id, deletedAt: null }, applyCompanyScopeWhere({}, user)] },
       include: {
         employee: { select: { id: true, fullName: true, employeeCode: true } },
         allowanceType: { select: { id: true, name: true, code: true } },
@@ -67,7 +78,7 @@ export class EmployeeAllowancesService {
       data: {
         ...dto,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
-        effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
+        effectiveTo: dto.effectiveTo === null ? null : dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
       } as any,
     });
     await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'EmployeeAllowance', entityId: id, newValue: dto as unknown as Record<string, unknown> });

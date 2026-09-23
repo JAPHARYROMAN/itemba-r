@@ -54,7 +54,7 @@ export function StatCard({ title, value, subtitle, icon, trend, variant = 'defau
   }
 
   return (
-    <div className={`rounded-aurora border p-5 ${className}`}
+    <div data-stat-card className={`rounded-aurora border p-5 ${className}`}
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)', boxShadow: 'var(--aurora-shadow-sm)' }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">

@@ -456,11 +456,11 @@ class FakePrisma {
     }
 
     if (sql.startsWith('DELETE FROM "msaidizi_conversations"')) {
-      const graceCutoff = values.find((value) => value instanceof Date) as Date | undefined;
+      const graceCutoff = Date.now() - Number(values[0]);
       const doomed = this.conversations.filter(
         (row) =>
           time(row.expiresAt) < Date.now() ||
-          (row.deletedAt != null && graceCutoff && time(row.deletedAt) < graceCutoff.getTime()),
+          (row.deletedAt != null && time(row.deletedAt) < graceCutoff),
       );
       const ids = new Set(doomed.map((row) => row.id));
       this.conversations = this.conversations.filter((row) => !ids.has(row.id));

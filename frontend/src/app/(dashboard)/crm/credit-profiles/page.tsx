@@ -6,6 +6,7 @@ import type { ResponsiveColumn } from '@/components/aurora';
 import { Modal, Btn, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { backendPost, backendPut, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface CreditProfileRow extends Record<string, unknown> {
   id: string;
@@ -201,9 +202,11 @@ function ProfileModal({
 }
 
 export default function CreditProfilesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('credit_profiles.list');
   const canCreate = hasPermission('credit_profiles.create');
   const canUpdate = hasPermission('credit_profiles.update');
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<CreditProfileRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -213,36 +216,49 @@ export default function CreditProfilesPage() {
   const [editing, setEditing] = useState<CreditProfileRow | null>(null);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/backend/customer-credit-profiles').then((r) => r.json());
-      const rows: CreditProfileRow[] = Array.isArray(res.data)
-        ? res.data
-        : Array.isArray(res.data?.data)
-          ? res.data.data
-          : Array.isArray(res.data?.items)
-            ? res.data.items
+      const res = await fetch('/api/backend/customer-credit-profiles', { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load credit profiles');
+      const body = await res.json();
+      if (!request.current()) return;
+      const rows: CreditProfileRow[] = Array.isArray(body.data)
+        ? body.data
+        : Array.isArray(body.data?.data)
+          ? body.data.data
+          : Array.isArray(body.data?.items)
+            ? body.data.items
             : [];
       setData(rows);
-    } catch {
-      setError('Failed to load credit profiles');
+    } catch (err) {
+      if (!request.current()) return;
+      setError(err instanceof Error ? err.message : 'Failed to load credit profiles');
       setData([]);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []))
-      .catch(() => setCompanies([]));
-  }, []);
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const onSaved = () => {
     setCreating(false);
@@ -307,6 +323,15 @@ export default function CreditProfilesPage() {
         ]
       : []),
   ];
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Customer Credit Profiles</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">

@@ -13,6 +13,7 @@ import {
 } from '@/components/aurora/data-display/ResponsiveDataTable';
 import { StatusBadge } from '@/components/aurora/data-display/StatusBadge';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendList } from '@/lib/api-client';
 import type { StatusVariant } from '@/lib/design-system/status';
 
@@ -118,8 +119,9 @@ function num(value: unknown): number {
 }
 
 export default function AutomationRunsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('automation_runs.list');
+  const beginRequest = useRequestGuard();
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<RunPage | null>(null);
@@ -131,26 +133,26 @@ export default function AutomationRunsPage() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<Company>('/companies', { query: { limit: 200 } })
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { signal: controller.signal, query: { limit: 200 } })
       .then((rows) => {
-        if (!cancelled) setCompanies(rows);
+        if (!controller.signal.aborted) setCompanies(rows);
       })
       .catch(() => {
-        if (!cancelled) setCompanies([]);
+        if (!controller.signal.aborted) setCompanies([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView]);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
       const result = await backendGet<RunPage>('/automation-runs', {
+        signal: request.signal,
         query: {
           page,
           limit: PAGE_SIZE,
@@ -158,6 +160,7 @@ export default function AutomationRunsPage() {
           status: status || undefined,
         },
       });
+      if (!request.current()) return;
       setData({
         items: Array.isArray(result?.items) ? result.items : [],
         total: num(result?.total),
@@ -165,12 +168,13 @@ export default function AutomationRunsPage() {
         limit: num(result?.limit) || PAGE_SIZE,
       });
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load automation runs');
       setData({ items: [], total: 0, page, limit: PAGE_SIZE });
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status]);
+  }, [authLoading, beginRequest, canView, page, companyId, status]);
 
   useEffect(() => {
     void load();
@@ -309,6 +313,14 @@ export default function AutomationRunsPage() {
     ],
     [],
   );
+
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Automation Runs" subtitle="Loading" />
+      </div>
+    );
+  }
 
   if (!canView) {
     return (

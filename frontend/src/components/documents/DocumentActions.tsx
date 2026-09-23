@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { DocumentArtifactButton, type DocumentEntityType } from './DocumentArtifactButton';
 import { DocumentPrintButton } from './DocumentPrintButton';
+import { DocumentExportButton } from './DocumentExportButton';
 
 interface DocumentActionsProps {
   backHref: string;
@@ -28,6 +29,7 @@ export function DocumentActions({
           {backLabel}
         </Link>
         <DocumentArtifactButton entityType={entityType} entityId={entityId} />
+        <DocumentExportButton source={{ entityType, entityId }} />
         <DocumentPrintButton />
       </div>
     </div>

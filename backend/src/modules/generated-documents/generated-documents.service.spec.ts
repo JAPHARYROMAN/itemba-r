@@ -45,6 +45,7 @@ function makeService() {
     createFromBuffer: jest.fn(async () => ({ id: 'doc-1' })),
     readFileBuffer: jest.fn(),
     download: jest.fn(),
+    preview: jest.fn(),
   } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
@@ -974,5 +975,102 @@ describe('GenerateTablePdfDto validation', () => {
     });
     const errors = await validate(instance);
     expect(errors.some((error) => error.property === 'numericColumns')).toBe(true);
+  });
+});
+
+describe('Shared letterhead and export scope', () => {
+  it('never fills missing company tax identifiers with group identifiers', async () => {
+    const { service, prisma } = makeService();
+    prisma.company.findFirst.mockResolvedValue({ name: 'Company A', profile: { tin: 'TAX-A' } });
+    const org = await service.letterhead('company-1', user());
+    expect(org.tin).toBe('TAX-A');
+    expect(org.vrn).toBeNull();
+    expect(org.registrationNumber).toBeNull();
+  });
+  it('rejects inaccessible company branding before querying or exporting', async () => {
+    const { service, prisma, companyScope } = makeService();
+    companyScope.assertCanAccessCompany.mockRejectedValue(new ForbiddenException());
+    await expect(
+      service.exportLetter(
+        { companyId: 'other', title: 'Letter', body: 'Body', format: 'docx' },
+        user(),
+      ),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.company.findFirst).not.toHaveBeenCalled();
+  });
+  it('rechecks source permissions for editable document exports', async () => {
+    const { service, prisma } = makeService();
+    await expect(
+      service.exportBusinessDocument(
+        { entityType: 'PAYSLIP', entityId: 'pay-1', format: 'docx' },
+        user(),
+      ),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.payrollEntry.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('Generated file preview and download authorization', () => {
+  const row = { id: 'artifact', documentId: 'file', companyId: 'company-1', entityType: 'PAYSLIP' };
+  it.each(['preview', 'download'] as const)(
+    '%s requires the source permission even with general generated-file access',
+    async (method) => {
+      const f = makeService();
+      f.prisma.generatedDocument.findFirst = jest.fn().mockResolvedValue(row);
+      await expect(
+        f.service[method]('artifact', user({ permissions: ['generated_documents.view'] })),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(f.documents[method]).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['preview', 'download'] as const)(
+    '%s authorizes a payroll viewer without requiring library access',
+    async (method) => {
+      const f = makeService(),
+        actor = user({ permissions: ['payroll.view'] });
+      f.prisma.generatedDocument.findFirst = jest.fn().mockResolvedValue(row);
+      f.documents[method].mockResolvedValue({ kind: 'pdf' });
+      expect(await f.service[method]('artifact', actor, '127.0.0.1')).toEqual({ kind: 'pdf' });
+      expect(f.documents[method]).toHaveBeenCalledWith('file', actor, '127.0.0.1');
+      expect(f.prisma.generatedDocument.findFirst).toHaveBeenLastCalledWith({
+        where: { id: 'artifact', deletedAt: null, companyId: 'company-1' },
+      });
+    },
+  );
+  it.each(['preview', 'download'] as const)(
+    '%s rejects inaccessible companies before reading the file',
+    async (method) => {
+      const f = makeService();
+      f.prisma.generatedDocument.findFirst = jest
+        .fn()
+        .mockResolvedValue({ ...row, companyId: 'other-company' });
+      await expect(
+        f.service[method]('artifact', user({ permissions: ['payroll.view'] })),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(f.documents[method]).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects removed artifacts and files, and propagates current file access failures', async () => {
+    const f = makeService(),
+      actor = user({ permissions: ['payroll.view'] });
+    f.prisma.generatedDocument.findFirst = jest.fn().mockResolvedValue(null);
+    await expect(f.service.preview('gone', actor)).rejects.toBeInstanceOf(NotFoundException);
+    f.prisma.generatedDocument.findFirst.mockResolvedValue({ ...row, documentId: null });
+    await expect(f.service.preview('artifact', actor)).rejects.toBeInstanceOf(NotFoundException);
+    f.prisma.generatedDocument.findFirst.mockResolvedValue(row);
+    f.documents.preview.mockRejectedValue(new ForbiddenException('File scope changed'));
+    await expect(f.service.preview('artifact', actor)).rejects.toThrow('File scope changed');
+  });
+  it('requires document-management or generated-file access for non-business source types', async () => {
+    const f = makeService();
+    f.prisma.generatedDocument.findFirst = jest
+      .fn()
+      .mockResolvedValue({ ...row, entityType: 'TABLE_REPORT' });
+    await expect(
+      f.service.preview('artifact', user({ permissions: ['payroll.view'] })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const manager = user({ permissions: ['generated_documents.view'] });
+    await f.service.preview('artifact', manager);
+    expect(f.documents.preview).toHaveBeenCalledWith('file', manager, undefined);
   });
 });

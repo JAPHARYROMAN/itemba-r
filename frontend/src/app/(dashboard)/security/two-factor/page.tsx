@@ -1,20 +1,39 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ErrorState, PageSpinner } from '@/components/ui';
 import { backendList } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 export default function TwoFactorAuthPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('two_factor.manage');
+  const beginRequest = useRequestGuard();
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setLoadError('');
+    try {
+      const rows = await backendList<any>('user-security-profiles', { signal: request.signal });
+      if (!request.current()) return;
+      setProfiles(rows);
+    } catch {
+      if (!request.current()) return;
+      setLoadError('Failed to load 2FA statistics.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
+
   useEffect(() => {
-    backendList<any>('user-security-profiles')
-      .then(setProfiles)
-      .catch(() => setLoadError('Failed to load 2FA statistics.'))
-      .finally(() => setLoading(false));
-  }, []);
+    void load();
+  }, [load]);
 
   const enabled = profiles.filter((p) => p.twoFactorEnabled).length;
   const total = profiles.length;
@@ -35,6 +54,15 @@ export default function TwoFactorAuthPage() {
     },
   ];
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Two-Factor Authentication</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -45,7 +73,7 @@ export default function TwoFactorAuthPage() {
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : loadError ? (
-        <ErrorState message={loadError} />
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

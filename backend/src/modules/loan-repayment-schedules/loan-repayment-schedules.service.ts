@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountingControlService } from '../../common/services/accounting-control.service';
@@ -7,6 +7,10 @@ import { AccountResolverService } from '../../common/services/account-resolver.s
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { applyCompanyScopeWhere, CompanyScopeService } from '../../common/services';
+import { LoanLifecycleService } from '../loans/loan-lifecycle.service';
+import { LoanLedgerService } from '../loans/loan-ledger.service';
+import { loanMoney, loanDate } from '../loans/loan-allocation';
+import { RecordLoanRepaymentDto } from './dto/loan-repayment-schedule-mutation.dto';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
@@ -23,12 +27,9 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
  * SEMI_ANNUALLY / ANNUALLY), and BULLET/OTHER collapse to a single balloon
  * installment due at maturity with interest accrued over the whole tenure.
  *
- * On `recordPayment`, the payment is split into principal/interest based on
- * the schedule row, the loan's outstanding balance is reduced, and a
- * balanced journal entry is generated:
- *   DR  Loan Principal Payable  (LOAN_PRINCIPAL_PAYABLE)        principalPortion
- *   DR  Interest Expense        (LOAN_INTEREST_EXPENSE)         interestPortion
- *   CR  Cash on Hand            (CASH_ON_HAND)                  total
+ * Payments use the shared lifecycle: reviewed remaining principal, interest and fees,
+ * the selected mapped cash account, a balanced journal and a reversible event,
+ * committed together. See LoanLifecycleService.
  */
 @Injectable()
 export class LoanRepaymentSchedulesService {
@@ -40,6 +41,8 @@ export class LoanRepaymentSchedulesService {
     private readonly codes: EntityCodeGeneratorService,
     private readonly postingEngine: PostingEngineService,
     private readonly companyScope: CompanyScopeService,
+    private readonly lifecycle: LoanLifecycleService,
+    private readonly loanLedger: LoanLedgerService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -47,7 +50,17 @@ export class LoanRepaymentSchedulesService {
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
-    if (loanId) where.loanDebtId = loanId;
+    if (user) {
+      const visible = await this.prisma.loan.findMany({
+        where: {
+          deletedAt: null,
+          ...(await this.loanLedger.readWhere(user, companyId)),
+          ...(loanId ? { id: loanId } : {}),
+        },
+        select: { id: true },
+      });
+      where.loanDebtId = { in: visible.map((loan) => loan.id) };
+    } else if (loanId) where.loanDebtId = loanId;
     if (status) where.status = status;
     const [items, total] = await Promise.all([
       this.prisma.loanRepaymentSchedule.findMany({
@@ -61,54 +74,119 @@ export class LoanRepaymentSchedulesService {
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthUser) {
     const item = await this.prisma.loanRepaymentSchedule.findFirst({
       where: { id, deletedAt: null },
     });
     if (!item) throw new NotFoundException('Loan repayment schedule not found');
+    if (user) {
+      const loan = await this.prisma.loan.findFirst({
+        where: { id: item.loanDebtId, deletedAt: null },
+      });
+      if (!loan) throw new NotFoundException('Loan not found');
+      await this.loanLedger.scope(user, loan, false);
+    }
     return item;
   }
 
   async create(dto: any, user: AuthUser) {
-    // ITMB-026: the parent loan is the source of truth for tenant scoping.
-    // Never trust a client-supplied companyId/loanDebtId on a financial row.
-    const loanId = dto?.loanDebtId ?? dto?.loanId;
-    if (!loanId || typeof loanId !== 'string') {
-      throw new BadRequestException('loanDebtId is required');
-    }
-    const loan = await this.prisma.loan.findFirst({
-      where: { id: loanId, deletedAt: null },
-      select: { id: true, companyId: true },
+    const loanId = dto.loanDebtId || dto.loanId;
+    if (!loanId) throw new BadRequestException('loanDebtId is required');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM loans WHERE id = ${loanId} FOR UPDATE`;
+      const loan = await tx.loan.findFirst({ where: { id: loanId, deletedAt: null } });
+      if (!loan) throw new NotFoundException('Loan not found');
+      await this.loanLedger.scope(user, loan);
+      if (!['ACTIVE', 'RESTRUCTURED', 'DEFAULTED'].includes(loan.status))
+        throw new BadRequestException('This loan is not active.');
+      if (
+        (await tx.loanFinancialEvent.count({
+          where: { loanId, kind: 'REPAYMENT', reversedAt: null },
+        })) ||
+        (await tx.loanRepayment.count({ where: { loanId, financialEvent: null } }))
+      )
+        throw new BadRequestException('Cannot change the schedule after repayments.');
+      const principal = loanMoney(dto.principalAmount, 'Principal'),
+        interest = loanMoney(dto.interestAmount, 'Interest'),
+        fees = loanMoney(dto.feeAmount, 'Fees');
+      const total = principal.plus(interest).plus(fees);
+      const opening = await tx.loanFinancialEvent.findFirst({
+        where: { loanId, kind: { in: ['OPENING', 'DISBURSEMENT'] }, reversedAt: null },
+      });
+      if (!opening)
+        throw new BadRequestException('Recognize the loan before creating installments.');
+      const dueDate = loanDate(dto.dueDate.slice(0, 10));
+      if (
+        total.lte(0) ||
+        !Number.isInteger(dto.installmentNumber) ||
+        dto.installmentNumber < 1 ||
+        dueDate < opening.businessDate ||
+        dueDate > loan.maturityDate
+      )
+        throw new BadRequestException(
+          'Enter a positive installment with a valid due date within the loan term.',
+        );
+      const prior = await tx.loanRepaymentSchedule.findFirst({
+        where: {
+          repaymentScheduleNumber: dto.repaymentScheduleNumber,
+          loanDebtId: loanId,
+          deletedAt: null,
+        },
+      });
+      if (prior) {
+        if (
+          prior.installmentNumber !== dto.installmentNumber ||
+          prior.dueDate.getTime() !== dueDate.getTime() ||
+          !prior.principalAmount.eq(principal) ||
+          !prior.interestAmount.eq(interest) ||
+          !prior.feeAmount.eq(fees)
+        )
+          throw new BadRequestException(
+            'This installment reference was used for different details.',
+          );
+        return prior;
+      }
+      if (
+        await tx.loanRepaymentSchedule.count({
+          where: { loanDebtId: loanId, installmentNumber: dto.installmentNumber, deletedAt: null },
+        })
+      )
+        throw new BadRequestException('This installment number already exists.');
+      const planned = await tx.loanRepaymentSchedule.aggregate({
+        where: { loanDebtId: loanId, deletedAt: null },
+        _sum: { principalAmount: true },
+      });
+      if (
+        (planned._sum.principalAmount || new Prisma.Decimal(0))
+          .plus(principal)
+          .gt(loan.outstandingBalance)
+      )
+        throw new BadRequestException('Scheduled principal exceeds the loan balance.');
+      const item = await tx.loanRepaymentSchedule.create({
+        data: {
+          companyId: loan.companyId!,
+          loanDebtId: loanId,
+          repaymentScheduleNumber: dto.repaymentScheduleNumber,
+          installmentNumber: dto.installmentNumber,
+          dueDate,
+          principalAmount: principal,
+          interestAmount: interest,
+          feeAmount: fees,
+          totalAmount: total,
+          paidAmount: 0,
+          outstandingAmount: total,
+          status: 'UPCOMING',
+        },
+      });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'CREATE',
+        entityType: 'LoanRepaymentSchedule',
+        entityId: item.id,
+        userId: user.id,
+        companyId: item.companyId,
+      });
+      return item;
     });
-    if (!loan) throw new NotFoundException('Loan not found');
-    if (!loan.companyId) {
-      throw new BadRequestException('Loan without a companyId cannot have a repayment schedule');
-    }
-    await this.companyScope.assertCanAccessCompany(user, loan.companyId, AccessLevel.WRITE);
-
-    // Strip client-controlled scoping fields; derive them from the loan.
-    const {
-      companyId: _companyId,
-      loanDebtId: _loanDebtId,
-      loanId: _loanId,
-      createdById: _createdById,
-      ...rest
-    } = dto ?? {};
-    const item = await this.prisma.loanRepaymentSchedule.create({
-      data: {
-        ...rest,
-        companyId: loan.companyId,
-        loanDebtId: loan.id,
-      },
-    });
-    await this.auditLogs.log({
-      action: 'CREATE',
-      entityType: 'LoanRepaymentSchedule',
-      entityId: item.id,
-      userId: user.id,
-      companyId: item.companyId,
-    });
-    return item;
   }
 
   /**
@@ -117,98 +195,109 @@ export class LoanRepaymentSchedulesService {
    * Idempotent: refuses if the loan already has a schedule (must explicitly
    * request regeneration which would invalidate posted history).
    */
-  async generateForLoan(loanId: string, user: any) {
-    const loan = await this.prisma.loan.findFirst({
-      where: { id: loanId, deletedAt: null },
-    });
-    if (!loan) throw new NotFoundException('Loan not found');
-    if (!loan.companyId) {
-      throw new BadRequestException(
-        'Loans without a companyId cannot have an auto-generated schedule',
-      );
-    }
-    await this.companyScope.assertCanAccessCompany(user, loan.companyId, AccessLevel.WRITE);
-
-    const existing = await this.prisma.loanRepaymentSchedule.count({
-      where: { loanDebtId: loanId, deletedAt: null },
-    });
-    if (existing > 0) {
-      throw new BadRequestException(
-        `Loan already has ${existing} scheduled installments. Delete them before regenerating.`,
-      );
-    }
-
-    const principal = Number(loan.principalAmount);
-    const annualRate = Number(loan.interestRate);
-    // Honor the loan's repayment cadence: the number of installments, the
-    // periodic interest rate and the due-date step must all follow
-    // repaymentFrequency, not a hard-coded month.
-    const profile = this.frequencyProfile(loan.repaymentFrequency);
-    const periodCount = this.computePeriodCount(loan.disbursementDate, loan.maturityDate, profile);
-    if (periodCount <= 0) {
-      throw new BadRequestException('Loan maturityDate must be after disbursementDate');
-    }
-    // For a single-balloon (BULLET/OTHER) schedule, interest accrues over the
-    // whole tenure, not a fixed 12 months, so scale the annual rate by the
-    // actual tenure in years. Regular cadences use the flat periodic rate.
-    const periodicRate =
-      profile.monthsPerPeriod > 0
-        ? annualRate / profile.periodsPerYear
-        : annualRate * (this.tenureMonths(loan.disbursementDate, loan.maturityDate) / 12);
-    const installments = this.amortize(principal, periodicRate, periodCount);
-
-    const companyId = loan.companyId;
-    const created = await this.prisma.$transaction(async (tx) => {
-      const rows = installments.map((row, idx) => {
-        // Regular cadences step from the disbursement date; a single-period
-        // (BULLET/OTHER) schedule falls due on the maturity date itself.
-        const dueDate =
-          profile.monthsPerPeriod > 0
-            ? profile.advance(loan.disbursementDate, idx + 1)
-            : new Date(loan.maturityDate);
-        const total = row.principal + row.interest;
-        return tx.loanRepaymentSchedule.create({
-          data: {
-            repaymentScheduleNumber: `LRS-${loanId.slice(-6)}-${String(idx + 1).padStart(3, '0')}`,
-            companyId,
-            loanDebtId: loanId,
-            installmentNumber: idx + 1,
-            dueDate,
-            principalAmount: row.principal,
-            interestAmount: row.interest,
-            feeAmount: 0,
-            totalAmount: total,
-            outstandingAmount: total,
-            status: 'UPCOMING',
-          },
+  async generateForLoan(loanId: string, user: AuthUser) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM loans WHERE id = ${loanId} FOR UPDATE`;
+        const loan = await tx.loan.findFirst({ where: { id: loanId, deletedAt: null } });
+        if (!loan) throw new NotFoundException('Loan not found');
+        await this.loanLedger.scope(user, loan);
+        if (
+          !['ACTIVE', 'DEFAULTED', 'RESTRUCTURED'].includes(loan.status) ||
+          loan.outstandingBalance.lte(0)
+        )
+          throw new BadRequestException('Choose an active loan with outstanding principal.');
+        if (
+          await tx.loanRepaymentSchedule.count({ where: { loanDebtId: loanId, deletedAt: null } })
+        )
+          throw new BadRequestException('Loan already has scheduled installments.');
+        if (
+          await tx.loanRepayment.count({
+            where: {
+              loanId,
+              OR: [{ financialEvent: null }, { financialEvent: { reversedAt: null } }],
+            },
+          })
+        )
+          throw new BadRequestException(
+            'This loan already has repayments. A new schedule needs a reviewed restructuring.',
+          );
+        const opening = await tx.loanFinancialEvent.findFirst({
+          where: { loanId, kind: { in: ['OPENING', 'DISBURSEMENT'] }, reversedAt: null },
         });
-      });
-      return Promise.all(rows);
-    });
-
-    await this.auditLogs.log({
-      action: 'GENERATE',
-      entityType: 'LoanRepaymentSchedule',
-      entityId: loanId,
-      userId: user.id,
-      companyId,
-      metadata: {
-        installments: created.length,
-        periodCount,
-        repaymentFrequency: loan.repaymentFrequency,
+        if (!opening)
+          throw new BadRequestException(
+            'Recognize the loan in accounting before generating its schedule.',
+          );
+        const start = opening.businessDate;
+        const profile = this.frequencyProfile(loan.repaymentFrequency);
+        const periodCount = this.computePeriodCount(start, loan.maturityDate, profile);
+        if (periodCount <= 0 || periodCount > 1200)
+          throw new BadRequestException(
+            'Loan term must be positive and contain at most 1,200 installments.',
+          );
+        const periodicRate =
+          profile.monthsPerPeriod > 0
+            ? new Prisma.Decimal(loan.interestRate).div(profile.periodsPerYear).toNumber()
+            : new Prisma.Decimal(loan.interestRate)
+                .mul((loan.maturityDate.getTime() - start.getTime()) / 86400000)
+                .div(365)
+                .toNumber();
+        const installments = this.amortize(
+          Number(loan.outstandingBalance),
+          periodicRate,
+          periodCount,
+        );
+        if (installments.some((row) => new Prisma.Decimal(row.principal).plus(row.interest).lte(0)))
+          throw new BadRequestException(
+            'This principal is too small for the selected number of installments. Use a shorter schedule.',
+          );
+        const created = [];
+        for (const [idx, row] of installments.entries()) {
+          const regularDate =
+            profile.monthsPerPeriod > 0 ? profile.advance(start, idx + 1) : loan.maturityDate;
+          const dueDate =
+            regularDate > loan.maturityDate || idx === installments.length - 1
+              ? loan.maturityDate
+              : regularDate;
+          const total = new Prisma.Decimal(row.principal).plus(row.interest);
+          created.push(
+            await tx.loanRepaymentSchedule.create({
+              data: {
+                repaymentScheduleNumber: `LRS-${loanId}-${idx + 1}`,
+                companyId: loan.companyId!,
+                loanDebtId: loanId,
+                installmentNumber: idx + 1,
+                dueDate,
+                principalAmount: row.principal,
+                interestAmount: row.interest,
+                feeAmount: 0,
+                totalAmount: total,
+                outstandingAmount: total,
+                status: 'UPCOMING',
+              },
+            }),
+          );
+        }
+        await this.auditLogs.logStrictInTransaction(tx, {
+          action: 'GENERATE',
+          entityType: 'LoanRepaymentSchedule',
+          entityId: loanId,
+          userId: user.id,
+          companyId: loan.companyId!,
+          metadata: { installments: created.length, repaymentFrequency: loan.repaymentFrequency },
+        });
+        return { installments: created.length, scheduleIds: created.map((r) => r.id) };
       },
-    });
-
-    // Return the exact created identities as well as the legacy count. The IDs
-    // let governed callers bind every additive row to recovery/audit evidence
-    // without a racy follow-up query; existing clients that only read
-    // `installments` remain compatible.
-    return { installments: created.length, scheduleIds: created.map((row) => row.id) };
+      { timeout: 30000 },
+    );
   }
 
-  async getPayments(scheduleId: string) {
+  async getPayments(scheduleId: string, user?: AuthUser) {
+    if (user) await this.findOne(scheduleId, user);
     return this.prisma.loanRepaymentPayment.findMany({
-      where: { loanRepaymentScheduleId: scheduleId },
+      where: { loanRepaymentScheduleId: scheduleId, deletedAt: null },
+      include: { financialEvent: true },
       orderBy: { paymentDate: 'asc' },
     });
   }
@@ -218,158 +307,9 @@ export class LoanRepaymentSchedulesService {
    * advance the schedule and the parent loan's outstanding balance, and
    * mark the schedule PAID / PARTIALLY_PAID accordingly.
    */
-  async recordPayment(scheduleId: string, dto: any, user: AuthUser) {
-    // ITMB-026: load the schedule and assert the caller can write to its company.
-    const scheduleMeta = await this.findOne(scheduleId);
-    await this.companyScope.assertCanAccessCompany(user, scheduleMeta.companyId, AccessLevel.WRITE);
-
-    const amount = Number(dto.amount);
-    if (!(amount > 0)) throw new BadRequestException('amount must be positive');
-
-    const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
-    await this.accountingControl.assertPostingAllowed({
-      companyId: scheduleMeta.companyId,
-      transactionDate: paymentDate,
-      moduleName: 'loan_repayment',
-    });
-
-    const companyId = scheduleMeta.companyId;
-
-    const { result, principalPortion, interestPortion } = await this.prisma.$transaction(
-      async (tx) => {
-        // ITMB-062: serialize all payments for this loan by taking a row lock on
-        // the parent loan first (the "loans" table is the verified lock target,
-        // matching the loans module). Every payment against any installment of
-        // the loan must acquire this lock, so concurrent payments cannot race.
-        await tx.$queryRaw`SELECT "id" FROM "loans" WHERE "id" = ${scheduleMeta.loanDebtId} AND "deletedAt" IS NULL FOR UPDATE`;
-
-        // Re-read the schedule inside the transaction (after the lock) so the
-        // outstanding/paid amounts and arithmetic use authoritative values.
-        const locked = await tx.loanRepaymentSchedule.findFirst({
-          where: { id: scheduleId, deletedAt: null },
-        });
-        if (!locked) {
-          throw new NotFoundException('Loan repayment schedule not found');
-        }
-        const outstanding = Number(locked.outstandingAmount);
-        if (amount > outstanding + 0.01) {
-          throw new BadRequestException(
-            `Payment amount ${amount} exceeds outstanding ${outstanding}`,
-          );
-        }
-
-        // Allocate this payment proportionally between scheduled principal and interest.
-        const totalScheduled = Number(locked.principalAmount) + Number(locked.interestAmount);
-        const principalPortion =
-          totalScheduled > 0 ? (amount * Number(locked.principalAmount)) / totalScheduled : amount;
-        const interestPortion = amount - principalPortion;
-
-        const principalAccount = await this.accountResolver.resolve(
-          companyId,
-          'LOAN_PRINCIPAL_PAYABLE',
-          tx,
-        );
-        const interestAccount = await this.accountResolver.resolve(
-          companyId,
-          'LOAN_INTEREST_EXPENSE',
-          tx,
-        );
-        const cashAccount = await this.accountResolver.resolve(companyId, 'CASH_ON_HAND', tx);
-
-        const journalNumber = await this.codes.next({
-          entityType: 'LoanJournal',
-          companyId,
-          tx,
-        });
-        const je = await this.postingEngine.postLines(
-          {
-            journalNumber,
-            companyId,
-            transactionDate: paymentDate,
-            description: `Loan repayment installment #${locked.installmentNumber}`,
-            referenceType: 'LoanRepaymentSchedule',
-            referenceId: scheduleId,
-            status: 'POSTED',
-            userId: user.id,
-            moduleName: 'loan_repayment',
-            lines: [
-              {
-                accountId: principalAccount.id,
-                description: 'Principal portion',
-                debit: principalPortion,
-                credit: 0,
-              },
-              {
-                accountId: interestAccount.id,
-                description: 'Interest portion',
-                debit: interestPortion,
-                credit: 0,
-              },
-              {
-                accountId: cashAccount.id,
-                description: 'Cash paid',
-                debit: 0,
-                credit: amount,
-              },
-            ],
-          },
-          tx,
-        );
-
-        const repaymentPaymentNumber = await this.codes.next({
-          entityType: 'LoanRepaymentPayment',
-          companyId,
-          tx,
-        });
-        const payment = await tx.loanRepaymentPayment.create({
-          data: {
-            repaymentPaymentNumber,
-            companyId,
-            loanRepaymentScheduleId: scheduleId,
-            paymentDate,
-            amount,
-            currency: dto.currency ?? 'TZS',
-            paymentMethod: dto.paymentMethod ?? 'BANK_TRANSFER',
-            cashAccountId: dto.cashAccountId,
-            reference: dto.reference,
-            journalEntryId: je.id,
-            paidById: user.id,
-          },
-        });
-
-        const newPaid = Number(locked.paidAmount) + amount;
-        const newOutstanding = Math.max(0, outstanding - amount);
-        const newStatus: 'PAID' | 'PARTIALLY_PAID' =
-          newOutstanding === 0 ? 'PAID' : 'PARTIALLY_PAID';
-        await tx.loanRepaymentSchedule.update({
-          where: { id: scheduleId },
-          data: {
-            paidAmount: newPaid,
-            outstandingAmount: newOutstanding,
-            status: newStatus,
-            journalEntryId: je.id,
-          },
-        });
-
-        // Decrement principal on the parent loan (row already locked above).
-        await tx.loan.update({
-          where: { id: locked.loanDebtId },
-          data: { outstandingBalance: { decrement: new Prisma.Decimal(principalPortion) } },
-        });
-
-        return { result: payment, principalPortion, interestPortion };
-      },
-    );
-
-    await this.auditLogs.log({
-      action: 'CREATE',
-      entityType: 'LoanRepaymentPayment',
-      entityId: result.id,
-      userId: user.id,
-      companyId,
-      metadata: { amount, principalPortion, interestPortion, scheduleId },
-    });
-    return result;
+  async recordPayment(scheduleId: string, dto: RecordLoanRepaymentDto, user: AuthUser) {
+    const schedule = await this.findOne(scheduleId, user);
+    return this.lifecycle.repay(schedule.loanDebtId, dto, user, scheduleId);
   }
 
   // ─── Math helpers ────────────────────────────────────────────────────────
@@ -387,29 +327,23 @@ export class LoanRepaymentSchedulesService {
     periodicRate: number,
     n: number,
   ): Array<{ principal: number; interest: number }> {
-    const rounded = (x: number) => Math.round(x * 100) / 100;
-    if (periodicRate < 1e-9) {
-      const equal = rounded(principal / n);
-      const result: Array<{ principal: number; interest: number }> = [];
-      let remaining = principal;
-      for (let i = 0; i < n; i++) {
-        const principalPart = i === n - 1 ? rounded(remaining) : equal;
-        result.push({ principal: principalPart, interest: 0 });
-        remaining -= principalPart;
-      }
-      return result;
-    }
-    const factor = Math.pow(1 + periodicRate, n);
-    const emi = (principal * periodicRate * factor) / (factor - 1);
-    let remaining = principal;
-    const result: Array<{ principal: number; interest: number }> = [];
+    const p = loanMoney(principal, 'Principal'),
+      rate = new Prisma.Decimal(periodicRate);
+    const factor = rate.plus(1).pow(n);
+    const emi = rate.isZero() ? p.div(n) : p.mul(rate).mul(factor).div(factor.minus(1));
+    let remaining = p;
+    const result = [];
     for (let i = 0; i < n; i++) {
-      const interest = remaining * periodicRate;
-      let principalPart = emi - interest;
-      // Final installment absorbs rounding drift.
-      if (i === n - 1) principalPart = remaining;
-      result.push({ principal: rounded(principalPart), interest: rounded(interest) });
-      remaining -= principalPart;
+      const interest = remaining.mul(rate).toDecimalPlaces(2);
+      const part =
+        i === n - 1
+          ? remaining
+          : Prisma.Decimal.min(
+              remaining,
+              Prisma.Decimal.max(0, emi.minus(interest).toDecimalPlaces(2)),
+            );
+      result.push({ principal: part.toNumber(), interest: interest.toNumber() });
+      remaining = remaining.minus(part);
     }
     return result;
   }
@@ -474,19 +408,26 @@ export class LoanRepaymentSchedulesService {
    */
   private computePeriodCount(start: Date, end: Date, profile: { monthsPerPeriod: number }): number {
     const months = this.tenureMonths(start, end);
-    if (months <= 0) return 0;
+    if (end <= start) return 0;
     if (profile.monthsPerPeriod <= 0) return 1; // BULLET / OTHER → single balloon
-    return Math.max(1, Math.round(months / profile.monthsPerPeriod));
+    return Math.max(1, Math.ceil(months / profile.monthsPerPeriod));
   }
 
   /** Whole calendar months between two dates (>= 0). */
   private tenureMonths(start: Date, end: Date): number {
-    return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    return (
+      (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+      (end.getUTCMonth() - start.getUTCMonth())
+    );
   }
 
   private addMonths(date: Date, n: number): Date {
     const d = new Date(date);
-    d.setMonth(d.getMonth() + n);
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + n);
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, last));
     return d;
   }
 }

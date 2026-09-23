@@ -3,42 +3,63 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalWorkflowDto } from './dto/create-approval-workflow.dto';
 import { UpdateApprovalWorkflowDto } from './dto/update-approval-workflow.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import {
+  applyCompanyScopeWhere,
+  assertCanAccessCompanyFromUser,
+  isGroupScopedUser,
+} from '../../common/services';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { AccessLevel } from '@prisma/client';
 
 @Injectable()
 export class ApprovalWorkflowsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+  ) {}
 
-  async findAll(user: any, query: any) {
-    const { page = 1, limit = 20, companyId, entityType, isActive } = query;
+  async findAll(user: AuthUser, query: any) {
+    const { page = 1, limit = 20, companyId, entityType, isActive, search } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    const scope = applyCompanyScopeWhere({}, user, companyId);
+    where.AND = [
+      !companyId && isGroupScopedUser(user) ? { OR: [scope, { companyId: null }] } : scope,
+    ];
     if (entityType) where.entityType = entityType;
     if (isActive !== undefined) where.isActive = isActive === 'true';
+    if (search?.trim())
+      where.OR = ['name', 'workflowCode'].map((field) => ({
+        [field]: { contains: search.trim(), mode: 'insensitive' },
+      }));
     const [data, total] = await Promise.all([
       this.prisma.approvalWorkflow.findMany({
         where,
         skip,
         take: Number(limit),
         orderBy: { createdAt: 'desc' },
-        include: { steps: { where: { deletedAt: null }, orderBy: { stepOrder: 'asc' } } },
+        include: {
+          company: { select: { id: true, name: true, code: true } },
+          steps: { where: { deletedAt: null }, orderBy: { stepOrder: 'asc' } },
+        },
       }),
       this.prisma.approvalWorkflow.count({ where }),
     ]);
     return { data, total, page: Number(page), limit: Number(limit) };
   }
 
-  async findOne(id: string, user: any) {
+  async findOne(id: string, user: AuthUser) {
     const record = await this.prisma.approvalWorkflow.findFirst({
       where: { id, deletedAt: null },
       include: { steps: { where: { deletedAt: null }, orderBy: { stepOrder: 'asc' } } },
     });
     if (!record) throw new NotFoundException('Approval workflow not found');
+    assertCanAccessCompanyFromUser(user, record.companyId);
     return record;
   }
 
-  async create(dto: CreateApprovalWorkflowDto, user: any) {
+  async create(dto: CreateApprovalWorkflowDto, user: AuthUser) {
+    assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
     const workflowCode = dto.workflowCode ?? `WF-${Date.now()}`;
     const record = await this.prisma.approvalWorkflow.create({
       data: {
@@ -57,35 +78,75 @@ export class ApprovalWorkflowsService {
         createdById: user.id,
       },
     });
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'ApprovalWorkflow', entityId: record.id, newValue: dto as any });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'ApprovalWorkflow',
+      entityId: record.id,
+      newValue: dto as any,
+    });
     return record;
   }
 
-  async update(id: string, dto: UpdateApprovalWorkflowDto, user: any) {
-    await this.findOne(id, user);
+  async update(id: string, dto: UpdateApprovalWorkflowDto, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     const record = await this.prisma.approvalWorkflow.update({ where: { id }, data: dto as any });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'ApprovalWorkflow', entityId: id, newValue: dto as any });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'ApprovalWorkflow',
+      entityId: id,
+      newValue: dto as any,
+    });
     return record;
   }
 
-  async activate(id: string, user: any) {
-    await this.findOne(id, user);
-    const record = await this.prisma.approvalWorkflow.update({ where: { id }, data: { isActive: true } });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'ApprovalWorkflow', entityId: id, newValue: { isActive: true } });
+  async activate(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
+    const record = await this.prisma.approvalWorkflow.update({
+      where: { id },
+      data: { isActive: true },
+    });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'ApprovalWorkflow',
+      entityId: id,
+      newValue: { isActive: true },
+    });
     return record;
   }
 
-  async deactivate(id: string, user: any) {
-    await this.findOne(id, user);
-    const record = await this.prisma.approvalWorkflow.update({ where: { id }, data: { isActive: false } });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'ApprovalWorkflow', entityId: id, newValue: { isActive: false } });
+  async deactivate(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
+    const record = await this.prisma.approvalWorkflow.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'ApprovalWorkflow',
+      entityId: id,
+      newValue: { isActive: false },
+    });
     return record;
   }
 
-  async remove(id: string, user: any) {
-    await this.findOne(id, user);
+  async remove(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     await this.prisma.approvalWorkflow.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'ApprovalWorkflow', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'ApprovalWorkflow',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Approval workflow deleted' };
   }
 }

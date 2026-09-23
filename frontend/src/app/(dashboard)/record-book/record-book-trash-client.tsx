@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Btn,
   Card,
   EmptyState,
+  ErrorState,
   FormInput,
   FormSelect,
   PageHeader,
@@ -12,6 +14,7 @@ import {
   StatCard,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendPage, backendPatch, type PaginatedResult } from '@/lib/api-client';
 import {
   type ConfirmAction,
@@ -68,9 +71,10 @@ interface DeletedCategory {
 }
 
 export function RecordBookTrashClient() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('record_book.view');
   const canAdmin = hasPermission('record_book.admin');
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [search, setSearch] = useState('');
@@ -81,53 +85,72 @@ export function RecordBookTrashClient() {
   const [expenses, setExpenses] = useState<PaginatedResult<DeletedExpense> | null>(null);
   const [categories, setCategories] = useState<PaginatedResult<DeletedCategory> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [busy, setBusy] = useState(false);
-  const requestIdRef = useRef(0);
   const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
-    backendGet<ScopeOptions>('/record-book/scope-options')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendGet<ScopeOptions>('/record-book/scope-options', { signal: controller.signal })
       .then((scope) => {
+        if (controller.signal.aborted) return;
         setCompanies(scope.companies);
         setCompanyId((current) => current || scope.companies[0]?.id || '');
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load companies'));
-  }, []);
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : 'Could not load companies');
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
-    const requestId = ++requestIdRef.current;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const base = { companyId, search: debouncedSearch, recordState: 'DELETED', limit: 20 };
       const [saleRows, expenseRows, categoryRows] = await Promise.all([
         backendPage<DeletedSale>('/record-book/daily-sales', {
           query: { ...base, page: salesPage },
+          signal: request.signal,
         }),
         backendPage<DeletedExpense>('/record-book/expenses', {
           query: { ...base, page: expensePage },
+          signal: request.signal,
         }),
         backendPage<DeletedCategory>('/record-book/expense-categories', {
           query: { ...base, page: categoryPage },
+          signal: request.signal,
         }),
       ]);
-      if (requestId !== requestIdRef.current) return;
+      if (!request.current()) return;
       setSales(saleRows);
       setExpenses(expenseRows);
       setCategories(categoryRows);
     } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setError(err instanceof Error ? err.message : 'Could not load Trash');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Could not load Trash');
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, categoryPage, companyId, debouncedSearch, expensePage, salesPage]);
+  }, [
+    authLoading,
+    beginRequest,
+    canView,
+    categoryPage,
+    companyId,
+    debouncedSearch,
+    expensePage,
+    salesPage,
+  ]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   useEffect(() => {
@@ -164,6 +187,28 @@ export function RecordBookTrashClient() {
   };
 
   const totalDeleted = (sales?.total ?? 0) + (expenses?.total ?? 0) + (categories?.total ?? 0);
+
+  if (authLoading) {
+    return (
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+        <PageHeader title="Records Book Trash" subtitle="Loading" />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+        <PageHeader
+          title="Records Book Trash"
+          subtitle="Recover audit-safe soft-deleted drafts and categories"
+        />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
@@ -216,6 +261,10 @@ export function RecordBookTrashClient() {
 
       {loading ? (
         <SkeletonTable rows={7} cols={6} />
+      ) : loadError ? (
+        <Card>
+          <ErrorState message={loadError} onRetry={() => void load()} />
+        </Card>
       ) : totalDeleted === 0 ? (
         <Card>
           <EmptyState
@@ -231,7 +280,7 @@ export function RecordBookTrashClient() {
               <p className="text-sm text-slate-400">No deleted daily sales.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-slate-800">
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead className="bg-slate-900/70 text-left text-slate-400">
                     <tr>
                       <th className="px-3 py-3">Date</th>
@@ -269,7 +318,7 @@ export function RecordBookTrashClient() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             )}
             {sales && (
@@ -288,7 +337,7 @@ export function RecordBookTrashClient() {
               <p className="text-sm text-slate-400">No deleted money-out records.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-slate-800">
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead className="bg-slate-900/70 text-left text-slate-400">
                     <tr>
                       <th className="px-3 py-3">Date</th>
@@ -323,7 +372,7 @@ export function RecordBookTrashClient() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             )}
             {expenses && (
@@ -342,7 +391,7 @@ export function RecordBookTrashClient() {
               <p className="text-sm text-slate-400">No deleted categories.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-slate-800">
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead className="bg-slate-900/70 text-left text-slate-400">
                     <tr>
                       <th className="px-3 py-3">Category</th>
@@ -375,7 +424,7 @@ export function RecordBookTrashClient() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             )}
             {categories && (

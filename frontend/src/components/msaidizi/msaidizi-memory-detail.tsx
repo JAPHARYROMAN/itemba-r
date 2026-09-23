@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Skeleton } from '@/components/ui';
+import { FormDateField, Skeleton } from '@/components/ui';
 import {
   deleteMsaidiziMemory,
   fetchMsaidiziMemory,
@@ -271,15 +271,13 @@ export function MsaidiziMemoryDetailPanel({
             style={CONTROL_INPUT_STYLE}
           />
         </ControlField>
-        <ControlField label="Memory expiry" hint="Leave blank for no expiry.">
-          <input
-            type="datetime-local"
-            value={draft.expiresAt}
-            onChange={(event) => setDraft({ ...draft, expiresAt: event.target.value })}
-            className={CONTROL_INPUT_CLASS}
-            style={CONTROL_INPUT_STYLE}
-          />
-        </ControlField>
+        <FormDateField
+          label="Memory expiry"
+          hint="Leave blank for no expiry."
+          granularity="minute"
+          value={draft.expiresAt}
+          onChange={(value) => setDraft({ ...draft, expiresAt: value })}
+        />
         <div className="flex flex-wrap gap-2">
           <ControlButton
             type="submit"

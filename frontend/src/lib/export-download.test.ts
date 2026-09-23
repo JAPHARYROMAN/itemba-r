@@ -44,6 +44,27 @@ describe('export-download', () => {
   });
 
   describe('filenameFromDisposition', () => {
+    it('does not download a PDF whose scope was cancelled while its body was loading', async () => {
+      const controller = new AbortController();
+      const response = pdfResponse();
+      vi.spyOn(response, 'blob').mockImplementation(async () => {
+        controller.abort();
+        return new Blob(['pdf']);
+      });
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+      await expect(
+        downloadTablePdf(
+          { title: 'Inventory', columns: ['Quantity'], rows: [['1']], baseName: 'inventory' },
+          controller.signal,
+        ),
+      ).rejects.toThrow();
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ signal: controller.signal }),
+      );
+      expect(downloads).toEqual([]);
+      expect(createObjectURL).not.toHaveBeenCalled();
+    });
     it('extracts a quoted filename', () => {
       expect(
         filenameFromDisposition('attachment; filename="products-2026-07-05.pdf"', 'fallback.pdf'),

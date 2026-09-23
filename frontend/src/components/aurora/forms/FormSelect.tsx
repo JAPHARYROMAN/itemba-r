@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 /**
  * Shake the field once whenever a NEW error appears (not on every render with
@@ -39,39 +39,92 @@ interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> 
   success?: boolean;
 }
 
-export function FormSelect({ label, error, help, required, options, placeholder, fullWidth = true, success, id, className = '', ...props }: FormSelectProps) {
-  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+export function FormSelect({
+  label,
+  error,
+  help,
+  required,
+  options,
+  placeholder,
+  fullWidth = true,
+  success,
+  id,
+  className = '',
+  ...props
+}: FormSelectProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
   const shake = useShakeOnError(error);
   const showSuccess = !!success && !error;
   return (
     <div className={fullWidth ? 'w-full' : ''}>
       {label && (
-        <label htmlFor={inputId} className="block text-xs font-medium mb-1.5" style={{ color: 'var(--aurora-text-secondary)' }}>
+        <label
+          htmlFor={inputId}
+          className="block text-xs font-medium mb-1.5"
+          style={{ color: 'var(--aurora-text-secondary)' }}
+        >
           {label}
-          {required && <span className="ml-0.5" style={{ color: 'var(--aurora-danger)' }}>*</span>}
+          {required && (
+            <span aria-hidden="true" className="ml-0.5" style={{ color: 'var(--aurora-danger)' }}>
+              *
+            </span>
+          )}
         </label>
       )}
       <div className="relative">
         <select
           id={inputId}
+          aria-describedby={error ? `${inputId}-error` : help ? `${inputId}-help` : undefined}
           aria-invalid={!!error}
+          aria-required={required}
           className={`aurora-input appearance-none pr-8 ${className}${shake}`}
-          style={error ? { borderColor: 'var(--aurora-danger)' } : showSuccess ? { borderColor: 'var(--aurora-success, #10b981)' } : {}}
+          style={
+            error
+              ? { borderColor: 'var(--aurora-danger)' }
+              : showSuccess
+                ? { borderColor: 'var(--aurora-success, #10b981)' }
+                : {}
+          }
           {...props}
         >
           {placeholder && <option value="">{placeholder}</option>}
-          {options.map(opt => (
-            <option key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</option>
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value} disabled={opt.disabled}>
+              {opt.label}
+            </option>
           ))}
         </select>
-        <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-          style={{ color: 'var(--aurora-text-muted)' }}>
-          <path d="m6 9 6 6 6-6"/>
+        <svg
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          <path d="m6 9 6 6 6-6" />
         </svg>
       </div>
-      {error && <p role="alert" className="text-xs mt-1" style={{ color: 'var(--aurora-danger)' }}>{error}</p>}
-      {help && !error && <p className="text-xs mt-1" style={{ color: 'var(--aurora-text-muted)' }}>{help}</p>}
+      {error && (
+        <p
+          id={`${inputId}-error`}
+          role="alert"
+          className="text-xs mt-1"
+          style={{ color: 'var(--aurora-danger)' }}
+        >
+          {error}
+        </p>
+      )}
+      {help && !error && (
+        <p
+          id={`${inputId}-help`}
+          className="text-xs mt-1"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          {help}
+        </p>
+      )}
     </div>
   );
 }

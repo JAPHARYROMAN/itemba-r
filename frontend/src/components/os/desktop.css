@@ -1,0 +1,1532 @@
+/* ITEMBA desktop: the wallpaper is an original asset; glass is reserved for chrome. */
+.desktop-window-modals {
+  position: absolute;
+  inset: 47px 0 0;
+  z-index: 100;
+  pointer-events: none;
+}
+.desktop-window-modals .os-window-layer > [role='dialog'] {
+  position: absolute;
+  pointer-events: auto;
+}
+.desktop-window-modals [data-os-dialog] {
+  max-height: 100%;
+}
+.desktop-window-modals .os-window-layer {
+  color: var(--aurora-text);
+}
+.itemba-desktop[data-auto-hide='true'][data-dock='bottom'] .desktop-dock {
+  transform: translate(-50%, calc(100% - 18px));
+  opacity: 1;
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.itemba-desktop[data-auto-hide='true'][data-dock='bottom'] .desktop-dock:is(:hover, :focus-within) {
+  transform: translate(-50%, 0);
+}
+.itemba-desktop[data-auto-hide='true'][data-dock='left'] .desktop-dock {
+  transform: translate(calc(-100% + 18px), -50%);
+  opacity: 1;
+  transition: transform 220ms;
+}
+.itemba-desktop[data-auto-hide='true'][data-dock='right'] .desktop-dock {
+  transform: translate(calc(100% - 18px), -50%);
+  opacity: 1;
+  transition: transform 220ms;
+}
+.itemba-desktop[data-auto-hide='true']:not([data-dock='bottom'])
+  .desktop-dock:is(:hover, :focus-within) {
+  transform: translate(0, -50%);
+}
+.itemba-desktop:is([data-theme='midnight'], [data-theme='ocean'], [data-theme='graphite'])
+  .desktop-home {
+  color: #fff;
+}
+.itemba-desktop:is([data-theme='midnight'], [data-theme='ocean'], [data-theme='graphite'])
+  .desktop-widget {
+  color: var(--desktop-ink);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: ease-out;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .itemba-desktop {
+    --desktop-glass: #f3f5fa !important;
+    --desktop-blur: 0px !important;
+  }
+  .dark .itemba-desktop {
+    --desktop-glass: #202638 !important;
+  }
+}
+.itemba-desktop {
+  --desktop-glass: rgba(248, 250, 255, 0.78);
+  --desktop-border: rgba(255, 255, 255, 0.52);
+  --desktop-ink: #1f2636;
+  --desktop-muted: #525e72;
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  color: var(--desktop-ink);
+  isolation: isolate;
+  background: #8a8bc0;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+.dark .itemba-desktop {
+  --desktop-glass: rgba(25, 30, 48, 0.84);
+  --desktop-border: rgba(255, 255, 255, 0.15);
+  --desktop-ink: #f4f5fc;
+  --desktop-muted: #c0c7d9;
+}
+.desktop-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: #999bd5 url('/brand/itemba-os-wallpaper.png') center/cover no-repeat;
+  transition: background-color 0.3s;
+}
+.desktop-wallpaper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(52, 81, 129, 0.24),
+    rgba(106, 73, 160, 0.33) 46%,
+    rgba(229, 154, 170, 0.24)
+  );
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+[data-theme='dune'] .desktop-wallpaper::after {
+  background: linear-gradient(120deg, #e7c39a20, #a66f4830);
+}
+[data-theme='pearl'] .desktop-wallpaper::after {
+  background: linear-gradient(125deg, #aec6e646, #eef4ff75);
+}
+[data-theme='ocean'] .desktop-wallpaper::after {
+  background: linear-gradient(135deg, #15486bcc, #2599bc9c, #4ccbbf5e);
+}
+[data-theme='midnight'] .desktop-wallpaper::after {
+  background: linear-gradient(125deg, #141a48e6, #38317bd9, #493966b8);
+}
+[data-theme='graphite'] .desktop-wallpaper::after {
+  background: linear-gradient(125deg, #313844bd, #606d7e8f);
+}
+.dark .desktop-wallpaper {
+  filter: brightness(0.57);
+}
+.itemba-desktop[data-transparency='reduced'] {
+  --desktop-glass: #f1f3fa;
+  --desktop-border: #c8d0df;
+}
+.dark .itemba-desktop[data-transparency='reduced'] {
+  --desktop-glass: #242b3b;
+  --desktop-border: #465166;
+}
+.desktop-menubar {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 20px;
+  position: relative;
+  z-index: 100;
+  background: var(--desktop-glass);
+  backdrop-filter: blur(var(--desktop-blur, 24px));
+  border-bottom: 1px solid var(--desktop-border);
+  font-size: 12px;
+  color: var(--desktop-ink);
+}
+.desktop-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.desktop-brand img {
+  height: 25px;
+  width: auto;
+}
+.desktop-brand strong {
+  font-size: 12px;
+}
+.desktop-brand span {
+  font-weight: 400;
+  opacity: 0.75;
+}
+.desktop-current-app {
+  font-weight: 600;
+}
+.desktop-system-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.desktop-system-actions > button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+.desktop-system-actions > button:hover {
+  background: #78839a20;
+}
+.desktop-system-actions time {
+  margin-left: 10px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.desktop-workspace {
+  position: relative;
+  height: calc(100dvh - 142px);
+  margin: 0 12px;
+  outline: none;
+}
+.itemba-desktop[data-dock='left'] .desktop-workspace {
+  margin-left: 108px;
+  height: calc(100dvh - 56px);
+}
+.itemba-desktop[data-dock='right'] .desktop-workspace {
+  margin-right: 108px;
+  height: calc(100dvh - 56px);
+}
+.desktop-home {
+  height: 100%;
+  position: absolute;
+  inset: 0;
+}
+.desktop-greeting {
+  position: absolute;
+  top: 12%;
+  left: 19%;
+  max-width: 580px;
+  text-shadow: 0 1px 18px #ffffff30;
+  pointer-events: none;
+}
+.desktop-eyebrow {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.18em;
+  opacity: 0.75;
+}
+.desktop-greeting h1 {
+  font-size: clamp(36px, 4.5vw, 68px);
+  line-height: 1.1;
+  letter-spacing: -0.05em;
+  font-weight: 500;
+  margin: 20px 0;
+}
+.desktop-greeting h1 em {
+  font-style: normal;
+  font-weight: 350;
+  opacity: 0.72;
+}
+.desktop-greeting p {
+  font-size: 15px;
+  opacity: 0.76;
+}
+.desktop-greeting button {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 26px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 12px 16px;
+  border: 1px solid var(--desktop-border);
+  background: var(--desktop-glass);
+  backdrop-filter: blur(var(--desktop-blur, 24px));
+  border-radius: 12px;
+  box-shadow: 0 4px 14px #27345610;
+}
+.desktop-shortcut {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 104px;
+  text-align: center;
+  touch-action: none;
+}
+.desktop-shortcut > button:first-child {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 2px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+}
+.desktop-shortcut > button:first-child:hover,
+.desktop-shortcut > button:first-child:focus-visible {
+  background: #ffffff29;
+  border-color: #ffffff48;
+}
+.desktop-shortcut .os-glyph-large {
+  height: 58px;
+  width: 58px;
+  border-radius: 17px;
+  box-shadow:
+    0 8px 18px #19295125,
+    inset 0 1px 1px #ffffff6b;
+}
+.desktop-shortcut > button > span:last-child {
+  font-size: 12px;
+  font-weight: 550;
+  text-shadow: 0 1px 8px #ffffff66;
+}
+.desktop-shortcut-options {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--desktop-glass);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+}
+.desktop-shortcut:hover .desktop-shortcut-options,
+.desktop-shortcut:focus-within .desktop-shortcut-options {
+  opacity: 1;
+}
+.desktop-widgets {
+  position: absolute;
+  right: 28px;
+  top: 32px;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100% - 70px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.desktop-widget {
+  padding: 19px;
+  border: 1px solid var(--desktop-border);
+  border-radius: 22px;
+  background: var(--desktop-glass);
+  backdrop-filter: blur(var(--desktop-blur, 24px));
+  box-shadow: 0 10px 35px #172d4420;
+  flex-shrink: 0;
+}
+.desktop-widget header {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.desktop-widget h2 {
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  font-weight: 650;
+}
+.desktop-widget p {
+  font-size: 11px;
+  color: var(--desktop-muted);
+  line-height: 1.5;
+}
+.desktop-widget > button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 0;
+  text-align: left;
+  font-size: 12px;
+}
+.desktop-widget > button span {
+  flex: 1;
+}
+.desktop-widget > button .os-glyph {
+  flex: 0 0 29px;
+  width: 29px;
+  height: 29px;
+  border-radius: 9px;
+}
+.desktop-widget-number {
+  font-size: 34px;
+  letter-spacing: -0.05em;
+  font-weight: 500;
+}
+.desktop-personalise {
+  position: absolute;
+  bottom: 16px;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--desktop-ink);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #ffffff25;
+}
+.desktop-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--aurora-bg, #f6f7fb);
+  border: 1px solid #ffffff75;
+  border-radius: 16px;
+  box-shadow:
+    0 12px 40px #17243b28,
+    0 2px 8px #17243b18;
+  overflow: hidden;
+  outline: none;
+  transform-origin: 50% 100%;
+  container-type: inline-size;
+  color: var(--aurora-text);
+}
+.desktop-window[data-active='true'] {
+  box-shadow:
+    0 28px 80px #17243b40,
+    0 4px 16px #17243b2e;
+  border-color: #ffffffa6;
+}
+.dark .desktop-window {
+  border-color: #ffffff24;
+}
+.desktop-window-titlebar {
+  height: 47px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  gap: 12px;
+  user-select: none;
+  touch-action: none;
+  background: var(--desktop-glass);
+  border-bottom: 1px solid var(--aurora-border);
+  backdrop-filter: blur(var(--desktop-blur, 24px));
+  color: var(--desktop-ink);
+}
+.desktop-traffic-lights {
+  display: flex;
+  gap: 8px;
+  padding: 9px 0;
+}
+.desktop-traffic-lights button {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid #00000018;
+  background: #ed6c64;
+  color: #592c2a;
+}
+.desktop-traffic-lights button:nth-child(2) {
+  background: #f5c251;
+  color: #735721;
+}
+.desktop-traffic-lights button:nth-child(3) {
+  background: #62c76d;
+  color: #225a29;
+}
+.desktop-traffic-lights svg {
+  opacity: 0;
+}
+.desktop-traffic-lights:hover svg,
+.desktop-traffic-lights:focus-within svg {
+  opacity: 1;
+}
+.desktop-window:not([data-active='true']) .desktop-traffic-lights button {
+  filter: saturate(0.35);
+}
+.desktop-window-name {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.desktop-window-name .os-glyph {
+  height: 23px;
+  width: 23px;
+  border-radius: 7px;
+}
+.desktop-window-name .os-glyph svg {
+  height: 14px;
+  width: 14px;
+}
+.desktop-icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.desktop-icon-button:hover {
+  background: #77819920;
+}
+.desktop-window-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  container-type: inline-size;
+}
+.desktop-app-content {
+  min-height: 100%;
+}
+.desktop-resize {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+  touch-action: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  opacity: 0.4;
+  z-index: 2;
+}
+.desktop-resize:hover,
+.desktop-resize:focus-visible {
+  opacity: 1;
+  background: var(--aurora-card);
+}
+.desktop-window-menu {
+  position: absolute;
+  right: 12px;
+  top: 45px;
+  z-index: 20;
+  background: var(--aurora-card);
+  border: 1px solid var(--aurora-border);
+  box-shadow: 0 15px 45px #0003;
+  border-radius: 14px;
+  padding: 16px;
+  width: min(320px, 95%);
+}
+.desktop-window-menu p {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.desktop-window-menu > div:first-of-type {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.desktop-window-menu button {
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  text-align: left;
+}
+.desktop-window-menu button:hover {
+  background: var(--aurora-bg-subtle);
+}
+.desktop-window-menu > button {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+}
+.desktop-position-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  border-top: 1px solid var(--aurora-border);
+  margin-top: 8px;
+  padding-top: 8px;
+  font-size: 11px;
+}
+.desktop-dock {
+  position: absolute;
+  z-index: 100;
+  left: 50%;
+  bottom: 15px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  background: var(--desktop-glass);
+  backdrop-filter: blur(var(--desktop-blur, 24px));
+  border: 1px solid var(--desktop-border);
+  border-radius: 24px;
+  box-shadow:
+    0 10px 35px #1e2d4730,
+    0 1px 0 #fff6 inset;
+  max-width: calc(100vw - 24px);
+}
+.desktop-dock button {
+  position: relative;
+  min-width: var(--desktop-icon-size, 48px);
+  min-height: var(--desktop-icon-size, 48px);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.desktop-dock .os-glyph {
+  height: var(--desktop-icon-size, 48px);
+  width: var(--desktop-icon-size, 48px);
+  border-radius: 15px;
+}
+.desktop-dock .desktop-apps-button {
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 5px;
+}
+.desktop-apps-button > span {
+  display: grid;
+  place-items: center;
+  height: 34px;
+  width: 42px;
+  background: linear-gradient(130deg, var(--desktop-accent, #7552d9), #536ddc);
+  border-radius: 11px;
+  color: #fff;
+}
+.desktop-apps-button strong {
+  font-size: 10px;
+  font-weight: 650;
+}
+.desktop-dock-divider {
+  width: 1px;
+  height: 35px;
+  background: var(--desktop-ink);
+  opacity: 0.15;
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+.desktop-running {
+  position: absolute;
+  bottom: -7px;
+  display: flex;
+  gap: 3px;
+}
+.desktop-running i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--desktop-ink);
+  opacity: 0.35;
+}
+.desktop-running i[data-active='true'] {
+  background: var(--desktop-accent);
+  opacity: 1;
+}
+.desktop-dock-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 11px;
+  background: var(--desktop-glass);
+  border: 1px solid var(--desktop-border);
+  border-radius: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--desktop-ink);
+  box-shadow: 0 4px 18px #0002;
+}
+.desktop-dock button:hover .desktop-dock-tooltip,
+.desktop-dock button:focus-visible .desktop-dock-tooltip {
+  display: block;
+}
+.itemba-desktop[data-dock='left'] .desktop-dock,
+.itemba-desktop[data-dock='right'] .desktop-dock {
+  flex-direction: column;
+  top: 50%;
+  bottom: auto;
+  left: 12px;
+  transform: translateY(-50%);
+  max-height: calc(100dvh - 80px);
+}
+.itemba-desktop[data-dock='right'] .desktop-dock {
+  left: auto;
+  right: 12px;
+}
+.itemba-desktop:not([data-dock='bottom']) .desktop-dock-divider {
+  width: 32px;
+  height: 1px;
+}
+.itemba-desktop:not([data-dock='bottom']) .desktop-dock-tooltip {
+  left: calc(100% + 15px);
+  bottom: auto;
+  transform: none;
+}
+.itemba-desktop[data-dock='right'] .desktop-dock-tooltip {
+  left: auto;
+  right: calc(100% + 15px);
+}
+.itemba-desktop[data-auto-hide='true'] .desktop-dock {
+  transition: opacity 0.2s;
+  opacity: 0.12;
+}
+.itemba-desktop[data-auto-hide='true'] .desktop-dock:hover,
+.itemba-desktop[data-auto-hide='true'] .desktop-dock:focus-within {
+  opacity: 1;
+}
+.desktop-launcher-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 15px;
+  border-radius: 12px;
+  background: var(--aurora-bg-subtle);
+  border: 1px solid var(--aurora-border);
+}
+.desktop-launcher-search input {
+  background: transparent;
+  outline: none;
+  width: 100%;
+  font-size: 14px;
+}
+.desktop-launcher-categories {
+  display: flex;
+  gap: 5px;
+  margin: 17px 0;
+  flex-wrap: wrap;
+}
+.desktop-launcher-categories button {
+  padding: 7px 12px;
+  font-size: 11px;
+  border-radius: 9px;
+}
+.desktop-launcher-categories button[aria-pressed='true'] {
+  background: var(--desktop-accent);
+  color: var(--desktop-accent-ink);
+}
+.desktop-launcher h3 {
+  font-size: 12px;
+  font-weight: 650;
+  margin: 19px 0 13px;
+  display: flex;
+  justify-content: space-between;
+}
+.desktop-launcher h3 > span {
+  opacity: 0.5;
+}
+.desktop-launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 7px;
+}
+.desktop-launcher-grid button {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 3px;
+  border-radius: 13px;
+  font-size: 10px;
+}
+.desktop-launcher-grid button:hover,
+.desktop-all-apps > div:hover {
+  background: var(--aurora-bg-subtle);
+}
+.desktop-all-apps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 18px;
+}
+.desktop-all-apps > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 11px;
+  padding: 7px;
+}
+.desktop-all-apps > div > button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  flex: 1;
+}
+.desktop-all-apps strong {
+  font-size: 12px;
+  font-weight: 550;
+  display: block;
+}
+.desktop-all-apps small {
+  font-size: 10px;
+  color: var(--aurora-text-muted);
+}
+.desktop-all-apps > div > button:last-child {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+}
+.desktop-launcher-recent {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.desktop-launcher-recent button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  padding: 6px 10px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 9px;
+}
+.desktop-launcher footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px solid var(--aurora-border);
+  font-size: 12px;
+}
+.desktop-launcher footer button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+[role='dialog']:has(.desktop-launcher) {
+  align-items: flex-end;
+  padding-bottom: 110px;
+  background: rgba(20, 30, 50, 0.08);
+}
+[data-os-dialog]:has(.desktop-launcher) {
+  backdrop-filter: blur(var(--desktop-blur, 24px));
+  background: color-mix(in srgb, var(--aurora-card) 90%, transparent) !important;
+  border-radius: 23px;
+}
+.desktop-context-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.desktop-context-actions button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border-radius: 9px;
+  font-size: 13px;
+  text-align: left;
+}
+.desktop-context-actions button:hover {
+  background: var(--aurora-bg-subtle);
+}
+.desktop-overview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.desktop-overview-card {
+  border: 1px solid var(--aurora-border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--aurora-bg-subtle);
+}
+.desktop-overview-card > button:first-child {
+  width: 100%;
+  text-align: left;
+}
+.desktop-window-preview {
+  height: 130px;
+  background: var(--aurora-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 10px;
+}
+.desktop-window-preview > span:last-child {
+  font-size: 10px;
+  color: var(--aurora-text-muted);
+}
+.desktop-overview-card strong,
+.desktop-overview-card small {
+  display: block;
+  padding: 0 12px;
+}
+.desktop-overview-card strong {
+  font-size: 12px;
+}
+.desktop-overview-card small {
+  font-size: 10px;
+  margin-top: 4px;
+  color: var(--aurora-text-muted);
+}
+.desktop-overview-card > button:last-child {
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--aurora-text-muted);
+}
+.desktop-control-centre {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+.desktop-control-centre label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.desktop-control-centre button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border-radius: 11px;
+  background: var(--aurora-bg-subtle);
+  font-size: 12px;
+  text-align: left;
+}
+.desktop-control-centre small {
+  display: block;
+  font-size: 10px;
+  opacity: 0.6;
+}
+.desktop-control-centre p {
+  font-size: 11px;
+  color: var(--aurora-text-muted);
+}
+.desktop-control-centre select {
+  padding: 7px;
+  border-radius: 8px;
+  background: var(--aurora-bg-subtle);
+}
+.desktop-settings-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--aurora-border);
+  background: var(--aurora-card);
+}
+.desktop-settings-tabs button {
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.desktop-settings-tabs button[aria-pressed='true'] {
+  background: var(--aurora-bg-subtle);
+  font-weight: 650;
+}
+.appearance-studio {
+  padding: 32px;
+  max-width: 1000px;
+  margin: auto;
+}
+.appearance-studio h1 {
+  font-size: 27px;
+  font-weight: 550;
+  letter-spacing: -0.035em;
+  margin: 10px 0;
+}
+.appearance-studio header > p {
+  font-size: 13px;
+  color: var(--aurora-text-muted);
+}
+.desktop-sync {
+  font-size: 10px;
+  display: block;
+  margin: 12px 0 28px;
+  color: var(--aurora-text-muted);
+}
+.appearance-studio h2 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 16px;
+}
+.appearance-themes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.appearance-themes button {
+  text-align: left;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: 15px;
+}
+.appearance-themes button[aria-pressed='true'] {
+  border-color: var(--desktop-accent);
+}
+.appearance-theme-preview {
+  height: 100px;
+  width: 100%;
+  display: block;
+  position: relative;
+  border-radius: 10px;
+  background-image: url('/brand/itemba-os-wallpaper.png');
+  background-size: cover;
+  background-blend-mode: multiply;
+  overflow: hidden;
+}
+.appearance-theme-preview > span {
+  position: absolute;
+  width: 57%;
+  height: 55%;
+  background: #ffffffb3;
+  top: 18%;
+  left: 21%;
+  border: 1px solid #ffffff80;
+  border-radius: 6px;
+  box-shadow: 0 5px 12px #0002;
+}
+.appearance-theme-preview > i {
+  position: absolute;
+  bottom: 8px;
+  left: 30%;
+  width: 40%;
+  height: 12px;
+  background: #ffffff95;
+  border: 1px solid #ffffff80;
+  border-radius: 4px;
+}
+.appearance-theme-preview > svg {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  border-radius: 50%;
+  background: #fff;
+  color: #333;
+  padding: 3px;
+}
+.appearance-themes strong {
+  display: block;
+  padding: 9px 5px 2px;
+  font-size: 11px;
+  font-weight: 550;
+}
+.appearance-section {
+  margin-top: 30px;
+  padding-top: 24px;
+  border-top: 1px solid var(--aurora-border);
+}
+.appearance-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.appearance-controls label {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.appearance-controls label:has(select),
+.appearance-controls label:has(input[type='range']) {
+  display: grid;
+  grid-template-columns: 1fr auto;
+}
+.appearance-controls select,
+.appearance-inline select,
+.appearance-save input {
+  border: 1px solid var(--aurora-border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: var(--aurora-card);
+  font-size: 12px;
+  color: var(--aurora-text);
+}
+.appearance-controls input[type='range'] {
+  grid-column: 1/-1;
+  width: 100%;
+  accent-color: var(--desktop-accent);
+}
+.appearance-controls input[type='color'] {
+  border: 0;
+  background: transparent;
+  width: 42px;
+  height: 30px;
+  margin-left: auto;
+}
+.appearance-controls input[type='checkbox'] {
+  accent-color: var(--desktop-accent);
+  height: 16px;
+  width: 16px;
+}
+.appearance-footnote,
+.appearance-section > p {
+  font-size: 11px;
+  color: var(--aurora-text-muted);
+  margin: 10px 0 14px;
+}
+.appearance-wallpapers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.appearance-wallpapers > div {
+  display: flex;
+  border: 1px solid var(--aurora-border);
+  border-radius: 8px;
+}
+.appearance-wallpapers button {
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.appearance-wallpapers button[aria-pressed='true'] {
+  background: var(--desktop-accent);
+  color: var(--desktop-accent-ink);
+}
+.appearance-upload {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  border: 1px solid var(--aurora-border);
+  padding: 10px 14px;
+  margin-top: 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.appearance-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.appearance-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  margin-left: 20px;
+}
+.appearance-presets {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.appearance-presets button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 9px;
+  font-size: 12px;
+}
+.appearance-presets i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+.appearance-save {
+  display: flex;
+  gap: 10px;
+}
+.appearance-save input {
+  min-width: 0;
+  flex: 1;
+}
+.appearance-save button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--desktop-accent);
+  color: var(--desktop-accent-ink);
+  padding: 9px 13px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.appearance-reset {
+  margin-top: 30px;
+  font-size: 12px;
+  color: var(--aurora-text-muted);
+  text-decoration: underline;
+}
+.desktop-erp {
+  display: flex;
+  min-height: 100%;
+}
+.desktop-erp-navigation {
+  width: 190px;
+  flex-shrink: 0;
+  background: var(--aurora-bg-subtle);
+  border-right: 1px solid var(--aurora-border);
+  padding: 18px 10px;
+  font-size: 12px;
+}
+.desktop-erp-navigation details {
+  padding-bottom: 8px;
+}
+.desktop-erp-navigation summary {
+  font-weight: 600;
+  padding: 8px;
+  cursor: pointer;
+}
+.desktop-erp-navigation a {
+  display: block;
+  padding: 7px 12px;
+  color: var(--aurora-text-secondary);
+  border-radius: 8px;
+}
+.desktop-erp-navigation a:hover {
+  background: var(--aurora-card);
+}
+.desktop-erp-content {
+  flex: 1;
+  min-width: 0;
+  container-type: inline-size;
+  padding: 16px;
+}
+.desktop-app-error {
+  padding: 40px;
+}
+.desktop-app-error h2 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+.desktop-app-error p {
+  font-size: 13px;
+  color: var(--aurora-text-muted);
+}
+.desktop-app-error button {
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--desktop-accent);
+  color: var(--desktop-accent-ink);
+  margin-top: 20px;
+  font-size: 13px;
+}
+.desktop-loading,
+.desktop-notice {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 18px;
+  background: var(--desktop-glass);
+  border: 1px solid var(--desktop-border);
+  border-radius: 12px;
+  z-index: 100;
+  font-size: 12px;
+}
+.desktop-notice button {
+  margin-left: 15px;
+  text-decoration: underline;
+}
+.desktop-skip {
+  position: absolute;
+  top: -100px;
+}
+.desktop-skip:focus {
+  top: 8px;
+  left: 50%;
+  padding: 10px;
+  background: var(--aurora-card);
+  z-index: 200;
+}
+.itemba-desktop button:focus-visible,
+.itemba-desktop a:focus-visible,
+.itemba-desktop input:focus-visible,
+.itemba-desktop select:focus-visible {
+  outline: 2px solid var(--desktop-ink);
+  outline-offset: 3px;
+}
+.desktop-window-content:has(.invoice-desk),
+.desktop-window-content:has(.business-workspace) {
+  background: var(--aurora-bg);
+}
+@media (max-width: 1200px) {
+  .desktop-widgets {
+    width: 220px;
+    right: 10px;
+  }
+  .desktop-greeting {
+    left: 18%;
+    max-width: 440px;
+  }
+  .desktop-greeting h1 {
+    font-size: 48px;
+  }
+}
+@media (max-width: 999px) {
+  .desktop-menubar {
+    padding: 0 12px;
+    gap: 12px;
+  }
+  .desktop-system-actions time {
+    display: none;
+  }
+  .desktop-workspace,
+  .itemba-desktop[data-dock='left'] .desktop-workspace,
+  .itemba-desktop[data-dock='right'] .desktop-workspace {
+    margin: 0;
+    height: calc(100dvh - 130px);
+  }
+  .desktop-window {
+    border-radius: 12px;
+  }
+  .desktop-home {
+    overflow: auto;
+    padding: 24px;
+  }
+  .desktop-greeting {
+    position: relative;
+    left: auto;
+    top: auto;
+    max-width: none;
+    padding: 5px 5px 20px;
+  }
+  .desktop-greeting h1 {
+    font-size: 40px;
+    margin: 14px 0;
+  }
+  .desktop-greeting button {
+    margin-top: 16px;
+  }
+  .desktop-shortcuts {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin: 15px 0;
+  }
+  .desktop-shortcut {
+    position: relative;
+    width: auto;
+    transform: none !important;
+  }
+  .desktop-shortcut-options {
+    opacity: 1;
+  }
+  .desktop-widgets {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
+    max-height: none;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    overflow: visible;
+  }
+  .desktop-personalise {
+    position: relative;
+    bottom: auto;
+    left: auto;
+    margin: 22px 0;
+  }
+  .itemba-desktop .desktop-dock,
+  .itemba-desktop[data-dock='left'] .desktop-dock,
+  .itemba-desktop[data-dock='right'] .desktop-dock {
+    flex-direction: row;
+    top: auto;
+    bottom: 10px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    padding: 9px 10px;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: calc(100vw - 16px);
+    border-radius: 20px;
+  }
+  .desktop-dock .os-glyph {
+    height: 42px;
+    width: 42px;
+    border-radius: 13px;
+  }
+  .desktop-dock button {
+    min-width: 42px;
+    min-height: 44px;
+  }
+  .itemba-desktop:not([data-dock='bottom']) .desktop-dock-divider {
+    width: 1px;
+    height: 30px;
+  }
+  .desktop-dock-tooltip {
+    display: none !important;
+  }
+  .desktop-traffic-lights button {
+    width: 24px;
+    height: 24px;
+  }
+  .desktop-traffic-lights svg {
+    opacity: 1;
+  }
+  .desktop-window-titlebar {
+    padding: 0 10px;
+  }
+  .desktop-overview {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .desktop-erp-navigation {
+    width: 145px;
+    padding: 12px 4px;
+  }
+  .appearance-studio {
+    padding: 22px;
+  }
+  .desktop-launcher-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  [role='dialog']:has(.desktop-launcher) {
+    padding-bottom: 95px;
+  }
+}
+@media (max-width: 550px) {
+  .desktop-current-app {
+    display: none;
+  }
+  .desktop-system-actions {
+    gap: 2px;
+  }
+  .desktop-menubar {
+    padding: 0 10px;
+  }
+  .desktop-brand strong {
+    font-size: 10px;
+  }
+  .desktop-brand {
+    gap: 6px;
+  }
+  .desktop-system-actions > button {
+    width: 29px;
+  }
+  .desktop-greeting h1 {
+    font-size: 34px;
+  }
+  .desktop-greeting p {
+    font-size: 13px;
+  }
+  .desktop-eyebrow {
+    font-size: 8px;
+  }
+  .desktop-shortcuts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .desktop-shortcut .os-glyph-large {
+    width: 52px;
+    height: 52px;
+  }
+  .desktop-widgets {
+    grid-template-columns: 1fr;
+  }
+  .desktop-widget {
+    padding: 16px;
+  }
+  .desktop-erp {
+    flex-direction: column;
+  }
+  .desktop-erp-navigation {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--aurora-border);
+    max-height: 130px;
+    overflow: auto;
+    display: flex;
+    gap: 10px;
+  }
+  .desktop-erp-navigation details {
+    min-width: 130px;
+  }
+  .desktop-all-apps {
+    grid-template-columns: 1fr;
+  }
+  .desktop-launcher-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .desktop-window-name strong {
+    font-size: 11px;
+  }
+  .desktop-window-name .os-glyph {
+    display: none;
+  }
+  .appearance-controls {
+    grid-template-columns: 1fr;
+  }
+  .appearance-themes {
+    gap: 10px;
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .appearance-studio {
+    padding: 20px 16px;
+  }
+  .appearance-studio h1 {
+    font-size: 23px;
+  }
+  .appearance-save {
+    flex-wrap: wrap;
+  }
+  .appearance-inline {
+    margin: 12px 0;
+  }
+  .desktop-settings-tabs {
+    padding: 10px;
+  }
+  .desktop-overview {
+    gap: 10px;
+  }
+  .desktop-window-preview {
+    height: 100px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .itemba-desktop *,
+  .itemba-desktop *::before,
+  .itemba-desktop *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+.itemba-desktop[data-reduced-motion='true'] * {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+}
+@media print {
+  .desktop-menubar,
+  .desktop-dock,
+  .desktop-home,
+  .desktop-window-titlebar,
+  .desktop-resize {
+    display: none !important;
+  }
+  .itemba-desktop,
+  .desktop-workspace {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+  .desktop-window {
+    display: none !important;
+  }
+  .desktop-window[data-active='true'] {
+    display: block !important;
+    position: static !important;
+    transform: none !important;
+    width: 100% !important;
+    height: auto !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+  .desktop-window-content {
+    overflow: visible !important;
+  }
+  .desktop-wallpaper {
+    display: none !important;
+  }
+}

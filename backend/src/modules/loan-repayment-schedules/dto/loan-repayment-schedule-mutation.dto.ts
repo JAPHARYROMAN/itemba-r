@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { LoanPaymentMethod, LoanRepaymentStatus } from '@prisma/client';
 import {
   IsDateString,
@@ -7,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
 } from 'class-validator';
 
 export class CreateLoanRepaymentScheduleDto {
@@ -27,26 +29,31 @@ export class CreateLoanRepaymentScheduleDto {
   @IsDateString()
   dueDate!: string;
 
-  @IsNumber()
-  principalAmount!: number;
+  @Transform(({ value }) => String(value))
+  @Matches(/^\d+(\.\d{1,2})?$/)
+  principalAmount!: string;
+
+  @IsOptional()
+  @Transform(({ value }) => String(value))
+  @Matches(/^\d+(\.\d{1,2})?$/)
+  interestAmount?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => String(value))
+  @Matches(/^\d+(\.\d{1,2})?$/)
+  feeAmount?: string;
 
   @IsOptional()
   @IsNumber()
-  interestAmount?: number;
-
-  @IsOptional()
-  @IsNumber()
-  feeAmount?: number;
-
-  @IsNumber()
-  totalAmount!: number;
+  totalAmount?: number;
 
   @IsOptional()
   @IsNumber()
   paidAmount?: number;
 
+  @IsOptional()
   @IsNumber()
-  outstandingAmount!: number;
+  outstandingAmount?: number;
 
   @IsOptional()
   @IsEnum(LoanRepaymentStatus)
@@ -62,8 +69,14 @@ export class CreateLoanRepaymentScheduleDto {
 }
 
 export class RecordLoanRepaymentDto {
-  @IsNumber()
-  amount!: number;
+  @Matches(/^[a-f0-9]{64}$/) allocationFingerprint!: string;
+  @IsUUID() requestId!: string;
+  @IsUUID() cashDeskAccountId!: string;
+  @IsOptional() @IsString() interestAccountId?: string;
+  @IsOptional() @IsString() feeAccountId?: string;
+  @Transform(({ value }) => String(value))
+  @Matches(/^\d+(\.\d{1,2})?$/)
+  amount!: string;
 
   @IsOptional()
   @IsDateString()

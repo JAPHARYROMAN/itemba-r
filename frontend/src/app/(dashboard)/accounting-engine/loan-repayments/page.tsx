@@ -1,18 +1,16 @@
 'use client';
+import '@/components/workspace/workspace.css';
+import { WorkspaceSplit } from '@/components/workspace/workspace-split';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import {
-  Btn,
-  Card,
-  FormInput,
-  FormSelect,
-  Modal,
-  PageHeader,
-  PageSpinner,
-  StatCard,
-  StatusBadge,
-} from '@/components/ui';
+import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, Modal, PageHeader, PageSpinner, PageToolbar, showToast, StatCard, StatusBadge } from '@/components/ui';
+import { LoanInstallmentModal } from '@/features/loans/loan-installment-modal';
+import { LoanPaymentAccounts, type PaymentAccounts } from '@/features/loans/loan-finance';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { unwrapList } from '@/lib/unwrap';
 
 interface Company {
@@ -57,6 +55,12 @@ interface LoanSchedule {
 }
 
 interface LoanPayment {
+  financialEvent?: {
+    principal: string;
+    interest: string;
+    fees: string;
+    reversedAt: string | null;
+  } | null;
   id: string;
   repaymentPaymentNumber: string;
   paymentDate: string;
@@ -97,18 +101,36 @@ function errorMessage(json: any, fallback: string) {
 }
 
 export default function LoanRepaymentsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('accounting_engine.dashboard');
+  const beginRequest = useRequestGuard();
   const [rows, setRows] = useState<LoanSchedule[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
-  const [payments, setPayments] = useState<LoanPayment[]>([]);
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccounts>({
+    cashDeskAccountId: '',
+    interestAccountId: '',
+    feeAccountId: '',
+  });
+  const paymentRequest = useRef<string | null>(null),
+    paymentPending = useRef(false);
+  const [paymentAck, setPaymentAck] = useState(false);
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<LoanSchedule | null>(null);
+  const paymentHistory = useWorkspaceResource<LoanPayment[]>(
+    `/loan-repayment-schedules/${selected?.id ?? ''}/payments`,
+    {},
+    !!selected,
+  );
+  const payments = unwrapList<LoanPayment>(paymentHistory.data);
   const [generating, setGenerating] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [generateForm, setGenerateForm] = useState({ companyId: '', loanId: '' });
   const [paymentForm, setPaymentForm] = useState({
@@ -120,16 +142,38 @@ export default function LoanRepaymentsPage() {
     reference: '',
   });
 
-  useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
-      .then((r) => r.json())
-      .then((j) => setCompanies(unwrapList<Company>(j)))
-      .catch(() => setCompanies([]));
-  }, []);
+  const preview = useWorkspaceResource<{
+    amount: string;
+    principal: string;
+    interest: string;
+    fees: string;
+    currency: string;
+    allocationFingerprint: string;
+  }>(
+    `/loan-repayment-schedules/${selected?.id || ''}/payment-preview`,
+    { amount: paymentForm.amount },
+    paymentOpen && !!selected && Number(paymentForm.amount) > 0,
+  );
 
   useEffect(() => {
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!controller.signal.aborted) setCompanies(unwrapList<Company>(j));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
+
+  useEffect(() => {
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
     const id = generateForm.companyId || companyId;
-    const loanParams = new URLSearchParams({ limit: '300' });
+    const loanParams = new URLSearchParams({ limit: '200' });
     const cashParams = new URLSearchParams({ isActive: 'true', limit: '200' });
     if (id) {
       loanParams.set('companyId', id);
@@ -137,61 +181,88 @@ export default function LoanRepaymentsPage() {
     }
 
     Promise.allSettled([
-      fetch(`/api/backend/loans?${loanParams}`).then((r) => r.json()),
-      id ? fetch(`/api/backend/cash-accounts?${cashParams}`).then((r) => r.json()) : Promise.resolve({ data: [] }),
+      fetch(`/api/backend/loans?${loanParams}`, { signal: controller.signal }).then((r) => r.json()),
+      id
+        ? fetch(`/api/backend/cash-accounts?${cashParams}`, { signal: controller.signal }).then((r) =>
+            r.json(),
+          )
+        : Promise.resolve({ data: [] }),
     ]).then(([loanResult, cashResult]) => {
+      if (controller.signal.aborted) return;
       setLoans(loanResult.status === 'fulfilled' ? unwrapList<Loan>(loanResult.value) : []);
-      setCashAccounts(cashResult.status === 'fulfilled' ? unwrapList<CashAccount>(cashResult.value) : []);
+      setCashAccounts(
+        cashResult.status === 'fulfilled' ? unwrapList<CashAccount>(cashResult.value) : [],
+      );
     });
-  }, [companyId, generateForm.companyId]);
+    return () => controller.abort();
+  }, [authLoading, canView, companyId, generateForm.companyId]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const params = new URLSearchParams({ limit: '200' });
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
-      const json = await fetch(`/api/backend/loan-repayment-schedules?${params}`).then((r) => r.json());
+      const response = await fetch(`/api/backend/loan-repayment-schedules?${params}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      const json = await response.json();
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(errorMessage(json, 'Unable to load repayment schedules'));
       const list = unwrapList<LoanSchedule>(json);
       setRows(list);
-      setSelected((current) => current ? list.find((row) => row.id === current.id) ?? current : null);
+      setSelected((current) =>
+        current ? (list.find((row) => row.id === current.id) ?? null) : null,
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load loan repayment schedules');
+      if (!request.current()) return;
+      setRows([]);
+      setSelected(null);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load loan repayment schedules');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId, status]);
+  }, [authLoading, beginRequest, canView, companyId, status]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const companyById = useMemo(() => new Map(companies.map((company) => [company.id, company])), [companies]);
+  const companyById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company])),
+    [companies],
+  );
   const loanById = useMemo(() => new Map(loans.map((loan) => [loan.id, loan])), [loans]);
-  const cashAccountById = useMemo(() => new Map(cashAccounts.map((account) => [account.id, account])), [cashAccounts]);
-  const dueCount = rows.filter((row) => ['DUE', 'OVERDUE', 'PARTIALLY_PAID'].includes(row.status)).length;
+  const cashAccountById = useMemo(
+    () => new Map(cashAccounts.map((account) => [account.id, account])),
+    [cashAccounts],
+  );
+  const dueCount = rows.filter((row) =>
+    ['DUE', 'OVERDUE', 'PARTIALLY_PAID'].includes(row.status),
+  ).length;
   const paidCount = rows.filter((row) => row.status === 'PAID').length;
   const outstandingTotal = rows.reduce((sum, row) => sum + Number(row.outstandingAmount ?? 0), 0);
 
   const loadPayments = async (schedule: LoanSchedule) => {
     setSelected(schedule);
+    paymentRequest.current = null;
+    setPaymentAck(false);
+    setPaymentAccounts({ cashDeskAccountId: '', interestAccountId: '', feeAccountId: '' });
     setPaymentForm((current) => ({
       ...current,
       amount: String(schedule.outstandingAmount ?? ''),
       currency: loanById.get(schedule.loanDebtId)?.currency ?? current.currency,
       cashAccountId: '',
     }));
-    try {
-      const json = await fetch(`/api/backend/loan-repayment-schedules/${schedule.id}/payments`).then((r) => r.json());
-      setPayments(unwrapList<LoanPayment>(json));
-    } catch {
-      setPayments([]);
-    }
   };
 
   const openGenerate = () => {
     setGenerateForm({ companyId, loanId: '' });
+    setError('');
     setGenerating(true);
   };
 
@@ -203,9 +274,12 @@ export default function LoanRepaymentsPage() {
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(`/api/backend/loan-repayment-schedules/generate/${generateForm.loanId}`, {
-        method: 'POST',
-      });
+      const response = await fetch(
+        `/api/backend/loan-repayment-schedules/generate/${generateForm.loanId}`,
+        {
+          method: 'POST',
+        },
+      );
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorMessage(json, 'Schedule generation failed'));
       setGenerating(false);
@@ -218,34 +292,56 @@ export default function LoanRepaymentsPage() {
   };
 
   const recordPayment = async () => {
+    if (paymentPending.current) return;
+    if (
+      !paymentAccounts.cashDeskAccountId ||
+      !preview.data ||
+      preview.error ||
+      preview.loading ||
+      !paymentAck
+    ) {
+      setError('Review the allocation and choose a connected paying account first.');
+      return;
+    }
     if (!selected || !paymentForm.amount || Number(paymentForm.amount) <= 0) {
       setError('Payment amount must be greater than zero');
       return;
     }
 
+    paymentPending.current = true;
+    paymentRequest.current ??= crypto.randomUUID();
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(`/api/backend/loan-repayment-schedules/${selected.id}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentDate: paymentForm.paymentDate,
-          amount: Number(paymentForm.amount),
-          currency: paymentForm.currency || 'TZS',
-          paymentMethod: paymentForm.paymentMethod,
-          cashAccountId: paymentForm.cashAccountId || undefined,
-          reference: paymentForm.reference || undefined,
-        }),
-      });
+      const response = await fetch(
+        `/api/backend/loan-repayment-schedules/${selected.id}/payments`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paymentDate: paymentForm.paymentDate,
+            amount: paymentForm.amount,
+            currency: preview.data.currency,
+            paymentMethod: paymentForm.paymentMethod,
+            requestId: paymentRequest.current,
+            allocationFingerprint: preview.data.allocationFingerprint,
+            ...paymentAccounts,
+            interestAccountId: paymentAccounts.interestAccountId || undefined,
+            feeAccountId: paymentAccounts.feeAccountId || undefined,
+            reference: paymentForm.reference || undefined,
+          }),
+        },
+      );
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorMessage(json, 'Payment failed'));
       setPaymentOpen(false);
       await load();
-      await loadPayments(selected);
+      paymentHistory.reload();
+      showToast('success', 'Repayment recorded');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payment failed');
     } finally {
+      paymentPending.current = false;
       setSaving(false);
     }
   };
@@ -254,74 +350,129 @@ export default function LoanRepaymentsPage() {
     ? loans.filter((loan) => loan.companyId === generateForm.companyId)
     : loans;
   const selectedCompanyId = selected?.companyId ?? companyId;
-  const availableCashAccounts = selectedCompanyId
-    ? cashAccounts.filter((account) => account.companyId === selectedCompanyId)
-    : cashAccounts;
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <PageHeader
+          title="Loan Repayment Schedules"
+          subtitle={authLoading ? 'Loading' : 'Access restricted'}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace accounting-workspace space-y-6">
       <PageHeader
         title="Loan Repayment Schedules"
         subtitle="Generate amortization schedules, inspect installments, and record repayment postings"
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Installments" value={rows.length} />
-        <StatCard label="Due / Partial" value={dueCount} />
-        <StatCard label="Paid" value={paidCount} />
-        <StatCard label="Outstanding" value={fmtMoney(outstandingTotal)} />
+        <StatCard countUp={false} label="Installments" value={rows.length} />
+        <StatCard countUp={false} label="Due / Partial" value={dueCount} />
+        <StatCard countUp={false} label="Paid" value={paidCount} />
+        <StatCard countUp={false} label="Outstanding" value={fmtMoney(outstandingTotal)} />
       </div>
 
-      <Card className="p-4">
-        <div className="grid md:grid-cols-[1fr_180px_auto] gap-3 items-end">
-          <FormSelect
-            label="Company"
-            value={companyId}
-            onChange={(e) => {
-              setCompanyId(e.target.value);
-              setSelected(null);
-              setPayments([]);
-            }}
-            placeholder="All companies"
-          >
-            {companies.map((company) => (
-              <option key={company.id} value={company.id}>{optionLabel(company)}</option>
-            ))}
-          </FormSelect>
-          <FormSelect label="Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="All statuses">
-            {['UPCOMING', 'DUE', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((item) => (
-              <option key={item} value={item}>{item}</option>
-            ))}
-          </FormSelect>
-          <Btn onClick={openGenerate}>Generate Schedule</Btn>
+      <PageToolbar
+        collapsibleFilters
+        activeFilterCount={[companyId, status].filter(Boolean).length}
+        filters={
+          <>
+            {' '}
+            <FormSelect
+              label="Company"
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                setSelected(null);
+              }}
+              placeholder="All companies"
+            >
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {optionLabel(company)}
+                </option>
+              ))}
+            </FormSelect>
+            <FormSelect
+              label="Status"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setSelected(null);
+              }}
+              placeholder="All statuses"
+            >
+              {['UPCOMING', 'DUE', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </FormSelect>
+          </>
+        }
+        actions={
+          <>
+            <Btn variant="secondary" onClick={() => void load()} disabled={loading}>
+              Refresh
+            </Btn>
+            <Btn variant="secondary" onClick={() => setCustomOpen(true)}>
+              Add installment
+            </Btn>
+            <Btn onClick={openGenerate}>Generate schedule</Btn>
+          </>
+        }
+      />
+
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
-      </Card>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {error}
+        </div>
+      )}
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_460px] gap-5">
+      <WorkspaceSplit selectedKey={selected?.id} onClose={() => setSelected(null)}>
         <Card className="overflow-hidden">
           {loading ? (
             <PageSpinner />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th className="px-4 py-3">Schedule</th>
-                    <th className="px-4 py-3">Company</th>
-                    <th className="px-4 py-3">Loan</th>
-                    <th className="px-4 py-3">Due Date</th>
-                    <th className="px-4 py-3 text-right">Total</th>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th className="px-4 py-3">Installment</th>
+                    <th className="px-4 py-3">Due</th>
                     <th className="px-4 py-3 text-right">Outstanding</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                      <td
+                        colSpan={4}
+                        className="px-4 py-8 text-center text-sm"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
                         No repayment schedules
                       </td>
                     </tr>
@@ -337,22 +488,33 @@ export default function LoanRepaymentsPage() {
                           style={{ borderColor: 'var(--aurora-border)' }}
                         >
                           <td className="px-4 py-3">
-                            <div className="font-mono text-xs">{row.repaymentScheduleNumber}</div>
-                            <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Installment {row.installmentNumber}</div>
+                            <strong>{loan ? loanLabel(loan) : row.loanDebtId}</strong>
+                            <div className="text-xs mt-1">
+                              {row.repaymentScheduleNumber} · #{row.installmentNumber}
+                            </div>
+                            <small>
+                              {optionLabel(
+                                companyById.get(row.companyId) ?? { name: row.companyId },
+                              )}
+                            </small>
                           </td>
-                          <td className="px-4 py-3">{optionLabel(companyById.get(row.companyId) ?? { name: row.companyId })}</td>
-                          <td className="px-4 py-3">{loan ? loanLabel(loan) : row.loanDebtId}</td>
-                          <td className="px-4 py-3">{fmtDate(row.dueDate)}</td>
-                          <td className="px-4 py-3 text-right font-mono">{fmtMoney(row.totalAmount, currency)}</td>
-                          <td className="px-4 py-3 text-right font-mono">{fmtMoney(row.outstandingAmount, currency)}</td>
-                          <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                          <td className="px-4 py-3">
+                            {fmtDate(row.dueDate)}
+                            <div className="text-xs mt-1">
+                              {fmtMoney(row.totalAmount, currency)} total
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-right">
+                            {fmtMoney(row.outstandingAmount, currency)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={row.status} />
                             <Link
                               href={`/group-control/loans-debts/loans/${row.loanDebtId}`}
-                              className="inline-flex rounded-md px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
+                              className="block mt-2 text-xs text-brand-600"
                               onClick={(event) => event.stopPropagation()}
                             >
-                              View Loan
+                              View loan
                             </Link>
                           </td>
                         </tr>
@@ -360,7 +522,7 @@ export default function LoanRepaymentsPage() {
                     })
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>
@@ -375,43 +537,118 @@ export default function LoanRepaymentsPage() {
               <div>
                 <div className="font-semibold">{selected.repaymentScheduleNumber}</div>
                 <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                  {loanById.get(selected.loanDebtId) ? loanLabel(loanById.get(selected.loanDebtId) as Loan) : selected.loanDebtId}
+                  {loanById.get(selected.loanDebtId)
+                    ? loanLabel(loanById.get(selected.loanDebtId) as Loan)
+                    : selected.loanDebtId}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <StatCard label="Principal" value={fmtMoney(selected.principalAmount, loanById.get(selected.loanDebtId)?.currency ?? 'TZS')} />
-                <StatCard label="Interest" value={fmtMoney(selected.interestAmount, loanById.get(selected.loanDebtId)?.currency ?? 'TZS')} />
-                <StatCard label="Paid" value={fmtMoney(selected.paidAmount, loanById.get(selected.loanDebtId)?.currency ?? 'TZS')} />
-                <StatCard label="Outstanding" value={fmtMoney(selected.outstandingAmount, loanById.get(selected.loanDebtId)?.currency ?? 'TZS')} />
+                <StatCard
+                  countUp={false}
+                  label="Principal"
+                  value={fmtMoney(
+                    selected.principalAmount,
+                    loanById.get(selected.loanDebtId)?.currency ?? 'TZS',
+                  )}
+                />
+                <StatCard
+                  countUp={false}
+                  label="Interest"
+                  value={fmtMoney(
+                    selected.interestAmount,
+                    loanById.get(selected.loanDebtId)?.currency ?? 'TZS',
+                  )}
+                />
+                <StatCard
+                  countUp={false}
+                  label="Paid"
+                  value={fmtMoney(
+                    selected.paidAmount,
+                    loanById.get(selected.loanDebtId)?.currency ?? 'TZS',
+                  )}
+                />
+                <StatCard
+                  countUp={false}
+                  label="Fees"
+                  value={fmtMoney(
+                    selected.feeAmount,
+                    loanById.get(selected.loanDebtId)?.currency ?? 'TZS',
+                  )}
+                />
+                <StatCard
+                  countUp={false}
+                  label="Outstanding"
+                  value={fmtMoney(
+                    selected.outstandingAmount,
+                    loanById.get(selected.loanDebtId)?.currency ?? 'TZS',
+                  )}
+                />
               </div>
               <div className="flex flex-wrap gap-2">
                 <Btn
                   size="sm"
                   variant="success"
                   disabled={selected.status === 'PAID' || selected.status === 'CANCELLED'}
-                  onClick={() => setPaymentOpen(true)}
+                  onClick={() => {
+                    setError('');
+                    setPaymentOpen(true);
+                  }}
                 >
                   Record Payment
                 </Btn>
               </div>
-              <div className="max-h-[340px] overflow-auto border rounded-lg" style={{ borderColor: 'var(--aurora-border)' }}>
-                {payments.length === 0 ? (
-                  <div className="p-4 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No payments recorded for this installment.</div>
+              <div
+                className="max-h-[340px] overflow-auto border rounded-lg"
+                style={{ borderColor: 'var(--aurora-border)' }}
+              >
+                {paymentHistory.error ? (
+                  <ErrorState message={paymentHistory.error} onRetry={paymentHistory.reload} />
+                ) : paymentHistory.loading ? (
+                  <PageSpinner />
+                ) : payments.length === 0 ? (
+                  <div className="p-4 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+                    No payments recorded for this installment.
+                  </div>
                 ) : (
                   payments.map((payment) => (
-                    <div key={payment.id} className="border-b p-3 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                    <div
+                      key={payment.id}
+                      className="border-b p-3 text-sm"
+                      style={{ borderColor: 'var(--aurora-border)' }}
+                    >
                       <div className="flex justify-between gap-3">
                         <div>
-                          <div className="font-medium">{payment.repaymentPaymentNumber}</div>
+                          <div className="font-medium">
+                            {payment.repaymentPaymentNumber}
+                            {payment.financialEvent?.reversedAt ? ' · Reversed' : ''}
+                          </div>
                           <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                             {fmtDate(payment.paymentDate)} - {payment.paymentMethod}
                           </div>
                         </div>
-                        <div className="text-right font-mono">{fmtMoney(payment.amount, payment.currency)}</div>
+                        <div className="text-right font-mono">
+                          {fmtMoney(payment.amount, payment.currency)}
+                        </div>
                       </div>
                       <div className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                        {payment.cashAccountId ? cashAccountLabel(cashAccountById.get(payment.cashAccountId) ?? { id: payment.cashAccountId, companyId: selected.companyId, accountName: payment.cashAccountId, accountType: 'Account' }) : 'No cash account selected'}
+                        {payment.cashAccountId
+                          ? cashAccountLabel(
+                              cashAccountById.get(payment.cashAccountId) ?? {
+                                id: payment.cashAccountId,
+                                companyId: selected.companyId,
+                                accountName: payment.cashAccountId,
+                                accountType: 'Account',
+                              },
+                            )
+                          : 'No cash account selected'}
                         {payment.reference ? ` - ${payment.reference}` : ''}
+                        {payment.financialEvent && (
+                          <p>
+                            Principal {fmtMoney(payment.financialEvent.principal, payment.currency)}{' '}
+                            · Interest {fmtMoney(payment.financialEvent.interest, payment.currency)}{' '}
+                            · Fees {fmtMoney(payment.financialEvent.fees, payment.currency)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))
@@ -420,8 +657,15 @@ export default function LoanRepaymentsPage() {
             </>
           )}
         </Card>
-      </div>
+      </WorkspaceSplit>
 
+      {customOpen && (
+        <LoanInstallmentModal
+          loans={loans}
+          onClose={() => setCustomOpen(false)}
+          onSaved={() => void load()}
+        />
+      )}
       {generating && (
         <Modal
           open
@@ -430,11 +674,20 @@ export default function LoanRepaymentsPage() {
           size="lg"
           footer={
             <>
-              <Btn variant="secondary" onClick={() => setGenerating(false)}>Cancel</Btn>
-              <Btn loading={saving} onClick={generateSchedule}>Generate</Btn>
+              <Btn variant="secondary" onClick={() => setGenerating(false)}>
+                Cancel
+              </Btn>
+              <Btn loading={saving} onClick={generateSchedule}>
+                Generate
+              </Btn>
             </>
           }
         >
+          {error && (
+            <p role="alert" className="workspace-error">
+              {error}
+            </p>
+          )}
           <div className="grid gap-3">
             <FormSelect
               label="Company"
@@ -442,7 +695,11 @@ export default function LoanRepaymentsPage() {
               onChange={(e) => setGenerateForm({ companyId: e.target.value, loanId: '' })}
               placeholder="All companies"
             >
-              {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {optionLabel(company)}
+                </option>
+              ))}
             </FormSelect>
             <FormSelect
               label="Loan"
@@ -465,26 +722,106 @@ export default function LoanRepaymentsPage() {
         <Modal
           open
           title="Record Loan Repayment"
-          onClose={() => setPaymentOpen(false)}
+          onClose={() => {
+            if (!saving) setPaymentOpen(false);
+          }}
           size="lg"
           footer={
             <>
-              <Btn variant="secondary" onClick={() => setPaymentOpen(false)}>Cancel</Btn>
-              <Btn loading={saving} onClick={recordPayment}>Record Payment</Btn>
+              <Btn variant="secondary" onClick={() => setPaymentOpen(false)}>
+                Cancel
+              </Btn>
+              <Btn
+                loading={saving}
+                disabled={
+                  !paymentAck ||
+                  !preview.data ||
+                  !!preview.error ||
+                  preview.loading ||
+                  !paymentAccounts.cashDeskAccountId
+                }
+                onClick={recordPayment}
+              >
+                Record Payment
+              </Btn>
             </>
           }
         >
           <div className="grid md:grid-cols-2 gap-3">
-            <FormInput label="Payment Date" type="date" value={paymentForm.paymentDate} onChange={(e) => setPaymentForm((f) => ({ ...f, paymentDate: e.target.value }))} />
-            <FormInput label="Amount" required type="number" value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))} />
-            <FormSelect label="Payment Method" value={paymentForm.paymentMethod} onChange={(e) => setPaymentForm((f) => ({ ...f, paymentMethod: e.target.value }))}>
-              {PAYMENT_METHODS.map((method) => <option key={method} value={method}>{method}</option>)}
+            <FormDateField
+              label="Payment Date"
+              value={paymentForm.paymentDate}
+              onChange={(value) => setPaymentForm((f) => ({ ...f, paymentDate: value }))}
+            />
+            <FormInput
+              label="Amount"
+              required
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={paymentForm.amount}
+              onChange={(e) => {
+                setPaymentAck(false);
+                setPaymentForm((f) => ({ ...f, amount: e.target.value }));
+              }}
+            />
+            <FormSelect
+              label="Payment Method"
+              value={paymentForm.paymentMethod}
+              onChange={(e) => setPaymentForm((f) => ({ ...f, paymentMethod: e.target.value }))}
+            >
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
             </FormSelect>
-            <FormInput label="Currency" value={paymentForm.currency} onChange={(e) => setPaymentForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))} />
-            <FormSelect label="Cash / Bank Account" value={paymentForm.cashAccountId} onChange={(e) => setPaymentForm((f) => ({ ...f, cashAccountId: e.target.value }))} placeholder="Optional account">
-              {availableCashAccounts.map((account) => <option key={account.id} value={account.id}>{cashAccountLabel(account)}</option>)}
-            </FormSelect>
-            <FormInput label="Reference" value={paymentForm.reference} onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))} />
+            <FormInput
+              label="Currency"
+              disabled
+              value={preview.data?.currency || paymentForm.currency}
+              onChange={(e) =>
+                setPaymentForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))
+              }
+            />
+            <FormInput
+              label="Reference"
+              value={paymentForm.reference}
+              onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))}
+            />
+          </div>
+          <div className="mt-4 space-y-3">
+            <LoanPaymentAccounts
+              companyId={selected.companyId}
+              currency={preview.data?.currency || paymentForm.currency}
+              value={paymentAccounts}
+              onChange={setPaymentAccounts}
+            />
+            {preview.loading && <p role="status">Reviewing allocation…</p>}
+            {(preview.error || error) && <p role="alert">{preview.error || error}</p>}
+            {preview.data && (
+              <div className="rounded-xl border p-3 text-sm">
+                <strong>Payment allocation</strong>
+                <p>
+                  Principal: {fmtMoney(preview.data.principal, preview.data.currency)} · Interest:{' '}
+                  {fmtMoney(preview.data.interest, preview.data.currency)} · Fees:{' '}
+                  {fmtMoney(preview.data.fees, preview.data.currency)}
+                </p>
+                <p>
+                  Allocated proportionally across the remaining installment amounts. Only principal
+                  reduces the loan.
+                </p>
+              </div>
+            )}
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={paymentAck}
+                onChange={(e) => setPaymentAck(e.target.checked)}
+              />
+              I have reviewed this allocation and confirmed the payment is not already recorded.
+              Save cash and accounting together.
+            </label>
           </div>
         </Modal>
       )}

@@ -1,0 +1,107 @@
+.fuel-launcher {
+  max-width: 880px;
+  width: 100%;
+  padding: 30px 35px 45px;
+  margin: 0 auto;
+}
+.fuel-launcher-heading {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 15px 40px;
+}
+.fuel-launcher-icon {
+  display: grid;
+  place-items: center;
+  width: 85px;
+  height: 85px;
+  border-radius: 23px;
+  background: #f29a47;
+  color: #fff;
+  box-shadow:
+    0 6px 20px #ca823529,
+    inset 0 1px 1px #ffffff80;
+  margin-bottom: 22px;
+}
+.fuel-launcher-heading h1 {
+  font-size: 32px;
+  letter-spacing: -0.04em;
+  font-weight: 550;
+}
+.fuel-launcher-heading p {
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+  margin-top: 10px;
+}
+.fuel-launcher dl dt {
+  text-transform: none;
+  font-size: 11px;
+}
+.fuel-launcher h2 {
+  font-size: 14px;
+}
+.fuel-launcher > div.overflow-hidden {
+  border-radius: 14px;
+  box-shadow: 0 5px 22px #202b3a04;
+}
+.fuel-launcher > div.overflow-hidden > section {
+  padding: 25px;
+}
+.fuel-launcher > div.overflow-hidden > div:last-child > p {
+  white-space: normal;
+  line-height: 1.7;
+}
+.fuel-launcher [role='status'] {
+  font-size: 12px;
+}
+.fuel-launcher[data-appearance='default'] .fuel-launcher-icon {
+  background: #527d92;
+}
+@media (min-width: 701px) and (max-height: 850px) {
+  .fuel-launcher {
+    padding: 24px 35px;
+  }
+  .fuel-launcher-heading {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 2px 18px;
+    text-align: left;
+    padding: 10px 0 24px;
+  }
+  .fuel-launcher-icon {
+    grid-row: span 2;
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+    margin: 0;
+  }
+  .fuel-launcher-heading h1 {
+    font-size: 28px;
+  }
+  .fuel-launcher-heading p {
+    margin: 0;
+  }
+}
+@media (max-width: 700px) {
+  .fuel-launcher {
+    padding: 22px 18px;
+  }
+  .fuel-launcher-heading {
+    padding: 18px 0 28px;
+  }
+  .fuel-launcher-icon {
+    width: 66px;
+    height: 66px;
+    border-radius: 19px;
+  }
+  .fuel-launcher-heading h1 {
+    font-size: 27px;
+  }
+  .fuel-launcher-heading p {
+    font-size: 12px;
+  }
+  .fuel-launcher > div.overflow-hidden > section {
+    padding: 20px;
+  }
+}

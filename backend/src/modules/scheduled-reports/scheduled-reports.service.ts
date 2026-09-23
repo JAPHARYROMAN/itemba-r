@@ -17,6 +17,45 @@ export class ScheduledReportsService {
     private readonly companyScope: CompanyScopeService,
   ) {}
 
+  async options(user: AuthUser) {
+    const canUseGroupScope = this.companyScope.isGroupScoped(user);
+    const companyIds = await this.companyScope.accessibleCompanyIds(user);
+    const [companies, definitions] = await Promise.all([
+      this.prisma.company.findMany({
+        where: {
+          deletedAt: null,
+          ...(canUseGroupScope ? {} : { id: { in: companyIds } }),
+        },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.reportDefinition.findMany({
+        where: {
+          deletedAt: null,
+          isActive: true,
+          OR: [{ requiredPermission: null }, { requiredPermission: { in: user.permissions } }],
+        },
+        select: { id: true, name: true, datasetKey: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    const supported = new Set([
+      'receivables_aging',
+      'payables_aging',
+      'inventory_summary',
+      'audit_trail',
+    ]);
+    return {
+      companies,
+      reports: definitions.map(({ datasetKey, ...definition }) => ({
+        ...definition,
+        snapshotSupported: supported.has(datasetKey),
+      })),
+      canUseGroupScope,
+      canUseSavedViews: user.permissions.includes('saved_report_views.view'),
+    };
+  }
+
   async findAll(user: AuthUser, query: any) {
     const { page = 1, limit = 20, companyId, reportDefinitionId, isActive } = query;
     const skip = (Number(page) - 1) * Number(limit);
@@ -299,7 +338,8 @@ export class ScheduledReportsService {
           mimeType: typeof summary.mimeType === 'string' ? summary.mimeType : null,
           sizeBytes: typeof summary.sizeBytes === 'number' ? summary.sizeBytes : null,
           dataset: typeof summary.dataset === 'string' ? summary.dataset : null,
-          downloadable: typeof summary.contentBase64 === 'string' && summary.contentBase64.length > 0,
+          downloadable:
+            typeof summary.contentBase64 === 'string' && summary.contentBase64.length > 0,
         };
       }),
       total,
@@ -406,7 +446,12 @@ export class ScheduledReportsService {
     scheduleCode: string;
     name: string;
     exportFormat: string;
-    reportDefinition: { reportCode: string; name: string; datasetKey: string; reportCategory: string };
+    reportDefinition: {
+      reportCode: string;
+      name: string;
+      datasetKey: string;
+      reportCategory: string;
+    };
     savedReportView?: { name: string; filters: any; columns: any } | null;
     companyId?: string | null;
   }): Promise<Array<Record<string, unknown>>> {
@@ -569,7 +614,12 @@ export class ScheduledReportsService {
   private unsupportedSnapshotRows(schedule: {
     scheduleCode: string;
     name: string;
-    reportDefinition: { reportCode: string; name: string; datasetKey: string; reportCategory: string };
+    reportDefinition: {
+      reportCode: string;
+      name: string;
+      datasetKey: string;
+      reportCategory: string;
+    };
     savedReportView?: { name: string } | null;
     companyId?: string | null;
   }): Array<Record<string, unknown>> {
@@ -636,7 +686,11 @@ export class ScheduledReportsService {
     datasetKey: string;
     rows: Array<Record<string, unknown>>;
   }): { filename: string; mimeType: string; content: Buffer } {
-    const safeName = input.reportName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'report';
+    const safeName =
+      input.reportName
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-|-$/g, '')
+        .toLowerCase() || 'report';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const columns = this.tableColumns(input.rows);
 
@@ -675,7 +729,10 @@ export class ScheduledReportsService {
         return {
           filename: `${safeName}-${stamp}.json`,
           mimeType: 'application/json',
-          content: Buffer.from(JSON.stringify({ dataset: input.datasetKey, rows: input.rows }, null, 2), 'utf8'),
+          content: Buffer.from(
+            JSON.stringify({ dataset: input.datasetKey, rows: input.rows }, null, 2),
+            'utf8',
+          ),
         };
     }
   }
@@ -690,11 +747,13 @@ export class ScheduledReportsService {
   }
 
   private renderExcelXml(columns: string[], rows: Array<Record<string, unknown>>) {
-    const cell = (value: string) => `<Cell><Data ss:Type="String">${this.escapeXml(value)}</Data></Cell>`;
+    const cell = (value: string) =>
+      `<Cell><Data ss:Type="String">${this.escapeXml(value)}</Data></Cell>`;
     const tableRows = [
       `<Row>${columns.map((col) => cell(col)).join('')}</Row>`,
       ...rows.map(
-        (row) => `<Row>${columns.map((col) => cell(this.sheetSafe(this.cellText(row[col])))).join('')}</Row>`,
+        (row) =>
+          `<Row>${columns.map((col) => cell(this.sheetSafe(this.cellText(row[col])))).join('')}</Row>`,
       ),
     ].join('');
     return `<?xml version="1.0"?>
@@ -708,10 +767,12 @@ export class ScheduledReportsService {
   }
 
   private renderSimplePdf(lines: string[]) {
-    const escapedLines = lines.flatMap((line) => this.wrapText(line, 88)).map((line, index) => {
-      const y = 760 - index * 16;
-      return `BT /F1 10 Tf 50 ${Math.max(y, 40)} Td (${this.escapePdf(line)}) Tj ET`;
-    });
+    const escapedLines = lines
+      .flatMap((line) => this.wrapText(line, 88))
+      .map((line, index) => {
+        const y = 760 - index * 16;
+        return `BT /F1 10 Tf 50 ${Math.max(y, 40)} Td (${this.escapePdf(line)}) Tj ET`;
+      });
     const objects = [
       '<< /Type /Catalog /Pages 2 0 R >>',
       '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -750,6 +811,9 @@ export class ScheduledReportsService {
   }
 
   private escapePdf(value: string) {
-    return String(value ?? '').replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    return String(value ?? '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
   }
 }

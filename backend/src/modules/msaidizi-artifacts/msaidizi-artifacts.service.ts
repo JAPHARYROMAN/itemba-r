@@ -59,6 +59,11 @@ import type {
   HostActionArtifactMaterialization,
   HostActionArtifactMaterializationRequest,
 } from '../msaidizi-tasks/msaidizi-input-bindings';
+import { parsePersistedInputBindings } from '../msaidizi-tasks/msaidizi-input-bindings';
+import {
+  parseDependencyLineage,
+  verifyDependencyLineage,
+} from '../msaidizi-tasks/msaidizi-dependency-lineage';
 import { CreateMsaidiziArtifactDto, QueryMsaidiziArtifactDto } from './dto/msaidizi-artifact.dto';
 import { AdaptiveHostFileExtension, AdaptiveHostFileMimeType } from './host-file-content-policy';
 
@@ -1378,6 +1383,7 @@ export class MsaidiziArtifactsService {
         id: binding.targetStepId,
         taskId: binding.taskId,
         planVersionId: binding.planVersionId,
+        target: 'HOST',
         status: MsaidiziTaskStepStatus.RUNNING,
         task: {
           mode: MsaidiziTaskMode.AUTOPILOT,
@@ -1415,6 +1421,46 @@ export class MsaidiziArtifactsService {
       throw new ConflictException('Host artifact device scope does not match the target step');
     }
 
+    // The request carries the target plan only. A caller cannot supply a
+    // historical plan ID: prior-plan authority must come from the target's
+    // immutable, server-created lineage and reviewed artifact binding.
+    let sourcePlanVersionId = binding.planVersionId;
+    const pins = parseDependencyLineage(target.dependencyLineage).filter(
+      (pin) => pin.sourceStepId === binding.sourceStepId,
+    );
+    if (pins.length > 1) throw new ConflictException('Host artifact lineage is ambiguous');
+    if (pins.length === 1) {
+      const pin = pins[0];
+      if (
+        pin.sourceAttemptId !== binding.sourceAttemptId ||
+        pin.dataClass !== binding.dataClass ||
+        target.dataClass !== binding.dataClass
+      )
+        throw new ConflictException('Host artifact lineage scope does not match the request');
+      const source = await verifyDependencyLineage(
+        this.prisma,
+        binding.taskId,
+        target.planVersion.version,
+        pin,
+      );
+      const artifacts = source.artifacts.filter(
+        (item) => jsonRecord(item.provenance).attemptId === pin.sourceAttemptId,
+      );
+      const reviewed = parsePersistedInputBindings(target.inputBindings).some(
+        (definition) =>
+          definition.source.kind === 'DEPENDENCY_ARTIFACT' &&
+          definition.source.dependencyStepKey === pin.dependencyStepKey &&
+          (definition.source.path ?? '') === '' &&
+          definition.dataClass === binding.dataClass &&
+          (definition.source.artifactId
+            ? definition.source.artifactId === binding.artifactId
+            : artifacts.length === 1 && artifacts[0].id === binding.artifactId),
+      );
+      if (!reviewed)
+        throw new ConflictException('Host artifact is not the exact reviewed lineage binding');
+      sourcePlanVersionId = pin.sourcePlanVersionId;
+    }
+
     const artifact = await this.prisma.msaidiziArtifact.findFirst({
       where: {
         id: binding.artifactId,
@@ -1432,7 +1478,7 @@ export class MsaidiziArtifactsService {
           is: {
             id: binding.sourceStepId,
             taskId: binding.taskId,
-            planVersionId: binding.planVersionId,
+            planVersionId: sourcePlanVersionId,
             status: MsaidiziTaskStepStatus.SUCCEEDED,
             toolAttempts: {
               some: {

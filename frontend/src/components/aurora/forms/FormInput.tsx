@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 /**
  * Shake the field once whenever a NEW error appears (not on every render with
@@ -30,7 +30,13 @@ function SuccessCheck({ right = '0.75rem' }: { right?: string }) {
       style={{ right, color: 'var(--aurora-success, #10b981)' }}
       aria-hidden="true"
     >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <svg
+        className="w-4 h-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2.5}
+      >
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
       </svg>
     </span>
@@ -49,21 +55,45 @@ interface FormInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
   success?: boolean;
 }
 
-export function FormInput({ label, error, help, required, fullWidth = true, prefix, suffix, success, id, className = '', ...props }: FormInputProps) {
-  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+export function FormInput({
+  label,
+  error,
+  help,
+  required,
+  fullWidth = true,
+  prefix,
+  suffix,
+  success,
+  id,
+  className = '',
+  ...props
+}: FormInputProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
   const shake = useShakeOnError(error);
   const showSuccess = !!success && !error;
   return (
     <div className={fullWidth ? 'w-full' : ''}>
       {label && (
-        <label htmlFor={inputId} className="block text-xs font-medium mb-1.5" style={{ color: 'var(--aurora-text-secondary)' }}>
+        <label
+          htmlFor={inputId}
+          className="block text-xs font-medium mb-1.5"
+          style={{ color: 'var(--aurora-text-secondary)' }}
+        >
           {label}
-          {required && <span className="ml-0.5" style={{ color: 'var(--aurora-danger)' }} aria-hidden>*</span>}
+          {required && (
+            <span aria-hidden="true" className="ml-0.5" style={{ color: 'var(--aurora-danger)' }}>
+              *
+            </span>
+          )}
         </label>
       )}
       <div className="relative">
         {prefix && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center" style={{ color: 'var(--aurora-text-muted)' }}>
+          <div
+            className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center"
+            style={{ color: 'var(--aurora-text-muted)' }}
+          >
             {prefix}
           </div>
         )}
@@ -73,21 +103,43 @@ export function FormInput({ label, error, help, required, fullWidth = true, pref
           aria-invalid={!!error}
           aria-required={required}
           className={`aurora-input ${prefix ? 'pl-9' : ''} ${suffix || showSuccess ? 'pr-9' : ''} ${className}${shake}`}
-          style={error ? { borderColor: 'var(--aurora-danger)' } : showSuccess ? { borderColor: 'var(--aurora-success, #10b981)' } : {}}
+          style={
+            error
+              ? { borderColor: 'var(--aurora-danger)' }
+              : showSuccess
+                ? { borderColor: 'var(--aurora-success, #10b981)' }
+                : {}
+          }
           {...props}
         />
         {suffix && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center" style={{ color: 'var(--aurora-text-muted)' }}>
+          <div
+            className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center"
+            style={{ color: 'var(--aurora-text-muted)' }}
+          >
             {suffix}
           </div>
         )}
         {showSuccess && !suffix && <SuccessCheck />}
       </div>
       {error && (
-        <p id={`${inputId}-error`} role="alert" className="text-xs mt-1" style={{ color: 'var(--aurora-danger)' }}>{error}</p>
+        <p
+          id={`${inputId}-error`}
+          role="alert"
+          className="text-xs mt-1"
+          style={{ color: 'var(--aurora-danger)' }}
+        >
+          {error}
+        </p>
       )}
       {help && !error && (
-        <p id={`${inputId}-help`} className="text-xs mt-1" style={{ color: 'var(--aurora-text-muted)' }}>{help}</p>
+        <p
+          id={`${inputId}-help`}
+          className="text-xs mt-1"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          {help}
+        </p>
       )}
     </div>
   );

@@ -1,9 +1,9 @@
 import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { LoanRepaymentSchedulesQueryDto } from '../../common/dto/resource-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { LoanRepaymentSchedulesService } from './loan-repayment-schedules.service';
+import { LoanLifecycleService } from '../loans/loan-lifecycle.service';
 import {
   CreateLoanRepaymentScheduleDto,
   RecordLoanRepaymentDto,
@@ -11,7 +11,16 @@ import {
 
 @Controller('loan-repayment-schedules')
 export class LoanRepaymentSchedulesController {
-  constructor(private readonly service: LoanRepaymentSchedulesService) {}
+  constructor(
+    private readonly service: LoanRepaymentSchedulesService,
+    private readonly lifecycle: LoanLifecycleService,
+  ) {}
+
+  @Get(':id/payment-preview')
+  @RequirePermissions('loan_schedules.view')
+  preview(@Param('id') id: string, @Query('amount') amount: string, @CurrentUser() user: AuthUser) {
+    return this.lifecycle.previewScheduled(id, amount, user);
+  }
 
   @Get()
   @RequirePermissions('loan_schedules.list')
@@ -20,10 +29,9 @@ export class LoanRepaymentSchedulesController {
   }
 
   @Get(':id')
-  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('loan_schedules.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
@@ -39,10 +47,9 @@ export class LoanRepaymentSchedulesController {
   }
 
   @Get(':id/payments')
-  @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('loan_schedules.view')
-  getPayments(@Param('id') id: string) {
-    return this.service.getPayments(id);
+  getPayments(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getPayments(id, user);
   }
 
   @Post(':id/payments')

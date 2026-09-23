@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, SkeletonCardGrid, StatCard, Btn, showToast } from '@/components/ui';
+import { Card, ErrorState, PageHeader, SkeletonCardGrid, StatCard, Btn } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface DashboardStats {
   overdueObligations: number;
@@ -78,34 +79,44 @@ const SECTIONS = [
 ];
 
 export default function CompliancePage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('compliance.dashboard.view');
+  const beginRequest = useRequestGuard();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  const canView = hasPermission('compliance.dashboard.view');
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setLoadError('');
+    try {
+      const response = await fetch('/api/backend/compliance/dashboard', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(`Compliance dashboard failed (${response.status})`);
+      const payload = await response.json();
+      if (!request.current()) return;
+      setStats(payload.data ?? null);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load compliance dashboard');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
-    let cancelled = false;
+    void load();
+  }, [load]);
 
-    async function loadComplianceDashboard() {
-      try {
-        const response = await fetch('/api/backend/compliance/dashboard');
-        if (!response.ok) throw new Error(`Compliance dashboard failed (${response.status})`);
-        const payload = await response.json();
-        if (!cancelled) setStats(payload.data ?? null);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load compliance dashboard';
-        showToast('error', 'Compliance dashboard unavailable', message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void loadComplianceDashboard();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Compliance" subtitle="Loading" />
+      </div>
+    );
+  }
 
   if (!canView) {
     return (
@@ -114,6 +125,15 @@ export default function CompliancePage() {
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">Access Restricted</p>
         </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Compliance" subtitle="Statutory & tax governance" />
+        <ErrorState message={loadError} onRetry={() => void load()} />
       </div>
     );
   }

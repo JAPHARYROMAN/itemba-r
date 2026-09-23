@@ -15,7 +15,7 @@ interface MetricCardProps {
 
 export function MetricCard({ title, value, unit, description, icon, trend, badge, footer, className = '', prominent = false }: MetricCardProps) {
   return (
-    <div className={`rounded-aurora-lg border p-6 ${prominent ? 'ring-1 ring-blue-500/20' : ''} ${className}`}
+    <div data-metric-card className={`rounded-aurora-lg border p-6 ${prominent ? 'ring-1 ring-blue-500/20' : ''} ${className}`}
       style={{
         background: prominent ? 'linear-gradient(135deg, var(--aurora-card) 0%, var(--aurora-primary-subtle) 100%)' : 'var(--aurora-card)',
         borderColor: prominent ? 'var(--aurora-border-focus)' : 'var(--aurora-border)',

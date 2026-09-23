@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { applyCompanyScopeWhere } from '../../../common/services';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { PayslipsQueryDto } from '../../../common/dto/resource-query.dto';
 
 /**
  * Aggregates everything a printable Tanzanian payslip needs. Pure read service —
@@ -161,6 +162,38 @@ export class PayslipsService {
       orderBy: { createdAt: 'asc' },
     });
     return Promise.all(entries.map((e) => this.getPayslip(e.id, user)));
+  }
+
+  /** Lightweight paginated view; the legacy full-document export remains unchanged. */
+  async getWorkspace(payrollRunId: string, user: AuthUser, query: PayslipsQueryDto) {
+    const runWhere: any = { id: payrollRunId, deletedAt: null };
+    applyCompanyScopeWhere(runWhere, user);
+    const run = await this.prisma.payrollRun.findFirst({
+      where: runWhere,
+      select: { id: true, payrollRunNumber: true, status: true, company: { select: { name: true } }, payrollPeriod: { select: { name: true } } },
+    });
+    if (!run) throw new NotFoundException('Payroll run not found');
+    const scope: any = { payrollRunId, deletedAt: null };
+    applyCompanyScopeWhere(scope, user);
+    const search = query.search?.trim();
+    const where = search ? { AND: [scope, { OR: [
+      { employee: { fullName: { contains: search, mode: 'insensitive' } } },
+      { employee: { employeeCode: { contains: search, mode: 'insensitive' } } },
+    ] }] } : scope;
+    const page = query.page ?? 1, limit = Math.min(query.limit ?? 20, 100);
+    const [data, total, aggregate] = await Promise.all([
+      this.prisma.payrollEntry.findMany({
+        where, skip: (page - 1) * limit, take: limit, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, basePay: true, grossPay: true, totalDeductions: true, netPay: true, status: true,
+          employee: { select: { fullName: true, employeeCode: true, department: { select: { name: true } }, position: { select: { title: true } } } } },
+      }),
+      this.prisma.payrollEntry.count({ where }),
+      this.prisma.payrollEntry.aggregate({ where: scope, _count: { _all: true }, _sum: { grossPay: true, totalDeductions: true, netPay: true } }),
+    ]);
+    return { data, total, page, limit, run, totals: {
+      employees: aggregate._count._all,
+      gross: Number(aggregate._sum.grossPay ?? 0), deductions: Number(aggregate._sum.totalDeductions ?? 0), net: Number(aggregate._sum.netPay ?? 0),
+    } };
   }
 }
 

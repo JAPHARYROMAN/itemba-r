@@ -6,6 +6,8 @@ import {
   IsOptional,
   IsString,
   Matches,
+  IsIn,
+  IsUUID,
 } from 'class-validator';
 import {
   BorrowerLevel,
@@ -17,6 +19,14 @@ import {
 } from '@prisma/client';
 
 export class CreateLoanDto {
+  @IsUUID() requestId!: string;
+  @IsIn(['NEW', 'OPENING']) fundingMode!: 'NEW' | 'OPENING';
+  @IsString() @IsNotEmpty() principalLedgerAccountId!: string;
+  @IsOptional() @IsUUID() cashDeskAccountId?: string;
+  @IsOptional() @IsString() openingOffsetAccountId?: string;
+  @IsOptional() @IsString() recognitionDate?: string;
+  @IsOptional() @IsString() fees?: string;
+  @IsOptional() @IsString() feeAccountId?: string;
   @IsOptional() @IsEnum(ObligationType) obligationType?: ObligationType;
   @IsOptional() @IsEnum(BorrowerLevel) borrowerLevel?: BorrowerLevel;
   @IsOptional() @IsString() companyId?: string;

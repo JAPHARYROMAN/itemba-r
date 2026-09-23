@@ -16,6 +16,14 @@ import {
   MsaidiziTaskBudgetDto,
   PlanMsaidiziTaskDto,
 } from '../msaidizi-tasks/dto/msaidizi-task.dto';
+import {
+  assertPlanInputBindings,
+  MsaidiziInputBindingError,
+} from '../msaidizi-tasks/msaidizi-input-bindings';
+import {
+  bindingAuthorityIssues,
+  bindingSafeDlpProjection,
+} from '../msaidizi-tasks/msaidizi-binding-authority';
 
 const TEMPLATE_KEYS = new Set([
   'title',
@@ -66,13 +74,6 @@ export function validateScheduleTaskTemplate(value: unknown): ValidatedScheduleT
       `taskTemplate contains unsupported fields: ${unexpected.sort().join(', ')}`,
     );
   }
-  if (containsPersistedSecretWithGeneratedUpdateAllowance(value)) {
-    throw new MsaidiziScheduleTemplateError(
-      'TEMPLATE_CONTAINS_SECRET',
-      'taskTemplate contains credential-like data; use a supervisor-owned secret reference',
-    );
-  }
-
   const candidate = plainToInstance(PlanMsaidiziTaskDto, {
     title: value.title,
     objective: value.objective,
@@ -97,6 +98,25 @@ export function validateScheduleTaskTemplate(value: unknown): ValidatedScheduleT
   }
 
   validateGraph(candidate.steps);
+  try {
+    assertPlanInputBindings(candidate.steps, candidate.inputs);
+  } catch (error) {
+    if (error instanceof MsaidiziInputBindingError) {
+      throw new MsaidiziScheduleTemplateError(error.code, error.message);
+    }
+    throw error;
+  }
+  const authorityIssue = bindingAuthorityIssues(candidate.steps, candidate.inputs)[0];
+  if (authorityIssue)
+    throw new MsaidiziScheduleTemplateError(authorityIssue.code, authorityIssue.message);
+  // Only closed-schema, authority-checked bindings may exempt exact null
+  // placeholders and opaque handles from the sensitive-key heuristic.
+  if (containsPersistedSecretWithGeneratedUpdateAllowance(bindingSafeDlpProjection(candidate))) {
+    throw new MsaidiziScheduleTemplateError(
+      'TEMPLATE_CONTAINS_SECRET',
+      'taskTemplate contains credential-like data; use a supervisor-owned secret reference',
+    );
+  }
   return {
     title: candidate.title.trim(),
     objective: candidate.objective.trim(),

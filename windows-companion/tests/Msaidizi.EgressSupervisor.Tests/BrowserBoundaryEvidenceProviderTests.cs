@@ -564,11 +564,13 @@ public sealed partial class EgressSupervisorEngineTests
       receipt.Receipt.ChargedExternalEgressBytes);
   }
 
-  [Fact]
-  public async Task RejectingProductionProviderCannotReserveManagedBrowser()
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task RejectingProductionProviderCannotReserveManagedBrowser(bool useConstructorDefault)
   {
     using var fixture = CreateBrowserFixture(
-      new RejectingBrowserBoundaryEvidenceProvider());
+      useConstructorDefault ? null : new RejectingBrowserBoundaryEvidenceProvider());
     await fixture.Engine.InitializeAsync(CancellationToken.None);
 
     var error = await Assert.ThrowsAsync<EgressSupervisorException>(() =>
@@ -619,7 +621,7 @@ public sealed partial class EgressSupervisorEngineTests
   }
 
   private BrowserFixture CreateBrowserFixture(
-    IBrowserBoundaryEvidenceProvider provider,
+    IBrowserBoundaryEvidenceProvider? provider,
     TestSigningKeys? signingKeys = null,
     string? journalPath = null,
     string? argumentsJsonOverride = null)

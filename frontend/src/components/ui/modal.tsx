@@ -1,9 +1,66 @@
 'use client';
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+let scrollLocks = 0;
+let originalOverflow = '';
+
+const PortalContext = createContext(false);
+const WindowPortalContext = createContext<{ target: HTMLElement | null; active: boolean } | null>(
+  null,
+);
+export function WindowModalProvider({
+  target,
+  active,
+  children,
+}: {
+  target: HTMLElement | null;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const value = useMemo(() => ({target,active}),[target,active]);
+  return (
+    <WindowPortalContext.Provider value={value}>
+      {children}
+    </WindowPortalContext.Provider>
+  );
+}
+/** Workspace windows must not clip dialogs when their content uses container queries. */
+export function ModalPortalProvider({ children }: { children: React.ReactNode }) {
+  return <PortalContext.Provider value>{children}</PortalContext.Provider>;
+}
+
+/** Share the system layer with confirmations and other workspace dialogs. */
+export function ModalPortal({ children }: { children: React.ReactNode }) {
+  const portal = useContext(PortalContext);
+  const windowPortal = useContext(WindowPortalContext);
+  if (windowPortal?.target)
+    return createPortal(<div className="os-window-layer">{children}</div>, windowPortal.target);
+  return portal && typeof document !== 'undefined'
+    ? createPortal(<div className="os-system-layer">{children}</div>, document.body)
+    : children;
+}
+
+function availableControls(panel: HTMLElement) {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((control) => {
+    let current: HTMLElement | null = control;
+    while (current && current !== panel) {
+      if (
+        current.hidden ||
+        current.inert ||
+        getComputedStyle(current).display === 'none' ||
+        getComputedStyle(current).visibility === 'hidden'
+      )
+        return false;
+      current = current.parentElement;
+    }
+    return true;
+  });
+}
 
 interface ModalProps {
   open: boolean;
@@ -18,21 +75,36 @@ interface ModalProps {
   children: React.ReactNode;
   /** Buttons rendered in the footer row */
   footer?: React.ReactNode;
+  onChangeCapture?: React.FormEventHandler<HTMLDivElement>;
+  placement?: 'center' | 'right';
+  /** Stable trigger when this dialog opens from a menu or another temporary surface. */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 const SIZE_MAP: Record<string, string> = {
-  sm:  'max-w-sm',
-  md:  'max-w-lg',
-  lg:  'max-w-2xl',
-  xl:  'max-w-3xl',
+  sm: 'max-w-sm',
+  md: 'max-w-lg',
+  lg: 'max-w-2xl',
+  xl: 'max-w-3xl',
   '2xl': 'max-w-4xl',
   '3xl': 'max-w-6xl',
 };
 
 export function Modal({
-  open, onClose, title, subtitle, size = 'md',
-  dismissOnBackdrop = true, children, footer,
+  open,
+  onClose,
+  title,
+  subtitle,
+  size = 'md',
+  dismissOnBackdrop = true,
+  children,
+  footer,
+  onChangeCapture,
+  placement = 'center',
+  returnFocusRef,
 }: ModalProps) {
+  const portal = useContext(PortalContext);
+  const windowPortal = useContext(WindowPortalContext);
   const [rendered, setRendered] = useState(open);
   const closing = rendered && !open;
   const titleId = useId();
@@ -41,6 +113,9 @@ export function Modal({
 
   useEffect(() => {
     if (open) {
+      // Capture the trigger before an autoFocus child mounts. Capturing after
+      // mounting would remember the dialog input instead of the outside trigger.
+      if (!rendered) restoreFocusRef.current = document.activeElement as HTMLElement | null;
       setRendered(true);
       return;
     }
@@ -52,24 +127,29 @@ export function Modal({
 
   // Focus management: remember the trigger, focus the first control on open, restore on close
   useEffect(() => {
-    if (!open) return;
-    restoreFocusRef.current = (document.activeElement as HTMLElement) ?? null;
-    const frame = window.requestAnimationFrame(() => {
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusable = panel.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-      (focusable ?? panel).focus();
-    });
+    // The first open render still returns null while the entrance surface mounts.
+    if (!open || !rendered || windowPortal?.active === false) return;
+    if (!restoreFocusRef.current)
+      restoreFocusRef.current = (document.activeElement as HTMLElement) ?? null;
+    const panel = panelRef.current;
+    const focusable = panel ? availableControls(panel)[0] : null;
+    const returnTarget = returnFocusRef?.current ?? restoreFocusRef.current;
+    if (!panel?.contains(document.activeElement)) (focusable ?? panel)?.focus();
     return () => {
-      window.cancelAnimationFrame(frame);
-      restoreFocusRef.current?.focus?.();
+      if (!windowPortal || panel?.contains(document.activeElement)) returnTarget?.focus?.();
+      restoreFocusRef.current = null;
     };
-  }, [open]);
+  }, [open, rendered, returnFocusRef, windowPortal]);
 
   // ESC to close + trap Tab focus within the dialog
   useEffect(() => {
-    if (!open) return;
+    if (!open || windowPortal?.active === false) return;
     function onKey(e: KeyboardEvent) {
+      if (windowPortal && !windowPortal.target?.contains(e.target as Node)) return;
+      // A nested confirmation owns keyboard focus until it is dismissed.
+      const activeDialog =
+        e.target instanceof Element ? e.target.closest('[role="dialog"], dialog') : null;
+      if (activeDialog && activeDialog !== panelRef.current?.closest('[role="dialog"]')) return;
       if (e.key === 'Escape') {
         onClose();
         return;
@@ -77,7 +157,7 @@ export function Modal({
       if (e.key !== 'Tab') return;
       const panel = panelRef.current;
       if (!panel) return;
-      const nodes = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      const nodes = availableControls(panel);
       if (nodes.length === 0) {
         e.preventDefault();
         panel.focus();
@@ -98,33 +178,39 @@ export function Modal({
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, windowPortal]);
 
   // Prevent body scroll while open
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => { document.body.style.overflow = ''; };
-  }, [open]);
+    if (!open || windowPortal) return;
+    if (scrollLocks === 0) originalOverflow = document.body.style.overflow;
+    scrollLocks += 1;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      scrollLocks -= 1;
+      if (scrollLocks === 0) document.body.style.overflow = originalOverflow;
+    };
+  }, [open, windowPortal]);
 
   if (!rendered) return null;
 
-  return (
+  const surface = (
     <div
-      className={`fixed inset-0 z-[1200] flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
+      onChangeCapture={onChangeCapture}
+      className={`fixed inset-0 z-[1200] flex ${placement === 'right' ? 'justify-end' : 'items-center justify-center p-2 sm:p-4'} ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
       style={{ background: 'var(--aurora-overlay)' }}
       onClick={dismissOnBackdrop ? onClose : undefined}
       role="dialog"
-      aria-modal="true"
+      aria-modal={windowPortal ? undefined : true}
       aria-labelledby={titleId}
+      aria-hidden={closing || undefined}
+      inert={closing}
     >
       <div
         ref={panelRef}
+        data-os-dialog
         tabIndex={-1}
-        className={`relative w-full ${SIZE_MAP[size]} rounded-2xl shadow-2xl flex flex-col max-h-[92vh] outline-none ${
+        className={`relative w-full ${SIZE_MAP[size]} ${placement === 'right' ? 'h-full !max-h-full' : 'rounded-2xl'} shadow-2xl flex flex-col max-h-[92dvh] outline-none ${
           closing ? 'animate-scale-out' : 'animate-scale-in'
         }`}
         style={{
@@ -136,18 +222,29 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 px-6 pt-5 pb-4 border-b" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          data-dialog-header
+          className="flex shrink-0 items-start justify-between gap-3 px-4 sm:px-6 pt-5 pb-4 border-b"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <div className="min-w-0">
-            <h2 id={titleId} className="text-[16px] font-semibold leading-snug truncate" style={{ color: 'var(--aurora-text)' }}>
+            <h2
+              id={titleId}
+              className="text-[16px] font-semibold leading-snug break-words"
+              style={{ color: 'var(--aurora-text)' }}
+            >
               {title}
             </h2>
             {subtitle && (
-              <p className="text-[12px] mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>{subtitle}</p>
+              <p className="text-[12px] mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>
+                {subtitle}
+              </p>
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--aurora-bg-subtle)]"
+            className="-mt-2 -mr-2 flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-xl transition-colors hover:bg-[var(--aurora-bg-subtle)]"
             style={{ color: 'var(--aurora-text-muted)' }}
             aria-label="Close"
           >
@@ -156,14 +253,18 @@ export function Modal({
         </div>
 
         {/* Body — scrollable */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div
+          data-dialog-body
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 py-5"
+        >
           {children}
         </div>
 
         {/* Footer */}
         {footer && (
           <div
-            className="flex items-center justify-end gap-2 px-6 py-4 border-t"
+            data-dialog-footer
+            className="flex shrink-0 flex-wrap items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t"
             style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
           >
             {footer}
@@ -172,4 +273,9 @@ export function Modal({
       </div>
     </div>
   );
+  if (windowPortal?.target)
+    return createPortal(<div className="os-window-layer">{surface}</div>, windowPortal.target);
+  return portal && typeof document !== 'undefined'
+    ? createPortal(<div className="os-system-layer">{surface}</div>, document.body)
+    : surface;
 }

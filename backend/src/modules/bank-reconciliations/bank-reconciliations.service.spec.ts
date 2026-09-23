@@ -54,6 +54,18 @@ function makeService(opts: {
     cashAccount: {
       findFirst: jest.fn(async () => ({
         accountType: 'BANK',
+        currency: 'TZS',
+        isActive: true,
+        companyId: COMPANY_ID,
+        ledgerAccountId: CASH_CHART_ID,
+        ledgerAccount: {
+          id: CASH_CHART_ID,
+          companyId: COMPANY_ID,
+          accountType: 'ASSET',
+          isActive: true,
+          divisionId: null,
+          branchId: null,
+        },
         divisionId: 'division-1',
         branchId: 'branch-1',
       })),
@@ -63,11 +75,15 @@ function makeService(opts: {
       findUniqueOrThrow: jest.fn(async ({ where }: any) => ({
         id: where.id,
         companyId: COMPANY_ID,
+        accountId: CASH_CHART_ID,
+        journalEntry: { status: 'POSTED', deletedAt: null },
         debit: new Prisma.Decimal(125),
         credit: new Prisma.Decimal(0),
       })),
     },
     bankReconciliationMatch: {
+      count: jest.fn(async () => 0),
+      findMany: jest.fn(async () => []),
       create: jest.fn(async ({ data }: any) => ({ id: 'match-created-1', ...data })),
       deleteMany: jest.fn(async () => ({ count: 0 })),
     },
@@ -75,6 +91,10 @@ function makeService(opts: {
       update: jest.fn(async ({ data }: any) => ({ id: 'line-1', ...data })),
     },
   } as any;
+  prisma.$queryRaw = jest.fn(async () => []);
+  prisma.$transaction = jest.fn(async (callback: (tx: any) => Promise<unknown>) =>
+    callback(prisma),
+  );
 
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const postingEngine = {
@@ -199,8 +219,40 @@ describe('BankReconciliationsService.recomputeBalances signing', () => {
 });
 
 describe('BankReconciliationsService manual mutation governance', () => {
+  it('does not auto-match an opposite direction or reuse one journal line for two deposits', async () => {
+    const deposit = {
+      id: 'l1',
+      matched: false,
+      transactionDate: new Date('2026-09-18'),
+      debitAmount: new Prisma.Decimal(0),
+      creditAmount: new Prisma.Decimal(125),
+    };
+    const candidate = {
+      id: 'j1',
+      debit: new Prisma.Decimal(0),
+      credit: new Prisma.Decimal(125),
+      journalEntry: { referenceType: null },
+    };
+    const { service, prisma } = makeService({
+      findOneReconciliation: baseReconciliation({
+        statementLines: [deposit, { ...deposit, id: 'l2' }],
+      }),
+      recomputeReconciliation: baseReconciliation(),
+      candidates: [candidate],
+    });
+    expect((await service.runMatching(RECON_ID, user)).summary.autoMatched).toBe(0);
+    candidate.debit = new Prisma.Decimal(125);
+    candidate.credit = new Prisma.Decimal(0);
+    expect((await service.runMatching(RECON_ID, user)).summary.autoMatched).toBe(1);
+    expect(prisma.bankReconciliationMatch.create).toHaveBeenCalledTimes(1);
+  });
   it('attributes a manual match to the exact statement line and reconciliation company', async () => {
-    const statementLine = { id: 'line-manual', matched: false };
+    const statementLine = {
+      id: 'line-manual',
+      matched: false,
+      debitAmount: new Prisma.Decimal(0),
+      creditAmount: new Prisma.Decimal(125),
+    };
     const { service, auditLogs } = makeService({
       findOneReconciliation: baseReconciliation({ statementLines: [statementLine] }),
       recomputeReconciliation: baseReconciliation({
@@ -252,7 +304,7 @@ describe('BankReconciliationsService manual mutation governance', () => {
 });
 
 describe('BankReconciliationsService.runMatching account resolution', () => {
-  it('queries journal lines by the role-resolved ChartOfAccount id, not the CashAccount id', async () => {
+  it('queries journal lines by the dedicated mapped ChartOfAccount id, not the CashAccount id', async () => {
     const statementLine = {
       id: 'line-1',
       matched: false,
@@ -273,7 +325,7 @@ describe('BankReconciliationsService.runMatching account resolution', () => {
     await service.runMatching(RECON_ID, user);
 
     // Resolver was asked for the BANK role (cashAccount.accountType === 'BANK').
-    expect(accountResolver.resolve).toHaveBeenCalledWith(COMPANY_ID, 'BANK');
+    expect(accountResolver.resolve).not.toHaveBeenCalled();
 
     expect(prisma.journalEntryLine.findMany).toHaveBeenCalledTimes(1);
     const findManyArg = prisma.journalEntryLine.findMany.mock.calls[0][0];

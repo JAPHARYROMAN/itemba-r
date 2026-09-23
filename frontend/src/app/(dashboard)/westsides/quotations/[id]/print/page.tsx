@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { DocumentArtifactButton, DocumentPrintButton } from '@/components/documents';
 import { backendGet } from '@/lib/api-client';
-import { Card, PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { splitLinesForPrint } from './page-budget';
 
 /**
@@ -81,23 +84,39 @@ interface Quotation {
 export default function QuotationPrintPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id as string;
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('quotations.view');
+  const beginRequest = useRequestGuard();
   const [record, setRecord] = useState<Quotation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const generatedAt = useMemo(() => new Date(), []);
 
-  useEffect(() => {
-    if (!id) return;
+  const load = useCallback(async () => {
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
-    backendGet<Quotation>(`/westsides/quotations/${id}`)
-      .then(setRecord)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Load failed'))
-      .finally(() => setLoading(false));
-  }, [id]);
+    try {
+      const next = await backendGet<Quotation>(`/westsides/quotations/${id}`, { signal: request.signal });
+      if (!request.current()) return;
+      setRecord(next);
+    } catch (err) {
+      if (!request.current()) return;
+      setError(err instanceof Error ? err.message : 'Load failed');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, id]);
 
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (authLoading) return <PageSpinner />;
+  if (!canView) return <ErrorState message="Access Restricted" />;
   if (loading) return <PageSpinner />;
-  if (error) return <ErrorCard message={error} />;
+  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!record) return null;
 
   const lines = record.lines ?? [];
@@ -357,7 +376,7 @@ function LineTable({
 }) {
   const numeric = new Set(['Qty', 'Unit Price', 'Discount', 'Tax', 'Amount']);
   return (
-    <table className="quotation-table mt-[3mm] w-full border-collapse text-[7.5pt]">
+    <WorkspaceTable className="quotation-table mt-[3mm] w-full border-collapse text-[7.5pt]">
       <thead>
         <tr className="bg-slate-100">
           {columns.map((column) => (
@@ -397,7 +416,7 @@ function LineTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </WorkspaceTable>
   );
 }
 
@@ -461,16 +480,6 @@ function DocumentFooter({
     </footer>
   );
 }
-
-function ErrorCard({ message }: { message: string }) {
-  return (
-    <div className="p-6">
-      <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{message}</Card>
-    </div>
-  );
-}
-
-// ─── Formatting ───────────────────────────────────────────────────────────────
 
 function labelise(value: string) {
   return value

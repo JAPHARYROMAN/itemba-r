@@ -28,6 +28,7 @@ export class EmploymentDisputesService {
 
   private include() {
     return {
+      company: { select: { id: true, name: true } },
       employee: {
         select: {
           id: true,
@@ -49,16 +50,20 @@ export class EmploymentDisputesService {
     };
   }
 
-  async findAll(query: {
-    page?: number;
-    limit?: number;
-    companyId?: string;
-    divisionId?: string;
-    branchId?: string;
-    employeeId?: string;
-    status?: string;
-    directToGroupHr?: boolean;
-  }, user: AuthUser) {
+  async findAll(
+    query: {
+      page?: number;
+      limit?: number;
+      companyId?: string;
+      divisionId?: string;
+      branchId?: string;
+      employeeId?: string;
+      status?: string;
+      search?: string;
+      directToGroupHr?: boolean;
+    },
+    user: AuthUser,
+  ) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
     const where: Record<string, unknown> = { deletedAt: null };
@@ -67,6 +72,14 @@ export class EmploymentDisputesService {
     if (query.branchId) where.branchId = query.branchId;
     if (query.employeeId) where.employeeId = query.employeeId;
     if (query.status) where.status = query.status;
+    const search = query.search?.trim();
+    if (search)
+      where.OR = [
+        { disputeNumber: { contains: search, mode: 'insensitive' } },
+        { summary: { contains: search, mode: 'insensitive' } },
+        { employee: { fullName: { contains: search, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains: search, mode: 'insensitive' } } },
+      ];
     if (query.directToGroupHr !== undefined) where.directToGroupHr = query.directToGroupHr;
     const [data, total] = await Promise.all([
       this.prisma.employmentDispute.findMany({
@@ -201,6 +214,17 @@ export class EmploymentDisputesService {
 
   async update(id: string, dto: UpdateEmploymentDisputeDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
+    if (
+      (dto.companyId !== undefined && dto.companyId !== existing.companyId) ||
+      (dto.employeeId !== undefined && dto.employeeId !== existing.employeeId)
+    )
+      throw new BadRequestException('The employee and company of a dispute cannot be changed.');
+    if (
+      dto.raisedAt !== undefined &&
+      (!dto.raisedAt || !Number.isFinite(new Date(dto.raisedAt).getTime()))
+    )
+      throw new BadRequestException('A valid raised date is required.');
     const data: Record<string, unknown> = {};
     if (dto.type !== undefined) data.type = dto.type;
     if (dto.summary !== undefined) data.summary = dto.summary;
@@ -225,6 +249,7 @@ export class EmploymentDisputesService {
 
   async startMediation(id: string, dto: MediateDisputeDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     if (!['RAISED'].includes(existing.status)) {
       throw new BadRequestException('Only RAISED disputes can move to internal mediation');
     }
@@ -251,6 +276,7 @@ export class EmploymentDisputesService {
 
   async referToCma(id: string, dto: ReferCmaDisputeDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     if (!['RAISED', 'INTERNAL_MEDIATION'].includes(existing.status)) {
       throw new BadRequestException('Dispute cannot be referred to CMA in its current status');
     }
@@ -279,6 +305,7 @@ export class EmploymentDisputesService {
 
   async resolve(id: string, dto: ResolveDisputeDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     if (['RESOLVED', 'DISMISSED', 'WITHDRAWN'].includes(existing.status)) {
       throw new BadRequestException('Dispute is already closed');
     }
@@ -307,6 +334,7 @@ export class EmploymentDisputesService {
 
   async withdraw(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     if (['RESOLVED', 'DISMISSED', 'WITHDRAWN'].includes(existing.status)) {
       throw new BadRequestException('Dispute is already closed');
     }
@@ -328,6 +356,7 @@ export class EmploymentDisputesService {
 
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     await this.prisma.employmentDispute.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       userId: user.id,

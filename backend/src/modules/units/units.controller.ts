@@ -58,6 +58,12 @@ export class UnitsController {
     return this.service.createConversion(dto, user);
   }
 
+  @Get('unit-conversions/:id')
+  @RequirePermissions('units.view')
+  findOneConversion(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOneConversion(id, user);
+  }
+
   @Patch('unit-conversions/:id')
   @RequirePermissions('units.manage')
   updateConversion(

@@ -1,5 +1,7 @@
 'use client';
+import '@/components/workspace/workspace.css';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Btn,
@@ -13,6 +15,8 @@ import {
   StatCard,
   StatusBadge,
 } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company {
   id: string;
@@ -113,11 +117,15 @@ const blankRule = {
 };
 
 export default function PostingRulesPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('accounting_engine.dashboard');
+  const beginRequest = useRequestGuard();
   const [rules, setRules] = useState<PostingRule[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [lineRule, setLineRule] = useState<PostingRule | null>(null);
@@ -132,42 +140,63 @@ export default function PostingRulesPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
       .then((j) => {
+        if (controller.signal.aborted) return;
         const rows = unwrapList<Company>(j);
         setCompanies(rows);
         if (rows.length > 0) setCompanyId((current) => current || rows[0].id);
       })
-      .catch(() => setCompanies([]));
-  }, []);
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    if (!companyId) {
-      setAccounts([]);
+    if (authLoading || !canView || !companyId) {
+      if (!companyId) setAccounts([]);
       return;
     }
+    const controller = new AbortController();
     // The backend caps chart-of-accounts page size at 200.
-    fetch(`/api/backend/chart-of-accounts?companyId=${companyId}&limit=200`)
+    fetch(`/api/backend/chart-of-accounts?companyId=${companyId}&limit=200`, {
+      signal: controller.signal,
+    })
       .then((r) => r.json())
-      .then((j) => setAccounts(unwrapList<Account>(j)))
-      .catch(() => setAccounts([]));
-  }, [companyId]);
+      .then((j) => {
+        if (!controller.signal.aborted) setAccounts(unwrapList<Account>(j));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAccounts([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView, companyId]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const params = new URLSearchParams({ limit: '100' });
       if (companyId) params.set('companyId', companyId);
-      const json = await fetch(`/api/backend/posting-rules?${params}`).then((r) => r.json());
+      const response = await fetch(`/api/backend/posting-rules?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const json = await response.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(json?.message ?? 'Failed to load posting rules');
       setRules(unwrapList<PostingRule>(json));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load posting rules');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load posting rules');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId]);
+  }, [authLoading, beginRequest, canView, companyId]);
 
   useEffect(() => {
     load();
@@ -246,8 +275,16 @@ export default function PostingRulesPage() {
   const activeRules = rules.filter((rule) => rule.isActive).length;
   const lineCount = rules.reduce((sum, rule) => sum + (rule.lines?.length ?? 0), 0);
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Posting Rules" subtitle={authLoading ? 'Loading' : 'Access restricted'} />
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace accounting-workspace space-y-6">
       <PageHeader
         title="Posting Rules"
         subtitle="Configure source events and the ledger lines they generate"
@@ -280,8 +317,19 @@ export default function PostingRulesPage() {
         </div>
       </Card>
 
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -291,7 +339,7 @@ export default function PostingRulesPage() {
           <PageSpinner />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr
                   className="text-left text-xs uppercase bg-gray-50"
@@ -359,7 +407,7 @@ export default function PostingRulesPage() {
                   ))
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Card>

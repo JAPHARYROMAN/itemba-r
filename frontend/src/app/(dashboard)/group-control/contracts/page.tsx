@@ -1,12 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Card, PageHeader, PageToolbar, StatCard, StatusBadge, Btn, PageSpinner,
-  Modal, FormInput, FormSelect, FormTextarea,
-} from '@/components/ui';
+import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string; code: string }
 
@@ -201,11 +200,11 @@ function ContractModal({
 
         <div className="col-span-2"><FormInput label="Counterparty Address" value={form.counterpartyAddress} onChange={(e) => setField('counterpartyAddress', e.target.value)} /></div>
 
-        <FormInput label="Start Date" required={mode === 'create'} type="date" value={form.startDate} onChange={(e) => setField('startDate', e.target.value)} />
-        <FormInput label="End Date" type="date" value={form.endDate} onChange={(e) => setField('endDate', e.target.value)} />
+        <FormDateField label="Start Date" required={mode === 'create'} value={form.startDate} onChange={(value) => setField('startDate', value)} />
+        <FormDateField label="End Date" value={form.endDate} onChange={(value) => setField('endDate', value)} />
 
-        <FormInput label="Renewal Date" type="date" value={form.renewalDate} onChange={(e) => setField('renewalDate', e.target.value)} />
-        <FormInput label="Renewal Notice Date" type="date" value={form.renewalNoticeDate} onChange={(e) => setField('renewalNoticeDate', e.target.value)} />
+        <FormDateField label="Renewal Date" value={form.renewalDate} onChange={(value) => setField('renewalDate', value)} />
+        <FormDateField label="Renewal Notice Date" value={form.renewalNoticeDate} onChange={(value) => setField('renewalNoticeDate', value)} />
 
         <FormInput label="Value" type="number" step="0.01" value={form.value} onChange={(e) => setField('value', e.target.value)} />
         <FormSelect label="Currency" value={form.currency} onChange={(e) => setField('currency', e.target.value)}>
@@ -264,7 +263,7 @@ function ContractDeleteConfirm({ contract, onClose, onConfirmed }: {
         </>
       }
     >
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
         Soft-delete <strong>{contract.title}</strong>? The record stays in the database for audit but is hidden from lists.
       </p>
@@ -273,12 +272,14 @@ function ContractDeleteConfirm({ contract, onClose, onConfirmed }: {
 }
 
 export default function ContractsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<Contract> | null>(null);
   const [summary, setSummary] = useState<ContractSummary | null>(null);
   const [expiring, setExpiring] = useState<ExpiringContract[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -295,19 +296,33 @@ export default function ContractsPage() {
   const canManage = hasPermission('contracts.create');
 
   const reloadSummary = useCallback(() => {
-    fetch('/api/backend/contracts/summary').then((r) => r.json()).then((j) => setSummary(j.data ?? null));
+    if (authLoading || !canView) return;
+    fetch('/api/backend/contracts/summary').then((r) => r.json()).then((j) => setSummary(j.data ?? null)).catch(() => undefined);
     fetch('/api/backend/contracts/expiring?days=60').then((r) => r.json())
-      .then((j) => setExpiring(Array.isArray(j.data) ? j.data : []));
-  }, []);
+      .then((j) => setExpiring(Array.isArray(j.data) ? j.data : [])).catch(() => undefined);
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-    reloadSummary();
-  }, [reloadSummary]);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    fetch('/api/backend/companies?limit=100', { signal }).then((r) => r.json())
+      .then((j) => {
+        if (signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      }).catch(() => undefined);
+    fetch('/api/backend/contracts/summary', { signal }).then((r) => r.json())
+      .then((j) => { if (!signal.aborted) setSummary(j.data ?? null); }).catch(() => undefined);
+    fetch('/api/backend/contracts/expiring?days=60', { signal }).then((r) => r.json())
+      .then((j) => { if (!signal.aborted) setExpiring(Array.isArray(j.data) ? j.data : []); }).catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search.trim()) params.set('search', search.trim());
@@ -315,18 +330,31 @@ export default function ContractsPage() {
       if (filterType) params.set('contractType', filterType);
       if (filterStatus) params.set('status', filterStatus);
       if (filterRisk) params.set('riskLevel', filterRisk);
-      const res = await fetch(`/api/backend/contracts?${params}`);
+      const res = await fetch(`/api/backend/contracts?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(`Failed to load contracts (${res.status})`);
       const json = await res.json();
+      if (!request.current()) return;
       setData(json.data ?? null);
-    } finally { setLoading(false); }
-  }, [page, search, filterCompany, filterType, filterStatus, filterRisk]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load contracts');
+      setData(null);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, search, filterCompany, filterType, filterStatus, filterRisk]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const refresh = useCallback(() => {
-    load();
+    void load();
     reloadSummary();
   }, [load, reloadSummary]);
+
+  if (authLoading) {
+    return <div className="p-6"><PageHeader title="Contracts" subtitle="Loading" /></div>;
+  }
 
   if (!canView) {
     return <div className="p-6"><PageHeader title="Contracts" subtitle="Group contracts registry" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
@@ -388,19 +416,19 @@ export default function ContractsPage() {
         searchPlaceholder="Title, counterparty, contract #…"
         filters={
           <>
-            <select value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterRisk} onChange={(e) => { setFilterRisk(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Risk" value={filterRisk} onChange={(e) => { setFilterRisk(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Risk</option>
               {RISK_LEVELS.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
@@ -410,7 +438,7 @@ export default function ContractsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
+          <WorkspaceTable className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Title</th>
@@ -427,6 +455,7 @@ export default function ContractsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan={canManage ? 10 : 9}><PageSpinner /></td></tr>
+                : loadError ? <tr><td colSpan={canManage ? 10 : 9}><ErrorState message={loadError} onRetry={() => void load()} /></td></tr>
                 : !data?.data.length ? <tr><td colSpan={canManage ? 10 : 9} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No contracts</td></tr>
                 : data.data.map((c) => {
                   const days = daysUntil(c.endDate);
@@ -459,7 +488,7 @@ export default function ContractsPage() {
                   );
                 })}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
         {data && data.totalPages > 1 && (
           <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>

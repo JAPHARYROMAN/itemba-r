@@ -26,29 +26,33 @@ export class MedicalExamRecordsController {
 
   @Get()
   @RequirePermissions('employees.view')
-  findAll(@Query() query: MedicalExamRecordsQueryDto) {
-    return this.service.findAll({
-      page: query.page ? Number(query.page) : undefined,
-      limit: query.limit ? Number(query.limit) : undefined,
-      companyId: query.companyId,
-      employeeId: query.employeeId,
-      fitnessStatus: query.fitnessStatus,
-      expiringDays: query.expiringDays ? Number(query.expiringDays) : undefined,
-      hazardOnly: query.hazardOnly === 'true',
-    });
+  findAll(@Query() query: MedicalExamRecordsQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.findAll(
+      {
+        page: query.page ? Number(query.page) : undefined,
+        limit: query.limit ? Number(query.limit) : undefined,
+        companyId: query.companyId,
+        employeeId: query.employeeId,
+        fitnessStatus: query.fitnessStatus,
+        expiringDays: query.expiringDays ? Number(query.expiringDays) : undefined,
+        hazardOnly: query.hazardOnly === 'true',
+        search: query.search,
+      },
+      user,
+    );
   }
 
   @Get(':id')
   @AgentExcluded('company_scope_not_enforced')
   @RequirePermissions('employees.view')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user);
   }
 
   @Post()
   @RequirePermissions('employees.update')
   create(@Body() dto: CreateMedicalExamRecordDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
@@ -58,12 +62,12 @@ export class MedicalExamRecordsController {
     @Body() dto: UpdateMedicalExamRecordDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermissions('employees.update')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.id);
+    return this.service.remove(id, user);
   }
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Btn,
@@ -14,6 +15,7 @@ import {
   StatCard,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendDelete, backendPatch, backendPost } from '@/lib/api-client';
 import { unwrapList } from '@/lib/unwrap';
 
@@ -197,7 +199,10 @@ export function CategoryModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -319,7 +324,10 @@ function DeleteConfirm({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -331,11 +339,13 @@ function DeleteConfirm({
 }
 
 export default function ExpenseCategoriesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accountsById, setAccountsById] = useState<Record<string, Account>>({});
   const [data, setData] = useState<Paginated<ExpenseCategory> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -350,27 +360,43 @@ export default function ExpenseCategoriesPage() {
   const canManage = hasPermission('chart_of_accounts.manage');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(unwrapList<Company>(j)))
-      .catch(() => setCompanies([]));
-  }, []);
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(unwrapList<Company>(j));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (companyId) params.set('companyId', companyId);
       if (activeFilter) params.set('isActive', activeFilter);
       if (search.trim()) params.set('search', search.trim());
-      const res = await fetch(`/api/backend/expense-categories?${params}`);
+      const res = await fetch(`/api/backend/expense-categories?${params}`, { signal: request.signal });
       const json = await res.json();
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(json.message ?? 'Unable to load categories');
       setData(json.data ?? null);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Unable to load categories');
+      setData(null);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, activeFilter, search]);
+  }, [authLoading, beginRequest, canView, page, companyId, activeFilter, search]);
 
   useEffect(() => {
     load();
@@ -379,7 +405,7 @@ export default function ExpenseCategoriesPage() {
   // Resolve linked-account codes/names for display. Only fetched when a single
   // company is filtered (the list can otherwise span many companies).
   useEffect(() => {
-    if (!canView || !companyId) {
+    if (authLoading || !canView || !companyId) {
       setAccountsById({});
       return;
     }
@@ -398,7 +424,7 @@ export default function ExpenseCategoriesPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView, companyId]);
+  }, [authLoading, canView, companyId]);
 
   const renderLinkedAccount = (cat: ExpenseCategory) => {
     if (!cat.linkedAccountId) {
@@ -423,12 +449,12 @@ export default function ExpenseCategoriesPage() {
     );
   };
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Expense Categories" subtitle="Manage expense categories" />
         <div className="mt-8 text-center">
-          <p className="text-sm text-slate-500">Access Restricted</p>
+          <p className="text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</p>
         </div>
       </div>
     );
@@ -483,6 +509,13 @@ export default function ExpenseCategoriesPage() {
         subtitle="Categorise expenses and link each to a GL account"
       />
 
+      {loadError && (
+        <div role="alert" className="workspace-load-error">
+          {loadError}
+          <button onClick={() => void load()}>Try again</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total" value={data?.total ?? 0} />
         <StatCard label="Active" value={data?.data.filter((c) => c.isActive).length ?? 0} />
@@ -506,6 +539,7 @@ export default function ExpenseCategoriesPage() {
         filters={
           <>
             <select
+              aria-label="All Companies"
               value={companyId}
               onChange={(e) => {
                 setCompanyId(e.target.value);
@@ -522,6 +556,7 @@ export default function ExpenseCategoriesPage() {
               ))}
             </select>
             <select
+              aria-label="All Status"
               value={activeFilter}
               onChange={(e) => {
                 setActiveFilter(e.target.value);
@@ -547,7 +582,7 @@ export default function ExpenseCategoriesPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
+          <WorkspaceTable className="w-full text-sm min-w-[800px]">
             <thead>
               <tr
                 className="text-left text-xs uppercase bg-gray-50"
@@ -617,7 +652,7 @@ export default function ExpenseCategoriesPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
 
         {data && data.totalPages > 1 && (

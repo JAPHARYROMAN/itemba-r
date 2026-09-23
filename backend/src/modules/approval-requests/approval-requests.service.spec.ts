@@ -35,6 +35,44 @@ function makePrisma(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe('ApprovalRequestsService readiness', () => {
+  it('applies the selected company to checks, actions, attachments and status counts', async () => {
+    const prisma = makePrisma();
+    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any, {} as any);
+    await service.getReadiness({ id: 'user', companyId: 'company-1' }, { companyId: 'company-1' });
+    for (const model of [
+      prisma.approvalWorkflow,
+      prisma.approvalRequest,
+      prisma.approvalDelegation,
+      prisma.dataQualityIssue,
+    ]) {
+      for (const [args] of model.count.mock.calls) expect(args.where.companyId).toBe('company-1');
+    }
+    expect(prisma.approvalStep.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          workflow: expect.objectContaining({ companyId: 'company-1' }),
+        }),
+      }),
+    );
+    for (const model of [prisma.approvalAction, prisma.approvalAttachment])
+      expect(model.count).toHaveBeenCalledWith({
+        where: { approvalRequest: { deletedAt: null, companyId: 'company-1' } },
+      });
+    expect(prisma.approvalRequest.groupBy.mock.calls[0][0].where.companyId).toBe('company-1');
+    expect(prisma.dataQualityIssue.groupBy.mock.calls[0][0].where.companyId).toBe('company-1');
+  });
+
+  it('denies an inaccessible selected company before any readiness read', async () => {
+    const prisma = makePrisma();
+    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any, {} as any);
+    await expect(
+      service.getReadiness({ id: 'user', companyId: 'company-1' }, { companyId: 'outside' }),
+    ).rejects.toThrow('You do not have access');
+    expect(prisma.approvalWorkflow.count).not.toHaveBeenCalled();
+    expect(prisma.approvalRequest.count).not.toHaveBeenCalled();
+    expect(prisma.dataQualityIssue.count).not.toHaveBeenCalled();
+  });
+
   it('returns approvals/workflow/data-quality readiness above the 90% threshold', async () => {
     const prisma = makePrisma();
     const service = new ApprovalRequestsService(

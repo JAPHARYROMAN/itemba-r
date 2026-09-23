@@ -24,6 +24,15 @@ export class EmployeeAssignmentsService {
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      where.AND = [...(where.AND ?? []), { OR: [
+        { employee: { fullName: { contains, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains, mode: 'insensitive' } } },
+        { department: { name: { contains, mode: 'insensitive' } } },
+        { position: { title: { contains, mode: 'insensitive' } } },
+      ] }];
+    }
     const [data, total] = await Promise.all([
       this.prisma.employeeAssignment.findMany({
         where,
@@ -166,12 +175,12 @@ export class EmployeeAssignmentsService {
       );
     }
     const startDate = dto.startDate ? new Date(dto.startDate) : existing.startDate;
-    const endDate = dto.endDate ? new Date(dto.endDate) : (existing.endDate ?? undefined);
+    const endDate = dto.endDate === undefined ? existing.endDate : dto.endDate === null ? null : new Date(dto.endDate);
     this.assertValidDateRange(startDate, endDate);
 
     const data: Record<string, unknown> = { ...dto };
     if (dto.startDate) data.startDate = startDate;
-    if (dto.endDate) data.endDate = endDate;
+    if (dto.endDate !== undefined) data.endDate = endDate;
 
     try {
       const record = await this.prisma.$transaction(async (tx) => {

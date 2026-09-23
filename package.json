@@ -2,6 +2,12 @@
   "name": "itemba-r",
   "private": true,
   "scripts": {
+    "release:prepare": "node scripts/prepare-release-proof.mjs",
+    "release:workflows": "node scripts/prove-release-workflows.mjs",
+    "release:opening-audit": "node scripts/audit-opening-data.mjs",
+    "release:upgrade": "node scripts/rehearse-release-upgrade.mjs",
+    "release:restore": "node scripts/rehearse-release-recovery.mjs && node scripts/rehearse-release-cutover.mjs",
+    "release:health": "node scripts/rehearse-release-health.mjs",
     "verify": "pwsh -File scripts/build-all.ps1",
     "verify:backend": "pwsh -File scripts/build-all.ps1 -SkipFrontend",
     "verify:frontend": "pwsh -File scripts/build-all.ps1 -SkipBackend",
@@ -30,11 +36,14 @@
     "smoke:registry-ui": "playwright test scripts/smoke-registry-ui.spec.mjs --reporter=line",
     "smoke:document-print": "playwright test scripts/smoke-document-print.spec.mjs --reporter=line",
     "smoke:dynamic-frontend-records": "node scripts/smoke-dynamic-frontend-records.mjs",
-    "smoke:frontend-routes": "npm --prefix frontend run smoke:routes"
+    "smoke:frontend-routes": "npm --prefix frontend run smoke:routes",
+    "release:search": "node scripts/prove-os-search.mjs",
+    "release:contracts-audit": "node scripts/audit-release-contracts.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "typescript": "5.9.3"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"

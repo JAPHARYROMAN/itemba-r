@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { applyCompanyScopeWhere } from '../../../common/services';
 
@@ -18,7 +18,7 @@ export class HrReportsService {
     applyCompanyScopeWhere(where, user, companyId);
     if (divisionId) where.divisionId = divisionId;
     if (departmentId) where.departmentId = departmentId;
-    if (status) where.status = status;
+    if (status) where.employmentStatus = status;
     if (search) {
       where.OR = [
         { fullName: { contains: search, mode: 'insensitive' } },
@@ -27,10 +27,19 @@ export class HrReportsService {
     }
     const [data, total] = await Promise.all([
       this.prisma.employee.findMany({
-        where, skip, take: Number(limit), orderBy: { fullName: 'asc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { fullName: 'asc' },
         select: {
-          id: true, employeeCode: true, fullName: true, email: true, phone: true,
-          employmentType: true, hireDate: true,
+          id: true,
+          employeeCode: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          employmentType: true,
+          employmentStatus: true,
+          hireDate: true,
           department: { select: { id: true, name: true } },
           position: { select: { id: true, title: true } },
           company: { select: { id: true, name: true } },
@@ -42,6 +51,7 @@ export class HrReportsService {
   }
 
   async attendanceReport(user: any, query: any) {
+    this.validateDates(query);
     const { companyId, divisionId, employeeId, dateFrom, dateTo, page = 1, limit = 50 } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
@@ -56,7 +66,10 @@ export class HrReportsService {
 
     const [data, total] = await Promise.all([
       this.prisma.attendanceRecord.findMany({
-        where, skip, take: Number(limit), orderBy: { attendanceDate: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { attendanceDate: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
           company: { select: { id: true, name: true } },
@@ -73,7 +86,10 @@ export class HrReportsService {
     });
 
     return {
-      data, total, page: Number(page), limit: Number(limit),
+      data,
+      total,
+      page: Number(page),
+      limit: Number(limit),
       summary: {
         totalRecords: totals._count.id,
         totalHours: totals._sum.totalHours ?? 0,
@@ -93,10 +109,14 @@ export class HrReportsService {
 
     const [data, total] = await Promise.all([
       this.prisma.payrollRun.findMany({
-        where, skip, take: Number(limit), orderBy: { createdAt: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
         include: {
           payrollPeriod: { select: { id: true, name: true, startDate: true, endDate: true } },
           company: { select: { id: true, name: true } },
+          _count: { select: { entries: { where: { deletedAt: null } } } },
         },
       }),
       this.prisma.payrollRun.count({ where }),
@@ -108,7 +128,10 @@ export class HrReportsService {
     });
 
     return {
-      data, total, page: Number(page), limit: Number(limit),
+      data,
+      total,
+      page: Number(page),
+      limit: Number(limit),
       totals: {
         totalGrossPay: totals._sum?.totalGrossPay ?? 0,
         totalDeductions: totals._sum?.totalDeductions ?? 0,
@@ -118,7 +141,17 @@ export class HrReportsService {
   }
 
   async leaveReport(user: any, query: any) {
-    const { companyId, divisionId, leaveTypeId, status, dateFrom, dateTo, page = 1, limit = 50 } = query;
+    this.validateDates(query);
+    const {
+      companyId,
+      divisionId,
+      leaveTypeId,
+      status,
+      dateFrom,
+      dateTo,
+      page = 1,
+      limit = 50,
+    } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
@@ -133,7 +166,10 @@ export class HrReportsService {
 
     const [data, total] = await Promise.all([
       this.prisma.leaveRequest.findMany({
-        where, skip, take: Number(limit), orderBy: { startDate: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { startDate: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
           leaveType: { select: { id: true, name: true } },
@@ -151,12 +187,26 @@ export class HrReportsService {
     });
 
     return {
-      data, total, page: Number(page), limit: Number(limit),
+      data,
+      total,
+      page: Number(page),
+      limit: Number(limit),
       summary: statusSummary.map((s) => ({
         status: s.status,
         count: s._count.id,
         totalDays: s._sum.totalDays ?? 0,
       })),
     };
+  }
+  private validateDates(query: { dateFrom?: string; dateTo?: string }) {
+    const start = query.dateFrom ? new Date(query.dateFrom).getTime() : undefined;
+    const end = query.dateTo ? new Date(query.dateTo).getTime() : undefined;
+    if (
+      (start !== undefined && !Number.isFinite(start)) ||
+      (end !== undefined && !Number.isFinite(end))
+    )
+      throw new BadRequestException('Report dates must be valid dates');
+    if (start !== undefined && end !== undefined && start > end)
+      throw new BadRequestException('From date must be on or before To date');
   }
 }

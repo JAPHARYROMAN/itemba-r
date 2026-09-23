@@ -1,9 +1,13 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Btn, Card, ConfirmDialog, FormInput, FormSelect, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
+import { Btn, Card, ConfirmDialog, FormDateField, FormInput, FormSelect, Modal, PageHeader, ProductPicker, showToast } from '@/components/ui';
 import type { ProductPickerOption } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { ApiError, backendDelete, backendPatch, backendPost } from '@/lib/api-client';
+import { WestsidesGate } from '../_components/route-gate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,7 +129,7 @@ function PriceListModal({ item, companies, onClose, onSaved }: ModalProps) {
   return (
     <Modal open onClose={onClose} title={item ? 'Edit Price List' : 'New Price List'}
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>{item ? 'Update' : 'Create'}</Btn></>}>
-      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      {error && <div role="alert" className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid grid-cols-2 gap-4">
         {!item && (
           <FormSelect label="Company" required value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="Select…" className="col-span-2">
@@ -139,7 +143,7 @@ function PriceListModal({ item, companies, onClose, onSaved }: ModalProps) {
           <option value="USD">USD</option>
           <option value="EUR">EUR</option>
         </FormSelect>
-        <FormInput label="Effective From" type="date" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} className="col-span-2" />
+        <FormDateField label="Effective From" required value={effectiveFrom} onChange={(value) => setEffectiveFrom(value)} className="col-span-2" />
       </div>
     </Modal>
   );
@@ -285,7 +289,7 @@ function PriceListItemsModal({ priceList, onClose }: ItemsModalProps) {
     <>
       <Modal open onClose={onClose} title={`Items — ${priceList.name}`} subtitle={`${priceList.currency} · effective ${priceList.effectiveFrom ? fmtDate(priceList.effectiveFrom) : '—'}`} size="xl"
         footer={<Btn variant="secondary" onClick={onClose}>Close</Btn>}>
-        {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+        {error && <div role="alert" className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
 
         {/* Add item */}
         <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 mb-4">
@@ -296,18 +300,18 @@ function PriceListItemsModal({ priceList, onClose }: ItemsModalProps) {
             </div>
             <div className="col-span-2">
               <label className={labelCls}>Unit</label>
-              <select value={newUnitId} onChange={(e) => setNewUnitId(e.target.value)} className={fieldCls}>
+              <select aria-label="Unit" value={newUnitId} onChange={(e) => setNewUnitId(e.target.value)} className={fieldCls}>
                 <option value="">Select…</option>
                 {units.map((u) => <option key={u.id} value={u.id}>{u.symbol ? `${u.name} (${u.symbol})` : u.name}</option>)}
               </select>
             </div>
             <div className="col-span-2">
               <label className={labelCls}>Unit Price ({priceList.currency})</label>
-              <input type="number" min={0} step="0.01" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} className={fieldCls} placeholder="0.00" />
+              <input aria-label="Unit Price ( )" type="number" min={0} step="0.01" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} className={fieldCls} placeholder="0.00" />
             </div>
             <div className="col-span-2">
               <label className={labelCls}>Min Qty</label>
-              <input type="number" min={0} value={newMinQty} onChange={(e) => setNewMinQty(e.target.value)} className={fieldCls} placeholder="0" />
+              <input aria-label="Min Qty" type="number" min={0} value={newMinQty} onChange={(e) => setNewMinQty(e.target.value)} className={fieldCls} placeholder="0" />
             </div>
             <div className="col-span-1">
               <Btn variant="primary" onClick={addItem} loading={adding}>Add</Btn>
@@ -320,7 +324,7 @@ function PriceListItemsModal({ priceList, onClose }: ItemsModalProps) {
           <p className="text-sm text-slate-400 text-center py-8">No items on this price list yet. Add one above.</p>
         ) : (
           <div className="overflow-x-auto rounded-md border border-slate-200">
-            <table className="w-full">
+            <WorkspaceTable className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className={thCls}>Product</th>
@@ -362,7 +366,7 @@ function PriceListItemsModal({ priceList, onClose }: ItemsModalProps) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Modal>
@@ -386,6 +390,9 @@ function PriceListItemsModal({ priceList, onClose }: ItemsModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PriceListsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('price_lists.view');
+  const beginRequest = useRequestGuard();
   const [items, setItems] = useState<PriceList[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
@@ -399,19 +406,29 @@ export default function PriceListsPage() {
   const [actioning, setActioning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
     try {
       const params = new URLSearchParams({ limit: '100' });
       if (filterType) params.set('priceListType', filterType);
       if (filterStatus) params.set('status', filterStatus);
-      const res = await fetch(`/api/backend/westsides/price-lists?${params}`);
+      const res = await fetch(`/api/backend/westsides/price-lists?${params}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) throw new Error('Failed to load price lists');
       const json = await res.json();
+      if (!request.current()) return;
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Error loading data');
-    } finally { setLoading(false); }
-  }, [filterType, filterStatus]);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterStatus, filterType]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -436,6 +453,10 @@ export default function PriceListsPage() {
     } finally { setActioning(null); }
   };
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Price Lists" loading={authLoading} />;
+  }
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -449,14 +470,14 @@ export default function PriceListsPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className={labelCls}>Type</label>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className={fieldCls}>
+            <select aria-label="Type" value={filterType} onChange={(e) => setFilterType(e.target.value)} className={fieldCls}>
               <option value="">All Types</option>
               {PRICE_LIST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </div>
           <div>
             <label className={labelCls}>Status</label>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={fieldCls}>
+            <select aria-label="Status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={fieldCls}>
               <option value="">All Statuses</option>
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
@@ -466,14 +487,24 @@ export default function PriceListsPage() {
         </div>
       </Card>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       {loading ? <Spinner /> : (
         <Card className="overflow-hidden">
           {items.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-10">No price lists found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <WorkspaceTable className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className={thCls}>Name</th>
@@ -510,7 +541,7 @@ export default function PriceListsPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>

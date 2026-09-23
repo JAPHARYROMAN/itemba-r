@@ -16,7 +16,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalRequestDto } from './dto/create-approval-request.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
-import { CompanyScopeService, applyCompanyScopeWhere } from '../../common/services';
+import {
+  CompanyScopeService,
+  applyCompanyScopeWhere,
+  isGroupScopedUser,
+} from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
@@ -39,10 +43,11 @@ export class ApprovalRequestsService {
   ) {}
 
   async findAll(user: AuthUser, query: any) {
-    const { page = 1, limit = 20, companyId, entityType, status, requestedById } = query;
+    const { page = 1, limit = 20, companyId, entityType, status, requestedById, search } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    this.scopeRequestList(where, user, companyId);
+    this.searchRequests(where, search);
     if (entityType) where.entityType = entityType;
     if (status) where.status = status;
     if (requestedById) where.requestedById = requestedById;
@@ -53,6 +58,7 @@ export class ApprovalRequestsService {
         take: Number(limit),
         orderBy: { createdAt: 'desc' },
         include: {
+          company: { select: { id: true, name: true } },
           requestedBy: { select: { id: true, fullName: true, email: true } },
           workflow: { select: { id: true, name: true } },
         },
@@ -274,6 +280,7 @@ export class ApprovalRequestsService {
     const record = await this.prisma.approvalRequest.findFirst({
       where: { id, deletedAt: null },
       include: {
+        company: { select: { id: true, name: true } },
         requestedBy: { select: { id: true, fullName: true, email: true } },
         workflow: {
           include: { steps: { where: { deletedAt: null }, orderBy: { stepOrder: 'asc' } } },
@@ -299,8 +306,52 @@ export class ApprovalRequestsService {
     return record;
   }
 
+  async getDetails(id: string, user: AuthUser) {
+    const record = await this.findOne(id, user);
+    const decisionPermission = user.permissions.some(
+      (p) => p === 'approval_requests.approve' || p === 'approval_requests.reject',
+    );
+    let eligible = false;
+    if (record.status === 'PENDING' && record.requestedById !== user.id && decisionPermission) {
+      const [roles, delegations] = await Promise.all([
+        this.getUserRoleIds(user),
+        this.getActiveDelegationsFor(user),
+      ]);
+      eligible = this.isEligibleApprover(record, user, roles, delegations);
+    }
+    return {
+      ...record,
+      availableActions: {
+        approve: eligible && user.permissions.includes('approval_requests.approve'),
+        reject: eligible && user.permissions.includes('approval_requests.reject'),
+        cancel:
+          ['DRAFT', 'PENDING'].includes(record.status) &&
+          user.permissions.includes('approval_requests.cancel'),
+      },
+    };
+  }
+
+  private scopeRequestList(where: any, user: AuthUser, companyId?: string) {
+    const scope = applyCompanyScopeWhere({}, user, companyId);
+    where.AND = [
+      !companyId && isGroupScopedUser(user) ? { OR: [scope, { companyId: null }] } : scope,
+    ];
+  }
+
+  private searchRequests(where: any, search?: string) {
+    if (!search?.trim()) return;
+    const text = { contains: search.trim(), mode: 'insensitive' };
+    where.OR = [
+      { requestTitle: text },
+      { approvalRequestNumber: text },
+      { requestSummary: text },
+      { requestedBy: { fullName: text } },
+      { requestedBy: { email: text } },
+    ];
+  }
+
   async findPendingForMe(user: AuthUser, query: any) {
-    const { page = 1, limit = 20, companyId } = query;
+    const { page = 1, limit = 20, companyId, entityType, search } = query;
     const take = Number(limit);
     const skip = (Number(page) - 1) * take;
 
@@ -311,13 +362,15 @@ export class ApprovalRequestsService {
     // then keep only requests for which the caller is an eligible approver of
     // the current step.
     const where: any = { status: ApprovalRequestStatus.PENDING, deletedAt: null };
-    applyCompanyScopeWhere(where, user, companyId);
+    this.scopeRequestList(where, user, companyId);
+    this.searchRequests(where, search);
+    if (entityType) where.entityType = entityType;
     where.requestedById = { not: user.id };
 
     // Resolve the caller's role ids once so ROLE-based steps can be evaluated
     // (AuthUser only carries role names / permission codes, not role ids).
     const roleIds = await this.getUserRoleIds(user);
-    const delegatorIds = await this.getActiveDelegatorIdsFor(user);
+    const delegations = await this.getActiveDelegationsFor(user);
 
     // Fetch the company-scoped candidate set with the current step config so we
     // can filter by approver eligibility in-memory. We over-fetch relative to
@@ -327,6 +380,7 @@ export class ApprovalRequestsService {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
+        company: { select: { id: true, name: true } },
         requestedBy: { select: { id: true, fullName: true, email: true } },
         workflow: {
           select: {
@@ -350,7 +404,7 @@ export class ApprovalRequestsService {
     });
 
     const eligible = candidates.filter((req) =>
-      this.isEligibleApprover(req as any, user, roleIds, delegatorIds),
+      this.isEligibleApprover(req as any, user, roleIds, delegations),
     );
 
     const total = eligible.length;
@@ -587,8 +641,8 @@ export class ApprovalRequestsService {
    */
   private async assertEligibleApprover(record: any, user: AuthUser) {
     const roleIds = await this.getUserRoleIds(user);
-    const delegatorIds = await this.getActiveDelegatorIdsFor(user);
-    if (!this.isEligibleApprover(record, user, roleIds, delegatorIds)) {
+    const delegations = await this.getActiveDelegationsFor(user);
+    if (!this.isEligibleApprover(record, user, roleIds, delegations)) {
       throw new ForbiddenException(
         'You are not a designated approver for the current step of this request.',
       );
@@ -598,6 +652,8 @@ export class ApprovalRequestsService {
   private isEligibleApprover(
     record: {
       requestedById: string;
+      companyId?: string | null;
+      entityType: string;
       currentStepOrder: number;
       workflow?: {
         steps?: Array<{
@@ -612,7 +668,11 @@ export class ApprovalRequestsService {
     },
     user: AuthUser,
     roleIds: Set<string>,
-    delegatorIds: Set<string>,
+    delegations: Array<{
+      delegatorUserId: string;
+      companyId: string | null;
+      entityType: string | null;
+    }>,
   ): boolean {
     const steps = record.workflow?.steps ?? [];
     // No workflow / no step config -> fall back to the coarse permission the
@@ -636,7 +696,15 @@ export class ApprovalRequestsService {
           return !isRequester || step.allowSelfApproval;
         }
         // Active delegation: the caller may act on behalf of the designated user.
-        return delegatorIds.has(step.approverUserId);
+        return (
+          (!isRequester || step.allowSelfApproval) &&
+          delegations.some(
+            (delegation) =>
+              delegation.delegatorUserId === step.approverUserId &&
+              (!delegation.companyId || delegation.companyId === record.companyId) &&
+              (!delegation.entityType || delegation.entityType === record.entityType),
+          )
+        );
       }
       case ApproverType.ROLE: {
         if (!step.approverRoleId) return true; // misconfigured -> don't block
@@ -666,11 +734,11 @@ export class ApprovalRequestsService {
   }
 
   /**
-   * Ids of users who have delegated their approval authority TO `user` under an
+   * Scope-bearing grants of approval authority TO `user` under an
    * active, in-window, non-deleted delegation. A delegate may then act on steps
    * that designate one of these users as the approver.
    */
-  private async getActiveDelegatorIdsFor(user: AuthUser): Promise<Set<string>> {
+  private async getActiveDelegationsFor(user: AuthUser) {
     const now = new Date();
     const rows = await this.prisma.approvalDelegation.findMany({
       where: {
@@ -680,9 +748,9 @@ export class ApprovalRequestsService {
         endDate: { gte: now },
         deletedAt: null,
       },
-      select: { delegatorUserId: true },
+      select: { delegatorUserId: true, companyId: true, entityType: true },
     });
-    return new Set(rows.map((r) => r.delegatorUserId));
+    return rows;
   }
 
   private buildWorkflowCoverageCheck(

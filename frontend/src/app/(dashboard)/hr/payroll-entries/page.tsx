@@ -1,130 +1,267 @@
 'use client';
-
-import { Suspense, useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { Card, PageHeader, StatusBadge } from '@/components/ui';
-
-const thCls = 'px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm text-slate-700';
-
+import { Suspense, useEffect, useState } from 'react';
+import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
+import { RefreshCw } from 'lucide-react';
+import {
+  Btn,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  PermissionDeniedState,
+} from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRouter as useGuardedRouter } from '@/components/workspace/workspace-navigation';
+import {
+  PayrollRunRecord,
+  payrollMoney,
+  runName,
+  periodName,
+} from '@/components/workspace/payroll-types';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
+import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
+import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
+import '@/components/workspace/workspace.css';
 interface PayrollEntry {
   id: string;
-  employee?: string | { fullName?: string; employeeCode?: string };
+  employee?: { fullName?: string; employeeCode?: string };
   employeeId?: string;
-  basePay?: number;
-  totalAllowances?: number;
-  grossPay?: number;
-  totalDeductions?: number;
-  netPay?: number;
+  company?: { name?: string };
+  payrollRunId?: string;
+  payrollRun?: { id: string; payrollRunNumber?: string };
+  basePay?: number | string;
+  attendancePay?: number | string;
+  overtimePay?: number | string;
+  totalAllowances?: number | string;
+  grossPay?: number | string;
+  totalDeductions?: number | string;
+  netPay?: number | string;
+  daysWorked?: number | string;
+  hoursWorked?: number | string;
+  overtimeHours?: number | string;
   status: string;
+  notes?: string;
+  allowances?: { id: string; amount: number | string; allowanceType?: { name?: string } }[];
+  deductions?: { id: string; amount: number | string; deductionType?: { name?: string } }[];
 }
-
+const employeeName = (e: PayrollEntry) =>
+  e.employee?.fullName || e.employee?.employeeCode || 'Employee';
 function PayrollEntriesContent() {
-  const searchParams = useSearchParams();
-  const [rows, setRows] = useState<PayrollEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [runFilter, setRunFilter] = useState(
-    searchParams.get('payrollRunId') ?? searchParams.get('runId') ?? '',
-  );
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (runFilter) params.set('payrollRunId', runFilter);
-    const r = await fetch(`/api/backend/hr/payroll-entries?${params}`);
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  }, [runFilter]);
-
+  const params = useSearchParams(),
+    router = useGuardedRouter(),
+    { hasPermission } = useAuth();
+  const urlRun = params.get('payrollRunId') ?? params.get('runId') ?? '';
+  const canRead = hasPermission('payroll.view');
+  const [run, setRun] = useState(urlRun),
+    [company, setCompany] = useState(''),
+    [page, setPage] = useState(1),
+    [search, setSearch] = useState(''),
+    [query, setQuery] = useState('');
   useEffect(() => {
-    load();
-  }, [load]);
-
-  const fmt = (n?: number) => (n != null ? `TZS ${(Number.isFinite(Number(n)) ? Number(n).toLocaleString('en-TZ') : '0')}` : '—');
-
+    setRun(urlRun);
+    setPage(1);
+  }, [urlRun]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const result = useWorkspaceRecords<PayrollEntry>(
+    '/hr/payroll-entries',
+    { page, limit: 20, payrollRunId: run, companyId: company, search: query },
+    canRead,
+  );
+  const runs = useWorkspaceChoices<PayrollRunRecord>(
+    '/hr/payroll-runs',
+    { companyId: company },
+    canRead,
+  );
+  const scope = useOrgScope(undefined, {
+    skipBranches: true,
+    skipDivisions: true,
+    skipEmployees: true,
+  });
+  const runOptions = runs.rows.map((r) => ({
+    value: r.id,
+    label: runName(r) + ' · ' + periodName(r),
+  }));
+  if (run && !runOptions.some((r) => r.value === run))
+    runOptions.unshift({ value: run, label: 'Selected payroll run' });
+  if (!canRead)
+    return <PermissionDeniedState description="Your role cannot view payroll entries." />;
   return (
-    <div className="p-6">
-      <PageHeader title="Payroll Entries" subtitle="Employee payroll line items per run" />
-
-      <div className="flex gap-3 mb-4">
-        <input
-          type="text"
-          placeholder="Filter by payroll run ID…"
-          value={runFilter}
-          onChange={(e) => setRunFilter(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 w-56 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-        />
-        <button
-          onClick={load}
-          className="px-4 py-2 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50"
-        >
-          Search
-        </button>
+    <div className="business-workspace record-workspace">
+      <PageHeader
+        title="Payroll entries"
+        subtitle="Understand each employee’s pay, before moving ahead."
+        breadcrumbs={[
+          { label: 'Payroll', href: '/payroll' },
+          { label: 'Payroll runs', href: '/hr/payroll-runs' },
+          { label: 'Entries' },
+        ]}
+      />
+      <div className="workspace-summary">
+        <div>
+          <span>Matching entries</span>
+          <strong>{result.total}</strong>
+        </div>
       </div>
-
-      <Card className="overflow-hidden">
-        {loading ? (
-          <div className="flex justify-center py-10">
-            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className={thCls}>Employee</th>
-                  <th className={thCls}>Base Pay</th>
-                  <th className={thCls}>Allowances</th>
-                  <th className={thCls}>Gross Pay</th>
-                  <th className={thCls}>Deductions</th>
-                  <th className={thCls}>Net Pay</th>
-                  <th className={thCls}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((e) => (
-                  <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>
-                      {typeof e.employee === 'string'
-                        ? e.employee
-                        : (e.employee?.fullName ?? e.employee?.employeeCode ?? e.employeeId ?? '—')}
-                    </td>
-                    <td className={tdCls}>{fmt(e.basePay)}</td>
-                    <td className={tdCls}>{fmt(e.totalAllowances)}</td>
-                    <td className={`${tdCls} font-medium`}>{fmt(e.grossPay)}</td>
-                    <td className={`${tdCls} text-red-600`}>{fmt(e.totalDeductions)}</td>
-                    <td className={`${tdCls} font-semibold text-green-700`}>{fmt(e.netPay)}</td>
-                    <td className={tdCls}>
-                      <StatusBadge status={e.status} />
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-8 text-slate-400 text-sm">
-                      No entries found. Filter by payroll run to load entries.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+      {scope.error && (
+        <div role="alert" className="workspace-notice">
+          {scope.error}{' '}
+          <Btn variant="ghost" onClick={scope.retry}>
+            Retry companies
+          </Btn>
+        </div>
+      )}
+      {runs.error && (
+        <div role="alert" className="workspace-notice">
+          {runs.error}{' '}
+          <Btn variant="ghost" onClick={runs.retry}>
+            Retry runs
+          </Btn>
+        </div>
+      )}
+      <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search employee or run number…"
+        collapsibleFilters
+        activeFilterCount={Number(!!run) + Number(!!company)}
+        filters={
+          <>
+            <FormSelect
+              label="Company filter"
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                setRun('');
+                setPage(1);
+              }}
+              options={scope.companyOptions}
+              placeholder="All companies"
+            />
+            <FormSelect
+              label="Payroll run filter"
+              value={run}
+              disabled={runs.loading}
+              onChange={(e) => {
+                setRun(e.target.value);
+                setPage(1);
+              }}
+              options={runOptions}
+              placeholder={runs.loading ? 'Loading runs…' : 'All runs'}
+            />
+          </>
+        }
+        actions={
+          <Btn
+            variant="secondary"
+            onClick={result.reload}
+            icon={<RefreshCw size={15} />}
+            disabled={result.loading}
+          >
+            Reload
+          </Btn>
+        }
+      />
+      <RecordBrowser
+        title="Payroll entries"
+        records={result.rows}
+        name={employeeName}
+        reference={(r) =>
+          [r.employee?.employeeCode, r.payrollRun?.payrollRunNumber].filter(Boolean).join(' · ')
+        }
+        status={(r) => r.status}
+        loading={result.loading}
+        error={result.error}
+        onRetry={result.reload}
+        page={page}
+        total={result.total}
+        pageSize={20}
+        onPage={setPage}
+        fields={[
+          { label: 'Gross pay', value: (r) => payrollMoney(r.grossPay) },
+          { label: 'Net pay', value: (r) => payrollMoney(r.netPay) },
+        ]}
+        details={[
+          { label: 'Company', value: (r) => r.company?.name || '—' },
+          { label: 'Base pay', value: (r) => payrollMoney(r.basePay) },
+          { label: 'Attendance pay', value: (r) => payrollMoney(r.attendancePay) },
+          { label: 'Overtime pay', value: (r) => payrollMoney(r.overtimePay) },
+          { label: 'Allowances', value: (r) => payrollMoney(r.totalAllowances) },
+          { label: 'Total deductions', value: (r) => payrollMoney(r.totalDeductions) },
+          {
+            label: 'Days / hours worked',
+            value: (r) => (r.daysWorked ?? '—') + ' days · ' + (r.hoursWorked ?? '—') + ' hours',
+          },
+          { label: 'Overtime hours', value: (r) => r.overtimeHours ?? '—' },
+          {
+            label: 'Allowance breakdown',
+            value: (r) =>
+              r.allowances?.length ? (
+                <ul>
+                  {r.allowances.map((a) => (
+                    <li key={a.id}>
+                      {a.allowanceType?.name || 'Allowance'} · {payrollMoney(a.amount)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                'No allowance lines'
+              ),
+          },
+          {
+            label: 'Manual deduction breakdown',
+            value: (r) =>
+              r.deductions?.length ? (
+                <ul>
+                  {r.deductions.map((d) => (
+                    <li key={d.id}>
+                      {d.deductionType?.name || 'Deduction'} · {payrollMoney(d.amount)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                'No manual deduction lines'
+              ),
+          },
+          { label: 'Notes', value: (r) => r.notes || '—' },
+        ]}
+        actions={(r) => (
+          <>
+            <Btn
+              variant="secondary"
+              onClick={() => router.push('/hr/payslips/' + encodeURIComponent(r.id))}
+            >
+              View payslip
+            </Btn>
+            {(r.payrollRunId || r.payrollRun?.id) && (
+              <Btn
+                variant="ghost"
+                onClick={() =>
+                  router.push(
+                    '/hr/payroll-runs/' +
+                      encodeURIComponent(r.payrollRunId || r.payrollRun!.id) +
+                      '/payslips',
+                  )
+                }
+              >
+                All payslips in this run
+              </Btn>
+            )}
+          </>
         )}
-      </Card>
+      />
     </div>
   );
 }
-
 export default function PayrollEntriesPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex justify-center py-20">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      }
-    >
+    <Suspense fallback={<PageSpinner />}>
       <PayrollEntriesContent />
     </Suspense>
   );

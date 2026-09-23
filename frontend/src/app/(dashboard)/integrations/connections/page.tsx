@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Connection {
   id: string;
@@ -23,6 +26,10 @@ interface Provider {
 const EMPTY_FORM = { connectionCode: '', connectionName: '', providerId: '', environment: 'PRODUCTION', publicConfig: '{}' };
 
 export default function IntegrationConnectionsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('integration_connections.view');
+  const beginRequest = useRequestGuard();
+
   const [connections, setConnections] = useState<Connection[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,24 +43,41 @@ export default function IntegrationConnectionsPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterStatus) params.set('status', filterStatus);
     if (filterEnv) params.set('environment', filterEnv);
-    fetch(`/api/backend/integration-connections?${params}`)
-      .then(r => r.json())
-      .then(data => setConnections(unwrapList(data)))
-      .catch(() => { setConnections([]); setLoadError('Failed to load integration connections.'); })
-      .finally(() => setLoading(false));
-  }, [filterStatus, filterEnv]);
+    try {
+      const res = await fetch(`/api/backend/integration-connections?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load integration connections.');
+      setConnections(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setConnections([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load integration connections.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterStatus, filterEnv]);
 
   useEffect(() => { load(); }, [load]);
+
   useEffect(() => {
-    // optional lookup — on failure the provider dropdown simply stays empty
-    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => undefined);
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/integration-providers?limit=100', { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => { if (!controller.signal.aborted) setProviders(unwrapList(data)); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   async function save() {
     setSaving(true); setError('');
@@ -78,6 +102,9 @@ export default function IntegrationConnectionsPage() {
     finally { setTestingId(null); }
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Integration Connections" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Integration Connections" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -88,7 +115,7 @@ export default function IntegrationConnectionsPage() {
       <PageToolbar
         filters={
           <>
-            <select
+            <select aria-label="All Status"
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value)}
               className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -97,7 +124,7 @@ export default function IntegrationConnectionsPage() {
               <option value="">All Status</option>
               {['ACTIVE', 'INACTIVE', 'ERROR', 'TESTING'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select
+            <select aria-label="All Environments"
               value={filterEnv}
               onChange={e => setFilterEnv(e.target.value)}
               className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -113,7 +140,7 @@ export default function IntegrationConnectionsPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -149,7 +176,7 @@ export default function IntegrationConnectionsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -165,7 +192,7 @@ export default function IntegrationConnectionsPage() {
           </>
         }
       >
-        {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="space-y-3">
           <FormInput label="Connection Code" required value={form.connectionCode} onChange={e => setForm(f => ({ ...f, connectionCode: e.target.value }))} placeholder="CONN-001" />
           <FormInput label="Connection Name" required value={form.connectionName} onChange={e => setForm(f => ({ ...f, connectionName: e.target.value }))} />

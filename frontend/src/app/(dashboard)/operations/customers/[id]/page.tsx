@@ -1,20 +1,20 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  ConfirmDialog,
-  DateInput,
-  PageHeader,
-  SkeletonCardGrid,
-  StatCard,
-  StatusBadge,
-  showToast,
-} from '@/components/ui';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useParams } from 'next/navigation';
+import { useMemo, useState } from 'react';
+import { Btn, Card, PageHeader, SkeletonCardGrid, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet, backendPatch, backendPost } from '@/lib/api-client';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useGuardedRouter, useUnsavedWork } from '@/components/workspace/unsaved-work-provider';
+import {
+  ProfileSections,
+  PartnerStatementGenerator,
+} from '@/components/workspace/partner-profile-controls';
+import { PartnerAction } from '@/components/workspace/trading-partner-workspace';
+import '@/components/workspace/workspace.css';
+import '@/components/workspace/partner-profile.css';
+import { TradingPartnerEditor } from '@/components/workspace/trading-partner-editor';
 
 type Tab =
   | 'Overview'
@@ -44,6 +44,8 @@ interface CustomerDetail {
   status: string;
   notes?: string | null;
   companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
   company?: { id: string; name: string; code?: string | null } | null;
   division?: { id: string; name: string; code?: string | null } | null;
   branch?: { id: string; name: string; code?: string | null } | null;
@@ -231,7 +233,8 @@ const TABS: Tab[] = [
 ];
 
 function money(value: number | string | null | undefined, currency = 'TZS') {
-  const numeric = Number(value ?? 0);
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return '—';
+  const numeric = Number(value);
   return `${currency} ${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -242,15 +245,6 @@ function shortDate(value?: string | null) {
   if (!value) return '-';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString();
-}
-
-function isoDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function monthStart() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1);
 }
 
 function humanize(value: string) {
@@ -273,11 +267,11 @@ function agingBucket(dueDate: string): AgingKey {
 const AGING_ORDER: AgingKey[] = ['Current', '1-30 days', '31-60 days', '61-90 days', '90+ days'];
 
 const AGING_TONE: Record<AgingKey, string> = {
-  Current: 'text-emerald-300',
-  '1-30 days': 'text-sky-300',
-  '31-60 days': 'text-amber-300',
-  '61-90 days': 'text-orange-300',
-  '90+ days': 'text-red-300',
+  Current: 'partner-tone-success',
+  '1-30 days': 'partner-tone-info',
+  '31-60 days': 'partner-tone-warning',
+  '61-90 days': 'partner-tone-warning',
+  '90+ days': 'partner-tone-danger',
 };
 
 interface AgingRow {
@@ -360,7 +354,7 @@ function DetailItem({
   mono?: boolean;
 }) {
   return (
-    <div>
+    <div className="partner-profile-detail">
       <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
         {label}
       </p>
@@ -368,7 +362,7 @@ function DetailItem({
         className={`mt-1 text-sm ${mono ? 'font-mono' : 'font-medium'}`}
         style={{ color: 'var(--aurora-text)' }}
       >
-        {value || '-'}
+        {value ?? '—'}
       </p>
     </div>
   );
@@ -386,123 +380,43 @@ function EmptyPanel({ text }: { text: string }) {
 }
 
 export default function CustomerDetailPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
-  const customerId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const { hasPermission } = useAuth();
-  const [data, setData] = useState<CustomerControlCenter | null>(null);
-  const [agingDetail, setAgingDetail] = useState<CustomerAgingDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  return <CustomerProfile key={id} customerId={id} />;
+}
+function CustomerProfile({ customerId }: { customerId: string }) {
+  const router = useGuardedRouter();
+  const { request } = useUnsavedWork();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const [notice, setNotice] = useState('');
   const [tab, setTab] = useState<Tab>('Overview');
-  const [statementStart, setStatementStart] = useState(isoDate(monthStart()));
-  const [statementEnd, setStatementEnd] = useState(isoDate(new Date()));
-  const [generating, setGenerating] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-
-  const canView = hasPermission('customers.view');
+  const canView = !authLoading && hasPermission('customers.view');
+  const canViewReports = hasPermission('operations.reports.view');
   const canViewFinanceReports = hasPermission('finance.reports.view');
   const canGenerateStatements = hasPermission('customer_statements.generate');
-  const canManageCustomers = hasPermission('customers.manage');
-  const canManageReceivables = hasPermission('receivables.manage');
-  const canManageSales = hasPermission('sales_orders.manage');
+  const canManageCustomers = hasPermission('customers.update');
+  const canOpenReceivables = hasPermission('receivables.view');
+  const canOpenSales = hasPermission('sales.view');
 
-  const load = useCallback(async () => {
-    if (!canView || !customerId) return;
-    setLoading(true);
-    setError('');
-    try {
-      const record = await backendGet<CustomerControlCenter>(
-        `/customers/${customerId}/control-center`,
-      );
-      setData(record);
-
-      // Pull the TRUE, unbounded per-customer aging from financial-reports so the
-      // A/R Aging card reflects ALL open invoices (not the control-center's
-      // take:10 slice). Best-effort: gated on finance.reports.view, and a failure
-      // here must not blank the page — the card falls back to the client-side
-      // estimate built from the control-center receivables when detail is null.
-      if (canViewFinanceReports) {
-        try {
-          const detail = await backendGet<CustomerAgingDetail>(
-            `/financial-reports/customer-aging-detail/${record.customer.companyId}/${customerId}`,
-          );
-          setAgingDetail(detail);
-        } catch {
-          setAgingDetail(null);
-        }
-      } else {
-        setAgingDetail(null);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load customer';
-      setError(message);
-      showToast('error', 'Could not load customer', message);
-    } finally {
-      setLoading(false);
-    }
-  }, [canView, canViewFinanceReports, customerId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const generateStatement = async () => {
-    if (!data) return;
-    setGenerating(true);
-    try {
-      await backendPost('/customer-statements/generate', {
-        companyId: data.customer.companyId,
-        customerId: data.customer.id,
-        periodStart: statementStart,
-        periodEnd: statementEnd,
-      });
-      showToast('success', 'Customer statement generated', data.customer.name);
-      load();
-    } catch (err) {
-      showToast(
-        'error',
-        'Could not generate statement',
-        err instanceof Error ? err.message : 'Failed',
-      );
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const toggleBlock = async () => {
-    if (!data) return;
-    const nextStatus = data.customer.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED';
-    setUpdatingStatus(true);
-    try {
-      await backendPatch(`/customers/${data.customer.id}`, {
-        companyId: data.customer.companyId,
-        status: nextStatus,
-      });
-      showToast(
-        'success',
-        nextStatus === 'BLOCKED' ? 'Customer blocked' : 'Customer unblocked',
-        data.customer.name,
-      );
-      setConfirmBlock(false);
-      load();
-    } catch (err) {
-      showToast(
-        'error',
-        'Could not update customer status',
-        err instanceof Error ? err.message : 'Failed',
-      );
-    } finally {
-      setUpdatingStatus(false);
-    }
-  };
-
+  const result = useWorkspaceResource<CustomerControlCenter>(
+    `/customers/${customerId}/control-center`,
+    {},
+    canView && !!customerId,
+  );
+  const { data, loading, error, reload: load } = result;
+  const agingResult = useWorkspaceResource<CustomerAgingDetail>(
+    `/financial-reports/customer-aging-detail/${data?.customer.companyId || ''}/${customerId}`,
+    {},
+    canView && canViewFinanceReports && !!data?.customer.companyId,
+  );
+  const agingDetail = agingResult.data;
   const creditColor = useMemo(() => {
     const utilization = data?.summary.creditUtilizationPct ?? 0;
-    if (utilization >= 90) return 'text-red-300';
-    if (utilization >= 70) return 'text-amber-300';
-    return 'text-emerald-300';
+    if (utilization >= 90) return 'partner-tone-danger';
+    if (utilization >= 70) return 'partner-tone-warning';
+    return 'partner-tone-success';
   }, [data?.summary.creditUtilizationPct]);
 
   // A/R aging is driven by the TRUE server-side aging detail
@@ -531,9 +445,15 @@ export default function CustomerDetailPage() {
     return { ...built, isServer: false, listedCount: source.length };
   }, [agingDetail, data]);
 
+  if (authLoading)
+    return (
+      <p role="status" className="workspace-notice">
+        Loading profile...
+      </p>
+    );
   if (!canView) {
     return (
-      <div className="p-6">
+      <div className="business-workspace partner-profile">
         <PageHeader title="Customer" subtitle="Customer control center" />
         <p className="mt-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
           Access restricted.
@@ -544,7 +464,7 @@ export default function CustomerDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="business-workspace partner-profile">
         <PageHeader title="Customer" subtitle="Loading customer control center" />
         <SkeletonCardGrid count={6} />
       </div>
@@ -553,10 +473,15 @@ export default function CustomerDetailPage() {
 
   if (error || !data) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="business-workspace partner-profile">
         <PageHeader title="Customer" subtitle="Customer control center" />
         <Card className="p-6">
-          <p className="text-sm text-red-300">{error || 'Customer not found'}</p>
+          <p role="alert" className="workspace-notice">
+            {error || 'Customer not found'}
+          </p>
+          <Btn variant="secondary" onClick={load}>
+            Try again
+          </Btn>
           <Btn
             className="mt-4"
             variant="secondary"
@@ -572,66 +497,46 @@ export default function CustomerDetailPage() {
   const { customer, summary } = data;
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <div className="business-workspace partner-profile">
+      <div className="partner-profile-heading">
         <PageHeader
           title={customer.name}
+          breadcrumbs={[
+            { label: 'Operations', href: '/operations' },
+            { label: 'Customers', href: '/operations/customers' },
+            { label: customer.name },
+          ]}
           subtitle={`${customer.customerCode ?? 'No code'} - ${customer.company?.name ?? 'Company'} - ${customer.branch?.name ?? 'No branch'}`}
         />
-        <div className="flex flex-wrap gap-2">
-          {canManageReceivables && (
+        <div className="partner-profile-actions">
+          {canOpenReceivables && (
             <Btn
-              variant="success"
+              variant="secondary"
               onClick={() =>
                 router.push(
                   `/finance/receivables?customerId=${encodeURIComponent(customer.id)}&companyId=${encodeURIComponent(customer.companyId)}`,
                 )
               }
             >
-              Receive Payment
+              Open receivables
             </Btn>
           )}
-          {canManageSales && (
-            <Btn
-              variant="primary"
-              onClick={() =>
-                router.push(
-                  `/operations/sales-orders?customerId=${encodeURIComponent(customer.id)}&companyId=${encodeURIComponent(customer.companyId)}&create=1`,
-                )
-              }
-            >
-              Create Sale
+          {canOpenSales && (
+            <Btn variant="secondary" onClick={() => router.push('/operations/sales-orders')}>
+              Open sales
             </Btn>
           )}
           {canGenerateStatements && (
-            <Btn
-              variant="secondary"
-              onClick={() => {
-                setTab('Statements');
-                if (typeof window !== 'undefined') {
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }
-              }}
-            >
-              Send Statement
+            <Btn variant="secondary" onClick={() => request(() => setTab('Statements'))}>
+              Statements
             </Btn>
           )}
           {canManageCustomers && (
             <>
-              <Btn
-                variant="secondary"
-                onClick={() =>
-                  router.push(
-                    `/operations/customers?customerId=${encodeURIComponent(customer.id)}&edit=credit`,
-                  )
-                }
-              >
-                Set Credit Limit
+              <Btn variant="primary" onClick={() => setEditing(true)}>
+                Edit customer
               </Btn>
-              <Btn
-                variant={customer.status === 'BLOCKED' ? 'warning' : 'danger'}
-                onClick={() => setConfirmBlock(true)}
-              >
+              <Btn variant="ghost" onClick={() => setConfirmBlock(true)}>
                 {customer.status === 'BLOCKED' ? 'Unblock Credit' : 'Block Credit'}
               </Btn>
             </>
@@ -639,171 +544,225 @@ export default function CustomerDetailPage() {
           <Btn variant="secondary" onClick={() => router.push('/operations/customers')}>
             Back to Customers
           </Btn>
-          <Btn
-            variant="secondary"
-            onClick={() =>
-              router.push(`/operations/reports?search=${encodeURIComponent(customer.name)}`)
-            }
-          >
-            Customer Reports
+          {canViewReports && (
+            <Btn
+              variant="secondary"
+              onClick={() =>
+                router.push(`/operations/reports?search=${encodeURIComponent(customer.name)}`)
+              }
+            >
+              Customer Reports
+            </Btn>
+          )}
+          <Btn variant="secondary" onClick={() => request(load)}>
+            Refresh
           </Btn>
           <StatusBadge status={customer.status} />
         </div>
       </div>
 
-      <ConfirmDialog
-        open={confirmBlock}
-        title={customer.status === 'BLOCKED' ? 'Unblock customer credit' : 'Block customer credit'}
-        message={
-          customer.status === 'BLOCKED'
-            ? `Restore ${customer.name} to ACTIVE status? New sales and credit can resume.`
-            : `Block ${customer.name}? This prevents new credit sales until the customer is unblocked.`
-        }
-        variant={customer.status === 'BLOCKED' ? 'warning' : 'danger'}
-        confirmLabel={customer.status === 'BLOCKED' ? 'Unblock' : 'Block'}
-        loading={updatingStatus}
-        onConfirm={toggleBlock}
-        onClose={() => setConfirmBlock(false)}
-      />
+      {editing && (
+        <TradingPartnerEditor
+          kind="customers"
+          record={customer}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setNotice('Customer saved.');
+            load();
+          }}
+        />
+      )}
+      {confirmBlock && (
+        <PartnerAction
+          partnerKind="customers"
+          record={customer}
+          kind={customer.status === 'BLOCKED' ? 'unblock' : 'block'}
+          onClose={() => setConfirmBlock(false)}
+          onSaved={() => {
+            setConfirmBlock(false);
+            setNotice('Customer status updated.');
+            load();
+          }}
+        />
+      )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <StatCard label="Lifetime Sales" value={money(summary.lifetimeSalesTotal)} />
-        <StatCard label="YTD Sales" value={money(summary.ytdSalesTotal)} />
-        <StatCard label="Open AR" value={money(summary.openReceivableBalance)} />
-        <StatCard label="Overdue AR" value={money(summary.overdueReceivableBalance)} />
+      {notice && (
+        <p role="status" className="workspace-notice">
+          {notice}
+        </p>
+      )}
+      <div className="workspace-summary">
+        <div>
+          <span>Lifetime Sales</span>
+          <strong>{money(summary.lifetimeSalesTotal)}</strong>
+        </div>
+        <div>
+          <span>YTD Sales</span>
+          <strong>{money(summary.ytdSalesTotal)}</strong>
+        </div>
+        <div>
+          <span>Open AR</span>
+          <strong>{money(summary.openReceivableBalance)}</strong>
+        </div>
+        <div>
+          <span>Overdue AR</span>
+          <strong>{money(summary.overdueReceivableBalance)}</strong>
+        </div>
       </div>
 
-      {(() => {
-        // When the true server-side aging is available, the bucket total IS the
-        // complete outstanding balance (every open invoice). Otherwise we fall
-        // back to summary.openReceivableBalance (an unbounded aggregate sum) so
-        // the headline still reconciles with the Open AR StatCard even though the
-        // client-side buckets only cover the control-center's capped slice.
-        const totalOutstanding = aging.isServer ? aging.total : summary.openReceivableBalance;
-        // Only meaningful in the fallback path: if the true total exceeds the
-        // bucketed sum, older open invoices exist but weren't in the capped
-        // control-center slice. Never partial once server aging is in play.
-        const unaccounted = Math.max(0, totalOutstanding - aging.total);
-        const isPartial = !aging.isServer && unaccounted > 0.005;
-        const hasAnyOutstanding = totalOutstanding > 0 || aging.total > 0;
-        return (
-          <Card className="p-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  A/R Aging
-                </h3>
-                <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                  Outstanding receivables by days past due
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                  Total Outstanding
-                </p>
-                <p className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  {money(totalOutstanding)}
-                </p>
-              </div>
-            </div>
-            {!hasAnyOutstanding ? (
-              <div className="mt-4">
-                <EmptyPanel text="No outstanding receivables to age for this customer." />
-              </div>
-            ) : (
-              <>
-                <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
-                  <p
-                    className="text-xs font-medium uppercase"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    {aging.isServer
-                      ? `Aging (${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`
-                      : `Aging (latest ${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`}
-                  </p>
-                  {isPartial && (
-                    <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      Breakdown covers the most-recent invoices only.
+      <Card padding="none" className="overflow-hidden">
+        <ProfileSections
+          items={TABS}
+          value={tab}
+          onChange={(next) => request(() => setTab(next))}
+        />
+
+        <section
+          id="partner-profile-section"
+          aria-label={`${tab} section`}
+          className="partner-profile-content"
+        >
+          {tab === 'Overview' &&
+            (() => {
+              // When the true server-side aging is available, the bucket total IS the
+              // complete outstanding balance (every open invoice). Otherwise we fall
+              // back to summary.openReceivableBalance (an unbounded aggregate sum) so
+              // the headline still reconciles with the Open AR StatCard even though the
+              // client-side buckets only cover the control-center's capped slice.
+              const totalOutstanding = aging.isServer ? aging.total : summary.openReceivableBalance;
+              // Only meaningful in the fallback path: if the true total exceeds the
+              // bucketed sum, older open invoices exist but weren't in the capped
+              // control-center slice. Never partial once server aging is in play.
+              const unaccounted = Math.max(0, totalOutstanding - aging.total);
+              const isPartial = !aging.isServer && unaccounted > 0.005;
+              const hasAnyOutstanding = totalOutstanding > 0 || aging.total > 0;
+              return (
+                <Card className="p-5 mb-6">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                        A/R Aging
+                      </h3>
+                      <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                        Outstanding receivables by days past due
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p
+                        className="text-xs uppercase"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
+                        Total Outstanding
+                      </p>
+                      <p
+                        className="text-base font-semibold"
+                        style={{ color: 'var(--aurora-text)' }}
+                      >
+                        {money(totalOutstanding)}
+                      </p>
+                    </div>
+                  </div>
+                  {canViewFinanceReports && agingResult.loading && (
+                    <p role="status" className="partner-profile-history-note">
+                      Loading complete aging...
                     </p>
                   )}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
-                  {aging.rows.map((row) => {
-                    const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
-                    return (
-                      <div
-                        key={row.key}
-                        className="rounded-lg border p-4"
-                        style={{ borderColor: 'var(--aurora-border)' }}
-                      >
+                  {agingResult.error && (
+                    <p role="alert" className="workspace-notice">
+                      Complete aging unavailable. The breakdown below uses recent invoices.{' '}
+                      <Btn variant="ghost" onClick={agingResult.reload}>
+                        Retry aging
+                      </Btn>
+                    </p>
+                  )}
+                  {!hasAnyOutstanding ? (
+                    <div className="mt-4">
+                      <EmptyPanel text="No outstanding receivables to age for this customer." />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
                         <p
-                          className="text-xs uppercase"
+                          className="text-xs font-medium uppercase"
                           style={{ color: 'var(--aurora-text-muted)' }}
                         >
-                          {row.key}
+                          {aging.isServer
+                            ? `Aging (${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`
+                            : `Aging (latest ${aging.listedCount} ${aging.listedCount === 1 ? 'invoice' : 'invoices'})`}
                         </p>
-                        <p className={`mt-1 text-lg font-semibold ${AGING_TONE[row.key]}`}>
-                          {money(row.amount)}
-                        </p>
-                        <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                          {row.count} {row.count === 1 ? 'invoice' : 'invoices'} · {pct.toFixed(0)}%
-                        </p>
+                        {isPartial && (
+                          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            Breakdown covers the most-recent invoices only.
+                          </p>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-                <div
-                  className="mt-4 flex h-2 w-full overflow-hidden rounded-full"
-                  style={{ background: 'var(--aurora-border)' }}
-                  role="img"
-                  aria-label="A/R aging distribution"
-                >
-                  {aging.rows.map((row) => {
-                    const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
-                    if (pct <= 0) return null;
-                    return (
+                      <div className="mt-3 partner-aging-grid">
+                        {aging.rows.map((row) => {
+                          const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
+                          return (
+                            <div
+                              key={row.key}
+                              className="rounded-lg border p-4"
+                              style={{ borderColor: 'var(--aurora-border)' }}
+                            >
+                              <p
+                                className="text-xs uppercase"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {row.key}
+                              </p>
+                              <p
+                                className={`mt-1 partner-aging-value font-semibold ${AGING_TONE[row.key]}`}
+                              >
+                                {money(row.amount)}
+                              </p>
+                              <p
+                                className="mt-1 text-xs"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {row.count} {row.count === 1 ? 'invoice' : 'invoices'} ·{' '}
+                                {pct.toFixed(0)}%
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
                       <div
-                        key={row.key}
-                        className={AGING_TONE[row.key]}
-                        style={{ width: `${pct}%`, background: 'currentColor' }}
-                        title={`${row.key}: ${money(row.amount)}`}
-                      />
-                    );
-                  })}
-                </div>
-                {isPartial && (
-                  <p className="mt-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                    Buckets total {money(aging.total)} across the listed invoices ·{' '}
-                    <span className="font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
-                      + {money(unaccounted)} in older invoices not shown
-                    </span>
-                  </p>
-                )}
-              </>
-            )}
-          </Card>
-        );
-      })()}
-
-      <Card className="overflow-hidden">
-        <div
-          className="flex flex-wrap gap-2 border-b p-3"
-          style={{ borderColor: 'var(--aurora-border)' }}
-        >
-          {TABS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setTab(item)}
-              className={`rounded-lg px-3 py-1.5 text-sm transition ${tab === item ? 'bg-brand-600 text-white' : 'hover:bg-white/5'}`}
-              style={tab === item ? undefined : { color: 'var(--aurora-text-secondary)' }}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-5">
+                        className="mt-4 flex h-2 w-full overflow-hidden rounded-full"
+                        style={{ background: 'var(--aurora-border)' }}
+                        role="img"
+                        aria-label="A/R aging distribution"
+                      >
+                        {aging.rows.map((row) => {
+                          const pct = aging.total > 0 ? (row.amount / aging.total) * 100 : 0;
+                          if (pct <= 0) return null;
+                          return (
+                            <div
+                              key={row.key}
+                              className={AGING_TONE[row.key]}
+                              style={{ width: `${pct}%`, background: 'currentColor' }}
+                              title={`${row.key}: ${money(row.amount)}`}
+                            />
+                          );
+                        })}
+                      </div>
+                      {isPartial && (
+                        <p className="mt-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          Buckets total {money(aging.total)} across the listed invoices ·{' '}
+                          <span
+                            className="font-medium"
+                            style={{ color: 'var(--aurora-text-secondary)' }}
+                          >
+                            + {money(unaccounted)} in older invoices not shown
+                          </span>
+                        </p>
+                      )}
+                    </>
+                  )}
+                </Card>
+              );
+            })()}
           {tab === 'Overview' && (
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:col-span-2">
@@ -853,6 +812,9 @@ export default function CustomerDetailPage() {
 
           {tab === 'Sales' && (
             <div className="space-y-4">
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
               {data.recentSalesOrders.length === 0 ? (
                 <EmptyPanel text="No sales orders for this customer yet." />
               ) : (
@@ -872,20 +834,24 @@ export default function CustomerDetailPage() {
                           {money(order.totalAmount, order.currency)}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="partner-profile-order-actions">
                         <StatusBadge status={order.status} />
                         <StatusBadge status={order.paymentStatus} />
-                        <Btn
-                          variant="secondary"
-                          size="xs"
-                          onClick={() => router.push(`/operations/sales-orders/${order.id}/print`)}
-                        >
-                          View / Print
-                        </Btn>
+                        {hasPermission('sales.view') && (
+                          <Btn
+                            variant="secondary"
+                            size="xs"
+                            onClick={() =>
+                              router.push(`/operations/sales-orders/${order.id}/print`)
+                            }
+                          >
+                            View / Print
+                          </Btn>
+                        )}
                       </div>
                     </div>
                     <div className="mt-3 overflow-x-auto">
-                      <table className="w-full min-w-[700px] text-xs">
+                      <WorkspaceTable className="partner-profile-table">
                         <thead style={{ color: 'var(--aurora-text-muted)' }}>
                           <tr className="text-left uppercase">
                             <th className="py-2">Product</th>
@@ -901,22 +867,22 @@ export default function CustomerDetailPage() {
                               className="border-t"
                               style={{ borderColor: 'var(--aurora-border)' }}
                             >
-                              <td className="py-2">
+                              <td data-label="Product" className="py-2">
                                 {line.product?.name ?? line.description ?? 'Product'}
                               </td>
-                              <td className="py-2 text-right">
+                              <td data-label="Qty" className="py-2 text-right">
                                 {Number(line.quantity).toLocaleString()} {line.unit?.symbol ?? ''}
                               </td>
-                              <td className="py-2 text-right">
+                              <td data-label="Unit Price" className="py-2 text-right">
                                 {money(line.unitPrice, order.currency)}
                               </td>
-                              <td className="py-2 text-right">
+                              <td data-label="Line Total" className="py-2 text-right">
                                 {money(line.lineTotal, order.currency)}
                               </td>
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </WorkspaceTable>
                     </div>
                   </div>
                 ))
@@ -926,6 +892,9 @@ export default function CustomerDetailPage() {
 
           {tab === 'Receivables' && (
             <div className="space-y-4">
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
               {data.recentReceivables.length === 0 ? (
                 <EmptyPanel text="No receivables recorded for this customer." />
               ) : (
@@ -960,10 +929,13 @@ export default function CustomerDetailPage() {
 
           {tab === 'Products' && (
             <div className="overflow-x-auto">
+              <p className="partner-profile-history-note">
+                Product history returned by this profile.
+              </p>
               {data.productHistory.length === 0 ? (
                 <EmptyPanel text="No product sales history found yet." />
               ) : (
-                <table className="w-full min-w-[820px] text-sm">
+                <WorkspaceTable className="partner-profile-table">
                   <thead
                     className="text-left text-xs uppercase"
                     style={{ color: 'var(--aurora-text-muted)' }}
@@ -983,7 +955,7 @@ export default function CustomerDetailPage() {
                         className="border-t"
                         style={{ borderColor: 'var(--aurora-border)' }}
                       >
-                        <td className="py-3">
+                        <td data-label="Product" className="py-3">
                           <div className="font-medium">{row.product.name}</div>
                           <div
                             className="font-mono text-xs"
@@ -992,44 +964,39 @@ export default function CustomerDetailPage() {
                             {row.product.productCode ?? row.product.sku ?? ''}
                           </div>
                         </td>
-                        <td className="py-3">{row.product.category?.name ?? '-'}</td>
-                        <td className="py-3 text-right">
+                        <td data-label="Category" className="py-3">
+                          {row.product.category?.name ?? '-'}
+                        </td>
+                        <td data-label="Quantity" className="py-3 text-right">
                           {row.quantity.toLocaleString()} {row.unit?.symbol ?? ''}
                         </td>
-                        <td className="py-3 text-right">{money(row.totalAmount)}</td>
-                        <td className="py-3">{shortDate(row.lastPurchasedAt)}</td>
+                        <td data-label="Amount" className="py-3 text-right">
+                          {money(row.totalAmount)}
+                        </td>
+                        <td data-label="Last Bought" className="py-3">
+                          {shortDate(row.lastPurchasedAt)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               )}
             </div>
           )}
 
           {tab === 'Statements' && (
             <div className="space-y-5">
-              {canGenerateStatements && (
-                <div
-                  className="grid grid-cols-1 gap-3 rounded-lg border p-4 md:grid-cols-[1fr_1fr_auto]"
-                  style={{ borderColor: 'var(--aurora-border)' }}
-                >
-                  <DateInput
-                    label="Period Start"
-                    value={statementStart}
-                    onChange={(event) => setStatementStart(event.target.value)}
-                  />
-                  <DateInput
-                    label="Period End"
-                    value={statementEnd}
-                    onChange={(event) => setStatementEnd(event.target.value)}
-                  />
-                  <div className="flex items-end">
-                    <Btn variant="primary" onClick={generateStatement} loading={generating}>
-                      Generate
-                    </Btn>
-                  </div>
-                </div>
-              )}
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
+              <PartnerStatementGenerator
+                kind="customers"
+                record={customer}
+                onGenerated={() => {
+                  setNotice('Customer statement generated.');
+                  load();
+                }}
+              />
               {data.latestStatements.length === 0 ? (
                 <EmptyPanel text="No customer statements have been generated." />
               ) : (
@@ -1057,6 +1024,9 @@ export default function CustomerDetailPage() {
 
           {tab === 'Pricing' && (
             <div className="space-y-3">
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
               {data.priceAgreements.length === 0 ? (
                 <EmptyPanel text="No customer-specific price agreements found." />
               ) : (
@@ -1080,11 +1050,13 @@ export default function CustomerDetailPage() {
                     <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
                       <DetailItem
                         label="Agreed Price"
-                        value={agreement.agreedPrice ? money(agreement.agreedPrice) : '-'}
+                        value={agreement.agreedPrice != null ? money(agreement.agreedPrice) : '—'}
                       />
                       <DetailItem
                         label="Discount %"
-                        value={agreement.discountPercent ? `${agreement.discountPercent}%` : '-'}
+                        value={
+                          agreement.discountPercent != null ? `${agreement.discountPercent}%` : '—'
+                        }
                       />
                       <DetailItem label="Notes" value={agreement.notes} />
                     </div>
@@ -1113,6 +1085,9 @@ export default function CustomerDetailPage() {
 
           {tab === 'Audit' && (
             <div className="space-y-5">
+              <p className="partner-profile-history-note">
+                Recent ledger activity returned by this profile.
+              </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailItem
                   label="Created At"
@@ -1160,7 +1135,7 @@ export default function CustomerDetailPage() {
               </div>
             </div>
           )}
-        </div>
+        </section>
       </Card>
     </div>
   );

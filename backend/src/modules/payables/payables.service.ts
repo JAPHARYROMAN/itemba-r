@@ -850,6 +850,8 @@ export class PayablesService {
       if (dateTo) where.issueDate.lte = dateRangeEnd(dateTo);
     }
 
+    const search = query.search?.trim();
+    if (search) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ payableNumber: { contains: search, mode: 'insensitive' } }, { supplierName: { contains: search, mode: 'insensitive' } }, { supplier: { name: { contains: search, mode: 'insensitive' } } }] }];
     return where;
   }
 

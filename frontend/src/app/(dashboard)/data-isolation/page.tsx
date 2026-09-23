@@ -1,31 +1,50 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ErrorState, PageSpinner } from '@/components/ui';
 import Link from 'next/link';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 export default function DataIsolationDashboardPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('data_isolation.view');
+  const beginRequest = useRequestGuard();
   const [stats, setStats] = useState({ totalTestRuns: 0, passed: 0, failed: 0, openIssues: 0, criticalIssues: 0, highIssues: 0 });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setLoadError('');
+    try {
+      const response = await fetch('/api/backend/data-isolation/dashboard', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load data isolation statistics.');
+      const body = await response.json();
+      if (!request.current()) return;
+      const dashboard = body.data ?? body;
+      setStats({
+        totalTestRuns: dashboard.totalTestRuns ?? 0,
+        passed: dashboard.passed ?? 0,
+        failed: dashboard.failed ?? 0,
+        openIssues: dashboard.openIssues ?? 0,
+        criticalIssues: dashboard.criticalIssues ?? 0,
+        highIssues: dashboard.highIssues ?? 0,
+      });
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load data isolation statistics.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
+
   useEffect(() => {
-    fetch('/api/backend/data-isolation/dashboard')
-      .then(r => r.json())
-      .then(res => {
-        const d = res.data ?? res;
-        setStats({
-          totalTestRuns: d.totalTestRuns ?? 0,
-          passed: d.passed ?? 0,
-          failed: d.failed ?? 0,
-          openIssues: d.openIssues ?? 0,
-          criticalIssues: d.criticalIssues ?? 0,
-          highIssues: d.highIssues ?? 0,
-        });
-      })
-      .catch(() => setLoadError('Failed to load data isolation statistics.'))
-      .finally(() => setLoading(false));
-  }, []);
+    void load();
+  }, [load]);
 
   const statCards = [
     { label: 'Total Test Runs', value: stats.totalTestRuns, color: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -39,6 +58,15 @@ export default function DataIsolationDashboardPage() {
     { label: 'Issues', href: '/data-isolation/issues', desc: 'Review and resolve data isolation violations' },
   ];
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Data Isolation</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -49,7 +77,7 @@ export default function DataIsolationDashboardPage() {
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : loadError ? (
-        <ErrorState message={loadError} />
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

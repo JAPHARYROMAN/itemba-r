@@ -9,6 +9,8 @@ import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-c
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import { UpdatePayrollRunDto } from './dto/update-payroll-run.dto';
+import { PayPayrollRunDto, ReversePayrollPaymentDto } from './dto/payroll-run-action.dto';
+import { PayrollCashService } from './payroll-cash.service';
 
 interface LockedPayrollRunRow {
   id: string;
@@ -41,6 +43,7 @@ export class PayrollRunsService {
     private readonly postings: PayrollPostingsService,
     private readonly companyScope: CompanyScopeService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly cash: PayrollCashService,
   ) {}
 
   async findAll(user: AuthUser, query: any) {
@@ -52,6 +55,19 @@ export class PayrollRunsService {
     };
     if (status) where.status = status;
     if (payrollPeriodId) where.payrollPeriodId = payrollPeriodId;
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      const existing = where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : [];
+      where.AND = [
+        ...existing,
+        {
+          OR: [
+            { payrollRunNumber: { contains, mode: 'insensitive' } },
+            { payrollPeriod: { name: { contains, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
     const [data, total] = await Promise.all([
       this.prisma.payrollRun.findMany({
         where,
@@ -61,6 +77,7 @@ export class PayrollRunsService {
         include: {
           payrollPeriod: { select: { id: true, name: true, startDate: true, endDate: true } },
           company: { select: { id: true, name: true } },
+          cashMovements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } },
         },
       }),
       this.prisma.payrollRun.count({ where }),
@@ -74,6 +91,7 @@ export class PayrollRunsService {
       include: {
         payrollPeriod: { select: { id: true, name: true, startDate: true, endDate: true } },
         company: { select: { id: true, name: true } },
+        cashMovements: { where: { reversedAt: null, reversalOfId: null }, select: { id: true } },
         entries: {
           where: { deletedAt: null },
           include: { employee: { select: { id: true, fullName: true, employeeCode: true } } },
@@ -86,6 +104,11 @@ export class PayrollRunsService {
   }
 
   async create(dto: CreatePayrollRunDto, user: AuthUser) {
+    if (dto.status && dto.status !== 'DRAFT')
+      throw new BadRequestException(
+        'Create a draft and use payroll approval actions to change its status.',
+      );
+    dto.createdById = user.id;
     if ((dto as any).companyId) {
       await this.companyScope.assertCanAccessCompany(
         user,
@@ -123,9 +146,17 @@ export class PayrollRunsService {
     if ((dto as any).companyId !== undefined && (dto as any).companyId !== existing.companyId) {
       throw new BadRequestException('PayrollRun companyId is immutable');
     }
+    if (existing.status !== 'DRAFT' || (dto.status && dto.status !== 'DRAFT'))
+      throw new BadRequestException(
+        'Only draft payroll runs can be edited. Use payroll actions for status changes.',
+      );
     const record = await this.prisma.payrollRun.update({
       where: { id },
-      data: { ...dto, runDate: dto.runDate ? new Date(dto.runDate) : undefined } as any,
+      data: {
+        ...dto,
+        createdById: existing.createdById,
+        runDate: dto.runDate ? new Date(dto.runDate) : undefined,
+      } as any,
     });
     await this.audit.log({
       userId: user.id,
@@ -800,68 +831,65 @@ export class PayrollRunsService {
     return updated;
   }
 
-  async pay(id: string, user: AuthUser, body?: { disbursingChartOfAccountId?: string }) {
-    let alreadyPaid = false;
-    const updated = await this.prisma.$transaction(
+  async pay(id: string, user: AuthUser, body: PayPayrollRunDto) {
+    await this.cash.authorize(user);
+    return this.prisma.$transaction(
       async (tx) => {
-        const run = await this.lockPayrollRun(id, tx);
-        if (!run) throw new NotFoundException('Payroll run not found');
-        await this.companyScope.assertCanAccessCompany(user, run.companyId, AccessLevel.WRITE);
-        if (run.status === 'PAID') {
-          alreadyPaid = true;
-          return tx.payrollRun.findUniqueOrThrow({ where: { id } });
+        const locked = await this.lockPayrollRun(id, tx);
+        if (!locked) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+        const run = await tx.payrollRun.findUniqueOrThrow({ where: { id } });
+        const result = await this.cash.payment(tx, run, user, body);
+        if (!result.duplicate) {
+          await this.syncAdvanceRecoveries(id, tx);
+          await this.settleSalesCommissions(id, tx);
         }
-        if (run.status !== 'APPROVED') {
-          throw new BadRequestException('Payroll run must be approved before paying');
-        }
-
-        if (body?.disbursingChartOfAccountId) {
-          const acct = await tx.chartOfAccount.findFirst({
-            where: {
-              id: body.disbursingChartOfAccountId,
-              companyId: run.companyId,
-              deletedAt: null,
-            },
-            select: { id: true },
-          });
-          if (!acct) {
-            throw new BadRequestException(
-              'Selected disbursing account does not belong to this company.',
-            );
-          }
-        }
-
-        const paidAt = new Date();
-        const paid = await tx.payrollRun.update({
+        return tx.payrollRun.findUniqueOrThrow({
           where: { id },
-          data: {
-            status: 'PAID',
-            paidById: user.id,
-            paidAt,
-            ...(body?.disbursingChartOfAccountId
-              ? { disbursingChartOfAccountId: body.disbursingChartOfAccountId }
-              : {}),
+          include: {
+            cashMovements: {
+              where: { reversedAt: null, reversalOfId: null },
+              select: { id: true },
+            },
           },
         });
-
-        await this.syncAdvanceRecoveries(id, tx);
-        await this.settleSalesCommissions(id, tx);
-        await this.postings.postPayment(id, user.id, tx);
-
-        return paid;
       },
       { timeout: 60_000 },
     );
-    if (!alreadyPaid) {
-      await this.audit.log({
-        userId: user.id,
-        action: 'UPDATE',
-        entityType: 'PayrollRun',
-        entityId: id,
-        newValue: { status: 'PAID', disbursingChartOfAccountId: body?.disbursingChartOfAccountId },
-      });
-    }
-    return updated;
+  }
+
+  async reversePayment(id: string, user: AuthUser, body: ReversePayrollPaymentDto) {
+    await this.cash.authorize(user, true);
+    return this.prisma.$transaction(
+      async (tx) => {
+        const locked = await this.lockPayrollRun(id, tx);
+        if (!locked) throw new NotFoundException('Payroll run not found');
+        await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+        const run = await tx.payrollRun.findUniqueOrThrow({ where: { id } });
+        const result = await this.cash.reverse(tx, run, user, body);
+        if (!result.duplicate) {
+          await this.syncAdvanceRecoveries(id, tx, true);
+          await this.unsettleSalesCommissions(id, tx);
+        }
+        return tx.payrollRun.findUniqueOrThrow({ where: { id } });
+      },
+      { timeout: 60_000 },
+    );
+  }
+
+  private async unsettleSalesCommissions(payrollRunId: string, tx: Prisma.TransactionClient) {
+    const entries = await tx.payrollEntry.findMany({
+      where: { payrollRunId, deletedAt: null },
+      select: { id: true },
+    });
+    await tx.salesCommission.updateMany({
+      where: {
+        paidPayrollEntryId: { in: entries.map((e) => e.id) },
+        status: 'PAID',
+        deletedAt: null,
+      },
+      data: { status: 'APPROVED', paidPayrollEntryId: null },
+    });
   }
 
   private async lockPayrollRun(
@@ -878,7 +906,11 @@ export class PayrollRunsService {
     return rows[0] ?? null;
   }
 
-  private async syncAdvanceRecoveries(payrollRunId: string, tx: Prisma.TransactionClient) {
+  private async syncAdvanceRecoveries(
+    payrollRunId: string,
+    tx: Prisma.TransactionClient,
+    reverse = false,
+  ) {
     const recoveryDeductions = await tx.payrollEntryDeduction.findMany({
       where: {
         salaryAdvanceId: { not: null },
@@ -908,13 +940,21 @@ export class PayrollRunsService {
         throw new BadRequestException(`Salary advance ${advanceId} no longer exists.`);
       }
 
-      const newRecovered = money(decimal(advance.recoveredAmount).plus(recoveredThisRun));
+      const newRecovered = money(
+        decimal(advance.recoveredAmount).plus(
+          reverse ? recoveredThisRun.negated() : recoveredThisRun,
+        ),
+      );
+      if (newRecovered.lt(0) || newRecovered.gt(advance.amount))
+        throw new BadRequestException(
+          'Salary advance recovery has changed. Recalculate or reconcile before payment.',
+        );
       const fullyRecovered = newRecovered.gte(decimal(advance.amount));
       await tx.salaryAdvance.update({
         where: { id: advanceId },
         data: {
           recoveredAmount: newRecovered,
-          status: fullyRecovered ? 'SETTLED' : 'DEDUCTING',
+          status: fullyRecovered ? 'SETTLED' : newRecovered.isZero() ? 'PAID' : 'DEDUCTING',
         },
       });
     }

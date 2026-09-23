@@ -1,0 +1,171 @@
+.approval-overview h2 {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.approval-overview-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.approval-overview-scope > div {
+  width: 300px;
+  max-width: 100%;
+}
+.approval-overview-scope p,
+.approval-overview-caption {
+  color: var(--aurora-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.approval-readiness-summary,
+.approval-controls,
+.approval-overview-feedback {
+  padding: 24px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+  margin-bottom: 24px;
+}
+.approval-overview-heading,
+.approval-readiness-context {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.approval-readiness-summary > p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--aurora-text-secondary);
+  margin-top: 14px;
+}
+.approval-readiness-context {
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--aurora-text-muted);
+}
+.approval-overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+  margin: 24px 0 0;
+}
+.approval-overview-metrics dt {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--aurora-text-muted);
+  margin-bottom: 8px;
+}
+.approval-overview-metrics dd {
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.approval-readiness-state {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--aurora-bg-subtle);
+  color: var(--aurora-text);
+  white-space: normal;
+}
+.approval-readiness-state[data-status='CRITICAL'] {
+  box-shadow: inset 3px 0 var(--aurora-danger);
+}
+.approval-readiness-state[data-status='WARNING'] {
+  box-shadow: inset 3px 0 var(--aurora-warning);
+}
+.approval-readiness-state[data-status='READY'] {
+  box-shadow: inset 3px 0 var(--aurora-success);
+}
+.approval-overview .record-browser {
+  min-height: 530px;
+  margin-bottom: 24px;
+}
+.approval-check-details {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.approval-check-details li {
+  padding: 10px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--aurora-border);
+}
+.approval-check-details span {
+  color: var(--aurora-text-muted);
+  font-size: 12px;
+}
+.approval-check-details strong {
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.approval-controls .approval-overview-metrics dd {
+  font-size: 20px;
+}
+.approval-overview-feedback p {
+  margin: 12px 0;
+  line-height: 1.7;
+}
+.approval-overview-destinations > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+.approval-overview-destinations a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+}
+.approval-overview-destinations span {
+  flex: 1;
+  min-width: 0;
+}
+.approval-overview-destinations strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.approval-overview-destinations small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--aurora-text-muted);
+}
+.approval-overview-destinations a:hover {
+  color: var(--aurora-primary);
+}
+.approval-overview-destinations a:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+@media (max-width: 900px) {
+  .approval-overview-metrics,
+  .approval-overview-destinations > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .approval-overview-destinations > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .approval-readiness-summary,
+  .approval-controls {
+    padding: 20px;
+  }
+}

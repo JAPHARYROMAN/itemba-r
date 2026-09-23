@@ -1,7 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, FormInput, FormSelect, Btn } from '@/components/ui';
+import { Card, ErrorState, PageHeader, FormInput, FormSelect, Btn } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ── Types mirroring the backend responses ────────────────────────────────────
 interface Company { id: string; name: string; code: string; }
@@ -115,12 +118,18 @@ const TRAFFIC_DOT: Record<'green' | 'amber' | 'red' | 'gray', string> = {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function ComplianceCockpitPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('tax_filing_periods.view');
+  const canScan = hasPermission('finance.reports.view');
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyRetry, setCompanyRetry] = useState(0);
   const [companyId, setCompanyId] = useState('');
   const [periods, setPeriods] = useState<FilingPeriod[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [info, setInfo] = useState('');
   const [computing, setComputing] = useState<string | null>(null);
   const [drillDown, setDrillDown] = useState<ComputeResult | null>(null);
@@ -128,36 +137,43 @@ export default function ComplianceCockpitPage() {
   const [autoApplyId, setAutoApplyId] = useState('');
   const [autoApplying, setAutoApplying] = useState(false);
 
-  // Load companies once.
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
       .then((j) => {
+        if (controller.signal.aborted) return;
         const inner = j.data?.data ?? j.data;
         const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
         setCompanies(rows);
       })
-      // Without companies the cockpit cannot load anything, so surface the failure.
-      .catch(() => setError('Failed to load companies. Refresh the page to try again.'));
-  }, []);
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setLoadError(err instanceof Error ? err.message : 'Failed to load companies');
+      });
+    return () => controller.abort();
+  }, [authLoading, canView, companyRetry]);
 
   const load = useCallback(async () => {
-    if (!companyId) return;
-    setLoading(true); setError(''); setInfo('');
+    if (authLoading || !canView || !companyId) return;
+    const request = beginRequest();
+    setLoading(true); setLoadError(''); setInfo('');
     try {
-      const [periodsRes, anomaliesRes] = await Promise.all([
-        fetch(`/api/backend/tax/filing-periods?companyId=${companyId}&limit=50`),
-        fetch(`/api/backend/tax-anomalies/scan?companyId=${companyId}`),
-      ]);
+      const periodsRes = await fetch(`/api/backend/tax/filing-periods?companyId=${companyId}&limit=50`, { signal: request.signal });
+      if (!request.current()) return;
       if (!periodsRes.ok) throw new Error(`Filing periods: HTTP ${periodsRes.status}`);
-      if (!anomaliesRes.ok) throw new Error(`Anomalies: HTTP ${anomaliesRes.status}`);
+      const anomaliesRes = canScan
+        ? await fetch(`/api/backend/tax-anomalies/scan?companyId=${companyId}`, { signal: request.signal })
+        : null;
+      if (!request.current()) return;
+      if (anomaliesRes && !anomaliesRes.ok) throw new Error(`Anomalies: HTTP ${anomaliesRes.status}`);
 
       const periodsJson = await periodsRes.json();
       const periodsInner = periodsJson.data?.data ?? periodsJson.data ?? periodsJson;
       const periodRows: FilingPeriod[] = Array.isArray(periodsInner)
         ? periodsInner
         : Array.isArray(periodsInner?.data) ? periodsInner.data : Array.isArray(periodsInner?.items) ? periodsInner.items : [];
-      // Sort by dueDate ascending so what's most pressing is at the top.
       periodRows.sort((a, b) => {
         const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
         const db = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
@@ -165,19 +181,25 @@ export default function ComplianceCockpitPage() {
       });
       setPeriods(periodRows);
 
-      const anomJson = await anomaliesRes.json();
-      const anomData: AnomalyResponse = anomJson.data ?? anomJson;
-      setAnomalies(anomData);
+      if (anomaliesRes) {
+        const anomJson = await anomaliesRes.json();
+        const anomData: AnomalyResponse = anomJson.data ?? anomJson;
+        setAnomalies(anomData);
+      } else {
+        setAnomalies(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load cockpit');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load cockpit');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId]);
+  }, [authLoading, beginRequest, canScan, canView, companyId]);
 
   useEffect(() => { load(); }, [load]);
 
   const computeReturn = async (periodId: string) => {
+    if (!canScan) return;
     setComputing(periodId); setError(''); setInfo('');
     try {
       const res = await fetch(`/api/backend/tax-filing-engine/compute/${periodId}`, { method: 'POST' });
@@ -202,6 +224,7 @@ export default function ComplianceCockpitPage() {
   };
 
   const previewReturn = async (periodId: string) => {
+    if (!canScan) return;
     setError(''); setInfo('');
     try {
       const res = await fetch(`/api/backend/tax-filing-engine/preview/${periodId}`);
@@ -219,6 +242,7 @@ export default function ComplianceCockpitPage() {
   };
 
   const runAutoApply = async () => {
+    if (!canScan) return;
     if (!autoApplyId.trim()) {
       setError('Enter the sales order or purchase order ID to apply tax to');
       return;
@@ -260,6 +284,25 @@ export default function ComplianceCockpitPage() {
     return { computedTotal, declaredTotal, paidTotal, outstandingTotal };
   }, [periods]);
 
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Tax Cockpit" subtitle="Loading" />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Tax Cockpit" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -284,6 +327,7 @@ export default function ComplianceCockpitPage() {
         />
       </Card>
 
+      {canScan && (
       <Card className="p-4">
         <div className="grid md:grid-cols-[220px_minmax(0,1fr)_auto] gap-3 items-end">
           <FormSelect
@@ -303,8 +347,10 @@ export default function ComplianceCockpitPage() {
           <Btn variant="secondary" onClick={runAutoApply} loading={autoApplying}>Run Auto Apply</Btn>
         </div>
       </Card>
+      )}
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
+      {loadError && <ErrorState message={loadError} onRetry={() => { setCompanyRetry((n) => n + 1); void load(); }} />}
+      {error && <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
       {info && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">{info}</div>}
       {loading && <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}
 
@@ -350,7 +396,7 @@ export default function ComplianceCockpitPage() {
               <div className="text-[11px] text-slate-400">{periods.length} period{periods.length === 1 ? '' : 's'}</div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
                     <th className="px-3 py-2 w-6"></th>
@@ -408,6 +454,8 @@ export default function ComplianceCockpitPage() {
                           ) : <span className="text-[11px] text-slate-400">No return yet</span>}
                         </td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">
+                          {canScan && (
+                            <>
                           <button
                             onClick={() => previewReturn(p.id)}
                             className="text-xs text-slate-600 hover:underline mr-3"
@@ -419,12 +467,14 @@ export default function ComplianceCockpitPage() {
                           >
                             {computing === p.id ? 'Drafting…' : latestReturn ? 'Recompute' : 'Draft return'}
                           </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
 
@@ -463,7 +513,7 @@ export default function ComplianceCockpitPage() {
                 <button onClick={() => setDrillDown(null)} className="text-xs text-slate-500 hover:text-slate-700">Close</button>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <tbody>
                     {drillDown.lines.map((l, i) => (
                       <tr key={i} className="border-b border-indigo-100/70 last:border-b-0">
@@ -473,7 +523,7 @@ export default function ComplianceCockpitPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
               {drillDown.assumptions && drillDown.assumptions.length > 0 && (
                 <div className="mt-3 text-[11px] text-slate-500 border-t border-indigo-100 pt-2 space-y-1">

@@ -422,6 +422,19 @@ export class ProductsService {
     return { data: enrichedData, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  async findOneFamily(id: string, user: AuthUser) {
+    const scope = await this.companyScope.companyWhereFor(user);
+    const record = await this.prisma.productFamily.findFirst({
+      where: { ...scope, id, deletedAt: null },
+      include: {
+        category: { select: { id: true, name: true } },
+        division: { select: { id: true, name: true, code: true } },
+      },
+    });
+    if (!record) throw new NotFoundException('Product family not found');
+    return record;
+  }
+
   async createFamily(dto: CreateProductFamilyDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertFamilyReferences(dto.companyId, dto.categoryId, dto.divisionId);
@@ -958,6 +971,7 @@ export class ProductsService {
       where: { id, deletedAt: null },
       include: {
         category: true,
+        division: { select: { id: true, name: true, code: true } },
         productFamily: true,
         company: { select: { id: true, name: true, code: true } },
         baseUnit: { select: { id: true, name: true, symbol: true } },

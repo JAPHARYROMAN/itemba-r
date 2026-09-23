@@ -15,8 +15,319 @@ import { ModelClient } from '../msaidizi/model-client';
 import { MsaidiziAdaptiveReasoningService } from './msaidizi-adaptive-reasoning.service';
 import { MsaidiziRuntimeCritic } from './msaidizi-runtime-critic.service';
 import { MsaidiziRuntimeOutcomeEvaluator } from './msaidizi-runtime-outcome.service';
+import { MsaidiziInputBindingError } from '../msaidizi-tasks/msaidizi-input-binding-error';
 
 describe('MsaidiziAdaptiveReasoningService durable loop', () => {
+  it.each([
+    'continue',
+    'replan',
+    'stop',
+    'malformed',
+    'provider-failure',
+    'revoked',
+    'killed',
+    'cancelled',
+    'already-paused',
+  ] as const)(
+    'settles an active model call under pause without reopening dispatch: %s',
+    async (variant) => {
+      const fixture = runtimeFixture({ twoPending: true });
+      const built = await adaptiveApi(fixture.service).buildModelInput(
+        fixture.task.id,
+        fixture.plan.id,
+        fixture.step.id,
+      );
+      fixture.turn.inputDigest = built.digest;
+      fixture.turn.inputByteSize = built.byteSize;
+      fixture.model.createMessage.mockImplementation(async () => {
+        fixture.state.status =
+          variant === 'cancelled'
+            ? 'CANCELLED'
+            : variant === 'already-paused'
+              ? 'PAUSED'
+              : 'PAUSING';
+        if (variant === 'provider-failure') throw new Error('Scripted transport failure');
+        if (variant === 'revoked') fixture.task.mandate.status = 'REVOKED';
+        if (variant === 'killed')
+          jest
+            .spyOn(
+              fixture.service as unknown as { globalKillSwitchActive(): boolean },
+              'globalKillSwitchActive',
+            )
+            .mockReturnValue(true);
+        if (variant === 'cancelled') {
+          await fixture.prisma.msaidiziReasoningTurn.update({
+            where: { id: fixture.turn.id },
+            data: { status: 'CANCELLED', errorCode: 'REASONING_TASK_CANCELLED' },
+          });
+          fixture.prisma.msaidiziReasoningTurn.updateMany.mockResolvedValue({ count: 0 });
+        }
+        const response = continueResponse();
+        const decision = JSON.parse(response.content[0].text);
+        if (variant === 'replan')
+          Object.assign(decision, {
+            decision: 'REPLAN',
+            replan: {
+              orderedPendingStepKeys: ['lookup'],
+              skippedPendingStepKeys: ['fallback'],
+              readArgumentFills: [],
+            },
+          });
+        if (variant === 'stop') Object.assign(decision, { decision: 'STOP', outcome: 'COMPLETE' });
+        return {
+          ...response,
+          content: [
+            { type: 'text', text: variant === 'malformed' ? 'not-json' : JSON.stringify(decision) },
+          ],
+        };
+      });
+      fixture.service.onModuleInit();
+      const result = await fixture.registry.get(
+        'MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType,
+      )!(jobContext(fixture));
+      expect(fixture.model.createMessage).toHaveBeenCalledTimes(1);
+      expect(fixture.prisma.backgroundJob.upsert).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziTask.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'RUNNING' }) }),
+      );
+      if (['continue', 'replan', 'stop'].includes(variant)) {
+        expect(result).toMatchObject({ data: { ok: true, decision: variant.toUpperCase() } });
+        expect(fixture.state.status).toBe(variant === 'stop' ? 'COMPLETED' : 'PAUSING');
+        expect(fixture.prisma.msaidiziReasoningTurn.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: 'SUCCEEDED' }) }),
+        );
+      } else if (variant === 'malformed' || variant === 'provider-failure') {
+        expect(result).toMatchObject({ data: { rejected: true } });
+        expect(fixture.state.status).toBe('NEEDS_ATTENTION');
+      } else {
+        expect(result).toMatchObject({ data: { ignored: true } });
+        expect(fixture.prisma.msaidiziReasoningTurn.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: fixture.turn.id, taskId: fixture.task.id, status: 'RUNNING' },
+            data: expect.objectContaining({ status: 'CANCELLED' }),
+          }),
+        );
+        expect(fixture.prisma.msaidiziReasoningTurn.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ errorCode: 'TASK_STATE_CHANGED_BEFORE_DECISION' }),
+          }),
+        );
+      }
+      expect(fixture.prisma.msaidiziPlanVersion.create).toHaveBeenCalledTimes(
+        variant === 'replan' ? 1 : 0,
+      );
+    },
+  );
+
+  it.each(['PAUSING', 'PAUSED'] as const)(
+    'parks a claimed checkpoint without a model call when task is %s',
+    async (status) => {
+      const fixture = runtimeFixture();
+      fixture.task.status = status;
+      fixture.state.status = status;
+      fixture.service.onModuleInit();
+      const handler = fixture.registry.get('MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType)!;
+      await expect(handler(jobContext(fixture))).resolves.toEqual({
+        data: { skipped: true, reason: `task is ${status}` },
+      });
+      expect(fixture.model.createMessage).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziTask.update).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziReasoningTurn.update).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziReasoningTurn.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('blocks corrupt binding metadata before model reservation or job dispatch', async () => {
+    const fixture = runtimeFixture();
+    fixture.step.inputBindings = [{ instruction: 'invent another step' }];
+    fixture.prisma.msaidiziTask.findUnique.mockResolvedValue(fixture.task);
+    await expect(fixture.service.gate(fixture.task.id, 1)).resolves.toBe('BLOCKED');
+    expect(fixture.model.createMessage).not.toHaveBeenCalled();
+    expect(fixture.prisma.backgroundJob.upsert).not.toHaveBeenCalled();
+    expect(fixture.prisma.msaidiziReasoningTurn.create).not.toHaveBeenCalled();
+    expect(fixture.prisma.msaidiziTask.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'NEEDS_ATTENTION',
+          failureCode: 'REVIEWED_BINDING_METADATA_INVALID',
+        }),
+      }),
+    );
+  });
+
+  it('explains executor-owned placeholders without exposing their source values', async () => {
+    const fixture = runtimeFixture();
+    fixture.step.arguments = { path: {}, query: { customerId: null } };
+    fixture.step.inputBindings = [
+      {
+        targetPath: '/query/customerId',
+        source: { kind: 'PLAN_INPUT', path: '/customerId' },
+        dataClass: 'internal',
+        expectedType: 'string',
+        expectedSchema: { type: 'string' },
+        transform: { name: 'IDENTITY', version: '1' },
+      },
+    ];
+    fixture.plan.inputs = { customerId: 'private-bound-source-value' };
+    const built = await adaptiveApi(fixture.service).buildModelInput(
+      fixture.task.id,
+      fixture.plan.id,
+      fixture.step.id,
+    );
+    const payload = JSON.parse(built.request.messages[0].content as string);
+    expect(payload.reviewedPlan[0].bindingContext).toEqual({
+      status: 'VALID',
+      resolutionOwner: 'EXECUTOR',
+      lockedTargets: [
+        {
+          targetPath: '/query/customerId',
+          modelFillAllowed: false,
+          expectedType: 'string',
+          transform: { name: 'IDENTITY', version: '1' },
+          sourceKind: 'PLAN_INPUT',
+        },
+      ],
+    });
+    expect(JSON.stringify(payload.reviewedPlan[0].bindingContext)).not.toContain(
+      'private-bound-source-value',
+    );
+    expect(built.request.system[0].text).toContain('PINNED_PRIOR_PLAN');
+    expect(fixture.step.arguments).toEqual({ path: {}, query: { customerId: null } });
+  });
+
+  it.each([
+    {
+      turns: 2,
+      cost: 1,
+      checkpoint: 'SUCCEEDED',
+      decision: 'CONTINUE',
+      pending: false,
+      expected: 'CLEAR',
+      failure: null,
+    },
+    {
+      turns: 1,
+      cost: 20,
+      checkpoint: 'SUCCEEDED',
+      decision: 'CONTINUE',
+      pending: false,
+      expected: 'CLEAR',
+      failure: null,
+    },
+    {
+      turns: 2,
+      cost: 1,
+      checkpoint: 'RUNNING',
+      decision: null,
+      pending: false,
+      expected: 'BLOCKED',
+      failure: null,
+    },
+    {
+      turns: 1,
+      cost: 20,
+      checkpoint: 'RUNNING',
+      decision: null,
+      pending: false,
+      expected: 'BLOCKED',
+      failure: null,
+    },
+    {
+      turns: 2,
+      cost: 1,
+      checkpoint: 'MISSING',
+      decision: null,
+      pending: false,
+      expected: 'BLOCKED',
+      failure: 'MODEL_BUDGET_EXHAUSTED',
+    },
+    {
+      turns: 1,
+      cost: 20,
+      checkpoint: 'QUEUED',
+      decision: null,
+      pending: false,
+      expected: 'BLOCKED',
+      failure: 'MODEL_COST_BUDGET_EXHAUSTED',
+    },
+    {
+      turns: 2,
+      cost: 1,
+      checkpoint: 'SUCCEEDED',
+      decision: 'CONTINUE',
+      pending: true,
+      expected: 'BLOCKED',
+      failure: 'MODEL_BUDGET_EXHAUSTED',
+    },
+    {
+      turns: 2,
+      cost: 1,
+      checkpoint: 'SUCCEEDED',
+      decision: null,
+      pending: false,
+      expected: 'BLOCKED',
+      failure: 'MODEL_BUDGET_EXHAUSTED',
+    },
+    {
+      turns: 3,
+      cost: 1,
+      checkpoint: 'SUCCEEDED',
+      decision: 'CONTINUE',
+      pending: false,
+      expected: 'BLOCKED',
+      failure: 'MODEL_BUDGET_EXHAUSTED',
+    },
+    {
+      turns: 1,
+      cost: 21,
+      checkpoint: 'SUCCEEDED',
+      decision: 'CONTINUE',
+      pending: false,
+      expected: 'BLOCKED',
+      failure: 'MODEL_COST_BUDGET_EXHAUSTED',
+    },
+  ])(
+    'honors a settled or in-flight last model reservation ($turns/$cost/$checkpoint/$pending)',
+    async ({ turns, cost, checkpoint, decision, pending, expected, failure }) => {
+      const fixture = runtimeFixture({ twoPending: pending });
+      fixture.prisma.msaidiziTask.findUnique.mockResolvedValue({
+        ...fixture.task,
+        modelTurns: turns,
+        maxModelTurns: 2,
+        modelCostUsd: new Prisma.Decimal(cost),
+      });
+      fixture.prisma.msaidiziPlanVersion.findUnique.mockResolvedValue({
+        ...fixture.plan,
+        reasoningTurns:
+          checkpoint === 'MISSING'
+            ? []
+            : [
+                {
+                  checkpointStepId: fixture.step.id,
+                  status: checkpoint,
+                  decision,
+                },
+              ],
+      });
+      expect(await fixture.service.gate(fixture.task.id, 1)).toBe(expected);
+      expect(fixture.model.createMessage).not.toHaveBeenCalled();
+      expect(fixture.prisma.backgroundJob.upsert).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziReasoningTurn.create).not.toHaveBeenCalled();
+      if (failure)
+        expect(fixture.prisma.msaidiziTask.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'NEEDS_ATTENTION', failureCode: failure }),
+          }),
+        );
+      else
+        expect(fixture.prisma.msaidiziTask.updateMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: expect.anything() }),
+          }),
+        );
+    },
+  );
+
   it('blocks checkpoints and cancels a queued turn before any model reservation when killed', async () => {
     const fixture = runtimeFixture({ globalKill: true });
 
@@ -194,6 +505,29 @@ describe('MsaidiziAdaptiveReasoningService durable loop', () => {
     expect(fixture.prisma.msaidiziPlanVersion.create).not.toHaveBeenCalled();
   });
 
+  it('preserves the queued turn when pause wins the model reservation lock', async () => {
+    const fixture = runtimeFixture();
+    const built = await adaptiveApi(fixture.service).buildModelInput(
+      fixture.task.id,
+      fixture.plan.id,
+      fixture.step.id,
+    );
+    fixture.turn.inputDigest = built.digest;
+    fixture.turn.inputByteSize = built.byteSize;
+    fixture.prisma.$queryRaw.mockImplementationOnce(async () => {
+      fixture.state.status = 'PAUSING';
+      return [{ id: fixture.task.id }];
+    });
+    fixture.service.onModuleInit();
+    const handler = fixture.registry.get('MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType)!;
+    await expect(handler(jobContext(fixture))).resolves.toEqual({
+      data: { skipped: true, reason: 'task is PAUSING' },
+    });
+    expect(fixture.model.createMessage).not.toHaveBeenCalled();
+    expect(fixture.prisma.msaidiziReasoningTurn.update).not.toHaveBeenCalled();
+    expect(fixture.prisma.msaidiziTask.update).not.toHaveBeenCalled();
+  });
+
   it('transitions safely before the provider call when the checkpoint step forbids model turns', async () => {
     const fixture = runtimeFixture();
     fixture.step.budgets = { maxModelTurns: 0 };
@@ -344,6 +678,43 @@ describe('MsaidiziAdaptiveReasoningService durable loop', () => {
     );
   });
 
+  it('records usage but preserves cancellation when a late reply is malformed', async () => {
+    const fixture = runtimeFixture();
+    const built = await adaptiveApi(fixture.service).buildModelInput(
+      fixture.task.id,
+      fixture.plan.id,
+      fixture.step.id,
+    );
+    fixture.turn.inputDigest = built.digest;
+    fixture.turn.inputByteSize = built.byteSize;
+    fixture.model.createMessage.mockImplementation(async () => {
+      fixture.state.status = MsaidiziTaskStatus.CANCELLED;
+      await fixture.prisma.msaidiziReasoningTurn.update({
+        where: { id: fixture.turn.id },
+        data: { status: 'CANCELLED', errorCode: 'REASONING_TASK_CANCELLED' },
+      });
+      fixture.prisma.msaidiziReasoningTurn.updateMany.mockResolvedValue({ count: 0 });
+      return { ...continueResponse(), content: [{ type: 'text', text: 'not-json' }] };
+    });
+    fixture.service.onModuleInit();
+    await expect(
+      fixture.registry.get('MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType)!(
+        jobContext(fixture),
+      ),
+    ).resolves.toMatchObject({ data: { rejected: true } });
+    const receiptEvents = fixture.prisma.msaidiziTaskEvent.create.mock.calls.filter(
+      ([args]: [{ data: { type: string } }]) => args.data.type === 'reasoning.model_call_accounted',
+    );
+    expect(receiptEvents).toHaveLength(1);
+    expect(fixture.prisma.msaidiziReasoningTurn.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'FAILED' }) }),
+    );
+    expect(fixture.prisma.msaidiziTask.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'NEEDS_ATTENTION' }) }),
+    );
+    expect(fixture.prisma.msaidiziPlanVersion.create).not.toHaveBeenCalled();
+  });
+
   it('ignores a late model decision after cancellation and never creates a plan version', async () => {
     const fixture = runtimeFixture();
     const built = await adaptiveApi(fixture.service).buildModelInput(
@@ -365,7 +736,7 @@ describe('MsaidiziAdaptiveReasoningService durable loop', () => {
       ),
     ).resolves.toEqual({ data: { ignored: true, reason: 'task state changed' } });
 
-    expect(fixture.prisma.msaidiziReasoningTurn.update).toHaveBeenCalledWith(
+    expect(fixture.prisma.msaidiziReasoningTurn.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: 'CANCELLED',
@@ -379,69 +750,163 @@ describe('MsaidiziAdaptiveReasoningService durable loop', () => {
     );
   });
 
-  it('creates an immutable narrowed plan version while copying locked effects and capabilities', async () => {
-    const fixture = runtimeFixture({ twoPending: true });
-    const decision = {
-      decision: 'REPLAN' as const,
-      outcome: 'ON_TRACK' as const,
-      reasonCode: 'NARROW_PENDING_READS',
-      summary: 'Use the identified customer and skip the broad fallback.',
-      confidence: 0.95,
-      replan: {
-        orderedPendingStepKeys: ['lookup'],
-        skippedPendingStepKeys: ['fallback'],
-        readArgumentFills: [{ stepKey: 'lookup', values: { query: { customerId: 'customer-1' } } }],
-      },
-    };
-    const review = fixture.critic.review(decision, fixture.plan.steps, fixture.task.mandate);
-    expect(review.acceptable).toBe(true);
-
-    await expect(
-      adaptiveApi(fixture.service).applyDecision(
-        fixture.turn.id,
-        {
-          task: fixture.task,
-          plan: fixture.plan,
-          checkpointStep: fixture.step,
-          attempt: fixture.attempt,
-          priorEvaluations: [],
+  it.each([false, true])(
+    'creates an immutable narrowed plan preserving bindings: %s',
+    async (bound) => {
+      const fixture = runtimeFixture({ twoPending: true });
+      const binding = {
+        targetPath: '/query/customerId',
+        source: { kind: 'PLAN_INPUT', path: '/customerId' },
+        dataClass: 'internal',
+        expectedType: 'string',
+        expectedSchema: { type: 'string' },
+        transform: { name: 'IDENTITY', version: '1' },
+      };
+      if (bound) {
+        fixture.plan.inputs = { customerId: 'customer-1' };
+        fixture.plan.steps[1].arguments = { path: {}, query: { customerId: null } };
+        fixture.plan.steps[1].inputBindings = [binding];
+      }
+      const decision = {
+        decision: 'REPLAN' as const,
+        outcome: 'ON_TRACK' as const,
+        reasonCode: 'NARROW_PENDING_READS',
+        summary: 'Use the identified customer and skip the broad fallback.',
+        confidence: 0.95,
+        replan: {
+          orderedPendingStepKeys: ['lookup'],
+          skippedPendingStepKeys: ['fallback'],
+          readArgumentFills: bound
+            ? []
+            : [{ stepKey: 'lookup', values: { query: { customerId: 'customer-1' } } }],
         },
+      };
+      const review = fixture.critic.review(
         decision,
-        review,
-        { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
-        0.00105,
-        0.5,
-      ),
-    ).resolves.toMatchObject({ ok: true, decision: 'REPLAN', planVersion: 2 });
+        fixture.plan.steps,
+        fixture.task.mandate,
+        new Date(),
+        fixture.plan.inputs,
+      );
+      expect(review.acceptable).toBe(true);
 
-    expect(fixture.prisma.msaidiziPlanVersion.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ version: 2 }) }),
-    );
-    const createdRows = fixture.prisma.msaidiziTaskStep.createMany.mock.calls[0][0].data;
-    expect(createdRows).toHaveLength(1);
-    expect(createdRows[0]).toMatchObject({
-      stepKey: 'lookup',
-      capability: 'CustomersController.findAll',
-      capabilityVersion: '1',
-      expectedEffect: 'READ',
-      mutation: false,
-      arguments: { path: {}, query: { customerId: 'customer-1' } },
+      await fixture.prisma.msaidiziReasoningTurn.update({
+        where: { id: fixture.turn.id },
+        data: {
+          status: 'RUNNING',
+          startedAt: new Date(),
+          reservedCostUsd: new Prisma.Decimal(0.5),
+        },
+      });
+
+      await expect(
+        adaptiveApi(fixture.service).applyDecision(
+          fixture.turn.id,
+          {
+            task: fixture.task,
+            plan: fixture.plan,
+            checkpointStep: fixture.step,
+            attempt: fixture.attempt,
+            priorEvaluations: [],
+          },
+          decision,
+          review,
+          {
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
+          0.00105,
+          0.5,
+        ),
+      ).resolves.toMatchObject({ ok: true, decision: 'REPLAN', planVersion: 2 });
+
+      expect(fixture.prisma.msaidiziPlanVersion.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ version: 2, inputs: fixture.plan.inputs }),
+        }),
+      );
+      const createdRows = fixture.prisma.msaidiziTaskStep.createMany.mock.calls[0][0].data;
+      expect(createdRows).toHaveLength(1);
+      expect(createdRows[0]).toMatchObject({
+        stepKey: 'lookup',
+        capability: 'CustomersController.findAll',
+        capabilityVersion: '1',
+        expectedEffect: 'READ',
+        mutation: false,
+        arguments: { path: {}, query: { customerId: bound ? null : 'customer-1' } },
+        inputBindings: bound ? [binding] : [],
+      });
+      expect(createdRows[0].createdAt).toBeInstanceOf(Date);
+      expect(fixture.prisma.msaidiziTask.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ activePlanVersion: 1 }),
+          data: expect.objectContaining({ activePlanVersion: 2 }),
+        }),
+      );
+    },
+  );
+
+  it('retains known model usage when lineage verification rejects plan persistence', async () => {
+    const fixture = runtimeFixture();
+    const api = adaptiveApi(fixture.service);
+    const built = await api.buildModelInput(fixture.task.id, fixture.plan.id, fixture.step.id);
+    fixture.turn.inputDigest = built.digest;
+    fixture.turn.inputByteSize = built.byteSize;
+    fixture.model.createMessage.mockResolvedValue(continueResponse());
+    jest
+      .spyOn(api, 'applyDecision')
+      .mockRejectedValue(
+        new MsaidiziInputBindingError('INPUT_BINDING_LINEAGE_DIGEST_MISMATCH', 'Changed source'),
+      );
+    fixture.service.onModuleInit();
+    await expect(
+      fixture.registry.get('MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType)!(
+        jobContext(fixture),
+      ),
+    ).resolves.toMatchObject({
+      data: { rejected: true, reason: 'INPUT_BINDING_LINEAGE_DIGEST_MISMATCH' },
     });
-    expect(createdRows[0].createdAt).toBeInstanceOf(Date);
-    expect(fixture.prisma.msaidiziTask.updateMany).toHaveBeenCalledWith(
+    expect(fixture.prisma.msaidiziReasoningTurn.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ activePlanVersion: 1 }),
-        data: expect.objectContaining({ activePlanVersion: 2 }),
+        data: expect.objectContaining({
+          status: 'FAILED',
+          errorCode: 'INPUT_BINDING_LINEAGE_DIGEST_MISMATCH',
+        }),
       }),
     );
+    expect(fixture.prisma.msaidiziTask.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inputTokens: { increment: 120n },
+          outputTokens: { increment: 30n },
+        }),
+      }),
+    );
+    expect(fixture.prisma.msaidiziPlanVersion.create).not.toHaveBeenCalled();
+    expect(fixture.model.createMessage).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed after a dead non-retryable reasoning lease and never calls the model', async () => {
     const fixture = runtimeFixture();
+    const payload = {
+      kind: 'msaidizi-runtime-checkpoint/v1',
+      taskId: fixture.task.id,
+      turnId: fixture.turn.id,
+    };
+    fixture.prisma.$queryRaw
+      .mockResolvedValueOnce([{ activePlanVersion: 1 }])
+      .mockResolvedValueOnce([{ payload }]);
+    fixture.prisma.msaidiziReasoningTurn.findFirst.mockResolvedValue({
+      planVersionId: fixture.plan.id,
+      checkpointStepId: fixture.step.id,
+      checkpointStep: { planVersionId: fixture.plan.id },
+    });
     fixture.prisma.backgroundJob.findMany.mockResolvedValue([
       {
         id: 'dead-job',
-        payload: { kind: 'msaidizi-runtime-checkpoint/v1', turnId: fixture.turn.id },
+        payload,
       },
     ]);
     fixture.prisma.msaidiziReasoningTurn.updateMany.mockResolvedValue({ count: 1 });
@@ -450,6 +915,12 @@ describe('MsaidiziAdaptiveReasoningService durable loop', () => {
 
     expect(fixture.prisma.msaidiziReasoningTurn.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({
+          id: fixture.turn.id,
+          taskId: fixture.task.id,
+          planVersionId: fixture.plan.id,
+          checkpointStepId: fixture.step.id,
+        }),
         data: expect.objectContaining({
           status: 'FAILED',
           errorCode: 'REASONING_WORKER_LEASE_LOST',
@@ -463,6 +934,62 @@ describe('MsaidiziAdaptiveReasoningService durable loop', () => {
     );
     expect(fixture.model.createMessage).not.toHaveBeenCalled();
   });
+
+  it('refuses a dead job whose payload names another task', async () => {
+    const fixture = runtimeFixture();
+    fixture.prisma.backgroundJob.findMany.mockResolvedValue([
+      {
+        id: 'foreign-job',
+        payload: {
+          kind: 'msaidizi-runtime-checkpoint/v1',
+          taskId: 'another-task',
+          turnId: 'another-turn',
+        },
+      },
+    ]);
+    await adaptiveApi(fixture.service).reconcileDeadTurns(fixture.task.id);
+    expect(fixture.prisma.msaidiziReasoningTurn.updateMany).not.toHaveBeenCalled();
+    expect(fixture.prisma.msaidiziTask.updateMany).not.toHaveBeenCalled();
+    expect(fixture.prisma.msaidiziTaskEvent.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['gone', 'task', 'turn', 'protocol'] as const)(
+    'revalidates the dead job under lock after candidate discovery: %s',
+    async (change) => {
+      const fixture = runtimeFixture();
+      const payload = {
+        kind: 'msaidizi-runtime-checkpoint/v1',
+        taskId: fixture.task.id,
+        turnId: fixture.turn.id,
+      };
+      fixture.prisma.backgroundJob.findMany.mockResolvedValue([{ id: 'dead-job', payload }]);
+      fixture.prisma.msaidiziReasoningTurn.findFirst.mockResolvedValue({
+        planVersionId: fixture.plan.id,
+        checkpointStepId: fixture.step.id,
+        checkpointStep: { planVersionId: fixture.plan.id },
+      });
+      fixture.prisma.$queryRaw
+        .mockResolvedValueOnce([{ activePlanVersion: 1 }])
+        .mockResolvedValueOnce(
+          change === 'gone'
+            ? []
+            : [
+                {
+                  payload: {
+                    ...payload,
+                    ...(change === 'task' ? { taskId: 'foreign-task' } : {}),
+                    ...(change === 'turn' ? { turnId: 'foreign-turn' } : {}),
+                    ...(change === 'protocol' ? { kind: 'unknown-protocol' } : {}),
+                  },
+                },
+              ],
+        );
+      await adaptiveApi(fixture.service).reconcileDeadTurns(fixture.task.id);
+      expect(fixture.prisma.msaidiziReasoningTurn.updateMany).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziTask.updateMany).not.toHaveBeenCalled();
+      expect(fixture.prisma.msaidiziTaskEvent.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('enqueues exactly one maxAttempts=1 checkpoint across repeated dispatcher gates', async () => {
     const fixture = runtimeFixture();
@@ -752,6 +1279,7 @@ function runtimeFixture(options: { twoPending?: boolean; globalKill?: boolean } 
     planDigest: 'a'.repeat(64),
     createdAt: new Date(),
     steps: [step, ...pending],
+    reasoningTurns: [],
   };
   const attempt = {
     status: 'SUCCEEDED',
@@ -824,6 +1352,16 @@ function prismaMock(fixture: {
   attempt: Record<string, unknown>;
   turn: Record<string, unknown>;
 }) {
+  const storedTurn: Record<string, unknown> = {
+    ...fixture.turn,
+    status: 'QUEUED',
+    startedAt: null,
+    reservedCostUsd: new Prisma.Decimal(0),
+    inputTokens: 0n,
+    outputTokens: 0n,
+    actualCostUsd: new Prisma.Decimal(0),
+  };
+  let recordedUsage: Prisma.JsonValue | null = null;
   const prisma: Record<string, any> = {
     msaidiziTask: {
       findUnique: jest.fn(async (args: any) => {
@@ -863,6 +1401,9 @@ function prismaMock(fixture: {
     },
     msaidiziToolAttempt: { findFirst: jest.fn().mockResolvedValue(fixture.attempt) },
     msaidiziReasoningTurn: {
+      findFirst: jest.fn(async (args: { select?: { reservedCostUsd?: boolean } }) =>
+        args.select?.reservedCostUsd ? { ...storedTurn } : null,
+      ),
       findUnique: jest.fn(async (args: any) => {
         if (args.include) {
           return { ...fixture.turn, task: { ...fixture.task, status: fixture.state.status } };
@@ -877,10 +1418,19 @@ function prismaMock(fixture: {
       }),
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockResolvedValue({}),
-      update: jest.fn().mockResolvedValue({}),
+      update: jest.fn(async (args: { data: Record<string, unknown> }) => {
+        Object.assign(storedTurn, args.data);
+        return { ...storedTurn };
+      }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
-    msaidiziTaskEvent: { create: jest.fn().mockResolvedValue({}) },
+    msaidiziTaskEvent: {
+      findFirst: jest.fn(async () => (recordedUsage === null ? null : { payload: recordedUsage })),
+      create: jest.fn(async (args: { data: { type: string; payload: Prisma.JsonValue } }) => {
+        if (args.data.type === 'reasoning.model_call_accounted') recordedUsage = args.data.payload;
+        return {};
+      }),
+    },
     backgroundJob: {
       upsert: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue([]),
@@ -907,6 +1457,7 @@ function stepRow(stepKey: string, sequence: number, status: MsaidiziTaskStepStat
     capability: 'CustomersController.findAll',
     capabilityVersion: '1',
     arguments: { path: {}, query: {} },
+    inputBindings: [] as Prisma.JsonValue,
     dependencies: [],
     expectedEffect: MsaidiziEffect.READ,
     dataClass: 'internal',

@@ -1,26 +1,40 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PageHeader } from '@/components/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Modal, PageHeader } from '@/components/ui';
+import {
+  useUnsavedWork,
+  useUnsavedWorkScopeId,
+} from '@/components/workspace/unsaved-work-provider';
+import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { ScheduleEditor } from '@/features/reports/schedule-editor';
+import {
+  PAGE_LIMIT,
+  FREQUENCY_OPTIONS,
+  formatDate,
+  formatBytes,
+  recipientEmails,
+  errorMessage,
+  type ScheduledReport,
+  type ScheduledRun,
+} from '@/features/reports/schedule-types';
 import {
   ResponsiveDataTable,
   type ResponsiveColumn,
-  FormShell,
-  FormSection,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  FormSwitch,
-  FormActions,
-  ConfirmDialog,
-  Modal,
   StatusBadge,
   AuroraButton,
 } from '@/components/aurora';
 import { showToast } from '@/components/aurora/feedback';
 import { PermissionGate } from '@/components/ui/permission-gate';
 import { useAuth } from '@/hooks/use-auth';
-import { backendPage, backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
+import {
+  backendPage,
+  backendPost,
+  backendPatch,
+  backendDelete,
+  backendGet,
+} from '@/lib/api-client';
 import { downloadBinaryGet } from '@/lib/export-download';
 
 // ── Backend contract: bi/scheduled-reports (backend/src/modules/scheduled-reports) ──
@@ -41,149 +55,67 @@ import { downloadBinaryGet } from '@/lib/export-download';
 // "Run now" generates a snapshot immediately WITHOUT emailing; every generated
 // file can be downloaded from the schedule's Runs list.
 
-type ScheduleFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUAL' | 'CUSTOM';
-type ReportExportFormat = 'PDF' | 'EXCEL' | 'CSV' | 'JSON' | 'DASHBOARD_ONLY';
-
-const FREQUENCY_OPTIONS: { value: ScheduleFrequency; label: string }[] = [
-  { value: 'DAILY', label: 'Daily' },
-  { value: 'WEEKLY', label: 'Weekly' },
-  { value: 'MONTHLY', label: 'Monthly' },
-  { value: 'QUARTERLY', label: 'Quarterly' },
-  { value: 'ANNUAL', label: 'Annual' },
-  { value: 'CUSTOM', label: 'Custom' },
-];
-
-const FORMAT_OPTIONS: { value: ReportExportFormat; label: string }[] = [
-  { value: 'EXCEL', label: 'Excel (.xls)' },
-  { value: 'PDF', label: 'PDF' },
-  { value: 'CSV', label: 'CSV' },
-  { value: 'JSON', label: 'JSON' },
-  { value: 'DASHBOARD_ONLY', label: 'Dashboard only' },
-];
-
-interface ScheduledReport extends Record<string, unknown> {
-  id: string;
-  scheduleCode: string;
-  reportDefinitionId: string;
-  savedReportViewId: string | null;
-  companyId: string | null;
-  name: string;
-  description: string | null;
-  frequency: ScheduleFrequency;
-  scheduleConfig: Record<string, unknown> | null;
-  recipients: Record<string, unknown> | null;
-  exportFormat: ReportExportFormat;
-  isActive: boolean;
-  lastRunAt: string | null;
-  nextRunAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface ScheduledRun {
-  id: string;
-  reportRunNumber: string;
-  status: string;
-  rowCount: number | null;
-  createdAt: string;
-  completedAt: string | null;
-  filename: string | null;
-  mimeType: string | null;
-  sizeBytes: number | null;
-  dataset: string | null;
-  downloadable: boolean;
-}
-
-interface ScheduleForm {
-  scheduleCode: string;
-  name: string;
-  description: string;
-  reportDefinitionId: string;
-  savedReportViewId: string;
-  companyId: string;
-  frequency: ScheduleFrequency;
-  exportFormat: ReportExportFormat;
-  recipients: string; // comma / newline separated emails
-}
-
-const EMPTY_FORM: ScheduleForm = {
-  scheduleCode: '',
-  name: '',
-  description: '',
-  reportDefinitionId: '',
-  savedReportViewId: '',
-  companyId: '',
-  frequency: 'MONTHLY',
-  exportFormat: 'EXCEL',
-  recipients: '',
-};
-
-const PAGE_LIMIT = 20;
-
-function formatDate(value?: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.message || fallback;
-  if (err instanceof Error) return err.message || fallback;
-  return fallback;
-}
-
-/** Pull a readable list of recipient emails out of the stored JSON blob. */
-function recipientEmails(recipients: ScheduledReport['recipients']): string[] {
-  if (!recipients) return [];
-  const raw = recipients as Record<string, unknown>;
-  const candidate = raw.emails ?? raw.to ?? raw.recipients ?? raw.addresses;
-  if (Array.isArray(candidate)) return candidate.map((v) => String(v)).filter(Boolean);
-  if (typeof candidate === 'string')
-    return candidate
-      .split(/[,\n;]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-  return [];
-}
-
-/** Parse the recipients textarea into the JSON shape the backend stores. */
-function parseRecipients(input: string): Record<string, unknown> {
-  const emails = input
-    .split(/[,\n;]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return { emails };
-}
-
 export default function ScheduledReportsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('scheduled_reports.view');
   const canManage = hasPermission('scheduled_reports.manage');
   const canRun = hasPermission('scheduled_reports.run');
 
   const [rows, setRows] = useState<ScheduledReport[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useWorkspaceState('reports.schedules.page', 1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ScheduledReport | null>(null);
-  const [form, setForm] = useState<ScheduleForm>(EMPTY_FORM);
-  const [formErrors, setFormErrors] = useState<Partial<Record<keyof ScheduleForm, string>>>({});
-  const [saving, setSaving] = useState(false);
+  const [editor, setEditor] = useState<{
+    key: string;
+    record?: ScheduledReport;
+    source?: WorkspaceDraft;
+  } | null>(null);
+  const { request } = useUnsavedWork();
+  const workScope = useUnsavedWorkScopeId();
+  const resumeController = useRef<AbortController | null>(null);
+  const loadController = useRef<AbortController | null>(null);
+  const runsController = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      resumeController.current?.abort();
+      loadController.current?.abort();
+      runsController.current?.abort();
+    },
+    [],
+  );
+  const openCreate = () => {
+    resumeController.current?.abort();
+    if (canManage)
+      request(() => setEditor({ key: crypto.randomUUID() }), undefined, 'close', {
+        scope: workScope,
+      });
+  };
+  const openEdit = (record: ScheduledReport) => {
+    resumeController.current?.abort();
+    if (canManage)
+      request(() => setEditor({ key: crypto.randomUUID(), record }), undefined, 'close', {
+        scope: workScope,
+      });
+  };
+  const resumeDraft = async (source: WorkspaceDraft) => {
+    if (!canManage || source.context.kind !== 'schedule')
+      throw new Error('Your role cannot open this report draft.');
+    resumeController.current?.abort();
+    const controller = new AbortController();
+    resumeController.current = controller;
+    const record = source.context.recordId
+      ? await backendGet<ScheduledReport>(
+          `/bi/scheduled-reports/${encodeURIComponent(source.context.recordId)}`,
+          { signal: controller.signal },
+        )
+      : undefined;
+    if (!controller.signal.aborted)
+      request(() => setEditor({ key: source.id, source, record }), undefined, 'close', {
+        scope: workScope,
+      });
+  };
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
@@ -198,122 +130,61 @@ export default function ScheduledReportsPage() {
   const [downloadingRunId, setDownloadingRunId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
     setLoading(true);
     setError(null);
+    setRows([]);
     try {
       const result = await backendPage<ScheduledReport>('/bi/scheduled-reports', {
         query: { page, limit: PAGE_LIMIT },
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
+      const lastPage = Math.max(1, Math.ceil(result.total / PAGE_LIMIT));
+      if (page > lastPage) {
+        setPage(lastPage);
+        return;
+      }
       setRows(result.data);
       setTotal(result.total);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError(errorMessage(err, 'Failed to load scheduled reports'));
       setRows([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [page]);
+  }, [page, authLoading, canView, setPage]);
 
   useEffect(() => {
     void load();
+    return () => loadController.current?.abort();
   }, [load]);
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm(EMPTY_FORM);
-    setFormErrors({});
-    setFormOpen(true);
-  };
-
-  const openEdit = (schedule: ScheduledReport) => {
-    setEditing(schedule);
-    setForm({
-      scheduleCode: schedule.scheduleCode,
-      name: schedule.name,
-      description: schedule.description ?? '',
-      reportDefinitionId: schedule.reportDefinitionId,
-      savedReportViewId: schedule.savedReportViewId ?? '',
-      companyId: schedule.companyId ?? '',
-      frequency: schedule.frequency,
-      exportFormat: schedule.exportFormat,
-      recipients: recipientEmails(schedule.recipients).join(', '),
-    });
-    setFormErrors({});
-    setFormOpen(true);
-  };
-
-  const validate = (): boolean => {
-    const errs: Partial<Record<keyof ScheduleForm, string>> = {};
-    if (!form.name.trim()) errs.name = 'Name is required';
-    if (!editing && !form.scheduleCode.trim()) errs.scheduleCode = 'Schedule code is required';
-    if (!editing && !form.reportDefinitionId.trim()) {
-      errs.reportDefinitionId = 'Report definition ID is required';
-    }
-    if (!form.recipients.trim()) errs.recipients = 'At least one recipient is required';
-    setFormErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const submitForm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-    setSaving(true);
-    try {
-      if (editing) {
-        // Partial update — schedule code + report definition are immutable in the UI.
-        await backendPatch(`/bi/scheduled-reports/${editing.id}`, {
-          name: form.name.trim(),
-          description: form.description.trim() || undefined,
-          savedReportViewId: form.savedReportViewId.trim() || undefined,
-          frequency: form.frequency,
-          exportFormat: form.exportFormat,
-          recipients: parseRecipients(form.recipients),
-        });
-        showToast('success', 'Schedule updated', form.name.trim());
-      } else {
-        await backendPost('/bi/scheduled-reports', {
-          scheduleCode: form.scheduleCode.trim(),
-          name: form.name.trim(),
-          description: form.description.trim() || undefined,
-          reportDefinitionId: form.reportDefinitionId.trim(),
-          ...(form.savedReportViewId.trim()
-            ? { savedReportViewId: form.savedReportViewId.trim() }
-            : {}),
-          ...(form.companyId.trim() ? { companyId: form.companyId.trim() } : {}),
-          frequency: form.frequency,
-          exportFormat: form.exportFormat,
-          recipients: parseRecipients(form.recipients),
-        });
-        showToast('success', 'Schedule created', form.name.trim());
-      }
-      setFormOpen(false);
-      if (!editing && page !== 1) setPage(1);
-      else await load();
-    } catch (err) {
-      showToast(
-        'error',
-        editing ? 'Update failed' : 'Create failed',
-        errorMessage(err, 'Please try again'),
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const loadRuns = useCallback(async (scheduleId: string) => {
+    runsController.current?.abort();
+    const controller = new AbortController();
+    runsController.current = controller;
+    setRuns([]);
     setRunsLoading(true);
     setRunsError(null);
     try {
       const result = await backendPage<ScheduledRun>(`/bi/scheduled-reports/${scheduleId}/runs`, {
         query: { page: 1, limit: 20 },
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       setRuns(result.data);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setRunsError(errorMessage(err, 'Failed to load run history'));
       setRuns([]);
     } finally {
-      setRunsLoading(false);
+      if (!controller.signal.aborted) setRunsLoading(false);
     }
   }, []);
 
@@ -395,134 +266,137 @@ export default function ScheduledReportsPage() {
     }
   };
 
-  const columns = useMemo<ResponsiveColumn<ScheduledReport>[]>(
-    () => [
-      {
-        key: 'name',
-        header: 'Schedule',
-        priority: 1,
-        accessor: (row) => (
-          <div className="flex flex-col">
-            <span className="font-medium" style={{ color: 'var(--aurora-text)' }}>
-              {row.name}
-            </span>
-            <span className="text-[11px] font-mono" style={{ color: 'var(--aurora-text-muted)' }}>
-              {row.scheduleCode}
-            </span>
-          </div>
-        ),
-      },
-      {
-        key: 'frequency',
-        header: 'Frequency',
-        priority: 2,
-        accessor: (row) => (
-          <span className="text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
-            {FREQUENCY_OPTIONS.find((f) => f.value === row.frequency)?.label ?? row.frequency}
+  const columns: ResponsiveColumn<ScheduledReport>[] = [
+    {
+      key: 'name',
+      header: 'Schedule',
+      priority: 1,
+      accessor: (row) => (
+        <div className="flex flex-col">
+          <span className="font-medium" style={{ color: 'var(--aurora-text)' }}>
+            {row.name}
           </span>
-        ),
-      },
-      {
-        key: 'exportFormat',
-        header: 'Format',
-        priority: 3,
-        accessor: (row) => (
-          <span className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-            {row.exportFormat.replace(/_/g, ' ')}
+          <span className="text-[11px] font-mono" style={{ color: 'var(--aurora-text-muted)' }}>
+            {row.scheduleCode}
           </span>
-        ),
-      },
-      {
-        key: 'recipients',
-        header: 'Recipients',
-        priority: 3,
-        accessor: (row) => {
-          const emails = recipientEmails(row.recipients);
-          if (!emails.length) {
-            return <span style={{ color: 'var(--aurora-text-muted)' }}>—</span>;
-          }
-          return (
-            <span
-              className="text-xs"
-              style={{ color: 'var(--aurora-text-secondary)' }}
-              title={emails.join(', ')}
-            >
-              {emails.length === 1 ? emails[0] : `${emails[0]} +${emails.length - 1}`}
-            </span>
-          );
-        },
-      },
-      {
-        key: 'isActive',
-        header: 'Status',
-        priority: 1,
-        accessor: (row) =>
-          row.isActive ? (
-            <StatusBadge status="Active" variant="success" />
-          ) : (
-            <StatusBadge status="Paused" variant="muted" />
-          ),
-      },
-      {
-        key: 'lastRunAt',
-        header: 'Last run',
-        priority: 2,
-        accessor: (row) => (
-          <span className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-            {formatDate(row.lastRunAt)}
+        </div>
+      ),
+    },
+    {
+      key: 'frequency',
+      header: 'Frequency',
+      priority: 2,
+      accessor: (row) => (
+        <span className="text-xs font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {FREQUENCY_OPTIONS.find((f) => f.value === row.frequency)?.label ?? row.frequency}
+        </span>
+      ),
+    },
+    {
+      key: 'exportFormat',
+      header: 'Format',
+      priority: 3,
+      accessor: (row) => (
+        <span className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {row.exportFormat.replace(/_/g, ' ')}
+        </span>
+      ),
+    },
+    {
+      key: 'recipients',
+      header: 'Recipients',
+      priority: 3,
+      accessor: (row) => {
+        const emails = recipientEmails(row.recipients);
+        if (!emails.length) {
+          return <span style={{ color: 'var(--aurora-text-muted)' }}>—</span>;
+        }
+        return (
+          <span
+            className="text-xs"
+            style={{ color: 'var(--aurora-text-secondary)' }}
+            title={emails.join(', ')}
+          >
+            {emails.length === 1 ? emails[0] : `${emails[0]} +${emails.length - 1}`}
           </span>
-        ),
+        );
       },
-      {
-        key: 'actions',
-        header: 'Actions',
-        priority: 1,
-        exportExclude: true,
-        accessor: (row) => {
-          const busy = pendingAction === row.id;
-          return (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {canRun && (
-                <AuroraButton
-                  size="sm"
-                  variant="primary"
-                  loading={busy}
-                  onClick={() => runNow(row)}
-                >
-                  Run now
-                </AuroraButton>
-              )}
-              <AuroraButton size="sm" variant="ghost" onClick={() => openRuns(row)}>
-                Runs
+    },
+    {
+      key: 'isActive',
+      header: 'Status',
+      priority: 1,
+      accessor: (row) =>
+        row.isActive ? (
+          <StatusBadge status="Active" variant="success" />
+        ) : (
+          <StatusBadge status="Paused" variant="muted" />
+        ),
+    },
+    {
+      key: 'lastRunAt',
+      header: 'Last run',
+      priority: 2,
+      accessor: (row) => (
+        <span className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {formatDate(row.lastRunAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      priority: 1,
+      exportExclude: true,
+      accessor: (row) => {
+        const busy = pendingAction === row.id;
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {canRun && (
+              <AuroraButton size="sm" variant="primary" loading={busy} onClick={() => runNow(row)}>
+                Run now
               </AuroraButton>
-              {canManage && (
-                <AuroraButton size="sm" variant="ghost" onClick={() => openEdit(row)}>
-                  Edit
-                </AuroraButton>
-              )}
-              {canManage && (
-                <AuroraButton
-                  size="sm"
-                  variant="ghost"
-                  loading={busy}
-                  onClick={() => toggleActive(row)}
-                >
-                  {row.isActive ? 'Deactivate' : 'Activate'}
-                </AuroraButton>
-              )}
-              {canManage && (
-                <AuroraButton size="sm" variant="danger" onClick={() => setDeleteTarget(row)}>
-                  Delete
-                </AuroraButton>
-              )}
-            </div>
-          );
-        },
+            )}
+            <AuroraButton size="sm" variant="ghost" onClick={() => openRuns(row)}>
+              Runs
+            </AuroraButton>
+            {canManage && (
+              <AuroraButton size="sm" variant="ghost" onClick={() => openEdit(row)}>
+                Edit
+              </AuroraButton>
+            )}
+            {canManage && (
+              <AuroraButton
+                size="sm"
+                variant="ghost"
+                loading={busy}
+                onClick={() => toggleActive(row)}
+              >
+                {row.isActive ? 'Deactivate' : 'Activate'}
+              </AuroraButton>
+            )}
+            {canManage && (
+              <AuroraButton size="sm" variant="danger" onClick={() => setDeleteTarget(row)}>
+                Delete
+              </AuroraButton>
+            )}
+          </div>
+        );
       },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canManage, canRun, pendingAction, runsTarget],
-  );
+    },
+  ];
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <PageHeader
+          title="Scheduled Reports"
+          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
+          breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Scheduled' }]}
+        />
+      </div>
+    );
+  }
 
   return (
     <PermissionGate
@@ -538,7 +412,7 @@ export default function ScheduledReportsPage() {
         </div>
       }
     >
-      <div className="p-6 space-y-4">
+      <div className="business-workspace space-y-4">
         <PageHeader
           title="Scheduled Reports"
           subtitle="Configure report snapshots with a frequency, export format and recipient list."
@@ -552,42 +426,16 @@ export default function ScheduledReportsPage() {
           }
         />
 
-        {/* How dispatch actually works: the background job worker runs due schedules. */}
-        <div
-          className="rounded-lg border px-4 py-3 flex items-start gap-3"
-          style={{
-            borderColor: 'var(--aurora-border)',
-            background: 'var(--aurora-bg-subtle)',
-            color: 'var(--aurora-text-secondary)',
-          }}
-          role="note"
-        >
-          <svg
-            className="w-5 h-5 flex-shrink-0 mt-0.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-            />
-          </svg>
-          <div className="text-sm leading-5">
-            <span className="font-semibold">
-              Active schedules are dispatched by the background worker.
-            </span>{' '}
-            When the server runs with the job worker and automation dispatch enabled (
-            <code className="text-[11px]">JOB_WORKER_ENABLED</code> and{' '}
-            <code className="text-[11px]">AUTOMATION_DISPATCH_ENABLED</code>), due schedules run
-            automatically and the generated export is emailed to the recipients with the file
-            attached. <span className="font-semibold">&ldquo;Run now&rdquo;</span> generates a
-            snapshot immediately without emailing — every generated file can be downloaded from the
-            schedule&rsquo;s <span className="font-semibold">Runs</span> list.
-          </div>
-        </div>
+        <WorkspaceDraftShelf
+          appId="reports"
+          filter={(draft) => draft.context.kind === 'schedule'}
+          onResume={resumeDraft}
+          activeDraftId={editor?.source?.id}
+        />
+        <p className="workspace-notice" role="note">
+          Automatic delivery emails recipients when enabled for your organisation. Run now creates a
+          snapshot without sending email; open Runs to download it.
+        </p>
 
         <ResponsiveDataTable<ScheduledReport>
           columns={columns}
@@ -612,131 +460,29 @@ export default function ScheduledReportsPage() {
         />
       </div>
 
-      <Modal
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        title={editing ? 'Edit schedule' : 'New schedule'}
-        description={
-          editing
-            ? 'Update the frequency, format and recipients for this schedule.'
-            : 'Define a report snapshot, its export format and recipient list.'
-        }
-        size="lg"
-      >
-        <div className="px-5 pb-5 pt-4 max-h-[70vh] overflow-y-auto">
-          <FormShell onSubmit={submitForm}>
-            <FormSection title="Basics" columns={2}>
-              <FormInput
-                label="Name"
-                required
-                value={form.name}
-                error={formErrors.name}
-                placeholder="e.g. Monthly board pack"
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <FormInput
-                label="Schedule code"
-                required={!editing}
-                disabled={!!editing}
-                value={form.scheduleCode}
-                error={formErrors.scheduleCode}
-                placeholder="e.g. BOARD-PACK-M"
-                help={
-                  editing
-                    ? 'Schedule code cannot be changed.'
-                    : 'Unique short code for this schedule.'
-                }
-                onChange={(e) => setForm((f) => ({ ...f, scheduleCode: e.target.value }))}
-              />
-              <div className="sm:col-span-2">
-                <FormTextarea
-                  label="Description"
-                  value={form.description}
-                  placeholder="Optional notes about what this schedule produces."
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                />
-              </div>
-            </FormSection>
-
-            <FormSection title="Source" columns={2}>
-              <FormInput
-                label="Report definition ID"
-                required={!editing}
-                disabled={!!editing}
-                value={form.reportDefinitionId}
-                error={formErrors.reportDefinitionId}
-                placeholder="UUID of the report definition"
-                help={
-                  editing
-                    ? 'Report definition cannot be changed.'
-                    : 'The report definition UUID to snapshot.'
-                }
-                onChange={(e) => setForm((f) => ({ ...f, reportDefinitionId: e.target.value }))}
-              />
-              <FormInput
-                label="Saved view ID (optional)"
-                value={form.savedReportViewId}
-                placeholder="UUID of a saved report view"
-                help="Optional. Applies a saved view's filters to the snapshot."
-                onChange={(e) => setForm((f) => ({ ...f, savedReportViewId: e.target.value }))}
-              />
-              {!editing && (
-                <FormInput
-                  label="Company ID (optional)"
-                  value={form.companyId}
-                  placeholder="Leave blank for group scope"
-                  help="Optional. Defaults to your active company; blank for group scope."
-                  onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}
-                />
-              )}
-            </FormSection>
-
-            <FormSection title="Delivery" columns={2}>
-              <FormSelect
-                label="Frequency"
-                required
-                value={form.frequency}
-                options={FREQUENCY_OPTIONS}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, frequency: e.target.value as ScheduleFrequency }))
-                }
-              />
-              <FormSelect
-                label="Export format"
-                required
-                value={form.exportFormat}
-                options={FORMAT_OPTIONS}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, exportFormat: e.target.value as ReportExportFormat }))
-                }
-              />
-              <div className="sm:col-span-2">
-                <FormTextarea
-                  label="Recipients"
-                  required
-                  value={form.recipients}
-                  error={formErrors.recipients}
-                  placeholder="finance@itemba.co.tz, board@itemba.co.tz"
-                  help="Comma or newline separated email addresses. The background worker emails the generated export to these addresses when the schedule fires (requires server automation dispatch to be enabled)."
-                  onChange={(e) => setForm((f) => ({ ...f, recipients: e.target.value }))}
-                />
-              </div>
-            </FormSection>
-
-            <FormActions
-              primaryLabel={editing ? 'Save changes' : 'Create schedule'}
-              onSecondary={() => setFormOpen(false)}
-              loading={saving}
-            />
-          </FormShell>
-        </div>
-      </Modal>
+      {editor && (
+        <ScheduleEditor
+          key={editor.key}
+          record={editor.record}
+          source={editor.source}
+          onClose={() => setEditor(null)}
+          onSaved={() => {
+            const created = !editor.record;
+            setEditor(null);
+            if (created && page !== 1) setPage(1);
+            else void load();
+          }}
+        />
+      )}
 
       <Modal
         open={!!runsTarget}
-        onClose={() => setRunsTarget(null)}
+        onClose={() => {
+          runsController.current?.abort();
+          setRunsTarget(null);
+        }}
         title={runsTarget ? `Runs — ${runsTarget.name}` : 'Runs'}
-        description="Generation history for this schedule. Download the stored export file of any completed run."
+        subtitle="Generation history for this schedule. Download the stored export file of any completed run."
         size="lg"
       >
         <div className="px-5 pb-5 pt-4 max-h-[70vh] overflow-y-auto">
@@ -805,20 +551,26 @@ export default function ScheduledReportsPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog
+      <Modal
         open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
+        onClose={() => !deleting && setDeleteTarget(null)}
         title="Delete scheduled report"
-        description={
-          deleteTarget
-            ? `"${deleteTarget.name}" will be removed. This cannot be undone.`
-            : undefined
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-3">
+            <AuroraButton variant="ghost" disabled={deleting} onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </AuroraButton>
+            <AuroraButton variant="danger" loading={deleting} onClick={confirmDelete}>
+              Delete
+            </AuroraButton>
+          </div>
         }
-        confirmLabel="Delete"
-        variant="danger"
-        loading={deleting}
-      />
+      >
+        <p>
+          {deleteTarget ? `"${deleteTarget.name}" will be removed. This cannot be undone.` : ''}
+        </p>
+      </Modal>
     </PermissionGate>
   );
 }

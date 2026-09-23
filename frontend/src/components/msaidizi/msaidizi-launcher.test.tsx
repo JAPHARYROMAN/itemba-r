@@ -115,7 +115,10 @@ vi.mock('@/components/security/CsrfFetchProvider', () => ({
   CsrfFetchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('@/lib/design-system/theme', () => ({ initTheme: vi.fn() }));
+vi.mock('@/lib/design-system/theme', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/design-system/theme')>()),
+  initTheme: vi.fn(),
+}));
 
 // jsdom ships no `matchMedia`, and the topbar's theme selector asks for it on
 // mount. Nothing under test here depends on the answer, so a permanently-light
@@ -136,12 +139,23 @@ beforeAll(() => {
   }
 });
 
-function renderShell() {
-  return render(
+async function renderShell() {
+  const view = render(
     <DashboardLayout>
-      <div data-testid="page-content" />
+      <div data-testid="page-content" tabIndex={-1} />
     </DashboardLayout>,
   );
+  // The ERP arm hosts the route inside a desktop window, and that window is only
+  // opened once the saved workspace session resolves. Waiting for the content is
+  // waiting for the tree the browser actually gets; querying synchronously would
+  // assert against the desktop as it looks before hydration. The POS arm renders
+  // its children directly, so this resolves immediately there and the same
+  // helper still covers both branches.
+  const content = await screen.findByTestId('page-content');
+  // jsdom applies autofocus inside the closed native discard dialog. A browser
+  // does not: start keyboard tests in the visible workspace instead.
+  content.focus();
+  return view;
 }
 
 beforeEach(() => {
@@ -174,7 +188,7 @@ beforeEach(() => {
 
 describe('LAUNCH-1 · the topbar entry opens the page with the question running', () => {
   it('opens a composer rather than answering in place', async () => {
-    renderShell();
+    await renderShell();
 
     await userEvent.click(screen.getByTestId('msaidizi-launcher-button'));
 
@@ -186,7 +200,7 @@ describe('LAUNCH-1 · the topbar entry opens the page with the question running'
   });
 
   it('navigates to /msaidizi carrying the question', async () => {
-    renderShell();
+    await renderShell();
 
     await userEvent.click(screen.getByTestId('msaidizi-launcher-button'));
     await userEvent.type(
@@ -200,7 +214,7 @@ describe('LAUNCH-1 · the topbar entry opens the page with the question running'
   });
 
   it('opens the bare page when nothing was typed', async () => {
-    renderShell();
+    await renderShell();
 
     await userEvent.click(screen.getByTestId('msaidizi-launcher-button'));
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
@@ -215,7 +229,7 @@ describe('LAUNCH-1 · the topbar entry opens the page with the question running'
 
 describe('LAUNCH-2 · Ctrl/Cmd+J follows the command-palette precedent', () => {
   it('toggles the launcher open and closed', async () => {
-    renderShell();
+    await renderShell();
 
     await userEvent.keyboard('{Control>}j{/Control}');
     expect(screen.getByTestId('msaidizi-launcher-dialog')).toBeInTheDocument();
@@ -225,7 +239,7 @@ describe('LAUNCH-2 · Ctrl/Cmd+J follows the command-palette precedent', () => {
   });
 
   it('closes on Escape without navigating', async () => {
-    renderShell();
+    await renderShell();
 
     await userEvent.keyboard('{Meta>}j{/Meta}');
     expect(screen.getByTestId('msaidizi-launcher-dialog')).toBeInTheDocument();
@@ -236,7 +250,7 @@ describe('LAUNCH-2 · Ctrl/Cmd+J follows the command-palette precedent', () => {
   });
 
   it('leaves Ctrl+K to the command palette', async () => {
-    renderShell();
+    await renderShell();
     await userEvent.keyboard('{Control>}k{/Control}');
     expect(screen.queryByTestId('msaidizi-launcher-dialog')).toBeNull();
   });
@@ -249,9 +263,9 @@ describe('LAUNCH-2 · Ctrl/Cmd+J follows the command-palette precedent', () => {
 describe('LAUNCH-3 · the POS shell never gets a launcher', () => {
   it.each(['/mobile-pos', '/westsides/mobile-pos'])(
     'mounts no assistant button at %s',
-    (pathname) => {
+    async (pathname) => {
       h.pathname.current = pathname;
-      renderShell();
+      await renderShell();
 
       expect(screen.getByTestId('page-content')).toBeInTheDocument();
       expect(screen.queryByTestId('msaidizi-launcher-button')).toBeNull();
@@ -260,7 +274,7 @@ describe('LAUNCH-3 · the POS shell never gets a launcher', () => {
 
   it('does not answer the shortcut inside Kaunta', async () => {
     h.pathname.current = '/mobile-pos';
-    renderShell();
+    await renderShell();
 
     await userEvent.keyboard('{Control>}j{/Control}');
 
@@ -268,9 +282,9 @@ describe('LAUNCH-3 · the POS shell never gets a launcher', () => {
     expect(h.push).not.toHaveBeenCalled();
   });
 
-  it('mounts it again in the ERP shell, so the exclusion is the branch and not the feature', () => {
+  it('mounts it again in the ERP shell, so the exclusion is the branch and not the feature', async () => {
     h.pathname.current = '/dashboard';
-    renderShell();
+    await renderShell();
     expect(screen.getByTestId('msaidizi-launcher-button')).toBeInTheDocument();
   });
 });
@@ -284,21 +298,21 @@ describe('LAUNCH-4 · without msaidizi.use the surface is absent', () => {
     h.permissions.current = ['sales.view'];
   });
 
-  it('shows no topbar entry', () => {
-    renderShell();
+  it('shows no topbar entry', async () => {
+    await renderShell();
     expect(screen.queryByTestId('msaidizi-launcher-button')).toBeNull();
     // Absent, not present-and-disabled: an unpermitted capability is invisible.
     expect(screen.queryByRole('button', { name: /msaidizi/i })).toBeNull();
   });
 
   it('ignores the shortcut', async () => {
-    renderShell();
+    await renderShell();
     await userEvent.keyboard('{Control>}j{/Control}');
     expect(screen.queryByTestId('msaidizi-launcher-dialog')).toBeNull();
   });
 
-  it('keeps the nav leaf out of the sidebar', () => {
-    renderShell();
+  it('keeps the nav leaf out of the sidebar', async () => {
+    await renderShell();
     expect(screen.queryByRole('link', { name: /msaidizi/i })).toBeNull();
   });
 });

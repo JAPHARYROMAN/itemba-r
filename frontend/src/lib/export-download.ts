@@ -32,8 +32,10 @@ export async function downloadBinaryExport(
   path: string,
   body: unknown,
   fallbackName: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${BACKEND_PROXY}${path}`, {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -47,6 +49,7 @@ export async function downloadBinaryExport(
   }
   const filename = filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName);
   const blob = await res.blob();
+  signal?.throwIfAborted();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -134,7 +137,7 @@ export interface TablePdfRequest {
  * inputs (long search subtitles, >5000-row reports) degrade gracefully instead
  * of failing validation with a 400.
  */
-export async function downloadTablePdf(req: TablePdfRequest): Promise<void> {
+export async function downloadTablePdf(req: TablePdfRequest, signal?: AbortSignal): Promise<void> {
   const truncated = req.rows.length > TABLE_PDF_MAX_ROWS;
   const meta = (req.meta ?? []).map((entry) => ({
     label: clamp(entry.label, 60),
@@ -163,7 +166,12 @@ export async function downloadTablePdf(req: TablePdfRequest): Promise<void> {
   };
   const stamp = new Date().toISOString().slice(0, 10);
   const stem = body.baseName || body.title || 'export';
-  await downloadBinaryExport('/generated-documents/table-pdf', body, `${stem}-${stamp}.pdf`);
+  await downloadBinaryExport(
+    '/generated-documents/table-pdf',
+    body,
+    `${stem}-${stamp}.pdf`,
+    signal,
+  );
 }
 
 /**

@@ -56,3 +56,9 @@ website/data/
 .docker-data/
 
 .vercel
+
+# Disposable Fuel Reporting verification artifacts
+.tmp-fuel-reporting/
+
+# Local release rehearsal secrets, database dumps and detailed audit output
+.release/

@@ -75,6 +75,91 @@ const dynamicArguments = {
 };
 
 describe('Msaidizi schedule task templates', () => {
+  const boundTemplate = () => {
+    const value = template();
+    return {
+      ...value,
+      inputs: { page: 2 },
+      steps: [
+        {
+          ...value.steps[0],
+          arguments: { path: {}, query: { page: null } },
+          inputBindings: [
+            {
+              targetPath: '/query/page',
+              source: { kind: 'PLAN_INPUT', path: '/page' },
+              dataClass: 'internal',
+              expectedType: 'integer',
+              expectedSchema: { type: 'integer', minimum: 1 },
+              transform: { name: 'IDENTITY', version: '1' },
+            },
+          ],
+        },
+      ],
+    };
+  };
+
+  it('preserves a validated routine input binding', () => {
+    const value = boundTemplate();
+    expect(validateScheduleTaskTemplate(value).steps[0].inputBindings).toEqual(
+      value.steps[0].inputBindings,
+    );
+  });
+
+  it.each([false, true])(
+    'validates a dependency binding and its fixed artifact authority (artifact=%s)',
+    (artifact) => {
+      const value = boundTemplate();
+      const binding = {
+        ...value.steps[0].inputBindings[0],
+        source: {
+          kind: artifact ? 'DEPENDENCY_ARTIFACT' : 'DEPENDENCY_RESULT',
+          path: '/body/page',
+          dependencyStepKey: 'source',
+          ...(artifact && { artifactId: '78ad31e5-b7d8-48f4-b606-bc6cd0e82c0f' }),
+        },
+      };
+      const candidate = {
+        ...value,
+        steps: [
+          {
+            ...value.steps[0],
+            key: 'source',
+            inputBindings: [],
+            arguments: { path: {}, query: {} },
+          },
+          { ...value.steps[0], key: 'consumer', dependsOn: ['source'], inputBindings: [binding] },
+        ],
+      };
+      if (artifact) {
+        expect(() => validateScheduleTaskTemplate(candidate)).toThrow(
+          'fixed artifact selector was not supplied in reviewed inputs',
+        );
+      } else {
+        const step = validateScheduleTaskTemplate(candidate).steps[1];
+        expect(step.dependsOn).toEqual(['source']);
+        expect(step.inputBindings).toEqual([binding]);
+      }
+    },
+  );
+
+  it.each(['missing-input', 'not-placeholder', 'wrong-type', 'undeclared-dependency'])(
+    'rejects invalid routine bindings: %s',
+    (kind) => {
+      const value = boundTemplate();
+      if (kind === 'missing-input') value.inputs = {} as typeof value.inputs;
+      if (kind === 'not-placeholder') value.steps[0].arguments.query.page = 1 as never;
+      if (kind === 'wrong-type') value.inputs.page = 'two' as never;
+      if (kind === 'undeclared-dependency')
+        value.steps[0].inputBindings[0].source = {
+          kind: 'DEPENDENCY_RESULT',
+          path: '/data',
+          dependencyStepKey: 'missing',
+        } as never;
+      expect(() => validateScheduleTaskTemplate(value)).toThrow(MsaidiziScheduleTemplateError);
+    },
+  );
+
   it('accepts a strict task DAG inside the persisted mandate scope', () => {
     const parsed = validateScheduleTaskTemplate(template());
     expect(() =>

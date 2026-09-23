@@ -1,15 +1,20 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { FilePreviewDialog } from '@/components/documents/FilePreviewDialog';
+import type { FilePreviewSource } from '@/components/documents/file-preview-source';
+import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendUpload } from '@/lib/api-client';
 
 interface Company { id: string; name: string; code: string }
 
 interface DocumentRecord {
   id: string;
+  version?: number;
   documentCode?: string | null;
   title: string;
   category: string;
@@ -70,7 +75,7 @@ function UploadModal({ companies, onClose, onSaved }: { companies: Company[]; on
   const handleSubmit = async () => {
     if (!file) { setError('File is required'); return; }
     if (!form.title.trim()) { setError('Title is required'); return; }
-    if (!form.ownerId.trim()) { setError('Owner ID is required'); return; }
+    if (!(form.ownerType === 'COMPANY' ? form.companyId : form.ownerId).trim()) { setError('Select the owning company or enter an owner ID'); return; }
     setSaving(true); setError('');
     try {
       const fd = new FormData();
@@ -78,7 +83,7 @@ function UploadModal({ companies, onClose, onSaved }: { companies: Company[]; on
       fd.append('title', form.title.trim());
       fd.append('category', form.category);
       fd.append('ownerType', form.ownerType);
-      fd.append('ownerId', form.ownerId.trim());
+      fd.append('ownerId', form.ownerType === 'COMPANY' ? form.companyId : form.ownerId.trim());
       if (form.companyId) fd.append('companyId', form.companyId);
       if (form.description) fd.append('description', form.description);
       fd.append('isConfidential', form.isConfidential ? 'true' : 'false');
@@ -93,11 +98,11 @@ function UploadModal({ companies, onClose, onSaved }: { companies: Company[]; on
   return (
     <Modal open onClose={onClose} title="Upload Document" size="xl"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>Upload</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="space-y-3">
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--aurora-text)' }}>File <span className="text-red-500">*</span></label>
-          <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
+          <input aria-label="File" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <FormInput label="Title" required value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
@@ -107,13 +112,13 @@ function UploadModal({ companies, onClose, onSaved }: { companies: Company[]; on
           <FormSelect label="Owner Type" value={form.ownerType} onChange={(e) => setForm((f) => ({ ...f, ownerType: e.target.value }))}>
             {OWNER_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
           </FormSelect>
-          <FormInput label="Owner ID (UUID)" required value={form.ownerId} onChange={(e) => setForm((f) => ({ ...f, ownerId: e.target.value }))} />
+          {form.ownerType !== 'COMPANY' && <FormInput label="Owner ID (UUID)" required value={form.ownerId} onChange={(e) => setForm((f) => ({ ...f, ownerId: e.target.value }))} />}
           <FormSelect label="Company" value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))} placeholder="Group-level">
             {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </FormSelect>
           <div></div>
-          <FormInput label="Expiry Date" type="date" value={form.expiryDate} onChange={(e) => setForm((f) => ({ ...f, expiryDate: e.target.value }))} />
-          <FormInput label="Renewal Date" type="date" value={form.renewalDate} onChange={(e) => setForm((f) => ({ ...f, renewalDate: e.target.value }))} />
+          <FormDateField label="Expiry Date" value={form.expiryDate} onChange={(value) => setForm((f) => ({ ...f, expiryDate: value }))} />
+          <FormDateField label="Renewal Date" value={form.renewalDate} onChange={(value) => setForm((f) => ({ ...f, renewalDate: value }))} />
           <div className="col-span-2"><FormTextarea label="Description" rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></div>
         </div>
         <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--aurora-text)' }}>
@@ -125,12 +130,14 @@ function UploadModal({ companies, onClose, onSaved }: { companies: Company[]; on
 }
 
 export default function DocumentsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<DocumentRecord> | null>(null);
   const [summary, setSummary] = useState<DocSummary | null>(null);
   const [expiring, setExpiring] = useState<ExpiringDoc[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -140,22 +147,42 @@ export default function DocumentsPage() {
   const [page, setPage] = useState(1);
   const [uploading, setUploading] = useState(false);
 
-  const canView = hasPermission('documents.read');
-  const canManage = hasPermission('documents.create');
+  const [preview, setPreview] = useState<FilePreviewSource | null>(null);
+  const files: FilePreviewSource[] = (data?.data ?? []).map((file) => ({
+    kind: 'document', id: file.id, title: file.title, fileName: file.fileName, version: file.version,
+  }));
 
-  useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-  }, []);
+  const canView = hasPermission('documents.view');
+  const canManage = hasPermission('documents.manage');
 
   const loadAux = useCallback(() => {
-    fetch('/api/backend/documents/summary').then((r) => r.json()).then((j) => setSummary(j.data ?? null));
+    if (authLoading || !canView) return;
+    fetch('/api/backend/documents/summary').then((r) => r.json()).then((j) => setSummary(j.data ?? null)).catch(() => undefined);
     fetch('/api/backend/documents/expiring?days=60').then((r) => r.json())
-      .then((j) => setExpiring(Array.isArray(j.data) ? j.data : []));
-  }, []);
+      .then((j) => setExpiring(Array.isArray(j.data) ? j.data : [])).catch(() => undefined);
+  }, [authLoading, canView]);
+
+  useEffect(() => {
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    fetch('/api/backend/generated-documents/letterhead-companies', { signal }).then((r) => r.json())
+      .then((j) => {
+        if (signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      }).catch(() => undefined);
+    fetch('/api/backend/documents/summary', { signal }).then((r) => r.json())
+      .then((j) => { if (!signal.aborted) setSummary(j.data ?? null); }).catch(() => undefined);
+    fetch('/api/backend/documents/expiring?days=60', { signal }).then((r) => r.json())
+      .then((j) => { if (!signal.aborted) setExpiring(Array.isArray(j.data) ? j.data : []); }).catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search.trim()) params.set('search', search.trim());
@@ -163,14 +190,26 @@ export default function DocumentsPage() {
       if (filterCategory) params.set('category', filterCategory);
       if (filterStatus) params.set('status', filterStatus);
       if (filterConfidential) params.set('isConfidential', filterConfidential);
-      const res = await fetch(`/api/backend/documents?${params}`);
+      const res = await fetch(`/api/backend/documents?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(`Failed to load documents (${res.status})`);
       const json = await res.json();
+      if (!request.current()) return;
       setData(json.data ?? null);
-    } finally { setLoading(false); }
-  }, [page, search, filterCompany, filterCategory, filterStatus, filterConfidential]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load documents');
+      setData(null);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, search, filterCompany, filterCategory, filterStatus, filterConfidential]);
 
-  useEffect(() => { loadAux(); }, [loadAux]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+
+  if (authLoading) {
+    return <div className="p-6"><PageHeader title="Documents" subtitle="Loading" /></div>;
+  }
 
   if (!canView) {
     return <div className="p-6"><PageHeader title="Documents" subtitle="Group document vault" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
@@ -178,7 +217,7 @@ export default function DocumentsPage() {
 
   const filterSelectCls = 'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
   const filterStyle = { borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' } as const;
-  const refresh = () => { load(); loadAux(); };
+  const refresh = () => { void load(); loadAux(); };
   const expiring60 = expiring.filter((e) => daysUntil(e.expiryDate) <= 60 && daysUntil(e.expiryDate) >= 0);
 
   const activeCount = summary?.byStatus?.find((s) => s.status === 'ACTIVE')?._count.id ?? 0;
@@ -188,9 +227,11 @@ export default function DocumentsPage() {
     <div className="p-6 space-y-6">
       {uploading && <UploadModal companies={companies} onClose={() => setUploading(false)} onSaved={() => { setUploading(false); refresh(); }} />}
 
+      {preview && <FilePreviewDialog sources={files} initial={preview} onClose={() => setPreview(null)} />}
+
       <PageHeader title="Documents" subtitle="Group document vault — confidential, expiry tracking, and renewals" />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div data-document-library-stats className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="Total" value={summary?.total ?? 0} />
         <StatCard label="Confidential" value={summary?.confidential ?? 0} hint="Restricted" />
         <StatCard label="Active" value={activeCount} />
@@ -219,19 +260,19 @@ export default function DocumentsPage() {
         searchPlaceholder="Title, code, filename…"
         filters={
           <>
-            <select value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Categories" value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Categories</option>
               {CATEGORIES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterConfidential} onChange={(e) => { setFilterConfidential(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Visibility" value={filterConfidential} onChange={(e) => { setFilterConfidential(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Visibility</option>
               <option value="true">Confidential</option>
               <option value="false">Standard</option>
@@ -243,7 +284,7 @@ export default function DocumentsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
+          <WorkspaceTable className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Title</th>
@@ -258,6 +299,7 @@ export default function DocumentsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan={8}><PageSpinner /></td></tr>
+                : loadError ? <tr><td colSpan={8}><ErrorState message={loadError} onRetry={() => void load()} /></td></tr>
                 : !data?.data.length ? <tr><td colSpan={8} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No documents</td></tr>
                 : data.data.map((d) => {
                   const days = daysUntil(d.expiryDate);
@@ -274,7 +316,7 @@ export default function DocumentsPage() {
                       </td>
                       <td className="px-4 py-3 text-xs">{d.category.replace(/_/g, ' ')}</td>
                       <td className="px-4 py-3 text-xs">{d.company?.name ?? '—'}</td>
-                      <td className="px-4 py-3 text-xs">{d.fileName}</td>
+                      <td className="px-4 py-3 text-xs"><Btn variant="ghost" size="sm" aria-label={`Preview ${d.title}`} onClick={() => setPreview(files.find((file) => file.id === d.id) ?? null)}>{d.fileName}</Btn></td>
                       <td className="px-4 py-3 text-xs">{fmtBytes(d.fileSizeBytes)}</td>
                       <td className={`px-4 py-3 text-xs ${expired ? 'text-red-700 font-bold' : expSoon ? 'text-amber-700 font-semibold' : ''}`}>
                         {fmtDate(d.expiryDate)}
@@ -285,7 +327,7 @@ export default function DocumentsPage() {
                   );
                 })}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
         {data && data.totalPages > 1 && (
           <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>

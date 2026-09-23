@@ -1,9 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner, Modal, Btn, FormInput, FormSelect, showToast } from '@/components/ui';
+import { ErrorState, PageSpinner, Modal, Btn, FormInput, FormSelect, showToast } from '@/components/ui';
 import { backendPost, backendPut, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 
@@ -76,7 +78,7 @@ function SequenceModal({ mode, initial, companies, onClose, onSaved }: { mode: '
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Sequence' : 'Edit Sequence'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         {mode === 'create' ? (
           <>
@@ -113,9 +115,11 @@ function SequenceModal({ mode, initial, companies, onClose, onSaved }: { mode: '
 }
 
 export default function DocumentNumberSequencesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('doc_sequences.list');
   const canCreate = hasPermission('doc_sequences.create');
   const canUpdate = hasPermission('doc_sequences.update');
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<Sequence[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -124,31 +128,53 @@ export default function DocumentNumberSequencesPage() {
   const [editing, setEditing] = useState<Sequence | null>(null);
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    fetch('/api/backend/document-number-sequences')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {
-        setData([]);
-        setLoadError('Failed to load number sequences. Check your connection and try again.');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const response = await fetch('/api/backend/document-number-sequences', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load number sequences.');
+      const res = await response.json();
+      if (!request.current()) return;
+      setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data?.data) ? res.data.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setData([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load number sequences.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!canCreate) return;
+    if (authLoading || !canView || !canCreate) return;
+    const controller = new AbortController();
     // Company dropdown options for the create modal only; failure just leaves the select empty.
-    fetch('/api/backend/companies?limit=100')
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then(r => r.json())
-      .then(j => setCompanies(j.data?.data ?? j.data ?? []))
+      .then(j => {
+        if (controller.signal.aborted) return;
+        setCompanies(j.data?.data ?? j.data ?? []);
+      })
       .catch(() => undefined);
-  }, [canCreate]);
+    return () => controller.abort();
+  }, [authLoading, canCreate, canView]);
 
-  const onSaved = () => { setCreating(false); setEditing(null); load(); };
+  const onSaved = () => { setCreating(false); setEditing(null); void load(); };
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Document Number Sequences</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -160,18 +186,13 @@ export default function DocumentNumberSequencesPage() {
         {canCreate && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Sequence</Btn>}
       </div>
 
-      {loadError && (
-        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <span>{loadError}</span>
-          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
-        </div>
-      )}
-
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Sequence Code</th>
@@ -210,7 +231,7 @@ export default function DocumentNumberSequencesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

@@ -21,12 +21,40 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { SensitiveAccessInterceptor } from '../../common/interceptors/sensitive-access.interceptor';
 import { SensitiveAccess } from '../../common/decorators/sensitive-access.decorator';
+import { LoanLifecycleService } from './loan-lifecycle.service';
+import { ReverseLoanEventDto } from './dto/reverse-loan-event.dto';
 
 @Controller('loans')
 @SensitiveAccess('Loans')
 @UseInterceptors(SensitiveAccessInterceptor)
 export class LoansController {
-  constructor(private readonly service: LoansService) {}
+  constructor(
+    private readonly service: LoansService,
+    private readonly lifecycle: LoanLifecycleService,
+  ) {}
+
+  @Get('accounting-options')
+  @RequirePermissions('cash_desk.view', 'journal_entries.view')
+  accountingOptions(@Query('companyId') companyId: string, @CurrentUser() user: AuthUser) {
+    return this.lifecycle.options(user, companyId);
+  }
+
+  @Get(':id/financial')
+  @RequirePermissions('loans.read', 'journal_entries.view', 'cash_desk.view')
+  financial(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.lifecycle.review(id, user);
+  }
+
+  @Post(':id/financial/:eventId/reverse')
+  @RequirePermissions('loans.manage', 'journal_entries.reverse')
+  reverseEvent(
+    @Param('id') id: string,
+    @Param('eventId') eventId: string,
+    @Body() dto: ReverseLoanEventDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.lifecycle.reverse(id, eventId, dto, user);
+  }
 
   @Get('summary')
   @RequirePermissions('loans.read')

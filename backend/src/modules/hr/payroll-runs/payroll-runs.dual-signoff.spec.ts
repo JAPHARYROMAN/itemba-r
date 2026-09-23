@@ -85,7 +85,6 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
   const postings: any = {
     postRun: jest.fn().mockImplementation(async (id: string) => postedRuns.push(id)),
     reverseAccrual: jest.fn().mockResolvedValue(null),
-    postPayment: jest.fn().mockResolvedValue(null),
   };
   const service = new PayrollRunsService(
     prisma,
@@ -96,6 +95,10 @@ function makeServiceWithRun(initial: Partial<RunRow> = {}) {
       assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     } as any,
     { next: jest.fn().mockResolvedValue('PR-2026-00001') } as any,
+    {
+      authorize: jest.fn(),
+      payment: jest.fn(async () => ({ duplicate: row.status === 'PAID' })),
+    } as any,
   );
 
   return { service, row, postedRuns, postings, tx, audit };
@@ -171,19 +174,27 @@ describe('PayrollRunsService dual sign-off', () => {
   });
 
   it('treats repeat payroll pay calls as idempotent no-ops', async () => {
-    const { service, postings, audit } = makeServiceWithRun({ status: 'PAID' });
+    const { service, tx, audit } = makeServiceWithRun({ status: 'PAID' });
 
-    const result = await service.pay('run-1', user('pay-user'));
+    const result = await service.pay('run-1', user('pay-user'), {
+      requestId: 'request',
+      cashDeskAccountId: 'cash',
+      businessDate: '2026-09-19',
+    });
 
     expect(result.status).toBe('PAID');
-    expect(postings.postPayment).not.toHaveBeenCalled();
+    expect(tx.salaryAdvance.update).not.toHaveBeenCalled();
     expect(audit.log).not.toHaveBeenCalled();
   });
 
   it('uses Decimal arithmetic when syncing salary advance recoveries', async () => {
     const { service, tx } = makeServiceWithRun({ status: 'APPROVED' });
 
-    await service.pay('run-1', user('pay-user'));
+    await service.pay('run-1', user('pay-user'), {
+      requestId: 'request',
+      cashDeskAccountId: 'cash',
+      businessDate: '2026-09-19',
+    });
 
     const updateCall = tx.salaryAdvance.update.mock.calls[0][0];
     expect(Number(updateCall.data.recoveredAmount)).toBe(0.3);

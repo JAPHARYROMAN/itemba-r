@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 interface ComplianceEvent {
@@ -57,7 +59,7 @@ function CreateEventModal({ companies, onClose, onSaved }: { companies: Company[
   return (
     <Modal open onClose={onClose} title="Record Event" size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Code" required value={form.eventCode} onChange={(e) => set('eventCode', e.target.value)} />
         <FormInput label="Title" required value={form.title} onChange={(e) => set('title', e.target.value)} />
@@ -70,7 +72,7 @@ function CreateEventModal({ companies, onClose, onSaved }: { companies: Company[
         <FormSelect label="Severity" value={form.severity} onChange={(e) => set('severity', e.target.value)}>
           {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
         </FormSelect>
-        <FormInput label="Event Date" type="date" required value={form.eventDate} onChange={(e) => set('eventDate', e.target.value)} />
+        <FormDateField label="Event Date" required value={form.eventDate} onChange={(value) => set('eventDate', value)} />
         <div className="col-span-2"><FormTextarea label="Description" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} /></div>
       </div>
     </Modal>
@@ -78,9 +80,10 @@ function CreateEventModal({ companies, onClose, onSaved }: { companies: Company[
 }
 
 export default function ComplianceEventsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('compliance_events.manage');
   const canView = hasPermission('compliance_events.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<ComplianceEvent[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -88,6 +91,7 @@ export default function ComplianceEventsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState('');
   const [eventType, setEventType] = useState('');
   const [severity, setSeverity] = useState('');
@@ -96,22 +100,45 @@ export default function ComplianceEventsPage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const read = (url: string, apply: (j: any) => void) => {
+      fetch(url, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((j) => { if (!controller.signal.aborted) apply(j); })
+        .catch(() => undefined);
+    };
+    read('/api/backend/companies?limit=100', (j) => { setCompanies(j.data?.data ?? j.data ?? []); });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (companyId) params.set('companyId', companyId);
     if (eventType) params.set('eventType', eventType);
     if (severity) params.set('severity', severity);
     if (dateFrom) params.set('dateFrom', dateFrom);
     if (dateTo) params.set('dateTo', dateTo);
-    const j = await fetch(`/api/backend/compliance/events?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<ComplianceEvent> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
-  }, [page, companyId, eventType, severity, dateFrom, dateTo]);
+        try {
+      const res = await fetch(`/api/backend/compliance/events?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load events');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<ComplianceEvent> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load events');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, companyId, eventType, severity, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
   const reset = (fn: (v: string) => void) => (v: string) => { fn(v); setPage(1); };
@@ -119,6 +146,7 @@ export default function ComplianceEventsPage() {
   const criticalCount = items.filter((e) => e.severity === 'CRITICAL').length;
   const warningCount = items.filter((e) => e.severity === 'WARNING').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Compliance Events" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Compliance Events" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -134,31 +162,41 @@ export default function ComplianceEventsPage() {
       <PageToolbar
         filters={
           <>
-            <select value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={eventType} onChange={(e) => reset(setEventType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={eventType} onChange={(e) => reset(setEventType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select value={severity} onChange={(e) => reset(setSeverity)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Severities" value={severity} onChange={(e) => reset(setSeverity)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Severities</option>
               {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <input type="date" value={dateFrom} onChange={(e) => reset(setDateFrom)(e.target.value)} className={filterSelectCls} style={filterStyle} />
-            <input type="date" value={dateTo} onChange={(e) => reset(setDateTo)(e.target.value)} className={filterSelectCls} style={filterStyle} />
+            <FormDateField
+              aria-label="Date From"
+              value={dateFrom}
+              onChange={(value) => reset(setDateFrom)(value)}
+              className="ui-date-field-inline"
+            />
+            <FormDateField
+              aria-label="Date To"
+              value={dateTo}
+              onChange={(value) => reset(setDateTo)(value)}
+              className="ui-date-field-inline"
+            />
           </>
         }
         actions={canManage ? <Btn variant="primary" onClick={() => setCreating(true)}>+ Record Event</Btn> : null}
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No events</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Code</th>
@@ -181,7 +219,7 @@ export default function ComplianceEventsPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
         {totalPages > 1 && (

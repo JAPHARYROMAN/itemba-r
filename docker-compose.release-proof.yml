@@ -1,0 +1,29 @@
+# Isolated local release rehearsal. Credentials live only in .release/rehearsal.env.
+# Never shares a database, Redis instance, volume or host port with the working app.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: itemba_proof
+      POSTGRES_PASSWORD: ${RELEASE_PROOF_PASSWORD:?Set RELEASE_PROOF_PASSWORD}
+      POSTGRES_DB: itemba_release_proof
+    ports:
+      - '127.0.0.1:5549:5432'
+    volumes:
+      - proof_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U itemba_proof -d itemba_release_proof']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '127.0.0.1:6399:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  proof_postgres:

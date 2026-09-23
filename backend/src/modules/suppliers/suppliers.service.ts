@@ -88,15 +88,8 @@ export class SuppliersService {
   }
 
   async workbenchSummary(query: QuerySupplierDto, user: AuthUser) {
-    const {
-      companyId,
-      divisionId,
-      branchId,
-      productCategoryId,
-      supplierType,
-      status,
-      search,
-    } = query;
+    const { companyId, divisionId, branchId, productCategoryId, supplierType, status, search } =
+      query;
 
     const where: Prisma.SupplierWhereInput = {
       deletedAt: null,
@@ -123,51 +116,36 @@ export class SuppliersService {
       ];
     }
 
-    const suppliers = await this.prisma.supplier.findMany({
-      where,
-      select: { id: true, status: true, currentBalance: true },
-      take: 5000,
-    });
-    const supplierIds = suppliers.map((supplier) => supplier.id);
-    const openStatuses: PayableStatus[] = [
-      PayableStatus.OPEN,
-      PayableStatus.PARTIALLY_PAID,
-      PayableStatus.OVERDUE,
-    ];
-    const [openPayables, overduePayables] = supplierIds.length
-      ? await Promise.all([
-          this.prisma.payable.aggregate({
-            where: {
-              supplierId: { in: supplierIds },
-              deletedAt: null,
-              status: { in: openStatuses },
-            },
-            _sum: { outstandingAmount: true },
-          }),
-          this.prisma.payable.aggregate({
-            where: {
-              supplierId: { in: supplierIds },
-              deletedAt: null,
-              status: { in: openStatuses },
-              dueDate: { lt: new Date() },
-              outstandingAmount: { gt: 0 },
-            },
-            _sum: { outstandingAmount: true },
-          }),
-        ])
-      : [{ _sum: { outstandingAmount: 0 } }, { _sum: { outstandingAmount: 0 } }];
-
+    // Aggregate the complete filtered directory, not a capped preview of IDs.
+    const openWhere = {
+      supplier: { is: where },
+      deletedAt: null,
+      status: { in: [PayableStatus.OPEN, PayableStatus.PARTIALLY_PAID, PayableStatus.OVERDUE] },
+    };
+    const [groups, openBalance, overdueBalance] = await Promise.all([
+      this.prisma.supplier.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+        _sum: { currentBalance: true },
+      }),
+      this.prisma.payable.aggregate({
+        where: openWhere,
+        _sum: { outstandingAmount: true },
+      }),
+      this.prisma.payable.aggregate({
+        where: { ...openWhere, dueDate: { lt: new Date() }, outstandingAmount: { gt: 0 } },
+        _sum: { outstandingAmount: true },
+      }),
+    ]);
     return {
-      total: suppliers.length,
-      active: suppliers.filter((supplier) => supplier.status === 'ACTIVE').length,
-      blocked: suppliers.filter((supplier) => supplier.status === 'BLOCKED').length,
-      inactive: suppliers.filter((supplier) => supplier.status === 'INACTIVE').length,
-      currentBalance: suppliers.reduce(
-        (sum, supplier) => sum + toNumber(supplier.currentBalance),
-        0,
-      ),
-      openPayableBalance: toNumber(openPayables._sum.outstandingAmount),
-      overduePayableBalance: toNumber(overduePayables._sum.outstandingAmount),
+      total: groups.reduce((sum, row) => sum + row._count._all, 0),
+      active: groups.find((row) => row.status === 'ACTIVE')?._count._all ?? 0,
+      blocked: groups.find((row) => row.status === 'BLOCKED')?._count._all ?? 0,
+      inactive: groups.find((row) => row.status === 'INACTIVE')?._count._all ?? 0,
+      currentBalance: groups.reduce((sum, row) => sum + toNumber(row._sum.currentBalance), 0),
+      openPayableBalance: toNumber(openBalance._sum.outstandingAmount),
+      overduePayableBalance: toNumber(overdueBalance._sum.outstandingAmount),
     };
   }
 
@@ -463,8 +441,7 @@ export class SuppliersService {
     const productCategoryIds = Array.from(new Set(dto.productCategoryIds));
     await this.assertDivisionAndCategories(dto.companyId, dto.divisionId, productCategoryIds);
 
-    const supplierCode =
-      dto.supplierCode ?? `SUPP-${Date.now().toString(36).toUpperCase()}`;
+    const supplierCode = dto.supplierCode ?? `SUPP-${Date.now().toString(36).toUpperCase()}`;
 
     if (dto.supplierCode) {
       const existing = await this.prisma.supplier.findFirst({
@@ -534,7 +511,9 @@ export class SuppliersService {
     }
     const divisionId = dto.divisionId ?? existing.divisionId;
     const productCategoryIds =
-      dto.productCategoryIds !== undefined ? Array.from(new Set(dto.productCategoryIds)) : undefined;
+      dto.productCategoryIds !== undefined
+        ? Array.from(new Set(dto.productCategoryIds))
+        : undefined;
     if (!divisionId) {
       throw new BadRequestException('Supplier division is required');
     }

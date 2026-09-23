@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 /**
  * Mobile POS Day Reports — the office side of Funga Siku.
  *
@@ -22,7 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
   Card,
-  DateInput,
+  FormDateField,
   DetailDrawer,
   EmptyState,
   ErrorState,
@@ -36,6 +37,7 @@ import {
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { backendList } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
@@ -138,10 +140,11 @@ function sortOptions(options: Option[]): Option[] {
 }
 
 export default function MobilePosDayReportsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   // The office list is gated on the terminal-admin permission (§1.5); the
   // per-terminal PDF stays on the phone and is not reachable from here.
   const canView = hasPermission('mobile_pos_lite.manage');
+  const beginRequest = useRequestGuard();
 
   // Filters the endpoint carries (§1.5: terminalId, from, to).
   const [from, setFrom] = useState(() => daysAgo(6));
@@ -170,45 +173,47 @@ export default function MobilePosDayReportsPage() {
   });
 
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<PosTerminal>('/mobile-pos-lite/terminals')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<PosTerminal>('/mobile-pos-lite/terminals', { signal: controller.signal })
       .then((rows) => {
-        if (!cancelled) setTerminals(rows);
+        if (!controller.signal.aborted) setTerminals(rows);
       })
       .catch(() => {
         // Terminal lookups only populate filter dropdowns; the register itself
         // still loads and renders every name it needs from the record.
-        if (!cancelled) setTerminals([]);
+        if (!controller.signal.aborted) setTerminals([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView]);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) {
+    if (authLoading || !canView) {
       setLoading(false);
       return;
     }
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
       const rows = await backendList<unknown>('/mobile-pos-lite/day-reports', {
+        signal: request.signal,
         query: {
           from: from || undefined,
           to: to || undefined,
           terminalId: terminalId || undefined,
         },
       });
+      if (!request.current()) return;
       setReports(normalizeDayReports(rows));
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load day reports');
       setReports([]);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, from, to, terminalId]);
+  }, [authLoading, beginRequest, canView, from, to, terminalId]);
 
   useEffect(() => {
     void load();
@@ -380,6 +385,7 @@ export default function MobilePosDayReportsPage() {
     }
   }, []);
 
+  if (authLoading) return <PageSpinner />;
   if (!canView) {
     return (
       <div className="p-6">
@@ -438,19 +444,19 @@ export default function MobilePosDayReportsPage() {
         filters={
           <>
             <div className="w-40">
-              <DateInput
+              <FormDateField
                 aria-label="Business date from"
                 value={from}
                 max={to || undefined}
-                onChange={(event) => setFrom(event.target.value)}
+                onChange={setFrom}
               />
             </div>
             <div className="w-40">
-              <DateInput
+              <FormDateField
                 aria-label="Business date to"
                 value={to}
                 min={from || undefined}
-                onChange={(event) => setTo(event.target.value)}
+                onChange={setTo}
               />
             </div>
             {companyOptions.length > 1 && (
@@ -570,7 +576,7 @@ export default function MobilePosDayReportsPage() {
       {reports !== null && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <WorkspaceTable className="w-full min-w-[980px] text-sm">
               <caption className="sr-only">Mobile POS end-of-day sales reports</caption>
               <thead>
                 <tr style={textMutedStyle}>
@@ -692,7 +698,7 @@ export default function MobilePosDayReportsPage() {
                   ))
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
           {visibleReports.length > 0 && (
             <div
@@ -794,7 +800,7 @@ function DayReportDrawer({ report, onClose, onExport, exporting }: DayReportDraw
                 No payments recorded for this day.
               </p>
             ) : (
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <caption className="sr-only">Payment method breakdown</caption>
                 <thead>
                   <tr style={textMutedStyle}>
@@ -829,7 +835,7 @@ function DayReportDrawer({ report, onClose, onExport, exporting }: DayReportDraw
                     </td>
                   </tr>
                 </tfoot>
-              </table>
+              </WorkspaceTable>
             )}
             {!breakdownReconciles && (
               <p className="px-4 pb-3 text-xs" style={{ color: 'var(--aurora-warning-text)' }}>
@@ -845,7 +851,7 @@ function DayReportDrawer({ report, onClose, onExport, exporting }: DayReportDraw
                 No items recorded for this day.
               </p>
             ) : (
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <caption className="sr-only">Item breakdown</caption>
                 <thead>
                   <tr style={textMutedStyle}>
@@ -873,7 +879,7 @@ function DayReportDrawer({ report, onClose, onExport, exporting }: DayReportDraw
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             )}
             {report.itemsTruncated && (
               <p className="px-4 pb-3 text-xs" style={textMutedStyle}>

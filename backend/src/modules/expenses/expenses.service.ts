@@ -206,6 +206,8 @@ export class ExpensesService {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
+    const search = query.search?.trim();
+    if (search) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ expenseNumber: { contains: search, mode: 'insensitive' } }, { vendorName: { contains: search, mode: 'insensitive' } }, { description: { contains: search, mode: 'insensitive' } }] }];
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
     if (expenseCategoryId) where.expenseCategoryId = expenseCategoryId;

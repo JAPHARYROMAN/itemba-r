@@ -1,19 +1,14 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
+
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import {
-  Card,
-  PageHeader,
-  PageToolbar,
-  StatCard,
-  StatusBadge,
-  Modal,
-  Btn,
-  PageSpinner,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { DocumentArtifactButton } from '@/components/documents';
 import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
@@ -362,7 +357,7 @@ function ReceivableDetailModal({
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
           {error}
         </div>
       )}
@@ -372,7 +367,7 @@ function ReceivableDetailModal({
         </div>
       )}
 
-      <div className="space-y-4">
+      <div className="workspace-form space-y-4">
         <div className="grid gap-3 md:grid-cols-4">
           <MoneyTile label="Invoice Amount" value={detail.amount} currency={currency} />
           <MoneyTile label="Paid / Collected" value={paid} currency={currency} tone="success" />
@@ -449,7 +444,7 @@ function ReceivableDetailModal({
           {sourceCount === 0 ? (
             <EmptyDetail>No linked source documents found for this receivable.</EmptyDetail>
           ) : (
-            <div className="space-y-4">
+            <div className="workspace-form space-y-4">
               {(detail.salesOrders?.length ?? 0) > 0 && (
                 <DetailTable
                   columns={[
@@ -677,7 +672,7 @@ function ReceivableDetailModal({
 
 export function RecordPaymentModal({
   receivable,
-  onClose,
+  onClose: closeWithoutGuard,
   onDone,
 }: {
   receivable: Receivable;
@@ -691,6 +686,13 @@ export function RecordPaymentModal({
   const [cashAccountsFailed, setCashAccountsFailed] = useState(false);
   const [cashAccountsRetry, setCashAccountsRetry] = useState(0);
   const [notes, setNotes] = useState('');
+  const draft = useFormGuard({ amount, paymentDate, cashAccountId, notes }, (baseline) => {
+    setAmount(baseline.amount);
+    setPaymentDate(baseline.paymentDate);
+    setCashAccountId(baseline.cashAccountId);
+    setNotes(baseline.notes);
+  });
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -774,6 +776,7 @@ export function RecordPaymentModal({
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Payment failed');
       }
+      draft.markSaved();
       onDone();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -784,6 +787,7 @@ export function RecordPaymentModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title="Record Payment"
@@ -801,7 +805,7 @@ export function RecordPaymentModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -850,11 +854,10 @@ export function RecordPaymentModal({
             </button>
           </div>
         )}
-        <FormInput
+        <FormDateField
           label="Payment Date"
-          type="date"
           value={paymentDate}
-          onChange={(e) => setPaymentDate(e.target.value)}
+          onChange={(value) => setPaymentDate(value)}
         />
         <FormTextarea
           label="Notes"
@@ -872,7 +875,7 @@ export function RecordPaymentModal({
 
 function WriteOffDialog({
   receivable,
-  onClose,
+  onClose: closeWithoutGuard,
   onDone,
 }: {
   receivable: Receivable;
@@ -880,6 +883,8 @@ function WriteOffDialog({
   onDone: () => void;
 }) {
   const [reason, setReason] = useState('');
+  const draft = useFormGuard(reason, setReason);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -900,6 +905,7 @@ function WriteOffDialog({
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Write-off failed');
       }
+      draft.markSaved();
       onDone();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -910,6 +916,7 @@ function WriteOffDialog({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title="Write Off Receivable"
@@ -927,7 +934,7 @@ function WriteOffDialog({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -949,7 +956,7 @@ function ReceivableModal({
   mode,
   initial,
   companies,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   mode: 'create' | 'edit';
@@ -973,6 +980,8 @@ function ReceivableModal({
       : { ...BLANK_FORM },
   );
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -1047,6 +1056,7 @@ function ReceivableModal({
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Save failed');
       }
+      draft.markSaved();
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -1057,6 +1067,7 @@ function ReceivableModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title={mode === 'create' ? 'Create Receivable' : 'Edit Receivable'}
@@ -1073,7 +1084,7 @@ function ReceivableModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -1153,19 +1164,17 @@ function ReceivableModal({
           </FormSelect>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <FormInput
+          <FormDateField
             label="Issue Date"
             required
-            type="date"
             value={form.issueDate}
-            onChange={(e) => set('issueDate', e.target.value)}
+            onChange={(value) => set('issueDate', value)}
           />
-          <FormInput
+          <FormDateField
             label="Due Date"
             required
-            type="date"
             value={form.dueDate}
-            onChange={(e) => set('dueDate', e.target.value)}
+            onChange={(value) => set('dueDate', value)}
           />
         </div>
         <FormTextarea
@@ -1228,16 +1237,28 @@ function DeleteConfirm({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ReceivablesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<Receivable> | null>(null);
   const [accounts, setAccounts] = useState<Paginated<ReceivableAccount> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'accounts' | 'documents'>('accounts');
+  const [loadError, setLoadError] = useState('');
+  const [layout, setLayout] = useWorkspaceLayout('/finance/receivables');
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQuery(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const [viewMode, setViewMode] = useState<'accounts' | 'documents'>('documents');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
-  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<Receivable | null>(null);
   const [editing, setEditing] = useState<Receivable | null>(null);
@@ -1245,39 +1266,64 @@ export default function ReceivablesPage() {
   const [recordingPayment, setRecordingPayment] = useState<Receivable | null>(null);
   const [writingOff, setWritingOff] = useState<Receivable | null>(null);
 
+  const [scopeReady, setScopeReady] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setCompanyId(params.get('companyId') ?? '');
+    setStatus(params.get('status') ?? '');
+    setScopeReady(true);
+  }, []);
+
   const canView = hasPermission('receivables.view');
   const canManage = hasPermission('receivables.manage');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) =>
+      .then((j) => {
+        if (controller.signal.aborted) return;
         setCompanies(
           Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      );
-  }, []);
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView || !scopeReady) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
+      if (query.trim()) params.set('search', query.trim());
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
       const endpoint =
         viewMode === 'accounts' ? '/api/backend/receivables/accounts' : '/api/backend/receivables';
-      const res = await fetch(`${endpoint}?${params}`);
+      const res = await fetch(`${endpoint}?${params}`, { signal: request.signal });
       const json = await res.json();
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(json.message ?? 'Unable to load records');
       if (viewMode === 'accounts') {
         setAccounts(json.data ?? null);
       } else {
         setData(json.data ?? null);
       }
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Unable to load records');
+      setData(null);
+      setAccounts(null);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status, viewMode]);
+  }, [authLoading, beginRequest, canView, scopeReady, query, page, companyId, status, viewMode]);
 
   useEffect(() => {
     load();
@@ -1323,16 +1369,48 @@ export default function ReceivablesPage() {
       : (data?.data.filter((r) => r.status === 'OPEN').length ?? 0);
   const paginated = viewMode === 'accounts' ? accounts : data;
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Receivables" subtitle="Manage accounts receivable" />
         <div className="mt-8 text-center">
-          <p className="text-sm text-slate-500">Access Restricted</p>
+          <p className="text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</p>
         </div>
       </div>
     );
   }
+
+  const renderRecordActions = (r: Receivable) => (
+    <>
+      <Btn variant="secondary" size="xs" onClick={() => setViewing(r)}>
+        View
+      </Btn>
+      {canManage && (
+        <>
+          {(r.status === 'OPEN' || r.status === 'PARTIALLY_PAID' || r.status === 'OVERDUE') && (
+            <Btn variant="success" size="xs" onClick={() => setRecordingPayment(r)}>
+              Pay
+            </Btn>
+          )}
+          {(r.status === 'OPEN' || r.status === 'OVERDUE') && (
+            <Btn variant="warning" size="xs" onClick={() => setWritingOff(r)}>
+              Write Off
+            </Btn>
+          )}
+          {r.status === 'OPEN' && (
+            <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>
+              Edit
+            </Btn>
+          )}
+          {r.status === 'OPEN' && (
+            <Btn variant="danger" size="xs" onClick={() => setDeleting(r)}>
+              Delete
+            </Btn>
+          )}
+        </>
+      )}
+    </>
+  );
 
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
@@ -1343,7 +1421,7 @@ export default function ReceivablesPage() {
   } as const;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace space-y-6">
       {creating && (
         <ReceivableModal
           mode="create"
@@ -1401,7 +1479,7 @@ export default function ReceivablesPage() {
 
       <PageHeader title="Receivables" subtitle="Accounts receivable management (AR)" />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="workspace-metrics grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard
           label={viewMode === 'accounts' ? 'Customer Accounts' : 'Documents'}
           value={totalRecords}
@@ -1412,9 +1490,15 @@ export default function ReceivablesPage() {
       </div>
 
       <PageToolbar
+        collapsibleFilters
+        activeFilterCount={[companyId, status].filter(Boolean).length}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search receivables…"
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={companyId}
               onChange={(e) => reset(setCompanyId)(e.target.value)}
               className={filterSelectCls}
@@ -1428,6 +1512,7 @@ export default function ReceivablesPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={status}
               onChange={(e) => reset(setStatus)(e.target.value)}
               className={filterSelectCls}
@@ -1465,10 +1550,50 @@ export default function ReceivablesPage() {
         }
       />
 
-      {viewMode === 'accounts' ? (
+      {loadError && (layout === 'ledger' || viewMode === 'accounts') && (
+        <div role="alert" className="workspace-load-error">
+          {loadError}
+          <button onClick={load}>Try again</button>
+        </div>
+      )}
+      {viewMode === 'documents' && (
+        <div className="workspace-view-bar">
+          <p>Select a record to review details and actions.</p>
+          <WorkspaceViewSwitch value={layout} onChange={setLayout} />
+        </div>
+      )}
+      {viewMode === 'documents' && layout === 'focus' ? (
+        <RecordBrowser
+          title="Receivables"
+          records={data?.data ?? []}
+          name={(r) => r.receivableNumber ?? r.id.slice(0, 8)}
+          reference={(r) => receivableCustomerName(r)}
+          status={(r) => r.status}
+          fields={[
+            {
+              label: 'Outstanding',
+              value: (r) => formatMoney(receivableOutstandingAmount(r), r.currency),
+            },
+            { label: 'Due', value: (r) => formatDate(r.dueDate) },
+          ]}
+          details={[
+            { label: 'Issued', value: (r) => formatDate(r.issueDate) },
+            { label: 'Original amount', value: (r) => formatMoney(r.amount, r.currency) },
+            { label: 'Paid', value: (r) => formatMoney(receivablePaidAmount(r), r.currency) },
+            { label: 'Company', value: (r) => r.company?.name || '—' },
+          ]}
+          actions={renderRecordActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={data?.total ?? 0}
+          onPage={setPage}
+        />
+      ) : viewMode === 'accounts' ? (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[980px]">
+            <WorkspaceTable className="w-full text-sm min-w-[980px]">
               <thead>
                 <tr
                   className="text-left text-xs uppercase bg-gray-50"
@@ -1573,7 +1698,7 @@ export default function ReceivablesPage() {
                                 className="rounded-lg border overflow-hidden"
                                 style={{ borderColor: 'var(--aurora-border)' }}
                               >
-                                <table className="w-full text-xs">
+                                <WorkspaceTable className="w-full text-xs">
                                   <thead>
                                     <tr
                                       className="text-left uppercase"
@@ -1669,7 +1794,7 @@ export default function ReceivablesPage() {
                                       </tr>
                                     ))}
                                   </tbody>
-                                </table>
+                                </WorkspaceTable>
                               </div>
                             </td>
                           </tr>
@@ -1679,13 +1804,13 @@ export default function ReceivablesPage() {
                   })
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
       ) : (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <WorkspaceTable className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr
                   className="text-left text-xs uppercase bg-gray-50"
@@ -1758,46 +1883,14 @@ export default function ReceivablesPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <Btn variant="secondary" size="xs" onClick={() => setViewing(r)}>
-                            View
-                          </Btn>
-                          {canManage && (
-                            <>
-                              {(r.status === 'OPEN' ||
-                                r.status === 'PARTIALLY_PAID' ||
-                                r.status === 'OVERDUE') && (
-                                <Btn
-                                  variant="success"
-                                  size="xs"
-                                  onClick={() => setRecordingPayment(r)}
-                                >
-                                  Pay
-                                </Btn>
-                              )}
-                              {(r.status === 'OPEN' || r.status === 'OVERDUE') && (
-                                <Btn variant="warning" size="xs" onClick={() => setWritingOff(r)}>
-                                  Write Off
-                                </Btn>
-                              )}
-                              {r.status === 'OPEN' && (
-                                <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>
-                                  Edit
-                                </Btn>
-                              )}
-                              {r.status === 'OPEN' && (
-                                <Btn variant="danger" size="xs" onClick={() => setDeleting(r)}>
-                                  Delete
-                                </Btn>
-                              )}
-                            </>
-                          )}
+                          {renderRecordActions(r)}
                         </div>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
 
           {data && data.totalPages > 1 && (

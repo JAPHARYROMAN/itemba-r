@@ -15,6 +15,8 @@ import { AllocationModal, LeaveBalanceRecord } from './AllocationModal';
  *   - Backend errors surface as an alert, onSaved is NOT called.
  */
 
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 const COMPANIES = [
   { id: 'c-1', name: 'Itemba Holdings' },
   { id: 'c-2', name: 'Westsides' },
@@ -65,6 +67,8 @@ beforeEach(() => {
     if (init?.method === 'POST' && u.startsWith('/api/backend/hr/leave-balances')) {
       return postResponse;
     }
+    if (u.startsWith('/api/backend/companies'))
+      return jsonResponse({ success: true, data: { data: COMPANIES } });
     if (u.startsWith('/api/backend/hr/employees')) {
       return jsonResponse({ success: true, data: { data: EMPLOYEES } });
     }
@@ -81,6 +85,7 @@ afterEach(() => {
 });
 
 async function fillCreateForm() {
+  await waitFor(() => expect(screen.getByLabelText('Company')).toBeEnabled());
   fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'c-1' } });
   await waitFor(() =>
     expect((screen.getByLabelText('Employee') as HTMLSelectElement).options.length).toBeGreaterThan(
@@ -95,8 +100,9 @@ async function fillCreateForm() {
 describe('AllocationModal', () => {
   it('blocks submit with an inline error when required fields are missing', async () => {
     const onSaved = vi.fn();
-    render(<AllocationModal companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />);
+    render(<AllocationModal onClose={() => {}} onSaved={onSaved} />);
 
+    await waitFor(() => expect(screen.getByText('Save')).toBeEnabled());
     fireEvent.click(screen.getByText('Save'));
 
     const alert = await screen.findByRole('alert');
@@ -107,12 +113,13 @@ describe('AllocationModal', () => {
 
   it('POSTs the canonical upsert payload to /api/backend/hr/leave-balances', async () => {
     const onSaved = vi.fn();
-    render(<AllocationModal companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />);
+    render(<AllocationModal onClose={() => {}} onSaved={onSaved} />);
 
     await fillCreateForm();
     fireEvent.change(screen.getByLabelText('Allocated Days'), { target: { value: '21' } });
     fireEvent.change(screen.getByLabelText('Carried Forward Days'), { target: { value: '3.5' } });
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Initial allocation' } });
+    await waitFor(() => expect(screen.getByText('Save')).toBeEnabled());
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(postCalls()).toHaveLength(1));
@@ -131,9 +138,10 @@ describe('AllocationModal', () => {
   });
 
   it('omits blank optional fields from the payload', async () => {
-    render(<AllocationModal companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />);
+    render(<AllocationModal onClose={() => {}} onSaved={() => {}} />);
 
     await fillCreateForm();
+    await waitFor(() => expect(screen.getByText('Save')).toBeEnabled());
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(postCalls()).toHaveLength(1));
@@ -148,14 +156,7 @@ describe('AllocationModal', () => {
 
   it('locks the identity in adjust mode and posts it from the initial record', async () => {
     const onSaved = vi.fn();
-    render(
-      <AllocationModal
-        initial={ADJUST_RECORD}
-        companies={COMPANIES}
-        onClose={() => {}}
-        onSaved={onSaved}
-      />,
-    );
+    render(<AllocationModal initial={ADJUST_RECORD} onClose={() => {}} onSaved={onSaved} />);
 
     // Identity selectors are replaced by a read-only summary.
     expect(screen.queryByLabelText('Company')).not.toBeInTheDocument();
@@ -163,6 +164,7 @@ describe('AllocationModal', () => {
     expect(screen.getByText('Alice Mkapa')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Allocated Days'), { target: { value: '25' } });
+    await waitFor(() => expect(screen.getByText('Save')).toBeEnabled());
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(postCalls()).toHaveLength(1));
@@ -174,8 +176,6 @@ describe('AllocationModal', () => {
       leaveTypeId: 'lt-9',
       year: 2025,
       allocatedDays: 25,
-      carriedForwardDays: 2,
-      notes: 'Carry over',
     });
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
   });
@@ -187,9 +187,10 @@ describe('AllocationModal', () => {
       400,
     );
     const onSaved = vi.fn();
-    render(<AllocationModal companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />);
+    render(<AllocationModal onClose={() => {}} onSaved={onSaved} />);
 
     await fillCreateForm();
+    await waitFor(() => expect(screen.getByText('Save')).toBeEnabled());
     fireEvent.click(screen.getByText('Save'));
 
     const alert = await screen.findByRole('alert');

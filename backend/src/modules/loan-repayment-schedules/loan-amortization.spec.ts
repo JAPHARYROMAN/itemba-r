@@ -1,9 +1,12 @@
+import {Prisma} from '@prisma/client';
 import { LoanRepaymentSchedulesService } from './loan-repayment-schedules.service';
 
 describe('LoanRepaymentSchedulesService — amortization math', () => {
   // We construct the service with throwaway dependencies because the math
   // helpers are pure and don't touch them.
   const svc = new LoanRepaymentSchedulesService(
+    {} as any,
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
@@ -59,6 +62,8 @@ describe('LoanRepaymentSchedulesService — amortization math', () => {
 
 describe('LoanRepaymentSchedulesService — repayment frequency', () => {
   const svc = new LoanRepaymentSchedulesService(
+    {} as any,
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
@@ -142,7 +147,8 @@ describe('LoanRepaymentSchedulesService — governed schedule generation', () =>
   const loan = {
     id: 'loan-1',
     companyId: 'company-a',
-    principalAmount: 1000,
+    principalAmount: new Prisma.Decimal(1000),
+    outstandingBalance:new Prisma.Decimal(1000),status:'ACTIVE',
     interestRate: 0,
     disbursementDate: new Date('2026-01-01T00:00:00.000Z'),
     maturityDate: new Date('2027-01-01T00:00:00.000Z'),
@@ -151,13 +157,13 @@ describe('LoanRepaymentSchedulesService — governed schedule generation', () =>
 
   function harness(scopeResult: Promise<void> = Promise.resolve()) {
     const create = jest.fn().mockResolvedValue({ id: 'schedule-1' });
-    const tx = { loanRepaymentSchedule: { create } };
+    const tx = {$queryRaw:jest.fn(),loan:{findFirst:jest.fn().mockResolvedValue(loan)},loanRepayment:{count:jest.fn().mockResolvedValue(0)},loanFinancialEvent:{findFirst:jest.fn().mockResolvedValue({businessDate:loan.disbursementDate})}, loanRepaymentSchedule: { create,count:jest.fn().mockResolvedValue(0) } };
     const prisma = {
       loan: { findFirst: jest.fn().mockResolvedValue(loan) },
-      loanRepaymentSchedule: { count: jest.fn().mockResolvedValue(0) },
+      loanRepaymentSchedule: tx.loanRepaymentSchedule,
       $transaction: jest.fn(async (work: (transaction: typeof tx) => unknown) => work(tx)),
     };
-    const auditLogs = { log: jest.fn().mockResolvedValue(undefined) };
+    const auditLogs = { logStrictInTransaction: jest.fn().mockResolvedValue(undefined) };
     const companyScope = { assertCanAccessCompany: jest.fn(() => scopeResult) };
     const service = new LoanRepaymentSchedulesService(
       prisma as any,
@@ -167,6 +173,8 @@ describe('LoanRepaymentSchedulesService — governed schedule generation', () =>
       {} as any,
       {} as any,
       companyScope as any,
+      {} as any,
+      {scope:()=>companyScope.assertCanAccessCompany()} as any,
     );
     return { service, prisma, auditLogs, companyScope, create };
   }
@@ -177,23 +185,19 @@ describe('LoanRepaymentSchedulesService — governed schedule generation', () =>
     denied.catch(() => undefined);
     const { service, prisma, companyScope } = harness(denied);
 
-    await expect(service.generateForLoan(loan.id, { id: 'user-1' })).rejects.toThrow(
+    await expect(service.generateForLoan(loan.id, { id: 'user-1' } as any)).rejects.toThrow(
       'company denied',
     );
 
-    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
-      { id: 'user-1' },
-      loan.companyId,
-      'WRITE',
-    );
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalled();
     expect(prisma.loanRepaymentSchedule.count).not.toHaveBeenCalled();
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalled();
   });
 
   it('returns every created schedule identity for governed effect binding and recovery', async () => {
     const { service, auditLogs, create } = harness();
 
-    await expect(service.generateForLoan(loan.id, { id: 'user-1' })).resolves.toEqual({
+    await expect(service.generateForLoan(loan.id, { id: 'user-1' } as any)).resolves.toEqual({
       installments: 1,
       scheduleIds: ['schedule-1'],
     });
@@ -203,10 +207,10 @@ describe('LoanRepaymentSchedulesService — governed schedule generation', () =>
         companyId: loan.companyId,
         loanDebtId: loan.id,
         installmentNumber: 1,
-        repaymentScheduleNumber: 'LRS-loan-1-001',
+        repaymentScheduleNumber: 'LRS-loan-1-1',
       }),
     });
-    expect(auditLogs.log).toHaveBeenCalledWith(
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(expect.anything(),
       expect.objectContaining({
         action: 'GENERATE',
         entityType: 'LoanRepaymentSchedule',

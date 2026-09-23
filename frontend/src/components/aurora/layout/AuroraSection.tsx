@@ -14,6 +14,7 @@ export function AuroraSection({ id, title, description, actions, children, class
   return (
     <section
       id={id}
+      data-workspace-section
       className={`rounded-aurora border ${className}`}
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)', boxShadow: 'var(--aurora-shadow-sm)' }}
     >

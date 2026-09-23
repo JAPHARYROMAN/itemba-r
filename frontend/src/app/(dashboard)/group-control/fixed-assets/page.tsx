@@ -1,12 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Card, PageHeader, PageToolbar, StatCard, StatusBadge, Btn, PageSpinner,
-  Modal, FormInput, FormSelect, FormTextarea,
-} from '@/components/ui';
+import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string; code: string }
 
@@ -199,7 +198,7 @@ function FixedAssetModal({
           {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
         </FormSelect>
 
-        <FormInput label="Acquisition Date" required={mode === 'create'} type="date" value={form.acquisitionDate} onChange={(e) => setField('acquisitionDate', e.target.value)} />
+        <FormDateField label="Acquisition Date" required={mode === 'create'} value={form.acquisitionDate} onChange={(value) => setField('acquisitionDate', value)} />
         <FormSelect label="Currency" value={form.currency} onChange={(e) => setField('currency', e.target.value)}>
           {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </FormSelect>
@@ -267,7 +266,7 @@ function FixedAssetDeleteConfirm({ asset, onClose, onConfirmed }: {
         </>
       }
     >
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
         Soft-delete <strong>{asset.assetCode} — {asset.name}</strong>? The record stays in the database for audit but is hidden from lists.
       </p>
@@ -276,11 +275,13 @@ function FixedAssetDeleteConfirm({ asset, onClose, onConfirmed }: {
 }
 
 export default function FixedAssetsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<FixedAsset> | null>(null);
   const [summary, setSummary] = useState<AssetSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -298,18 +299,30 @@ export default function FixedAssetsPage() {
   const canManage = hasPermission('fixed-assets.create');
 
   const reloadSummary = useCallback(() => {
+    if (authLoading || !canView) return;
     fetch('/api/backend/fixed-assets/summary').then((r) => r.json())
-      .then((j) => setSummary(j.data ?? null));
-  }, []);
+      .then((j) => setSummary(j.data ?? null)).catch(() => undefined);
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=50').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-    reloadSummary();
-  }, [reloadSummary]);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    fetch('/api/backend/companies?limit=50', { signal }).then((r) => r.json())
+      .then((j) => {
+        if (signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      }).catch(() => undefined);
+    fetch('/api/backend/fixed-assets/summary', { signal }).then((r) => r.json())
+      .then((j) => { if (!signal.aborted) setSummary(j.data ?? null); }).catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search.trim()) params.set('search', search.trim());
@@ -318,18 +331,31 @@ export default function FixedAssetsPage() {
       if (filterStatus) params.set('status', filterStatus);
       if (filterCollateral) params.set('collateralStatus', filterCollateral);
       if (filterInsurance) params.set('insuranceStatus', filterInsurance);
-      const res = await fetch(`/api/backend/fixed-assets?${params}`);
+      const res = await fetch(`/api/backend/fixed-assets?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(`Failed to load fixed assets (${res.status})`);
       const json = await res.json();
+      if (!request.current()) return;
       setData(json.data ?? null);
-    } finally { setLoading(false); }
-  }, [page, search, filterCompany, filterCategory, filterStatus, filterCollateral, filterInsurance]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load fixed assets');
+      setData(null);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, search, filterCompany, filterCategory, filterStatus, filterCollateral, filterInsurance]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const refresh = useCallback(() => {
-    load();
+    void load();
     reloadSummary();
   }, [load, reloadSummary]);
+
+  if (authLoading) {
+    return <div className="p-6"><PageHeader title="Fixed Assets" subtitle="Loading" /></div>;
+  }
 
   if (!canView) {
     return <div className="p-6"><PageHeader title="Fixed Assets" subtitle="Group-wide asset registry" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
@@ -376,23 +402,23 @@ export default function FixedAssetsPage() {
         searchPlaceholder="Asset code, name, serial, registration…"
         filters={
           <>
-            <select value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Categories" value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Categories</option>
               {CATEGORIES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterCollateral} onChange={(e) => { setFilterCollateral(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Collateral" value={filterCollateral} onChange={(e) => { setFilterCollateral(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Collateral</option>
               {COLLATERAL_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={filterInsurance} onChange={(e) => { setFilterInsurance(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Insurance" value={filterInsurance} onChange={(e) => { setFilterInsurance(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Insurance</option>
               {INSURANCE_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
@@ -402,7 +428,7 @@ export default function FixedAssetsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
+          <WorkspaceTable className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -419,6 +445,7 @@ export default function FixedAssetsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan={canManage ? 10 : 9}><PageSpinner /></td></tr>
+                : loadError ? <tr><td colSpan={canManage ? 10 : 9}><ErrorState message={loadError} onRetry={() => void load()} /></td></tr>
                 : !data?.data.length ? <tr><td colSpan={canManage ? 10 : 9} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No assets</td></tr>
                 : data.data.map((a) => (
                   <tr key={a.id} className="hover:bg-slate-50">
@@ -445,7 +472,7 @@ export default function FixedAssetsPage() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
         {data && data.totalPages > 1 && (
           <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>

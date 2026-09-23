@@ -1,9 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { Btn, Card, ConfirmDialog, FormInput, FormSelect, Modal, PageHeader, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { ApiError, backendDelete, backendPatch, backendPost } from '@/lib/api-client';
+import { WestsidesGate } from '../_components/route-gate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,7 +129,7 @@ function PackageModal({ mode, initial, companies, onClose, onSaved }: ModalProps
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Returnable Package' : 'Edit Package'}
       subtitle={mode === 'edit' ? initial!.packageCode : undefined}
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>{mode === 'create' ? 'Create' : 'Update'}</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         {mode === 'create' && (
           <FormSelect label="Company" required value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…" className="col-span-2">
@@ -147,8 +150,10 @@ function PackageModal({ mode, initial, companies, onClose, onSaved }: ModalProps
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ReturnablePackagesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('returnable_packages.view');
   const canManage = hasPermission('returnable_packages.manage');
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<ReturnablePackage[]>([]);
   const [balances, setBalances] = useState<PackageBalance[]>([]);
@@ -161,16 +166,26 @@ export default function ReturnablePackagesPage() {
   const [deleting, setDeleting] = useState<ReturnablePackage | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch('/api/backend/westsides/returnable-packages?limit=100');
+      const res = await fetch('/api/backend/westsides/returnable-packages?limit=100', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) throw new Error('Failed to load packages');
       const json = await res.json();
+      if (!request.current()) return;
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Error loading data');
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   const loadBalances = useCallback(async () => {
     setBalLoading(true);
@@ -206,6 +221,10 @@ export default function ReturnablePackagesPage() {
     }
   };
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Returnable Packages" loading={authLoading} />;
+  }
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -213,14 +232,24 @@ export default function ReturnablePackagesPage() {
         {canManage && <Btn variant="primary" onClick={() => setCreating(true)}>+ New Package</Btn>}
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       {loading ? <Spinner /> : (
         <Card className="overflow-hidden">
           {items.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-10">No packages found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <WorkspaceTable className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className={thCls}>Package Code</th>
@@ -248,7 +277,7 @@ export default function ReturnablePackagesPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>
@@ -263,7 +292,7 @@ export default function ReturnablePackagesPage() {
               <p className="text-sm text-slate-400 text-center py-8">No balance records found.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <WorkspaceTable className="w-full">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <th className={thCls}>Customer</th>
@@ -286,7 +315,7 @@ export default function ReturnablePackagesPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             )}
           </Card>

@@ -10,7 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { businessDayWindow } from '../../common/utils/business-day';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { QueryReportDto } from './dto/query-report.dto';
+import { QueryReportDto, QueryInventoryReportDto } from './dto/query-report.dto';
 import { SaveDailyCloseDto } from './dto/save-daily-close.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
@@ -1624,11 +1624,16 @@ export class WestsidesReportsService {
     });
   }
 
-  async batchStatus(query: QueryReportDto, user: AuthUser) {
+  async batchStatus(query: QueryInventoryReportDto, user: AuthUser) {
     const { companyId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
     const rows = await this.prisma.productBatch.findMany({
-      where: { ...companyWhere, deletedAt: null },
+      where: {
+        ...companyWhere,
+        deletedAt: null,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+        ...(query.divisionId ? { branch: { divisionId: query.divisionId } } : {}),
+      },
       select: {
         id: true,
         batchNumber: true,
@@ -1710,36 +1715,66 @@ export class WestsidesReportsService {
     });
   }
 
-  async stockDamageReport(query: QueryReportDto, user: AuthUser) {
+  async stockDamageReport(query: QueryInventoryReportDto, user: AuthUser) {
     const { companyId, branchId } = query;
     const companyWhere = await this.companyWhere({ companyId }, user);
     const where: any = { ...companyWhere, deletedAt: null };
     if (branchId) where.branchId = branchId;
+    if (query.divisionId) where.branch = { divisionId: query.divisionId };
 
     const rows = await this.prisma.stockDamage.groupBy({
-      by: ['damageType', 'status'],
+      by: ['damageType', 'status', 'productId', 'unitId'],
       where,
       _sum: { quantity: true, estimatedValue: true },
-      _count: { id: true },
+      _count: { id: true, estimatedValue: true },
+      orderBy: [{ productId: 'asc' }, { unitId: 'asc' }, { damageType: 'asc' }, { status: 'asc' }],
     });
 
+    const [products, units] = rows.length
+      ? await Promise.all([
+          this.prisma.product.findMany({
+            where: { id: { in: [...new Set(rows.map((row) => row.productId))] } },
+            select: { id: true, name: true, productCode: true },
+          }),
+          this.prisma.unitOfMeasure.findMany({
+            where: { id: { in: [...new Set(rows.map((row) => row.unitId))] } },
+            select: { id: true, name: true, symbol: true },
+          }),
+        ])
+      : [[], []];
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const unitById = new Map(units.map((unit) => [unit.id, unit]));
+
     return rows.map((row) => {
-      const estimatedValue = this.toNumber(row._sum.estimatedValue);
+      const estimatedValue =
+        row._sum.estimatedValue === null ? null : this.toNumber(row._sum.estimatedValue);
+      const missingEstimateCount = row._count.id - row._count.estimatedValue;
+      const product = productById.get(row.productId),
+        unit = unitById.get(row.unitId);
       const readinessStatus: ReportReadinessStatus =
         row.status === 'DRAFT' || row.status === 'SUBMITTED' ? 'WARNING' : 'READY';
       return {
+        productId: row.productId,
+        productCode: product?.productCode ?? row.productId,
+        product: product?.name ?? row.productId,
+        unitId: row.unitId,
+        unit: unit?.symbol ?? unit?.name ?? row.unitId,
         damageType: row.damageType,
         status: row.status,
         reportCount: row._count.id,
+        missingEstimateCount,
         quantity: this.toNumber(row._sum.quantity),
         estimatedValue,
         readinessStatus,
         ...this.reportMeta({
           readiness: this.readiness(
             readinessStatus,
-            readinessStatus === 'WARNING'
+            (readinessStatus === 'WARNING'
               ? 'Damage entries still need review or approval.'
-              : 'Damage entries are in a controlled status.',
+              : 'Damage entries are in a controlled status.') +
+              (missingEstimateCount
+                ? ` ${missingEstimateCount} report(s) have no estimate; the value includes recorded estimates only.`
+                : ''),
           ),
           lineage: this.lineage(
             'Stock damage report',
@@ -1752,6 +1787,8 @@ export class WestsidesReportsService {
               href: this.route('/inventory?tab=controls&view=damage', {
                 companyId: query.companyId,
                 branchId: query.branchId,
+                divisionId: query.divisionId,
+                productId: row.productId,
                 status: row.status,
                 damageType: row.damageType,
               }),

@@ -94,6 +94,8 @@ export class InventoryMovementsService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true, code: true } },
+          unit: { select: { id: true, name: true, symbol: true } },
           product: { select: { id: true, name: true, sku: true, productCode: true } },
           branch: { select: { id: true, name: true, code: true } },
           createdBy: { select: { id: true, fullName: true } },

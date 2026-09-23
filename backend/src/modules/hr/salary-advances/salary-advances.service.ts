@@ -34,6 +34,15 @@ export class SalaryAdvancesService {
     };
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
+    const search = query.search?.trim();
+    if (search) where.AND = [
+      ...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []),
+      { OR: [
+        { advanceNumber: { contains: search, mode: 'insensitive' } },
+        { employee: { fullName: { contains: search, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains: search, mode: 'insensitive' } } },
+      ] },
+    ];
     const [data, total] = await Promise.all([
       this.prisma.salaryAdvance.findMany({
         where,

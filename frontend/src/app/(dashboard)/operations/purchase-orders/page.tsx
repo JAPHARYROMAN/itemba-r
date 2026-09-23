@@ -1,25 +1,16 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
+
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { DocumentPreviewLink } from '@/components/documents';
-import {
-  Card,
-  PageHeader,
-  PageToolbar,
-  StatCard,
-  StatusBadge,
-  Modal,
-  ConfirmDialog,
-  Btn,
-  SkeletonTable,
-  EmptyState,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  SupplierPicker,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, ConfirmDialog, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, showToast, SkeletonTable, StatCard, StatusBadge, SupplierPicker } from '@/components/ui';
 import {
   backendDelete,
   backendGet,
@@ -231,7 +222,7 @@ function PurchaseOrderModal({
   mode,
   initial,
   companies,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   mode: 'create' | 'edit';
@@ -280,6 +271,8 @@ function PurchaseOrderModal({
   const [units, setUnits] = useState<Unit[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const selectedProductIdKey = form.lines
@@ -403,8 +396,10 @@ function PurchaseOrderModal({
     selectedProductIdKey,
   ]);
 
-  const setField = <K extends keyof PurchaseOrderForm>(k: K, v: PurchaseOrderForm[K]) =>
+  const setField = <K extends keyof PurchaseOrderForm>(k: K, v: PurchaseOrderForm[K]) => {
+    draft.touch();
     setForm((f) => ({ ...f, [k]: v }));
+  };
   const setLine = (i: number, patch: Partial<PurchaseOrderLine>) =>
     setForm((f) => ({
       ...f,
@@ -484,6 +479,7 @@ function PurchaseOrderModal({
         mode === 'create' ? 'Purchase order created' : 'Purchase order updated',
         'Saved successfully.',
       );
+      draft.markSaved();
       onSaved();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed';
@@ -496,6 +492,7 @@ function PurchaseOrderModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title={mode === 'create' ? 'Create Purchase Order' : 'Edit Purchase Order'}
@@ -512,12 +509,13 @@ function PurchaseOrderModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
+      <div className="workspace-form space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <h3 className="workspace-form-heading">Order context</h3>
           <FormSelect
             label="Company"
             required
@@ -618,6 +616,7 @@ function PurchaseOrderModal({
               </option>
             ))}
           </FormSelect>
+          <h3 className="workspace-form-heading">Supplier and delivery</h3>
           <SupplierPicker
             label="Supplier"
             value={form.supplierId}
@@ -637,18 +636,16 @@ function PurchaseOrderModal({
             onChange={(e) => setField('supplierName', e.target.value)}
             placeholder="If no supplier selected"
           />
-          <FormInput
+          <FormDateField
             label="Order Date"
             required
-            type="date"
             value={form.orderDate}
-            onChange={(e) => setField('orderDate', e.target.value)}
+            onChange={(value) => setField('orderDate', value)}
           />
-          <FormInput
+          <FormDateField
             label="Expected Date"
-            type="date"
             value={form.expectedDate}
-            onChange={(e) => setField('expectedDate', e.target.value)}
+            onChange={(value) => setField('expectedDate', value)}
           />
           <FormInput
             label="Supplier Invoice #"
@@ -656,11 +653,10 @@ function PurchaseOrderModal({
             onChange={(e) => setField('supplierInvoiceNumber', e.target.value)}
             placeholder="Supplier-issued invoice number"
           />
-          <FormInput
+          <FormDateField
             label="Invoice Date"
-            type="date"
             value={form.supplierInvoiceDate}
-            onChange={(e) => setField('supplierInvoiceDate', e.target.value)}
+            onChange={(value) => setField('supplierInvoiceDate', value)}
           />
           <div className="col-span-3">
             <FormTextarea
@@ -680,9 +676,9 @@ function PurchaseOrderModal({
           units={units}
           currency={form.currency}
           productSearchLoading={productSearchLoading}
-          onAddLine={addLine}
-          onRemoveLine={removeLine}
-          onLineChange={setLine}
+          onAddLine={() => draft.change(addLine)}
+          onRemoveLine={(index) => draft.change(() => removeLine(index))}
+          onLineChange={(index, patch) => draft.change(() => setLine(index, patch))}
           onProductSearch={handleProductSearch}
         />
       </div>
@@ -692,7 +688,7 @@ function PurchaseOrderModal({
 
 function InvoiceReferenceModal({
   order,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   order: PurchaseOrder;
@@ -702,6 +698,11 @@ function InvoiceReferenceModal({
   const linked = order.invoiceSource === 'PROCUREMENT_INVOICE';
   const [number, setNumber] = useState(order.supplierInvoiceNumber ?? '');
   const [invoiceDate, setInvoiceDate] = useState(order.supplierInvoiceDate?.slice(0, 10) ?? '');
+  const draft = useFormGuard({ number, invoiceDate }, (baseline) => {
+    setNumber(baseline.number);
+    setInvoiceDate(baseline.invoiceDate);
+  });
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -714,6 +715,7 @@ function InvoiceReferenceModal({
         supplierInvoiceDate: invoiceDate || null,
       });
       showToast('success', 'Supplier invoice reference updated');
+      draft.markSaved();
       onSaved();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not update invoice reference';
@@ -726,6 +728,7 @@ function InvoiceReferenceModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title={linked ? 'Linked Supplier Invoice' : 'Supplier Invoice Reference'}
@@ -744,7 +747,7 @@ function InvoiceReferenceModal({
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -776,11 +779,10 @@ function InvoiceReferenceModal({
             onChange={(event) => setNumber(event.target.value)}
             placeholder="e.g. INV-1042"
           />
-          <FormInput
+          <FormDateField
             label="Invoice Date"
-            type="date"
             value={invoiceDate}
-            onChange={(event) => setInvoiceDate(event.target.value)}
+            onChange={(value) => setInvoiceDate(value)}
           />
           <p className="sm:col-span-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
             This changes invoice metadata only. It does not alter stock, totals, payables, or
@@ -836,7 +838,7 @@ function DeleteConfirm({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -893,7 +895,7 @@ function ReceiveOrderModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -915,10 +917,12 @@ function ReceiveOrderModal({
 
 export default function PurchaseOrdersPage() {
   const { hasPermission } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<PurchaseOrder> | null>(null);
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [layout, setLayout] = useWorkspaceLayout('/operations/purchase-orders');
   const [searchInput, setSearchInput] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -962,6 +966,7 @@ export default function PurchaseOrdersPage() {
 
   const load = useCallback(async () => {
     if (!canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     try {
@@ -978,20 +983,26 @@ export default function PurchaseOrdersPage() {
       delete summaryQuery.page;
       delete summaryQuery.limit;
       const [pageResult, summaryResult] = await Promise.all([
-        backendPage<PurchaseOrder>('/purchase-orders', { query }),
-        backendGet<PurchaseSummary>('/purchase-orders/summary', { query: summaryQuery }),
+        backendPage<PurchaseOrder>('/purchase-orders', { query, signal: request.signal }),
+        backendGet<PurchaseSummary>('/purchase-orders/summary', {
+          query: summaryQuery,
+          signal: request.signal,
+        }),
       ]);
+      if (!request.current()) return;
       setData(pageResult);
       setSummary(summaryResult);
     } catch (err: unknown) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Failed to load purchase orders';
       setData(emptyPaginated<PurchaseOrder>());
       setLoadError(message);
       showToast('error', 'Could not load purchase orders', message);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
   }, [
+    beginRequest,
     canView,
     page,
     filterSearch,
@@ -1203,6 +1214,84 @@ export default function PurchaseOrdersPage() {
     );
   }
 
+  const renderOrderActions = (o: PurchaseOrder) => {
+    const orderLabel = o.purchaseOrderNumber ?? o.id.slice(0, 8);
+    return (
+      <>
+        <Link
+          href={`/operations/purchase-orders/${o.id}`}
+          aria-label={`View order ${orderLabel}`}
+          className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium bg-transparent text-zinc-600 hover:bg-zinc-100 border border-transparent transition"
+        >
+          View
+        </Link>
+        <DocumentPreviewLink href={`/operations/purchase-orders/${o.id}/print`} />
+        {canCreate && !['CANCELLED', 'VOIDED'].includes(o.status) && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`${o.displayInvoiceNumber ? 'View or edit' : 'Add'} invoice for ${orderLabel}`}
+            onClick={() => setEditingInvoice(o)}
+          >
+            {o.displayInvoiceNumber ? 'Invoice' : 'Add Invoice'}
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canCreate && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`Edit order ${orderLabel}`}
+            onClick={() => setEditing(o)}
+          >
+            Edit
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canConfirm && (
+          <Btn
+            variant="primary"
+            size="xs"
+            aria-label={`Confirm order ${orderLabel}`}
+            loading={actionLoading === `${o.id}:confirm`}
+            onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
+          >
+            Confirm
+          </Btn>
+        )}
+        {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') && canReceive && (
+          <Btn
+            variant="success"
+            size="xs"
+            aria-label={`Receive order ${orderLabel}`}
+            onClick={() => setReceiving(o)}
+          >
+            Receive
+          </Btn>
+        )}
+        {o.status === 'CONFIRMED' && canCancel && (
+          <Btn
+            variant="danger"
+            size="xs"
+            aria-label={`Cancel order ${orderLabel}`}
+            loading={actionLoading === `${o.id}:cancel`}
+            onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
+          >
+            Cancel
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canCreate && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`Delete order ${orderLabel}`}
+            onClick={() => setDeleting(o)}
+          >
+            Delete
+          </Btn>
+        )}
+      </>
+    );
+  };
+
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
   const filterStyle = {
@@ -1220,7 +1309,7 @@ export default function PurchaseOrdersPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace space-y-6">
       {creating && (
         <PurchaseOrderModal
           mode="create"
@@ -1315,9 +1404,12 @@ export default function PurchaseOrdersPage() {
       {loadError && (
         <div
           role="alert"
-          className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
         >
-          {loadError}
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
       {actionError && (
@@ -1330,6 +1422,18 @@ export default function PurchaseOrdersPage() {
       )}
 
       <PageToolbar
+        collapsibleFilters
+        activeFilterCount={
+          [
+            filterCompany,
+            filterType,
+            filterStatus,
+            filterPayment,
+            filterInvoiceStatus,
+            filterDateFrom,
+            filterDateTo,
+          ].filter(Boolean).length
+        }
         search={searchInput}
         onSearch={setSearchInput}
         searchPlaceholder="Order #, invoice #, or supplier…"
@@ -1418,27 +1522,23 @@ export default function PurchaseOrdersPage() {
               <option value="RECORDED">Recorded on Purchase</option>
               <option value="LINKED">Linked Procurement Invoice</option>
             </select>
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter from date"
               value={filterDateFrom}
-              onChange={(e) => {
-                setFilterDateFrom(e.target.value);
+              onChange={(value) => {
+                setFilterDateFrom(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter to date"
               value={filterDateTo}
-              onChange={(e) => {
-                setFilterDateTo(e.target.value);
+              onChange={(value) => {
+                setFilterDateTo(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
           </>
         }
@@ -1459,218 +1559,181 @@ export default function PurchaseOrdersPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1240px]" aria-label="Purchase orders">
-            <caption className="sr-only">Purchase orders with status, totals, and actions</caption>
-            <thead>
-              <tr
-                className="text-left text-xs uppercase bg-gray-50"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <th scope="col" className="px-4 py-3">
-                  Number
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Date
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Supplier
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Invoice
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Type
-                </th>
-                <th scope="col" className="px-4 py-3 text-right">
-                  Total
-                </th>
-                <th scope="col" className="px-4 py-3 text-right">
-                  Outstanding
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Status
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Payment
-                </th>
-                <th scope="col" className="px-4 py-3 text-right">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={10}>
-                    <SkeletonTable rows={6} cols={10} />
-                  </td>
+      <div className="workspace-view-bar">
+        <p>{'Select a record to review details and actions.'}</p>
+        {<WorkspaceViewSwitch value={layout} onChange={setLayout} />}
+      </div>
+      {layout === 'focus' ? (
+        <RecordBrowser
+          title="Purchase orders"
+          records={data?.data ?? []}
+          name={(o) => o.purchaseOrderNumber ?? o.id.slice(0, 8)}
+          reference={(o) => o.supplier?.name ?? o.supplierName ?? '—'}
+          status={(o) => o.status}
+          fields={[
+            { label: 'Date', value: (o) => new Date(o.orderDate).toLocaleDateString('en-GB') },
+            { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
+          ]}
+          details={[
+            { label: 'Supplier', value: (o) => o.supplier?.name ?? o.supplierName ?? '—' },
+            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Supplier invoice', value: (o) => o.displayInvoiceNumber || 'Not recorded' },
+            { label: 'Notes', value: (o) => o.notes || '—' },
+          ]}
+          actions={renderOrderActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={data?.total ?? 0}
+          onPage={setPage}
+          empty="No orders match your filters. Adjust the date range or search to see more."
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <WorkspaceTable className="w-full text-sm min-w-[1240px]" aria-label="Purchase orders">
+              <caption className="sr-only">
+                Purchase orders with status, totals, and actions
+              </caption>
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th scope="col" className="px-4 py-3">
+                    Number
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Date
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Supplier
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Invoice
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Type
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Total
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Outstanding
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Payment
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
                 </tr>
-              ) : !data?.data.length ? (
-                <tr>
-                  <td colSpan={10}>
-                    <EmptyState
-                      title="No purchase orders"
-                      description="No orders match the current filters."
-                    />
-                  </td>
-                </tr>
-              ) : (
-                data.data.map((o) => {
-                  const orderLabel = o.purchaseOrderNumber ?? o.id.slice(0, 8);
-                  return (
-                    <tr key={o.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {o.purchaseOrderNumber ?? o.id.slice(0, 8)}
-                      </td>
-                      <td className="px-4 py-3 text-xs">
-                        {new Date(o.orderDate).toLocaleDateString('en-GB')}
-                      </td>
-                      <td className="px-4 py-3">
-                        {o.supplier?.name ?? o.supplierName ?? (
-                          <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
-                            —
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {o.displayInvoiceNumber ? (
-                          <div>
-                            <p className="font-mono text-xs">{o.displayInvoiceNumber}</p>
-                            <p
-                              className="mt-0.5 text-[10px] uppercase"
-                              style={{ color: 'var(--aurora-text-muted)' }}
-                            >
-                              {o.invoiceSource === 'PROCUREMENT_INVOICE' ? 'Linked' : 'Recorded'}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-xs font-medium text-amber-600">Missing</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs">{o.purchaseType.replace(/_/g, ' ')}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {fmtMoney(o.totalAmount, o.currency)}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {fmtMoney(o.outstandingAmount, o.currency)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge value={o.status} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge value={o.paymentStatus} />
-                      </td>
-                      <td className="px-4 py-3 text-right space-x-1">
-                        <Link
-                          href={`/operations/purchase-orders/${o.id}`}
-                          aria-label={`View order ${orderLabel}`}
-                          className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium bg-transparent text-zinc-600 hover:bg-zinc-100 border border-transparent transition"
-                        >
-                          View
-                        </Link>
-                        <DocumentPreviewLink href={`/operations/purchase-orders/${o.id}/print`} />
-                        {canCreate && !['CANCELLED', 'VOIDED'].includes(o.status) && (
-                          <Btn
-                            variant="ghost"
-                            size="xs"
-                            aria-label={`${o.displayInvoiceNumber ? 'View or edit' : 'Add'} invoice for ${orderLabel}`}
-                            onClick={() => setEditingInvoice(o)}
-                          >
-                            {o.displayInvoiceNumber ? 'Invoice' : 'Add Invoice'}
-                          </Btn>
-                        )}
-                        {o.status === 'DRAFT' && canCreate && (
-                          <Btn
-                            variant="ghost"
-                            size="xs"
-                            aria-label={`Edit order ${orderLabel}`}
-                            onClick={() => setEditing(o)}
-                          >
-                            Edit
-                          </Btn>
-                        )}
-                        {o.status === 'DRAFT' && canConfirm && (
-                          <Btn
-                            variant="primary"
-                            size="xs"
-                            aria-label={`Confirm order ${orderLabel}`}
-                            loading={actionLoading === `${o.id}:confirm`}
-                            onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
-                          >
-                            Confirm
-                          </Btn>
-                        )}
-                        {(o.status === 'CONFIRMED' || o.status === 'PARTIALLY_RECEIVED') &&
-                          canReceive && (
-                            <Btn
-                              variant="success"
-                              size="xs"
-                              aria-label={`Receive order ${orderLabel}`}
-                              onClick={() => setReceiving(o)}
-                            >
-                              Receive
-                            </Btn>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={10}>
+                      <SkeletonTable rows={6} cols={10} />
+                    </td>
+                  </tr>
+                ) : !data?.data.length ? (
+                  <tr>
+                    <td colSpan={10}>
+                      <EmptyState
+                        title="No purchase orders"
+                        description="No orders match the current filters."
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  data.data.map((o) => {
+                    const orderLabel = o.purchaseOrderNumber ?? o.id.slice(0, 8);
+                    return (
+                      <tr key={o.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-mono text-xs">
+                          {o.purchaseOrderNumber ?? o.id.slice(0, 8)}
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {new Date(o.orderDate).toLocaleDateString('en-GB')}
+                        </td>
+                        <td className="px-4 py-3">
+                          {o.supplier?.name ?? o.supplierName ?? (
+                            <span className="italic" style={{ color: 'var(--aurora-text-muted)' }}>
+                              —
+                            </span>
                           )}
-                        {o.status === 'CONFIRMED' && canCancel && (
-                          <Btn
-                            variant="danger"
-                            size="xs"
-                            aria-label={`Cancel order ${orderLabel}`}
-                            loading={actionLoading === `${o.id}:cancel`}
-                            onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
-                          >
-                            Cancel
-                          </Btn>
-                        )}
-                        {o.status === 'DRAFT' && canCreate && (
-                          <Btn
-                            variant="ghost"
-                            size="xs"
-                            aria-label={`Delete order ${orderLabel}`}
-                            onClick={() => setDeleting(o)}
-                          >
-                            Delete
-                          </Btn>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        {data && data.totalPages > 1 && (
-          <div
-            className="px-5 py-3 border-t flex items-center justify-between"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Page {data.page} of {data.totalPages} · {data.total} total
-            </span>
-            <div className="flex gap-2">
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Btn>
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page >= data.totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Btn>
-            </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {o.displayInvoiceNumber ? (
+                            <div>
+                              <p className="font-mono text-xs">{o.displayInvoiceNumber}</p>
+                              <p
+                                className="mt-0.5 text-[10px] uppercase"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {o.invoiceSource === 'PROCUREMENT_INVOICE' ? 'Linked' : 'Recorded'}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-xs font-medium text-amber-600">Missing</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-xs">{o.purchaseType.replace(/_/g, ' ')}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(o.totalAmount, o.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {fmtMoney(o.outstandingAmount, o.currency)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge value={o.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge value={o.paymentStatus} />
+                        </td>
+                        <td className="px-4 py-3 text-right space-x-1">{renderOrderActions(o)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </WorkspaceTable>
           </div>
-        )}
-      </Card>
+          {data && data.totalPages > 1 && (
+            <div
+              className="px-5 py-3 border-t flex items-center justify-between"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Page {data.page} of {data.totalPages} · {data.total} total
+              </span>
+              <div className="flex gap-2">
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Previous
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page >= data.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

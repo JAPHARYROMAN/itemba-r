@@ -50,7 +50,7 @@ export class ApprovalRequestsController {
   @Get(':id')
   @RequirePermissions('approval_requests.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.findOne(id, user);
+    return this.service.getDetails(id, user);
   }
 
   @Post()

@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { applyCompanyScopeWhere } from '../../../common/services';
+import { Prisma } from '@prisma/client';
 
 /**
  * CCM (Commission for Mediation & Arbitration) form payload assembly.
@@ -23,14 +26,26 @@ export class CcmNoticesService {
    * Form 1 — Notice of Termination of Employment.
    * Pulls everything we need from the Employee + active disciplinary chain.
    */
-  async terminationNotice(employeeId: string) {
+  async terminationNotice(employeeId: string, user: AuthUser) {
+    const where: Prisma.EmployeeWhereInput = { id: employeeId, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const includeHistory = user.permissions.includes('disciplinary_actions.view');
     const employee = await this.prisma.employee.findFirst({
-      where: { id: employeeId, deletedAt: null },
+      where,
       include: {
         company: {
           select: {
-            id: true, name: true, code: true,
-            profile: { select: { tin: true, registeredAddress: true, postalAddress: true, brelaRegNumber: true } },
+            id: true,
+            name: true,
+            code: true,
+            profile: {
+              select: {
+                tin: true,
+                registeredAddress: true,
+                postalAddress: true,
+                brelaRegNumber: true,
+              },
+            },
           },
         },
         position: { select: { title: true } },
@@ -38,7 +53,11 @@ export class CcmNoticesService {
         branch: { select: { name: true, location: true } },
         contracts: { where: { deletedAt: null }, orderBy: { startDate: 'desc' as const }, take: 1 },
         disciplinaryActions: {
-          where: { deletedAt: null, status: { in: ['ACTIVE', 'EXPIRED'] } },
+          where: {
+            deletedAt: null,
+            status: { in: ['ACTIVE', 'EXPIRED'] },
+            ...(!includeHistory ? { id: { in: [] } } : {}),
+          },
           orderBy: { issuedAt: 'desc' as const },
           take: 5,
         },
@@ -48,7 +67,9 @@ export class CcmNoticesService {
 
     const latestContract = employee.contracts[0];
     const tenureMonths = employee.hireDate
-      ? Math.floor((Date.now() - new Date(employee.hireDate).getTime()) / (1000 * 60 * 60 * 24 * 30.4375))
+      ? Math.floor(
+          (Date.now() - new Date(employee.hireDate).getTime()) / (1000 * 60 * 60 * 24 * 30.4375),
+        )
       : null;
 
     return {
@@ -90,7 +111,8 @@ export class CcmNoticesService {
         baseSalary: employee.baseSalary != null ? Number(employee.baseSalary) : null,
         salaryCurrency: employee.salaryCurrency,
       },
-      disciplinaryHistory: employee.disciplinaryActions.map((d) => ({
+      disciplinaryHistoryIncluded: includeHistory,
+      disciplinaryHistory: (includeHistory ? employee.disciplinaryActions : []).map((d) => ({
         actionNumber: d.actionNumber,
         type: d.type,
         issuedAt: d.issuedAt,
@@ -115,29 +137,49 @@ export class CcmNoticesService {
    * Form CMA-F1 — Referral of Dispute to the Commission for Mediation &
    * Arbitration. Generated from an existing EmploymentDispute record.
    */
-  async cmaReferralForm(disputeId: string) {
+  async cmaReferralForm(disputeId: string, user: AuthUser) {
+    const where: Prisma.EmploymentDisputeWhereInput = { id: disputeId, deletedAt: null };
+    applyCompanyScopeWhere(where, user);
+    const includeHistory = user.permissions.includes('disciplinary_actions.view');
     const dispute = await this.prisma.employmentDispute.findFirst({
-      where: { id: disputeId, deletedAt: null },
+      where,
       include: {
         company: {
           select: {
-            id: true, name: true,
-            profile: { select: { tin: true, brelaRegNumber: true, registeredAddress: true, postalAddress: true } },
+            id: true,
+            name: true,
+            profile: {
+              select: {
+                tin: true,
+                brelaRegNumber: true,
+                registeredAddress: true,
+                postalAddress: true,
+              },
+            },
           },
         },
         employee: {
           select: {
-            id: true, employeeCode: true, fullName: true, firstName: true, lastName: true,
-            nidaNumber: true, address: true, phone: true, email: true,
+            id: true,
+            employeeCode: true,
+            fullName: true,
+            firstName: true,
+            lastName: true,
+            nidaNumber: true,
+            address: true,
+            phone: true,
+            email: true,
             position: { select: { title: true } },
             department: { select: { name: true } },
-            hireDate: true, baseSalary: true, salaryCurrency: true,
+            hireDate: true,
+            baseSalary: true,
+            salaryCurrency: true,
           },
         },
         raisedBy: { select: { id: true, fullName: true } },
         mediatedBy: { select: { id: true, fullName: true } },
         disciplinaryActions: {
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...(!includeHistory ? { id: { in: [] } } : {}) },
           orderBy: { issuedAt: 'desc' as const },
         },
       },
@@ -171,7 +213,8 @@ export class CcmNoticesService {
       },
       employee: {
         employeeCode: dispute.employee.employeeCode,
-        fullName: dispute.employee.fullName ?? `${dispute.employee.firstName} ${dispute.employee.lastName}`,
+        fullName:
+          dispute.employee.fullName ?? `${dispute.employee.firstName} ${dispute.employee.lastName}`,
         nida: dispute.employee.nidaNumber ?? null,
         address: dispute.employee.address ?? null,
         phone: dispute.employee.phone ?? null,
@@ -179,12 +222,14 @@ export class CcmNoticesService {
         position: dispute.employee.position?.title ?? null,
         department: dispute.employee.department?.name ?? null,
         hireDate: dispute.employee.hireDate ?? null,
-        baseSalary: dispute.employee.baseSalary != null ? Number(dispute.employee.baseSalary) : null,
+        baseSalary:
+          dispute.employee.baseSalary != null ? Number(dispute.employee.baseSalary) : null,
         salaryCurrency: dispute.employee.salaryCurrency,
       },
       raisedBy: dispute.raisedBy ? { fullName: dispute.raisedBy.fullName } : null,
       mediatedBy: dispute.mediatedBy ? { fullName: dispute.mediatedBy.fullName } : null,
-      disciplinaryHistory: dispute.disciplinaryActions.map((d) => ({
+      disciplinaryHistoryIncluded: includeHistory,
+      disciplinaryHistory: (includeHistory ? dispute.disciplinaryActions : []).map((d) => ({
         actionNumber: d.actionNumber,
         type: d.type,
         issuedAt: d.issuedAt,

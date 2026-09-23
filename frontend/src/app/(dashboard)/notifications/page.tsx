@@ -7,10 +7,12 @@ import {
   SkeletonCardGrid,
   Btn,
   ConfirmDialog,
+  ErrorState,
   showToast,
 } from '@/components/ui';
 import { backendDelete, backendGet, backendPage, backendPatch } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { safeNotificationActionUrl } from '@/lib/notification-links';
 
 const TYPE_ICONS: Record<string, AppIconName> = {
@@ -54,9 +56,11 @@ const ROW_ACTIONS: Record<string, { action: RowAction; label: string }[]> = {
 };
 
 export default function NotificationsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('notifications.view');
   const canManage = hasPermission('notifications.manage');
+  const beginListRequest = useRequestGuard();
+  const beginUnreadRequest = useRequestGuard();
 
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,40 +71,59 @@ export default function NotificationsPage() {
   const [markingAll, setMarkingAll] = useState(false);
   const [deleting, setDeleting] = useState<NotificationRow | null>(null);
 
+  const loadUnread = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginUnreadRequest();
+    try {
+      const unread = await backendGet<{ count: number }>('/notifications/unread-count', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setUnreadCount(Number.isFinite(unread.count) ? Math.max(0, unread.count) : 0);
+    } catch {
+      if (!request.current()) return;
+    }
+  }, [authLoading, beginUnreadRequest, canView]);
+
   const load = useCallback(
     async (options: { silent?: boolean } = {}) => {
-      if (!canView) {
-        setNotifications([]);
-        setUnreadCount(0);
-        setLoading(false);
+      if (authLoading || !canView) {
+        if (!authLoading) {
+          setNotifications([]);
+          setUnreadCount(0);
+          setLoading(false);
+        }
         return;
       }
       const params: Record<string, string> = {};
       if (activeTab === 'unread') params.status = 'UNREAD';
       if (activeTab === 'archived') params.status = 'ARCHIVED';
       if (activeTab === 'dismissed') params.status = 'DISMISSED';
+      const listRequest = beginListRequest();
       if (!options.silent) {
         setLoading(true);
         setLoadError('');
       }
+      void loadUnread();
       try {
-        const [page, unread] = await Promise.all([
-          backendPage<NotificationRow>('/notifications', { query: params }),
-          backendGet<{ count: number }>('/notifications/unread-count'),
-        ]);
+        const page = await backendPage<NotificationRow>('/notifications', {
+          query: params,
+          signal: listRequest.signal,
+        });
+        if (!listRequest.current()) return;
         setNotifications(page.data);
-        setUnreadCount(Number.isFinite(unread.count) ? Math.max(0, unread.count) : 0);
         setLoadError('');
       } catch {
+        if (!listRequest.current()) return;
         if (!options.silent) {
           setNotifications([]);
           setLoadError('Failed to load notifications. Check your connection and try again.');
         }
       } finally {
-        if (!options.silent) setLoading(false);
+        if (listRequest.current() && !options.silent) setLoading(false);
       }
     },
-    [activeTab, canView],
+    [activeTab, authLoading, beginListRequest, canView, loadUnread],
   );
 
   useEffect(() => {
@@ -108,7 +131,7 @@ export default function NotificationsPage() {
   }, [load]);
 
   useEffect(() => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
     const refreshIfVisible = () => {
       if (document.visibilityState === 'visible') void load({ silent: true });
     };
@@ -120,7 +143,7 @@ export default function NotificationsPage() {
       window.removeEventListener('focus', refreshIfVisible);
       document.removeEventListener('visibilitychange', refreshIfVisible);
     };
-  }, [canView, load]);
+  }, [authLoading, canView, load]);
 
   const doAction = async (id: string, action: RowAction) => {
     setActionLoading(`${id}-${action}`);
@@ -177,6 +200,24 @@ export default function NotificationsPage() {
     { key: 'dismissed', label: 'Dismissed' },
   ];
 
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
+        <p className="text-gray-500 mt-1">Loading</p>
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
+        <p className="text-gray-500 mt-1">Access Restricted</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-start justify-between gap-3">
@@ -191,7 +232,7 @@ export default function NotificationsPage() {
           </h1>
           <p className="text-gray-500 mt-1">Your notification centre</p>
         </div>
-        {canView && unreadCount > 0 && (
+        {unreadCount > 0 && (
           <Btn variant="secondary" size="sm" onClick={markAllRead} loading={markingAll}>
             Mark All Read
           </Btn>
@@ -214,19 +255,9 @@ export default function NotificationsPage() {
         ))}
       </div>
 
-      {loadError && (
-        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <span>{loadError}</span>
-          <button
-            onClick={() => void load()}
-            className="text-red-700 font-medium hover:underline ml-3"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {loading ? (
+      {loadError ? (
+        <ErrorState message={loadError} onRetry={() => void load()} />
+      ) : loading ? (
         <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-2" />
       ) : (
         <div className="space-y-2">
@@ -265,17 +296,16 @@ export default function NotificationsPage() {
                       Open
                     </Link>
                   )}
-                  {canView &&
-                    (ROW_ACTIONS[n.status] ?? []).map((a) => (
-                      <button
-                        key={a.action}
-                        onClick={() => doAction(n.id, a.action)}
-                        disabled={actionLoading === `${n.id}-${a.action}`}
-                        className={`text-xs hover:underline disabled:opacity-50 ${a.action === 'read' ? 'text-blue-600' : 'text-gray-400'}`}
-                      >
-                        {actionLoading === `${n.id}-${a.action}` ? '…' : a.label}
-                      </button>
-                    ))}
+                  {(ROW_ACTIONS[n.status] ?? []).map((a) => (
+                    <button
+                      key={a.action}
+                      onClick={() => doAction(n.id, a.action)}
+                      disabled={actionLoading === `${n.id}-${a.action}`}
+                      className={`text-xs hover:underline disabled:opacity-50 ${a.action === 'read' ? 'text-blue-600' : 'text-gray-400'}`}
+                    >
+                      {actionLoading === `${n.id}-${a.action}` ? '…' : a.label}
+                    </button>
+                  ))}
                   {canManage && (
                     <button
                       onClick={() => setDeleting(n)}

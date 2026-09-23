@@ -1,20 +1,13 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import {
-  Btn,
-  Card,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  PageHeader,
-  PageSpinner,
-  PageToolbar,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormSelect, FormTextarea, PageHeader, PageSpinner, PageToolbar, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { WestsidesGate } from '../_components/route-gate';
 
 // Types
 
@@ -293,8 +286,10 @@ export default function DailyClosePage() {
   const [notes, setNotes] = useState('');
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [savingClose, setSavingClose] = useState(false);
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('westsides.reports.view');
   const canSaveClose = hasPermission('westsides.daily_close.manage');
+  const beginRequest = useRequestGuard();
 
   const { companyOptions, branchOptions } = useOrgScope(companyId, {
     skipDivisions: true,
@@ -302,22 +297,29 @@ export default function DailyClosePage() {
   });
 
   const load = useCallback(async () => {
-    if (!companyId) {
-      setData(null);
-      setLastLoadedAt(null);
+    if (authLoading || !canView || !companyId) {
+      if (!companyId) {
+        setData(null);
+        setLastLoadedAt(null);
+      }
       return;
     }
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ companyId, date });
       if (branchId) params.set('branchId', branchId);
-      const res = await fetch(`/api/backend/westsides/reports/daily-close?${params}`);
+      const res = await fetch(`/api/backend/westsides/reports/daily-close?${params}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.message ?? `HTTP ${res.status}`);
       }
       const j = await res.json();
+      if (!request.current()) return;
       const payload: DailyClose = j.data ?? j;
       setData(payload);
       // A persisted close for this scope+date pre-fills the count sheet, so a
@@ -338,11 +340,12 @@ export default function DailyClosePage() {
       }
       setLastLoadedAt(new Date());
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Load failed');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId, branchId, date]);
+  }, [authLoading, beginRequest, branchId, canView, companyId, date]);
 
   useEffect(() => {
     void load();
@@ -793,6 +796,10 @@ export default function DailyClosePage() {
     unassignedMethodCount,
   ]);
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Daily Close" loading={authLoading} />;
+  }
+
   return (
     <div className="p-6 space-y-4 daily-close-page">
       <PageHeader
@@ -831,7 +838,7 @@ export default function DailyClosePage() {
               />
             </div>
             <div className="w-44">
-              <FormInput type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <FormDateField value={date} onChange={(value) => setDate(value)} />
             </div>
           </>
         }
@@ -871,7 +878,7 @@ export default function DailyClosePage() {
               loading={loading}
               disabled={!companyId}
             >
-              Retry
+              Try again
             </Btn>
           }
         />
@@ -1094,7 +1101,7 @@ export default function DailyClosePage() {
               />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-sm">
+              <WorkspaceTable className="w-full min-w-[980px] text-sm">
                 <thead>
                   <tr style={tableHeadStyle}>
                     <Th>Method</Th>
@@ -1153,7 +1160,7 @@ export default function DailyClosePage() {
                         )}
                       </Td>
                       <Td align="right">
-                        <input
+                        <input aria-label="0.00"
                           type="number"
                           step="any"
                           value={m.countedValue}
@@ -1223,7 +1230,7 @@ export default function DailyClosePage() {
                     </tr>
                   </tfoot>
                 )}
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
 
@@ -1249,7 +1256,7 @@ export default function DailyClosePage() {
                 />
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1080px] text-sm">
+                <WorkspaceTable className="w-full min-w-[1080px] text-sm">
                   <thead>
                     <tr style={tableHeadStyle}>
                       <Th>Till</Th>
@@ -1419,7 +1426,7 @@ export default function DailyClosePage() {
                       <Td>{''}</Td>
                     </tr>
                   </tfoot>
-                </table>
+                </WorkspaceTable>
               </div>
               <div
                 className="border-t px-4 py-2 text-xs"
@@ -1496,7 +1503,7 @@ export default function DailyClosePage() {
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-sm">
+                <WorkspaceTable className="w-full min-w-[760px] text-sm">
                   <thead>
                     <tr style={tableHeadStyle}>
                       <Th>Order</Th>
@@ -1569,7 +1576,7 @@ export default function DailyClosePage() {
                       );
                     })}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             )}
             {mobileMoneyStats.accountTotals.length > 0 && (
@@ -1655,7 +1662,7 @@ export default function DailyClosePage() {
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px] text-sm">
+              <WorkspaceTable className="w-full min-w-[680px] text-sm">
                 <thead>
                   <tr style={tableHeadStyle}>
                     <Th>#</Th>
@@ -1702,7 +1709,7 @@ export default function DailyClosePage() {
                     <EmptyRow colSpan={5} message="No items sold today." />
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
 
@@ -1714,7 +1721,7 @@ export default function DailyClosePage() {
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
+              <WorkspaceTable className="w-full min-w-[860px] text-sm">
                 <thead>
                   <tr style={tableHeadStyle}>
                     <Th>Time</Th>
@@ -1768,7 +1775,7 @@ export default function DailyClosePage() {
                     <EmptyRow colSpan={8} message="No orders returned for this close." />
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
             {data.orders.length > 20 && (
               <div
@@ -2259,7 +2266,7 @@ function DataTableCard({
         <h3 className="text-sm font-semibold">{title}</h3>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
+        <WorkspaceTable className="w-full min-w-[520px] text-sm">
           <thead>
             <tr style={tableHeadStyle}>
               {columns.map((column, index) => (
@@ -2272,7 +2279,7 @@ function DataTableCard({
           <tbody>
             {hasRows ? children : <EmptyRow colSpan={columns.length} message={empty} />}
           </tbody>
-        </table>
+        </WorkspaceTable>
       </div>
     </Card>
   );

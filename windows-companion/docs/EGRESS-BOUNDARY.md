@@ -14,6 +14,12 @@ only production implementation in this repository always rejects and has no
 configuration override, so implementing or enabling this egress boundary alone
 still cannot make `command.privileged.execute` launch.
 
+The Egress Supervisor cannot and must not open `\\.\ItembaMsaidiziIsolation`:
+that device admits only the Privileged Command Supervisor service SID, not the
+egress-supervisor SID, and its v3 protocol is not the egress health protocol.
+Do not widen the device DACL to satisfy an egress posture probe; this is an
+intentional separation between the two trust boundaries.
+
 ## Required companion integration protocol
 
 `IEgressBoundaryClient` now opens a versioned, full-lifecycle session with

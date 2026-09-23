@@ -1,9 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { PageSpinner, PageToolbar, Modal, Btn, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, PageSpinner, PageToolbar, Modal, Btn, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { backendPost, backendPut, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 interface SupplierOption { id: string; name: string }
@@ -103,7 +105,7 @@ function PerfModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Performance Record' : 'Edit Performance Record'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormSelect label="Company" required disabled={mode === 'edit'} value={form.companyId}
           onChange={(e) => { set('companyId', e.target.value); set('supplierId', ''); }} placeholder="Select…">
@@ -132,9 +134,11 @@ function PerfModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
 }
 
 export default function SupplierPerformancePage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('supplier_performance.list');
   const canCreate = hasPermission('supplier_performance.create');
   const canUpdate = hasPermission('supplier_performance.update');
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<SupplierPerf[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -143,30 +147,51 @@ export default function SupplierPerformancePage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SupplierPerf | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
-    fetch('/api/backend/supplier-performance')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch((err) => {
-        setData([]);
-        setError(err instanceof Error ? err.message : 'Failed to load supplier performance records');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const response = await fetch('/api/backend/supplier-performance', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load supplier performance records');
+      const body = await response.json();
+      if (!request.current()) return;
+      setData(Array.isArray(body.data) ? body.data : Array.isArray(body.data?.data) ? body.data.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setData([]);
+      setError(err instanceof Error ? err.message : 'Failed to load supplier performance records');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(j.data?.data ?? j.data ?? []))
-      // Company options only enrich the modal dropdown and table names (raw ids remain as fallback).
+      .then((j) => {
+        if (!controller.signal.aborted) setCompanies(j.data?.data ?? j.data ?? []);
+      })
       .catch(() => undefined);
-  }, []);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Supplier Performance</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -179,16 +204,12 @@ export default function SupplierPerformancePage() {
         <PageToolbar actions={canCreate ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New Record</Btn> : null} />
       </div>
 
-      {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Company</th>
@@ -225,7 +246,7 @@ export default function SupplierPerformancePage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

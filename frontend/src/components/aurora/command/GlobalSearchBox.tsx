@@ -26,7 +26,7 @@ export function GlobalSearchBox() {
         <circle cx="11" cy="11" r="8" />
         <path d="m21 21-4.35-4.35" />
       </svg>
-      <span className="hidden flex-1 text-left text-sm md:block">Search records, pages...</span>
+      <span className="hidden flex-1 text-left text-sm md:block">Search apps, records, files…</span>
       <kbd
         className="hidden rounded px-1.5 py-0.5 text-xs md:block"
         style={{

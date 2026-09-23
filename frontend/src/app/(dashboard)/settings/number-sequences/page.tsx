@@ -1,10 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Hash, ListFilter, Plus, RefreshCw, RotateCcw, Save, ShieldCheck } from 'lucide-react';
-import { Card, PageHeader, FormInput, FormSelect, Btn, Modal, ConfirmDialog } from '@/components/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Plus, RefreshCw, RotateCcw, Save } from 'lucide-react';
+import {
+  PageHeader,
+  FormInput,
+  FormSelect,
+  Btn,
+  Modal,
+  ConfirmDialog,
+  PermissionDeniedState,
+} from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import '@/components/workspace/workspace.css';
 
-interface Company { id: string; name: string; code: string; }
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
 
 interface NumberSequence {
   id: string;
@@ -55,7 +72,7 @@ const EMPTY_FORM: FormState = {
 
 function preview(form: { prefix: string; padding: string; suffix: string; startNumber: string }) {
   const next = (Number.parseInt(form.startNumber, 10) || 0) + 1;
-  const pad = Math.max(Number.parseInt(form.padding, 10) || 0, 0);
+  const pad = Math.min(20, Math.max(Number.parseInt(form.padding, 10) || 1, 1));
   return `${form.prefix ?? ''}${String(next).padStart(pad, '0')}${form.suffix ?? ''}`;
 }
 
@@ -76,6 +93,13 @@ function formFromSequence(seq: NumberSequence): FormState {
 }
 
 export default function NumberSequencesPage() {
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('doc_sequences.list');
+  const canCreate = hasPermission('doc_sequences.create');
+  const canUpdate = hasPermission('doc_sequences.update');
+  const startRequest = useRequestGuard();
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [sequences, setSequences] = useState<NumberSequence[]>([]);
@@ -89,6 +113,8 @@ export default function NumberSequencesPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState<NumberSequence | null>(null);
+  const draft = useFormGuard(form, setForm);
+  const closeEditor = () => draft.requestClose(() => setOpen(false));
   const activeCount = useMemo(() => sequences.filter((seq) => seq.isActive).length, [sequences]);
   const globalCount = useMemo(() => sequences.filter((seq) => !seq.companyId).length, [sequences]);
   const selectedCompany = companies.find((company) => company.id === companyId);
@@ -98,7 +124,11 @@ export default function NumberSequencesPage() {
       .then((r) => r.json())
       .then((j) => {
         const inner = j.data?.data ?? j.data;
-        const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
+        const rows: Company[] = Array.isArray(inner)
+          ? inner
+          : Array.isArray(inner?.data)
+            ? inner.data
+            : [];
         setCompanies(rows);
       })
       // Company filter dropdown only: the sequences load has its own error state; failure just leaves the filter empty.
@@ -106,37 +136,55 @@ export default function NumberSequencesPage() {
   }, []);
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    if (!canRead) return;
+    const request = startRequest();
+    setLoading(true);
+    setError('');
     try {
       const params = new URLSearchParams();
       if (companyId) params.set('companyId', companyId);
-      params.set('limit', '100');
-      const res = await fetch(`/api/backend/document-number-sequences?${params}`);
+      params.set('limit', String(pageSize));
+      params.set('page', String(page));
+      const res = await fetch(`/api/backend/document-number-sequences?${params}`, {
+        signal: request.signal,
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const inner = json.data ?? json;
-      setSequences(Array.isArray(inner.items) ? inner.items : Array.isArray(inner.data) ? inner.data : []);
+      if (!request.current()) return;
+      setSequences(
+        Array.isArray(inner.items) ? inner.items : Array.isArray(inner.data) ? inner.data : [],
+      );
       setTotal(typeof inner.total === 'number' ? inner.total : 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sequences');
+      if (request.current())
+        setError(err instanceof Error ? err.message : 'Failed to load sequences');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, page, canRead, startRequest]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const openCreate = () => {
+    if (!canCreate) return;
+    draft.markSaved();
     setEditing(null);
     setForm({ ...EMPTY_FORM, companyId });
     setOpen(true);
-    setInfo(''); setError('');
+    setInfo('');
+    setError('');
   };
   const openEdit = (seq: NumberSequence) => {
+    if (!canUpdate) return;
+    draft.markSaved();
     setEditing(seq);
     setForm(formFromSequence(seq));
     setOpen(true);
-    setInfo(''); setError('');
+    setInfo('');
+    setError('');
   };
 
   const resetForm = () => {
@@ -145,19 +193,35 @@ export default function NumberSequencesPage() {
   };
 
   const submit = async () => {
-    setSaving(true); setError(''); setInfo('');
+    if (editing ? !canUpdate : !canCreate) return;
+    const padding = Number(form.padding);
+    const start = Number(form.startNumber);
+    if (
+      !Number.isInteger(padding) ||
+      padding < 1 ||
+      padding > 20 ||
+      (!editing && (!Number.isSafeInteger(start) || start < 0))
+    ) {
+      setError('Use a padding between 1 and 20 and a non-negative whole start number.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setInfo('');
     try {
       const body: Record<string, unknown> = {
-        sequenceCode: form.sequenceCode.trim(),
-        entityType: form.entityType.trim(),
         prefix: form.prefix.trim() || null,
         suffix: form.suffix.trim() || null,
-        padding: Number.parseInt(form.padding, 10) || 5,
+        padding,
         resetFrequency: form.resetFrequency,
         isActive: form.isActive,
       };
-      if (form.companyId) body.companyId = form.companyId;
-      if (!editing) body.startNumber = Number.parseInt(form.startNumber, 10) || 0;
+      if (!editing) {
+        body.sequenceCode = form.sequenceCode.trim();
+        body.entityType = form.entityType.trim();
+        if (form.companyId) body.companyId = form.companyId;
+        body.startNumber = start;
+      }
 
       const url = editing
         ? `/api/backend/document-number-sequences/${editing.id}`
@@ -172,6 +236,7 @@ export default function NumberSequencesPage() {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.message ?? `HTTP ${res.status}`);
       }
+      draft.markSaved();
       setOpen(false);
       setInfo(editing ? 'Sequence updated.' : 'Sequence created.');
       await load();
@@ -183,8 +248,11 @@ export default function NumberSequencesPage() {
   };
 
   const advance = async (seq: NumberSequence) => {
+    if (!canUpdate) return;
     try {
-      const res = await fetch(`/api/backend/document-number-sequences/${seq.id}/next`, { method: 'POST' });
+      const res = await fetch(`/api/backend/document-number-sequences/${seq.id}/next`, {
+        method: 'POST',
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const data = json.data ?? json;
@@ -195,11 +263,13 @@ export default function NumberSequencesPage() {
     }
   };
 
+  if (!canRead) return <PermissionDeniedState />;
+
   return (
-    <div className="p-6 space-y-4">
+    <div className="business-workspace record-workspace space-y-5">
       <PageHeader
-        title="Number Sequences"
-        subtitle="Prefixes, padding, and counters for auto-generated entity numbers."
+        title="Document numbers"
+        subtitle="A clear sequence for every business document."
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: 'Number Sequences' }]}
         actions={
           <div className="flex items-center gap-2">
@@ -211,118 +281,101 @@ export default function NumberSequencesPage() {
             >
               Reload
             </Btn>
-            <Btn icon={<Plus className="h-3.5 w-3.5" />} onClick={openCreate}>New sequence</Btn>
+            <>
+              {canCreate && (
+                <Btn icon={<Plus className="h-3.5 w-3.5" />} onClick={openCreate}>
+                  New sequence
+                </Btn>
+              )}
+            </>
           </div>
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <SequenceSummary
-          icon={<Hash className="h-4 w-4" />}
-          label="Registered sequences"
-          value={String(total || sequences.length)}
-          note={`${activeCount} active in the current view.`}
-        />
-        <SequenceSummary
-          icon={<ShieldCheck className="h-4 w-4" />}
-          label="Scope"
-          value={selectedCompany?.name ?? 'All companies'}
-          note={companyId ? 'Showing company-specific and linked numbering.' : `${globalCount} global sequences visible.`}
-        />
-        <SequenceSummary
-          icon={<ListFilter className="h-4 w-4" />}
-          label="Reset rules"
-          value={sequences.some((seq) => seq.resetFrequency !== 'NEVER') ? 'Configured' : 'Manual counters'}
-          note="Daily, monthly, or yearly reset rules appear in the table."
-        />
+      <div className="workspace-summary">
+        <div>
+          <span>Sequences</span>
+          <strong>{total}</strong>
+        </div>
+        <div>
+          <span>Active on this page</span>
+          <strong>{activeCount}</strong>
+        </div>
+        <div>
+          <span>Global on this page</span>
+          <strong>{globalCount}</strong>
+        </div>
       </div>
-
-      <Card className="p-5">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] lg:items-end">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Find a sequence</div>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              Filter by company before editing counters so document numbers stay scoped to the right business.
-            </p>
-          </div>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="w-full sm:max-w-sm">
           <FormSelect
-            label="Filter by Company"
+            label="Company"
             value={companyId}
-            onChange={(e) => setCompanyId(e.target.value)}
-            placeholder="— All companies —"
-            options={companies.map((c) => ({ value: c.id, label: c.name }))}
+            onChange={(event) => {
+              setCompanyId(event.target.value);
+              setPage(1);
+            }}
+            placeholder="All companies"
+            options={companies.map((company) => ({ value: company.id, label: company.name }))}
           />
         </div>
-      </Card>
-
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
-      {info && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">{info}</div>}
-      {loading && <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}
-
-      {!loading && (
-        <Card className="overflow-hidden">
-          <div className="flex flex-col gap-1 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Document number rules</div>
-              <div className="text-xs text-slate-500">{total} sequence{total === 1 ? '' : 's'} in this view</div>
-            </div>
-            <div className="text-xs text-slate-500">Next number is shown before you edit or advance a counter.</div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Code</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Entity</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Company</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Prefix</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Suffix</th>
-                  <th className="px-4 py-2 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Current</th>
-                  <th className="px-4 py-2 text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Pad</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Reset</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Next preview</th>
-                  <th className="px-4 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="px-4 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sequences.length === 0 ? (
-                  <tr><td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-400">No sequences yet. Click <strong>New Sequence</strong> to define one.</td></tr>
-                ) : sequences.map((seq) => {
-                  const company = companies.find((c) => c.id === seq.companyId);
-                  const next = `${seq.prefix ?? ''}${String(seq.currentNumber + 1).padStart(seq.padding, '0')}${seq.suffix ?? ''}`;
-                  return (
-                    <tr key={seq.id} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="px-4 py-2 font-mono text-xs text-slate-800">{seq.sequenceCode}</td>
-                      <td className="px-4 py-2 text-slate-700">{seq.entityType}</td>
-                      <td className="px-4 py-2 text-slate-700">{company?.name ?? (seq.companyId ? '—' : <span className="text-slate-400">All</span>)}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-600">{seq.prefix || '—'}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-600">{seq.suffix || '—'}</td>
-                      <td className="px-4 py-2 text-right tabular-nums text-slate-700">{seq.currentNumber}</td>
-                      <td className="px-4 py-2 text-right tabular-nums text-slate-700">{seq.padding}</td>
-                      <td className="px-4 py-2 text-slate-700">{seq.resetFrequency}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-indigo-700">{next}</td>
-                      <td className="px-4 py-2">
-                        {seq.isActive
-                          ? <span className="inline-flex items-center px-2 py-0.5 border rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border-emerald-200">Active</span>
-                          : <span className="inline-flex items-center px-2 py-0.5 border rounded-full text-[10px] font-medium bg-zinc-100 text-zinc-500 border-zinc-200">Inactive</span>}
-                      </td>
-                      <td className="px-4 py-2 text-right whitespace-nowrap">
-                        <button onClick={() => setAdvancing(seq)} className="text-xs text-indigo-600 hover:underline mr-3">Advance</button>
-                        <button onClick={() => openEdit(seq)} className="text-xs text-slate-600 hover:underline">Edit</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <p className="text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
+          {selectedCompany?.name ?? 'Your accessible companies and global sequences'}
+        </p>
+      </div>
+      {info && (
+        <p role="status" className="rounded-lg border p-3 text-sm">
+          {info}
+        </p>
       )}
+      <RecordBrowser
+        records={sequences}
+        title="Number sequences"
+        name={(seq) => seq.sequenceCode}
+        reference={(seq) => seq.entityType}
+        status={(seq) => (seq.isActive ? 'ACTIVE' : 'INACTIVE')}
+        fields={[
+          { label: 'Next number', value: (seq) => preview(formFromSequence(seq)) },
+          {
+            label: 'Company',
+            value: (seq) =>
+              companies.find((company) => company.id === seq.companyId)?.name ??
+              (seq.companyId ? 'Company sequence' : 'Global'),
+          },
+        ]}
+        details={[
+          { label: 'Current number', value: (seq) => seq.currentNumber },
+          { label: 'Prefix', value: (seq) => seq.prefix || 'None' },
+          { label: 'Suffix', value: (seq) => seq.suffix || 'None' },
+          { label: 'Padding', value: (seq) => seq.padding },
+          { label: 'Reset frequency', value: (seq) => seq.resetFrequency },
+          { label: 'Last reset', value: (seq) => fmtDate(seq.lastResetAt) },
+          { label: 'Updated', value: (seq) => fmtDate(seq.updatedAt) },
+        ]}
+        actions={(seq) =>
+          canUpdate && (
+            <>
+              <Btn onClick={() => openEdit(seq)}>Edit sequence</Btn>
+              <Btn variant="secondary" onClick={() => setAdvancing(seq)}>
+                Advance number
+              </Btn>
+            </>
+          )
+        }
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPage={setPage}
+        loading={loading}
+        error={!open ? error : undefined}
+        onRetry={load}
+        empty="No numbering rules in this scope."
+      />
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closeEditor}
+        onChangeCapture={draft.touch}
         title={editing ? 'Edit Sequence' : 'New Sequence'}
         subtitle="Define the prefix, counter, reset rule, and company scope for generated document numbers."
         size="lg"
@@ -347,6 +400,7 @@ export default function NumberSequencesPage() {
             />
             <FormInput
               label="Entity Type"
+              disabled={!!editing}
               value={form.entityType}
               onChange={(e) => setForm((f) => ({ ...f, entityType: e.target.value }))}
               required
@@ -354,6 +408,7 @@ export default function NumberSequencesPage() {
             />
             <FormSelect
               label="Company"
+              disabled={!!editing}
               value={form.companyId}
               onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}
               placeholder="— All companies —"
@@ -363,7 +418,12 @@ export default function NumberSequencesPage() {
             <FormSelect
               label="Reset Frequency"
               value={form.resetFrequency}
-              onChange={(e) => setForm((f) => ({ ...f, resetFrequency: e.target.value as FormState['resetFrequency'] }))}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  resetFrequency: e.target.value as FormState['resetFrequency'],
+                }))
+              }
               options={RESET_FREQUENCIES}
             />
             <FormInput
@@ -384,7 +444,11 @@ export default function NumberSequencesPage() {
               onChange={(e) => setForm((f) => ({ ...f, startNumber: e.target.value }))}
               type="number"
               min={0}
-              hint={editing ? 'Last number used. Next will be this + 1.' : 'First issued will be this + 1.'}
+              hint={
+                editing
+                  ? 'Last number used. Next will be this + 1.'
+                  : 'First issued will be this + 1.'
+              }
               disabled={!!editing}
             />
             <FormInput
@@ -392,40 +456,50 @@ export default function NumberSequencesPage() {
               value={form.padding}
               onChange={(e) => setForm((f) => ({ ...f, padding: e.target.value }))}
               type="number"
-              min={0}
-              max={12}
+              min={1}
+              max={20}
               hint="Number is left-padded with zeros to this width."
             />
           </div>
 
           <div className="flex items-center gap-2">
-            <input
+            <input aria-label="Active"
               id="np_active"
               type="checkbox"
               checked={form.isActive}
               onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
               className="rounded border-slate-300"
             />
-            <label htmlFor="np_active" className="text-sm text-slate-700">Active</label>
+            <label htmlFor="np_active" className="text-sm text-slate-700">
+              Active
+            </label>
           </div>
 
           <div className="border border-dashed border-slate-200 rounded-md p-3 bg-slate-50">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Next number preview</div>
+            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+              Next number preview
+            </div>
             <div className="font-mono text-base text-indigo-700">{preview(form)}</div>
           </div>
 
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">{error}</div>}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Btn
               variant="secondary"
               icon={<RotateCcw className="h-3.5 w-3.5" />}
-              onClick={resetForm}
+              onClick={() => draft.requestClose(resetForm)}
               disabled={saving}
             >
               Reset form
             </Btn>
-            <Btn variant="secondary" onClick={() => setOpen(false)}>Cancel</Btn>
+            <Btn variant="secondary" onClick={closeEditor}>
+              Cancel
+            </Btn>
             <Btn
               icon={<Save className="h-3.5 w-3.5" />}
               onClick={submit}
@@ -455,43 +529,7 @@ export default function NumberSequencesPage() {
         }}
         onCancel={() => setAdvancing(null)}
       />
-
-      {sequences.length > 0 && (
-        <p className="text-[11px] text-slate-400">
-          Last updated {fmtDate(sequences[0]?.updatedAt)}.
-          <span className="ml-2">
-            Integration note: verify each document workflow before treating a sequence as official.
-          </span>
-        </p>
-      )}
     </div>
-  );
-}
-
-function SequenceSummary({
-  icon,
-  label,
-  value,
-  note,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  note: string;
-}) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-          <div className="mt-1 truncate text-sm font-semibold text-slate-900">{value}</div>
-          <div className="mt-1 text-xs leading-5 text-slate-500">{note}</div>
-        </div>
-      </div>
-    </Card>
   );
 }
 

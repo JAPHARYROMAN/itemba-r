@@ -1,5 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { revision, validateAppearance } from '../workspace/workspace.validation';
 
 const VALID_THEMES = ['system', 'light', 'dark'] as const;
 const VALID_DENSITIES = ['compact', 'comfortable', 'spacious'] as const;
@@ -18,6 +19,8 @@ const DEFAULTS = {
 };
 
 export interface UpsertUserPreferenceDto {
+  desktop?: unknown;
+  expectedDesktopRevision?: number;
   theme?: string;
   density?: string;
   locale?: string;
@@ -54,6 +57,17 @@ export class UserPreferencesService {
    * call so existing users don't need a backfill migration.
    */
   async upsertMine(userId: string, dto: UpsertUserPreferenceDto) {
+    if (dto.desktop !== undefined) {
+      const desktop = validateAppearance(dto.desktop);
+      const expected = revision(dto.expectedDesktopRevision);
+      if (desktop.wallpaperId && !await this.prisma.workspaceWallpaper.findFirst({ where: { id: String(desktop.wallpaperId), userId }, select: { id: true } })) throw new BadRequestException('Wallpaper is unavailable');
+      return this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`desktop-profile:${userId}`}))`;
+        const existing = await tx.userPreference.findUnique({ where: { userId } });
+        if ((existing?.desktopRevision ?? 0) !== expected) throw new ConflictException('Appearance changed in another session. Reload to use the saved profile.');
+        return tx.userPreference.upsert({ where: { userId }, create: { userId, ...DEFAULTS, desktop, desktopRevision: 1, theme: String(desktop.mode), density: String(desktop.density) }, update: { desktop, desktopRevision: { increment: 1 }, theme: String(desktop.mode), density: String(desktop.density) } });
+      });
+    }
     if (dto.theme && !(VALID_THEMES as readonly string[]).includes(dto.theme)) {
       throw new BadRequestException(`theme must be one of: ${VALID_THEMES.join(', ')}`);
     }

@@ -58,47 +58,37 @@ export class CustomersService {
 
   async workbenchSummary(query: QueryCustomerDto, user: AuthUser) {
     const where = await this.customerWhere(query, user);
-    const customers = await this.prisma.customer.findMany({
-      where,
-      select: { id: true, status: true, currentBalance: true, creditLimit: true },
-      take: 5000,
-    });
-    const customerIds = customers.map((customer) => customer.id);
-    const [openReceivables, overdueReceivables] = customerIds.length
-      ? await Promise.all([
-          this.prisma.receivable.aggregate({
-            where: {
-              customerId: { in: customerIds },
-              deletedAt: null,
-              status: { in: OPEN_RECEIVABLE_STATUSES },
-            },
-            _sum: { outstandingAmount: true },
-          }),
-          this.prisma.receivable.aggregate({
-            where: {
-              customerId: { in: customerIds },
-              deletedAt: null,
-              status: { in: OPEN_RECEIVABLE_STATUSES },
-              dueDate: { lt: new Date() },
-              outstandingAmount: { gt: 0 },
-            },
-            _sum: { outstandingAmount: true },
-          }),
-        ])
-      : [{ _sum: { outstandingAmount: 0 } }, { _sum: { outstandingAmount: 0 } }];
-
+    // Aggregate the complete filtered directory, not a capped preview of IDs.
+    const openWhere = {
+      customer: { is: where },
+      deletedAt: null,
+      status: { in: OPEN_RECEIVABLE_STATUSES },
+    };
+    const [groups, openBalance, overdueBalance] = await Promise.all([
+      this.prisma.customer.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+        _sum: { currentBalance: true, creditLimit: true },
+      }),
+      this.prisma.receivable.aggregate({
+        where: openWhere,
+        _sum: { outstandingAmount: true },
+      }),
+      this.prisma.receivable.aggregate({
+        where: { ...openWhere, dueDate: { lt: new Date() }, outstandingAmount: { gt: 0 } },
+        _sum: { outstandingAmount: true },
+      }),
+    ]);
     return {
-      total: customers.length,
-      active: customers.filter((customer) => customer.status === 'ACTIVE').length,
-      blocked: customers.filter((customer) => customer.status === 'BLOCKED').length,
-      inactive: customers.filter((customer) => customer.status === 'INACTIVE').length,
-      creditLimit: customers.reduce((sum, customer) => sum + toNumber(customer.creditLimit), 0),
-      currentBalance: customers.reduce(
-        (sum, customer) => sum + toNumber(customer.currentBalance),
-        0,
-      ),
-      openReceivableBalance: toNumber(openReceivables._sum.outstandingAmount),
-      overdueReceivableBalance: toNumber(overdueReceivables._sum.outstandingAmount),
+      total: groups.reduce((sum, row) => sum + row._count._all, 0),
+      active: groups.find((row) => row.status === 'ACTIVE')?._count._all ?? 0,
+      blocked: groups.find((row) => row.status === 'BLOCKED')?._count._all ?? 0,
+      inactive: groups.find((row) => row.status === 'INACTIVE')?._count._all ?? 0,
+      creditLimit: groups.reduce((sum, row) => sum + toNumber(row._sum.creditLimit), 0),
+      currentBalance: groups.reduce((sum, row) => sum + toNumber(row._sum.currentBalance), 0),
+      openReceivableBalance: toNumber(openBalance._sum.outstandingAmount),
+      overdueReceivableBalance: toNumber(overdueBalance._sum.outstandingAmount),
     };
   }
 
@@ -767,14 +757,7 @@ export class CustomersService {
   }
 
   private async customerWhere(query: QueryCustomerDto, user: AuthUser) {
-    const {
-      companyId,
-      divisionId,
-      branchId,
-      customerType,
-      status,
-      search,
-    } = query;
+    const { companyId, divisionId, branchId, customerType, status, search } = query;
     const where: Prisma.CustomerWhereInput = {
       deletedAt: null,
       ...(await this.companyScope.companyWhereFor(user, companyId)),

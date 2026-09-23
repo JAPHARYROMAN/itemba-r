@@ -58,8 +58,10 @@ export interface InvocationResult {
   error?: string;
   /** Exact raw HTTP response bytes retained by the bounded reader. */
   responseBytes?: number;
-  /** SHA-256 of the exact raw HTTP response bytes when the body completed. */
+  /** SHA-256 of observed response bytes; only a prefix when responseIncomplete. */
   responseSha256?: string;
+  /** The stream failed after headers; body is withheld, observed bytes still count. */
+  responseIncomplete?: boolean;
   /** The response was cancelled because it could not fit the caller's reservation. */
   responseLimitExceeded?: boolean;
   /** Strict in-memory receipt issued by the trusted loopback adapter boundary. */
@@ -286,6 +288,18 @@ export class CapabilityInvoker {
 
       const bounded = await readBoundedResponse(response, maxResponseBytes);
       if (!bounded.ok) {
+        if (bounded.interrupted) {
+          return {
+            ok: false,
+            status: 0,
+            body: null,
+            error: 'The response ended before it was complete.',
+            responseBytes: bounded.interrupted.bytes,
+            responseSha256: bounded.interrupted.sha256,
+            responseIncomplete: true,
+            ...(egressContext ? { egressReceiptError: 'ERP_EGRESS_RECEIPT_MISSING' } : {}),
+          };
+        }
         return {
           ok: false,
           status: response.status,
@@ -354,7 +368,9 @@ export class CapabilityInvoker {
   }
 }
 
-type BoundedResponse = { ok: true; text: string; bytes: number; sha256: string } | { ok: false };
+type BoundedResponse =
+  | { ok: true; text: string; bytes: number; sha256: string }
+  | { ok: false; interrupted?: { bytes: number; sha256: string } };
 
 async function readBoundedResponse(
   response: Response,
@@ -403,7 +419,14 @@ async function readBoundedResponse(
       bytes,
       sha256: hash.digest('hex'),
     };
+  } catch {
+    // A failed stream has already consumed local IO. Keep value-free prefix
+    // provenance so callers cannot refund those bytes or treat a 2xx header as
+    // a completed action. Never expose or retain the incomplete response text.
+    await reader.cancel().catch(() => undefined);
+    return { ok: false, interrupted: { bytes, sha256: hash.digest('hex') } };
   } finally {
+    for (const retained of chunks) retained.fill(0);
     reader.releaseLock();
   }
 }

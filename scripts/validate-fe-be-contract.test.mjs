@@ -138,6 +138,60 @@ test('a constant holding no backend path contributes no call', () => {
   assert.deepEqual(calls, []);
 });
 
+test('checks concatenated form paths without mistaking suffixes and body strings for endpoints', () => {
+  const { calls } = callsInSource(
+    `
+    const path = '/hr/attendance';
+    backendPatch(path + '/' + record.id + '/approve', { note: '/not-an-endpoint' });
+    backendDelete(\`/hr/employee-\${kind}s/\${record.id}\`);
+    backendGet(\`/reports\${query ? \`?search=\${query}\` : ''}\`);
+  `,
+    'forms.tsx',
+  );
+  assert.deepEqual(
+    calls.map(({ method, route }) => `${method} ${route}`),
+    ['PATCH /hr/attendance/:param/approve', 'DELETE /hr/employee-:params/:param', 'GET /reports'],
+  );
+  assert.equal(
+    brokenContracts([calls[0]], [{ method: 'PATCH', route: '/hr/attendance/:id/approve' }]).length,
+    0,
+  );
+  assert.equal(
+    brokenContracts([calls[0]], [{ method: 'POST', route: '/hr/attendance/:id/approve' }]).length,
+    1,
+  );
+});
+
+test('respects edit/create branches when a shared URL has conditional alternatives', () => {
+  const { calls } = callsInSource(
+    `
+    const url = isEdit ? '/customers/' + id : '/customers';
+    if (isEdit) await backendPatch(url, body);
+    else await backendPost(url, body);
+  `,
+    'editor.tsx',
+  );
+  assert.deepEqual(
+    calls.map(({ method, route }) => `${method} ${route}`),
+    ['PATCH /customers/:param', 'POST /customers'],
+  );
+});
+
+test('follows the nearest scoped constant rather than an unrelated function URL', () => {
+  const { calls } = callsInSource(
+    `
+    const path = '/customers';
+    function suppliers() { const path = '/suppliers'; backendPost(path, data); }
+    function customers() { backendPost(path, data); }
+  `,
+    'scopes.tsx',
+  );
+  assert.deepEqual(
+    calls.map(({ route }) => route),
+    ['/suppliers', '/customers'],
+  );
+});
+
 /* ------------------------------------------------------------------------ *
  * Coverage of this repo, which is the assertion with teeth
  * ------------------------------------------------------------------------ */

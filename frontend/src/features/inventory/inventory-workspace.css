@@ -1,0 +1,988 @@
+.inventory-workspace,
+.inventory-overview,
+.inventory-batches {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  min-width: 0;
+}
+.inventory-workspace > [data-page-header],
+.inventory-overview > [data-page-header],
+.inventory-batches > [data-page-header] {
+  margin-bottom: 0;
+}
+.inventory-workspace-nav,
+.inventory-view-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inventory-workspace-nav {
+  border-bottom: 1px solid var(--aurora-border);
+}
+.inventory-workspace-nav a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+}
+.inventory-workspace-nav a[aria-current] {
+  color: var(--aurora-primary-text);
+  border-bottom-color: var(--aurora-primary);
+}
+.inventory-view-nav {
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--aurora-bg-subtle);
+  width: fit-content;
+  max-width: 100%;
+}
+.inventory-view-nav a {
+  padding: 9px 13px;
+  border-radius: 8px;
+  color: var(--aurora-text-secondary);
+  font-size: 13px;
+}
+.inventory-view-nav a[aria-current] {
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  box-shadow: 0 1px 4px #0000000d;
+}
+.inventory-scope {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.inventory-scope-errors {
+  grid-column: 1/-1;
+}
+.inventory-scope-errors:empty {
+  display: none;
+}
+.inventory-scope-panel {
+  display: grid;
+  gap: 18px;
+}
+.inventory-workspace [data-inventory-embedded] > .business-workspace {
+  padding: 0;
+  min-height: 0;
+}
+.inventory-workspace a:focus-visible,
+.inventory-overview a:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+.inventory-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.inventory-section-heading h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.inventory-section-heading p,
+.inventory-attention p,
+.inventory-register-note {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--aurora-text-secondary);
+}
+.inventory-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.inventory-overview a {
+  font-size: 13px;
+  color: var(--aurora-primary-text);
+}
+.inventory-health-summary small {
+  font-size: 11px;
+  color: var(--aurora-text-muted);
+}
+.workspace-summary.inventory-health-summary > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 7px;
+  min-width: 0;
+}
+.inventory-health-summary strong {
+  overflow-wrap: anywhere;
+}
+.inventory-attention {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  background: var(--aurora-bg-subtle);
+}
+.inventory-attention h3 {
+  font-weight: 550;
+  font-size: 14px;
+}
+.inventory-recent {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.inventory-destinations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 24px;
+}
+.inventory-destinations a {
+  display: grid;
+  gap: 7px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--aurora-border);
+}
+.inventory-destinations a > span {
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--aurora-text);
+}
+.inventory-destinations small {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--aurora-text-secondary);
+}
+.inventory-filter-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+}
+.inventory-live-auto {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--aurora-text-secondary);
+  cursor: pointer;
+}
+.inventory-live-auto input {
+  accent-color: var(--aurora-primary);
+}
+.inventory-live-attention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.inventory-live-attention button[aria-pressed='true'] {
+  background: var(--aurora-primary-subtle);
+  color: var(--aurora-primary-text);
+}
+.inventory-live-locations {
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  padding: 18px;
+}
+.inventory-live-locations > summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 550;
+}
+.inventory-location-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+.inventory-location-grid button {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--aurora-border);
+  text-align: left;
+  background: var(--aurora-bg-subtle);
+  overflow-wrap: anywhere;
+}
+.inventory-location-grid button[aria-pressed='true'] {
+  border-color: var(--aurora-primary);
+  background: var(--aurora-primary-subtle);
+}
+.inventory-location-grid strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.inventory-location-grid span {
+  font-size: 11px;
+  color: var(--aurora-text-secondary);
+}
+.inventory-location-grid b {
+  margin-top: 5px;
+  font-size: 14px;
+  font-weight: 550;
+}
+.inventory-live button:focus-visible,
+.inventory-live summary:focus-visible,
+.inventory-live-auto input:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .workspace-filters:not([hidden]) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .workspace-filters
+  > * {
+  min-width: 0;
+  width: 100%;
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .inventory-register-note {
+  overflow-wrap: anywhere;
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .record-actions,
+.inventory-balances .record-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .record-inspector
+  dl
+  > div,
+.inventory-balances .record-inspector dl > div {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.8fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .record-inspector
+  dt,
+.inventory-balances .record-inspector dt {
+  margin-bottom: 0;
+}
+:is(
+    .inventory-movements,
+    .inventory-live,
+    .inventory-batches,
+    .inventory-adjustments,
+    .inventory-damage,
+    .inventory-reports
+  )
+  .record-inspector
+  dd,
+.inventory-balances .record-inspector dd {
+  text-align: right;
+}
+@media (max-width: 700px) {
+  .inventory-location-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    thead {
+    display: none;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table,
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    tbody {
+    display: block;
+    width: 100%;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+    border-bottom: 1px solid var(--aurora-border);
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td {
+    display: block;
+    padding: 7px 0;
+    border: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:first-child,
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(2),
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(3) {
+    display: block;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(2)::before,
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(3)::before {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 10px;
+    color: var(--aurora-text-muted);
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(2)::before {
+    content: 'Quantity';
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(3)::before {
+    content: 'Recorded cost';
+  }
+  .inventory-live .record-table td:nth-child(2)::before {
+    content: 'Available';
+  }
+  .inventory-live .record-table td:nth-child(3)::before {
+    content: 'Stock value';
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:last-child {
+    display: none;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .workspace-filters:not([hidden]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inventory-scope {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .inventory-workspace-nav a {
+    padding: 10px 9px;
+  }
+  .inventory-workspace-nav svg {
+    display: none;
+  }
+  .inventory-destinations {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inventory-health-summary {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px !important;
+  }
+  .inventory-health-summary strong {
+    font-size: 20px;
+    overflow-wrap: anywhere;
+  }
+}
+
+.inventory-batch-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.inventory-adjustment-stack {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.inventory-damage-stack {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.inventory-damage-review-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.inventory-damage-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 18px;
+}
+.inventory-damage-review-grid dt {
+  font-size: 12px;
+  color: var(--aurora-text-muted);
+}
+.inventory-damage-review-grid dd {
+  margin: 5px 0 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.inventory-damage-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .inventory-damage-review-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .inventory-damage .record-table td:nth-child(2)::before {
+    content: 'Quantity';
+  }
+  .inventory-damage .record-table td:nth-child(3)::before {
+    content: 'Estimated value';
+  }
+}
+.inventory-adjustments .record-actions {
+  grid-template-columns: 1fr;
+}
+.inventory-adjustment-stack .workspace-action-link {
+  width: fit-content;
+  color: var(--aurora-primary-text);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.inventory-adjustment-stack .workspace-action-link:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.inventory-adjustment-heading,
+.inventory-adjustment-actions,
+.inventory-adjustment-line > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.inventory-adjustment-heading {
+  color: var(--aurora-text-muted);
+  font-size: 13px;
+}
+.inventory-adjustment-line {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 18px;
+  background: var(--aurora-card);
+}
+.inventory-adjustment-line > header {
+  justify-content: space-between;
+}
+.inventory-adjustment-line small,
+.inventory-adjustment-quantities dt,
+.inventory-adjustment-trail dt {
+  color: var(--aurora-text-muted);
+  font-size: 12px;
+}
+.inventory-adjustment-quantities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.inventory-adjustment-quantities dd {
+  margin: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+}
+.inventory-adjustment-trail {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--aurora-border);
+}
+.inventory-adjustment-trail dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.inventory-adjustment-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .inventory-adjustment-line {
+    padding: 14px;
+  }
+  .inventory-adjustment-quantities {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .inventory-adjustment-actions > * {
+    flex: 1 1 100%;
+  }
+  .inventory-adjustments .record-table td:nth-child(2)::before {
+    content: 'Branch';
+  }
+  .inventory-adjustments .record-table td:nth-child(3)::before {
+    content: 'Lines';
+  }
+}
+@media (max-width: 700px) {
+  .inventory-batches .record-table td:nth-child(2)::before {
+    content: 'Expiry date';
+  }
+  .inventory-batches .record-table td:nth-child(3)::before {
+    content: 'Remaining';
+  }
+}
+
+.inventory-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: end;
+  justify-content: space-between;
+}
+.inventory-report-toolbar > :first-child {
+  flex: 1 1 240px;
+  max-width: 380px;
+}
+.inventory-reports .record-inspector dd {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+@media (max-width: 700px) {
+  .inventory-report-toolbar > :first-child {
+    max-width: none;
+  }
+  .inventory-reports .record-table td:nth-child(2)::before {
+    content: var(--report-first-label);
+  }
+  .inventory-reports .record-table td:nth-child(3)::before {
+    content: var(--report-second-label);
+  }
+}
+
+/* Respond to the width of an OS app window as well as the viewport. */
+@container os-workspace (max-width: 700px) {
+  .inventory-location-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    thead {
+    display: none;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table,
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    tbody {
+    display: block;
+    width: 100%;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+    border-bottom: 1px solid var(--aurora-border);
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td {
+    display: block;
+    padding: 7px 0;
+    border: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:first-child,
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(2),
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(3) {
+    display: block;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(2)::before,
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(3)::before {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 10px;
+    color: var(--aurora-text-muted);
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(2)::before {
+    content: 'Quantity';
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:nth-child(3)::before {
+    content: 'Recorded cost';
+  }
+  .inventory-live .record-table td:nth-child(2)::before {
+    content: 'Available';
+  }
+  .inventory-live .record-table td:nth-child(3)::before {
+    content: 'Stock value';
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .record-table
+    td:last-child {
+    display: none;
+  }
+  :is(
+      .inventory-movements,
+      .inventory-live,
+      .inventory-batches,
+      .inventory-adjustments,
+      .inventory-damage,
+      .inventory-reports
+    )
+    .workspace-filters:not([hidden]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inventory-scope {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .inventory-workspace-nav a {
+    padding: 10px 9px;
+  }
+  .inventory-workspace-nav svg {
+    display: none;
+  }
+  .inventory-destinations {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inventory-health-summary {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px !important;
+  }
+  .inventory-health-summary strong {
+    font-size: 20px;
+    overflow-wrap: anywhere;
+  }
+}
+@container os-workspace (max-width: 640px) {
+  .inventory-damage-review-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .inventory-damage .record-table td:nth-child(2)::before {
+    content: 'Quantity';
+  }
+  .inventory-damage .record-table td:nth-child(3)::before {
+    content: 'Estimated value';
+  }
+}
+@container os-workspace (max-width: 640px) {
+  .inventory-adjustment-line {
+    padding: 14px;
+  }
+  .inventory-adjustment-quantities {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .inventory-adjustment-actions > * {
+    flex: 1 1 100%;
+  }
+  .inventory-adjustments .record-table td:nth-child(2)::before {
+    content: 'Branch';
+  }
+  .inventory-adjustments .record-table td:nth-child(3)::before {
+    content: 'Lines';
+  }
+}
+@container os-workspace (max-width: 700px) {
+  .inventory-batches .record-table td:nth-child(2)::before {
+    content: 'Expiry date';
+  }
+  .inventory-batches .record-table td:nth-child(3)::before {
+    content: 'Remaining';
+  }
+}
+@container os-workspace (max-width: 700px) {
+  .inventory-report-toolbar > :first-child {
+    max-width: none;
+  }
+  .inventory-reports .record-table td:nth-child(2)::before {
+    content: var(--report-first-label);
+  }
+  .inventory-reports .record-table td:nth-child(3)::before {
+    content: var(--report-second-label);
+  }
+}

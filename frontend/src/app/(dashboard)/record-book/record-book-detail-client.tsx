@@ -1,10 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Btn, Card, EmptyState, PageHeader, SkeletonTable } from '@/components/ui';
+import { Btn, Card, EmptyState, ErrorState, PageHeader, SkeletonTable } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendDelete, backendGet, backendPatch } from '@/lib/api-client';
 import {
   type ConfirmAction,
@@ -87,9 +89,12 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 export function RecordBookDetailClient({ kind }: { kind: Kind }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('record_book.view');
+  const beginRequest = useRequestGuard();
   const [record, setRecord] = useState<DailySale | Expense | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [reason, setReason] = useState('');
@@ -99,21 +104,27 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
   const listHref = isSale ? '/record-book/daily-sales' : '/record-book/expenses';
 
   const load = useCallback(async () => {
-    if (!params.id) return;
+    if (authLoading || !canView || !params.id) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
-      const data = await backendGet<DailySale | Expense>(`/record-book/${kind}/${params.id}`);
+      const data = await backendGet<DailySale | Expense>(`/record-book/${kind}/${params.id}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       setRecord(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load record');
+      if (!request.current()) return;
+      setRecord(null);
+      setLoadError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [kind, params.id]);
+  }, [authLoading, beginRequest, canView, kind, params.id]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const request = (
@@ -226,6 +237,31 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
     </div>
   ) : undefined;
 
+  if (authLoading) {
+    return (
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+        <PageHeader
+          title={isSale ? 'Daily Sales Record' : 'Money-Out Record'}
+          subtitle="Loading"
+        />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+        <PageHeader
+          title={isSale ? 'Daily Sales Record' : 'Money-Out Record'}
+          subtitle="Complete scope, value, lifecycle, and audit details"
+        />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
@@ -241,6 +277,10 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
       )}
       {loading ? (
         <SkeletonTable rows={5} cols={4} />
+      ) : loadError ? (
+        <Card>
+          <ErrorState message={loadError} onRetry={() => void load()} />
+        </Card>
       ) : !record ? (
         <Card>
           <EmptyState
@@ -294,7 +334,7 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
             <Card>
               <h2 className="mb-4 text-lg font-semibold text-slate-100">Receipt split</h2>
               <div className="overflow-x-auto rounded-lg border border-slate-800">
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead className="bg-slate-900/70 text-left text-slate-400">
                     <tr>
                       <th className="px-3 py-3">Method</th>
@@ -317,7 +357,7 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             </Card>
           ) : (

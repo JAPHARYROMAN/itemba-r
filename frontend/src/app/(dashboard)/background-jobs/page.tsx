@@ -1,7 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendPage, backendPut } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -14,6 +17,11 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function BackgroundJobsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('background_jobs.view');
+  const canRetry = hasPermission('background_jobs.retry');
+  const canCancel = hasPermission('background_jobs.cancel');
+  const beginRequest = useRequestGuard();
   const [jobs, setJobs] = useState<any[]>([]);
   const [stats, setStats] = useState({ queued: 0, running: 0, failed: 0, deadLetter: 0 });
   const [loading, setLoading] = useState(true);
@@ -22,22 +30,37 @@ export default function BackgroundJobsPage() {
   const [total, setTotal] = useState(0);
   const limit = 20;
 
-  const fetchJobs = useCallback(() => {
+  const fetchJobs = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    Promise.all([
-      backendPage<any>('/background-jobs', { query: { page, pageSize: limit } }),
-      backendGet<Record<string, number>>('/background-jobs/stats'),
-    ])
-      .then(([jobsRes, statsRes]) => {
-        setJobs(jobsRes.data);
-        setTotal(jobsRes.total);
-        const s = statsRes;
-        setStats({ queued: s.queued ?? s.QUEUED ?? 0, running: s.running ?? s.RUNNING ?? 0, failed: s.failed ?? s.FAILED ?? 0, deadLetter: s.deadLetter ?? s.DEAD_LETTER ?? 0 });
-      })
-      .catch(() => { setJobs([]); setLoadError('Failed to load background jobs.'); })
-      .finally(() => setLoading(false));
-  }, [page]);
+    try {
+      const [jobsRes, statsRes] = await Promise.all([
+        backendPage<any>('/background-jobs', {
+          signal: request.signal,
+          query: { page, pageSize: limit },
+        }),
+        backendGet<Record<string, number>>('/background-jobs/stats', { signal: request.signal }),
+      ]);
+      if (!request.current()) return;
+      setJobs(jobsRes.data);
+      setTotal(jobsRes.total);
+      const s = statsRes;
+      setStats({
+        queued: s.queued ?? s.QUEUED ?? 0,
+        running: s.running ?? s.RUNNING ?? 0,
+        failed: s.failed ?? s.FAILED ?? 0,
+        deadLetter: s.deadLetter ?? s.DEAD_LETTER ?? 0,
+      });
+    } catch (err) {
+      if (!request.current()) return;
+      setJobs([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load background jobs.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page]);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
@@ -58,6 +81,15 @@ export default function BackgroundJobsPage() {
     { label: 'Dead Letter', value: stats.deadLetter, color: 'bg-red-100 text-red-800 border-red-300' },
   ];
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Background Jobs</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -75,7 +107,7 @@ export default function BackgroundJobsPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <table className="w-full text-sm">
+        <WorkspaceTable className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
               <th className="px-4 py-3">Job #</th>
@@ -109,15 +141,21 @@ export default function BackgroundJobsPage() {
                 <td className="px-4 py-3 text-gray-400">{j.scheduledAt ? new Date(j.scheduledAt).toLocaleString() : '—'}</td>
                 <td className="px-4 py-3 text-gray-400">{j.createdAt ? new Date(j.createdAt).toLocaleString() : '—'}</td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-1">
-                    <button onClick={() => retryJob(j.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Retry</button>
-                    <button onClick={() => cancelJob(j.id)} className="px-2 py-1 text-xs bg-gray-50 text-gray-600 rounded hover:bg-gray-100">Cancel</button>
-                  </div>
+                  {(canRetry || canCancel) && (
+                    <div className="flex gap-1">
+                      {canRetry && (
+                        <button onClick={() => retryJob(j.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Retry</button>
+                      )}
+                      {canCancel && (
+                        <button onClick={() => cancelJob(j.id)} className="px-2 py-1 text-xs bg-gray-50 text-gray-600 rounded hover:bg-gray-100">Cancel</button>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </WorkspaceTable>
 
         {total > 0 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm text-gray-500">

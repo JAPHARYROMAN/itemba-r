@@ -904,6 +904,10 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
    */
   async sweep(): Promise<void> {
     const batch = this.config.sweepBatchSize;
+    // Prisma DateTime columns hold UTC in timestamp-without-time-zone fields.
+    // Comparing them to timestamptz now() interprets the stored value in the
+    // database session's timezone. In Nairobi that erased a new 30-minute
+    // approval at the next request. Keep every retention clock explicitly UTC.
     try {
       // 1. Resume state past its short clock. The row survives and stays
       //    readable; only the array holding retrieved records is destroyed.
@@ -924,7 +928,7 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
          WHERE "id" IN (
            SELECT "id" FROM "msaidizi_conversations"
             WHERE "resumeExpiresAt" IS NOT NULL
-              AND "resumeExpiresAt" < now()
+              AND "resumeExpiresAt" < (now() AT TIME ZONE 'UTC')
             LIMIT ${batch}
          )`;
 
@@ -949,20 +953,20 @@ export class MsaidiziConversationsService implements ApprovalGrantStore {
         DELETE FROM "msaidizi_approval_grants"
          WHERE "id" IN (
            SELECT "id" FROM "msaidizi_approval_grants"
-            WHERE "expiresAt" < now()
+            WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')
             LIMIT ${batch}
          )`;
 
       // 3. Conversations past the retention window, and removed ones past their
       //    grace. A real DELETE; turns and grants cascade.
       const graceMs = this.config.deletedGraceHours * 3_600_000;
-      const graceCutoff = new Date(Date.now() - graceMs);
       await this.prisma.$executeRaw`
         DELETE FROM "msaidizi_conversations"
          WHERE "id" IN (
            SELECT "id" FROM "msaidizi_conversations"
-            WHERE "expiresAt" < now()
-               OR ("deletedAt" IS NOT NULL AND "deletedAt" < ${graceCutoff})
+            WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')
+               OR ("deletedAt" IS NOT NULL AND "deletedAt" <
+                   (now() AT TIME ZONE 'UTC') - (${graceMs} * interval '1 millisecond'))
             LIMIT ${batch}
          )`;
     } catch (err) {

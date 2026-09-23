@@ -260,7 +260,10 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
           LEFT JOIN job_queue_configs jqc
             ON jqc."queueName" = background_jobs."queueName"
          WHERE background_jobs.status IN ('QUEUED', 'RETRYING')
-           AND (background_jobs."scheduledAt" IS NULL OR background_jobs."scheduledAt" <= NOW())
+           -- Prisma's timestamp-without-time-zone columns store UTC. Comparing
+           -- with timestamptz NOW() would reinterpret the schedule in the
+           -- session timezone and dispatch future work early (or late).
+           AND (background_jobs."scheduledAt" IS NULL OR background_jobs."scheduledAt" <= (NOW() AT TIME ZONE 'UTC'))
            AND background_jobs."jobType"::text IN (${Prisma.join(registered)})
            ${filter.jobId ? Prisma.sql`AND background_jobs.id = ${filter.jobId}` : Prisma.empty}
            ${
@@ -382,6 +385,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       payload: (job.payload ?? {}) as Record<string, unknown>,
       correlationId: job.correlationId,
       attempts: job.attempts,
+      leaseOwner,
       signal: execution.signal,
       checkpoint: heartbeat.checkpoint,
     };

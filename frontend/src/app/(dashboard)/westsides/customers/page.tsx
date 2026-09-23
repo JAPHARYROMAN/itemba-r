@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { DocumentPreviewLink } from '@/components/documents';
 import {
@@ -15,6 +16,9 @@ import {
   PageToolbar,
 } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { WestsidesGate } from '../_components/route-gate';
 
 interface Customer {
   id: string;
@@ -72,11 +76,15 @@ const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide
 const tdCls = 'px-4 py-2 text-sm';
 
 export default function WestsidesCustomersPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('customers.view');
+  const beginRequest = useRequestGuard();
   const [companyId, setCompanyId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<FormState>(blankForm());
   const [saving, setSaving] = useState(false);
@@ -86,48 +94,41 @@ export default function WestsidesCustomersPage() {
     skipEmployees: true,
   });
 
-  const load = () => {
-    if (!companyId) {
-      setRows([]);
+  const load = useCallback(async () => {
+    if (authLoading || !canView || !companyId) {
+      if (!companyId) setRows([]);
       return;
     }
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams({ companyId, limit: '200' });
     if (branchId) params.set('branchId', branchId);
     if (search) params.set('search', search);
-    fetch(`/api/backend/customers?${params}`)
-      .then((r) => r.json())
-      .then((j) =>
-        setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []),
-      )
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false));
-  };
+    try {
+      const response = await fetch(`/api/backend/customers?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const json = await response.json();
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(json?.message ?? 'Failed to load customers');
+      setRows(
+        Array.isArray(json.data?.data) ? json.data.data : Array.isArray(json.data) ? json.data : [],
+      );
+    } catch (err) {
+      if (!request.current()) return;
+      setRows([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load customers');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, branchId, canView, companyId, search]);
 
   useEffect(() => {
-    if (!companyId) {
-      setRows([]);
-      return;
-    }
-    setLoading(true);
-    const params = new URLSearchParams({ companyId, limit: '200' });
-    if (branchId) params.set('branchId', branchId);
-    if (search) params.set('search', search);
-    const ctrl = new AbortController();
-    const t = setTimeout(() => {
-      fetch(`/api/backend/customers?${params}`, { signal: ctrl.signal })
-        .then((r) => r.json())
-        .then((j) =>
-          setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []),
-        )
-        .catch(() => setRows([]))
-        .finally(() => setLoading(false));
+    const timer = setTimeout(() => {
+      void load();
     }, 200);
-    return () => {
-      ctrl.abort();
-      clearTimeout(t);
-    };
-  }, [branchId, companyId, search]);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   useEffect(() => {
     if (!branchId || branchOptions.some((option) => option.value === branchId)) return;
@@ -219,6 +220,10 @@ export default function WestsidesCustomersPage() {
     }
   };
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Customers" loading={authLoading} />;
+  }
+
   return (
     <div className="p-6">
       <PageHeader title="Customers" subtitle="Click a customer to open their 360° profile." />
@@ -256,12 +261,23 @@ export default function WestsidesCustomersPage() {
           </Btn>
         }
       />
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       <Card className="overflow-hidden">
         {loading ? (
           <PageSpinner />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <WorkspaceTable className="w-full">
               <thead
                 className="bg-slate-50 border-b border-slate-100"
                 style={{ color: 'var(--aurora-text-muted)' }}
@@ -314,7 +330,7 @@ export default function WestsidesCustomersPage() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Card>
@@ -337,7 +353,7 @@ export default function WestsidesCustomersPage() {
       >
         <form id="customer-form" onSubmit={submitCreate} className="space-y-3">
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+            <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
               {error}
             </div>
           )}

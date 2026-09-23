@@ -1,7 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { ErrorState } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { unwrapList } from '@/lib/unwrap';
 
 interface ApiRequestLog {
@@ -32,27 +35,50 @@ function statusCodeColor(code: number): string {
 }
 
 export default function ApiRequestLogsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('api_request_logs.view');
+  const beginRequest = useRequestGuard();
   const [logs, setLogs] = useState<ApiRequestLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatusCode, setFilterStatusCode] = useState('');
   const [filterRateLimited, setFilterRateLimited] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterStatusCode) params.set('statusCode', filterStatusCode);
     if (filterRateLimited === 'true') params.set('rateLimited', 'true');
     if (filterRateLimited === 'false') params.set('rateLimited', 'false');
-    fetch(`/api/backend/api-request-logs?${params}`)
-      .then(r => r.json())
-      .then(data => setLogs(unwrapList(data)))
-      .catch(() => { setLogs([]); setLoadError('Failed to load API request logs.'); })
-      .finally(() => setLoading(false));
-  }, [filterStatusCode, filterRateLimited]);
+    try {
+      const response = await fetch(`/api/backend/api-request-logs?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await response.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(data?.message ?? 'Failed to load API request logs.');
+      setLogs(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setLogs([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load API request logs.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterRateLimited, filterStatusCode]);
 
   useEffect(() => { load(); }, [load]);
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">API Request Logs</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -62,8 +88,8 @@ export default function ApiRequestLogsPage() {
       </div>
 
       <div className="flex gap-3 mb-4">
-        <input value={filterStatusCode} onChange={e => setFilterStatusCode(e.target.value)} placeholder="Status code (e.g. 200, 4xx)..." className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-48" />
-        <select value={filterRateLimited} onChange={e => setFilterRateLimited(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        <input aria-label="Status code (e.g. 200, 4xx)..." value={filterStatusCode} onChange={e => setFilterStatusCode(e.target.value)} placeholder="Status code (e.g. 200, 4xx)..." className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-48" />
+        <select aria-label="All Requests" value={filterRateLimited} onChange={e => setFilterRateLimited(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
           <option value="">All Requests</option>
           <option value="true">Rate Limited Only</option>
           <option value="false">Not Rate Limited</option>
@@ -73,7 +99,7 @@ export default function ApiRequestLogsPage() {
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
         {loading ? <div className="text-center py-10 text-gray-500">Loading...</div> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Number</th>
@@ -102,7 +128,7 @@ export default function ApiRequestLogsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </div>
     </div>

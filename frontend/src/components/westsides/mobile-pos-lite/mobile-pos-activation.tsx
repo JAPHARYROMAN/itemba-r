@@ -9,6 +9,7 @@ import {
   saveMobilePosLiteBinding,
   type MobilePosLiteBinding,
 } from '@/lib/mobile-pos-lite-store';
+import { useAuth } from '@/hooks/use-auth';
 import { usePosLang } from './pos-i18n';
 
 type ActivationResponse = {
@@ -26,6 +27,8 @@ function deviceSecret() {
 export function MobilePosActivation() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canUse = hasPermission('mobile_pos_lite.use');
   const { lang, setLang, t } = usePosLang();
   const [terminalCode, setTerminalCode] = useState(() => searchParams.get('terminal') ?? '');
   const [activationCode, setActivationCode] = useState(() => searchParams.get('code') ?? '');
@@ -34,12 +37,14 @@ export function MobilePosActivation() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (authLoading || !canUse) return;
     getMobilePosLiteBinding()
       .then(setBinding)
       .catch(() => undefined);
-  }, []);
+  }, [authLoading, canUse]);
 
   async function activate() {
+    if (authLoading || !canUse) return;
     if (!terminalCode.trim() || !activationCode.trim()) {
       setMessage(t('enterBothCodes'));
       return;
@@ -79,6 +84,26 @@ export function MobilePosActivation() {
       {lang === 'sw' ? 'EN' : 'SW'}
     </button>
   );
+
+  if (authLoading) {
+    return (
+      <main className="min-h-screen px-4 py-8" style={{ background: 'var(--aurora-bg)' }}>
+        <p className="text-center text-sm font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+          Loading
+        </p>
+      </main>
+    );
+  }
+
+  if (!canUse) {
+    return (
+      <main className="min-h-screen px-4 py-8" style={{ background: 'var(--aurora-bg)' }}>
+        <p className="text-center text-sm font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+          Access Restricted
+        </p>
+      </main>
+    );
+  }
 
   if (binding) {
     return (

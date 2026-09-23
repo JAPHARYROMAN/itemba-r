@@ -1,20 +1,20 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  ConfirmDialog,
-  DateInput,
-  PageHeader,
-  SkeletonCardGrid,
-  StatCard,
-  StatusBadge,
-  showToast,
-} from '@/components/ui';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useParams } from 'next/navigation';
+import { useMemo, useState } from 'react';
+import { Btn, Card, PageHeader, SkeletonCardGrid, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
-import { backendDelete, backendGet, backendPost } from '@/lib/api-client';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useGuardedRouter, useUnsavedWork } from '@/components/workspace/unsaved-work-provider';
+import {
+  ProfileSections,
+  PartnerStatementGenerator,
+} from '@/components/workspace/partner-profile-controls';
+import { PartnerAction } from '@/components/workspace/trading-partner-workspace';
+import '@/components/workspace/workspace.css';
+import '@/components/workspace/partner-profile.css';
+
 import { SupplierFormModal, type Company } from '../_components/SupplierFormModal';
 
 interface SupplierCategory {
@@ -191,7 +191,8 @@ const TABS = [
 type Tab = (typeof TABS)[number];
 
 function money(value: number | string | null | undefined, currency = 'TZS') {
-  const numeric = Number(value ?? 0);
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return '—';
+  const numeric = Number(value);
   return `${currency} ${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -207,15 +208,6 @@ function shortDate(value?: string | null) {
   }).format(new Date(value));
 }
 
-function isoDate(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function monthStart() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1);
-}
-
 function DetailItem({
   label,
   value,
@@ -226,7 +218,7 @@ function DetailItem({
   mono?: boolean;
 }) {
   return (
-    <div>
+    <div className="partner-profile-detail">
       <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
         {label}
       </p>
@@ -252,70 +244,29 @@ function EmptyPanel({ text }: { text: string }) {
 }
 
 export default function SupplierDetailPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
-  const supplierId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const { hasPermission } = useAuth();
-  const [data, setData] = useState<SupplierControlCenter | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  return <SupplierProfile key={id} supplierId={id} />;
+}
+function SupplierProfile({ supplierId }: { supplierId: string }) {
+  const router = useGuardedRouter();
+  const { request } = useUnsavedWork();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const [notice, setNotice] = useState('');
   const [tab, setTab] = useState<Tab>('Overview');
-  const [statementStart, setStatementStart] = useState(isoDate(monthStart()));
-  const [statementEnd, setStatementEnd] = useState(isoDate(new Date()));
-  const [generating, setGenerating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const canView = hasPermission('suppliers.view');
+  const canView = !authLoading && hasPermission('suppliers.view');
+  const canViewReports = hasPermission('operations.reports.view');
   const canUpdate = hasPermission('suppliers.update');
   const canDelete = hasPermission('suppliers.delete');
-  const canGenerateStatements = hasPermission('supplier_statements.generate');
 
-  const load = useCallback(async () => {
-    if (!canView || !supplierId) return;
-    setLoading(true);
-    setError('');
-    try {
-      const record = await backendGet<SupplierControlCenter>(
-        `/suppliers/${supplierId}/control-center`,
-      );
-      setData(record);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load supplier';
-      setError(message);
-      showToast('error', 'Could not load supplier', message);
-    } finally {
-      setLoading(false);
-    }
-  }, [canView, supplierId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const generateStatement = async () => {
-    if (!data) return;
-    setGenerating(true);
-    try {
-      await backendPost('/supplier-statements/generate', {
-        companyId: data.supplier.companyId,
-        supplierId: data.supplier.id,
-        periodStart: statementStart,
-        periodEnd: statementEnd,
-      });
-      showToast('success', 'Supplier statement generated', data.supplier.name);
-      load();
-    } catch (err) {
-      showToast(
-        'error',
-        'Could not generate statement',
-        err instanceof Error ? err.message : 'Failed',
-      );
-    } finally {
-      setGenerating(false);
-    }
-  };
-
+  const result = useWorkspaceResource<SupplierControlCenter>(
+    `/suppliers/${supplierId}/control-center`,
+    {},
+    canView && !!supplierId,
+  );
+  const { data, loading, error, reload: load } = result;
   const categories = useMemo(
     () => data?.supplier.productCategories?.map((item) => item.productCategory) ?? [],
     [data?.supplier.productCategories],
@@ -326,25 +277,15 @@ export default function SupplierDetailPage() {
     return company ? [{ id: company.id, name: company.name, code: company.code ?? '' }] : [];
   }, [data?.supplier.company]);
 
-  const handleDelete = async () => {
-    if (!data) return;
-    try {
-      await backendDelete(`/suppliers/${data.supplier.id}`);
-      showToast('success', 'Supplier deleted', data.supplier.name);
-      setConfirmDelete(false);
-      router.push('/operations/suppliers');
-    } catch (err) {
-      showToast(
-        'error',
-        'Could not delete supplier',
-        err instanceof Error ? err.message : 'Failed',
-      );
-    }
-  };
-
+  if (authLoading)
+    return (
+      <p role="status" className="workspace-notice">
+        Loading profile...
+      </p>
+    );
   if (!canView) {
     return (
-      <div className="p-6">
+      <div className="business-workspace partner-profile">
         <PageHeader title="Supplier" subtitle="Supplier control center" />
         <p className="mt-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
           Access restricted.
@@ -355,7 +296,7 @@ export default function SupplierDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="business-workspace partner-profile">
         <PageHeader title="Supplier" subtitle="Loading supplier control center" />
         <SkeletonCardGrid count={6} />
       </div>
@@ -364,10 +305,15 @@ export default function SupplierDetailPage() {
 
   if (error || !data) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="business-workspace partner-profile">
         <PageHeader title="Supplier" subtitle="Supplier control center" />
         <Card className="p-6">
-          <p className="text-sm text-red-300">{error || 'Supplier not found'}</p>
+          <p role="alert" className="workspace-notice">
+            {error || 'Supplier not found'}
+          </p>
+          <Btn variant="secondary" onClick={load}>
+            Try again
+          </Btn>
           <Btn
             className="mt-4"
             variant="secondary"
@@ -383,7 +329,7 @@ export default function SupplierDetailPage() {
   const { supplier, summary } = data;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="business-workspace partner-profile">
       {editing && (
         <SupplierFormModal
           mode="edit"
@@ -396,75 +342,95 @@ export default function SupplierDetailPage() {
           }}
         />
       )}
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Delete Supplier"
-        message={`Delete ${supplier.name}? Suppliers linked to historical purchases remain preserved in those documents, but this supplier will no longer be selectable.`}
-        confirmLabel="Delete"
-        variant="danger"
-        onConfirm={handleDelete}
-        onCancel={() => setConfirmDelete(false)}
-      />
+      {confirmDelete && (
+        <PartnerAction
+          partnerKind="suppliers"
+          record={supplier}
+          kind="delete"
+          onClose={() => setConfirmDelete(false)}
+          onSaved={() => router.push('/operations/suppliers')}
+        />
+      )}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="partner-profile-heading">
         <PageHeader
           title={supplier.name}
+          breadcrumbs={[
+            { label: 'Operations', href: '/operations' },
+            { label: 'Suppliers', href: '/operations/suppliers' },
+            { label: supplier.name },
+          ]}
           subtitle={`${supplier.supplierCode ?? 'No code'} · ${supplier.company?.name ?? 'Company'} · ${supplier.division?.name ?? 'No division'}`}
         />
-        <div className="flex flex-wrap gap-2">
+        <div className="partner-profile-actions">
           <Btn variant="secondary" onClick={() => router.push('/operations/suppliers')}>
             Back to Suppliers
           </Btn>
-          <Btn
-            variant="secondary"
-            onClick={() =>
-              router.push(
-                `/operations/reports/suppliers?companyId=${encodeURIComponent(supplier.companyId)}&supplierId=${encodeURIComponent(supplier.id)}`,
-              )
-            }
-          >
-            Supplier Reports
-          </Btn>
+          {canViewReports && (
+            <Btn
+              variant="secondary"
+              onClick={() =>
+                router.push(
+                  `/operations/reports/suppliers?companyId=${encodeURIComponent(supplier.companyId)}&supplierId=${encodeURIComponent(supplier.id)}`,
+                )
+              }
+            >
+              Supplier Reports
+            </Btn>
+          )}
           {canUpdate && (
             <Btn variant="primary" onClick={() => setEditing(true)}>
               Edit
             </Btn>
           )}
           {canDelete && (
-            <Btn variant="danger" onClick={() => setConfirmDelete(true)}>
+            <Btn variant="ghost" onClick={() => setConfirmDelete(true)}>
               Delete
             </Btn>
           )}
+          <Btn variant="secondary" onClick={() => request(load)}>
+            Refresh
+          </Btn>
           <StatusBadge status={supplier.status} />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <StatCard label="Lifetime Purchases" value={money(summary.lifetimePurchaseTotal)} />
-        <StatCard label="YTD Purchases" value={money(summary.ytdPurchaseTotal)} />
-        <StatCard label="Open AP" value={money(summary.openPayableBalance)} />
-        <StatCard label="Overdue AP" value={money(summary.overduePayableBalance)} />
+      {notice && (
+        <p role="status" className="workspace-notice">
+          {notice}
+        </p>
+      )}
+      <div className="workspace-summary">
+        <div>
+          <span>Lifetime Purchases</span>
+          <strong>{money(summary.lifetimePurchaseTotal)}</strong>
+        </div>
+        <div>
+          <span>YTD Purchases</span>
+          <strong>{money(summary.ytdPurchaseTotal)}</strong>
+        </div>
+        <div>
+          <span>Open AP</span>
+          <strong>{money(summary.openPayableBalance)}</strong>
+        </div>
+        <div>
+          <span>Overdue AP</span>
+          <strong>{money(summary.overduePayableBalance)}</strong>
+        </div>
       </div>
 
-      <Card className="overflow-hidden">
-        <div
-          className="flex flex-wrap gap-2 border-b p-3"
-          style={{ borderColor: 'var(--aurora-border)' }}
-        >
-          {TABS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setTab(item)}
-              className={`rounded-lg px-3 py-1.5 text-sm transition ${tab === item ? 'bg-brand-600 text-white' : 'hover:bg-white/5'}`}
-              style={tab === item ? undefined : { color: 'var(--aurora-text-secondary)' }}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
+      <Card padding="none" className="overflow-hidden">
+        <ProfileSections
+          items={TABS}
+          value={tab}
+          onChange={(next) => request(() => setTab(next))}
+        />
 
-        <div className="p-5">
+        <section
+          id="partner-profile-section"
+          aria-label={`${tab} section`}
+          className="partner-profile-content"
+        >
           {tab === 'Overview' && (
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -521,6 +487,9 @@ export default function SupplierDetailPage() {
 
           {tab === 'Purchases' && (
             <div className="space-y-4">
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
               {data.recentPurchaseOrders.length === 0 ? (
                 <EmptyPanel text="No purchase orders for this supplier yet." />
               ) : (
@@ -539,22 +508,24 @@ export default function SupplierDetailPage() {
                           {shortDate(order.orderDate)} · {money(order.totalAmount, order.currency)}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="partner-profile-order-actions">
                         <StatusBadge status={order.status} />
                         <StatusBadge status={order.paymentStatus} />
-                        <Btn
-                          variant="secondary"
-                          size="xs"
-                          onClick={() =>
-                            router.push(`/operations/purchase-orders/${order.id}/print`)
-                          }
-                        >
-                          View / Print
-                        </Btn>
+                        {hasPermission('purchases.view') && (
+                          <Btn
+                            variant="secondary"
+                            size="xs"
+                            onClick={() =>
+                              router.push(`/operations/purchase-orders/${order.id}/print`)
+                            }
+                          >
+                            View / Print
+                          </Btn>
+                        )}
                       </div>
                     </div>
                     <div className="mt-3 overflow-x-auto">
-                      <table className="w-full min-w-[700px] text-xs">
+                      <WorkspaceTable className="partner-profile-table">
                         <thead style={{ color: 'var(--aurora-text-muted)' }}>
                           <tr className="text-left uppercase">
                             <th className="py-2">Product</th>
@@ -570,22 +541,22 @@ export default function SupplierDetailPage() {
                               className="border-t"
                               style={{ borderColor: 'var(--aurora-border)' }}
                             >
-                              <td className="py-2">
+                              <td data-label="Product" className="py-2">
                                 {line.product?.name ?? line.description ?? 'Product'}
                               </td>
-                              <td className="py-2 text-right">
+                              <td data-label="Qty" className="py-2 text-right">
                                 {Number(line.quantity).toLocaleString()} {line.unit?.symbol ?? ''}
                               </td>
-                              <td className="py-2 text-right">
+                              <td data-label="Unit Cost" className="py-2 text-right">
                                 {money(line.unitCost, order.currency)}
                               </td>
-                              <td className="py-2 text-right">
+                              <td data-label="Line Total" className="py-2 text-right">
                                 {money(line.lineTotal, order.currency)}
                               </td>
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </WorkspaceTable>
                     </div>
                   </div>
                 ))
@@ -595,6 +566,9 @@ export default function SupplierDetailPage() {
 
           {tab === 'Payables' && (
             <div className="space-y-4">
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
               {data.recentPayables.length === 0 ? (
                 <EmptyPanel text="No payables recorded for this supplier." />
               ) : (
@@ -628,10 +602,13 @@ export default function SupplierDetailPage() {
 
           {tab === 'Products' && (
             <div className="overflow-x-auto">
+              <p className="partner-profile-history-note">
+                Product history returned by this profile.
+              </p>
               {data.productCoverage.length === 0 ? (
                 <EmptyPanel text="No product purchase coverage found yet." />
               ) : (
-                <table className="w-full min-w-[820px] text-sm">
+                <WorkspaceTable className="partner-profile-table">
                   <thead
                     className="text-left text-xs uppercase"
                     style={{ color: 'var(--aurora-text-muted)' }}
@@ -651,7 +628,7 @@ export default function SupplierDetailPage() {
                         className="border-t"
                         style={{ borderColor: 'var(--aurora-border)' }}
                       >
-                        <td className="py-3">
+                        <td data-label="Product" className="py-3">
                           <div className="font-medium">{row.product.name}</div>
                           <div
                             className="font-mono text-xs"
@@ -660,44 +637,39 @@ export default function SupplierDetailPage() {
                             {row.product.productCode ?? row.product.sku ?? ''}
                           </div>
                         </td>
-                        <td className="py-3">{row.product.category?.name ?? '—'}</td>
-                        <td className="py-3 text-right">
+                        <td data-label="Category" className="py-3">
+                          {row.product.category?.name ?? '—'}
+                        </td>
+                        <td data-label="Quantity" className="py-3 text-right">
                           {row.quantity.toLocaleString()} {row.unit?.symbol ?? ''}
                         </td>
-                        <td className="py-3 text-right">{money(row.totalAmount)}</td>
-                        <td className="py-3">{shortDate(row.lastPurchasedAt)}</td>
+                        <td data-label="Amount" className="py-3 text-right">
+                          {money(row.totalAmount)}
+                        </td>
+                        <td data-label="Last Purchased" className="py-3">
+                          {shortDate(row.lastPurchasedAt)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               )}
             </div>
           )}
 
           {tab === 'Statements' && (
             <div className="space-y-5">
-              {canGenerateStatements && (
-                <div
-                  className="grid grid-cols-1 gap-3 rounded-lg border p-4 md:grid-cols-[1fr_1fr_auto]"
-                  style={{ borderColor: 'var(--aurora-border)' }}
-                >
-                  <DateInput
-                    label="Period Start"
-                    value={statementStart}
-                    onChange={(event) => setStatementStart(event.target.value)}
-                  />
-                  <DateInput
-                    label="Period End"
-                    value={statementEnd}
-                    onChange={(event) => setStatementEnd(event.target.value)}
-                  />
-                  <div className="flex items-end">
-                    <Btn variant="primary" onClick={generateStatement} loading={generating}>
-                      Generate
-                    </Btn>
-                  </div>
-                </div>
-              )}
+              <p className="partner-profile-history-note">
+                Recent records returned by this profile. Summary balances cover all records.
+              </p>
+              <PartnerStatementGenerator
+                kind="suppliers"
+                record={supplier}
+                onGenerated={() => {
+                  setNotice('Supplier statement generated.');
+                  load();
+                }}
+              />
               {data.latestStatements.length === 0 ? (
                 <EmptyPanel text="No supplier statements have been generated." />
               ) : (
@@ -729,18 +701,51 @@ export default function SupplierDetailPage() {
                 <DetailItem label="Rating" value={data.performance.rating} />
                 <DetailItem
                   label="On-Time Delivery"
-                  value={`${Number(data.performance.onTimeDeliveryRate ?? 0).toFixed(2)}%`}
+                  value={
+                    data.performance.onTimeDeliveryRate == null
+                      ? '—'
+                      : `${Number(data.performance.onTimeDeliveryRate).toFixed(2)}%`
+                  }
                 />
                 <DetailItem
                   label="Quality Score"
-                  value={`${Number(data.performance.qualityScore ?? 0).toFixed(2)}%`}
+                  value={
+                    data.performance.qualityScore == null
+                      ? '—'
+                      : `${Number(data.performance.qualityScore).toFixed(2)}%`
+                  }
                 />
                 <DetailItem
                   label="Price Competitiveness"
-                  value={`${Number(data.performance.priceCompetitivenessScore ?? 0).toFixed(2)}%`}
+                  value={
+                    data.performance.priceCompetitivenessScore == null
+                      ? '—'
+                      : `${Number(data.performance.priceCompetitivenessScore).toFixed(2)}%`
+                  }
                 />
                 <DetailItem label="Returns" value={money(data.performance.totalReturns)} />
-                <DetailItem label="Disputes" value={String(data.performance.disputeCount ?? 0)} />
+                <DetailItem
+                  label="Total purchases"
+                  value={money(data.performance.totalPurchases)}
+                />
+                <DetailItem
+                  label="Last reviewed"
+                  value={shortDate(data.performance.lastReviewedAt)}
+                />
+                <DetailItem
+                  label="Reviewed by"
+                  value={
+                    data.performance.reviewedBy?.fullName || data.performance.reviewedBy?.email
+                  }
+                />
+                <DetailItem
+                  label="Disputes"
+                  value={
+                    data.performance.disputeCount == null
+                      ? '—'
+                      : String(data.performance.disputeCount)
+                  }
+                />
                 <div className="md:col-span-3">
                   <DetailItem label="Notes" value={data.performance.notes} />
                 </div>
@@ -751,6 +756,9 @@ export default function SupplierDetailPage() {
 
           {tab === 'Audit' && (
             <div className="space-y-5">
+              <p className="partner-profile-history-note">
+                Recent ledger activity returned by this profile.
+              </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <DetailItem
                   label="Created At"
@@ -798,7 +806,7 @@ export default function SupplierDetailPage() {
               </div>
             </div>
           )}
-        </div>
+        </section>
       </Card>
     </div>
   );

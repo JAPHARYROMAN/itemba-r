@@ -9,6 +9,22 @@ $problems = [System.Collections.Generic.List[string]]::new()
 
 $generatedPathPattern = '[\\/](?:bin|obj)[\\/]'
 
+function Assert-PinnedSourceBlock {
+  param(
+    [Parameter(Mandatory)][string]$Source,
+    [Parameter(Mandatory)][string]$Description,
+    [Parameter(Mandatory)][string]$Block
+  )
+
+  # Only line endings may differ. Pin comparisons and defaults together rather
+  # than accepting constant names left behind after a refusal is weakened.
+  $normalizedSource = $Source.Replace("`r`n", "`n")
+  $normalizedBlock = $Block.Replace("`r`n", "`n")
+  if ([regex]::Matches($normalizedSource, [regex]::Escape($normalizedBlock)).Count -ne 1) {
+    $problems.Add("$Description must retain its exact reviewed source block once.")
+  }
+}
+
 function Assert-LiteralOrder {
   param(
     [Parameter(Mandatory)][string]$Source,
@@ -1870,6 +1886,22 @@ Assert-LiteralOrder -Source $egressSupervisorRegistrationSource `
     'services.AddHostedService<NamedPipeEgressControlService>()',
     'services.AddHostedService<NamedPipeEgressDataService>()'
   )
+Assert-PinnedSourceBlock -Source $egressSupervisorRegistrationSource `
+  -Description 'Egress rejecting browser registration' -Block @'
+    services.AddSingleton<IBrowserBoundaryEvidenceProvider,
+      RejectingBrowserBoundaryEvidenceProvider>();
+'@
+Assert-PinnedSourceBlock -Source $egressSupervisorEngineSource `
+  -Description 'Egress rejecting browser constructor default' -Block @'
+    _browserBoundaryProvider = browserBoundaryProvider
+      ?? new RejectingBrowserBoundaryEvidenceProvider();
+'@
+if ([regex]::Matches($egressSupervisorRegistrationSource,
+    '\bIBrowserBoundaryEvidenceProvider\b').Count -ne 1 -or
+    [regex]::Matches($egressSupervisorEngineSource,
+    '\b_browserBoundaryProvider\s*=').Count -ne 1) {
+  $problems.Add('Egress browser provider must retain one production registration and one constructor assignment.')
+}
 foreach ($requiredPipeBoundary in @(
     'PipeRejectRemoteClients',
     'FileFlagFirstPipeInstance',
@@ -2426,6 +2458,30 @@ foreach ($requiredV3SessionBoundary in @(
       "Privileged-command managed v3 session is missing $requiredV3SessionBoundary.")
   }
 }
+Assert-PinnedSourceBlock -Source $isolationSupervisorV3SessionSource `
+  -Description 'Privileged-command v3 ready-health refusal' -Block @'
+  private void RequireReadyHealth(NetworkIsolationHealthV3 health)
+  {
+    const uint requiredFlags = NetworkIsolationProtocolV3.HealthWfpRegistered
+      | NetworkIsolationProtocolV3.HealthDriverMeasurementProvisioned
+      | NetworkIsolationProtocolV3.HealthBootMeasurementProvisioned;
+    if (health.Status != NetworkIsolationProtocolV3.StatusOk
+      || (health.HealthFlags & requiredFlags) != requiredFlags
+      || (health.HealthFlags & (NetworkIsolationProtocolV3.HealthKillActive
+        | NetworkIsolationProtocolV3.HealthUnloading)) != 0
+      || health.BootTimeFileTime100ns == 0
+      || health.CalloutIdV4 == 0
+      || health.CalloutIdV6 == 0
+      || health.BootMeasurementSha256.AsSpan().IndexOfAnyExcept((byte)0) < 0
+      || !CryptographicOperations.FixedTimeEquals(
+        health.DriverImageSha256,
+        _expectedDriverMeasurementSha256))
+    {
+      throw new UnauthorizedAccessException(
+        "The v3 network-isolation driver health or measurement posture is incomplete.");
+    }
+  }
+'@
 foreach ($requiredV3TransportBoundary in @(
     'FileFlagOverlapped',
     'DeviceIoControl(',
@@ -2466,6 +2522,7 @@ foreach ($requiredV3Regression in @(
     'DriverReplayOrStaleGenerationTripsTheSessionWithoutRetry',
     'KillUsesOutOfBandGenerationAndLatchesTheSession',
     'InvalidHealthChallengeFailsClosed',
+    'IncompleteHealthPostureLatchesSessionBeforeAnyPolicyMutation',
     'HighLevelBindAndSettleMapToV3AndKeepSignedAttestationMandatory',
     'MissingSignedV3AttestationSourceRejectsAfterBinaryHealth',
     'ExecutableIdentityLockBlocksReplacementAndDetectsPostReleaseDrift'

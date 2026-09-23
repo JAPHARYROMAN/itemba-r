@@ -1,213 +1,208 @@
 'use client';
-
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, FormTextarea, PageToolbar, showToast } from '@/components/ui';
+import { Plus, RefreshCw } from 'lucide-react';
+import { Btn, FormSelect, PageHeader, PageToolbar, PermissionDeniedState } from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
-
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface LeaveRequest {
-  id: string;
-  employee?: string | { fullName?: string; name?: string; employeeCode?: string };
-  employeeId?: string;
-  leaveType?: string | { name?: string };
-  leaveTypeId?: string;
-  startDate?: string;
-  endDate?: string;
-  totalDays?: number;
-  reason?: string;
-  status: string;
-}
-
-interface FormState {
-  companyId: string;
-  employeeId: string;
-  leaveTypeId: string;
-  startDate: string;
-  endDate: string;
-  reason: string;
-}
-
-const empty: FormState = { companyId: '', employeeId: '', leaveTypeId: '', startDate: '', endDate: '', reason: '' };
+import '@/components/workspace/workspace.css';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+import {
+  type LeaveRequest,
+  type Action,
+  employeeName,
+  typeName,
+  date,
+  label,
+} from '@/features/payroll/leave-request-workflow';
 
 export default function LeaveRequestsPage() {
-  const [rows, setRows] = useState<LeaveRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState<FormState>(empty);
-  const [saving, setSaving] = useState(false);
-  const [actionLoading, setActionLoading] = useState('');
-  const [leaveTypeOptions, setLeaveTypeOptions] = useState<{ value: string; label: string }[]>([]);
-  const { companyOptions, employeeOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true });
-  const { user } = useAuth();
-
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('leave_requests.view'),
+    canCreate = hasPermission('leave_requests.create'),
+    canApprove = hasPermission('leave_requests.approve'),
+    canApproveHr = hasPermission('leave_requests.approve.hr'),
+    canReject = hasPermission('leave_requests.reject');
+  const stateKey = usePayrollStateKey('leave-requests');
+  const [page, setPage] = useWorkspaceState(stateKey + '.page', 1),
+    [search, setSearch] = useWorkspaceState(stateKey + '.search', ''),
+    [query, setQuery] = useState(search.trim()),
+    [company, setCompany] = useWorkspaceState(stateKey + '.company', ''),
+    [status, setStatus] = useWorkspaceState(stateKey + '.status', '');
+  const result = useWorkspaceRecords<LeaveRequest>(
+    '/hr/leave-requests',
+    { page, limit: 20, search: query, companyId: company, status },
+    canRead,
+  );
   useEffect(() => {
-    if (!form.companyId) { setLeaveTypeOptions([]); return; }
-    let cancelled = false;
-    fetch(`/api/backend/hr/leave-types?companyId=${form.companyId}&limit=100`)
-      .then(r => r.json())
-      .then(j => {
-        if (cancelled) return;
-        const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
-        setLeaveTypeOptions(list.map((lt: { id: string; name?: string; code?: string }) => ({ value: lt.id, label: lt.name ?? lt.code ?? lt.id })));
-      })
-      .catch(() => { if (!cancelled) setLeaveTypeOptions([]); });
-    return () => { cancelled = true; };
-  }, [form.companyId]);
-
-  const load = async () => {
-    setLoading(true);
-    const r = await fetch('/api/backend/hr/leave-requests');
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    // Inclusive day count between the two dates (backend requires totalDays).
-    const totalDays = Math.max(
-      1,
-      Math.round((new Date(form.endDate).getTime() - new Date(form.startDate).getTime()) / 86_400_000) + 1,
-    );
-    try {
-      const res = await fetch('/api/backend/hr/leave-requests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyId: form.companyId,
-          employeeId: form.employeeId,
-          leaveTypeId: form.leaveTypeId,
-          startDate: form.startDate,
-          endDate: form.endDate,
-          totalDays,
-          reason: form.reason || undefined,
-          createdById: user?.id,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the leave request.'));
-        return;
-      }
-      setShowModal(false);
-      load();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const doAction = async (id: string, action: 'submit' | 'approve' | 'reject' | 'cancel') => {
-    setActionLoading(`${id}-${action}`);
-    try {
-      const res = await fetch(`/api/backend/hr/leave-requests/${id}/${action}`, { method: 'PATCH' });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this request.`));
-      }
-    } finally {
-      setActionLoading('');
-      load();
-    }
-  };
-
-  const relationLabel = (value: unknown, fallback?: string | null) => {
-    if (typeof value === 'string' && value) return value;
-    if (value && typeof value === 'object') {
-      const rel = value as { fullName?: string; name?: string; employeeCode?: string };
-      return rel.fullName ?? rel.name ?? rel.employeeCode ?? fallback ?? '—';
-    }
-    return fallback ?? '—';
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(p => ({ ...p, [k]: e.target.value }));
-
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
+  useEffect(() => {
+    if (!result.loading && !result.error && page > 1 && !result.rows.length)
+      setPage(Math.max(1, Math.ceil(result.total / 20)));
+  }, [result.loading, result.error, result.rows.length, result.total, page, setPage]);
+  const [notice, setNotice] = useState('');
+  const scope = useOrgScope(undefined, {
+    skipBranches: true,
+    skipDivisions: true,
+    skipEmployees: true,
+  });
+  const entry = usePayrollDraftEditor(['leave-request', 'leave-action'], (message) => {
+    setNotice(message);
+    void result.reload();
+  });
+  const openAction = (record: LeaveRequest, action: Action) =>
+    entry.open({ kind: 'leave-action', record, action });
+  if (!canRead)
+    return <PermissionDeniedState description="Your role cannot view leave requests." />;
   return (
-    <div className="p-6">
+    <div className="business-workspace record-workspace">
       <PageHeader
-        title="Leave Requests"
-        subtitle="Employee leave applications and approvals"
+        title="Leave requests"
+        subtitle="Plan time away. Keep every approval in view."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Leave requests' }]}
+        actions={
+          canCreate && (
+            <Btn icon={<Plus size={16} />} onClick={() => entry.open({ kind: 'leave-request' })}>
+              New request
+            </Btn>
+          )
+        }
       />
-      <PageToolbar actions={<Btn variant="primary" onClick={() => { setForm(empty); setShowModal(true); }}>+ New Request</Btn>} />
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-100" style={{ color: 'var(--aurora-text-muted)' }}>
-                <tr>
-                  <th className={thCls}>Employee</th>
-                  <th className={thCls}>Leave Type</th>
-                  <th className={thCls}>From</th>
-                  <th className={thCls}>To</th>
-                  <th className={thCls}>Days</th>
-                  <th className={thCls}>Status</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map(lr => (
-                  <tr key={lr.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{relationLabel(lr.employee, lr.employeeId)}</td>
-                    <td className={tdCls}>{relationLabel(lr.leaveType, lr.leaveTypeId)}</td>
-                    <td className={tdCls}>{lr.startDate ? new Date(lr.startDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{lr.endDate ? new Date(lr.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{lr.totalDays != null ? Number(lr.totalDays) : '—'}</td>
-                    <td className={tdCls}><StatusBadge status={lr.status} /></td>
-                    <td className={tdCls}>
-                      {lr.status === 'DRAFT' && (
-                        <div className="flex gap-1">
-                          <Btn variant="primary" size="xs" onClick={() => doAction(lr.id, 'submit')} disabled={actionLoading === `${lr.id}-submit`}>
-                            {actionLoading === `${lr.id}-submit` ? '…' : 'Submit'}
-                          </Btn>
-                          <Btn variant="secondary" size="xs" onClick={() => doAction(lr.id, 'cancel')} disabled={actionLoading === `${lr.id}-cancel`}>
-                            {actionLoading === `${lr.id}-cancel` ? '…' : 'Cancel'}
-                          </Btn>
-                        </div>
-                      )}
-                      {lr.status === 'SUBMITTED' && (
-                        <div className="flex gap-1">
-                          <Btn variant="success" size="xs" onClick={() => doAction(lr.id, 'approve')} disabled={actionLoading === `${lr.id}-approve`}>
-                            {actionLoading === `${lr.id}-approve` ? '…' : 'Approve'}
-                          </Btn>
-                          <Btn variant="danger" size="xs" onClick={() => doAction(lr.id, 'reject')} disabled={actionLoading === `${lr.id}-reject`}>
-                            {actionLoading === `${lr.id}-reject` ? '…' : 'Reject'}
-                          </Btn>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No leave requests found</td></tr>}
-              </tbody>
-            </table>
-          </div>
+      <div className="workspace-summary">
+        <div>
+          <span>Matching requests</span>
+          <strong>{result.total}</strong>
+        </div>
+        <div>
+          <span>Awaiting approval on this page</span>
+          <strong>{result.rows.filter((r) => r.status === 'SUBMITTED').length}</strong>
+        </div>
+      </div>
+      {notice && (
+        <div role="status" className="workspace-notice">
+          {notice}
+        </div>
+      )}
+      <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search requests by employee or reference…"
+        collapsibleFilters
+        activeFilterCount={[company, status].filter(Boolean).length}
+        filters={
+          <>
+            <FormSelect
+              label="Company filter"
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                setPage(1);
+              }}
+              options={scope.companyOptions}
+              placeholder="All companies"
+            />
+            <FormSelect
+              label="Status filter"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+              options={['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'CANCELLED'].map((value) => ({
+                value,
+                label: label(value),
+              }))}
+              placeholder="All statuses"
+            />
+          </>
+        }
+        actions={
+          <Btn
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            disabled={result.loading}
+            onClick={result.reload}
+          >
+            Reload
+          </Btn>
+        }
+      />
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.selection'}
+        selectionScope={JSON.stringify([company, status, query])}
+        title="Leave requests"
+        records={result.rows}
+        name={employeeName}
+        reference={(r) => r.leaveRequestNumber || typeName(r)}
+        status={(r) => r.status}
+        loading={result.loading}
+        error={result.error}
+        onRetry={result.reload}
+        page={page}
+        total={result.total}
+        pageSize={20}
+        onPage={setPage}
+        fields={[
+          { label: 'From', value: (r) => date(r.startDate) },
+          { label: 'Days', value: (r) => (r.totalDays == null ? '—' : Number(r.totalDays)) },
+        ]}
+        details={[
+          { label: 'Leave type', value: typeName },
+          { label: 'Company', value: (r) => r.company?.name || '—' },
+          { label: 'To', value: (r) => date(r.endDate) },
+          { label: 'Reason', value: (r) => r.reason || '—' },
+          {
+            label: 'Line approval',
+            value: (r) => (r.lineApprovedById ? 'Recorded' : 'Not recorded'),
+          },
+          {
+            label: 'Group HR approval',
+            value: (r) =>
+              Number(r.totalDays) > 5
+                ? r.groupHrApprovedById
+                  ? 'Recorded'
+                  : 'Required for leave over 5 days'
+                : 'Not required',
+          },
+          { label: 'Approval notes', value: (r) => r.approvalNotes || '—' },
+          { label: 'Rejection / cancellation reason', value: (r) => r.rejectionReason || '—' },
+        ]}
+        actions={(r) => (
+          <>
+            {r.status === 'DRAFT' && canCreate && (
+              <Btn onClick={() => openAction(r, 'submit')}>Submit request</Btn>
+            )}
+            {r.status === 'SUBMITTED' && canApprove && !r.lineApprovedById && (
+              <Btn onClick={() => openAction(r, 'approve')}>Line approval</Btn>
+            )}
+            {r.status === 'SUBMITTED' &&
+              Number(r.totalDays) > 5 &&
+              canApproveHr &&
+              !r.groupHrApprovedById && (
+                <Btn onClick={() => openAction(r, 'approve-hr')}>Group HR approval</Btn>
+              )}
+            {r.status === 'SUBMITTED' && canReject && (
+              <Btn variant="secondary" onClick={() => openAction(r, 'reject')}>
+                Reject request
+              </Btn>
+            )}
+            {['DRAFT', 'SUBMITTED', 'APPROVED'].includes(r.status) && canCreate && (
+              <Btn variant="ghost" onClick={() => openAction(r, 'cancel')}>
+                Cancel request
+              </Btn>
+            )}
+          </>
         )}
-      </Card>
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Leave Request" footer={<><Btn variant="secondary" onClick={() => setShowModal(false)}>Cancel</Btn><Btn variant="primary" type="submit" form="leave-request-form" loading={saving}>Submit</Btn></>}>
-        <form id="leave-request-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormSelect label="Company" required value={form.companyId}
-            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value, employeeId: '' }))}
-            options={companyOptions} placeholder="Select company" />
-          <FormSelect label="Employee" required value={form.employeeId} onChange={f('employeeId')}
-            options={employeeOptions} placeholder={form.companyId ? 'Select employee' : 'Select company first'} />
-          <FormSelect label="Leave Type" required value={form.leaveTypeId} onChange={f('leaveTypeId')}
-            options={leaveTypeOptions} placeholder={form.companyId ? 'Select leave type' : 'Select company first'} />
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Start Date" type="date" value={form.startDate} onChange={f('startDate')} required />
-            <FormInput label="End Date" type="date" value={form.endDate} onChange={f('endDate')} required />
-          </div>
-          <FormTextarea label="Reason" value={form.reason} onChange={f('reason')} rows={3} />
-        </form>
-      </Modal>
+      />
     </div>
   );
 }

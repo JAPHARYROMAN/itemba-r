@@ -44,9 +44,12 @@ export class WcfAuditService {
   ) {}
 
   async exposureRegister(filter: WcfFilter, user: AuthUser) {
-    if (filter.fromMonth < 1 || filter.fromMonth > 12)
+    if (!filter.companyId) throw new BadRequestException('companyId is required');
+    if (!Number.isInteger(filter.year) || filter.year < 2000 || filter.year > 2100)
+      throw new BadRequestException('year must be between 2000 and 2100');
+    if (!Number.isInteger(filter.fromMonth) || filter.fromMonth < 1 || filter.fromMonth > 12)
       throw new BadRequestException('fromMonth must be 1-12');
-    if (filter.toMonth < 1 || filter.toMonth > 12)
+    if (!Number.isInteger(filter.toMonth) || filter.toMonth < 1 || filter.toMonth > 12)
       throw new BadRequestException('toMonth must be 1-12');
     if (filter.fromMonth > filter.toMonth)
       throw new BadRequestException('fromMonth must be <= toMonth');

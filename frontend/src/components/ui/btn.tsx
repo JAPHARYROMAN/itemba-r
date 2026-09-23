@@ -56,6 +56,8 @@ export function Btn({
   return (
     <button
       disabled={isDisabled}
+      data-os-button={variant}
+      aria-busy={loading || undefined}
       className={`
         inline-flex items-center justify-center font-medium transition duration-150 ease-out select-none
         ${VARIANT_MAP[variant]}
@@ -90,6 +92,7 @@ export function IconBtn({ variant = 'ghost', size = 'sm', label, children, class
   return (
     <button
       aria-label={label}
+      data-os-button={variant}
       className={`
         inline-flex items-center justify-center rounded-lg transition duration-150 ease-out active:scale-95
         ${VARIANT_MAP[variant]}

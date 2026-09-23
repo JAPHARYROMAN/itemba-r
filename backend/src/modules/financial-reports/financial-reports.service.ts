@@ -721,7 +721,7 @@ export class FinancialReportsService {
     // Net income from P&L for the period (income - expenses - cogs).
     const lines = await this.prisma.journalEntryLine.findMany({
       where: this.buildLineWhere(companyId, jeWhere, scope),
-      include: { account: { select: { accountType: true, accountCode: true, accountSubType: true } } },
+      include: { account: { select: { accountType: true, accountCode: true, accountSubType: true, mappedCashAccount: { select: { id: true } } } } },
     });
 
     let income = 0;
@@ -765,7 +765,7 @@ export class FinancialReportsService {
           break;
         case 'ASSET':
           // Cash movements
-          if (subtype === 'cash_on_hand' || subtype === 'bank' || code === '1010' || code === '1020') {
+          if (line.account.mappedCashAccount || subtype === 'cash_on_hand' || subtype === 'bank' || code === '1010' || code === '1020') {
             cashMovement += debit - credit;
           }
           // Receivables
@@ -836,7 +836,7 @@ export class FinancialReportsService {
         unexplainedDelta: cashMovement - netChangeInCash,
       },
       assumptions: [
-        'Cash and bank accounts are detected via accountSubType (cash_on_hand|bank) or codes 1010/1020.',
+        'Cash and bank accounts are detected via dedicated cash-account mappings, accountSubType (cash_on_hand|bank), or codes 1010/1020.',
         'Depreciation is detected via accountSubType=depreciation_expense or codes 5500/6500.',
         'Investing activities are proxied by movements on accounts whose code starts with 15 (fixed-asset block).',
         'Financing activities are loan-principal movements only; equity raises are not yet categorized.',

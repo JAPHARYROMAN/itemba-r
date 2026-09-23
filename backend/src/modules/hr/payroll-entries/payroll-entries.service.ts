@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
@@ -23,9 +23,26 @@ export class PayrollEntriesService {
     };
     if (payrollRunId) where.payrollRunId = payrollRunId;
     if (employeeId) where.employeeId = employeeId;
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      const existing = where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : [];
+      where.AND = [
+        ...existing,
+        {
+          OR: [
+            { employee: { fullName: { contains, mode: 'insensitive' } } },
+            { employee: { employeeCode: { contains, mode: 'insensitive' } } },
+            { payrollRun: { payrollRunNumber: { contains, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
     const [data, total] = await Promise.all([
       this.prisma.payrollEntry.findMany({
-        where, skip, take: Number(limit), orderBy: { createdAt: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
           payrollRun: { select: { id: true, payrollRunNumber: true, status: true } },
@@ -57,7 +74,15 @@ export class PayrollEntriesService {
 
   async update(id: string, dto: UpdatePayrollEntryDto, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    const record = await this.prisma.payrollEntry.update({ where: { id }, data: dto as any });
+    const record = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM payroll_runs WHERE id = ${existing.payrollRun.id} FOR UPDATE`;
+      const run = await tx.payrollRun.findUniqueOrThrow({ where: { id: existing.payrollRun.id } });
+      if (!['DRAFT', 'CALCULATED'].includes(run.status))
+        throw new BadRequestException(
+          'Approved payroll entries cannot be edited. Cancel and recalculate an unpaid run.',
+        );
+      return tx.payrollEntry.update({ where: { id }, data: dto as any });
+    });
     await this.audit.log({
       userId: user.id,
       action: 'PAYROLL_ENTRY_UPDATE',

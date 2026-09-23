@@ -1,173 +1,92 @@
-import { Prisma, BorrowerLevel, LoanStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { LoansService } from './loans.service';
-
-/**
- * Fully-mocked unit tests for the loan disbursement poster. No Postgres / real
- * Prisma client needed — the delegates the service touches are stubbed on a
- * mock `prisma` object and `$transaction` runs the callback inline.
- *
- * Focus (GL FIX, audit MED): create() must post the full-principal disbursement
- * JE (DR Cash/Bank / CR LOAN_PRINCIPAL_PAYABLE) ONLY for a genuinely new
- * drawdown funded through this system (outstandingBalance == principalAmount).
- * For an opening-balance / migrated loan (outstandingBalance < principalAmount)
- * NO disbursement JE is posted, so cash and the liability are not double-booked.
- */
-
-const D = (v: number | string) => new Prisma.Decimal(v);
-
-const USER = { id: 'user-1' } as any;
-
-function baseDto(overrides?: Partial<any>) {
-  return {
-    obligationType: 'LOAN',
-    borrowerLevel: BorrowerLevel.COMPANY,
-    companyId: 'company-1',
-    lenderName: 'Acme Bank',
-    principalAmount: '1000000',
-    interestRate: '12',
-    disbursementDate: '2026-01-15',
-    maturityDate: '2027-01-15',
-    outstandingBalance: '1000000',
-    ...overrides,
-  } as any;
-}
-
-function makeService() {
-  const loanCreate = jest.fn(async ({ data }: any) => ({
-    id: 'loan-1',
-    loanReference: null,
-    lenderName: data.lenderName,
-    companyId: data.companyId ?? null,
-    divisionId: data.divisionId ?? null,
-    branchId: data.branchId ?? null,
-    ...data,
-  }));
-
-  const prisma: any = {
-    loan: { create: loanCreate, findMany: jest.fn().mockResolvedValue([]) },
-    bankAccount: { findFirst: jest.fn() },
-    branch: { findFirst: jest.fn() },
-    division: { findFirst: jest.fn() },
-    $transaction: jest.fn(async (cb: any) => cb(prisma)),
+const user = { id: 'user' } as any;
+function harness() {
+  const loan = {
+    id: 'loan',
+    companyId: 'co',
+    divisionId: null,
+    branchId: null,
+    principalAmount: new Prisma.Decimal(100),
+    outstandingBalance: new Prisma.Decimal(80),
+    status: 'ACTIVE',
+    disbursementDate: new Date('2026-01-01'),
   };
-
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
-  const companyScope = {
-    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
-    accessibleCompanyIds: jest.fn().mockResolvedValue(null),
-  } as any;
-  const accountResolver = {
-    resolve: jest.fn(async (_companyId: string, role: string) =>
-      role === 'LOAN_PRINCIPAL_PAYABLE' ? { id: 'acc-loan-payable' } : { id: 'acc-cash' },
-    ),
-  } as any;
-  const postingEngine = {
-    postLines: jest.fn(async () => ({ id: 'je-1', journalNumber: 'LOAN-2026-00001' })),
-  } as any;
-  const codes = { next: jest.fn(async () => 'LOAN-2026-00001') } as any;
-
+  const tx: any = {
+    $queryRaw: jest.fn(),
+    loan: {
+      findFirst: jest.fn().mockResolvedValue(loan),
+      update: jest.fn(async ({ data }) => ({ ...loan, ...data })),
+    },
+    loanFinancialEvent: { count: jest.fn().mockResolvedValue(1) },
+    loanRepayment: { count: jest.fn().mockResolvedValue(0) },
+    loanRepaymentSchedule: { count: jest.fn().mockResolvedValue(0) },
+  };
+  const db: any = { $transaction: jest.fn((fn) => fn(tx)) };
+  const audit: any = { logStrictInTransaction: jest.fn() };
+  const scope: any = { assertCanAccessCompany: jest.fn() };
+  const lifecycle: any = { create: jest.fn().mockResolvedValue(loan), repay: jest.fn() };
+  const ledger: any = { scope: jest.fn() };
   const service = new LoansService(
-    prisma,
-    auditLogs,
-    companyScope,
-    accountResolver,
-    postingEngine,
-    codes,
+    db,
+    audit,
+    scope,
+    {} as any,
+    {} as any,
+    {} as any,
+    lifecycle,
+    ledger,
   );
-
-  return { service, prisma, postingEngine, accountResolver, loanCreate, companyScope };
+  return { service, tx, loan, audit, lifecycle, ledger };
 }
-
-describe('LoansService.getOverdue', () => {
-  it('uses an ACTIVE, strict past-maturity filter in the caller company scope', async () => {
-    const { service, prisma, companyScope } = makeService();
-    companyScope.accessibleCompanyIds.mockResolvedValue(['company-1']);
-
-    await service.getOverdue(USER);
-
-    expect(prisma.loan.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          deletedAt: null,
-          status: LoanStatus.ACTIVE,
-          maturityDate: { lt: expect.any(Date) },
-          companyId: { in: ['company-1'] },
-        },
-      }),
-    );
+describe('Loan register financial protections', () => {
+  it('uses the shared atomic lifecycle for recognition and payments', async () => {
+    const { service, lifecycle } = harness();
+    const dto = {} as any;
+    await service.create(dto, user);
+    await service.recordRepayment('loan', dto, user);
+    expect(lifecycle.create).toHaveBeenCalledWith(dto, user);
+    expect(lifecycle.repay).toHaveBeenCalledWith('loan', dto, user);
   });
-});
-
-describe('LoansService.create — disbursement journal entry', () => {
-  it('posts a balanced DR Cash / CR LOAN_PRINCIPAL_PAYABLE JE for a new drawdown (outstanding == principal)', async () => {
-    const { service, postingEngine } = makeService();
-
-    await service.create(
-      baseDto({ principalAmount: '1000000', outstandingBalance: '1000000' }),
-      USER,
-    );
-
-    expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
-    const [payload] = postingEngine.postLines.mock.calls[0];
-    const lines = payload.lines;
-    expect(lines).toHaveLength(2);
-
-    const debit = lines.find((l: any) => new Prisma.Decimal(l.debit).gt(0));
-    const credit = lines.find((l: any) => new Prisma.Decimal(l.credit).gt(0));
-    expect(debit.accountId).toBe('acc-cash');
-    expect(new Prisma.Decimal(debit.debit).toString()).toBe('1000000');
-    expect(credit.accountId).toBe('acc-loan-payable');
-    expect(new Prisma.Decimal(credit.credit).toString()).toBe('1000000');
-
-    // Balanced: total debits === total credits.
-    const totalDebit = lines.reduce((s: Prisma.Decimal, l: any) => s.plus(l.debit), D(0));
-    const totalCredit = lines.reduce((s: Prisma.Decimal, l: any) => s.plus(l.credit), D(0));
-    expect(totalDebit.equals(totalCredit)).toBe(true);
-
-    expect(payload.referenceType).toBe('Loan');
-    expect(payload.referenceId).toBe('loan-1');
+  it('locks before editing, checks organisation and never writes a supplied balance', async () => {
+    const { service, tx, ledger } = harness();
+    await service.update('loan', { notes: 'Reviewed', outstandingBalance: '80' }, user);
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(ledger.scope).toHaveBeenCalled();
+    expect(tx.loan.update).toHaveBeenCalledWith({
+      where: { id: 'loan' },
+      data: { notes: 'Reviewed' },
+    });
   });
-
-  it('does NOT post a disbursement JE for an opening-balance loan (outstanding < principal) — no double-booking of a migrated loan', async () => {
-    const { service, postingEngine, accountResolver } = makeService();
-
-    // Migrated loan: principal 1,000,000 but only 600,000 still outstanding
-    // (400,000 was already repaid before this record existed). The cash landed
-    // before the system, so no disbursement JE should be booked.
-    const record = await service.create(
-      baseDto({ principalAmount: '1000000', outstandingBalance: '600000' }),
-      USER,
-    );
-
-    expect(postingEngine.postLines).not.toHaveBeenCalled();
-    expect(accountResolver.resolve).not.toHaveBeenCalled();
-    // The loan (subledger) is still created with the opening outstanding balance.
-    expect(new Prisma.Decimal(record.outstandingBalance).toString()).toBe('600000');
+  it('rejects a stale financial edit without changing any fields', async () => {
+    const { service, tx } = harness();
+    await expect(
+      service.update('loan', { outstandingBalance: '100', notes: 'stale' }, user),
+    ).rejects.toThrow('balances cannot');
+    expect(tx.loan.update).not.toHaveBeenCalled();
   });
-
-  it('does NOT post a JE for a GROUP-level loan (no companyId to resolve a chart)', async () => {
-    const { service, postingEngine } = makeService();
-
-    await service.create(
-      baseDto({
-        borrowerLevel: BorrowerLevel.GROUP,
-        companyId: undefined,
-        groupId: 'group-1',
-        outstandingBalance: '1000000',
-      }),
-      USER,
+  it('prevents manual settlement and reopening closed loans', async () => {
+    const { service, tx, loan } = harness();
+    await expect(service.markStatus('loan', { status: 'FULLY_PAID' } as any, user)).rejects.toThrow(
+      'controlled',
     );
-
-    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    loan.status = 'FULLY_PAID';
+    await expect(service.markStatus('loan', { status: 'ACTIVE' } as any, user)).rejects.toThrow(
+      'closed loan',
+    );
+    expect(tx.loan.update).not.toHaveBeenCalled();
   });
-
-  it('forces status to ACTIVE and persists the opening outstanding balance on the subledger row', async () => {
-    const { service, loanCreate } = makeService();
-
-    await service.create(baseDto({ outstandingBalance: '600000' }), USER);
-
-    const { data } = loanCreate.mock.calls[0][0];
-    expect(data.status).toBe(LoanStatus.ACTIVE);
-    expect(new Prisma.Decimal(data.outstandingBalance).toString()).toBe('600000');
+  it('preserves loans with financial history', async () => {
+    const { service, tx } = harness();
+    await expect(service.remove('loan', user)).rejects.toThrow('history');
+    expect(tx.loan.update).not.toHaveBeenCalled();
+  });
+  it('does not change scheduled terms', async () => {
+    const { service, tx } = harness();
+    tx.loanRepaymentSchedule.count.mockResolvedValue(1);
+    await expect(service.update('loan', { interestRate: '0.2' }, user)).rejects.toThrow(
+      'restructuring',
+    );
+    expect(tx.loan.update).not.toHaveBeenCalled();
   });
 });

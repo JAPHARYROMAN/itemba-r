@@ -1,16 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  FormInput,
-  FormSelect,
-  PageHeader,
-  PageSpinner,
-  StatCard,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, PageHeader, PageSpinner, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { backendGet, backendPatch, backendPost } from '@/lib/api-client';
 
@@ -164,6 +158,7 @@ export default function OperationsProfitPage() {
   const canView = hasPermission('profit.view') || hasPermission('operations.reports.view');
   const canManageCosts = hasPermission('profit.manage_costs');
   const canAudit = hasPermission('profit.audit') || hasPermission('profit.view');
+  const beginRequest = useRequestGuard();
   const [companyId, setCompanyId] = useState('');
   const [divisionId, setDivisionId] = useState('');
   const [branchId, setBranchId] = useState('');
@@ -212,6 +207,7 @@ export default function OperationsProfitPage() {
 
   const load = useCallback(async () => {
     if (!canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     setNotice('');
@@ -219,14 +215,17 @@ export default function OperationsProfitPage() {
       const [summaryPayload, gapsPayload, attemptsPayload] = await Promise.all([
         backendGet<unknown>('/profit/product-summary', {
           query,
+          signal: request.signal,
         }),
-        backendGet<unknown>('/profit/cost-gaps', { query }),
+        backendGet<unknown>('/profit/cost-gaps', { query, signal: request.signal }),
         canAudit
           ? backendGet<unknown>('/profit/below-cost-attempts', {
               query: { ...query, limit: 10 },
+              signal: request.signal,
             })
           : Promise.resolve({ rows: [], total: 0 }),
       ]);
+      if (!request.current()) return;
       const summaryResult = unwrapNested<{
         summary?: ProfitSummary;
         products?: ProductProfitRow[];
@@ -240,11 +239,12 @@ export default function OperationsProfitPage() {
       setGaps(safeRows(gapsResult.rows));
       setAttempts(safeRows(attemptsResult.rows));
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load profit module');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canAudit, canView, query]);
+  }, [beginRequest, canAudit, canView, query]);
 
   useEffect(() => {
     void load();
@@ -453,17 +453,15 @@ export default function OperationsProfitPage() {
             })}
             disabled={!companyId}
           />
-          <FormInput
+          <FormDateField
             label="Date From"
-            type="date"
             value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
+            onChange={(value) => setDateFrom(value)}
           />
-          <FormInput
+          <FormDateField
             label="Date To"
-            type="date"
             value={dateTo}
-            onChange={(event) => setDateTo(event.target.value)}
+            onChange={(value) => setDateTo(value)}
           />
         </div>
       </Card>
@@ -550,9 +548,12 @@ export default function OperationsProfitPage() {
         <div
           role="alert"
           aria-live="assertive"
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
         >
-          {error}
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
 
@@ -674,7 +675,7 @@ export default function OperationsProfitPage() {
                   <h2 className="text-sm font-semibold">Product profitability</h2>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-[920px] w-full text-sm">
+                  <WorkspaceTable className="min-w-[920px] w-full text-sm">
                     <caption className="sr-only">Product profitability</caption>
                     <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                       <tr
@@ -762,7 +763,7 @@ export default function OperationsProfitPage() {
                         ))
                       )}
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               </Card>
 
@@ -791,7 +792,7 @@ export default function OperationsProfitPage() {
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="min-w-[900px] w-full text-sm">
+                        <WorkspaceTable className="min-w-[900px] w-full text-sm">
                           <caption className="sr-only">{`${selectedProduct.productName} sales ledger`}</caption>
                           <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                             <tr
@@ -853,7 +854,7 @@ export default function OperationsProfitPage() {
                               </tr>
                             ))}
                           </tbody>
-                        </table>
+                        </WorkspaceTable>
                       </div>
                     )}
                   </Card>
@@ -931,7 +932,7 @@ export default function OperationsProfitPage() {
                       <h2 className="text-sm font-semibold">Customer profitability</h2>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="min-w-[860px] w-full text-sm">
+                      <WorkspaceTable className="min-w-[860px] w-full text-sm">
                         <caption className="sr-only">Customer profitability</caption>
                         <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                           <tr
@@ -1008,7 +1009,7 @@ export default function OperationsProfitPage() {
                             ))
                           )}
                         </tbody>
-                      </table>
+                      </WorkspaceTable>
                     </div>
                   </Card>
                 </>
@@ -1021,7 +1022,7 @@ export default function OperationsProfitPage() {
               <h2 className="text-sm font-semibold">Cost gaps blocking sales</h2>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-[1040px] w-full text-sm">
+              <WorkspaceTable className="min-w-[1040px] w-full text-sm">
                 <caption className="sr-only">Cost gaps blocking sales</caption>
                 <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                   <tr
@@ -1102,7 +1103,7 @@ export default function OperationsProfitPage() {
                     ))
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
 
@@ -1115,7 +1116,7 @@ export default function OperationsProfitPage() {
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-[820px] w-full text-sm">
+                <WorkspaceTable className="min-w-[820px] w-full text-sm">
                   <caption className="sr-only">Below-cost attempt audit</caption>
                   <thead style={{ background: 'var(--aurora-bg-subtle)' }}>
                     <tr
@@ -1168,7 +1169,7 @@ export default function OperationsProfitPage() {
                       ))
                     )}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             </Card>
           )}

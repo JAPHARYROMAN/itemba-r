@@ -1,242 +1,214 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+
+import {
+  Btn,
+  ConfirmDialog,
+  FormSelect,
+  PageHeader,
+  PageToolbar,
+  PermissionDeniedState,
+} from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
+import { backendDelete, backendPatch } from '@/lib/api-client';
+import { Plus, RefreshCw } from 'lucide-react';
+import '@/components/workspace/workspace.css';
 
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface Assignment {
-  id: string;
-  employee?: string | { fullName?: string; employeeCode?: string };
-  employeeId?: string;
-  assignmentContextType?: string;
-  company?: string | { id?: string; name?: string };
-  companyId?: string;
-  divisionId?: string | null;
-  branchId?: string | null;
-  startDate?: string;
-  endDate?: string;
-  status: string;
-  approvalStatus?: string | null;
-}
-
-interface FormState {
-  employeeId: string;
-  contextType: string;
-  companyId: string;
-  branchId: string;
-  divisionId: string;
-  startDate: string;
-  endDate: string;
-  status: string;
-}
-
-const empty: FormState = { employeeId: '', contextType: 'COMPANY', companyId: '', branchId: '', divisionId: '', startDate: '', endDate: '', status: 'ACTIVE' };
-
+import {
+  type Assignment,
+  employeeName,
+  companyName,
+  label,
+  date,
+} from '@/features/payroll/assignment-workflow';
 export default function EmployeeAssignmentsPage() {
-  const [rows, setRows] = useState<Assignment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<Assignment | null>(null);
-  const [form, setForm] = useState<FormState>(empty);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const { companyOptions, branchOptions, divisionOptions, employeeOptions } = useOrgScope(form.companyId);
-  const { user, hasPermission } = useAuth();
-  const canApproveTransfer = hasPermission('employees.transfer.approve.hr');
-  const [approvingId, setApprovingId] = useState<string | null>(null);
-
-  const load = async () => {
-    setLoading(true);
-    const r = await fetch('/api/backend/hr/employee-assignments');
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('employees.assignments.manage');
+  const canApprove = hasPermission('employees.transfer.approve.hr');
+  const stateKey = usePayrollStateKey('assignments');
+  const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
+  const [search, setSearch] = useWorkspaceState(stateKey + '.search', '');
+  const [query, setQuery] = useState(search.trim());
+  const [company, setCompany] = useWorkspaceState(stateKey + '.company', '');
+  const result = useWorkspaceRecords<Assignment>(
+    '/hr/employee-assignments',
+    { page, limit: 20, search: query, companyId: company },
+    canManage,
+  );
+  useEffect(() => {
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
+  useEffect(() => {
+    if (!result.loading && !result.error && page > 1 && !result.rows.length)
+      setPage(Math.max(1, Math.ceil(result.total / 20)));
+  }, [result.loading, result.error, result.rows.length, result.total, page, setPage]);
+  const [notice, setNotice] = useState('');
+  const scope = useOrgScope(undefined, {
+    skipEmployees: true,
+    skipDivisions: true,
+    skipBranches: true,
+  });
+  const entry = usePayrollDraftEditor('assignment', (message) => {
+    setNotice(message);
+    void result.reload();
+  });
+  const [action, setAction] = useState<{ record: Assignment; kind: 'delete' | 'approve' } | null>(
+    null,
+  );
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const openAction = (record: Assignment, kind: 'delete' | 'approve') => {
+    setAction({ record, kind });
+    setActionError('');
   };
-
-  useEffect(() => { load(); }, []);
-
-  const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
-  const openEdit = (a: Assignment) => {
-    setEditing(a);
-    setForm({
-      employeeId: a.employeeId ?? '',
-      contextType: a.assignmentContextType ?? 'COMPANY',
-      companyId: (typeof a.company === 'object' ? a.company?.id : undefined) ?? a.companyId ?? '',
-      branchId: a.branchId ?? '',
-      divisionId: a.divisionId ?? '',
-      startDate: a.startDate ? a.startDate.slice(0, 10) : '',
-      endDate: a.endDate ? a.endDate.slice(0, 10) : '',
-      status: a.status,
-    });
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const payload: Record<string, unknown> = {
-      employeeId: form.employeeId,
-      companyId: form.companyId,
-      assignmentContextType: form.contextType,
-      divisionId: form.divisionId || undefined,
-      branchId: form.branchId || undefined,
-      startDate: form.startDate,
-      endDate: form.endDate || undefined,
-      status: form.status,
-    };
-    if (!editing) payload.createdById = user?.id;
-    const url = editing ? `/api/backend/hr/employee-assignments/${editing.id}` : '/api/backend/hr/employee-assignments';
+  const performAction = async () => {
+    if (!action || actionBusy || !canManage || (action.kind === 'approve' && !canApprove)) return;
+    setActionBusy(true);
+    setActionError('');
     try {
-      const res = await fetch(url, {
-        method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the assignment.'));
-        return;
-      }
-      setShowModal(false);
-      load();
+      if (action.kind === 'delete')
+        await backendDelete(`/hr/employee-assignments/${action.record.id}`);
+      else await backendPatch(`/hr/employee-assignments/${action.record.id}/approve-transfer`);
+      setNotice(
+        action.kind === 'delete'
+          ? 'Assignment deleted.'
+          : 'Transfer approved. The assignment is active and the employee placement has been updated.',
+      );
+      setAction(null);
+      await result.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to update the assignment.');
     } finally {
-      setSaving(false);
+      setActionBusy(false);
     }
   };
-
-  const handleApproveTransfer = async (id: string) => {
-    setApprovingId(id);
-    try {
-      const res = await fetch(`/api/backend/hr/employee-assignments/${id}/approve-transfer`, { method: 'PATCH' });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Approval failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not approve the transfer.'));
-        return;
-      }
-      showToast('success', 'Transfer approved', 'The assignment is now active and the employee has moved.');
-      load();
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteId) return;
-    const res = await fetch(`/api/backend/hr/employee-assignments/${deleteId}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      showToast('error', 'Delete failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not delete the assignment.'));
-    }
-    setDeleteId(null);
-    load();
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(p => ({ ...p, [k]: e.target.value }));
-
+  if (!canManage)
+    return <PermissionDeniedState description="Your role cannot manage employee assignments." />;
   return (
-    <div className="p-6">
+    <div className="business-workspace record-workspace">
       <PageHeader
-        title="Employee Assignments"
-        subtitle="Manage employee context and company assignments"
-      />
-      <PageToolbar actions={<Btn variant="primary" onClick={openCreate}>+ Add Assignment</Btn>} />
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-100" style={{ color: 'var(--aurora-text-muted)' }}>
-                <tr>
-                  <th className={thCls}>Employee</th>
-                  <th className={thCls}>Context Type</th>
-                  <th className={thCls}>Company</th>
-                  <th className={thCls}>Start Date</th>
-                  <th className={thCls}>End Date</th>
-                  <th className={thCls}>Status</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map(a => (
-                  <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>
-                      {typeof a.employee === 'string'
-                        ? a.employee
-                        : (a.employee?.fullName ?? a.employee?.employeeCode ?? a.employeeId ?? '—')}
-                    </td>
-                    <td className={tdCls}>{a.assignmentContextType ?? '—'}</td>
-                    <td className={tdCls}>{typeof a.company === 'string' ? a.company : (a.company?.name ?? '—')}</td>
-                    <td className={tdCls}>{a.startDate ? new Date(a.startDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{a.endDate ? new Date(a.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>
-                      {a.approvalStatus?.startsWith('PENDING') ? (
-                        <StatusBadge status="TRANSFER_PENDING" />
-                      ) : (
-                        <StatusBadge status={a.status} />
-                      )}
-                    </td>
-                    <td className={tdCls}>
-                      <div className="flex gap-2">
-                        {a.approvalStatus?.startsWith('PENDING') && canApproveTransfer && (
-                          <Btn variant="success" size="xs" onClick={() => handleApproveTransfer(a.id)} disabled={approvingId === a.id}>
-                            {approvingId === a.id ? '…' : 'Approve Transfer'}
-                          </Btn>
-                        )}
-                        <Btn variant="ghost" size="xs" onClick={() => openEdit(a)}>Edit</Btn>
-                        <Btn variant="danger" size="xs" onClick={() => setDeleteId(a.id)}>Delete</Btn>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No assignments found</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <Modal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        title={editing ? 'Edit Assignment' : 'New Assignment'}
-        footer={
-          <>
-            <Btn variant="secondary" type="button" onClick={() => setShowModal(false)}>Cancel</Btn>
-            <Btn variant="primary" type="submit" form="assignment-form" loading={saving}>Save</Btn>
-          </>
+        title="Employee assignments"
+        subtitle="Where your people work, and the moves that come next."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Assignments' }]}
+        actions={
+          <Btn icon={<Plus size={16} />} onClick={() => entry.open({ kind: 'assignment' })}>
+            New assignment
+          </Btn>
         }
-      >
-        <form id="assignment-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormSelect label="Company" required value={form.companyId}
-            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value, employeeId: '', branchId: '', divisionId: '' }))}
-            options={companyOptions} placeholder="Select company" />
-          <FormSelect label="Employee" required value={form.employeeId} onChange={f('employeeId')}
-            options={employeeOptions} placeholder={form.companyId ? 'Select employee' : 'Select company first'} />
-          <FormSelect label="Context Type" value={form.contextType} onChange={f('contextType')}
-            options={[
-              { value: 'COMPANY', label: 'Company' },
-              { value: 'DIVISION', label: 'Division' },
-              { value: 'BRANCH', label: 'Branch' },
-              { value: 'OTHER', label: 'Other' },
-            ]} />
-          <FormSelect label="Branch" value={form.branchId} onChange={f('branchId')}
-            options={branchOptions} placeholder={form.companyId ? 'Select branch' : 'Select company first'} />
-          <FormSelect label="Division" value={form.divisionId} onChange={f('divisionId')}
-            options={divisionOptions} placeholder={form.companyId ? 'Select division' : 'Select company first'} />
-          <FormInput label="Start Date" type="date" value={form.startDate} onChange={f('startDate')} required />
-          <FormInput label="End Date" type="date" value={form.endDate} onChange={f('endDate')} />
-          <FormSelect label="Status" value={form.status} onChange={f('status')}
-            options={[{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} />
-        </form>
-      </Modal>
-
-      <ConfirmDialog open={!!deleteId} title="Delete Assignment" message="Delete this assignment?" onConfirm={handleDelete} onCancel={() => setDeleteId(null)} />
+      />
+      <div className="workspace-summary">
+        <div>
+          <span>Matching assignments</span>
+          <strong>{result.total}</strong>
+        </div>
+        <div>
+          <span>Pending on this page</span>
+          <strong>
+            {result.rows.filter((r) => r.approvalStatus?.startsWith('PENDING')).length}
+          </strong>
+        </div>
+      </div>
+      {notice && (
+        <div role="status" className="workspace-notice">
+          {notice}
+        </div>
+      )}
+      <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search assignments by employee or role…"
+        collapsibleFilters
+        activeFilterCount={Number(Boolean(company))}
+        filters={
+          <FormSelect
+            label="Company filter"
+            value={company}
+            onChange={(e) => {
+              setCompany(e.target.value);
+              setPage(1);
+            }}
+            options={scope.companyOptions}
+            placeholder="All companies"
+          />
+        }
+        actions={
+          <Btn
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            disabled={result.loading}
+            onClick={result.reload}
+          >
+            Reload
+          </Btn>
+        }
+      />
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.record'}
+        selectionScope={JSON.stringify([company, query])}
+        records={result.rows}
+        title="Assignments"
+        name={employeeName}
+        reference={(r) => (r.assignmentContextType ? label(r.assignmentContextType) : 'Assignment')}
+        status={(r) => (r.approvalStatus?.startsWith('PENDING') ? 'TRANSFER_PENDING' : r.status)}
+        fields={[
+          { label: 'Company', value: companyName },
+          { label: 'Starts', value: (r) => date(r.startDate) },
+        ]}
+        details={[
+          { label: 'Ends', value: (r) => date(r.endDate) },
+          { label: 'Department', value: (r) => r.department?.name || '—' },
+          { label: 'Position', value: (r) => r.position?.title || '—' },
+          { label: 'Assignment', value: (r) => (r.isPrimary ? 'Primary' : 'Additional') },
+          { label: 'Approval', value: (r) => (r.approvalStatus ? label(r.approvalStatus) : '—') },
+          { label: 'Notes', value: (r) => r.notes || '—' },
+        ]}
+        loading={result.loading}
+        error={result.error}
+        onRetry={result.reload}
+        page={page}
+        total={result.total}
+        onPage={setPage}
+        actions={(r) => (
+          <>
+            {canApprove && r.approvalStatus?.startsWith('PENDING') && (
+              <Btn onClick={() => openAction(r, 'approve')}>Approve transfer</Btn>
+            )}
+            <Btn
+              variant={r.approvalStatus?.startsWith('PENDING') ? 'secondary' : 'primary'}
+              onClick={() => entry.open({ kind: 'assignment', record: r })}
+            >
+              Edit assignment
+            </Btn>
+            <Btn variant="ghost" onClick={() => openAction(r, 'delete')}>
+              Delete assignment
+            </Btn>
+          </>
+        )}
+      />
+      <ConfirmDialog
+        open={!!action}
+        title={`${action?.kind === 'approve' ? 'Approve transfer' : 'Delete assignment'}${action ? ` for ${employeeName(action.record)}?` : ''}`}
+        message={`${actionError ? actionError + '\n\n' : ''}${action?.kind === 'approve' ? `Move this employee to ${action ? companyName(action.record) : 'the destination'} and make this their active primary assignment? The requester cannot approve their own transfer.` : 'Delete this assignment record? Review the employee and destination before continuing.'}`}
+        confirmLabel={action?.kind === 'approve' ? 'Approve transfer' : 'Delete assignment'}
+        variant={action?.kind === 'delete' ? 'danger' : 'default'}
+        loading={actionBusy}
+        onConfirm={performAction}
+        onCancel={() => {
+          if (!actionBusy) setAction(null);
+        }}
+      />
     </div>
   );
 }

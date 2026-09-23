@@ -29,6 +29,7 @@ import {
 import { msaidiziScheduleVersionSnapshot } from '../msaidizi-control-plane/msaidizi-version-history';
 import { AutonomyBudgetCeilings, AutonomyConfig } from '../msaidizi-tasks/autonomy.config';
 import { persistableUpdateProposalStepArguments } from '../msaidizi-updates/update-candidate-proposal.port';
+import { restoreBoundNullPlaceholders } from '../msaidizi-tasks/msaidizi-binding-authority';
 import { parseStepBudgets, validateStepStopConditions } from './msaidizi-step-controls';
 
 const DEFAULT_BATCH = 20;
@@ -131,6 +132,8 @@ export class MsaidiziScheduleDispatcherService {
     schedule: DueSchedule,
     now: Date,
   ): Promise<'dispatched' | 'skipped'> {
+    // A kill/disable can arrive after the batch query or a prior occurrence.
+    if (!this.enabled()) return 'skipped';
     const dueAt = schedule.nextRunAt;
     if (!dueAt)
       throw new ScheduleDispatchPolicyError('SCHEDULE_CURSOR_MISSING', 'nextRunAt is missing');
@@ -147,6 +150,7 @@ export class MsaidiziScheduleDispatcherService {
     const queuedAt = new Date();
     const createdAt = queuedAt;
     const idempotencyKey = occurrenceKey(schedule.id, dueAt);
+    const authority = scheduleAuthoritySnapshot(schedule);
     const objective = redactPersistedSecrets(template.objective);
     const title = redactPersistedSecrets(template.title);
     const summary = redactPersistedSecrets(template.summary);
@@ -165,8 +169,17 @@ export class MsaidiziScheduleDispatcherService {
         target: step.target,
         capability: step.capability,
         capabilityVersion: step.capabilityVersion,
-        arguments: persistableUpdateProposalStepArguments(step) as Prisma.InputJsonValue,
+        arguments: restoreBoundNullPlaceholders(
+          persistableUpdateProposalStepArguments(step),
+          step.arguments,
+          step.inputBindings ?? [],
+        ) as Prisma.InputJsonValue,
         dependencies: persistedJson(step.dependsOn),
+        // Validated definitions are part of the immutable reviewed plan and its
+        // digest. Dropping them would dispatch the unresolved null template.
+        inputBindings: JSON.parse(
+          JSON.stringify(step.inputBindings ?? []),
+        ) as Prisma.InputJsonValue,
         expectedEffect: step.expectedEffect,
         dataClass: step.dataClass,
         preconditions: persistedJson(step.preconditions),
@@ -180,6 +193,9 @@ export class MsaidiziScheduleDispatcherService {
     const planDigest = digest({ objective, inputs, stopConditions, budgetSnapshot, steps });
 
     return this.prisma.$transaction(async (tx) => {
+      // Recheck after waiting for a transaction connection, before any writes.
+      if (!this.enabled()) return 'skipped';
+      if (!(await this.lockCurrentAuthority(tx, schedule))) return 'skipped';
       const claimed = await tx.msaidiziSchedule.updateMany({
         where: {
           id: schedule.id,
@@ -187,6 +203,10 @@ export class MsaidiziScheduleDispatcherService {
           mandateId: schedule.mandateId,
           status: MsaidiziScheduleStatus.ACTIVE,
           nextRunAt: dueAt,
+          // ACTIVE -> PAUSED -> edited -> ACTIVE may retain the same cursor.
+          // Only the reviewed snapshot used to build this plan may claim it.
+          version: schedule.version,
+          updatedAt: schedule.updatedAt,
         },
         data: { lastRunAt: dueAt, nextRunAt },
       });
@@ -213,6 +233,7 @@ export class MsaidiziScheduleDispatcherService {
               reason: 'PRIOR_TASK_NOT_SETTLED',
               priorTaskStatus: overlapping.status,
               nextRunAt: nextRunAt.toISOString(),
+              observedAuthority: authority,
             },
           );
           await this.audit(tx, {
@@ -226,6 +247,7 @@ export class MsaidiziScheduleDispatcherService {
               reason: 'PRIOR_TASK_NOT_SETTLED',
               priorTaskId: overlapping.id,
               priorTaskStatus: overlapping.status,
+              observedAuthority: authority,
             },
           });
           return 'skipped';
@@ -258,6 +280,7 @@ export class MsaidiziScheduleDispatcherService {
               scheduleId: schedule.id,
               occurrenceAt: dueAt.toISOString(),
               recovered: true,
+              observedAuthority: authority,
             });
           }
         }
@@ -271,6 +294,7 @@ export class MsaidiziScheduleDispatcherService {
             nextRunAt: nextRunAt.toISOString(),
             taskId: recovered.id,
             taskStatus: recovered.status,
+            observedAuthority: authority,
           },
         });
         return 'dispatched';
@@ -340,6 +364,7 @@ export class MsaidiziScheduleDispatcherService {
             mode: MsaidiziTaskMode.AUTOPILOT,
             scheduleId: schedule.id,
             occurrenceAt: dueAt.toISOString(),
+            creationAuthority: authority,
           }),
           eventRow(taskId, 'task.ready', schedule.principalId, {
             from: MsaidiziTaskStatus.PLANNING,
@@ -367,10 +392,46 @@ export class MsaidiziScheduleDispatcherService {
           taskId,
           taskStatus: MsaidiziTaskStatus.QUEUED,
           planDigest,
+          creationAuthority: authority,
         },
       });
       return 'dispatched';
     });
+  }
+
+  private async lockCurrentAuthority(
+    tx: Prisma.TransactionClient,
+    schedule: DueSchedule,
+  ): Promise<boolean> {
+    // Match schedule activation's principal -> mandate -> schedule lock order.
+    // A revoke/edit committed first invalidates this snapshot; one arriving
+    // later waits until the occurrence and its evidence commit atomically.
+    const principals = await tx.$queryRaw<Array<{ status: MsaidiziPrincipalStatus }>>(Prisma.sql`
+      SELECT "status" FROM "msaidizi_principals"
+      WHERE "id" = ${schedule.principalId} FOR UPDATE
+    `);
+    if (principals[0]?.status !== MsaidiziPrincipalStatus.ACTIVE) return false;
+    type Authority = Pick<
+      DueSchedule['mandate'],
+      'principalId' | 'status' | 'version' | 'updatedAt' | 'startsAt' | 'expiresAt'
+    >;
+    const mandates = await tx.$queryRaw<Authority[]>(Prisma.sql`
+      SELECT "principalId", "status", "version", "updatedAt", "startsAt", "expiresAt"
+      FROM "msaidizi_mandates" WHERE "id" = ${schedule.mandateId} FOR UPDATE
+    `);
+    const mandate = mandates[0];
+    // Use the time AFTER waiting for the locks, not the batch's original time.
+    const claimTime = new Date();
+    return Boolean(
+      this.enabled() &&
+      mandate &&
+      mandate.principalId === schedule.principalId &&
+      mandate.status === MsaidiziMandateStatus.ACTIVE &&
+      mandate.version === schedule.mandate.version &&
+      mandate.updatedAt.getTime() === schedule.mandate.updatedAt.getTime() &&
+      (!mandate.startsAt || mandate.startsAt <= claimTime) &&
+      (!mandate.expiresAt || mandate.expiresAt > claimTime),
+    );
   }
 
   private assertAuthority(schedule: DueSchedule, now: Date): void {
@@ -651,6 +712,21 @@ function policyFailureCode(
   error: ScheduleDispatchPolicyError | MsaidiziScheduleTemplateError | UnsupportedMsaidiziCronError,
 ): string {
   return error instanceof UnsupportedMsaidiziCronError ? 'CRON_UNSUPPORTED' : error.code;
+}
+
+/** Value-free links to immutable control-plane version history, not mutable policy content. */
+function scheduleAuthoritySnapshot(schedule: DueSchedule): Prisma.InputJsonObject {
+  return {
+    protocol: 'MSAIDIZI_SCHEDULE_AUTHORITY_V1',
+    principalId: schedule.principalId,
+    companyId: schedule.mandate.companyId,
+    scheduleId: schedule.id,
+    scheduleVersion: schedule.version,
+    scheduleUpdatedAt: schedule.updatedAt.toISOString(),
+    mandateId: schedule.mandateId,
+    mandateVersion: schedule.mandate.version,
+    mandateUpdatedAt: schedule.mandate.updatedAt.toISOString(),
+  };
 }
 
 function eventRow(

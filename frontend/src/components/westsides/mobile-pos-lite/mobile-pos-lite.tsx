@@ -45,7 +45,8 @@ import { SuccessScreen } from './screens/SuccessScreen';
 
 export function MobilePosLite() {
   const router = useRouter();
-  const { logout } = useAuth();
+  const { logout, hasPermission, loading: authLoading } = useAuth();
+  const canUse = hasPermission('mobile_pos_lite.use');
   const { lang, setLang, t } = usePosLang();
   const [screen, setScreen] = useState<PosScreen>('home');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
@@ -64,14 +65,16 @@ export function MobilePosLite() {
   // be a circular hook dependency. Raw setters go in as stable args.
   const [frequents, setFrequents] = useState<Record<string, number>>({});
   const { pendingSales, syncing, refreshPendingSales, syncPendingSales } = usePosOutbox();
-  const { binding, session, catalog, online, updateCatalog, syncCatalog } = usePosBootstrap({
-    refreshPendingSales,
-    syncPendingSales,
-    setFrequents,
-    setPaymentMethod,
-    setNotice,
-    t,
-  });
+  const { binding, session, catalog, online, updateCatalog, syncCatalog, retryBoot } =
+    usePosBootstrap({
+      refreshPendingSales,
+      syncPendingSales,
+      setFrequents,
+      setPaymentMethod,
+      setNotice,
+      t,
+      enabled: !authLoading && canUse,
+    });
   const {
     cart,
     setCart,
@@ -549,6 +552,32 @@ export function MobilePosLite() {
     await refreshPendingSales(binding);
   }
 
+  if (authLoading) {
+    return (
+      <main
+        className="grid min-h-screen place-items-center px-5"
+        style={{ background: 'var(--aurora-bg)' }}
+      >
+        <p className="text-sm font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+          Loading
+        </p>
+      </main>
+    );
+  }
+
+  if (!canUse) {
+    return (
+      <main
+        className="grid min-h-screen place-items-center px-5"
+        style={{ background: 'var(--aurora-bg)' }}
+      >
+        <p className="text-sm font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+          Access Restricted
+        </p>
+      </main>
+    );
+  }
+
   if (!binding || !session) {
     return (
       <main
@@ -565,13 +594,22 @@ export function MobilePosLite() {
             {notice || t('opening')}
           </p>
           {notice && (
-            <button
-              type="button"
-              onClick={resetTerminal}
-              className="mt-4 text-sm font-semibold text-brand-700 underline"
-            >
-              {t('setupAgain')}
-            </button>
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={retryBoot}
+                className="text-sm font-semibold text-brand-700 underline"
+              >
+                {t('tryAgain')}
+              </button>
+              <button
+                type="button"
+                onClick={resetTerminal}
+                className="text-sm font-semibold text-brand-700 underline"
+              >
+                {t('setupAgain')}
+              </button>
+            </div>
           )}
         </div>
       </main>

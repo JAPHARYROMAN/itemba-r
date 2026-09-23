@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
+import { Card, ErrorState, PageHeader, SkeletonCardGrid, StatCard } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -76,6 +78,9 @@ function formatDateTime(value?: string) {
 }
 
 export default function CRMDashboardPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('crm.dashboard');
+  const beginRequest = useRequestGuard();
   const [stats, setStats] = useState<CRMSummary>({
     totalCustomers: 0,
     totalSuppliers: 0,
@@ -92,13 +97,16 @@ export default function CRMDashboardPage() {
   const [error, setError] = useState('');
 
   const loadDashboard = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setError('');
     setRefreshing(true);
     try {
       const [summaryResponse, readinessResponse] = await Promise.all([
-        fetch('/api/backend/crm/summary'),
-        fetch('/api/backend/crm/readiness'),
+        fetch('/api/backend/crm/summary', { signal: request.signal }),
+        fetch('/api/backend/crm/readiness', { signal: request.signal }),
       ]);
+      if (!request.current()) return;
       if (!summaryResponse.ok) throw new Error(`CRM summary failed (${summaryResponse.status})`);
       if (!readinessResponse.ok)
         throw new Error(`CRM readiness failed (${readinessResponse.status})`);
@@ -106,6 +114,7 @@ export default function CRMDashboardPage() {
         summaryResponse.json(),
         readinessResponse.json(),
       ]);
+      if (!request.current()) return;
       const data = summaryResult.data ?? summaryResult;
       setStats({
         totalCustomers: data.totalCustomers ?? 0,
@@ -119,18 +128,42 @@ export default function CRMDashboardPage() {
       });
       setReadiness(readinessResult.data ?? readinessResult);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load CRM/SRM dashboard';
-      setError(message);
-      showToast('error', 'CRM/SRM dashboard unavailable', message);
+      if (!request.current()) return;
+      setError(err instanceof Error ? err.message : 'Failed to load CRM/SRM dashboard');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request.current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  if (authLoading || !canView) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="CRM / SRM"
+          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
+        />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="CRM / SRM"
+          subtitle="Customer and supplier relationship command center, risk controls, statements, and follow-ups"
+        />
+        <ErrorState message={error} onRetry={() => void loadDashboard()} />
+      </div>
+    );
+  }
 
   if (loading)
     return (
@@ -186,12 +219,6 @@ export default function CRMDashboardPage() {
           </button>
         }
       />
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
 
       <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

@@ -9,6 +9,7 @@ describe('PostingEngineService', () => {
   // registry + balance-validation logic; $transaction is implemented as a
   // pass-through so the engine's `tx` shares the same fake client.
   const fakePrisma: any = {
+    $queryRaw: jest.fn(async () => []),
     journalEntry: {
       create: jest.fn(async (args: any) => ({
         id: 'je-1',
@@ -183,6 +184,7 @@ describe('PostingEngineService', () => {
       expect(result).toEqual({ id: 'je-1', journalNumber: 'JE-DIRECT-1' });
       expect(fakeAccountingControl.assertPostingAllowed).toHaveBeenCalledWith(
         expect.objectContaining({ companyId: 'co-1', moduleName: 'expenses' }),
+        fakePrisma,
       );
       expect(fakePrisma.journalEntry.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -211,6 +213,10 @@ describe('PostingEngineService', () => {
     it('validates the period lock inside the caller transaction before inserting', async () => {
       const callOrder: string[] = [];
       const tx: any = {
+        $queryRaw: jest.fn(async () => {
+          callOrder.push('lockPeriod');
+          return [];
+        }),
         journalEntry: {
           create: jest.fn(async (args: any) => {
             callOrder.push('create');
@@ -241,7 +247,11 @@ describe('PostingEngineService', () => {
       );
 
       // The lock validation ran, and ran before the JE insert on the same tx.
-      expect(callOrder).toEqual(['assertPostingAllowed', 'create']);
+      expect(callOrder).toEqual(['assertPostingAllowed', 'lockPeriod', 'create']);
+      expect(fakeAccountingControl.assertPostingAllowed).toHaveBeenLastCalledWith(
+        expect.objectContaining({ accountingPeriodId: 'period-1' }),
+        tx,
+      );
       expect(tx.journalEntry.create).toHaveBeenCalledTimes(1);
     });
 

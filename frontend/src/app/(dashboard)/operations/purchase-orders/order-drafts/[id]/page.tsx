@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui';
 import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { PurchaseOrderTabs } from '../../_components/PurchaseOrderTabs';
 import { SupplierOrderDraftForm } from '../../_components/SupplierOrderDraftForm';
 import { SupplierOrderDraftShareDialog } from '../../_components/SupplierOrderDraftShareDialog';
@@ -45,6 +47,8 @@ export default function SupplierOrderDraftDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { hasPermission } = useAuth();
+  const canView = hasPermission('supplier_order_drafts.view');
+  const beginRequest = useRequestGuard();
   const [draft, setDraft] = useState<SupplierOrderDraft | null>(null);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,16 +59,23 @@ export default function SupplierOrderDraftDetailPage() {
   const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async () => {
+    if (!canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
-      setDraft(await backendGet<SupplierOrderDraft>(`/supplier-order-drafts/${params.id}`));
+      const next = await backendGet<SupplierOrderDraft>(`/supplier-order-drafts/${params.id}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setDraft(next);
     } catch (cause) {
+      if (!request.current()) return;
       setError(cause instanceof Error ? cause.message : 'Could not load supplier order draft');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [params.id]);
+  }, [beginRequest, canView, params.id]);
 
   useEffect(() => {
     void load();
@@ -112,6 +123,12 @@ export default function SupplierOrderDraftDetailPage() {
     }
   }
 
+  if (!canView)
+    return (
+      <div className="p-6">
+        <PageHeader title="Supplier Order Draft" subtitle="Access restricted" />
+      </div>
+    );
   if (loading)
     return (
       <div className="space-y-5 p-6">
@@ -129,6 +146,11 @@ export default function SupplierOrderDraftDetailPage() {
         >
           Back to drafts
         </Link>
+        {error && (
+          <Btn className="mt-4" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        )}
       </div>
     );
 
@@ -326,7 +348,7 @@ export default function SupplierOrderDraftDetailPage() {
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-[13px]">
+          <WorkspaceTable className="w-full text-left text-[13px]">
             <thead
               style={{ background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-muted)' }}
             >
@@ -390,7 +412,7 @@ export default function SupplierOrderDraftDetailPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       </Card>
 

@@ -1,0 +1,73 @@
+/** Synthetic verification data; never submitted to a live API. */
+export const payslipFixture = {
+  entry: {
+    id: 'entry',
+    basePay: 1000000,
+    attendancePay: 20000,
+    overtimePay: 50000,
+    totalAllowances: 80000,
+    grossPay: 1150000,
+    totalDeductions: 230000,
+    netPay: 920000,
+    daysWorked: 22,
+    overtimeHours: 10,
+    status: 'CALCULATED',
+  },
+  employee: {
+    id: 'employee',
+    employeeCode: 'EXAMPLE-01',
+    fullName: 'Alex Example',
+    department: { name: 'Operations' },
+    position: { title: 'Operations coordinator' },
+    branch: { name: 'Example branch', code: 'EX' },
+    tin: 'SYNTHETIC-TIN',
+    nidaNumber: 'SYNTHETIC-NIDA',
+    nssfNumber: 'SYNTHETIC-NSSF',
+  },
+  company: {
+    name: 'Example Company (test fixture)',
+    code: 'EXAMPLE',
+    profile: {
+      tin: 'SYNTHETIC-COMPANY-TIN',
+      registeredAddress: 'Example address for layout verification',
+    },
+  },
+  payrollRun: {
+    id: 'run',
+    payrollRunNumber: 'PR-EXAMPLE-01',
+    runDate: '2026-09-28T00:00:00Z',
+    payrollPeriod: {
+      name: 'September 2026',
+      startDate: '2026-09-01T00:00:00Z',
+      endDate: '2026-09-30T00:00:00Z',
+      paymentDate: '2026-09-28T00:00:00Z',
+    },
+  },
+  allowances: [{ id: 'allowance', name: 'Transport allowance', taxable: true, amount: 80000 }],
+  manualDeductions: [
+    { id: 'deduction', name: 'Advance recovery', statutory: false, amount: 30000 },
+  ],
+  statutoryLines: [
+    {
+      id: 'nssf',
+      taxTypeCode: 'NSSF',
+      taxTypeName: 'Pension',
+      basis: 'GROSS_PAY',
+      basisAmount: 1150000,
+      employeeContribution: 115000,
+      employerContribution: 115000,
+      appliedRate: 0.1,
+    },
+    {
+      id: 'paye',
+      taxTypeCode: 'PAYE_MAINLAND',
+      taxTypeName: 'PAYE',
+      basis: 'TAXABLE_PAY',
+      basisAmount: 1035000,
+      employeeContribution: 85000,
+      employerContribution: 0,
+      appliedRate: null,
+    },
+  ],
+  totals: { employeeStatutory: 200000, employerStatutory: 115000, manualDeductions: 30000 },
+};

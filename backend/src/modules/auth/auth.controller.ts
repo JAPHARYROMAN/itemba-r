@@ -113,7 +113,7 @@ export class AuthController {
   @Get('me')
   @ApiOperation({ summary: 'Get current authenticated user profile' })
   me(@CurrentUser() user: AuthUser) {
-    return this.auth.getMe(user.id);
+    return this.auth.getMe(user.id).then(profile => ({ ...profile, roleScopes: user.roleScopes, companyAccess: user.companyAccess, divisionAccess: user.divisionAccess, branchAccess: user.branchAccess }));
   }
 
   // ─── Password Reset ───────────────────────────────────────────────────────

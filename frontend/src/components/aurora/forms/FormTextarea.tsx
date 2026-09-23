@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 /**
  * Shake the field once whenever a NEW error appears (not on every render with
@@ -29,7 +29,13 @@ function SuccessCheck() {
       style={{ color: 'var(--aurora-success, #10b981)' }}
       aria-hidden="true"
     >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <svg
+        className="w-4 h-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2.5}
+      >
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
       </svg>
     </span>
@@ -46,31 +52,75 @@ interface FormTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaEle
   success?: boolean;
 }
 
-export function FormTextarea({ label, error, help, required, fullWidth = true, success, id, className = '', ...props }: FormTextareaProps) {
-  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+export function FormTextarea({
+  label,
+  error,
+  help,
+  required,
+  fullWidth = true,
+  success,
+  id,
+  className = '',
+  ...props
+}: FormTextareaProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
   const shake = useShakeOnError(error);
   const showSuccess = !!success && !error;
   return (
     <div className={fullWidth ? 'w-full' : ''}>
       {label && (
-        <label htmlFor={inputId} className="block text-xs font-medium mb-1.5" style={{ color: 'var(--aurora-text-secondary)' }}>
+        <label
+          htmlFor={inputId}
+          className="block text-xs font-medium mb-1.5"
+          style={{ color: 'var(--aurora-text-secondary)' }}
+        >
           {label}
-          {required && <span className="ml-0.5" style={{ color: 'var(--aurora-danger)' }}>*</span>}
+          {required && (
+            <span aria-hidden="true" className="ml-0.5" style={{ color: 'var(--aurora-danger)' }}>
+              *
+            </span>
+          )}
         </label>
       )}
       <div className="relative">
         <textarea
           id={inputId}
+          aria-describedby={error ? `${inputId}-error` : help ? `${inputId}-help` : undefined}
           rows={3}
           aria-invalid={!!error}
+          aria-required={required}
           className={`aurora-input resize-y min-h-[80px] ${showSuccess ? 'pr-9' : ''} ${className}${shake}`}
-          style={error ? { borderColor: 'var(--aurora-danger)' } : showSuccess ? { borderColor: 'var(--aurora-success, #10b981)' } : {}}
+          style={
+            error
+              ? { borderColor: 'var(--aurora-danger)' }
+              : showSuccess
+                ? { borderColor: 'var(--aurora-success, #10b981)' }
+                : {}
+          }
           {...props}
         />
         {showSuccess && <SuccessCheck />}
       </div>
-      {error && <p role="alert" className="text-xs mt-1" style={{ color: 'var(--aurora-danger)' }}>{error}</p>}
-      {help && !error && <p className="text-xs mt-1" style={{ color: 'var(--aurora-text-muted)' }}>{help}</p>}
+      {error && (
+        <p
+          id={`${inputId}-error`}
+          role="alert"
+          className="text-xs mt-1"
+          style={{ color: 'var(--aurora-danger)' }}
+        >
+          {error}
+        </p>
+      )}
+      {help && !error && (
+        <p
+          id={`${inputId}-help`}
+          className="text-xs mt-1"
+          style={{ color: 'var(--aurora-text-muted)' }}
+        >
+          {help}
+        </p>
+      )}
     </div>
   );
 }

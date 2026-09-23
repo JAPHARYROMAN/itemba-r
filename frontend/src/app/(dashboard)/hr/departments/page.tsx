@@ -1,234 +1,240 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, StatusBadge, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner } from '@/components/ui';
+import { useEffect, useState } from 'react';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+
+import { Plus, RefreshCw } from 'lucide-react';
+import {
+  PageHeader,
+  PageToolbar,
+  FormSelect,
+  Modal,
+  Btn,
+  PermissionDeniedState,
+} from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
+import { backendDelete } from '@/lib/api-client';
+import '@/components/workspace/workspace.css';
 
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface Department {
-  id: string;
-  departmentCode: string;
-  name: string;
-  company?: { id: string; name: string } | string;
-  companyId?: string;
-  division?: { id: string; name: string; code?: string | null } | null;
-  divisionId?: string;
-  branch?: { id: string; name: string; code?: string | null } | null;
-  branchId?: string;
-  status: string;
-}
-
-interface FormState {
-  departmentCode: string;
-  name: string;
-  companyId: string;
-  divisionId: string;
-  branchId: string;
-  status: string;
-}
-
-const empty: FormState = { departmentCode: '', name: '', companyId: '', divisionId: '', branchId: '', status: 'ACTIVE' };
-
+import type { Department } from '@/features/payroll/department-workflow';
 export default function DepartmentsPage() {
-  const [rows, setRows] = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<Department | null>(null);
-  const [form, setForm] = useState<FormState>(empty);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [nextCodePreview, setNextCodePreview] = useState('');
-  const { branches, companyOptions, divisionOptions } = useOrgScope(form.companyId, { skipEmployees: true });
-  const branchOptions = useMemo(
-    () =>
-      branches
-        .filter((b) => !form.divisionId || b.divisionId === form.divisionId)
-        .map((b) => ({ value: b.id, label: `${b.code ? b.code + ' - ' : ''}${b.name}` })),
-    [branches, form.divisionId],
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('departments.view');
+  const canManage = hasPermission('departments.manage');
+  const stateKey = usePayrollStateKey('departments');
+  const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
+  const [search, setSearch] = useWorkspaceState(stateKey + '.search', '');
+  const [query, setQuery] = useState(search.trim());
+  const [status, setStatus] = useWorkspaceState(stateKey + '.status', '');
+  const [companyFilter, setCompanyFilter] = useWorkspaceState(stateKey + '.companyFilter', '');
+  const [deleting, setDeleting] = useState<Department | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingBusy, setDeletingBusy] = useState(false);
+  const [info, setInfo] = useState('');
+  const { companyOptions } = useOrgScope(undefined, {
+    skipEmployees: true,
+    skipDivisions: true,
+    skipBranches: true,
+  });
+  const {
+    rows,
+    total,
+    loading,
+    error: loadError,
+    reload: load,
+  } = useWorkspaceRecords<Department>(
+    '/hr/departments',
+    { page, limit: 20, search: query, status, companyId: companyFilter },
+    canRead,
   );
-
+  const entry = usePayrollDraftEditor('department', (message) => {
+    setInfo(message);
+    void load();
+  });
   useEffect(() => {
-    if (!form.companyId || editing) { setNextCodePreview(''); return; }
-    fetch(`/api/backend/hr/departments/next-code?companyId=${form.companyId}`).then(r => r.json())
-      .then(j => setNextCodePreview(j.data?.departmentCode ?? j.departmentCode ?? ''))
-      .catch(() => setNextCodePreview(''));
-  }, [form.companyId, editing]);
+    if (!loading && !loadError && page > 1 && !rows.length)
+      setPage(Math.max(1, Math.ceil(total / 20)));
+  }, [loading, loadError, rows.length, total, page, setPage]);
+  useEffect(() => {
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
 
-  const load = async () => {
-    setLoading(true);
-    const r = await fetch('/api/backend/hr/departments');
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const openCreate = () => { setEditing(null); setForm(empty); setError(''); setShowModal(true); };
-  const openEdit = (d: Department) => {
-    setEditing(d);
-    const companyId = typeof d.company === 'object' && d.company ? d.company.id : (d.companyId ?? '');
-    setForm({
-      departmentCode: d.departmentCode,
-      name: d.name,
-      companyId,
-      divisionId: d.division?.id ?? d.divisionId ?? '',
-      branchId: d.branch?.id ?? d.branchId ?? '',
-      status: d.status,
-    });
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setError('');
-    const url = editing ? `/api/backend/hr/departments/${editing.id}` : '/api/backend/hr/departments';
-    // Omit departmentCode entirely when blank — server auto-generates.
-    const body: Record<string, unknown> = {
-      name: form.name,
-      companyId: form.companyId,
-      status: form.status,
-    };
-    if (form.departmentCode.trim()) body.departmentCode = form.departmentCode.trim();
-    if (form.divisionId) body.divisionId = form.divisionId;
-    if (form.branchId) body.branchId = form.branchId;
+  async function remove() {
+    if (!deleting || !canManage || deletingBusy) return;
+    setDeletingBusy(true);
+    setDeleteError('');
+    setInfo('');
     try {
-      const res = await fetch(url, {
-        method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        const msg = Array.isArray(j?.message) ? j.message.join(', ') : (j?.message ?? `Save failed (HTTP ${res.status})`);
-        throw new Error(msg);
-      }
-      setShowModal(false);
-      load();
+      await backendDelete(`/hr/departments/${deleting.id}`);
+      setDeleting(null);
+      setInfo('Department deleted.');
+      void load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      setDeleteError(err instanceof Error ? err.message : 'Unable to delete department.');
     } finally {
-      setSaving(false);
+      setDeletingBusy(false);
     }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteId) return;
-    await fetch(`/api/backend/hr/departments/${deleteId}`, { method: 'DELETE' });
-    setDeleteId(null);
-    load();
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(p => ({ ...p, [k]: e.target.value }));
-
+  }
+  if (!canRead) return <PermissionDeniedState />;
   return (
-    <div className="p-6">
+    <div className="business-workspace record-workspace space-y-5">
       <PageHeader
         title="Departments"
-        subtitle="Manage organisational departments"
-        actions={<Btn variant="primary" onClick={openCreate}>+ Add Department</Btn>}
+        subtitle="Give every team a clear place in your organisation."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Departments' }]}
+        actions={
+          canManage && (
+            <Btn
+              icon={<Plus size={16} />}
+              onClick={() => entry.open({ kind: 'department', companyId: companyFilter })}
+            >
+              New department
+            </Btn>
+          )
+        }
       />
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead style={{ color: 'var(--aurora-text-muted)' }} className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className={thCls}>Code</th>
-                  <th className={thCls}>Name</th>
-                  <th className={thCls}>Company</th>
-                  <th className={thCls}>Division</th>
-                  <th className={thCls}>Branch / Location</th>
-                  <th className={thCls}>Status</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map(d => {
-                  const companyLabel = typeof d.company === 'object' && d.company ? d.company.name : (d.company ?? '—');
-                  const divisionLabel = d.division?.name ?? '—';
-                  const branchLabel = d.branch?.name ?? '—';
-                  return (
-                  <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-mono`}>{d.departmentCode}</td>
-                    <td className={`${tdCls} font-medium`}>{d.name}</td>
-                    <td className={tdCls}>{companyLabel}</td>
-                    <td className={tdCls}>{divisionLabel}</td>
-                    <td className={tdCls}>{branchLabel}</td>
-                    <td className={tdCls}><StatusBadge status={d.status} /></td>
-                    <td className={tdCls}>
-                      <div className="flex gap-2">
-                        <Btn variant="ghost" size="xs" onClick={() => openEdit(d)}>Edit</Btn>
-                        <Btn variant="danger" size="xs" onClick={() => setDeleteId(d.id)}>Delete</Btn>
-                      </div>
-                    </td>
-                  </tr>
-                  );
-                })}
-                {rows.length === 0 && (
-                  <tr><td colSpan={7} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No departments found</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
+      <div className="workspace-summary">
+        <div>
+          <span>Matching departments</span>
+          <strong>{loading || loadError ? '—' : total}</strong>
+        </div>
+        <div>
+          <span>Active on this page</span>
+          <strong>
+            {loading || loadError ? '—' : rows.filter((row) => row.status === 'ACTIVE').length}
+          </strong>
+        </div>
+      </div>
+      <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search departments by name…"
+        collapsibleFilters
+        activeFilterCount={Number(Boolean(companyFilter)) + Number(Boolean(status))}
+        filters={
+          <>
+            <FormSelect
+              label="Company filter"
+              value={companyFilter}
+              options={companyOptions}
+              placeholder="All companies"
+              onChange={(e) => {
+                setCompanyFilter(e.target.value);
+                setPage(1);
+              }}
+            />
+            <FormSelect
+              label="Status filter"
+              value={status}
+              options={[
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'INACTIVE', label: 'Inactive' },
+              ]}
+              placeholder="All statuses"
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+            />
+          </>
+        }
+        actions={
+          <Btn variant="secondary" icon={<RefreshCw size={15} />} disabled={loading} onClick={load}>
+            Reload
+          </Btn>
+        }
+      />
+      {info && (
+        <p role="status" className="workspace-notice">
+          {info}
+        </p>
+      )}
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.record'}
+        selectionScope={JSON.stringify([companyFilter, status, query])}
+        records={rows}
+        title="Departments"
+        name={(row) => row.name}
+        reference={(row) => row.departmentCode}
+        status={(row) => row.status}
+        fields={[
+          {
+            label: 'Company',
+            value: (row) =>
+              typeof row.company === 'object' ? row.company.name : row.company || '—',
+          },
+          { label: 'Division', value: (row) => row.division?.name || '—' },
+        ]}
+        details={[
+          { label: 'Branch / Location', value: (row) => row.branch?.name || 'Company-wide' },
+        ]}
+        actions={
+          canManage
+            ? (row) => (
+                <>
+                  <Btn onClick={() => entry.open({ kind: 'department', record: row })}>
+                    Edit department
+                  </Btn>
+                  <Btn
+                    variant="ghost"
+                    style={{ color: 'var(--aurora-danger)' }}
+                    onClick={() => {
+                      setDeleting(row);
+                      setDeleteError('');
+                    }}
+                  >
+                    Delete department
+                  </Btn>
+                </>
+              )
+            : undefined
+        }
+        loading={loading}
+        error={loadError}
+        onRetry={load}
+        empty="No departments match your search or filters."
+        page={page}
+        pageSize={20}
+        total={total}
+        onPage={setPage}
+      />
       <Modal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        title={editing ? 'Edit Department' : 'New Department'}
+        open={Boolean(deleting)}
+        onClose={() => {
+          if (!deletingBusy) setDeleting(null);
+        }}
+        title="Delete department"
         footer={
           <>
-            <Btn variant="secondary" type="button" onClick={() => setShowModal(false)}>Cancel</Btn>
-            <Btn variant="primary" type="submit" form="department-form" loading={saving}>Save</Btn>
+            <Btn variant="secondary" disabled={deletingBusy} onClick={() => setDeleting(null)}>
+              Cancel
+            </Btn>
+            <Btn variant="danger" loading={deletingBusy} onClick={remove}>
+              Delete department
+            </Btn>
           </>
         }
       >
-        <form id="department-form" onSubmit={handleSubmit} className="space-y-3">
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{error}</div>
-          )}
-          <FormSelect label="Company" required value={form.companyId}
-            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value, divisionId: '', branchId: '' }))}
-            options={companyOptions} placeholder="Select company" />
-          <FormInput
-            label="Department Code"
-            value={form.departmentCode}
-            onChange={f('departmentCode')}
-            placeholder={editing ? '' : (nextCodePreview ? `Auto: ${nextCodePreview}` : 'Auto-generated when blank')}
-            hint={editing ? '' : (nextCodePreview && !form.departmentCode ? `Will be assigned ${nextCodePreview}` : 'Leave blank to auto-generate, or enter a meaningful abbreviation (e.g. MWAN-OPS)')}
-          />
-          <FormInput label="Name" value={form.name} onChange={f('name')} required />
-          <FormSelect label="Division" value={form.divisionId}
-            onChange={(e) => setForm((p) => ({ ...p, divisionId: e.target.value, branchId: '' }))}
-            options={divisionOptions} placeholder={form.companyId ? 'Select division' : 'Select company first'} />
-          <FormSelect
-            label="Branch / Location"
-            value={form.branchId}
-            onChange={f('branchId')}
-            options={branchOptions}
-            placeholder={form.divisionId ? 'Select branch/location' : 'Select division first'}
-          />
-          <FormSelect label="Status" value={form.status} onChange={f('status')}
-            options={[{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} />
-        </form>
+        <p>
+          Delete <strong>{deleting?.name}</strong> ({deleting?.departmentCode})? It will be removed
+          from the department list.
+        </p>
+        {deleteError && (
+          <p role="alert" className="workspace-error mt-4">
+            {deleteError}
+          </p>
+        )}
       </Modal>
-
-      <ConfirmDialog
-        open={!!deleteId}
-        title="Delete Department"
-        message="Are you sure you want to delete this department? This cannot be undone."
-        onConfirm={handleDelete}
-        onCancel={() => setDeleteId(null)}
-      />
     </div>
   );
 }

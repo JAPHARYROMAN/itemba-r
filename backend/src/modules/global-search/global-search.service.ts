@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { DeskSearchService } from './desk-search.service';
 import {
   CompanyScopeService,
   CompanyScopedWhere,
@@ -11,6 +12,7 @@ type SearchInput = {
   q?: string;
   limit?: string;
   companyId?: string;
+  category?: string;
 };
 
 export type GlobalSearchResult = {
@@ -22,6 +24,14 @@ export type GlobalSearchResult = {
   href: string;
   badge?: string;
   date?: string;
+  file?: {
+    kind: 'document' | 'invoice-attachment';
+    id: string;
+    title: string;
+    fileName: string;
+    version?: number;
+    invoiceId?: string;
+  };
 };
 
 type SearchBucket = {
@@ -74,9 +84,12 @@ export class GlobalSearchService {
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
     private readonly organizationScope: OrganizationScopeService,
+    private readonly desks: DeskSearchService,
   ) {}
 
   async search(input: SearchInput, user: AuthUser): Promise<SearchResponse> {
+    if (input.category && !['all', 'files'].includes(input.category))
+      throw new BadRequestException('Choose all results or files.');
     const query = input.q?.trim() ?? '';
     if (query.length < 2) {
       return { query, total: 0, groups: [] };
@@ -84,25 +97,34 @@ export class GlobalSearchService {
 
     const limit = asLimit(input.limit);
     const companyWhere = await this.companyScope.companyWhereFor(user, input.companyId);
-    const groups = await Promise.all([
-      this.searchCompanies(query, user, limit),
-      this.searchCustomers(query, user, companyWhere, limit),
-      this.searchSuppliers(query, user, companyWhere, limit),
-      this.searchProducts(query, user, companyWhere, limit),
-      this.searchSalesOrders(query, user, companyWhere, limit),
-      this.searchPurchaseOrders(query, user, companyWhere, limit),
-      this.searchSupplierOrderDrafts(query, user, companyWhere, limit),
-      this.searchReceivables(query, user, companyWhere, limit),
-      this.searchPayables(query, user, companyWhere, limit),
-      this.searchJournalEntries(query, user, companyWhere, limit),
-      this.searchCashAccounts(query, user, companyWhere, limit),
-      this.searchEmployees(query, user, companyWhere, limit),
-      this.searchWestsidesDocuments(query, user, companyWhere, limit),
-      this.searchRecordBook(query, user, companyWhere, limit),
-      this.searchReports(query, user, limit),
+    if (input.category === 'files') {
+      const groups = (await this.desks.search(query, user, companyWhere, limit, true)).filter(
+        (group) => group.results.length > 0,
+      );
+      return { query, total: groups.reduce((sum, group) => sum + group.results.length, 0), groups };
+    }
+    const [legacyGroups, deskGroups] = await Promise.all([
+      Promise.all([
+        this.searchCompanies(query, user, limit),
+        this.searchCustomers(query, user, companyWhere, limit),
+        this.searchSuppliers(query, user, companyWhere, limit),
+        this.searchProducts(query, user, companyWhere, limit),
+        this.searchSalesOrders(query, user, companyWhere, limit),
+        this.searchPurchaseOrders(query, user, companyWhere, limit),
+        this.searchSupplierOrderDrafts(query, user, companyWhere, limit),
+        this.searchReceivables(query, user, companyWhere, limit),
+        this.searchPayables(query, user, companyWhere, limit),
+        this.searchJournalEntries(query, user, companyWhere, limit),
+        this.searchCashAccounts(query, user, companyWhere, limit),
+        this.searchEmployees(query, user, companyWhere, limit),
+        this.searchWestsidesDocuments(query, user, companyWhere, limit),
+        this.searchRecordBook(query, user, companyWhere, limit),
+        this.searchReports(query, user, limit),
+      ]),
+      this.desks.search(query, user, companyWhere, limit),
     ]);
 
-    const populated = groups.filter((group) => group.results.length > 0);
+    const populated = [...deskGroups, ...legacyGroups].filter((group) => group.results.length > 0);
     return {
       query,
       total: populated.reduce((sum, group) => sum + group.results.length, 0),
@@ -144,7 +166,7 @@ export class GlobalSearchService {
         module: 'Registry',
         title: row.name,
         subtitle: compactSubtitle([row.code, row.industryType]),
-        href: `/companies?search=${encodeSearch(row.code)}`,
+        href: `/companies/${encodeURIComponent(row.id)}`,
         badge: row.status,
       })),
     };
@@ -244,7 +266,7 @@ export class GlobalSearchService {
         module: 'Operations',
         title: row.name,
         subtitle: compactSubtitle([row.supplierCode, row.supplierType, row.company?.code]),
-        href: `/operations/suppliers?search=${encodeSearch(row.supplierCode)}`,
+        href: `/operations/suppliers/${encodeURIComponent(row.id)}`,
         badge: row.status,
       })),
     };
@@ -312,7 +334,7 @@ export class GlobalSearchService {
           row.productFamily?.name,
           row.company?.code,
         ]),
-        href: `/inventory?tab=catalog&view=products&search=${encodeSearch(row.productCode)}`,
+        href: `/inventory?tab=catalog&view=products&q=${encodeSearch(row.productCode)}`,
         badge: row.status,
       })),
     };
@@ -365,7 +387,7 @@ export class GlobalSearchService {
           `${row.currency} ${row.totalAmount}`,
           row.paymentStatus,
         ]),
-        href: `/operations/sales-orders/${row.id}/print`,
+        href: `/operations/sales-orders/${encodeURIComponent(row.id)}`,
         badge: row.status,
         date: dateOnly(row.orderDate),
       })),
@@ -438,7 +460,7 @@ export class GlobalSearchService {
           `${row.currency} ${row.totalAmount}`,
           row.paymentStatus,
         ]),
-        href: `/operations/purchase-orders/${row.id}/print`,
+        href: `/operations/purchase-orders/${encodeURIComponent(row.id)}`,
         badge: row.status,
         date: dateOnly(row.orderDate),
       })),

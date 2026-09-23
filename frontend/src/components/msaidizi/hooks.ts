@@ -23,6 +23,7 @@ import {
   listMsaidiziConversations,
 } from '@/lib/msaidizi-client';
 import type { MsaidiziCapabilities, MsaidiziConversationSummary } from '@/lib/msaidizi-types';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 function messageFrom(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -114,6 +115,7 @@ export function useMsaidiziConversations(
   const page = options.page ?? 1;
   const limit = options.limit ?? 20;
   const enabled = options.enabled ?? true;
+  const beginRequest = useRequestGuard();
 
   const [conversations, setConversations] = useState<MsaidiziConversationSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -125,20 +127,23 @@ export function useMsaidiziConversations(
       setLoading(false);
       return;
     }
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
       // `{ data, meta }`, not the house `PaginatedResult` — `normalizePaginated`
       // reads `pagination` and would zero the totals out silently.
       const listed = await listMsaidiziConversations({ page, limit });
+      if (!request.current()) return;
       setConversations(listed.data ?? []);
       setTotal(listed.meta ? listed.meta.total : 0);
     } catch (failure: unknown) {
+      if (!request.current()) return;
       setError(messageFrom(failure, 'Could not load your conversations.'));
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [enabled, page, limit]);
+  }, [beginRequest, enabled, page, limit]);
 
   useEffect(() => {
     void reload();

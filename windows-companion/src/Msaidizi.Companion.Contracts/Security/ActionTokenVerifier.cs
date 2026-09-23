@@ -507,6 +507,16 @@ public static class LeaseFenceContract
 
 public static class PayloadDigest
 {
+  /// <summary>
+  /// Validates a provisioned, canonical deployment pin. The all-zero sentinel
+  /// is not an enrolled measurement; generic digests and journal genesis hashes
+  /// retain their existing IsSha256Hex semantics.
+  /// </summary>
+  public static bool IsProvisionedSha256(string? value) =>
+    value is { Length: 64 }
+    && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f')
+    && value.Any(character => character != '0');
+
   public static string Sha256Hex(string value) =>
     Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 

@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useState } from 'react';
 import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendList } from '@/lib/api-client';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -13,16 +16,42 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function BackupRunsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('backup_runs.view');
+  const beginRequest = useRequestGuard();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setLoadError('');
+    try {
+      const rows = await backendList<any>('/backup-runs', { signal: request.signal });
+      if (!request.current()) return;
+      setData(rows);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load backup runs.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
+
   useEffect(() => {
-    backendList<any>('/backup-runs')
-      .then(setData)
-      .catch(() => setLoadError('Failed to load backup runs.'))
-      .finally(() => setLoading(false));
-  }, []);
+    void load();
+  }, [load]);
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Backup Runs</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -34,10 +63,10 @@ export default function BackupRunsPage() {
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : loadError ? (
-        <ErrorState message={loadError} />
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Run #</th>
@@ -68,7 +97,7 @@ export default function BackupRunsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
     </div>

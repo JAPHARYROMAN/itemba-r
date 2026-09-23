@@ -53,6 +53,12 @@ export class ProductsController {
     return this.service.findFamilies(query, user);
   }
 
+  @Get('families/:id')
+  @RequireAnyPermissions('products.view', 'operations.dashboard.view')
+  findOneFamily(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOneFamily(id, user);
+  }
+
   @Post('families')
   @RequirePermissions('product_categories.manage')
   createFamily(@Body() dto: CreateProductFamilyDto, @CurrentUser() user: AuthUser) {

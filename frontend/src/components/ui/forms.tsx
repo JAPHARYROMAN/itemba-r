@@ -1,135 +1,15 @@
 'use client';
-import React, { useEffect, useId, useRef, useState } from 'react';
-
-// ── Shared base styles ────────────────────────────────────────────────────────
-//
-// Inputs use the `aurora-input` utility class defined in globals.css, which
-// already wires up bg/text/border/placeholder against the theme tokens for
-// both light and dark mode. We only add layout + width here. transition-all
-// (not transition-colors) so the focus ring — a box-shadow — animates too.
-const INPUT_BASE =
-  'aurora-input w-full px-3 py-2 text-[13px] rounded-lg ' +
-  'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all duration-150 ' +
-  'disabled:cursor-not-allowed';
-
-/** Border/ring treatment for the three field states. */
-function fieldStateClasses(error?: string, success?: boolean) {
-  if (error) return 'border-red-400 focus:ring-red-400 focus:border-red-400';
-  if (success) return 'border-emerald-400 focus:ring-emerald-400 focus:border-emerald-400';
-  return '';
-}
-
-/**
- * Shake the field once whenever a NEW error appears (not on every render with
- * the same error, and never re-mounting the input — focus and value survive).
- */
-function useShakeOnError(error?: string) {
-  const [shaking, setShaking] = useState(false);
-  const prev = useRef(error);
-  useEffect(() => {
-    if (error && error !== prev.current) {
-      setShaking(true);
-      const t = setTimeout(() => setShaking(false), 320);
-      prev.current = error;
-      return () => clearTimeout(t);
-    }
-    prev.current = error;
-  }, [error]);
-  return shaking ? ' animate-shake' : '';
-}
-
-function SuccessCheck() {
-  return (
-    <span
-      className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 animate-fade-in"
-      style={{ color: 'var(--aurora-success, #10b981)' }}
-      aria-hidden="true"
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-      </svg>
-    </span>
-  );
-}
-
-// ── Label ─────────────────────────────────────────────────────────────────────
-function Label({
-  children,
-  required,
-  htmlFor,
-}: {
-  children: React.ReactNode;
-  required?: boolean;
-  htmlFor?: string;
-}) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className="block text-[12px] font-medium mb-1"
-      style={{ color: 'var(--aurora-text-secondary)' }}
-    >
-      {children}
-      {required && (
-        <span className="ml-0.5" style={{ color: 'var(--aurora-danger)' }}>
-          *
-        </span>
-      )}
-    </label>
-  );
-}
-
-function Hint({ children, id }: { children: React.ReactNode; id?: string }) {
-  return (
-    <p id={id} className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
-      {children}
-    </p>
-  );
-}
-
-function FieldError({ children, id }: { children: React.ReactNode; id?: string }) {
-  return (
-    <p
-      id={id}
-      role="alert"
-      className="mt-1 text-[11px] flex items-center gap-1 animate-fade-in"
-      style={{ color: 'var(--aurora-danger)' }}
-    >
-      <svg
-        className="w-3 h-3 flex-shrink-0"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2}
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="9" />
-        <path strokeLinecap="round" d="M12 8v4m0 4h.01" />
-      </svg>
-      <span>{children}</span>
-    </p>
-  );
-}
-
-/**
- * Field accessibility wiring shared by every form primitive: a stable id for
- * the control (caller-provided `id` wins), plus aria-invalid/aria-describedby
- * pointing at the error (announced via role="alert") or hint element.
- */
-function useFieldA11y(propsId: string | undefined, error?: string, hint?: string) {
-  const autoId = useId();
-  const fieldId = propsId ?? autoId;
-  const errorId = `${fieldId}-error`;
-  const hintId = `${fieldId}-hint`;
-  return {
-    fieldId,
-    errorId,
-    hintId,
-    aria: {
-      'aria-invalid': error ? true : undefined,
-      'aria-describedby': error ? errorId : hint ? hintId : undefined,
-    } as const,
-  };
-}
+import React, { useId, useRef, useState } from 'react';
+import {
+  FieldError,
+  Hint,
+  INPUT_BASE,
+  Label,
+  SuccessCheck,
+  fieldStateClasses,
+  useFieldA11y,
+  useShakeOnError,
+} from './field-chrome';
 
 // ── FormInput ─────────────────────────────────────────────────────────────────
 interface FormInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -222,31 +102,6 @@ export function FormTextarea({ label, hint, error, success, className = '', ...p
   );
 }
 
-// ── DateInput ─────────────────────────────────────────────────────────────────
-interface DateInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
-  label?: string;
-  hint?: string;
-  error?: string;
-}
-
-export function DateInput({ label, hint, error, className = '', ...props }: DateInputProps) {
-  const shake = useShakeOnError(error);
-  const { fieldId, errorId, hintId, aria } = useFieldA11y(props.id, error, hint);
-  return (
-    <div className={className}>
-      {label && <Label required={props.required} htmlFor={fieldId}>{label}</Label>}
-      <input
-        type="date"
-        className={`${INPUT_BASE} ${fieldStateClasses(error)}${shake}`}
-        {...props}
-        id={fieldId}
-        {...aria}
-      />
-      {error ? <FieldError id={errorId}>{error}</FieldError> : hint ? <Hint id={hintId}>{hint}</Hint> : null}
-    </div>
-  );
-}
-
 // ── FileUpload ────────────────────────────────────────────────────────────────
 interface FileUploadProps {
   label?: string;
@@ -260,26 +115,27 @@ interface FileUploadProps {
 }
 
 export function FileUpload({ label, hint, error, accept, multiple, onChange, disabled, className = '' }: FileUploadProps) {
+  const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
 
   function handleFiles(files: FileList | null) {
-    if (!files) return;
+    if (!files || disabled) return;
     setSelectedFiles(Array.from(files).map((f) => f.name));
     onChange?.(files);
   }
 
   return (
     <div className={className}>
-      {label && <Label>{label}</Label>}
+      {label && <Label htmlFor={id}>{label}</Label>}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
         onClick={() => !disabled && inputRef.current?.click()}
         className={`
-          relative flex flex-col items-center justify-center px-4 py-6 border-2 border-dashed rounded-xl cursor-pointer transition-colors
+          relative flex flex-col items-center justify-center px-4 py-6 border-2 border-dashed rounded-xl cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-brand-500
           ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
         `}
         style={{
@@ -313,12 +169,14 @@ export function FileUpload({ label, hint, error, accept, multiple, onChange, dis
           </div>
         )}
         <input
+          id={id}
+          aria-label={label || 'Upload file'}
           ref={inputRef}
           type="file"
           accept={accept}
           multiple={multiple}
           disabled={disabled}
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
           className="sr-only"
         />
       </div>

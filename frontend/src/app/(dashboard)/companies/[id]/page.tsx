@@ -1,10 +1,14 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useFormGuard, useGuardedRouter } from '@/components/workspace/unsaved-work-provider';
+import '@/components/workspace/workspace.css';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { AppIcon, type AppIconName, Card, ConfirmDialog } from '@/components/ui';
+import { AppIcon, Card, ConfirmDialog, ErrorState, FormDateField, PermissionDeniedState, type AppIconName } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { Modal } from '@/components/aurora/overlays/Modal';
 import { FormInput } from '@/components/aurora/forms/FormInput';
 import { FormSelect } from '@/components/aurora/forms/FormSelect';
@@ -103,7 +107,9 @@ const STATUS_STYLES: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-600'}`}>
+    <span
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-600'}`}
+    >
       {status}
     </span>
   );
@@ -138,70 +144,112 @@ const DIVISION_TYPE_COLORS: Record<string, string> = {
 
 function formatDate(iso: string | null) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-TZ', { year: 'numeric', month: 'long', day: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-TZ', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
-  const { hasPermission } = useAuth();
+  const router = useGuardedRouter();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('companies.read');
+  const beginRequest = useRequestGuard();
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'divisions' | 'documents' | 'profile'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'divisions' | 'documents' | 'profile'>(
+    'overview',
+  );
   const [editOpen, setEditOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingCompany, setDeletingCompany] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function loadCompany(options: { showLoading?: boolean } = {}) {
-    if (!id) return;
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     const showLoading = options.showLoading ?? !company;
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/backend/companies/${id}`);
+      const res = await fetch(`/api/backend/companies/${id}`, { signal: request.signal });
+      if (!request.current()) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      if (!request.current()) return;
       setCompany(json.data ?? null);
     } catch (e) {
+      if (!request.current()) return;
       setError(e instanceof Error ? e.message : 'Failed to load company');
     } finally {
-      if (showLoading) setLoading(false);
+      if (request.current() && showLoading) setLoading(false);
     }
   }
 
   useEffect(() => {
     void loadCompany();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, authLoading, canView]);
 
-  if (loading) return (
-    <>
-      <main className="p-6 flex-1 bg-slate-50 min-h-screen">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-slate-200 rounded w-1/3" />
-          <div className="h-4 bg-slate-100 rounded w-1/2" />
-          <div className="grid grid-cols-4 gap-4 mt-6">
-            {[1, 2, 3, 4].map((i) => <div key={i} className="h-20 bg-white rounded-xl border border-slate-200" />)}
+  if (authLoading) {
+    return (
+      <main className="business-workspace company-workspace">
+        <h1 className="text-2xl font-bold text-slate-900">Company</h1>
+        <p className="text-slate-500 mt-1">Loading</p>
+      </main>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <main className="business-workspace company-workspace">
+        <PermissionDeniedState />
+      </main>
+    );
+  }
+
+  if (loading)
+    return (
+      <>
+        <main className="business-workspace company-workspace">
+          <div className="animate-pulse space-y-4">
+            <div className="h-8 bg-slate-200 rounded w-1/3" />
+            <div className="h-4 bg-slate-100 rounded w-1/2" />
+            <div className="grid grid-cols-4 gap-4 mt-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-20 bg-white rounded-xl border border-slate-200" />
+              ))}
+            </div>
           </div>
-        </div>
-      </main>
-    </>
-  );
+        </main>
+      </>
+    );
 
-  if (error || !company) return (
-    <>
-      <main className="p-6 flex-1 bg-slate-50 min-h-screen">
-        <Card className="p-6">
-          <div className="text-red-600">{error ?? 'Company not found'}</div>
-          <button onClick={() => router.back()} className="mt-3 text-sm text-blue-600 hover:underline">← Back</button>
-        </Card>
-      </main>
-    </>
-  );
+  if (error || !company)
+    return (
+      <>
+        <main className="business-workspace company-workspace">
+          <Card className="p-6">
+            {error ? (
+              <ErrorState message={error} onRetry={() => void loadCompany()} />
+            ) : (
+              <div className="text-red-600">Company not found</div>
+            )}
+            <button
+              onClick={() => router.back()}
+              className="mt-3 text-sm text-blue-600 hover:underline"
+            >
+              ← Back
+            </button>
+          </Card>
+        </main>
+      </>
+    );
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -235,11 +283,12 @@ export default function CompanyDetailPage() {
 
   return (
     <>
-      <main className="p-6 flex-1 bg-slate-50 min-h-screen">
-
+      <main className="business-workspace company-workspace">
         {/* Breadcrumb */}
         <div className="text-xs text-slate-400 mb-4 flex items-center gap-1.5">
-          <Link href="/companies" className="hover:text-blue-600">Companies</Link>
+          <Link href="/companies" className="hover:text-blue-600">
+            Companies
+          </Link>
           <span>/</span>
           <span className="text-slate-600">{company.name}</span>
         </div>
@@ -301,11 +350,36 @@ export default function CompanyDetailPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
           {[
             { label: 'Divisions', value: company._count.divisions, icon: 'company' as AppIconName },
-            { label: 'Bank Accounts', value: company._count.bankAccounts, icon: 'bank' as AppIconName, sensitive: true },
-            { label: 'Loans', value: company._count.loans, icon: 'loan' as AppIconName, sensitive: true },
-            { label: 'Debts', value: company._count.debts, icon: 'trendDown' as AppIconName, sensitive: true },
-            { label: 'Contracts', value: company._count.contracts, icon: 'document' as AppIconName, sensitive: true },
-            { label: 'Fixed Assets', value: company._count.fixedAssets, icon: 'inventory' as AppIconName, sensitive: true },
+            {
+              label: 'Bank Accounts',
+              value: company._count.bankAccounts,
+              icon: 'bank' as AppIconName,
+              sensitive: true,
+            },
+            {
+              label: 'Loans',
+              value: company._count.loans,
+              icon: 'loan' as AppIconName,
+              sensitive: true,
+            },
+            {
+              label: 'Debts',
+              value: company._count.debts,
+              icon: 'trendDown' as AppIconName,
+              sensitive: true,
+            },
+            {
+              label: 'Contracts',
+              value: company._count.contracts,
+              icon: 'document' as AppIconName,
+              sensitive: true,
+            },
+            {
+              label: 'Fixed Assets',
+              value: company._count.fixedAssets,
+              icon: 'inventory' as AppIconName,
+              sensitive: true,
+            },
           ].map(({ label, value, icon, sensitive }) => {
             if (sensitive && !hasPermission('bank-accounts.read')) return null;
             return (
@@ -338,9 +412,15 @@ export default function CompanyDetailPage() {
         {/* Tab Content */}
         {activeTab === 'overview' && <OverviewTab company={company} />}
         {activeTab === 'divisions' && (
-          <DivisionsTab companyId={company.id} divisions={company.divisions} onChanged={loadCompany} />
+          <DivisionsTab
+            companyId={company.id}
+            divisions={company.divisions}
+            onChanged={loadCompany}
+          />
         )}
-        {activeTab === 'documents' && <DocumentsTab documents={company.documents} companyId={company.id} />}
+        {activeTab === 'documents' && (
+          <DocumentsTab documents={company.documents} companyId={company.id} />
+        )}
         {activeTab === 'profile' && (
           <LegalProfileTab
             profile={company.profile}
@@ -389,7 +469,12 @@ interface EditCompanyModalProps {
   onSaved: () => void;
 }
 
-function EditCompanyModal({ open, company, onClose, onSaved }: EditCompanyModalProps) {
+function EditCompanyModal({
+  open,
+  company,
+  onClose: closeWithoutGuard,
+  onSaved,
+}: EditCompanyModalProps) {
   const [form, setForm] = useState({
     name: company.name,
     code: company.code,
@@ -399,6 +484,8 @@ function EditCompanyModal({ open, company, onClose, onSaved }: EditCompanyModalP
     email: company.email ?? '',
     website: company.website ?? '',
   });
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -461,6 +548,7 @@ function EditCompanyModal({ open, company, onClose, onSaved }: EditCompanyModalP
           `HTTP ${res.status}`;
         throw new Error(message);
       }
+      draft.markSaved();
       onSaved();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Failed to save changes');
@@ -471,6 +559,7 @@ function EditCompanyModal({ open, company, onClose, onSaved }: EditCompanyModalP
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open={open}
       onClose={() => (submitting ? undefined : onClose())}
       title="Edit Company"
@@ -541,7 +630,10 @@ function EditCompanyModal({ open, company, onClose, onSaved }: EditCompanyModalP
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="flex justify-end gap-2 pt-2 border-t"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <button
             type="button"
             onClick={onClose}
@@ -582,7 +674,16 @@ function OverviewTab({ company }: { company: CompanyDetail }) {
           {company.website && (
             <div className="flex gap-3">
               <dt className="text-slate-500 w-32 shrink-0">Website</dt>
-              <dd><a href={company.website} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-xs">{company.website}</a></dd>
+              <dd>
+                <a
+                  href={company.website}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline text-xs"
+                >
+                  {company.website}
+                </a>
+              </dd>
             </div>
           )}
           <ProfileRow label="Registered" value={formatDate(company.createdAt)} />
@@ -600,7 +701,10 @@ function OverviewTab({ company }: { company: CompanyDetail }) {
             <ProfileRow label="TIN" value={company.profile.tin} mono />
             <ProfileRow label="VRN" value={company.profile.vrn} mono />
             <ProfileRow label="Tax Office" value={company.profile.taxOffice} />
-            <ProfileRow label="Incorporated" value={formatDate(company.profile.incorporationDate)} />
+            <ProfileRow
+              label="Incorporated"
+              value={formatDate(company.profile.incorporationDate)}
+            />
             <ProfileRow label="Biz License" value={company.profile.businessLicenseNumber} mono />
           </dl>
         ) : (
@@ -614,13 +718,22 @@ function OverviewTab({ company }: { company: CompanyDetail }) {
   );
 }
 
-function ProfileRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
-  if (!value && value !== 0) return (
-    <div className="flex gap-3">
-      <dt className="text-slate-400 w-32 shrink-0">{label}</dt>
-      <dd className="text-slate-300">—</dd>
-    </div>
-  );
+function ProfileRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
+  if (!value && value !== 0)
+    return (
+      <div className="flex gap-3">
+        <dt className="text-slate-400 w-32 shrink-0">{label}</dt>
+        <dd className="text-slate-300">—</dd>
+      </div>
+    );
   return (
     <div className="flex gap-3">
       <dt className="text-slate-500 w-32 shrink-0">{label}</dt>
@@ -647,11 +760,15 @@ function DivisionsTab({
   const canCreateBranch = hasPermission('branches.create');
   const canUpdateBranch = hasPermission('branches.update');
   const canDeleteBranch = hasPermission('branches.delete');
-  const [selectedDivisionId, setSelectedDivisionId] = useState<string | null>(divisions[0]?.id ?? null);
+  const [selectedDivisionId, setSelectedDivisionId] = useState<string | null>(
+    divisions[0]?.id ?? null,
+  );
   const [addingDivision, setAddingDivision] = useState(false);
   const [editingDivision, setEditingDivision] = useState<Division | null>(null);
   const [addingForDivision, setAddingForDivision] = useState<Division | null>(null);
-  const [editingBranch, setEditingBranch] = useState<{ division: Division; branch: Branch } | null>(null);
+  const [editingBranch, setEditingBranch] = useState<{ division: Division; branch: Branch } | null>(
+    null,
+  );
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deactivatingDivision, setDeactivatingDivision] = useState<Division | null>(null);
@@ -668,7 +785,8 @@ function DivisionsTab({
     }
   }, [divisions, selectedDivisionId]);
 
-  const selectedDivision = divisions.find((division) => division.id === selectedDivisionId) ?? divisions[0] ?? null;
+  const selectedDivision =
+    divisions.find((division) => division.id === selectedDivisionId) ?? divisions[0] ?? null;
 
   async function setDivisionActive(division: Division, isActive: boolean) {
     setBusyAction(`division:${division.id}:active`);
@@ -745,7 +863,9 @@ function DivisionsTab({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Divisions and branches</h2>
-            <p className="text-sm text-slate-500">Registry structure for operating divisions, branches, stations, and sites.</p>
+            <p className="text-sm text-slate-500">
+              Registry structure for operating divisions, branches, stations, and sites.
+            </p>
           </div>
           {canCreateDivision && (
             <button
@@ -759,7 +879,10 @@ function DivisionsTab({
         </div>
 
         {actionError && (
-          <div role="alert" className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700">
+          <div
+            role="alert"
+            className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700"
+          >
             {actionError}
           </div>
         )}
@@ -774,7 +897,10 @@ function DivisionsTab({
               {divisions.map((division) => {
                 const selected = selectedDivision?.id === division.id;
                 return (
-                  <Card key={division.id} className={`p-4 transition-colors ${selected ? 'border-blue-300 bg-blue-50/60' : ''}`}>
+                  <Card
+                    key={division.id}
+                    className={`p-4 transition-colors ${selected ? 'border-blue-300 bg-blue-50/60' : ''}`}
+                  >
                     <div className="flex items-start gap-3">
                       <button
                         type="button"
@@ -784,19 +910,28 @@ function DivisionsTab({
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-semibold text-slate-900">{division.name}</h3>
-                          <span className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[division.type] ?? DIVISION_TYPE_COLORS.OTHER}`}>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[division.type] ?? DIVISION_TYPE_COLORS.OTHER}`}
+                          >
                             {enumLabel(division.type)}
                           </span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${division.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-medium ${division.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}
+                          >
                             {division.isActive ? 'Active' : 'Inactive'}
                           </span>
                         </div>
-                        <div className="text-xs font-mono text-slate-400 mt-0.5">{division.code}</div>
+                        <div className="text-xs font-mono text-slate-400 mt-0.5">
+                          {division.code}
+                        </div>
                         {division.description && (
-                          <p className="text-sm text-slate-600 mt-2 line-clamp-2">{division.description}</p>
+                          <p className="text-sm text-slate-600 mt-2 line-clamp-2">
+                            {division.description}
+                          </p>
                         )}
                         <div className="mt-3 text-xs text-slate-500">
-                          {division._count.branches} branch{division._count.branches !== 1 ? 'es' : ''}
+                          {division._count.branches} branch
+                          {division._count.branches !== 1 ? 'es' : ''}
                         </div>
                       </button>
                       <div className="flex shrink-0 flex-col gap-1.5">
@@ -845,7 +980,9 @@ function DivisionsTab({
                             disabled={busyAction === `division:${division.id}:delete`}
                             className="px-2.5 py-1 text-xs border border-red-200 rounded-md text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
                           >
-                            {busyAction === `division:${division.id}:delete` ? 'Deleting' : 'Delete'}
+                            {busyAction === `division:${division.id}:delete`
+                              ? 'Deleting'
+                              : 'Delete'}
                           </button>
                         )}
                       </div>
@@ -862,16 +999,24 @@ function DivisionsTab({
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-semibold text-slate-900">{selectedDivision.name}</h3>
-                        <span className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[selectedDivision.type] ?? DIVISION_TYPE_COLORS.OTHER}`}>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded border font-medium ${DIVISION_TYPE_COLORS[selectedDivision.type] ?? DIVISION_TYPE_COLORS.OTHER}`}
+                        >
                           {enumLabel(selectedDivision.type)}
                         </span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${selectedDivision.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${selectedDivision.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}
+                        >
                           {selectedDivision.isActive ? 'Active' : 'Inactive'}
                         </span>
                       </div>
-                      <div className="text-xs font-mono text-slate-400 mt-0.5">{selectedDivision.code}</div>
+                      <div className="text-xs font-mono text-slate-400 mt-0.5">
+                        {selectedDivision.code}
+                      </div>
                       {selectedDivision.description && (
-                        <p className="text-sm text-slate-600 mt-2">{selectedDivision.description}</p>
+                        <p className="text-sm text-slate-600 mt-2">
+                          {selectedDivision.description}
+                        </p>
                       )}
                     </div>
                     {canCreateBranch && (
@@ -887,7 +1032,7 @@ function DivisionsTab({
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
+                    <WorkspaceTable className="min-w-full text-sm">
                       <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                           <th className="px-4 py-3 text-left font-medium">Code</th>
@@ -908,11 +1053,19 @@ function DivisionsTab({
                           </tr>
                         ) : (
                           selectedDivision.branches.map((branch) => (
-                            <tr key={branch.id} data-testid={`branch-row-${branch.code}`} className="hover:bg-slate-50">
-                              <td className="px-4 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">{branch.code}</td>
+                            <tr
+                              key={branch.id}
+                              data-testid={`branch-row-${branch.code}`}
+                              className="hover:bg-slate-50"
+                            >
+                              <td className="px-4 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">
+                                {branch.code}
+                              </td>
                               <td className="px-4 py-3">
                                 <div className="font-medium text-slate-900">{branch.name}</div>
-                                {branch.address && <div className="text-xs text-slate-500">{branch.address}</div>}
+                                {branch.address && (
+                                  <div className="text-xs text-slate-500">{branch.address}</div>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                                 <AppIcon
@@ -923,9 +1076,13 @@ function DivisionsTab({
                                 {enumLabel(branch.type)}
                               </td>
                               <td className="px-4 py-3 text-slate-600">{branch.location || '—'}</td>
-                              <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{branch.phone || '—'}</td>
+                              <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                                {branch.phone || '—'}
+                              </td>
                               <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${branch.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${branch.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}
+                                >
                                   {branch.isActive ? 'Active' : 'Inactive'}
                                 </span>
                               </td>
@@ -936,7 +1093,9 @@ function DivisionsTab({
                                       <button
                                         type="button"
                                         data-testid={`branch-edit-${branch.code}`}
-                                        onClick={() => setEditingBranch({ division: selectedDivision, branch })}
+                                        onClick={() =>
+                                          setEditingBranch({ division: selectedDivision, branch })
+                                        }
                                         className="text-xs text-blue-600 hover:underline"
                                       >
                                         Edit
@@ -945,8 +1104,15 @@ function DivisionsTab({
                                         type="button"
                                         data-testid={`branch-toggle-${branch.code}`}
                                         onClick={() => setBranchActive(branch, !branch.isActive)}
-                                        disabled={busyAction === `branch:${branch.id}:active` || (!branch.isActive && !selectedDivision.isActive)}
-                                        title={!branch.isActive && !selectedDivision.isActive ? 'Activate the parent division first' : undefined}
+                                        disabled={
+                                          busyAction === `branch:${branch.id}:active` ||
+                                          (!branch.isActive && !selectedDivision.isActive)
+                                        }
+                                        title={
+                                          !branch.isActive && !selectedDivision.isActive
+                                            ? 'Activate the parent division first'
+                                            : undefined
+                                        }
                                         className="text-xs text-slate-600 hover:underline disabled:opacity-50"
                                       >
                                         {busyAction === `branch:${branch.id}:active`
@@ -965,7 +1131,9 @@ function DivisionsTab({
                                       disabled={busyAction === `branch:${branch.id}:delete`}
                                       className="text-xs text-red-600 hover:underline disabled:opacity-50"
                                     >
-                                      {busyAction === `branch:${branch.id}:delete` ? 'Deleting' : 'Delete'}
+                                      {busyAction === `branch:${branch.id}:delete`
+                                        ? 'Deleting'
+                                        : 'Delete'}
                                     </button>
                                   )}
                                 </div>
@@ -974,7 +1142,7 @@ function DivisionsTab({
                           ))
                         )}
                       </tbody>
-                    </table>
+                    </WorkspaceTable>
                   </div>
                 </>
               ) : (
@@ -1116,7 +1284,10 @@ function TypeCodeConfirmModal({
           placeholder={code}
           autoComplete="off"
         />
-        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="flex justify-end gap-2 pt-2 border-t"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <button
             type="button"
             onClick={onCancel}
@@ -1177,7 +1348,7 @@ const BRANCH_TYPES: Array<{ value: string; label: string }> = [
 function DivisionEditorModal({
   companyId,
   division,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   companyId: string;
@@ -1192,6 +1363,8 @@ function DivisionEditorModal({
     type: division?.type ?? 'OTHER',
     description: division?.description ?? '',
   });
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -1211,13 +1384,17 @@ function DivisionEditorModal({
         description: form.description.trim() || undefined,
       };
       if (!editing) payload.companyId = companyId;
-      const res = await fetch(editing ? `/api/backend/divisions/${division!.id}` : '/api/backend/divisions', {
-        method: editing ? 'PATCH' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        editing ? `/api/backend/divisions/${division!.id}` : '/api/backend/divisions',
+        {
+          method: editing ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      draft.markSaved();
       onSaved();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Failed to save division');
@@ -1228,6 +1405,7 @@ function DivisionEditorModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open={true}
       onClose={() => (submitting ? undefined : onClose())}
       title={editing ? `Edit Division - ${division!.name}` : 'Add Division'}
@@ -1264,12 +1442,18 @@ function DivisionEditorModal({
         />
 
         {submitError && (
-          <div role="alert" className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700">
+          <div
+            role="alert"
+            className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700"
+          >
             {submitError}
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="flex justify-end gap-2 pt-2 border-t"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <button
             type="button"
             onClick={onClose}
@@ -1302,7 +1486,7 @@ function defaultBranchTypeForDivision(divisionType: string) {
 function BranchEditorModal({
   division,
   branch,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   division: Division;
@@ -1319,6 +1503,8 @@ function BranchEditorModal({
     address: branch?.address ?? '',
     phone: branch?.phone ?? '',
   });
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -1340,13 +1526,17 @@ function BranchEditorModal({
         phone: form.phone.trim() || undefined,
       };
       if (!editing) payload.divisionId = division.id;
-      const res = await fetch(editing ? `/api/backend/branches/${branch!.id}` : '/api/backend/branches', {
-        method: editing ? 'PATCH' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        editing ? `/api/backend/branches/${branch!.id}` : '/api/backend/branches',
+        {
+          method: editing ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(apiErrorMessage(json, res.status));
+      draft.markSaved();
       onSaved();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Failed to save branch');
@@ -1357,6 +1547,7 @@ function BranchEditorModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open={true}
       onClose={() => (submitting ? undefined : onClose())}
       title={editing ? `Edit Branch - ${branch!.name}` : `Add Branch to ${division.name}`}
@@ -1409,12 +1600,18 @@ function BranchEditorModal({
         </div>
 
         {submitError && (
-          <div role="alert" className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700">
+          <div
+            role="alert"
+            className="text-sm rounded-lg p-3 border border-red-200 bg-red-50 text-red-700"
+          >
             {submitError}
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--aurora-border)' }}>
+        <div
+          className="flex justify-end gap-2 pt-2 border-t"
+          style={{ borderColor: 'var(--aurora-border)' }}
+        >
           <button
             type="button"
             onClick={onClose}
@@ -1447,16 +1644,19 @@ function DocumentsTab({ documents, companyId }: { documents: Document[]; company
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document',
   };
 
-  if (documents.length === 0) return (
-    <Card className="p-8 text-center">
-      <div className="text-slate-400 text-sm">No documents attached to this company yet.</div>
-      <div className="text-xs text-slate-300 mt-1">Documents can be uploaded via the Group Control Center.</div>
-    </Card>
-  );
+  if (documents.length === 0)
+    return (
+      <Card className="p-8 text-center">
+        <div className="text-slate-400 text-sm">No documents attached to this company yet.</div>
+        <div className="text-xs text-slate-300 mt-1">
+          Documents can be uploaded via the Group Control Center.
+        </div>
+      </Card>
+    );
 
   return (
     <Card>
-      <table className="w-full text-sm">
+      <WorkspaceTable className="w-full text-sm">
         <thead className="text-left text-slate-500 border-b border-slate-200 bg-slate-50">
           <tr>
             <th className="px-5 py-3">Document</th>
@@ -1480,7 +1680,7 @@ function DocumentsTab({ documents, companyId }: { documents: Document[]; company
             </tr>
           ))}
         </tbody>
-      </table>
+      </WorkspaceTable>
     </Card>
   );
 }
@@ -1510,8 +1710,8 @@ function LegalProfileTab({
             <AppIcon name="document" size={36} className="mx-auto mb-2 text-slate-400" />
             <div className="font-semibold text-slate-700">No Legal Profile</div>
             <div className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
-              This company does not yet have a legal profile configured. Add the BRELA
-              registration details, TIN, registered address, and other statutory information here.
+              This company does not yet have a legal profile configured. Add the BRELA registration
+              details, TIN, registered address, and other statutory information here.
             </div>
             {canEdit && (
               <button
@@ -1568,7 +1768,10 @@ function LegalProfileTab({
               <ProfileRow label="TIN" value={profile.tin} mono />
               <ProfileRow label="VRN" value={profile.vrn} mono />
               <ProfileRow label="Business License" value={profile.businessLicenseNumber} mono />
-              <ProfileRow label="Incorporation Date" value={formatDate(profile.incorporationDate)} />
+              <ProfileRow
+                label="Incorporation Date"
+                value={formatDate(profile.incorporationDate)}
+              />
               <ProfileRow label="Status" value={<StatusBadge status={profile.status} />} />
             </dl>
           </Card>
@@ -1592,7 +1795,9 @@ function LegalProfileTab({
               {profile.notes && (
                 <div>
                   <dt className="text-slate-500 mb-1">Notes</dt>
-                  <dd className="text-slate-700 text-xs bg-slate-50 p-2 rounded border border-slate-100">{profile.notes}</dd>
+                  <dd className="text-slate-700 text-xs bg-slate-50 p-2 rounded border border-slate-100">
+                    {profile.notes}
+                  </dd>
                 </div>
               )}
             </dl>
@@ -1642,7 +1847,7 @@ function LegalProfileEditorModal({
   companyId,
   companyName,
   profile,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: LegalProfileEditorModalProps) {
   const isCreate = !profile;
@@ -1663,6 +1868,8 @@ function LegalProfileEditorModal({
     status: profile?.status ?? 'ACTIVE',
     notes: profile?.notes ?? '',
   });
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -1671,7 +1878,12 @@ function LegalProfileEditorModal({
     setSubmitError(null);
 
     // Required fields per UpsertCompanyProfileDto.
-    if (!form.registeredName.trim() || !form.brelaRegNumber.trim() || !form.tin.trim() || !form.registeredAddress.trim()) {
+    if (
+      !form.registeredName.trim() ||
+      !form.brelaRegNumber.trim() ||
+      !form.tin.trim() ||
+      !form.registeredAddress.trim()
+    ) {
       setSubmitError('Registered Name, BRELA No., TIN, and Registered Address are required.');
       return;
     }
@@ -1715,6 +1927,7 @@ function LegalProfileEditorModal({
           `HTTP ${res.status}`;
         throw new Error(message);
       }
+      draft.markSaved();
       onSaved();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Failed to save legal profile');
@@ -1725,144 +1938,146 @@ function LegalProfileEditorModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open={true}
       onClose={() => (submitting ? undefined : onClose())}
-      title={isCreate ? `Add Legal Profile — ${companyName}` : `Edit Legal Profile — ${companyName}`}
+      title={
+        isCreate ? `Add Legal Profile — ${companyName}` : `Edit Legal Profile — ${companyName}`
+      }
       description="BRELA, TIN, statutory address, and tax-office details."
       size="lg"
     >
       <form onSubmit={onSubmit} className="flex flex-col max-h-[80vh]">
         <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
-        <section>
-          <h4 className="text-sm font-semibold text-slate-800 mb-3">Registration</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormInput
-              label="Registered Name"
-              required
-              value={form.registeredName}
-              onChange={(e) => setForm({ ...form, registeredName: e.target.value })}
-              help="Exact name on the BRELA certificate."
-            />
-            <FormInput
-              label="Trading Name"
-              value={form.tradingName}
-              onChange={(e) => setForm({ ...form, tradingName: e.target.value })}
-              help="Optional. Public-facing name if different from registered."
-            />
-            <FormInput
-              label="BRELA No."
-              required
-              value={form.brelaRegNumber}
-              onChange={(e) => setForm({ ...form, brelaRegNumber: e.target.value })}
-            />
-            <FormInput
-              label="TIN"
-              required
-              value={form.tin}
-              onChange={(e) => setForm({ ...form, tin: e.target.value })}
-            />
-            <FormInput
-              label="VRN"
-              value={form.vrn}
-              onChange={(e) => setForm({ ...form, vrn: e.target.value })}
-              help="VAT registration number, if registered for VAT."
-            />
-            <FormInput
-              label="Business License Number"
-              value={form.businessLicenseNumber}
-              onChange={(e) => setForm({ ...form, businessLicenseNumber: e.target.value })}
-            />
-            <FormInput
-              label="Incorporation Date"
-              type="date"
-              value={form.incorporationDate}
-              onChange={(e) => setForm({ ...form, incorporationDate: e.target.value })}
-            />
-            <FormSelect
-              label="Status"
-              required
-              options={COMPANY_STATUS_OPTIONS}
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-            />
-          </div>
-        </section>
+          <section>
+            <h4 className="text-sm font-semibold text-slate-800 mb-3">Registration</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormInput
+                label="Registered Name"
+                required
+                value={form.registeredName}
+                onChange={(e) => setForm({ ...form, registeredName: e.target.value })}
+                help="Exact name on the BRELA certificate."
+              />
+              <FormInput
+                label="Trading Name"
+                value={form.tradingName}
+                onChange={(e) => setForm({ ...form, tradingName: e.target.value })}
+                help="Optional. Public-facing name if different from registered."
+              />
+              <FormInput
+                label="BRELA No."
+                required
+                value={form.brelaRegNumber}
+                onChange={(e) => setForm({ ...form, brelaRegNumber: e.target.value })}
+              />
+              <FormInput
+                label="TIN"
+                required
+                value={form.tin}
+                onChange={(e) => setForm({ ...form, tin: e.target.value })}
+              />
+              <FormInput
+                label="VRN"
+                value={form.vrn}
+                onChange={(e) => setForm({ ...form, vrn: e.target.value })}
+                help="VAT registration number, if registered for VAT."
+              />
+              <FormInput
+                label="Business License Number"
+                value={form.businessLicenseNumber}
+                onChange={(e) => setForm({ ...form, businessLicenseNumber: e.target.value })}
+              />
+              <FormDateField
+                label="Incorporation Date"
+                value={form.incorporationDate}
+                onChange={(value) => setForm({ ...form, incorporationDate: value })}
+              />
+              <FormSelect
+                label="Status"
+                required
+                options={COMPANY_STATUS_OPTIONS}
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+              />
+            </div>
+          </section>
 
-        <section>
-          <h4 className="text-sm font-semibold text-slate-800 mb-3">Address & Tax</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormInput
-              label="Registered Address"
-              required
-              value={form.registeredAddress}
-              onChange={(e) => setForm({ ...form, registeredAddress: e.target.value })}
-              className="sm:col-span-2"
-            />
-            <FormInput
-              label="Postal Address"
-              value={form.postalAddress}
-              onChange={(e) => setForm({ ...form, postalAddress: e.target.value })}
-            />
-            <FormInput
-              label="Tax Office"
-              value={form.taxOffice}
-              onChange={(e) => setForm({ ...form, taxOffice: e.target.value })}
-              help="e.g. Ilala Tax Region, TRA Mwanza"
-            />
-            <FormInput
-              label="Nature of Business"
-              value={form.natureOfBusiness}
-              onChange={(e) => setForm({ ...form, natureOfBusiness: e.target.value })}
-              className="sm:col-span-2"
-              help="Free-text description per the BRELA filing."
-            />
-          </div>
-        </section>
+          <section>
+            <h4 className="text-sm font-semibold text-slate-800 mb-3">Address & Tax</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormInput
+                label="Registered Address"
+                required
+                value={form.registeredAddress}
+                onChange={(e) => setForm({ ...form, registeredAddress: e.target.value })}
+                className="sm:col-span-2"
+              />
+              <FormInput
+                label="Postal Address"
+                value={form.postalAddress}
+                onChange={(e) => setForm({ ...form, postalAddress: e.target.value })}
+              />
+              <FormInput
+                label="Tax Office"
+                value={form.taxOffice}
+                onChange={(e) => setForm({ ...form, taxOffice: e.target.value })}
+                help="e.g. Ilala Tax Region, TRA Mwanza"
+              />
+              <FormInput
+                label="Nature of Business"
+                value={form.natureOfBusiness}
+                onChange={(e) => setForm({ ...form, natureOfBusiness: e.target.value })}
+                className="sm:col-span-2"
+                help="Free-text description per the BRELA filing."
+              />
+            </div>
+          </section>
 
-        <section>
-          <h4 className="text-sm font-semibold text-slate-800 mb-3">Capital</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <FormInput
-              label="Authorized Capital"
-              type="number"
-              step="0.01"
-              value={form.authorizedCapital}
-              onChange={(e) => setForm({ ...form, authorizedCapital: e.target.value })}
-              className="sm:col-span-2"
-            />
-            <FormSelect
-              label="Currency"
-              options={CURRENCY_OPTIONS}
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value })}
-            />
-          </div>
-        </section>
+          <section>
+            <h4 className="text-sm font-semibold text-slate-800 mb-3">Capital</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <FormInput
+                label="Authorized Capital"
+                type="number"
+                step="0.01"
+                value={form.authorizedCapital}
+                onChange={(e) => setForm({ ...form, authorizedCapital: e.target.value })}
+                className="sm:col-span-2"
+              />
+              <FormSelect
+                label="Currency"
+                options={CURRENCY_OPTIONS}
+                value={form.currency}
+                onChange={(e) => setForm({ ...form, currency: e.target.value })}
+              />
+            </div>
+          </section>
 
-        <section>
-          <h4 className="text-sm font-semibold text-slate-800 mb-3">Notes</h4>
-          <textarea
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            rows={3}
-            placeholder="Internal notes — only visible to authorized users."
-            className="aurora-input w-full px-3 py-2 text-sm rounded-lg"
-          />
-        </section>
+          <section>
+            <h4 className="text-sm font-semibold text-slate-800 mb-3">Notes</h4>
+            <textarea aria-label="Internal notes — only visible to authorized users."
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={3}
+              placeholder="Internal notes — only visible to authorized users."
+              className="aurora-input w-full px-3 py-2 text-sm rounded-lg"
+            />
+          </section>
 
-        {submitError && (
-          <div
-            role="alert"
-            className="text-sm rounded-lg p-3 border"
-            style={{
-              color: 'var(--aurora-danger)',
-              borderColor: 'var(--aurora-danger)',
-              background: 'var(--aurora-danger-bg, #fef2f2)',
-            }}
-          >
-            {submitError}
-          </div>
-        )}
+          {submitError && (
+            <div
+              role="alert"
+              className="text-sm rounded-lg p-3 border"
+              style={{
+                color: 'var(--aurora-danger)',
+                borderColor: 'var(--aurora-danger)',
+                background: 'var(--aurora-danger-bg, #fef2f2)',
+              }}
+            >
+              {submitError}
+            </div>
+          )}
         </div>
 
         <div

@@ -18,10 +18,12 @@
  */
 
 import fs from 'node:fs';
-
-const API = process.env.MSAIDIZI_API ?? 'http://127.0.0.1:3014/api/v1';
-const EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@itemba.local';
-const PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe!123';
+import { scoreToolSearchCase } from './tool-search-score.mjs';
+import {
+  assertReadOnlyBenchmark,
+  benchmarkConnection,
+  benchmarkJson,
+} from './tool-search-client.mjs';
 
 /**
  * `want` is a regex over tool names, matched against the live capability list.
@@ -58,10 +60,11 @@ const QUESTIONS = [
   },
   {
     id: 'spending',
+    capabilityId: 'ExpensesController.findAll',
     ask: 'What did we spend money on recently?',
-    want: /Expense/i,
+    want: /^Expenses_findAll(?:_\d+)*$/,
     why: 'near miss - "spend" vs "expenses"',
-    first: /Expense/i,
+    first: /^Expenses_findAll(?:_\d+)*$/,
     maxCalls: 2,
   },
   {
@@ -87,38 +90,38 @@ if (requestedCase && selectedQuestions.length === 0) {
 }
 
 async function login() {
-  const res = await fetch(`${API}/auth/login`, {
+  const { body } = await benchmarkJson(`${connection.api}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+    body: JSON.stringify({ email: connection.email, password: connection.password }),
   });
-  if (!res.ok) {
-    throw new Error(`login failed (${res.status}) - set SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD`);
+  if (typeof body?.data?.accessToken !== 'string' || !body.data.accessToken) {
+    throw new Error('Login response did not contain an access token');
   }
-  return (await res.json()).data.accessToken;
+  return body.data.accessToken;
 }
 
 async function capabilities(token) {
-  const res = await fetch(`${API}/msaidizi/capabilities`, {
+  const { body } = await benchmarkJson(`${connection.api}/msaidizi/capabilities`, {
     headers: { authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`capabilities failed (${res.status})`);
-  return (await res.json()).data ?? {};
+  return body?.data ?? {};
 }
 
 async function ask(token, message) {
   const started = Date.now();
-  const res = await fetch(`${API}/msaidizi/ask`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ message }),
-  });
-  const body = await res.json();
-  return { result: body.data ?? body, ms: Date.now() - started, status: res.status };
+  const { body, status } = await benchmarkJson(
+    `${connection.api}/msaidizi/ask`,
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ message }),
+    },
+    { timeoutMs: 180_000 },
+  );
+  return { result: body.data ?? body, ms: Date.now() - started, status };
 }
 
-const toolsCalled = (r) =>
-  (r.events ?? []).filter((e) => e.type === 'tool_call').map((e) => e.tool);
 const answerText = (r) =>
   (r.events ?? [])
     .filter((e) => e.type === 'text')
@@ -176,20 +179,28 @@ if (!out) {
   process.exit(2);
 }
 
+const connection = benchmarkConnection();
+await benchmarkJson(`${connection.api}/health/ready`);
 const token = await login();
 const caps = await capabilities(token);
+assertReadOnlyBenchmark(caps);
 const names = (caps.capabilities ?? []).map((c) => c.name);
 
 console.log(`permitted: ${caps.narrowing?.permitted}   per run: ${caps.narrowing?.perRun}`);
 console.log(`narrowing active: ${caps.narrowing?.active}   write mode: ${caps.writeMode}\n`);
 
 const label = process.env.RUN_LABEL ?? (out.includes('search') ? 'search' : 'baseline');
+const requireFastPath = process.env.MSAIDIZI_BENCHMARK_REQUIRE_FAST_PATH === 'true';
 const cases = [];
 
 for (const q of selectedQuestions) {
   // Resolve the expectation before judging, so a stale regex reports itself
   // rather than masquerading as a miss.
-  const resolvable = names.filter((n) => q.want.test(n));
+  const resolvable = q.capabilityId
+    ? (caps.capabilities ?? [])
+        .filter((entry) => entry.capabilityId === q.capabilityId)
+        .map((entry) => entry.name)
+    : names.filter((n) => q.want.test(n));
   if (resolvable.length === 0) {
     console.log(
       `? ${q.id.padEnd(18)} EXPECTATION UNRESOLVABLE - nothing permitted matches ${q.want}`,
@@ -198,21 +209,27 @@ for (const q of selectedQuestions) {
     continue;
   }
 
-  const { result, ms } = await ask(token, q.ask);
-  const called = toolsCalled(result);
-  const reachedExpected = called.some((t) => q.want.test(t));
-  const firstMatched =
-    q.first === undefined || (called[0] !== undefined && q.first.test(called[0]));
-  const withinCallBudget = q.maxCalls === undefined || called.length <= q.maxCalls;
-  const hit = reachedExpected && firstMatched && withinCallBudget;
+  const { result, ms, status } = await ask(token, q.ask);
+  const resolvedMatcher = { test: (name) => resolvable.includes(name) };
+  const score = scoreToolSearchCase(
+    {
+      ...q,
+      want: resolvedMatcher,
+      ...(q.capabilityId && q.first ? { first: resolvedMatcher } : {}),
+    },
+    result,
+    status,
+    { requireFastPath },
+  );
+  const { called, firstMatched, withinCallBudget, hit } = score;
 
   cases.push({
     id: q.id,
     why: q.why,
     ask: q.ask,
     want: String(q.want),
-    called,
-    hit,
+    ...score,
+    status,
     ...(q.first ? { first: String(q.first), firstMatched } : {}),
     ...(q.maxCalls ? { maxCalls: q.maxCalls, withinCallBudget } : {}),
     ms,
@@ -228,12 +245,24 @@ for (const q of selectedQuestions) {
     console.log(`    wanted ${q.want} - ${q.why}`);
     if (!firstMatched) console.log(`    first call must match ${q.first}`);
     if (!withinCallBudget) console.log(`    call budget ${q.maxCalls}, observed ${called.length}`);
+    if (!score.completed)
+      console.log(`    incomplete run: HTTP ${status}, reason ${result.reason}`);
+    if (!score.reachedExpected) console.log('    no successful expected-tool result');
+    if (!score.answerPresent) console.log('    no answer returned');
+    if (!score.fastPath)
+      console.log(
+        `    fast path unproved: ${score.searchCalls} searches, trace available ${score.traceAvailable}`,
+      );
   }
 }
 
 fs.writeFileSync(
   out,
-  JSON.stringify({ label, at: new Date().toISOString(), caps: caps.narrowing, cases }, null, 2),
+  JSON.stringify(
+    { label, at: new Date().toISOString(), requireFastPath, caps: caps.narrowing, cases },
+    null,
+    2,
+  ),
 );
 
 const hits = cases.filter((c) => c.hit).length;

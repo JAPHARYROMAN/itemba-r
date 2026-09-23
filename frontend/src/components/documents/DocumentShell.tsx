@@ -50,6 +50,8 @@ interface DocumentShellProps {
   actions?: React.ReactNode;
   footerNote?: string;
   generatedAt?: Date;
+  /** Surplus rows, rendered as a second sheet so page 1 can keep its tail. */
+  continuation?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -70,6 +72,7 @@ export function DocumentShell({
   actions,
   footerNote,
   generatedAt = new Date(),
+  continuation,
   children,
 }: DocumentShellProps) {
   const groupName = organization.groupName ?? 'ITEMBA GROUP';
@@ -110,7 +113,10 @@ export function DocumentShell({
         </div>
       )}
 
-      <article className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] bg-white px-8 py-8 text-slate-950 shadow-sm ring-1 ring-slate-200 sm:px-10">
+      <article
+        className="document-page mx-auto min-h-[297mm] w-full max-w-[210mm] bg-white px-8 py-8 text-slate-950 shadow-sm ring-1 ring-slate-200 sm:px-10"
+        data-document-sheet="1"
+      >
         <header className="document-letterhead flex flex-col gap-5 border-b border-slate-950 pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-4">
             <div className="document-logo-box flex h-20 w-20 flex-shrink-0 items-center justify-center border-2 border-slate-950 p-2">
@@ -154,7 +160,7 @@ export function DocumentShell({
             </div>
           </div>
 
-          <div className="document-reference-block flex-shrink-0 text-left sm:text-right">
+          <div className="document-reference-block min-w-0 break-words text-left sm:text-right">
             <div className="document-reference-label text-[10px] font-extrabold uppercase text-slate-950">
               Document
             </div>
@@ -171,7 +177,7 @@ export function DocumentShell({
 
         <div className="document-title-block mt-3 flex items-start justify-between gap-6">
           <div className="min-w-0">
-            <h1 className="document-title text-3xl font-extrabold uppercase leading-none text-slate-950">
+            <h1 className="document-title break-words text-2xl sm:text-3xl font-extrabold uppercase leading-none text-slate-950">
               {title}
             </h1>
             {subtitle && (
@@ -200,20 +206,66 @@ export function DocumentShell({
 
         <div className="document-body mt-6">{children}</div>
 
-        <footer className="document-footer mt-10">
-          <div className="text-[11px] leading-5 text-slate-500">
-            <div>{footerNote ?? 'This document was generated from ITEMBA-R system records.'}</div>
-            <div className="mt-0.5">
-              Printed copies are uncontrolled unless signed or issued by an authorized user.
-            </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-4 border-t border-slate-200 pt-2.5 text-[10px] text-slate-500">
-            <span>{footerContactLine}</span>
-            <span>Generated {formatDateTime(generatedAt)}</span>
-          </div>
-        </footer>
+        <DocumentFooter
+          footerNote={footerNote}
+          contactLine={footerContactLine}
+          generatedAt={generatedAt}
+          pageNumber={continuation ? 1 : undefined}
+          pageCount={continuation ? 2 : undefined}
+        />
       </article>
+      {continuation && (
+        <article
+          className="document-page document-continuation mx-auto mt-4 min-h-[297mm] w-full max-w-[210mm] bg-white px-8 py-8 text-slate-950 shadow-sm ring-1 ring-slate-200 sm:px-10"
+          data-document-sheet="2"
+        >
+          <header className="flex items-end justify-between gap-4 border-b border-slate-950 pb-2">
+            <div className="text-sm font-extrabold uppercase">{title} (continued)</div>
+            {reference && <div className="text-sm font-semibold">{reference}</div>}
+          </header>
+          <div className="document-body mt-4">{continuation}</div>
+          <DocumentFooter
+            footerNote={footerNote}
+            contactLine={footerContactLine}
+            generatedAt={generatedAt}
+            pageNumber={2}
+            pageCount={2}
+          />
+        </article>
+      )}
     </div>
+  );
+}
+
+function DocumentFooter({
+  footerNote,
+  contactLine,
+  generatedAt,
+  pageNumber,
+  pageCount,
+}: {
+  footerNote?: string;
+  contactLine: string;
+  generatedAt: Date;
+  pageNumber?: number;
+  pageCount?: number;
+}) {
+  return (
+    <footer className="document-footer mt-10">
+      <div className="text-[11px] leading-5 text-slate-500">
+        <div>{footerNote ?? 'This document was generated from ITEMBA OS records.'}</div>
+        <div className="mt-0.5">
+          Printed copies are uncontrolled unless signed or issued by an authorized user.
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-4 border-t border-slate-200 pt-2.5 text-[10px] text-slate-500">
+        <span>{contactLine}</span>
+        <span>
+          {pageNumber && pageCount ? `Page ${pageNumber} of ${pageCount} · ` : ''}
+          Generated {formatDateTime(generatedAt)}
+        </span>
+      </div>
+    </footer>
   );
 }
 

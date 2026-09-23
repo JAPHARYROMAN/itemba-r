@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   DocumentActions,
@@ -22,8 +22,11 @@ import {
   labelDocumentValue,
   valueOrNA,
 } from '@/components/documents';
+import { layoutDocumentLines, proformaLineBudget } from '@/components/documents/document-line-budget';
 import { backendGet } from '@/lib/api-client';
-import { Card, PageSpinner } from '@/components/ui';
+import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface ProformaLine {
   id: string;
@@ -98,27 +101,46 @@ interface ProformaInvoice {
 export default function ProformaInvoicePrintPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id as string;
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('proformas.view');
+  const beginRequest = useRequestGuard();
   const [record, setRecord] = useState<ProformaInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const generatedAt = useMemo(() => new Date(), []);
 
-  useEffect(() => {
-    if (!id) return;
+  const load = useCallback(async () => {
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
-    backendGet<ProformaInvoice>(`/westsides/proforma-invoices/${id}`)
-      .then(setRecord)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Load failed'))
-      .finally(() => setLoading(false));
-  }, [id]);
+    try {
+      const next = await backendGet<ProformaInvoice>(`/westsides/proforma-invoices/${id}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setRecord(next);
+    } catch (err) {
+      if (!request.current()) return;
+      setError(err instanceof Error ? err.message : 'Load failed');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, id]);
 
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (authLoading) return <PageSpinner />;
+  if (!canView) return <ErrorState message="Access Restricted" />;
   if (loading) return <PageSpinner />;
-  if (error) return <ErrorCard message={error} />;
+  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!record) return null;
 
   const customerName = record.customer?.name ?? record.customerName ?? 'N/A';
   const lines = record.lines ?? [];
+  const split = layoutDocumentLines(lines, proformaLineBudget(Boolean(record.notes?.trim())));
   const branchLabel = [record.branch?.code, record.branch?.name].filter(Boolean).join(' - ');
 
   return (
@@ -148,6 +170,23 @@ export default function ProformaInvoicePrintPage() {
           entityType="PROFORMA_INVOICE"
           entityId={record.id}
         />
+      }
+      continuation={
+        split.overflowLines.length > 0 ? (
+          <DocumentSection title="Line Items (continued)">
+            <DocumentTable>
+              <ProformaHead />
+              <tbody>
+                {split.overflowLines.map((line) => (
+                  <ProformaRow key={line.id} line={line} currency={record.currency} />
+                ))}
+              </tbody>
+            </DocumentTable>
+            <p className="mt-3 text-xs text-slate-600">
+              Totals for all {lines.length} items are stated on page 1.
+            </p>
+          </DocumentSection>
+        ) : undefined
       }
     >
       <DocumentStatGrid
@@ -207,44 +246,22 @@ export default function ProformaInvoicePrintPage() {
       <DocumentSection title="Line Items">
         {lines.length > 0 ? (
           <>
-            <DocumentTable>
-              <thead>
-                <tr>
-                  <DocumentTh>Item</DocumentTh>
-                  <DocumentTh>SKU</DocumentTh>
-                  <DocumentTh align="right">Qty</DocumentTh>
-                  <DocumentTh>Unit</DocumentTh>
-                  <DocumentTh align="right">Unit Price</DocumentTh>
-                  <DocumentTh align="right">Discount</DocumentTh>
-                  <DocumentTh align="right">Tax</DocumentTh>
-                  <DocumentTh align="right">Line Total</DocumentTh>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line) => (
-                  <tr key={line.id}>
-                    <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
-                    <DocumentTd mono>
-                      {line.product?.sku ?? line.product?.productCode ?? 'N/A'}
-                    </DocumentTd>
-                    <DocumentTd align="right">{formatQty(line.quantity)}</DocumentTd>
-                    <DocumentTd>{line.unit?.symbol ?? line.unit?.name ?? 'N/A'}</DocumentTd>
-                    <DocumentTd align="right">
-                      {formatDocumentMoney(line.unitPrice, record.currency)}
-                    </DocumentTd>
-                    <DocumentTd align="right">
-                      {formatDocumentMoney(line.discountAmount, record.currency)}
-                    </DocumentTd>
-                    <DocumentTd align="right">
-                      {formatDocumentMoney(line.taxAmount, record.currency)}
-                    </DocumentTd>
-                    <DocumentTd align="right">
-                      {formatDocumentMoney(line.lineTotal, record.currency)}
-                    </DocumentTd>
-                  </tr>
-                ))}
-              </tbody>
-            </DocumentTable>
+            {split.firstPageLines.length > 0 && (
+              <DocumentTable>
+                <ProformaHead />
+                <tbody>
+                  {split.firstPageLines.map((line) => (
+                    <ProformaRow key={line.id} line={line} currency={record.currency} />
+                  ))}
+                </tbody>
+              </DocumentTable>
+            )}
+            {split.overflowLines.length > 0 && (
+              <p className="mt-3 text-xs text-slate-600">
+                {split.overflowLines.length} further item(s) continue overleaf. Totals below cover
+                every line.
+              </p>
+            )}
             <DocumentTotals
               items={[
                 { label: 'Subtotal', value: formatDocumentMoney(record.subtotal, record.currency) },
@@ -281,11 +298,35 @@ export default function ProformaInvoicePrintPage() {
   );
 }
 
-function ErrorCard({ message }: { message: string }) {
+function ProformaHead() {
   return (
-    <div className="p-6">
-      <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{message}</Card>
-    </div>
+    <thead>
+      <tr>
+        <DocumentTh>Item</DocumentTh>
+        <DocumentTh>SKU</DocumentTh>
+        <DocumentTh align="right">Qty</DocumentTh>
+        <DocumentTh>Unit</DocumentTh>
+        <DocumentTh align="right">Unit Price</DocumentTh>
+        <DocumentTh align="right">Discount</DocumentTh>
+        <DocumentTh align="right">Tax</DocumentTh>
+        <DocumentTh align="right">Line Total</DocumentTh>
+      </tr>
+    </thead>
+  );
+}
+
+function ProformaRow({ line, currency }: { line: ProformaLine; currency: string }) {
+  return (
+    <tr>
+      <DocumentTd>{line.description || line.product?.name || 'N/A'}</DocumentTd>
+      <DocumentTd mono>{line.product?.sku ?? line.product?.productCode ?? 'N/A'}</DocumentTd>
+      <DocumentTd align="right">{formatQty(line.quantity)}</DocumentTd>
+      <DocumentTd>{line.unit?.symbol ?? line.unit?.name ?? 'N/A'}</DocumentTd>
+      <DocumentTd align="right">{formatDocumentMoney(line.unitPrice, currency)}</DocumentTd>
+      <DocumentTd align="right">{formatDocumentMoney(line.discountAmount, currency)}</DocumentTd>
+      <DocumentTd align="right">{formatDocumentMoney(line.taxAmount, currency)}</DocumentTd>
+      <DocumentTd align="right">{formatDocumentMoney(line.lineTotal, currency)}</DocumentTd>
+    </tr>
   );
 }
 

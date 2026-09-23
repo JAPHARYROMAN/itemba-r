@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { BankReconciliationsService } from './bank-reconciliations.service';
+import { ImportStatementDto } from './dto/import-statement.dto';
 import {
   AddBankStatementLineDto,
   CreateBankReconciliationDto,
@@ -60,6 +61,22 @@ class PostBankAdjustmentDto {
 @Controller('bank-reconciliations')
 export class BankReconciliationsController {
   constructor(private readonly service: BankReconciliationsService) {}
+
+  @Get(':id/evidence')
+  @RequirePermissions('bank_reconciliations.view')
+  evidence(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.evidence(id, user);
+  }
+
+  @Post(':id/import')
+  @RequirePermissions('bank_reconciliations.update')
+  importStatement(
+    @Param('id') id: string,
+    @Body() dto: ImportStatementDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.importStatement(id, dto, user);
+  }
 
   @Get()
   @RequirePermissions('bank_reconciliations.list')

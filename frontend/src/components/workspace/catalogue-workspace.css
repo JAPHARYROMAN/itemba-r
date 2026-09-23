@@ -1,0 +1,130 @@
+.catalogue-workspace {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+}
+.catalogue-workspace > [data-page-header],
+.catalogue-workspace > [data-page-toolbar] {
+  margin-bottom: 0;
+}
+.catalogue-workspace .workspace-summary > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.catalogue-workspace .workspace-summary strong {
+  overflow-wrap: anywhere;
+}
+.catalogue-workspace .record-inspector dl > div {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 12px;
+}
+.catalogue-workspace .record-inspector dt {
+  margin: 0;
+}
+.catalogue-workspace .record-inspector dd {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.catalogue-workspace .record-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.catalogue-editor,
+.catalogue-editor fieldset {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.catalogue-editor legend {
+  font-size: 14px;
+  font-weight: 600;
+  padding-bottom: 18px;
+}
+.catalogue-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.catalogue-help {
+  color: var(--aurora-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.catalogue-check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.catalogue-check input {
+  width: 17px;
+  height: 17px;
+}
+.catalogue-record-name {
+  font-size: 20px;
+  font-weight: 500;
+  margin-bottom: 14px;
+  overflow-wrap: anywhere;
+}
+.catalogue-family-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.catalogue-family-heading h2 {
+  font-size: 22px;
+  font-weight: 500;
+}
+.catalogue-price-review {
+  display: grid;
+  gap: 16px;
+}
+.catalogue-price-review article {
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--aurora-bg-subtle);
+}
+.catalogue-price-review h3 {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.catalogue-price-review dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.catalogue-price-review dt {
+  font-size: 12px;
+  color: var(--aurora-text-secondary);
+}
+.catalogue-price-review dd {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+}
+@media (min-width: 1001px) {
+  .catalogue-workspace .record-inspector {
+    overflow-y: auto;
+  }
+  .catalogue-workspace .record-inspector > * {
+    flex-shrink: 0;
+  }
+  .catalogue-workspace .record-inspector > dl {
+    flex: none;
+    overflow: visible;
+  }
+  .catalogue-workspace .record-actions {
+    max-height: none;
+    overflow: visible;
+  }
+}
+@media (max-width: 600px) {
+  .catalogue-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

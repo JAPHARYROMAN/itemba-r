@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { Btn, FormInput, FormSelect, FormTextarea, Modal, showToast } from '@/components/ui';
+import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal, showToast } from '@/components/ui';
 import { backendList, backendPatch, backendPost } from '@/lib/api-client';
 import type {
   BranchOption,
@@ -357,18 +357,16 @@ export function SupplierOrderDraftForm({ open, companies, initial, onClose, onSa
         <section>
           <h3 className="mb-3 text-sm font-semibold">Document</h3>
           <div className="grid gap-3 md:grid-cols-4">
-            <FormInput
+            <FormDateField
               label="Draft Date"
               required
-              type="date"
               value={draftDate}
-              onChange={(event) => setDraftDate(event.target.value)}
+              onChange={(value) => setDraftDate(value)}
             />
-            <FormInput
+            <FormDateField
               label="Needed By"
-              type="date"
               value={neededBy}
-              onChange={(event) => setNeededBy(event.target.value)}
+              onChange={(value) => setNeededBy(value)}
             />
             <FormSelect
               label="Currency"

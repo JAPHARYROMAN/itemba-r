@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   backendGet,
+  backendBinaryGet,
   backendList,
   backendPage,
   backendPost,
@@ -18,6 +19,42 @@ function jsonResponse(payload: unknown, init?: ResponseInit) {
 }
 
 describe('api-client', () => {
+  it('refreshes an expired session before reading a file and preserves the original filename', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ message: 'Expired' }, { status: 401 }))
+      .mockResolvedValueOnce(jsonResponse({ success: true }))
+      .mockResolvedValueOnce(
+        new Response('PDF bytes', {
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'attachment; filename="Payslip.pdf"',
+          },
+        }),
+      );
+    const result = await backendBinaryGet('/generated-documents/file/download');
+    expect(result.blob.type).toBe('application/pdf');
+    expect(result.disposition).toContain('Payslip.pdf');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      cache: 'no-store',
+      headers: { 'x-itemba-managed-401': '1' },
+    });
+  });
+  it('surfaces file access errors and rejects a late body after cancellation', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ message: 'File access denied' }, { status: 403 }),
+    );
+    await expect(backendBinaryGet('/documents/file/download')).rejects.toMatchObject({
+      message: 'File access denied',
+      status: 403,
+    });
+    const controller = new AbortController();
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('content'));
+    const read = backendBinaryGet('/documents/file/download', controller.signal);
+    controller.abort();
+    await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     document.cookie = 'itemba_csrf=; Max-Age=0; path=/';

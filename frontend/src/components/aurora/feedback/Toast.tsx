@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import './toast.css';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -10,110 +11,154 @@ interface Toast {
   type: ToastType;
   title: string;
   description?: string;
-  exiting?: boolean;
 }
 
 const TOAST_STYLES: Record<ToastType, { accent: string; icon: LucideIcon }> = {
-  success: {
-    accent: 'var(--aurora-success)',
-    icon: CheckCircle2,
-  },
-  error: {
-    accent: 'var(--aurora-danger)',
-    icon: XCircle,
-  },
-  warning: {
-    accent: 'var(--aurora-warning)',
-    icon: AlertTriangle,
-  },
-  info: {
-    accent: 'var(--aurora-info)',
-    icon: Info,
-  },
+  success: { accent: 'var(--aurora-success)', icon: CheckCircle2 },
+  error: { accent: 'var(--aurora-danger)', icon: XCircle },
+  warning: { accent: 'var(--aurora-warning)', icon: AlertTriangle },
+  info: { accent: 'var(--aurora-info)', icon: Info },
 };
 
 let globalToast: ((type: ToastType, title: string, description?: string) => void) | null = null;
 
 export function showToast(type: ToastType, title: string, description?: string) {
-  if (globalToast) globalToast(type, title, description);
+  globalToast?.(type, title, description);
+}
+
+function ToastCard({
+  toast,
+  hidden,
+  onRemove,
+  returnFocusRef,
+}: {
+  toast: Toast;
+  hidden: boolean;
+  onRemove: (id: string) => void;
+  returnFocusRef: React.RefObject<HTMLElement | null>;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const card = useRef<HTMLDivElement>(null);
+  const remaining = useRef(toast.description ? 8000 : 6000);
+  const persistent = toast.type === 'error' || toast.type === 'warning';
+  const { accent, icon: Icon } = TOAST_STYLES[toast.type];
+
+  useEffect(() => {
+    if (exiting || persistent || hidden || hovered || focused) return;
+    const started = Date.now();
+    const timer = window.setTimeout(() => setExiting(true), remaining.current);
+    return () => {
+      window.clearTimeout(timer);
+      remaining.current = Math.max(0, remaining.current - (Date.now() - started));
+    };
+  }, [exiting, persistent, hidden, hovered, focused]);
+
+  useEffect(() => {
+    if (!exiting) return;
+    const timer = window.setTimeout(() => onRemove(toast.id), 180);
+    return () => window.clearTimeout(timer);
+  }, [exiting, onRemove, toast.id]);
+
+  function dismiss() {
+    if (card.current?.contains(document.activeElement)) {
+      const next = Array.from(
+        card.current.parentElement?.querySelectorAll<HTMLButtonElement>(
+          '.os-toast:not([inert]) > button',
+        ) ?? [],
+      ).find((button) => !card.current?.contains(button));
+      const previous = returnFocusRef.current;
+      if (next) next.focus();
+      else if (
+        previous?.isConnected &&
+        !previous.closest('[hidden], [inert], [aria-hidden="true"]')
+      ) {
+        previous.focus({ preventScroll: true });
+      }
+    }
+    setExiting(true);
+  }
+
+  return (
+    <div
+      ref={card}
+      className={`os-toast ${exiting ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}
+      style={{ borderInlineStartColor: accent }}
+      aria-hidden={exiting || undefined}
+      inert={exiting}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocusCapture={(event) => {
+        if (
+          event.relatedTarget instanceof HTMLElement &&
+          !event.relatedTarget.closest('.os-toast-region')
+        ) {
+          returnFocusRef.current = event.relatedTarget;
+        }
+        setFocused(true);
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
+    >
+      <Icon aria-hidden className="os-toast-icon" style={{ color: accent }} />
+      <div className="os-toast-copy">
+        <p className="os-toast-title">{toast.title}</p>
+        {toast.description && <p className="os-toast-description">{toast.description}</p>}
+      </div>
+      <button type="button" onClick={dismiss} aria-label={`Dismiss notification: ${toast.title}`}>
+        <X aria-hidden size={16} />
+      </button>
+    </div>
+  );
 }
 
 export function ToastProvider() {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const timersRef = useRef<number[]>([]);
-
-  const schedule = useCallback((callback: () => void, delay: number) => {
-    const timer = window.setTimeout(callback, delay);
-    timersRef.current.push(timer);
-    return timer;
+  const [hidden, setHidden] = useState(false);
+  const nextId = useRef(0);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const remove = useCallback(
+    (id: string) => setToasts((items) => items.filter((item) => item.id !== id)),
+    [],
+  );
+  const add = useCallback((type: ToastType, title: string, description?: string) => {
+    const id = String(++nextId.current);
+    setToasts((items) => [...items, { id, type, title, description }]);
   }, []);
 
-  const dismissToast = useCallback((id: string) => {
-    setToasts(prev => prev.map(t => (t.id === id ? { ...t, exiting: true } : t)));
-    schedule(() => setToasts(prev => prev.filter(t => t.id !== id)), 180);
-  }, [schedule]);
-
-  const addToast = useCallback((type: ToastType, title: string, description?: string) => {
-    const id = Math.random().toString(36).slice(2);
-    setToasts(prev => [...prev, { id, type, title, description }]);
-    schedule(() => dismissToast(id), 4000);
-  }, [dismissToast, schedule]);
-
   useEffect(() => {
-    globalToast = addToast;
-    return () => { globalToast = null; };
-  }, [addToast]);
-
-  useEffect(() => {
+    globalToast = add;
     return () => {
-      timersRef.current.forEach(timer => window.clearTimeout(timer));
-      timersRef.current = [];
+      if (globalToast === add) globalToast = null;
     };
-  }, []);
+  }, [add]);
 
-  if (toasts.length === 0) return null;
+  useEffect(() => {
+    const update = () => setHidden(document.visibilityState === 'hidden');
+    update();
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
 
   return (
     <div
-      className="fixed bottom-4 right-4 flex flex-col gap-2 pointer-events-none"
-      style={{ zIndex: 1400 }}
+      className="os-system-layer os-toast-region"
+      role="region"
+      aria-label="Feedback"
       aria-live="polite"
       aria-relevant="additions text"
     >
-      {toasts.map(t => {
-        const s = TOAST_STYLES[t.type];
-        const Icon = s.icon;
-        return (
-          <div
-            key={t.id}
-            className={`pointer-events-auto flex min-w-64 max-w-sm items-start gap-3 rounded-aurora-lg px-4 py-3 ${
-              t.exiting ? 'animate-slide-out-right' : 'animate-slide-in-right'
-            }`}
-            style={{
-              background: 'var(--aurora-card)',
-              border: '1px solid var(--aurora-border)',
-              boxShadow: 'var(--aurora-shadow-lg)',
-              borderLeftColor: s.accent,
-              borderLeftWidth: '3px',
-            }}
-          >
-            <Icon aria-hidden className="mt-0.5 h-4 w-4 flex-shrink-0" style={{ color: s.accent }} />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium" style={{ color: 'var(--aurora-text)' }}>{t.title}</p>
-              {t.description && <p className="text-xs mt-0.5" style={{ color: 'var(--aurora-text-muted)' }}>{t.description}</p>}
-            </div>
-            <button
-              type="button"
-              onClick={() => dismissToast(t.id)}
-              className="ml-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--aurora-bg-subtle)]"
-              style={{ color: 'var(--aurora-text-muted)' }}
-              aria-label="Dismiss notification"
-            >
-              <X aria-hidden className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        );
-      })}
+      {toasts.map((toast) => (
+        <ToastCard
+          key={toast.id}
+          toast={toast}
+          hidden={hidden}
+          onRemove={remove}
+          returnFocusRef={returnFocusRef}
+        />
+      ))}
     </div>
   );
 }

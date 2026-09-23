@@ -11,11 +11,16 @@ export type ThemeMode = 'light' | 'dark' | 'system';
  * this hook manages after it.
  */
 const THEME_KEY = 'aurora-theme';
+const THEME_CHANGED = 'itemba-theme-changed';
 
 function readStoredMode(): ThemeMode {
   if (typeof window === 'undefined') return 'system';
-  const stored = window.localStorage.getItem(THEME_KEY);
-  return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+  try {
+    const stored = window.localStorage.getItem(THEME_KEY);
+    return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+  } catch {
+    return 'system';
+  }
 }
 
 function systemPrefersDark(): boolean {
@@ -58,8 +63,16 @@ export function useTheme() {
       setModeState(next);
       applyMode(next);
     };
+    const onChange = (event: Event) => {
+      const next = (event as CustomEvent<ThemeMode>).detail;
+      setModeState(next);
+    };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    window.addEventListener(THEME_CHANGED, onChange);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(THEME_CHANGED, onChange);
+    };
   }, []);
 
   const setMode = useCallback((next: ThemeMode) => {
@@ -67,6 +80,7 @@ export function useTheme() {
     // Best-effort persist (private mode etc.) — the theme still applies this session.
     safeLocalStorageSet(THEME_KEY, next);
     applyMode(next);
+    window.dispatchEvent(new CustomEvent(THEME_CHANGED, { detail: next }));
   }, []);
 
   return { mode, setMode, hydrated };

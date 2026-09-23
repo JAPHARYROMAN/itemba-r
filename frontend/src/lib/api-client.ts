@@ -244,6 +244,31 @@ export function backendGet<T>(path: string, opts: FetchOpts = {}) {
   return backendFetch<T>(path, { ...opts, method: 'GET' });
 }
 
+/** Authenticated file reads use the same session refresh/expiry contract as JSON reads. */
+export async function backendBinaryGet(path: string, signal?: AbortSignal) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const url = `${BACKEND_PROXY_URL}${normalizedPath}`;
+  const fetchOnce = () =>
+    fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      signal,
+      headers: { [MANAGED_401_HEADER]: '1' },
+    });
+  const response = await retryOrExpire(await fetchOnce(), url, fetchOnce);
+  if (!response.ok) {
+    const payload = await parseJson(response);
+    throw new ApiError(
+      messageFromPayload(payload, `Could not open file (${response.status})`),
+      response.status,
+      payload,
+    );
+  }
+  const blob = await response.blob();
+  signal?.throwIfAborted();
+  return { blob, disposition: response.headers.get('Content-Disposition') };
+}
+
 export async function backendList<T>(path: string, opts: FetchOpts = {}) {
   const payload = await backendGet<unknown>(path, opts);
   return normalizePaginated<T>(payload).data;

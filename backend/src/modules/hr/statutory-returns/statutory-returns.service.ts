@@ -453,10 +453,10 @@ export class StatutoryReturnsService {
   // ─── Helpers ────────────────────────────────────────────────────────────
 
   private async context(user: AuthUser, filter: ReturnFilter, taxType: string): Promise<ReturnHeader> {
-    if (filter.month < 1 || filter.month > 12) {
+    if (!Number.isInteger(filter.month) || filter.month < 1 || filter.month > 12) {
       throw new BadRequestException('month must be between 1 and 12');
     }
-    if (filter.year < 2000 || filter.year > 2100) {
+    if (!Number.isInteger(filter.year) || filter.year < 2000 || filter.year > 2100) {
       throw new BadRequestException('year is out of range');
     }
     if (!filter.companyId) {

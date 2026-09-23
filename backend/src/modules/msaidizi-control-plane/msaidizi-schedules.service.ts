@@ -34,6 +34,7 @@ import {
 } from './msaidizi-schedule-template';
 import { PersistenceSecretGuard } from './persistence-secret-guard';
 import { msaidiziScheduleVersionSnapshot } from './msaidizi-version-history';
+import { sanitizeScheduleTaskTemplate } from './msaidizi-schedule-template-persistence';
 
 const EDITABLE_SCHEDULE_STATUSES = new Set<MsaidiziScheduleStatus>([
   MsaidiziScheduleStatus.DRAFT,
@@ -444,7 +445,7 @@ export class MsaidiziSchedulesService {
   }
 
   private sanitizeJson(value: unknown): Prisma.InputJsonValue {
-    return this.secrets.sanitizeJson(value).value as Prisma.InputJsonValue;
+    return sanitizeScheduleTaskTemplate(value, this.secrets) as Prisma.InputJsonValue;
   }
 
   private async writeAudit(
