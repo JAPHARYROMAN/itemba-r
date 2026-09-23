@@ -45,6 +45,9 @@ const PERMISSIONLESS_BY_DESIGN: Record<string, string> = {
   AuthController: 'credential endpoints — they run before the user has permissions',
   // Self-scoped: a user editing their own preferences needs no grant.
   UserPreferencesController: 'self-scoped to the authenticated user (/me)',
+  // Self-scoped desktop shell state (sessions, drafts, wallpapers) keyed to the
+  // authenticated user; the controller is also @AgentExcluded.
+  WorkspaceController: 'self-scoped to the authenticated user (own workspace shell state)',
   // Group governance is gated by @Roles at the class level instead.
   GroupsController: 'role-gated to GROUP_SUPER_ADMIN / GROUP_DIRECTOR',
   // Read-only catalogue and telemetry surfaces behind JwtAuthGuard.

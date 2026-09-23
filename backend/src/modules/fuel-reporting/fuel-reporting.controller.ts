@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { FuelReportingService } from './fuel-reporting.service';
 import {
   CreateReportingPumpDto,
@@ -12,9 +13,15 @@ import {
   SaveFuelReportDto,
 } from './fuel-reporting.dto';
 
+/**
+ * `@AgentExcluded` — added by the ITEMBA OS redesign (4a155f19) and not yet
+ * reviewed for agent eligibility. Every route here stays out of Msaidizi's tool
+ * registry (fail closed) until it has reviewed positive evidence.
+ */
 @ApiTags('fuel-reporting')
 @ApiBearerAuth()
 @Controller('fuel-reporting')
+@AgentExcluded()
 export class FuelReportingController {
   constructor(private readonly service: FuelReportingService) {}
   @Get('stations')

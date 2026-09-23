@@ -33,19 +33,28 @@ export class LoansController {
     private readonly lifecycle: LoanLifecycleService,
   ) {}
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Get('accounting-options')
+  @AgentExcluded()
   @RequirePermissions('cash_desk.view', 'journal_entries.view')
   accountingOptions(@Query('companyId') companyId: string, @CurrentUser() user: AuthUser) {
     return this.lifecycle.options(user, companyId);
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Get(':id/financial')
+  @AgentExcluded()
   @RequirePermissions('loans.read', 'journal_entries.view', 'cash_desk.view')
   financial(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.lifecycle.review(id, user);
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Post(':id/financial/:eventId/reverse')
+  @AgentExcluded()
   @RequirePermissions('loans.manage', 'journal_entries.reverse')
   reverseEvent(
     @Param('id') id: string,
@@ -94,7 +103,11 @@ export class LoansController {
     return this.service.getAuditHistory(id, user);
   }
 
+  // The ITEMBA OS redesign (4a155f19) re-routed this money movement through a
+  // Cash Desk account with a new request contract; the prior agent evidence no
+  // longer applies, so it stays agent-excluded (fail closed) until re-reviewed.
   @Post()
+  @AgentExcluded()
   @RequirePermissions('loans.create')
   create(@Body() dto: CreateLoanDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user);
@@ -106,7 +119,11 @@ export class LoansController {
     return this.service.update(id, dto, user);
   }
 
+  // The ITEMBA OS redesign (4a155f19) re-routed this money movement through a
+  // Cash Desk account with a new request contract; the prior agent evidence no
+  // longer applies, so it stays agent-excluded (fail closed) until re-reviewed.
   @Post(':id/repayments')
+  @AgentExcluded()
   @RequirePermissions('loans.manage')
   recordRepayment(
     @Param('id') id: string,

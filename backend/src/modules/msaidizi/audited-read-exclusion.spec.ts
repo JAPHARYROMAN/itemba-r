@@ -20,6 +20,10 @@ describe('persistent-write GET policy', () => {
     'CustomersController.findOne',
     'OperationsReportsController.getSupplier360',
     'OperationsReportsController.exportSupplier360',
+    // Inline previews added by the ITEMBA OS redesign (4a155f19); both resolve
+    // through the audited DocumentsService.findOne access path.
+    'DocumentsController.preview',
+    'GeneratedDocumentsController.preview',
   ].sort();
 
   it('keeps the complete source-confirmed audited GET inventory method-excluded', () => {

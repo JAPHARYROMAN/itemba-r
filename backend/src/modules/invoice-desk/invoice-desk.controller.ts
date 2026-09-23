@@ -17,6 +17,7 @@ import { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { InvoiceDeskService } from './invoice-desk.service';
 import {
   DeskInvoiceDto,
@@ -27,8 +28,14 @@ import {
   DeskSupplierDto,
 } from './invoice-desk.dto';
 
+/**
+ * `@AgentExcluded` — added by the ITEMBA OS redesign (4a155f19) and not yet
+ * reviewed for agent eligibility. Every route here stays out of Msaidizi's tool
+ * registry (fail closed) until it has reviewed positive evidence.
+ */
 @Controller('invoice-desk')
 @RequirePermissions('invoice_desk.view')
+@AgentExcluded()
 export class InvoiceDeskController {
   constructor(private readonly service: InvoiceDeskService) {}
   @Get('directory') directory(@CurrentUser() u: AuthUser) {

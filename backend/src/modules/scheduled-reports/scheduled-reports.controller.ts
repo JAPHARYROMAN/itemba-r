@@ -42,7 +42,10 @@ export class ScheduledReportsController {
     return this.service.findAll(user, query);
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Get('options')
+  @AgentExcluded()
   @RequirePermissions('scheduled_reports.manage')
   options(@CurrentUser() user: AuthUser) {
     return this.service.options(user);
