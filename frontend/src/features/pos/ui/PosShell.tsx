@@ -12,6 +12,7 @@ import { buildReceipt, type ReceiptModel } from '../hardware/receipt';
 import { productForCode, useScanner } from '../hardware/scanner';
 import { usePosPrinter } from '../hardware/use-pos-printer';
 import { money, pendingTime } from '../core/pos-utils';
+import type { PosStringKey } from '../core/pos-i18n';
 import type { PosTranslate } from '../core/pos-types';
 import { PriceSheet } from './PriceSheet';
 import { PrinterPanel } from './PrinterPanel';
@@ -50,42 +51,32 @@ function stockLabel(product: MobilePosLiteProduct, t: PosTranslate): string {
   return '';
 }
 
-export function PosShell(props: PosShellProps) {
-  const [bridgeOpen, setBridgeOpen] = useState(false);
+/** A Kaunta module the new POS opens in the OS skin, by its deep-link hash. */
+export type PosModule = 'leo' | 'stoo' | 'manunuzi' | 'mipangilio';
 
-  if (bridgeOpen) {
-    return (
-      <>
-        <KauntaShell {...props} />
-        <button
-          type="button"
-          className="pos-bridge-return"
-          onClick={() => setBridgeOpen(false)}
-          style={{
-            position: 'fixed',
-            left: 12,
-            bottom: 'calc(96px + env(safe-area-inset-bottom))',
-            zIndex: 50,
-            minHeight: 44,
-            padding: '0 16px',
-            borderRadius: 999,
-            border: 0,
-            background: '#3268ca',
-            color: '#ffffff',
-            fontWeight: 600,
-            boxShadow: '0 8px 24px rgb(23 36 59 / 25%)',
-          }}
-        >
-          {props.t('posBackToNew')}
-        </button>
-      </>
-    );
+export function PosShell(props: PosShellProps) {
+  const [module, setModule] = useState<PosModule | null>(null);
+
+  if (module) {
+    // The day book, stock, counts, deliveries, history, close and settings are
+    // Kaunta's own screens, hooks and slab in the OS skin (phase 5), so every
+    // behaviour their tests pin carries over. Reaching Mauzo returns here.
+    return <KauntaShell {...props} skin="os" onReturnToSale={() => setModule(null)} />;
   }
 
-  return <PosApp {...props} openBridge={() => setBridgeOpen(true)} />;
+  return (
+    <PosApp
+      {...props}
+      openModule={(next) => {
+        // Kaunta's router honours a module deep link on boot (KAUNTA-7).
+        window.history.replaceState(window.history.state, '', `#${next}`);
+        setModule(next);
+      }}
+    />
+  );
 }
 
-function PosApp(props: PosShellProps & { openBridge: () => void }) {
+function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void }) {
   const {
     session,
     online,
@@ -136,7 +127,7 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
     retryPendingSale,
     confirmRemoveId,
     setConfirmRemoveId,
-    openBridge,
+    openModule,
   } = props;
   const { step, go } = usePosStep();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -306,16 +297,26 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
           </button>
           {menuOpen && (
             <div className="pos-menu-list" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  openBridge();
-                }}
-              >
-                {t('posMore')}
-              </button>
+              {(
+                [
+                  ['leo', 'posModuleLeo'],
+                  ['stoo', 'posModuleStoo'],
+                  ...(session.purchasesEnabled ? [['manunuzi', 'posModuleManunuzi']] : []),
+                  ['mipangilio', 'posModuleMipangilio'],
+                ] as Array<[PosModule, PosStringKey]>
+              ).map(([module, label]) => (
+                <button
+                  key={module}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    openModule(module);
+                  }}
+                >
+                  {t(label)}
+                </button>
+              ))}
               <button
                 type="button"
                 role="menuitem"

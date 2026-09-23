@@ -1054,3 +1054,76 @@ button.pos-chip {
     font-size: 44px;
   }
 }
+
+/*
+ * ITEMBA OS skin for Kaunta's module screens (POS remake phase 5): the day
+ * book, stock, counts, purchases, history, close and settings keep their
+ * screens, hooks and slab, and take the OS colours instead of paper and brass.
+ * Brass meant money and custody; here money is plain ink and custody is the
+ * OS amber, so no colour claims a status it does not have. Follows the OS
+ * light/dark theme, never Mchana/Usiku.
+ */
+html .pos-shell[data-pos-skin='os'] {
+  --aurora-bg: #f6f7fa;
+  --aurora-bg-subtle: #f1f3f7;
+  --aurora-card: #ffffff;
+  --aurora-card-elevated: #ffffff;
+  --aurora-overlay: rgb(23 36 59 / 42%);
+  --aurora-text: #263143;
+  --aurora-text-secondary: #657185;
+  --aurora-text-muted: #69768a;
+  --aurora-border: #e4e8ee;
+  --aurora-border-strong: #cbd3df;
+  --aurora-primary: #3268ca;
+  --aurora-primary-hover: #2556a8;
+  --aurora-primary-subtle: #edf3ff;
+  --aurora-primary-text: #2556a8;
+  --aurora-accent: #263143;
+  --aurora-accent-hover: #1a2433;
+  --aurora-accent-subtle: #f1f3f7;
+  --aurora-accent-text: #263143;
+  --aurora-success: #10b981;
+  --aurora-success-bg: #d1fae5;
+  --aurora-success-text: #064e3b;
+  --aurora-warning: #f59e0b;
+  --aurora-warning-bg: #fef3c7;
+  --aurora-warning-text: #78350f;
+  --aurora-danger: #ef4444;
+  --aurora-danger-bg: #fee2e2;
+  --aurora-danger-text: #7f1d1d;
+  /* var() resolves where it is declared, so the -subtle aliases must be
+     re-declared here or they keep :root's values (see the Kaunta note). */
+  --aurora-success-subtle: var(--aurora-success-bg);
+  --aurora-warning-subtle: var(--aurora-warning-bg);
+  --aurora-danger-subtle: var(--aurora-danger-bg);
+  font-family: Inter, system-ui, sans-serif;
+}
+html.dark .pos-shell[data-pos-skin='os'] {
+  --aurora-bg: #19202c;
+  --aurora-bg-subtle: #242d3c;
+  --aurora-card: #202837;
+  --aurora-card-elevated: #202837;
+  --aurora-overlay: rgb(0 0 0 / 55%);
+  --aurora-text: #ecf0f8;
+  --aurora-text-secondary: #b0bdd2;
+  --aurora-text-muted: #a0afc6;
+  --aurora-border: #354054;
+  --aurora-border-strong: #536079;
+  --aurora-primary: #8bb6ff;
+  --aurora-primary-hover: #b4ceff;
+  --aurora-primary-subtle: #2b3c58;
+  --aurora-primary-text: #b4ceff;
+  --aurora-accent: #ecf0f8;
+  --aurora-accent-hover: #ffffff;
+  --aurora-accent-subtle: #242d3c;
+  --aurora-accent-text: #ecf0f8;
+  --aurora-success-bg: #064e3b;
+  --aurora-success-text: #6ee7b7;
+  --aurora-warning-bg: #451a03;
+  --aurora-warning-text: #fcd34d;
+  --aurora-danger-bg: #450a0a;
+  --aurora-danger-text: #fca5a5;
+  --aurora-success-subtle: var(--aurora-success-bg);
+  --aurora-warning-subtle: var(--aurora-warning-bg);
+  --aurora-danger-subtle: var(--aurora-danger-bg);
+}

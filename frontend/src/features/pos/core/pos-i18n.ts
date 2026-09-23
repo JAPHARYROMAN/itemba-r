@@ -313,6 +313,10 @@ const STRINGS = {
     // New POS on ITEMBA OS (uiVersion 3, POS remake phase 1)
     posMenu: 'Menu',
     posMore: 'More',
+    posModuleLeo: 'Today (day book, history, close)',
+    posModuleStoo: 'Stock and counts',
+    posModuleManunuzi: 'Deliveries',
+    posModuleMipangilio: 'Settings',
     posBackToNew: 'Back to the new POS',
     posClearCart: 'Clear cart',
     posCartEmpty: 'The cart is empty. Search or scan a product.',
@@ -801,6 +805,10 @@ const STRINGS = {
     // POS mpya kwenye ITEMBA OS (uiVersion 3)
     posMenu: 'Menyu',
     posMore: 'Zaidi',
+    posModuleLeo: 'Leo (daftari, historia, funga siku)',
+    posModuleStoo: 'Stoo na hesabu',
+    posModuleManunuzi: 'Mizigo',
+    posModuleMipangilio: 'Mipangilio',
     posBackToNew: 'Rudi kwenye POS mpya',
     posClearCart: 'Futa kikapu',
     posCartEmpty: 'Kikapu ni tupu. Tafuta au scan bidhaa.',

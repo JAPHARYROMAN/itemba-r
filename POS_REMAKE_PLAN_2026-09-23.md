@@ -126,6 +126,15 @@ Built as designed above, with these specifics and one pre-existing leak closed:
 - **Browser receipts, done:** one receipt model drawn for the browser print dialog at 80 mm (72 mm printable) or 58 mm (48 mm), chosen per device under Menu → Printa na droo. It holds charged prices only (D3) and never a cost; a held sale prints "not yet sent" and no order number. Measured in a browser at both widths: every amount sits on the right edge and nothing overflows.
 - **Direct ESC/POS and the cash drawer, built, not certified:** an encoder (init, bold, double height, partial cut, drawer pulse `ESC p 0 25 250`), a Web Serial connection (desktop Chrome/Edge) and a Web Bluetooth one (Chrome on Android), off by default. The drawer opens once per finished cash sale (sent or held), only with a directly connected printer and the setting on, and never for credit or mobile money. **Not tried on real hardware:** D5 (the printer and scanner models) is still open, so the panel says "not yet certified". Certification means a test print on each model, adding its Bluetooth service if it is not one of the three common ones, and confirming the drawer pulse.
 
+### Phase 5 status (23 September 2026, branch `pos-remake-phase-5`)
+
+**Approach changed from the table below, deliberately.** Rebuilding every module screen from scratch would re-derive behaviour that about 8,000 lines of Kaunta tests pin (count key saved with the draft, the 6-hour capture limit, the queued-sales gate, cost-blind history, the close's frozen key and business day). Kaunta's look is almost entirely CSS variables under `.pos-shell`, so the new POS instead opens Kaunta's own module screens, hooks and bottom action bar in an **ITEMBA OS skin** (`KauntaShell skin="os"`): OS colours, OS light/dark instead of Mchana/Usiku, brass replaced by plain ink (money) and OS amber (custody). No module logic changed.
+
+- **5a, done:** day reports carry the day's price changes (count, given below list, added above), computed by the server from its own records; shown on the day-report PDF and the office register.
+- **5b, done:** Menu lists the modules (Leo: day book, history and close; Stoo: stock and counts; Mizigo: deliveries, for users who may receive stock; Mipangilio: settings). Each opens in the OS skin at its deep link; tapping Mauzo returns to the new selling screens. The floating "back" button is gone.
+- **Trade-off:** module screens keep Kaunta's phone-first single column rather than the till/tablet layouts. A module can later get a native layout on its own, without touching behaviour.
+- **Not yet seen rendered:** the skin was checked by tests and by its tokens (the approved OS palette), not in a browser: the module screens are styled with Tailwind classes that need a real build. A signed-in look is needed before the pilot.
+
 ## 7. Visual direction
 
 Adopt the ITEMBA OS language: Inter, pearl and white surfaces, restrained blue for primary actions, the OS light/dark themes, 16px window radius, and frosted glass only on chrome. The POS-specific rules below are kept because they serve a counter, not a style:

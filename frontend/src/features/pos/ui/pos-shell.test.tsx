@@ -80,7 +80,6 @@ vi.mock('@/lib/mobile-pos-lite-store', () => ({
 
 function makeSession(uiVersion: number, extra: Record<string, unknown> = {}) {
   return {
-    ...extra,
     terminal: {
       id: 't1',
       code: 'T-001',
@@ -99,6 +98,7 @@ function makeSession(uiVersion: number, extra: Record<string, unknown> = {}) {
       { code: 'CREDIT', label: 'Mkopo', requiresReference: false },
     ],
     purchasesEnabled: false,
+    ...extra,
   };
 }
 
@@ -123,6 +123,13 @@ beforeEach(() => {
   h.backendGet.mockImplementation(async (path: string) => {
     if (path === '/mobile-pos-lite/session') return h.state.session;
     if (path === '/mobile-pos-lite/catalog') return [SODA, MAJI];
+    if (path === '/mobile-pos-lite/my-sales-today') return { count: 0, totalAmount: 0, sales: [] };
+    if (path === '/mobile-pos-lite/stock')
+      return {
+        asOf: new Date().toISOString(),
+        branch: { id: 'b1', name: 'Kisimani Main' },
+        items: [],
+      };
     if (path === '/mobile-pos-lite/customers')
       return [{ id: 'cu-1', name: 'Asha Duka', customerCode: 'C-01' }];
     return [];
@@ -579,5 +586,51 @@ describe('hardware on the new POS', () => {
     expect(kicks()).toBe(1);
 
     delete (window.navigator as unknown as { serial?: unknown }).serial;
+  });
+});
+
+describe('Kaunta modules in the OS skin', () => {
+  async function openMenuItem(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+    await user.click(screen.getByRole('button', { name: 'Menyu' }));
+    await user.click(screen.getByRole('menuitem', { name }));
+  }
+
+  it('opens the day book in the OS skin and returns to the new sale from Mauzo', async () => {
+    const user = userEvent.setup();
+    const { container } = await boot();
+    await openMenuItem(user, /^Leo/);
+
+    const kaunta = await waitFor(() => {
+      const root = container.querySelector('.pos-shell');
+      expect(root).not.toBeNull();
+      return root as HTMLElement;
+    });
+    expect(kaunta).toHaveAttribute('data-pos-skin', 'os');
+    // The OS skin follows the OS theme, never Mchana/Usiku.
+    expect(kaunta).not.toHaveAttribute('data-pos-theme');
+    expect(container.querySelector('.pos-app')).toBeNull();
+    expect(window.location.hash).toBe('#leo');
+
+    await user.click(screen.getAllByRole('button', { name: /Mauzo/ })[0]);
+    await waitFor(() => expect(container.querySelector('.pos-app')).not.toBeNull());
+    expect(container.querySelector('.pos-shell')).toBeNull();
+    expect(window.location.hash).toBe('#pos/sale');
+  });
+
+  it('offers deliveries only to a user who may receive stock', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.click(screen.getByRole('button', { name: 'Menyu' }));
+    expect(screen.queryByRole('menuitem', { name: 'Mizigo' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Stoo na hesabu' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Mipangilio' })).toBeInTheDocument();
+  });
+
+  it('shows deliveries when purchases are enabled', async () => {
+    h.state.session = makeSession(3, { purchasesEnabled: true });
+    const user = userEvent.setup();
+    await boot();
+    await user.click(screen.getByRole('button', { name: 'Menyu' }));
+    expect(screen.getByRole('menuitem', { name: 'Mizigo' })).toBeInTheDocument();
   });
 });
