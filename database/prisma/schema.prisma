@@ -13533,6 +13533,13 @@ model MobilePosDayReport {
   itemsTruncated     Boolean  @default(false)
   declaredHeldCount  Int      @default(0)
   declaredHeldAmount Decimal  @default(0) @db.Decimal(18, 2)
+  /// Lines sold at a changed price in this report's sales (POS remake
+  /// phase 5), from mobile_pos_price_overrides: how many, what was given away
+  /// below list, and what was added above it. Reports filed before price
+  /// editing existed read 0, which is what they were.
+  priceChangeCount   Int      @default(0)
+  priceDropTotal     Decimal  @default(0) @db.Decimal(18, 2)
+  priceRaiseTotal    Decimal  @default(0) @db.Decimal(18, 2)
   /// Client-supplied idempotency token, written by the INSERT itself. NOT NULL
   /// on purpose: sales_orders and purchase_orders keep theirs nullable because
   /// desktop-created rows share those tables and Postgres treats NULLs as

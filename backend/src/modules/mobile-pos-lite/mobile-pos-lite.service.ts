@@ -2828,6 +2828,9 @@ export class MobilePosLiteService {
           salesCount: computed.salesCount,
           grossTotal: computed.grossTotal,
           itemsSoldQuantity: computed.itemsSoldQuantity,
+          priceChangeCount: computed.priceChangeCount,
+          priceDropTotal: computed.priceDropTotal,
+          priceRaiseTotal: computed.priceRaiseTotal,
           byMethod: computed.byMethod as unknown as Prisma.InputJsonValue,
           items: computed.items as unknown as Prisma.InputJsonValue,
           itemsTruncated: computed.itemsTruncated,
@@ -3000,6 +3003,24 @@ export class MobilePosLiteService {
       // phone declared something still in its outbox, saying both that it is
       // NOT in the total above and that the phone is where the figure came
       // from. A report that silently omitted unsent sales would be a lie.
+      // Price changes are part of the day's story for whoever reads the
+      // paper: how many lines left the list price, and which way. Printed only
+      // when there were any, like the held-sales section below.
+      ...(report.priceChangeCount > 0
+        ? [
+            {
+              title: 'Mabadiliko ya Bei / Price Changes',
+              items: [
+                { label: 'Mistari / Lines', value: String(report.priceChangeCount) },
+                { label: 'Punguzo / Discounts given', value: tzsWhole(report.priceDropTotal) },
+                { label: 'Ongezeko / Increases', value: tzsWhole(report.priceRaiseTotal) },
+              ],
+              paragraphs: [
+                'Kila badiliko limehifadhiwa na jina la muuzaji na sababu. / Each change is recorded with the rep and the reason.',
+              ],
+            },
+          ]
+        : []),
       ...(report.declaredHeldCount > 0
         ? [
             {
@@ -3114,7 +3135,7 @@ export class MobilePosLiteService {
     // predicate, so the two can never drift.
     const lineWhere: Prisma.SalesOrderLineWhereInput = { salesOrder: where };
 
-    const [totals, methods, lineTotals] = await Promise.all([
+    const [totals, methods, lineTotals, priceChanges] = await Promise.all([
       // Unbounded and exact.
       this.prisma.salesOrder.aggregate({
         where,
@@ -3138,7 +3159,22 @@ export class MobilePosLiteService {
         where: lineWhere,
         _sum: { quantity: true, lineTotal: true },
       }),
+      // Every changed price in the same sales, through the same relation
+      // filter so it can never cover different orders from the totals above.
+      this.prisma.mobilePosPriceOverride.findMany({
+        where: { salesOrder: where },
+        select: { listUnitPrice: true, chargedUnitPrice: true, quantity: true },
+      }),
     ]);
+
+    let priceDropTotal = 0;
+    let priceRaiseTotal = 0;
+    for (const change of priceChanges) {
+      const difference =
+        (Number(change.listUnitPrice) - Number(change.chargedUnitPrice)) * Number(change.quantity);
+      if (difference > 0) priceDropTotal += difference;
+      else priceRaiseTotal -= difference;
+    }
 
     const byMethod: DayReportMethodTotal[] = methods.map((method) => ({
       paymentMethod: method.paymentMethod,
@@ -3190,6 +3226,9 @@ export class MobilePosLiteService {
       // it can move no total on the record or on the paper. Disclosed anyway,
       // because a shortened list should say it is one.
       itemsTruncated: ranked.length > MOBILE_POS_DAY_REPORT_ITEM_CAP,
+      priceChangeCount: priceChanges.length,
+      priceDropTotal: round2(priceDropTotal),
+      priceRaiseTotal: round2(priceRaiseTotal),
     };
   }
 
@@ -3280,6 +3319,9 @@ export class MobilePosLiteService {
       // are: the phone's own statement about its outbox.
       declaredHeldCount: record.declaredHeldCount,
       declaredHeldAmount: Number(record.declaredHeldAmount),
+      priceChangeCount: record.priceChangeCount,
+      priceDropTotal: Number(record.priceDropTotal),
+      priceRaiseTotal: Number(record.priceRaiseTotal),
     };
   }
 

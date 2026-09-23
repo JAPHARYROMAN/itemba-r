@@ -294,6 +294,8 @@ describe('summarizeDayReports', () => {
       grossTotal: 360000,
       declaredHeldCount: 1,
       declaredHeldAmount: 6000,
+      priceChangeCount: 0,
+      priceDropTotal: 0,
     });
   });
 
@@ -354,7 +356,24 @@ describe('summarizeDayReports', () => {
       grossTotal: 0,
       declaredHeldCount: 0,
       declaredHeldAmount: 0,
+      priceChangeCount: 0,
+      priceDropTotal: 0,
     });
+  });
+
+  it('counts a twice-closed day price changes once, like its money', () => {
+    const [evening, afternoon] = doubleClosedDay;
+    const totals = summarizeDayReports([
+      { ...evening, priceChangeCount: 3, priceDropTotal: 2500, priceRaiseTotal: 600 },
+      { ...afternoon, priceChangeCount: 2, priceDropTotal: 1500, priceRaiseTotal: 0 },
+    ]);
+    expect(totals.priceChangeCount).toBe(3);
+    expect(totals.priceDropTotal).toBe(2500);
+  });
+
+  it('reads a report filed before price editing as having no price changes', () => {
+    const [report] = doubleClosedDay;
+    expect(report).toMatchObject({ priceChangeCount: 0, priceDropTotal: 0, priceRaiseTotal: 0 });
   });
 });
 

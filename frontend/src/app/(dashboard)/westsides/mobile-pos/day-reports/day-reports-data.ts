@@ -65,6 +65,13 @@ export interface MobilePosDayReport {
   /** Declared by the PHONE — sales still in its outbox, NOT in `grossTotal`. */
   declaredHeldCount: number;
   declaredHeldAmount: number;
+  /**
+   * Lines sold at a changed price (POS price editing), computed by the server
+   * from its own records: how many, given away below list, added above it.
+   */
+  priceChangeCount: number;
+  priceDropTotal: number;
+  priceRaiseTotal: number;
 }
 
 /**
@@ -238,6 +245,10 @@ export function normalizeDayReport(raw: unknown): MobilePosDayReport | null {
     itemsTruncated: row.itemsTruncated === true,
     declaredHeldCount: toNum(row.declaredHeldCount),
     declaredHeldAmount: toNum(row.declaredHeldAmount),
+    // Absent on reports filed before price editing existed: they had none.
+    priceChangeCount: toNum(row.priceChangeCount),
+    priceDropTotal: toNum(row.priceDropTotal),
+    priceRaiseTotal: toNum(row.priceRaiseTotal),
   };
 }
 
@@ -419,6 +430,8 @@ export interface DayReportTotals {
   grossTotal: number;
   declaredHeldCount: number;
   declaredHeldAmount: number;
+  priceChangeCount: number;
+  priceDropTotal: number;
 }
 
 /**
@@ -437,6 +450,8 @@ export function summarizeDayReports(reports: MobilePosDayReport[]): DayReportTot
     grossTotal: 0,
     declaredHeldCount: 0,
     declaredHeldAmount: 0,
+    priceChangeCount: 0,
+    priceDropTotal: 0,
   };
   for (const report of annotateSupersession(reports)) {
     totals.submissions += 1;
@@ -449,6 +464,10 @@ export function summarizeDayReports(reports: MobilePosDayReport[]): DayReportTot
     totals.grossTotal += report.grossTotal;
     totals.declaredHeldCount += report.declaredHeldCount;
     totals.declaredHeldAmount += report.declaredHeldAmount;
+    // A later close of the same terminal-day recounts the same sales, so the
+    // price changes deduplicate exactly like the money.
+    totals.priceChangeCount += report.priceChangeCount;
+    totals.priceDropTotal += report.priceDropTotal;
   }
   return totals;
 }

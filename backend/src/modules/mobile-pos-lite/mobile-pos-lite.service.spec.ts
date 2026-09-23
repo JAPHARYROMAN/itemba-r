@@ -195,6 +195,10 @@ function makeService() {
     productBatch: {
       update: jest.fn().mockResolvedValue({}),
     },
+    // Price changes in the day's sales (phase 5); none unless a test says so.
+    mobilePosPriceOverride: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     mobilePosDayReport: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
@@ -5425,5 +5429,67 @@ describe('MobilePosLiteService createSale price editing', () => {
       priceEditUnlimited: false,
       maxPriceDropPct: 7.5,
     });
+  });
+});
+
+describe('MobilePosLiteService createDayReport price changes', () => {
+  it('sums the day price changes over exactly the report sales, both ways', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 3 },
+      _sum: { totalAmount: '42500' },
+    });
+    prisma.salesOrder.groupBy.mockResolvedValue([
+      { paymentMethod: 'CASH', _count: { _all: 3 }, _sum: { totalAmount: '42500' } },
+    ]);
+    prisma.salesOrderLine.groupBy.mockResolvedValue([]);
+    prisma.mobilePosPriceOverride.findMany.mockResolvedValue([
+      // 1 x (32000 -> 30500): 1500 given away
+      { listUnitPrice: '32000', chargedUnitPrice: '30500', quantity: '1' },
+      // 2 x (1200 -> 1500): 600 added
+      { listUnitPrice: '1200', chargedUnitPrice: '1500', quantity: '2' },
+      // 2 x (5000 -> 4500): 1000 given away
+      { listUnitPrice: '5000', chargedUnitPrice: '4500', quantity: '2' },
+    ]);
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+
+    // The same order filter as the day's totals, through the relation.
+    const salesWhere = prisma.salesOrder.aggregate.mock.calls[0][0].where;
+    expect(prisma.mobilePosPriceOverride.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { salesOrder: salesWhere } }),
+    );
+    const [{ data }] = prisma.mobilePosDayReport.create.mock.calls[0];
+    expect(data).toMatchObject({ priceChangeCount: 3, priceDropTotal: 2500, priceRaiseTotal: 600 });
+    expect(result).toMatchObject({
+      priceChangeCount: 3,
+      priceDropTotal: 2500,
+      priceRaiseTotal: 600,
+    });
+  });
+
+  it('reports none on a day without changed prices', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 0 },
+      _sum: { totalAmount: null },
+    });
+    prisma.salesOrder.groupBy.mockResolvedValue([]);
+    prisma.salesOrderLine.groupBy.mockResolvedValue([]);
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+    expect(result).toMatchObject({ priceChangeCount: 0, priceDropTotal: 0, priceRaiseTotal: 0 });
   });
 });
