@@ -161,7 +161,7 @@ export function DesktopShell({
   const [desktopMenu, setDesktopMenu] = useState(false),
     [systemSettings, setSystemSettings] = useState(false),
     [notice, setNotice] = useState('');
-  const [clock, setClock] = useState(''),
+  const [clock, setClock] = useState<Date | null>(null),
     [wallpaper, setWallpaper] = useState<string | null>(null);
   const [area, setArea] = useState({ width: 1280, height: 760 });
   const areaRef = useRef<HTMLDivElement>(null),
@@ -196,16 +196,7 @@ export function DesktopShell({
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    const tick = () =>
-      setClock(
-        new Date().toLocaleString(undefined, {
-          weekday: 'short',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      );
+    const tick = () => setClock(new Date());
     tick();
     const timer = setInterval(tick, 30000);
     return () => clearInterval(timer);
@@ -502,30 +493,46 @@ export function DesktopShell({
                 ITEMBA <span>OS</span>
               </strong>
             </button>
+            <span className="desktop-bar-divider" aria-hidden="true" />
             <span className="desktop-current-app">
               {showDesktop ? 'Desktop' : (getApp(active?.appId ?? '')?.label ?? 'Desktop')}
             </span>
             <div className="desktop-system-actions">
-              <button
-                aria-label="Search workspace"
-                title="Search (Ctrl / ⌘ K)"
-                onClick={openSearch}
-              >
-                <Search size={18} />
-              </button>
-              <MsaidiziTopbarButton />
-              <button
-                ref={overviewTrigger}
-                aria-label="Window overview"
-                title="Windows (Ctrl / ⌘ Shift Space)"
-                onClick={() => setOverview(true)}
-              >
-                <PanelsTopLeft size={18} />
-              </button>
-              <OsNotifications onNavigate={(href) => navigate(href)} />
-              <button aria-label="Control centre" onClick={() => setControl(true)}>
-                <SlidersHorizontal size={18} />
-              </button>
+              {/* Find and ask: the two ways into anything. */}
+              <div className="desktop-bar-group">
+                <button
+                  className="desktop-bar-icon"
+                  aria-label="Search workspace"
+                  title="Search (Ctrl / ⌘ K)"
+                  onClick={openSearch}
+                >
+                  <Search size={17} />
+                </button>
+                <MsaidiziTopbarButton className="desktop-bar-assistant" />
+              </div>
+              <span className="desktop-bar-divider" aria-hidden="true" />
+              {/* The workspace itself: windows, what needs attention, settings. */}
+              <div className="desktop-bar-group">
+                <button
+                  ref={overviewTrigger}
+                  className="desktop-bar-icon"
+                  aria-label="Window overview"
+                  title="Windows (Ctrl / ⌘ Shift Space)"
+                  onClick={() => setOverview(true)}
+                >
+                  <PanelsTopLeft size={17} />
+                </button>
+                <OsNotifications onNavigate={(href) => navigate(href)} />
+                <button
+                  className="desktop-bar-icon"
+                  aria-label="Control centre"
+                  title="Control centre"
+                  onClick={() => setControl(true)}
+                >
+                  <SlidersHorizontal size={17} />
+                </button>
+              </div>
+              <span className="desktop-bar-divider" aria-hidden="true" />
               <OsAccountMenu
                 initials={
                   user?.fullName
@@ -539,7 +546,20 @@ export function DesktopShell({
                 onSettings={() => openApp('settings')}
                 onSignOut={() => request(() => void logout())}
               />
-              <time>{clock}</time>
+              {clock && (
+                <time className="desktop-bar-clock" dateTime={clock.toISOString()}>
+                  <span>
+                    {clock.toLocaleDateString(undefined, {
+                      weekday: 'short',
+                      day: 'numeric',
+                      month: 'short',
+                    })}
+                  </span>
+                  <strong>
+                    {clock.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                  </strong>
+                </time>
+              )}
             </div>
           </header>
           <main

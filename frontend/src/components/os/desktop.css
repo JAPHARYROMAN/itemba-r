@@ -133,8 +133,8 @@
   height: 42px;
   display: flex;
   align-items: center;
-  gap: 22px;
-  padding: 0 20px;
+  gap: 12px;
+  padding: 0 12px 0 16px;
   position: relative;
   z-index: 100;
   background: var(--desktop-glass);
@@ -143,47 +143,136 @@
   font-size: 12px;
   color: var(--desktop-ink);
 }
+/*
+ * Menubar: brand and the current app on the left; on the right three groups
+ * separated by hairlines (find and ask | windows, notices, settings |
+ * account and clock). Every control is the same 32px target with the same
+ * hover and focus treatment, so nothing reads as an odd one out.
+ */
 .desktop-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
+  height: 32px;
+  padding: 0 8px 0 4px;
+  border-radius: 8px;
   white-space: nowrap;
   letter-spacing: 0.04em;
 }
+.desktop-brand:hover {
+  background: var(--desktop-control-hover, #78839a1f);
+}
 .desktop-brand img {
-  height: 25px;
+  height: 22px;
   width: auto;
+  border-radius: 4px;
 }
 .desktop-brand strong {
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 700;
 }
 .desktop-brand span {
   font-weight: 400;
-  opacity: 0.75;
+  opacity: 0.7;
 }
 .desktop-current-app {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
   font-weight: 600;
+}
+.desktop-bar-divider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: var(--desktop-border);
 }
 .desktop-system-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
+  min-width: 0;
 }
-.desktop-system-actions > button {
+.desktop-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.desktop-bar-icon,
+.desktop-system-actions .os-notification-trigger,
+.desktop-system-actions .os-account-trigger {
+  flex: none;
   width: 32px;
   height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 8px;
+  color: var(--desktop-ink);
+  transition: background-color 120ms ease;
 }
-.desktop-system-actions > button:hover {
-  background: #78839a20;
+.desktop-bar-icon:hover,
+.desktop-system-actions .os-notification-trigger:hover,
+.desktop-system-actions .os-account-trigger[data-hovered],
+.desktop-system-actions .os-account-trigger[data-pressed] {
+  background: var(--desktop-control-hover, #78839a1f);
 }
-.desktop-system-actions time {
-  margin-left: 10px;
+.desktop-menubar :is(button, a):focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 1px;
+}
+/* Msaidizi is the one labelled control: an icon and its name in a pill. */
+.desktop-system-actions .desktop-bar-assistant {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
   white-space: nowrap;
-  font-size: 11px;
+  color: var(--desktop-ink) !important;
+}
+.desktop-system-actions .desktop-bar-assistant:hover {
+  background: var(--desktop-control-hover, #78839a1f);
+}
+.desktop-system-actions .desktop-bar-assistant > span {
+  display: inline;
+}
+.desktop-system-actions .os-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 10px;
+}
+.desktop-bar-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.desktop-bar-clock span {
+  opacity: 0.7;
+}
+.desktop-bar-clock strong {
+  font-weight: 600;
+}
+@media (max-width: 1199px) {
+  /* Narrower: Msaidizi keeps its icon, the clock keeps the time. */
+  .desktop-system-actions .desktop-bar-assistant {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .desktop-system-actions .desktop-bar-assistant > span,
+  .desktop-bar-clock span {
+    display: none;
+  }
 }
 .desktop-workspace {
   position: relative;
@@ -1271,7 +1360,7 @@
     padding: 0 12px;
     gap: 12px;
   }
-  .desktop-system-actions time {
+  .desktop-bar-clock {
     display: none;
   }
   .desktop-workspace,
@@ -1406,7 +1495,7 @@
   .desktop-brand {
     gap: 6px;
   }
-  .desktop-system-actions > button {
+  .desktop-bar-icon {
     width: 29px;
   }
   .desktop-greeting h1 {
