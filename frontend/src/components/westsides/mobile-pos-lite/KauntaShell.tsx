@@ -107,6 +107,8 @@ export type KauntaShellProps = {
   setQuantity: (productId: string, next: number) => void;
   /** Price editing: drawn only by the new POS (uiVersion 3); Kaunta ignores it. */
   setLinePrice?: (productId: string, price: CartLinePrice | null) => void;
+  /** The terminal catalog, for exact barcode matches (new POS only). */
+  catalog?: MobilePosLiteProduct[];
   cartCount: number;
   total: number;
   beginSale: () => void;

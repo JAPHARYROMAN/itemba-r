@@ -847,6 +847,79 @@ button.pos-chip {
   }
 }
 
+/* ---------- printer panel ---------- */
+.pos-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.pos-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--pos-primary);
+}
+
+/* ---------- printed receipt (browser print dialog) ---------- */
+.pos-receipt {
+  display: none;
+}
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .pos-receipt,
+  .pos-receipt * {
+    visibility: visible !important;
+  }
+  .pos-receipt {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 72mm;
+    padding: 2mm 0;
+    background: #fff;
+    color: #000;
+    font:
+      12px/1.35 'Courier New',
+      ui-monospace,
+      monospace;
+  }
+  .pos-receipt[data-paper='58'] {
+    width: 48mm;
+    font-size: 10px;
+  }
+  .pos-receipt p {
+    margin: 0;
+  }
+  .pos-receipt hr {
+    margin: 4px 0;
+    border: 0;
+    border-top: 1px dashed #000;
+  }
+  .pos-receipt-center {
+    text-align: center;
+  }
+  .pos-receipt-strong {
+    font-weight: 700;
+  }
+  .pos-receipt-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .pos-receipt-total {
+    font-weight: 700;
+    font-size: 1.2em;
+  }
+  .pos-receipt-line {
+    margin-bottom: 2px;
+  }
+}
+
 /* ---------- tablet ---------- */
 @container pos (min-width: 640px) {
   .pos-body {

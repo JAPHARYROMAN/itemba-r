@@ -97,7 +97,8 @@ export function PriceSheet({
       <button
         type="button"
         className="pos-sheet-scrim"
-        aria-label={t('posCancel')}
+        aria-hidden="true"
+        tabIndex={-1}
         onClick={onClose}
       />
       <section className="pos-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>

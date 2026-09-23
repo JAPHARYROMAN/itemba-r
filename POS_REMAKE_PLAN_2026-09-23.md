@@ -120,6 +120,12 @@ Built as designed above, with these specifics and one pre-existing leak closed:
 | Cash drawer | Kicked open by an ESC/POS command through the printer (stage 2), only on a completed cash sale. | No drawer without a direct-print printer. |
 | Share receipt | Keep the existing letterhead PDF share (`GET sales/:id/receipt`) for phones without a printer. | Already shipped. |
 
+### Phase 4 status (23 September 2026, branch `pos-remake-phase-4`)
+
+- **Scanner (keyboard wedge), done:** a burst of 4+ keys less than 50 ms apart, ending in Enter, is a scan. Outside a text field it adds the exact barcode (or product code) match; an unknown code goes into search with a plain note. Inside the search box, Enter now prefers an exact barcode over the top fuzzy result. No camera (D4).
+- **Browser receipts, done:** one receipt model drawn for the browser print dialog at 80 mm (72 mm printable) or 58 mm (48 mm), chosen per device under Menu → Printa na droo. It holds charged prices only (D3) and never a cost; a held sale prints "not yet sent" and no order number. Measured in a browser at both widths: every amount sits on the right edge and nothing overflows.
+- **Direct ESC/POS and the cash drawer, built, not certified:** an encoder (init, bold, double height, partial cut, drawer pulse `ESC p 0 25 250`), a Web Serial connection (desktop Chrome/Edge) and a Web Bluetooth one (Chrome on Android), off by default. The drawer opens once per finished cash sale (sent or held), only with a directly connected printer and the setting on, and never for credit or mobile money. **Not tried on real hardware:** D5 (the printer and scanner models) is still open, so the panel says "not yet certified". Certification means a test print on each model, adding its Bluetooth service if it is not one of the three common ones, and confirming the drawer pulse.
+
 ## 7. Visual direction
 
 Adopt the ITEMBA OS language: Inter, pearl and white surfaces, restrained blue for primary actions, the OS light/dark themes, 16px window radius, and frosted glass only on chrome. The POS-specific rules below are kept because they serve a counter, not a style:

@@ -468,3 +468,116 @@ describe('price editing on the new POS', () => {
     });
   });
 });
+
+describe('hardware on the new POS', () => {
+  function scan(code: string) {
+    for (const key of code) fireEvent.keyDown(document.body, { key });
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+  }
+
+  it('adds the exact barcode match when a scanner fires outside a text field', async () => {
+    await boot();
+    await screen.findByRole('button', { name: /Soda Baridi/ });
+    (document.activeElement as HTMLElement | null)?.blur();
+    scan('6200001');
+    const cart = screen.getByRole('region', { name: 'Bidhaa za mauzo' });
+    await waitFor(() => expect(within(cart).getByText('Soda Baridi')).toBeInTheDocument());
+  });
+
+  it('puts an unknown scan in the search box with a plain note', async () => {
+    await boot();
+    await screen.findByRole('button', { name: /Soda Baridi/ });
+    (document.activeElement as HTMLElement | null)?.blur();
+    scan('999000111');
+    expect(await screen.findByRole('status')).toHaveTextContent('999000111');
+    expect(screen.getByLabelText('Tafuta au skani bidhaa')).toHaveValue('999000111');
+  });
+
+  it('prefers an exact barcode over the top search result on Enter', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.type(screen.getByLabelText('Tafuta au skani bidhaa'), 'SODA{Enter}');
+    const cart = screen.getByRole('region', { name: 'Bidhaa za mauzo' });
+    expect(within(cart).getByText('Soda Baridi')).toBeInTheDocument();
+  });
+
+  it('prints the finished sale through the browser print dialog by default', async () => {
+    // What matters is what is on the page at the moment the dialog opens.
+    let printed = '';
+    let pageRule = '';
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {
+      printed = document.querySelector('.pos-receipt')?.textContent ?? '';
+      pageRule = document.getElementById('pos-receipt-page')?.textContent ?? '';
+    });
+    const user = userEvent.setup();
+    const { container } = await boot();
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    fireEvent.keyDown(window, { key: 'F12' });
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    expect(container.querySelector('.pos-receipt')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Chapisha risiti' }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(printed).toContain('SO-0001');
+    expect(printed).toContain('TZS 2,400');
+    expect(pageRule).toContain('80mm');
+    await waitFor(() => expect(container.querySelector('.pos-receipt')).toBeNull());
+    print.mockRestore();
+  });
+
+  it('opens the drawer once after a cash sale through a connected printer, and never for credit', async () => {
+    const writes: Uint8Array[] = [];
+    const port = {
+      open: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      writable: {
+        getWriter: () => ({
+          write: vi.fn(async (bytes: Uint8Array) => {
+            writes.push(bytes);
+          }),
+          releaseLock: vi.fn(),
+        }),
+      },
+    };
+    Object.defineProperty(window.navigator, 'serial', {
+      configurable: true,
+      value: { requestPort: vi.fn(async () => port), getPorts: vi.fn(async () => []) },
+    });
+    const kick = [0x1b, 0x70, 0x00, 0x19, 0xfa];
+    const kicks = () =>
+      writes.filter((bytes) =>
+        kick.every((byte, i) => bytes[bytes.length - kick.length + i] === byte),
+      ).length;
+
+    const user = userEvent.setup();
+    await boot();
+    await user.click(screen.getByRole('button', { name: 'Menyu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Printa na droo' }));
+    await user.click(screen.getByRole('button', { name: 'Unganisha printa ya USB au serial' }));
+    await user.click(await screen.findByRole('checkbox', { name: /Fungua droo ya pesa/ }));
+    await user.click(screen.getByRole('button', { name: 'Funga' }));
+
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    fireEvent.keyDown(window, { key: 'F12' });
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    await waitFor(() => expect(kicks()).toBe(1));
+
+    // A different order, so only the payment method can keep the drawer shut.
+    h.backendPost.mockImplementation(async () => ({
+      id: 'so-2',
+      salesOrderNumber: 'SO-0002',
+      totalAmount: 1200,
+    }));
+    await user.click(screen.getByRole('button', { name: 'Mauzo Mapya' }));
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Mkopo' }));
+    await user.type(screen.getByLabelText('Jina, simu au namba ya mteja'), 'as');
+    await user.click(await screen.findByRole('button', { name: /Asha Duka/ }));
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    expect(kicks()).toBe(1);
+
+    delete (window.navigator as unknown as { serial?: unknown }).serial;
+  });
+});

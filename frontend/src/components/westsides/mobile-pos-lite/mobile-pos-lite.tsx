@@ -668,6 +668,7 @@ export function MobilePosLite() {
         addProduct={addProduct}
         setQuantity={setQuantity}
         setLinePrice={setLinePrice}
+        catalog={catalog}
         cartCount={cartCount}
         total={total}
         beginSale={beginSale}

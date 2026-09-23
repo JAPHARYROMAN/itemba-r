@@ -8,9 +8,14 @@ import {
 } from '@/components/westsides/mobile-pos-lite/KauntaShell';
 import { posErrorMessage } from '../core/pos-errors';
 import { lineUnitPrice } from '../core/pos-price';
+import { buildReceipt, type ReceiptModel } from '../hardware/receipt';
+import { productForCode, useScanner } from '../hardware/scanner';
+import { usePosPrinter } from '../hardware/use-pos-printer';
 import { money, pendingTime } from '../core/pos-utils';
 import type { PosTranslate } from '../core/pos-types';
 import { PriceSheet } from './PriceSheet';
+import { PrinterPanel } from './PrinterPanel';
+import { ReceiptPrint } from './ReceiptPrint';
 import { usePosStep } from './use-pos-step';
 import './pos-app.css';
 
@@ -100,6 +105,7 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
     addProduct,
     setQuantity,
     setLinePrice,
+    catalog,
     cartCount,
     total,
     beginSale,
@@ -137,6 +143,37 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
   const [priceFor, setPriceFor] = useState<string | null>(null);
   const canEditPrice = Boolean(session.priceEditEnabled && setLinePrice);
   const pricedLine = priceFor ? cart.find((line) => line.product.id === priceFor) : undefined;
+  const [scanMiss, setScanMiss] = useState<string | null>(null);
+  const printer = usePosPrinter(t);
+  const [printerOpen, setPrinterOpen] = useState(false);
+  const [doneAt, setDoneAt] = useState<Date>(() => new Date());
+  const kickedFor = useRef<string | null>(null);
+  // Browser printing needs the receipt on the page when the print dialog
+  // opens, so a print is a short-lived job: render it, print, remove it.
+  const [printJob, setPrintJob] = useState<ReceiptModel | null>(null);
+  useEffect(() => {
+    if (!printJob) return;
+    void printer.print(printJob).finally(() => setPrintJob(null));
+  }, [printer, printJob]);
+
+  // A scan anywhere on the sale (focus outside a text field) adds the exact
+  // barcode match; an unknown code goes to the search box so the rep sees
+  // what the server finds, with a plain note instead of a silent miss.
+  useScanner(
+    (code) => {
+      if (priceFor || (step !== 'sale' && step !== 'pay')) return;
+      const product = productForCode(catalog ?? [], code);
+      if (product) {
+        setScanMiss(null);
+        addProduct(product);
+      } else {
+        setScanMiss(code);
+        setQuery(code);
+        searchRef.current?.focus();
+      }
+    },
+    { enabled: step === 'sale' || step === 'pay' },
+  );
   const searchRef = useRef<HTMLInputElement>(null);
   const customerRef = useRef<HTMLInputElement>(null);
   const previousScreen = useRef(screen);
@@ -161,6 +198,38 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
   const canPay = cart.length > 0 && !busy;
   const creditNeedsCustomer = paymentMethod === 'CREDIT' && !customer;
   const held = Boolean(notice) && screen === 'success';
+
+  // The receipt describes the finished sale: its cart survives into done.
+  const receipt =
+    step === 'done'
+      ? buildReceipt({
+          session,
+          cart,
+          total,
+          saleResult,
+          held,
+          paymentLabel: selectedPayment?.label ?? paymentMethod,
+          paymentMethod,
+          receivedAmount,
+          customer,
+          issuedAt: doneAt,
+        })
+      : null;
+
+  useEffect(() => {
+    if (step === 'done') setDoneAt(new Date());
+  }, [step]);
+
+  // Cash was taken, whether the office has the sale yet or it is held on the
+  // phone, so the drawer opens once per finished cash sale, and only through
+  // a directly connected printer the rep switched the drawer on for.
+  useEffect(() => {
+    if (step !== 'done' || paymentMethod !== 'CASH' || !saleResult) return;
+    if (!printer.settings.drawer || !printer.connection) return;
+    if (kickedFor.current === saleResult.id) return;
+    kickedFor.current = saleResult.id;
+    void printer.kickDrawer();
+  }, [paymentMethod, printer, saleResult, step]);
 
   function openPay() {
     if (!cart.length) return;
@@ -251,6 +320,16 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
                 type="button"
                 role="menuitem"
                 onClick={() => {
+                  setMenuOpen(false);
+                  setPrinterOpen(true);
+                }}
+              >
+                {t('posPrinter')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
                   setLang(lang === 'sw' ? 'en' : 'sw');
                   setMenuOpen(false);
                 }}
@@ -307,6 +386,14 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
             <button
               type="button"
               className="pos-btn"
+              disabled={printer.busy || !receipt}
+              onClick={() => receipt && setPrintJob(receipt)}
+            >
+              {printer.busy ? t('posPrinting') : t('posPrintReceipt')}
+            </button>
+            <button
+              type="button"
+              className="pos-btn"
               disabled={receiptBusy}
               onClick={() => void shareReceipt()}
             >
@@ -316,11 +403,42 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
               {t('queueTitle')}
             </button>
           </div>
+          {printer.error && (
+            <p className="pos-note" data-tone="bad" role="alert">
+              {printer.error}
+            </p>
+          )}
           <button type="button" className="pos-btn pos-btn-primary" onClick={newSale}>
             {t('newSale')}
           </button>
         </main>
       )}
+
+      {printerOpen && (
+        <PrinterPanel
+          printer={printer}
+          t={t}
+          onClose={() => setPrinterOpen(false)}
+          onTestPrint={() =>
+            setPrintJob(
+              buildReceipt({
+                session,
+                cart: [],
+                total: 0,
+                saleResult: null,
+                held: false,
+                paymentLabel: t('posTestPrint'),
+                paymentMethod: 'TEST',
+                receivedAmount: null,
+                customer: null,
+                issuedAt: new Date(),
+              }),
+            )
+          }
+        />
+      )}
+
+      {printJob && <ReceiptPrint model={printJob} paper={printer.settings.paper} t={t} />}
 
       {step === 'queue' && (
         <main className="pos-full">
@@ -389,17 +507,33 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
                   value={query}
                   autoComplete="off"
                   placeholder={t('productSearchPlaceholder')}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setScanMiss(null);
+                    setQuery(event.target.value);
+                  }}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && query.trim().length >= 2 && matches[0]) {
-                      event.preventDefault();
-                      addProduct(matches[0]);
+                    if (event.key === 'Enter' && query.trim().length >= 2) {
+                      // An exact barcode or code wins over the top fuzzy
+                      // match: a scan into this box must add that product.
+                      const exact =
+                        productForCode(catalog ?? [], query) ?? productForCode(matches, query);
+                      const pick = exact ?? matches[0];
+                      if (pick) {
+                        event.preventDefault();
+                        setScanMiss(null);
+                        addProduct(pick);
+                      }
                     } else if (event.key === 'Escape') {
                       setQuery('');
                     }
                   }}
                 />
               </div>
+              {scanMiss && (
+                <p className="pos-note" data-tone="warn" role="status">
+                  {t('posScanNotFound', { code: scanMiss })}
+                </p>
+              )}
               {query.trim().length > 0 && query.trim().length < 2 && (
                 <p className="pos-hint">{t('typeTwoOrScan')}</p>
               )}
@@ -428,7 +562,9 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
                   </button>
                 ))}
               </div>
-              <p className="pos-keys">{t('posKeyHints')}</p>
+              <p className="pos-keys">
+                {t('posScannerReady')} · {t('posKeyHints')}
+              </p>
             </section>
 
             <section className="pos-panel pos-cart" aria-labelledby="pos-cart-title">
