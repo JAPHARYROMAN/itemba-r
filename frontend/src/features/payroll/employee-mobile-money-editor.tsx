@@ -140,7 +140,7 @@ export function EmployeeMobileMoneyEditor({
         onClose();
         return;
       }
-            setBusy(true);
+      setBusy(true);
       if (record)
         await backendPatch(`/hr/mobile-money-accounts/${encodeURIComponent(record.id)}`, payload);
       else await backendPost('/hr/mobile-money-accounts', { ...payload, employeeId });

@@ -439,7 +439,9 @@ export function useFormGuard<T>(
   );
   return {
     touch,
-    isDirty: () => state.current.forceDirty || (state.current.touched && state.current.current !== state.current.baseline),
+    isDirty: () =>
+      state.current.forceDirty ||
+      (state.current.touched && state.current.current !== state.current.baseline),
     markSaved,
     requestClose,
     capture: { onChangeCapture: touch, onInputCapture: touch },

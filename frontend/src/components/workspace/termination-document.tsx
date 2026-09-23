@@ -59,8 +59,7 @@ function fmtDate(d?: string | null): string {
 }
 
 export function TerminationDocument({ data }: { data: Form1Payload }) {
-  const history =
-    data.disciplinaryHistoryIncluded === false ? [] : data.disciplinaryHistory;
+  const history = data.disciplinaryHistoryIncluded === false ? [] : data.disciplinaryHistory;
   const { firstPageItems, overflowItems } = splitHistoryForPrint(
     history,
     terminationPreambleMm(Boolean(data.employee.passport)),
@@ -69,161 +68,161 @@ export function TerminationDocument({ data }: { data: Form1Payload }) {
 
   return (
     <>
-    <div className="ccm-paper ccm-sheet" data-ccm-sheet="1" aria-label="Termination notice draft">
-      <div className="text-center mb-6">
-        <div className="text-xs text-slate-500 mb-1">
-          United Republic of Tanzania · Jamhuri ya Muungano wa Tanzania
+      <div className="ccm-paper ccm-sheet" data-ccm-sheet="1" aria-label="Termination notice draft">
+        <div className="text-center mb-6">
+          <div className="text-xs text-slate-500 mb-1">
+            United Republic of Tanzania · Jamhuri ya Muungano wa Tanzania
+          </div>
+          <h2 className="ccm-document-title">
+            {data.formCode} — Notice of Termination of Employment
+          </h2>
+          <div className="text-sm italic mt-1">{data.formNameSwahili}</div>
+          <div className="text-xs mt-2 text-slate-500">{data.jurisdiction}</div>
         </div>
-        <h2 className="ccm-document-title">
-          {data.formCode} — Notice of Termination of Employment
-        </h2>
-        <div className="text-sm italic mt-1">{data.formNameSwahili}</div>
-        <div className="text-xs mt-2 text-slate-500">{data.jurisdiction}</div>
-      </div>
 
-      <h3>1. Employer / Mwajiri</h3>
-      <table>
-        <tbody>
-          <tr>
-            <td className="label">Name / Jina:</td>
-            <td>{data.employer.name}</td>
-          </tr>
-          <tr>
-            <td className="label">TIN:</td>
-            <td>{data.employer.tin ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">BRELA reg #:</td>
-            <td>{data.employer.brelaRegNumber ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Registered address / Anwani:</td>
-            <td>{data.employer.registeredAddress ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Postal address:</td>
-            <td>{data.employer.postalAddress ?? '—'}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h3>2. Employee / Mfanyakazi</h3>
-      <table>
-        <tbody>
-          <tr>
-            <td className="label">Full name / Jina kamili:</td>
-            <td>{data.employee.fullName}</td>
-          </tr>
-          <tr>
-            <td className="label">Employee code:</td>
-            <td>{data.employee.employeeCode}</td>
-          </tr>
-          <tr>
-            <td className="label">NIDA:</td>
-            <td>{data.employee.nida ?? '—'}</td>
-          </tr>
-          {data.employee.passport && (
+        <h3>1. Employer / Mwajiri</h3>
+        <table>
+          <tbody>
             <tr>
-              <td className="label">Passport:</td>
-              <td>{data.employee.passport}</td>
+              <td className="label">Name / Jina:</td>
+              <td>{data.employer.name}</td>
             </tr>
-          )}
-          <tr>
-            <td className="label">Nationality / Uraia:</td>
-            <td>{data.employee.nationality ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Gender / Jinsia:</td>
-            <td>{data.employee.gender}</td>
-          </tr>
-          <tr>
-            <td className="label">Date of birth:</td>
-            <td>{fmtDate(data.employee.dateOfBirth)}</td>
-          </tr>
-          <tr>
-            <td className="label">Address / Anwani:</td>
-            <td>{data.employee.address ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Phone:</td>
-            <td>{data.employee.phone ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Email:</td>
-            <td>{data.employee.email ?? '—'}</td>
-          </tr>
-        </tbody>
-      </table>
+            <tr>
+              <td className="label">TIN:</td>
+              <td>{data.employer.tin ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">BRELA reg #:</td>
+              <td>{data.employer.brelaRegNumber ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Registered address / Anwani:</td>
+              <td>{data.employer.registeredAddress ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Postal address:</td>
+              <td>{data.employer.postalAddress ?? '—'}</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <h3>3. Employment particulars / Maelezo ya ajira</h3>
-      <table>
-        <tbody>
-          <tr>
-            <td className="label">Position / Cheo:</td>
-            <td>{data.employment.position ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Department / Idara:</td>
-            <td>{data.employment.department ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Branch / Tawi:</td>
-            <td>
-              {data.employment.branch ?? '—'}
-              {data.employment.location && ` · ${data.employment.location}`}
-            </td>
-          </tr>
-          <tr>
-            <td className="label">Hire date / Tarehe ya kuajiriwa:</td>
-            <td>{fmtDate(data.employment.hireDate)}</td>
-          </tr>
-          <tr>
-            <td className="label">Tenure / Muda wa ajira:</td>
-            <td>
-              {data.employment.tenureMonths != null
-                ? `${data.employment.tenureMonths} months`
-                : '—'}
-            </td>
-          </tr>
-          <tr>
-            <td className="label">Contract type / Aina ya mkataba:</td>
-            <td>{data.employment.contractType ?? '—'}</td>
-          </tr>
-          <tr>
-            <td className="label">Base salary / Mshahara:</td>
-            <td>
-              {data.employment.baseSalary != null
-                ? `${data.employment.salaryCurrency} ${data.employment.baseSalary.toLocaleString('en-TZ')}`
-                : '—'}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+        <h3>2. Employee / Mfanyakazi</h3>
+        <table>
+          <tbody>
+            <tr>
+              <td className="label">Full name / Jina kamili:</td>
+              <td>{data.employee.fullName}</td>
+            </tr>
+            <tr>
+              <td className="label">Employee code:</td>
+              <td>{data.employee.employeeCode}</td>
+            </tr>
+            <tr>
+              <td className="label">NIDA:</td>
+              <td>{data.employee.nida ?? '—'}</td>
+            </tr>
+            {data.employee.passport && (
+              <tr>
+                <td className="label">Passport:</td>
+                <td>{data.employee.passport}</td>
+              </tr>
+            )}
+            <tr>
+              <td className="label">Nationality / Uraia:</td>
+              <td>{data.employee.nationality ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Gender / Jinsia:</td>
+              <td>{data.employee.gender}</td>
+            </tr>
+            <tr>
+              <td className="label">Date of birth:</td>
+              <td>{fmtDate(data.employee.dateOfBirth)}</td>
+            </tr>
+            <tr>
+              <td className="label">Address / Anwani:</td>
+              <td>{data.employee.address ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Phone:</td>
+              <td>{data.employee.phone ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Email:</td>
+              <td>{data.employee.email ?? '—'}</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <CcmHistory
-        heading="4. Disciplinary history / Historia ya nidhamu"
-        items={firstPageItems}
-        included={data.disciplinaryHistoryIncluded}
-        overflowCount={overflowItems.length}
-      />
+        <h3>3. Employment particulars / Maelezo ya ajira</h3>
+        <table>
+          <tbody>
+            <tr>
+              <td className="label">Position / Cheo:</td>
+              <td>{data.employment.position ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Department / Idara:</td>
+              <td>{data.employment.department ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Branch / Tawi:</td>
+              <td>
+                {data.employment.branch ?? '—'}
+                {data.employment.location && ` · ${data.employment.location}`}
+              </td>
+            </tr>
+            <tr>
+              <td className="label">Hire date / Tarehe ya kuajiriwa:</td>
+              <td>{fmtDate(data.employment.hireDate)}</td>
+            </tr>
+            <tr>
+              <td className="label">Tenure / Muda wa ajira:</td>
+              <td>
+                {data.employment.tenureMonths != null
+                  ? `${data.employment.tenureMonths} months`
+                  : '—'}
+              </td>
+            </tr>
+            <tr>
+              <td className="label">Contract type / Aina ya mkataba:</td>
+              <td>{data.employment.contractType ?? '—'}</td>
+            </tr>
+            <tr>
+              <td className="label">Base salary / Mshahara:</td>
+              <td>
+                {data.employment.baseSalary != null
+                  ? `${data.employment.salaryCurrency} ${data.employment.baseSalary.toLocaleString('en-TZ')}`
+                  : '—'}
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-      {overflowItems.length === 0 && tail}
-    </div>
-    {overflowItems.length > 0 && (
-      <div
-        className="ccm-paper ccm-sheet"
-        data-ccm-sheet="2"
-        aria-label="Termination notice continuation"
-      >
         <CcmHistory
-          heading="4. Disciplinary history / Historia ya nidhamu (continued)"
-          items={overflowItems}
+          heading="4. Disciplinary history / Historia ya nidhamu"
+          items={firstPageItems}
           included={data.disciplinaryHistoryIncluded}
-          continued
+          overflowCount={overflowItems.length}
         />
-        {tail}
+
+        {overflowItems.length === 0 && tail}
       </div>
-    )}
+      {overflowItems.length > 0 && (
+        <div
+          className="ccm-paper ccm-sheet"
+          data-ccm-sheet="2"
+          aria-label="Termination notice continuation"
+        >
+          <CcmHistory
+            heading="4. Disciplinary history / Historia ya nidhamu (continued)"
+            items={overflowItems}
+            included={data.disciplinaryHistoryIncluded}
+            continued
+          />
+          {tail}
+        </div>
+      )}
     </>
   );
 }

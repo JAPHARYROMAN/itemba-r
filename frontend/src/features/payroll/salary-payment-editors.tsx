@@ -63,7 +63,7 @@ export function ReverseDialog({
   };
   const reverse = async () => {
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -72,7 +72,7 @@ export function ReverseDialog({
       pending.current = false;
       return;
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       await backendPatch('/hr/salary-payments/' + payment.id + '/reverse', {

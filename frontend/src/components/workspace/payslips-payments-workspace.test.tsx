@@ -221,9 +221,7 @@ describe('Payslip workspace', () => {
         amount: 1000,
       })),
     };
-    state.get.mockImplementation(async (path) =>
-      path.includes('/run/') ? workspace : long,
-    );
+    state.get.mockImplementation(async (path) => (path.includes('/run/') ? workspace : long));
     mount(<PayslipPage />);
     await screen.findByText('Payslip / Hati ya Malipo');
     const first = document.querySelector('[data-payslip-sheet="1"]');

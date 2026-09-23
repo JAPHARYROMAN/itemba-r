@@ -86,7 +86,9 @@ describe('finance route gates', () => {
     render(<ChartOfAccounts />);
     expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
     const chartCalls = () =>
-      state.fetch.mock.calls.filter((call) => String(call[0]).includes('/api/backend/chart-of-accounts'));
+      state.fetch.mock.calls.filter((call) =>
+        String(call[0]).includes('/api/backend/chart-of-accounts'),
+      );
     expect(chartCalls()).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(chartCalls()).toHaveLength(2);

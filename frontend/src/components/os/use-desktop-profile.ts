@@ -14,7 +14,9 @@ export function useDesktopProfile(userId: string) {
     saving = useRef(false),
     loaded = useRef(false);
   const appearanceRef = useRef(appearance);
-  useLayoutEffect(() => { appearanceRef.current = appearance; }, [appearance]);
+  useLayoutEffect(() => {
+    appearanceRef.current = appearance;
+  }, [appearance]);
   const pending = useRef<DesktopAppearance | null>(null);
   const mounted = useRef(true);
   const { setMode } = useTheme();
@@ -120,7 +122,11 @@ export function useDesktopProfile(userId: string) {
       next.motion !== 'reduced' &&
       !matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
-      void transition.call(document, () => flushSync(apply)).finished.catch(() => { apply(); });
+      void transition
+        .call(document, () => flushSync(apply))
+        .finished.catch(() => {
+          apply();
+        });
     } else apply();
   }
   return { appearance, update, ready, status };

@@ -111,7 +111,8 @@ export function employerOnFirstPage(flags: PayslipBudgetFlags): boolean {
 
 export function firstPageAllowanceCapacity(flags: PayslipBudgetFlags): number {
   const reserved =
-    requiredChromeMm(flags) + (employerOnFirstPage(flags) ? employerBlockMm(flags.employerRows) : 0);
+    requiredChromeMm(flags) +
+    (employerOnFirstPage(flags) ? employerBlockMm(flags.employerRows) : 0);
   return Math.max(0, Math.floor((PAGE_CONTENT_MM - reserved) / ROW_MM));
 }
 

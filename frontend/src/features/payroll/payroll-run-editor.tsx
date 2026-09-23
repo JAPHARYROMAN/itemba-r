@@ -59,7 +59,7 @@ export function PayrollRunEditor({
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -74,7 +74,7 @@ export function PayrollRunEditor({
       pending.current = false;
       return;
     }
-        setSaving(true);
+    setSaving(true);
     setError('');
     try {
       await backendPost('/hr/payroll-runs', {

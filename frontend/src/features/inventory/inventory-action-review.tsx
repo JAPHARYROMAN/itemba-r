@@ -165,7 +165,7 @@ export function InventoryActionReview({ kind, id, action, draftSource, onClose, 
     // Claimed synchronously. saveNow() below awaits, and a second confirmation
     // inside that window would otherwise clear the guard above and run the
     // action twice.
-        setBusy(true);
+    setBusy(true);
     try {
       draft.validateReview();
       await draft.saveNow();

@@ -157,7 +157,7 @@ export function PayrollActionDialog({
         throw new Error('Enter a reason for reversing this payment.');
       if (financial) await draft.beginRequest();
       const original = draft.requestContext.current;
-            setBusy(true);
+      setBusy(true);
       const result = await backendPatch<PayrollRunRecord>(
         '/hr/payroll-runs/' + run.id + '/' + action,
         action === 'reverse-payment'

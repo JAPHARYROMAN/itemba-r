@@ -149,7 +149,7 @@ export default function DashboardClientLayout({
         <CsrfFetchProvider>
           <WorkspaceSessionProvider>
             <UnsavedWorkProvider>
-          <WorkspaceDraftsProvider synchronize>
+              <WorkspaceDraftsProvider synchronize>
                 <CommandPaletteProvider>
                   <RouteProgress />
                   <ToastProvider />

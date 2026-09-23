@@ -55,10 +55,7 @@ export function shellPreambleMm(parts: ShellPreamble): number {
 
 export function shellTailMm(parts: ShellTail): number {
   return (
-    parts.totalRows * TOTAL_ROW_MM +
-    (parts.hasNotes ? NOTES_MM : 0) +
-    SIGNATURES_MM +
-    FOOTER_MM
+    parts.totalRows * TOTAL_ROW_MM + (parts.hasNotes ? NOTES_MM : 0) + SIGNATURES_MM + FOOTER_MM
   );
 }
 
@@ -95,14 +92,9 @@ export function deliveryNoteLineBudget(hasNotes: boolean) {
   };
 }
 
-export function layoutDocumentLines<T>(
-  lines: T[],
-  budget: { preambleMm: number; tailMm: number },
-) {
+export function layoutDocumentLines<T>(lines: T[], budget: { preambleMm: number; tailMm: number }) {
   const tailOnFirstPage = budget.preambleMm + budget.tailMm <= PAGE_CONTENT_MM;
-  const reserved = tailOnFirstPage
-    ? budget.preambleMm + budget.tailMm
-    : budget.preambleMm;
+  const reserved = tailOnFirstPage ? budget.preambleMm + budget.tailMm : budget.preambleMm;
   const capacity = Math.max(0, Math.floor((PAGE_CONTENT_MM - reserved) / ROW_MM));
   const overflowLines = lines.slice(capacity);
   return {

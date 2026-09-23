@@ -3,7 +3,19 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
-import { Btn, ErrorState, FormDateField, FormInput, FormSelect, PageHeader, PageSpinner, PageToolbar, PermissionDeniedState, ProductPicker, type ScopeValue } from '@/components/ui';
+import {
+  Btn,
+  ErrorState,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  PermissionDeniedState,
+  ProductPicker,
+  type ScopeValue,
+} from '@/components/ui';
 import { RecordBrowser } from '@/components/workspace/record-browser';
 import { catalogueMoney } from '@/components/workspace/catalogue-types';
 import { productLabel, productQuantity } from '@/components/workspace/product-form';

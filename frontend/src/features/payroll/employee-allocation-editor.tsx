@@ -104,7 +104,7 @@ export function AllocationEditor({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || blocked || !hasPermission(kind + 's.manage')) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -164,7 +164,7 @@ export function AllocationEditor({
       pending.current = false;
       return;
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       const path = '/hr/employee-' + kind + 's';

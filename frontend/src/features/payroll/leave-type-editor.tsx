@@ -81,7 +81,7 @@ export function LeaveTypeEditor({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -113,7 +113,7 @@ export function LeaveTypeEditor({
       pending.current = false;
       return;
     }
-        setSaving(true);
+    setSaving(true);
     setError('');
     try {
       const values = {

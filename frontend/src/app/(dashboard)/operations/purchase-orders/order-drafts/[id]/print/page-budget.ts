@@ -31,10 +31,7 @@ export function firstPageCapacity(flags: { hasTitle: boolean; unpriced: boolean 
   return Math.max(MIN_FIRST_PAGE_ROWS, Math.floor((PAGE_CONTENT_MM - fixed) / ROW_MM));
 }
 
-export function splitDraftLines<T>(
-  lines: T[],
-  flags: { hasTitle: boolean; unpriced: boolean },
-) {
+export function splitDraftLines<T>(lines: T[], flags: { hasTitle: boolean; unpriced: boolean }) {
   const capacity = firstPageCapacity(flags);
   return {
     capacity,

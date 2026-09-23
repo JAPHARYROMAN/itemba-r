@@ -57,7 +57,7 @@ export function PayrollPeriodEditor({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -86,7 +86,7 @@ export function PayrollPeriodEditor({
       pending.current = false;
       return;
     }
-        setSaving(true);
+    setSaving(true);
     setError('');
     try {
       await backendPost('/hr/payroll-periods', {

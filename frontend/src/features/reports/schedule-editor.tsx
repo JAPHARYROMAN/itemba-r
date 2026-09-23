@@ -138,7 +138,7 @@ export function ScheduleEditor({
           !eligibleViews.some((row) => row.id === form.savedReportViewId))
       )
         throw new Error('Choose an available saved view for this report and company.');
-            setBusy(true);
+      setBusy(true);
       const values = {
         name: form.name.trim(),
         description: form.description.trim(),

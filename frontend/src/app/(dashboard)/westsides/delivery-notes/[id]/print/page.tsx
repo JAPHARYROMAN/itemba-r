@@ -185,22 +185,22 @@ export default function DeliveryNotePrintPage() {
       <DocumentSection title="Line Items">
         {lines.length > 0 ? (
           <>
-          {split.firstPageLines.length > 0 && (
-            <DocumentTable>
-              <DeliveryHead />
-              <tbody>
-                {split.firstPageLines.map((line) => (
-                  <DeliveryRow key={line.id} line={line} />
-                ))}
-              </tbody>
-            </DocumentTable>
-          )}
-          {split.overflowLines.length > 0 && (
-            <p className="mt-3 text-xs text-slate-600">
-              {split.overflowLines.length} further item(s) continue overleaf. The acknowledgement
-              below covers every line.
-            </p>
-          )}
+            {split.firstPageLines.length > 0 && (
+              <DocumentTable>
+                <DeliveryHead />
+                <tbody>
+                  {split.firstPageLines.map((line) => (
+                    <DeliveryRow key={line.id} line={line} />
+                  ))}
+                </tbody>
+              </DocumentTable>
+            )}
+            {split.overflowLines.length > 0 && (
+              <p className="mt-3 text-xs text-slate-600">
+                {split.overflowLines.length} further item(s) continue overleaf. The acknowledgement
+                below covers every line.
+              </p>
+            )}
           </>
         ) : (
           <EmptyDocumentState>No line items are attached to this delivery note.</EmptyDocumentState>

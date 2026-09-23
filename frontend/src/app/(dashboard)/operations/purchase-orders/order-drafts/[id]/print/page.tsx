@@ -152,13 +152,9 @@ export default function SupplierOrderDraftPrintPage() {
               </div>
               <div>Email: {email}</div>
               <div>
-                TIN: {text(profile?.tin, '—')} | VRN:{' '}
-                {text(profile?.vrn, '—')}
+                TIN: {text(profile?.tin, '—')} | VRN: {text(profile?.vrn, '—')}
               </div>
-              <div>
-                Reg No:{' '}
-                {text(profile?.brelaRegNumber, '—')}
-              </div>
+              <div>Reg No: {text(profile?.brelaRegNumber, '—')}</div>
             </div>
           </div>
           <div className="min-w-0 text-[7.2pt] leading-[1.28]">

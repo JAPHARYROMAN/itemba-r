@@ -101,7 +101,7 @@ export function CategoryEditor({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || !allowed || draft.availabilityError) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -141,7 +141,7 @@ export function CategoryEditor({
       pending.current = false;
       return setError('Enter a name for the new parent category.');
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       let parentId = createdParent?.id || form.parentCategoryId || null;
@@ -434,7 +434,7 @@ export function FamilyEditor({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || !allowed || draft.availabilityError) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -478,7 +478,7 @@ export function FamilyEditor({
     for (const [key] of FAMILY_PRICES)
       if (!record || form[key] !== initial[key])
         body[key] = form[key].trim() ? Number(form[key]) : null;
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       if (record) await backendPatch(`/products/families/${record.id}`, body);

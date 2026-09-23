@@ -117,7 +117,7 @@ export function PeopleActionEditor({
     try {
       draft.validateReview();
       await draft.saveNow();
-            setBusy(true);
+      setBusy(true);
       const text = draft.form.text.trim();
       if (contract) {
         await backendPatch(

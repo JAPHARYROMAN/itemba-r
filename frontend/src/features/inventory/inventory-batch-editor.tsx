@@ -1,6 +1,15 @@
 'use client';
 import { useId, useState } from 'react';
-import { Btn, FormDateField, FormInput, FormSelect, Modal, ProductPicker, showToast, type ScopeValue } from '@/components/ui';
+import {
+  Btn,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  Modal,
+  ProductPicker,
+  showToast,
+  type ScopeValue,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
 import { CatalogueChoiceError } from '@/components/workspace/catalogue-editors';

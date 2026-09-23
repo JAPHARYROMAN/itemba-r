@@ -66,7 +66,7 @@ export function AdvanceForm({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -85,7 +85,7 @@ export function AdvanceForm({
       pending.current = false;
       return;
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       await backendPost('/hr/salary-advances', {
@@ -277,7 +277,7 @@ export function AdvanceAction({
   };
   const submit = async () => {
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -295,7 +295,7 @@ export function AdvanceAction({
       pending.current = false;
       return;
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       await backendPatch(

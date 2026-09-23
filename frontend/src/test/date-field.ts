@@ -34,10 +34,7 @@ export function getDateField(label: string | RegExp, scope?: DateFieldScope): HT
   return queries(scope).getByRole('group', { name: nameMatcher(label) });
 }
 
-export function queryDateField(
-  label: string | RegExp,
-  scope?: DateFieldScope,
-): HTMLElement | null {
+export function queryDateField(label: string | RegExp, scope?: DateFieldScope): HTMLElement | null {
   return queries(scope).queryByRole('group', { name: nameMatcher(label) });
 }
 
@@ -91,7 +88,9 @@ export async function setDateField(
   const [datePart, timePart] = iso.split('T');
   const [year, month, day] = datePart.split('-');
   if (!year || !month || !day) {
-    throw new Error(`setDateField expects an ISO YYYY-MM-DD or YYYY-MM-DDTHH:mm value, received "${iso}"`);
+    throw new Error(
+      `setDateField expects an ISO YYYY-MM-DD or YYYY-MM-DDTHH:mm value, received "${iso}"`,
+    );
   }
   const digits = timePart
     ? `${day}${month}${year}${(timePart.split(':')[0] ?? '').padStart(2, '0')}${(timePart.split(':')[1] ?? '').padStart(2, '0')}`

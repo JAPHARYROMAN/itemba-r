@@ -22,7 +22,9 @@ export function AppearanceStudio({
       signal: controller.signal,
     })
       .then(setWallpapers)
-      .catch(() => { if(!controller.signal.aborted)setError('Your saved wallpapers could not be loaded.'); });
+      .catch(() => {
+        if (!controller.signal.aborted) setError('Your saved wallpapers could not be loaded.');
+      });
     return () => controller.abort();
   }, []);
   function change<K extends keyof DesktopAppearance>(key: K, next: DesktopAppearance[K]) {

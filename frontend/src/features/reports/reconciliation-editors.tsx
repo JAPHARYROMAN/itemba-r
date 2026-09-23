@@ -2,13 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Btn, FormDateField, Modal } from '@/components/ui';
-import {
-  FormInput,
-  FormSelect,
-  FormSection,
-  FormShell,
-  FormTextarea,
-} from '@/components/aurora';
+import { FormInput, FormSelect, FormSection, FormShell, FormTextarea } from '@/components/aurora';
 import {
   DraftFormNotice,
   useWorkspaceDraftForm,
@@ -183,7 +177,7 @@ function CreateReconciliation({
         bookClosingBalance: entryAmount(form.bookClosingBalance),
         notes: form.notes.trim() || undefined,
       };
-            setBusy(true);
+      setBusy(true);
       await backendPost('/bank-reconciliations', body);
       if (mounted.current) {
         draft.markSaved();
@@ -277,7 +271,9 @@ function CreateReconciliation({
               label="Statement start"
               value={form.statementStartDate}
               disabled={busy}
-              onChange={(value) => setForm((current) => ({ ...current, statementStartDate: value }))}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, statementStartDate: value }))
+              }
             />
             <FormDateField
               label="Statement end"

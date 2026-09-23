@@ -5,7 +5,10 @@ import DashboardPage from '@/app/(dashboard)/dashboard/page';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
-  user: { fullName: 'Amina Tester', email: 'amina@example.com' } as { fullName: string; email: string } | null,
+  user: { fullName: 'Amina Tester', email: 'amina@example.com' } as {
+    fullName: string;
+    email: string;
+  } | null,
   fetch: vi.fn(),
 }));
 

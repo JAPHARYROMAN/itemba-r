@@ -384,7 +384,9 @@ export default function ExpenseCategoriesPage() {
       if (companyId) params.set('companyId', companyId);
       if (activeFilter) params.set('isActive', activeFilter);
       if (search.trim()) params.set('search', search.trim());
-      const res = await fetch(`/api/backend/expense-categories?${params}`, { signal: request.signal });
+      const res = await fetch(`/api/backend/expense-categories?${params}`, {
+        signal: request.signal,
+      });
       const json = await res.json();
       if (!request.current()) return;
       if (!res.ok) throw new Error(json.message ?? 'Unable to load categories');

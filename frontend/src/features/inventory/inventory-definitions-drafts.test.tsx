@@ -525,9 +525,7 @@ describe('Inventory catalogue continuity', () => {
       // The draft hint is a live region too, so name the one under test rather
       // than assuming the form has only one.
       expect(
-        form
-          .getAllByRole('status')
-          .some((node) => node.textContent?.includes('has been created')),
+        form.getAllByRole('status').some((node) => node.textContent?.includes('has been created')),
       ).toBe(true);
       await user.click(form.getByRole('button', { name: 'Save category' }));
       expect(state.post).toHaveBeenCalledTimes(3);

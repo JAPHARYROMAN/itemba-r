@@ -101,63 +101,63 @@ export function FormDateField({
     <I18nProvider locale={DATE_DISPLAY_LOCALE}>
       <div ref={host} className="ui-date-field-host">
         <DatePicker
-        className={`${className}${granularity === 'minute' ? ' ui-date-field-datetime' : ''}`.trim()}
-        value={draft}
-        onChange={(next) => {
-          change(next);
-          notifyForm();
-        }}
-        minValue={parseBound(min) ?? undefined}
-        maxValue={parseBound(max) ?? undefined}
-        isRequired={required}
-        isDisabled={disabled}
-        isInvalid={!!error}
-        granularity={granularity}
-        hourCycle={granularity === 'minute' ? 24 : undefined}
-        shouldForceLeadingZeros
-        name={name}
-        id={fieldId}
-        aria-label={label ? undefined : ariaLabel}
-        aria-describedby={aria['aria-describedby']}
-      >
-        {label && (
-          <AriaLabel className={LABEL_CLASS} style={LABEL_STYLE}>
-            {label}
-            {required && <RequiredMark />}
-          </AriaLabel>
-        )}
-        <Group
-          className={`ui-date-group${error ? ' ui-date-group-invalid' : ''}${shake}`}
-          onBlur={(event) => {
-            blur(event);
+          className={`${className}${granularity === 'minute' ? ' ui-date-field-datetime' : ''}`.trim()}
+          value={draft}
+          onChange={(next) => {
+            change(next);
             notifyForm();
           }}
+          minValue={parseBound(min) ?? undefined}
+          maxValue={parseBound(max) ?? undefined}
+          isRequired={required}
+          isDisabled={disabled}
+          isInvalid={!!error}
+          granularity={granularity}
+          hourCycle={granularity === 'minute' ? 24 : undefined}
+          shouldForceLeadingZeros
+          name={name}
+          id={fieldId}
+          aria-label={label ? undefined : ariaLabel}
+          aria-describedby={aria['aria-describedby']}
         >
-          <AriaDateInput className="ui-date-segments">
-            {(segment) => <DateSegment segment={segment} className="ui-date-segment" />}
-          </AriaDateInput>
-          <Button className="ui-date-trigger">
-            <CalendarDays size={15} aria-hidden="true" />
-          </Button>
-        </Group>
-        <Popover className="ui-date-popover" placement="bottom start">
-          <Dialog className="ui-date-dialog">
-            <Calendar className="ui-date-calendar">
-              <header className="ui-date-calendar-header">
-                <Button slot="previous" className="ui-date-nav">
-                  &#8249;
-                </Button>
-                <Heading className="ui-date-calendar-heading" />
-                <Button slot="next" className="ui-date-nav">
-                  &#8250;
-                </Button>
-              </header>
-              <CalendarGrid className="ui-date-grid">
-                {(date) => <CalendarCell date={date} className="ui-date-cell" />}
-              </CalendarGrid>
-            </Calendar>
-          </Dialog>
-        </Popover>
+          {label && (
+            <AriaLabel className={LABEL_CLASS} style={LABEL_STYLE}>
+              {label}
+              {required && <RequiredMark />}
+            </AriaLabel>
+          )}
+          <Group
+            className={`ui-date-group${error ? ' ui-date-group-invalid' : ''}${shake}`}
+            onBlur={(event) => {
+              blur(event);
+              notifyForm();
+            }}
+          >
+            <AriaDateInput className="ui-date-segments">
+              {(segment) => <DateSegment segment={segment} className="ui-date-segment" />}
+            </AriaDateInput>
+            <Button className="ui-date-trigger">
+              <CalendarDays size={15} aria-hidden="true" />
+            </Button>
+          </Group>
+          <Popover className="ui-date-popover" placement="bottom start">
+            <Dialog className="ui-date-dialog">
+              <Calendar className="ui-date-calendar">
+                <header className="ui-date-calendar-header">
+                  <Button slot="previous" className="ui-date-nav">
+                    &#8249;
+                  </Button>
+                  <Heading className="ui-date-calendar-heading" />
+                  <Button slot="next" className="ui-date-nav">
+                    &#8250;
+                  </Button>
+                </header>
+                <CalendarGrid className="ui-date-grid">
+                  {(date) => <CalendarCell date={date} className="ui-date-cell" />}
+                </CalendarGrid>
+              </Calendar>
+            </Dialog>
+          </Popover>
         </DatePicker>
       </div>
       {error ? (

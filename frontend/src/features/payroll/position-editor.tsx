@@ -188,7 +188,7 @@ export function PositionEditor({
             Object.entries(values).filter(([key]) => Object.hasOwn(draft.form, key)),
           )
         : values;
-            setSaving(true);
+      setSaving(true);
       if (editing) {
         if (Object.keys(body).length) await backendPut('/hr/positions/' + editing.id, body);
       } else await backendPost('/hr/positions', body);

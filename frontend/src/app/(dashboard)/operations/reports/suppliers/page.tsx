@@ -540,16 +540,12 @@ export default function SupplierReportsPage() {
           <FormDateField
             label="From"
             value={filters.dateFrom}
-            onChange={(value) =>
-              setFilters((current) => ({ ...current, dateFrom: value }))
-            }
+            onChange={(value) => setFilters((current) => ({ ...current, dateFrom: value }))}
           />
           <FormDateField
             label="To"
             value={filters.dateTo}
-            onChange={(value) =>
-              setFilters((current) => ({ ...current, dateTo: value }))
-            }
+            onChange={(value) => setFilters((current) => ({ ...current, dateTo: value }))}
           />
           <label className="grid gap-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
             Purchase status

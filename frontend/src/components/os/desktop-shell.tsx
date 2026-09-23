@@ -148,7 +148,9 @@ export function DesktopShell({
     updateWorkspace = updateAppearance;
   const { drafts } = useWorkspaceDrafts();
   const sessionRef = useRef(session);
-  useLayoutEffect(() => { sessionRef.current = session; }, [session]);
+  useLayoutEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   const [launcher, setLauncher] = useState(false),
     [overview, setOverview] = useState(false),
     [control, setControl] = useState(false),

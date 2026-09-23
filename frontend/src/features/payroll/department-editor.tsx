@@ -159,7 +159,7 @@ export function DepartmentEditor({
             Object.entries(values).filter(([key]) => Object.hasOwn(draft.form, key)),
           )
         : values;
-            setSaving(true);
+      setSaving(true);
       if (editing) {
         if (Object.keys(body).length) await backendPut('/hr/departments/' + editing.id, body);
       } else await backendPost('/hr/departments', body);

@@ -22,7 +22,10 @@ import {
   labelDocumentValue,
   valueOrNA,
 } from '@/components/documents';
-import { layoutDocumentLines, proformaLineBudget } from '@/components/documents/document-line-budget';
+import {
+  layoutDocumentLines,
+  proformaLineBudget,
+} from '@/components/documents/document-line-budget';
 import { backendGet } from '@/lib/api-client';
 import { ErrorState, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';

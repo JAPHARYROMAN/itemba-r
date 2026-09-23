@@ -82,7 +82,7 @@ export function TypeEditor({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -142,7 +142,7 @@ export function TypeEditor({
       pending.current = false;
       return;
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       const path = '/hr/' + kind + '-types';

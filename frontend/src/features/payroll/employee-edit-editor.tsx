@@ -155,7 +155,7 @@ export function EmployeeEditEditor({
         onClose();
         return;
       }
-            setBusy(true);
+      setBusy(true);
       await backendPut(`/hr/employees/${encodeURIComponent(record.id)}`, payload);
       draft.markSaved();
       onSaved('Employee details updated.');

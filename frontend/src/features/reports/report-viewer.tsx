@@ -48,10 +48,7 @@ export function ReportViewer() {
   if (authLoading || !canView) {
     return (
       <div className="business-workspace report-viewer">
-        <PageHeader
-          title="Run report"
-          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
-        />
+        <PageHeader title="Run report" subtitle={authLoading ? 'Loading' : 'Access Restricted'} />
       </div>
     );
   }

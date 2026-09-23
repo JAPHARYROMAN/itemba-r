@@ -181,7 +181,15 @@ export function usePosBootstrap({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bootAttempt, enabled, loadSession, refreshPendingSales, router, syncCatalog, syncPendingSales]);
+  }, [
+    bootAttempt,
+    enabled,
+    loadSession,
+    refreshPendingSales,
+    router,
+    syncCatalog,
+    syncPendingSales,
+  ]);
 
   useEffect(() => {
     if (!enabled || !binding || !online) return;

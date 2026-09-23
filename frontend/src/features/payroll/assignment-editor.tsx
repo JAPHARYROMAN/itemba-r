@@ -140,7 +140,7 @@ export function AssignmentEditor({
         status: form.status,
         notes: form.notes.trim(),
       };
-            setSaving(true);
+      setSaving(true);
       if (editing) {
         const changes: Record<string, unknown> = {};
         const mapping = {

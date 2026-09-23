@@ -111,7 +111,9 @@ export function createDraftSync(publish: () => void) {
       item.pending = draft;
       item.status = item.blocked ? 'Needs attention' : 'Saving';
       publish();
-      void flush(draft.id).catch(() => { publish(); });
+      void flush(draft.id).catch(() => {
+        publish();
+      });
     },
     flush,
     claim: async (id: string) => {
@@ -173,9 +175,14 @@ export function createDraftSync(publish: () => void) {
     },
     retry: () => {
       for (const [id, item] of entries)
-        if (item.pending && !item.blocked) void flush(id).catch(() => { publish(); });
+        if (item.pending && !item.blocked)
+          void flush(id).catch(() => {
+            publish();
+          });
     },
-    activate: () => { active = true; },
+    activate: () => {
+      active = true;
+    },
     dispose: () => {
       active = false;
       entries.clear();

@@ -51,7 +51,7 @@ export function ContractEditor({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -91,7 +91,7 @@ export function ContractEditor({
       pending.current = false;
       return;
     }
-        setSaving(true);
+    setSaving(true);
     setError('');
     try {
       await backendPost('/hr/employment-contracts', {

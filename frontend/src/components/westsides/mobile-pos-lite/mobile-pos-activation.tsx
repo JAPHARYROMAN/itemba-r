@@ -88,7 +88,10 @@ export function MobilePosActivation() {
   if (authLoading) {
     return (
       <main className="min-h-screen px-4 py-8" style={{ background: 'var(--aurora-bg)' }}>
-        <p className="text-center text-sm font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+        <p
+          className="text-center text-sm font-medium"
+          style={{ color: 'var(--aurora-text-secondary)' }}
+        >
           Loading
         </p>
       </main>
@@ -98,7 +101,10 @@ export function MobilePosActivation() {
   if (!canUse) {
     return (
       <main className="min-h-screen px-4 py-8" style={{ background: 'var(--aurora-bg)' }}>
-        <p className="text-center text-sm font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+        <p
+          className="text-center text-sm font-medium"
+          style={{ color: 'var(--aurora-text-secondary)' }}
+        >
           Access Restricted
         </p>
       </main>

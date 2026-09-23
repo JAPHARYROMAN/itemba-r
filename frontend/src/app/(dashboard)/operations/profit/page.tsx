@@ -2,7 +2,16 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, Card, FormDateField, FormInput, FormSelect, PageHeader, PageSpinner, StatCard } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  StatCard,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { useOrgScope } from '@/hooks/use-org-scope';
@@ -458,11 +467,7 @@ export default function OperationsProfitPage() {
             value={dateFrom}
             onChange={(value) => setDateFrom(value)}
           />
-          <FormDateField
-            label="Date To"
-            value={dateTo}
-            onChange={(value) => setDateTo(value)}
-          />
+          <FormDateField label="Date To" value={dateTo} onChange={(value) => setDateTo(value)} />
         </div>
       </Card>
 

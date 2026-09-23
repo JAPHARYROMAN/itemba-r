@@ -55,9 +55,7 @@ export function terminationPreambleMm(hasPassport: boolean): number {
 }
 
 export function terminationTailMm(operatorFieldCount: number): number {
-  return (
-    NOTICE_MM + operatorFieldCount * OPERATOR_ROW_MM + SIGNATURES_MM + FOOTER_MM
-  );
+  return NOTICE_MM + operatorFieldCount * OPERATOR_ROW_MM + SIGNATURES_MM + FOOTER_MM;
 }
 
 export function cmaPreambleMm(flags: {

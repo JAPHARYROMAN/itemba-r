@@ -98,7 +98,9 @@ export default function QuotationPrintPage() {
     setLoading(true);
     setError('');
     try {
-      const next = await backendGet<Quotation>(`/westsides/quotations/${id}`, { signal: request.signal });
+      const next = await backendGet<Quotation>(`/westsides/quotations/${id}`, {
+        signal: request.signal,
+      });
       if (!request.current()) return;
       setRecord(next);
     } catch (err) {

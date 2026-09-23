@@ -257,7 +257,7 @@ export function ProductEditor({
           'Load family choices before creating all family sizes, or turn off that option.',
         );
       const body = productBody(form, initial, !!record, family, siblings.length);
-            setBusy(true);
+      setBusy(true);
       const result = record
         ? await backendPatch<ProductCreateResponse>(`/products/${record.id}`, body)
         : await backendPost<ProductCreateResponse>('/products', body);

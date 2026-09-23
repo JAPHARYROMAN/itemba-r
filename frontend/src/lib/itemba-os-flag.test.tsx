@@ -79,8 +79,20 @@ describe('isItembaOsEnabled', () => {
 
 describe.each([
   { flag: 'true', shell: 'os-shell', login: 'os-login', appsHidden: false, fuelHidden: true },
-  { flag: 'false', shell: 'legacy-shell', login: 'legacy-login', appsHidden: true, fuelHidden: false },
-  { flag: undefined, shell: 'legacy-shell', login: 'legacy-login', appsHidden: true, fuelHidden: false },
+  {
+    flag: 'false',
+    shell: 'legacy-shell',
+    login: 'legacy-login',
+    appsHidden: true,
+    fuelHidden: false,
+  },
+  {
+    flag: undefined,
+    shell: 'legacy-shell',
+    login: 'legacy-login',
+    appsHidden: true,
+    fuelHidden: false,
+  },
 ])('with NEXT_PUBLIC_ITEMBA_OS_ENABLED=$flag', ({ flag, shell, login, appsHidden, fuelHidden }) => {
   it(`renders the dashboard inside ${shell}`, async () => {
     await withFlag(flag);

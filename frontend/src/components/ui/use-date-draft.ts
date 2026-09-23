@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import type { FocusEvent } from 'react';
 import type { DateValue } from 'react-aria-components';
 import {
@@ -35,7 +35,7 @@ export function useDateDraft(
   const format = granularity === 'minute' ? formatIsoDateTime : formatIsoDate;
   const [draft, setDraft] = useState<DateValue | null>(() => parse(value));
   const [syncedFrom, setSyncedFrom] = useState(value);
-  const swallowedPartialYear = useRef(false);
+  const [swallowedPartialYear, setSwallowedPartialYear] = useState(false);
 
   // The value moved underneath us — a record loaded, a form reset, a sibling
   // field rewriting this one. Adjusting state during render is the supported
@@ -43,27 +43,27 @@ export function useDateDraft(
   if (value !== syncedFrom) {
     setSyncedFrom(value);
     setDraft(parse(value));
-    swallowedPartialYear.current = false;
+    setSwallowedPartialYear(false);
   }
 
   function change(next: DateValue | null) {
     setDraft(next);
     if (next && next.year < MIN_PLAUSIBLE_YEAR) {
-      swallowedPartialYear.current = true;
+      setSwallowedPartialYear(true);
       return;
     }
-    swallowedPartialYear.current = false;
+    setSwallowedPartialYear(false);
     onChange?.(format(next));
   }
 
   function blur(event: FocusEvent<HTMLElement>) {
     // Moving between segments is not leaving the field.
     if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    if (!swallowedPartialYear.current) return;
+    if (!swallowedPartialYear) return;
     // What is on screen is not a date. Clearing it is honest, and lets
     // required-field validation say so; keeping the form's previous value while
     // showing something else would not.
-    swallowedPartialYear.current = false;
+    setSwallowedPartialYear(false);
     setDraft(null);
     onChange?.('');
   }

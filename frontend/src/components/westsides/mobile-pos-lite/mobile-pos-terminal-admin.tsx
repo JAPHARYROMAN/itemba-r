@@ -123,7 +123,9 @@ export function MobilePosTerminalAdmin() {
     const request = beginRequest();
     setLoadError('');
     try {
-      const rows = await backendList<Terminal>('/mobile-pos-lite/terminals', { signal: request.signal });
+      const rows = await backendList<Terminal>('/mobile-pos-lite/terminals', {
+        signal: request.signal,
+      });
       if (!request.current()) return;
       setTerminals(rows);
     } catch (error) {

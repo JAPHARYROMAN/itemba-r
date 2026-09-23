@@ -136,7 +136,7 @@ export function UnitEditor({
     e.preventDefault();
     if (pending.current || !allowed || draft.availabilityError || (!record && companies.loading))
       return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -153,7 +153,7 @@ export function UnitEditor({
       pending.current = false;
       return setError('Enter a name and symbol.');
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       const body = {
@@ -375,7 +375,7 @@ export function ConversionEditor({
     e.preventDefault();
     if (pending.current || !allowed || draft.availabilityError || (!record && companies.loading))
       return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -406,7 +406,7 @@ export function ConversionEditor({
       pending.current = false;
       return setError('Enter a positive, finite factor with at most six decimal places.');
     }
-        setBusy(true);
+    setBusy(true);
     setError('');
     try {
       const body = {

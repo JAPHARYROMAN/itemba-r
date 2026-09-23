@@ -78,7 +78,13 @@ vi.mock('@/lib/mobile-pos-lite-store', () => ({
 }));
 
 const SESSION = {
-  terminal: { id: 't1', code: 'T-001', name: 'Kaunta 1', configVersion: 1, offlineCashEnabled: true },
+  terminal: {
+    id: 't1',
+    code: 'T-001',
+    name: 'Kaunta 1',
+    configVersion: 1,
+    offlineCashEnabled: true,
+  },
   company: { id: 'c1', name: 'Duka Ltd', code: 'DL' },
   division: { id: 'd1', name: 'Rejareja', code: 'RJ' },
   branch: { id: 'b1', name: 'Tawi la Kariakoo', code: 'KRK' },

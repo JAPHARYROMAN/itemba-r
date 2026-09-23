@@ -48,7 +48,9 @@ export function WorkspaceNavigationProvider({
   });
   const current = useRef(history);
   const notify = useRef(onHrefChange);
-  useLayoutEffect(() => { notify.current = onHrefChange; }, [onHrefChange]);
+  useLayoutEffect(() => {
+    notify.current = onHrefChange;
+  }, [onHrefChange]);
   const previousHref = useRef(initialHref);
   useLayoutEffect(() => {
     if (previousHref.current === initialHref) return;

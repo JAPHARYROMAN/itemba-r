@@ -26,9 +26,7 @@ export function DraftLineTable({
           <th className="w-[10%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">
             Disc/Tax
           </th>
-          <th className="w-[15%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">
-            Amount
-          </th>
+          <th className="w-[15%] border border-slate-400 px-[1mm] py-[1.2mm] text-right">Amount</th>
         </tr>
       </thead>
       <tbody>

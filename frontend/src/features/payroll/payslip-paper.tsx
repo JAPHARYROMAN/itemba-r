@@ -1,8 +1,5 @@
 import { WorkspaceTable } from '@/components/ui/workspace-table';
-import {
-  payslipBudgetFlags,
-  splitPayslipForPrint,
-} from './payslip-page-budget';
+import { payslipBudgetFlags, splitPayslipForPrint } from './payslip-page-budget';
 
 export const TAX_LABELS: Record<string, { en: string; sw: string }> = {
   PAYE_MAINLAND: { en: 'PAYE (Mainland)', sw: 'PAYE (Bara)' },
@@ -105,8 +102,16 @@ export interface PayslipPayload {
 }
 
 export function PayslipPaper({ data }: { data: PayslipPayload }) {
-  const { entry, employee, company, payrollRun, allowances, manualDeductions, statutoryLines, totals } =
-    data;
+  const {
+    entry,
+    employee,
+    company,
+    payrollRun,
+    allowances,
+    manualDeductions,
+    statutoryLines,
+    totals,
+  } = data;
   const employeeStatutory = statutoryLines.filter((line) => line.employeeContribution > 0);
   const employerLines = statutoryLines.filter((line) => line.employerContribution > 0);
   const split = splitPayslipForPrint(
@@ -465,13 +470,7 @@ function Net({ employee, netPay }: { employee: PayslipPayload['employee']; netPa
   );
 }
 
-function Employer({
-  lines,
-  total,
-}: {
-  lines: PayslipPayload['statutoryLines'];
-  total: number;
-}) {
+function Employer({ lines, total }: { lines: PayslipPayload['statutoryLines']; total: number }) {
   return (
     <>
       <SectionTitle

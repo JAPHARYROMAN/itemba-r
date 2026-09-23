@@ -2,7 +2,17 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, FormDateField, PageHeader, PageToolbar, PermissionDeniedState, ProductPicker, showToast, StatCard, StatusBadge } from '@/components/ui';
+import {
+  Btn,
+  FormDateField,
+  PageHeader,
+  PageToolbar,
+  PermissionDeniedState,
+  ProductPicker,
+  showToast,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
 import { Modal, ConfirmDialog } from '@/components/aurora/overlays';
 import {
   ResponsiveDataTable,
@@ -1450,10 +1460,7 @@ export default function CreditNotesPage() {
   if (authLoading || !canView) {
     return (
       <div className="p-6 space-y-6">
-        <PageHeader
-          title="Credit Notes"
-          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
-        />
+        <PageHeader title="Credit Notes" subtitle={authLoading ? 'Loading' : 'Access Restricted'} />
         {!authLoading && <PermissionDeniedState />}
       </div>
     );

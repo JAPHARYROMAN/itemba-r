@@ -63,7 +63,7 @@ export function EmployeeTerminationEditor({
       draft.validateReview();
       await draft.saveNow();
       if (!form.reason.trim()) throw new Error('Enter the termination reason.');
-            setBusy(true);
+      setBusy(true);
       await backendPatch(`/hr/employees/${encodeURIComponent(employee.id)}/request-termination`, {
         reason: form.reason.trim(),
         ...(form.terminationDate ? { terminationDate: form.terminationDate } : {}),

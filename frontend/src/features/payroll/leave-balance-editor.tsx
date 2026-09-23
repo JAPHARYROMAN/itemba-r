@@ -129,7 +129,7 @@ export function AllocationModal({ initial, source, onClose, onSaved }: Props) {
   const set = (key: keyof FormState, value: string) => setForm((f) => ({ ...f, [key]: value }));
   const submit = async () => {
     if (pending.current || blocked) return;
-      pending.current = true;
+    pending.current = true;
     try {
       draft.validateReview();
       await draft.saveNow();
@@ -171,7 +171,7 @@ export function AllocationModal({ initial, source, onClose, onSaved }: Props) {
       pending.current = false;
       return;
     }
-        setSaving(true);
+    setSaving(true);
     setError('');
     try {
       await backendPost('/hr/leave-balances', {

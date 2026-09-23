@@ -84,7 +84,9 @@ describe('group control route gates', () => {
     render(<BankAccounts />);
     expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
     const listCalls = () =>
-      state.fetch.mock.calls.filter((call) => String(call[0]).includes('/api/backend/bank-accounts?'));
+      state.fetch.mock.calls.filter((call) =>
+        String(call[0]).includes('/api/backend/bank-accounts?'),
+      );
     expect(listCalls()).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(listCalls()).toHaveLength(2);

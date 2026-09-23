@@ -47,11 +47,19 @@ function createDraftStore(synchronize = false) {
   return {
     sync,
     error: () => loadError,
-    setError: (message:string) => { loadError=message; publish(); },
+    setError: (message: string) => {
+      loadError = message;
+      publish();
+    },
     version: () => version,
     hydrate: (loaded: WorkspaceDraft[]) => {
       sync?.hydrate(loaded);
-      rows = [...rows.filter(row => leases.has(row.id) || !loaded.some(current => current.id === row.id)), ...loaded.filter(row => !leases.has(row.id))];
+      rows = [
+        ...rows.filter(
+          (row) => leases.has(row.id) || !loaded.some((current) => current.id === row.id),
+        ),
+        ...loaded.filter((row) => !leases.has(row.id)),
+      ];
       publish();
     },
     unsynced: () => (synchronize ? !!sync?.unsynced() : rows.length > 0),
@@ -74,7 +82,9 @@ function createDraftStore(synchronize = false) {
       const lease = leases.get(id);
       if (lease && !lease.opening && lease.owner !== owner) return false;
       leases.set(id, { owner, opening: false });
-      void sync?.claim(id).catch(() => { publish(); });
+      void sync?.claim(id).catch(() => {
+        publish();
+      });
       publish();
       return true;
     },
@@ -135,7 +145,12 @@ export function WorkspaceDraftsProvider({
       .then((rows) => {
         if (!controller.signal.aborted) store.hydrate(rows);
       })
-      .catch(() => { if(!controller.signal.aborted)store.setError('Saved drafts could not be loaded. Reconnect and reload before resuming earlier work.'); });
+      .catch(() => {
+        if (!controller.signal.aborted)
+          store.setError(
+            'Saved drafts could not be loaded. Reconnect and reload before resuming earlier work.',
+          );
+      });
     const retry = () => store.sync?.retry();
     window.addEventListener('online', retry);
     return () => {
@@ -263,17 +278,23 @@ export function useWorkspaceDraftForm<T>(
         }
       : undefined,
   );
-  const actions = useRef({retain,ownsDraft,isDirty:guard.isDirty});
-  useLayoutEffect(() => { actions.current = {retain,ownsDraft,isDirty:guard.isDirty}; });
+  const actions = useRef({ retain, ownsDraft, isDirty: guard.isDirty });
+  useLayoutEffect(() => {
+    actions.current = { retain, ownsDraft, isDirty: guard.isDirty };
+  });
   useEffect(() => {
-    if (!store?.sync || options.busy || !actions.current.isDirty() || !actions.current.ownsDraft()) return;
+    if (!store?.sync || options.busy || !actions.current.isDirty() || !actions.current.ownsDraft())
+      return;
     const timer = setTimeout(() => actions.current.retain(), 1000);
     return () => clearTimeout(timer);
   }, [form, options.busy, store]);
   useEffect(() => {
     if (!store?.sync) return;
     const timer = setInterval(() => {
-      if (actions.current.ownsDraft()) void store.sync?.claim(id).catch(() => { setAvailabilityError(store.sync?.error(id) ?? 'Draft lease could not be renewed.'); });
+      if (actions.current.ownsDraft())
+        void store.sync?.claim(id).catch(() => {
+          setAvailabilityError(store.sync?.error(id) ?? 'Draft lease could not be renewed.');
+        });
     }, 20000);
     return () => clearInterval(timer);
   }, [store, id, owner]);

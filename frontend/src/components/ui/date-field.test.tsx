@@ -105,8 +105,7 @@ describe('FormDateField', () => {
       const [value, setValue] = useState('2026-09-01');
       return (
         <div className="ui-date-caption">
-          From{' '}
-          <FormDateField aria-label="Expenses from" value={value} onChange={setValue} />
+          From <FormDateField aria-label="Expenses from" value={value} onChange={setValue} />
         </div>
       );
     }

@@ -1,7 +1,15 @@
 'use client';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
-import { Btn, FormDateField, FormSelect, PageHeader, PageSpinner, PageToolbar, PermissionDeniedState } from '@/components/ui';
+import {
+  Btn,
+  FormDateField,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  PermissionDeniedState,
+} from '@/components/ui';
 import { RecordBrowser } from '@/components/workspace/record-browser';
 import { productLabel } from '@/components/workspace/product-form';
 import { useAuth } from '@/hooks/use-auth';

@@ -240,10 +240,7 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
   if (authLoading) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
-        <PageHeader
-          title={isSale ? 'Daily Sales Record' : 'Money-Out Record'}
-          subtitle="Loading"
-        />
+        <PageHeader title={isSale ? 'Daily Sales Record' : 'Money-Out Record'} subtitle="Loading" />
       </div>
     );
   }
