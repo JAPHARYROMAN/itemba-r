@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { AppIcon, type AppIconName, showToast } from '@/components/ui';
 import {
   AuroraPage,
@@ -465,9 +466,28 @@ function MiniMetric({ label, value, danger = false }: { label: string; value: Re
   );
 }
 
+const DASHBOARD_VIEW_PERMISSIONS = [
+  'group-control.view',
+  'operations.dashboard.view',
+  'operations.reports.view',
+  'finance.view',
+  'finance.reports.view',
+  'receivables.view',
+  'payables.view',
+  'procurement.dashboard',
+  'westsides.dashboard.view',
+  'petroleum.dashboard.view',
+  'hr.dashboard.view',
+  'compliance.dashboard.view',
+  'approvals.dashboard.view',
+  'profit.view',
+] as const;
+
 export default function DashboardPage() {
   const { user, loading: authLoading, hasPermission } = useAuth();
   const canViewControl = hasPermission('group-control.view');
+  const canView = DASHBOARD_VIEW_PERMISSIONS.some((permission) => hasPermission(permission));
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -476,11 +496,14 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const loadSummary = useCallback(async () => {
+    if (authLoading || !user || !canView) return;
+    const request = beginRequest();
     try {
       setLoading(true);
       setError(null);
       setForbidden(false);
-      const res = await fetch('/api/backend/dashboard/executive-summary');
+      const res = await fetch('/api/backend/dashboard/executive-summary', { signal: request.signal });
+      if (!request.current()) return;
       if (res.status === 403) {
         setForbidden(true);
         setData(null);
@@ -488,16 +511,18 @@ export default function DashboardPage() {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { data: Summary };
+      if (!request.current()) return;
       setData(json.data);
       setLastUpdated(new Date());
     } catch (e) {
+      if (!request.current()) return;
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
       showToast('error', 'Dashboard unavailable', message);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, []);
+  }, [authLoading, beginRequest, canView, user]);
 
   useEffect(() => {
     if (authLoading) {
@@ -508,12 +533,21 @@ export default function DashboardPage() {
     if (!user) {
       setData(null);
       setError(null);
+      setForbidden(false);
+      setLoading(false);
+      return;
+    }
+
+    if (!canView) {
+      setData(null);
+      setError(null);
+      setForbidden(true);
       setLoading(false);
       return;
     }
 
     void loadSummary();
-  }, [authLoading, user, loadSummary]);
+  }, [authLoading, canView, user, loadSummary]);
 
   const now = new Date();
   const greeting =
@@ -611,19 +645,17 @@ export default function DashboardPage() {
   return (
     <AuroraPage>
       <AuroraPageHeader
-        title={user?.fullName ? `${greeting}, ${user.fullName.split(' ')[0]}` : 'Command Centre'}
-        subtitle={`${dateStr} · Live operating dashboard across finance, sales, purchases, inventory, workflow, and compliance`}
-        eyebrow="Live"
-        live
+        title={user?.fullName ? `${greeting}, ${user.fullName.split(' ')[0]}` : 'Overview'}
+        subtitle={`${dateStr} · Your business at a glance.`}
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link
-              href="/operations/sales-orders"
+            {hasPermission('sales.create') && <Link
+              href="/operations/sales-orders?create=1"
               className="text-sm font-medium px-4 py-2 rounded-lg transition-colors"
               style={{ background: 'var(--aurora-primary)', color: '#fff' }}
             >
               New sale →
-            </Link>
+            </Link>}
             <Link
               href="/reports"
               className="text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -640,8 +672,8 @@ export default function DashboardPage() {
       />
 
       <AuroraToolbar
-        title="Operating pulse"
-        description="The dashboard now reads live business signals from transactions, balances, inventory, workflow, and compliance."
+        title="Business snapshot"
+        description="Today's activity and what needs your attention."
         meta={
           <>
             <StatusBadge status={user ? 'ACTIVE' : 'PENDING'} size="sm" />
@@ -659,7 +691,7 @@ export default function DashboardPage() {
             variant="secondary"
             onClick={loadSummary}
             loading={loading && Boolean(data)}
-            disabled={authLoading || !user}
+            disabled={authLoading || !user || !canView}
           >
             Refresh
           </AuroraButton>
@@ -706,6 +738,7 @@ export default function DashboardPage() {
         <ErrorState
           title="Dashboard Unavailable"
           description={`Failed to load: ${error}`}
+          onRetry={() => void loadSummary()}
           className="mx-6 mt-6"
         />
       )}

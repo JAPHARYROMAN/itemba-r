@@ -1,3 +1,5 @@
+import { PayrollCashService } from './payroll-cash.service';
+import { OrganizationScopeService } from '../../../common/services/organization-scope.service';
 import { Module } from '@nestjs/common';
 import { PayrollRunsController } from './payroll-runs.controller';
 import { PayrollRunsService } from './payroll-runs.service';
@@ -10,7 +12,12 @@ import { CompanyScopeService } from '../../../common/services';
 @Module({
   imports: [PrismaModule, AuditLogsModule, PayrollCalculatorModule, PayrollPostingsModule],
   controllers: [PayrollRunsController],
-  providers: [PayrollRunsService, CompanyScopeService],
+  providers: [
+    PayrollRunsService,
+    CompanyScopeService,
+    OrganizationScopeService,
+    PayrollCashService,
+  ],
   exports: [PayrollRunsService],
 })
 export class PayrollRunsModule {}

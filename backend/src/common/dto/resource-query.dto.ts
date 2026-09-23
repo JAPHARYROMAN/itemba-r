@@ -429,6 +429,39 @@ class ResourceQueryFieldsDto {
   userId?: string;
 }
 
+export class ApprovalDelegationsQueryDto extends PickType(ResourceQueryFieldsDto, [
+  'page',
+  'limit',
+  'companyId',
+  'search',
+] as const) {
+  @IsOptional()
+  @IsIn(['ACTIVE', 'INACTIVE', 'EXPIRED', 'CANCELLED'])
+  status?: string;
+}
+
+export class PayslipsQueryDto extends PickType(ResourceQueryFieldsDto, [
+  'page',
+  'limit',
+  'search',
+] as const) {}
+export class SalaryPaymentsQueryDto extends PickType(ResourceQueryFieldsDto, [
+  'page',
+  'limit',
+  'search',
+  'employeeId',
+  'companyId',
+  'status',
+] as const) {}
+export class SalaryAdvancesQueryDto extends PickType(ResourceQueryFieldsDto, [
+  'page',
+  'limit',
+  'search',
+  'employeeId',
+  'companyId',
+  'status',
+] as const) {}
+
 type ResourceQueryField = keyof ResourceQueryFieldsDto;
 const fields = <T extends readonly ResourceQueryField[]>(...names: T): T => names;
 
@@ -445,6 +478,10 @@ export class CompanyPageLimitQueryDto extends PickType(
 export class CompanyStatusPageLimitQueryDto extends PickType(
   ResourceQueryFieldsDto,
   fields('companyId', 'status', 'page', 'limit'),
+) {}
+export class PayrollPeriodsQueryDto extends PickType(
+  ResourceQueryFieldsDto,
+  fields('search', 'companyId', 'status', 'page', 'limit'),
 ) {}
 export class SearchCompanyPageLimitQueryDto extends PickType(
   ResourceQueryFieldsDto,
@@ -465,7 +502,7 @@ export class AlertRulesQueryDto extends PickType(
 ) {}
 export class ApprovalPendingQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId'),
+  fields('page', 'limit', 'companyId', 'search', 'entityType'),
 ) {}
 export class ApprovalSubmittedQueryDto extends PickType(
   ResourceQueryFieldsDto,
@@ -473,11 +510,15 @@ export class ApprovalSubmittedQueryDto extends PickType(
 ) {}
 export class ApprovalRequestsQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId', 'entityType', 'status', 'requestedById'),
-) {}
+  fields('page', 'limit', 'companyId', 'entityType', 'status', 'requestedById', 'search'),
+) {
+  @IsOptional()
+  @IsIn(['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'ESCALATED', 'EXPIRED'])
+  status?: string;
+}
 export class ApprovalWorkflowsQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId', 'entityType', 'isActive'),
+  fields('page', 'limit', 'companyId', 'entityType', 'isActive', 'search'),
 ) {}
 export class AuditEvidencePacksQueryDto extends PickType(
   ResourceQueryFieldsDto,
@@ -558,6 +599,7 @@ export class GeneratedDocumentsQueryDto extends PickType(
 export class AttendanceQueryDto extends PickType(
   ResourceQueryFieldsDto,
   fields(
+    'search',
     'page',
     'limit',
     'employeeId',
@@ -575,15 +617,19 @@ export class DepartmentsQueryDto extends PickType(
 ) {}
 export class EmployeeAllowanceQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'employeeId', 'companyId', 'allowanceTypeId'),
+  fields('page', 'limit', 'employeeId', 'companyId', 'allowanceTypeId', 'search', 'status'),
 ) {}
 export class EmployeeAssignmentQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'employeeId', 'companyId'),
+  fields('page', 'limit', 'employeeId', 'companyId', 'search'),
+) {}
+export class EmploymentContractsQueryDto extends PickType(
+  ResourceQueryFieldsDto,
+  fields('page', 'limit', 'employeeId', 'companyId', 'status', 'search'),
 ) {}
 export class EmployeeDeductionQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'employeeId', 'companyId', 'deductionTypeId'),
+  fields('page', 'limit', 'employeeId', 'companyId', 'deductionTypeId', 'search', 'status'),
 ) {}
 export class EmployeesQueryDto extends PickType(
   ResourceQueryFieldsDto,
@@ -610,6 +656,7 @@ export class HrDocumentsQueryDto extends PickType(
 export class LeaveRequestsQueryDto extends PickType(
   ResourceQueryFieldsDto,
   fields(
+    'search',
     'page',
     'limit',
     'employeeId',
@@ -622,15 +669,15 @@ export class LeaveRequestsQueryDto extends PickType(
 ) {}
 export class LeaveBalancesQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId', 'employeeId', 'leaveTypeId', 'year'),
+  fields('page', 'limit', 'companyId', 'employeeId', 'leaveTypeId', 'year', 'search'),
 ) {}
 export class PayrollEntriesQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'payrollRunId', 'employeeId', 'companyId'),
+  fields('page', 'limit', 'payrollRunId', 'employeeId', 'companyId', 'search'),
 ) {}
 export class PayrollRunsQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId', 'status', 'payrollPeriodId'),
+  fields('page', 'limit', 'companyId', 'status', 'payrollPeriodId', 'search'),
 ) {}
 export class PerformanceQueryDto extends PickType(
   ResourceQueryFieldsDto,
@@ -680,15 +727,25 @@ export class EmploymentDisputesQueryDto extends PickType(
     'employeeId',
     'status',
     'directToGroupHr',
+    'search',
   ),
 ) {}
 export class DisciplinaryActionsQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId', 'employeeId', 'status', 'type'),
+  fields('page', 'limit', 'companyId', 'employeeId', 'status', 'type', 'search'),
 ) {}
 export class MedicalExamRecordsQueryDto extends PickType(
   ResourceQueryFieldsDto,
-  fields('page', 'limit', 'companyId', 'employeeId', 'fitnessStatus', 'expiringDays', 'hazardOnly'),
+  fields(
+    'page',
+    'limit',
+    'companyId',
+    'employeeId',
+    'fitnessStatus',
+    'expiringDays',
+    'hazardOnly',
+    'search',
+  ),
 ) {}
 export class OshaRegistrationsQueryDto extends PickType(
   ResourceQueryFieldsDto,

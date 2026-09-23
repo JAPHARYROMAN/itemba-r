@@ -31,7 +31,7 @@ export class MobileMoneyAccountsController {
   @Post()
   @RequirePermissions('employees.update')
   create(@Body() dto: CreateMobileMoneyAccountDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.id);
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
@@ -41,7 +41,7 @@ export class MobileMoneyAccountsController {
     @Body() dto: UpdateMobileMoneyAccountDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.update(id, dto, user.id);
+    return this.service.update(id, dto, user);
   }
 
   @Delete(':id')

@@ -10,6 +10,14 @@ import { validateJsonSchema } from '../msaidizi-reasoning/msaidizi-policy-evalua
 import { ManifestProvider } from '../msaidizi/manifest.provider';
 import { buildToolDefinition } from '../msaidizi/tool-registry';
 import { RuntimeReasoningDecision } from './msaidizi-runtime-reasoning.protocol';
+import {
+  assertPlanInputBindings,
+  MsaidiziInputBindingError,
+  parsePersistedInputBindings,
+} from '../msaidizi-tasks/msaidizi-input-bindings';
+import { MsaidiziPlanStepDto } from '../msaidizi-tasks/dto/msaidizi-task.dto';
+import { parseDependencyLineage } from '../msaidizi-tasks/msaidizi-dependency-lineage';
+import { validateBoundCapabilityArguments } from '../msaidizi-tasks/msaidizi-bound-capability-schema';
 
 export interface RuntimeAuthorizedStep {
   id: string;
@@ -21,6 +29,8 @@ export interface RuntimeAuthorizedStep {
   capabilityVersion: string;
   arguments: Prisma.JsonValue;
   dependencies: Prisma.JsonValue;
+  inputBindings?: Prisma.JsonValue;
+  dependencyLineage?: Prisma.JsonValue;
   expectedEffect: MsaidiziEffect;
   dataClass: string;
   preconditions: Prisma.JsonValue;
@@ -74,6 +84,7 @@ export class MsaidiziRuntimeCritic {
     steps: RuntimeAuthorizedStep[],
     mandate: RuntimeMandateSnapshot | null,
     now = new Date(),
+    planInputs: Prisma.JsonValue = {},
   ): RuntimeCriticReview {
     const issues: RuntimeCriticIssue[] = [];
     if (decision.decision === 'CONTINUE' && decision.outcome !== 'ON_TRACK') {
@@ -188,7 +199,10 @@ export class MsaidiziRuntimeCritic {
             issues.push({ code: 'REPLAN_READ_CAPABILITY_UNAVAILABLE', stepKey: step.stepKey });
           } else {
             const schema = buildToolDefinition(capability, 'runtime_read').input_schema;
-            if (validateRuntimeArguments(argumentsValue, schema).length > 0) {
+            if (
+              validateRuntimeArguments(argumentsValue, schema, step.inputBindings, planInputs)
+                .length > 0
+            ) {
               issues.push({ code: 'REPLAN_FILL_SCHEMA_MISMATCH', stepKey: step.stepKey });
             }
           }
@@ -204,6 +218,71 @@ export class MsaidiziRuntimeCritic {
     }
 
     const originalOrder = pending.map((step) => step.stepKey);
+    try {
+      const boundSteps: MsaidiziPlanStepDto[] = replannedSteps.map((step) => ({
+        ...step,
+        key: step.stepKey,
+        arguments: step.arguments as Record<string, unknown>,
+        dependsOn: stringArray(step.dependencies),
+        inputBindings: parsePersistedInputBindings(
+          step.inputBindings === undefined ? [] : step.inputBindings,
+        ),
+        preconditions: isObject(step.preconditions) ? step.preconditions : {},
+        budgets: isObject(step.budgets) ? step.budgets : {},
+        stopConditions: isObject(step.stopConditions) ? step.stopConditions : {},
+        recovery: isObject(step.recovery) ? step.recovery : undefined,
+      }));
+      for (const step of boundSteps) {
+        const original = pendingByKey.get(step.key)!;
+        const pins = parseDependencyLineage(original.dependencyLineage);
+        const priorSources = [
+          ...steps
+            .filter(
+              (candidate) =>
+                succeededKeys.has(candidate.stepKey) &&
+                stringArray(original.dependencies).includes(candidate.stepKey),
+            )
+            .map((candidate) => ({ key: candidate.stepKey, dataClass: candidate.dataClass })),
+          ...pins.map((pin) => ({ key: pin.dependencyStepKey, dataClass: pin.dataClass })),
+        ];
+        if (
+          new Set(priorSources.map((source) => source.key)).size !== priorSources.length ||
+          priorSources.some((source) => selectedKeys.has(source.key))
+        )
+          throw new MsaidiziInputBindingError(
+            'INPUT_BINDING_LINEAGE_INVALID',
+            'Ambiguous prior dependency',
+          );
+        const stubs = priorSources.map(
+          (source): MsaidiziPlanStepDto => ({
+            ...step,
+            key: source.key,
+            dataClass: source.dataClass,
+            dependsOn: [],
+            inputBindings: [],
+            arguments: {},
+          }),
+        );
+        assertPlanInputBindings(
+          [
+            ...boundSteps
+              .filter((candidate) => candidate.key !== step.key)
+              .map((candidate) => ({ ...candidate, inputBindings: [] })),
+            ...stubs,
+            {
+              ...step,
+              dependsOn: [...step.dependsOn, ...priorSources.map((source) => source.key)],
+            },
+          ],
+          isObject(planInputs) ? planInputs : {},
+        );
+      }
+    } catch (error) {
+      issues.push({
+        code:
+          error instanceof MsaidiziInputBindingError ? error.code : 'REPLAN_INPUT_BINDINGS_INVALID',
+      });
+    }
     const noOp =
       skippedKeys.length === 0 &&
       instruction.readArgumentFills.length === 0 &&
@@ -313,6 +392,8 @@ function validateRuntimeArguments(
     required?: string[];
     additionalProperties?: boolean;
   },
+  inputBindings?: Prisma.JsonValue,
+  planInputs: Prisma.JsonValue = {},
 ): string[] {
   const projected: Record<string, unknown> = {};
   const issues: string[] = [];
@@ -323,5 +404,22 @@ function validateRuntimeArguments(
       issues.push(`arguments.${key} is not accepted by the capability schema`);
     }
   }
-  return [...issues, ...validateJsonSchema(projected, schema, 'arguments')];
+  try {
+    const bindings = parsePersistedInputBindings(inputBindings === undefined ? [] : inputBindings);
+    // Validate the resolved shape on a clone. Reviewed placeholders remain null
+    // in the new plan; only the executor may materialize their bound values.
+    return [
+      ...issues,
+      ...(bindings.length
+        ? validateBoundCapabilityArguments(
+            projected,
+            bindings,
+            schema,
+            isObject(planInputs) ? planInputs : {},
+          ).map((issue) => issue.message)
+        : validateJsonSchema(projected, schema, 'arguments')),
+    ];
+  } catch {
+    return [...issues, 'Reviewed input bindings are invalid'];
+  }
 }

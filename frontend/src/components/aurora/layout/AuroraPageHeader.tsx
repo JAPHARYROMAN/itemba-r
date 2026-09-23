@@ -13,7 +13,7 @@ interface AuroraPageHeaderProps {
 
 export function AuroraPageHeader({ title, subtitle, eyebrow, live = false, actions, breadcrumbs, className = '' }: AuroraPageHeaderProps) {
   return (
-    <div className={`flex items-start justify-between gap-4 ${className}`}>
+    <div data-page-header className={`flex items-start justify-between gap-4 ${className}`}>
       <div className="min-w-0 flex-1">
         {breadcrumbs && <div className="mb-2">{breadcrumbs}</div>}
         {eyebrow && (

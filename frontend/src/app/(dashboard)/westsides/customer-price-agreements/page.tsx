@@ -1,9 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
+import { Btn, Card, ConfirmDialog, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
+import { WestsidesGate } from '../_components/route-gate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,7 +128,7 @@ function AgreementModal({ mode, item, onClose, onSaved }: ModalProps) {
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Agreement' : 'Edit Agreement'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>{mode === 'create' ? 'Create' : 'Update'}</Btn></>}>
-      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      {error && <div role="alert" className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid grid-cols-2 gap-4">
         <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setCustomerId(''); }} placeholder="Select…" disabled={mode === 'edit'}>
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -141,8 +144,8 @@ function AgreementModal({ mode, item, onClose, onSaved }: ModalProps) {
         </FormSelect>
         <FormInput label="Agreed Price" type="number" min={0} step="0.01" value={agreedPrice} onChange={(e) => setAgreedPrice(e.target.value)} placeholder="0.00" />
         <FormInput label="Discount %" type="number" min={0} max={100} step="0.01" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} placeholder="0" />
-        <FormInput label="Start Date" type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        <FormInput label="End Date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        <FormDateField label="Start Date" required value={startDate} onChange={(value) => setStartDate(value)} />
+        <FormDateField label="End Date" value={endDate} onChange={(value) => setEndDate(value)} />
         <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
       </div>
     </Modal>
@@ -152,9 +155,11 @@ function AgreementModal({ mode, item, onClose, onSaved }: ModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CustomerPriceAgreementsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('customer_price_agreements.view');
   const canManage = hasPermission('customer_price_agreements.manage');
   const canApprove = hasPermission('customer_price_agreements.approve');
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<CustomerPriceAgreement[]>([]);
   const [loading, setLoading] = useState(false);
@@ -165,16 +170,26 @@ export default function CustomerPriceAgreementsPage() {
   const [actionLoading, setActionLoading] = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch('/api/backend/westsides/customer-price-agreements?limit=100');
+      const res = await fetch('/api/backend/westsides/customer-price-agreements?limit=100', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) throw new Error('Failed to load agreements');
       const json = await res.json();
+      if (!request.current()) return;
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Error loading data');
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -202,6 +217,10 @@ export default function CustomerPriceAgreementsPage() {
     }
   };
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Customer Price Agreements" loading={authLoading} />;
+  }
+
   const showActions = canManage || canApprove;
 
   return (
@@ -214,14 +233,24 @@ export default function CustomerPriceAgreementsPage() {
         ) : null}
       />
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       {loading ? <Spinner /> : (
         <Card className="overflow-hidden">
           {items.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-10">No agreements found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <WorkspaceTable className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className={thCls}>Customer</th>
@@ -267,7 +296,7 @@ export default function CustomerPriceAgreementsPage() {
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>

@@ -123,8 +123,8 @@ export class DepartmentsService {
     const existing = await this.findOne(id, user);
     await this.assertDepartmentHierarchy(
       dto.companyId ?? existing.companyId,
-      dto.divisionId ?? existing.divisionId ?? undefined,
-      dto.branchId ?? existing.branchId ?? undefined,
+      (dto.divisionId === undefined ? existing.divisionId : dto.divisionId) ?? undefined,
+      (dto.branchId === undefined ? existing.branchId : dto.branchId) ?? undefined,
       user,
     );
     const record = await this.prisma.department.update({ where: { id }, data: dto });

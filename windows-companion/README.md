@@ -267,6 +267,15 @@ $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
 .\scripts\Invoke-ProtectedSourceVerification.ps1 -DotNetPath $dotnet
 ```
 
+CI also runs `node --test scripts/verify-static-boundaries.test.mjs` on Windows.
+This copies the source into an owned temporary directory, proves the current
+verifier passes, then proves it rejects seven weakened health/browser-boundary
+variants. It never edits the checkout or starts a companion service. Runtime
+tests separately cover eleven authentic-but-unacceptable driver-health responses,
+session latching before policy mutation, and the rejecting browser registration
+and constructor default. These are source/managed tests, not driver or VM
+acceptance evidence.
+
 The GitHub `Windows Companion — Protected Verification` check must be required
 by branch protection. The signed release constructor independently invokes the
 same runner before it creates or signs a candidate, so direct release-script

@@ -1,0 +1,132 @@
+.reconciliation-workspace,
+.reconciliation-detail {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.reconciliation-workspace > .reconciliation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding: 18px;
+}
+.reconciliation-filters > div {
+  flex: 1 1 180px;
+}
+.reconciliation-links,
+.reconciliation-form-actions,
+.reconciliation-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.reconciliation-links a {
+  color: var(--aurora-primary);
+  font-size: 13px;
+}
+.reconciliation-pagination {
+  justify-content: space-between;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+}
+.reconciliation-workspace .os-split-detail > [data-workspace-card] {
+  padding: 20px;
+}
+.reconciliation-detail > header,
+.reconciliation-checks > header,
+.reconciliation-lines header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.reconciliation-detail h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.reconciliation-detail h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.reconciliation-detail p,
+.reconciliation-checks li {
+  color: var(--aurora-text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.reconciliation-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.reconciliation-checks {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 16px;
+  background: var(--aurora-bg-elevated);
+}
+.reconciliation-checks ul {
+  padding-left: 18px;
+  list-style: disc;
+}
+.reconciliation-lines {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+.reconciliation-lines > li {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+  background: var(--aurora-card);
+}
+.reconciliation-file {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  padding: 18px;
+  border: 1px dashed var(--aurora-border);
+  border-radius: 14px;
+  background: var(--aurora-bg-elevated);
+}
+.reconciliation-file input {
+  max-width: 100%;
+  color: var(--aurora-text);
+}
+.reconciliation-file input::file-selector-button {
+  border: 1px solid var(--aurora-border);
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-right: 12px;
+}
+.reconciliation-workspace button,
+.reconciliation-form-actions button {
+  min-height: 44px;
+}
+@media (max-width: 600px) {
+  .reconciliation-totals {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reconciliation-filters > button {
+    flex: 1 1 auto;
+  }
+}
+@container os-workspace (max-width: 600px) {
+  .reconciliation-totals {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reconciliation-filters > button {
+    flex: 1 1 auto;
+  }
+}

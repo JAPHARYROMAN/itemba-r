@@ -1,9 +1,22 @@
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsDateString, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 
 export class PayPayrollRunDto {
-  @IsOptional()
   @IsUUID('all')
-  disbursingChartOfAccountId?: string;
+  cashDeskAccountId!: string;
+  @IsUUID('all')
+  requestId!: string;
+  @IsDateString()
+  businessDate!: string;
+}
+
+export class ReversePayrollPaymentDto {
+  @IsUUID('all')
+  movementId!: string;
+  @IsDateString()
+  businessDate!: string;
+  @IsString()
+  @Length(3, 500)
+  reason!: string;
 }
 
 export class CancelPayrollRunDto {

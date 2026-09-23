@@ -1,6 +1,7 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ModalPortal } from './modal';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -45,6 +46,7 @@ export function ConfirmDialog({
   loading: loadingProp,
 }: ConfirmDialogProps) {
   const [busy, setBusy] = useState(false);
+  const titleId = useId();
   const [rendered, setRendered] = useState(open);
   const loading = loadingProp ?? busy;
   const closing = rendered && !open;
@@ -66,6 +68,9 @@ export function ConfirmDialog({
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (!open) return;
+      const activeDialog =
+        e.target instanceof Element ? e.target.closest('[role="dialog"], dialog') : null;
+      if (activeDialog && activeDialog !== containerRef.current) return;
       if (e.key === 'Escape') handleCancel();
     }
     window.addEventListener('keydown', handler);
@@ -79,6 +84,7 @@ export function ConfirmDialog({
   const openerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    if (open && !rendered) return;
     if (open) {
       openerRef.current = document.activeElement as HTMLElement | null;
       cancelRef.current?.focus();
@@ -86,12 +92,15 @@ export function ConfirmDialog({
     }
     openerRef.current?.focus?.();
     openerRef.current = null;
-  }, [open]);
+  }, [open, rendered]);
 
   useEffect(() => {
     if (!open) return;
     function trapTab(e: KeyboardEvent) {
       if (e.key !== 'Tab' || !containerRef.current) return;
+      const activeDialog =
+        e.target instanceof Element ? e.target.closest('[role="dialog"], dialog') : null;
+      if (activeDialog && activeDialog !== containerRef.current) return;
       const focusable = containerRef.current.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
@@ -123,53 +132,77 @@ export function ConfirmDialog({
   };
 
   return (
-    <div
-      ref={containerRef}
-      className={`fixed inset-0 z-[1300] flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
-      style={{ background: 'var(--aurora-overlay)' }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="aurora-confirm-title"
-    >
+    <ModalPortal>
       <div
-        className={`w-full max-w-sm rounded-2xl border p-6 ${closing ? 'animate-scale-out' : 'animate-scale-in'}`}
-        style={{
-          background: 'var(--aurora-card)',
-          borderColor: 'var(--aurora-border)',
-          boxShadow: 'var(--aurora-shadow-command)',
-        }}
+        ref={containerRef}
+        className={`fixed inset-0 z-[1300] flex items-center justify-center p-4 ${closing ? 'animate-fade-out' : 'animate-fade-in'}`}
+        style={{ background: 'var(--aurora-overlay)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
       >
         <div
-          className="mb-4 flex h-10 w-10 items-center justify-center rounded-full"
+          className={`w-full max-w-sm rounded-2xl border p-6 ${closing ? 'animate-scale-out' : 'animate-scale-in'}`}
           style={{
-            background: variant === 'danger' ? 'var(--aurora-danger-bg)' : variant === 'warning' ? 'var(--aurora-warning-bg)' : 'var(--aurora-primary-subtle)',
-            color: variant === 'danger' ? 'var(--aurora-danger-text)' : variant === 'warning' ? 'var(--aurora-warning-text)' : 'var(--aurora-primary-text)',
+            background: 'var(--aurora-card)',
+            borderColor: 'var(--aurora-border)',
+            boxShadow: 'var(--aurora-shadow-command)',
           }}
         >
-          {variant === 'default' ? <CheckCircle2 aria-hidden className="h-5 w-5" /> : <AlertTriangle aria-hidden className="h-5 w-5" />}
-        </div>
-        <h2 id="aurora-confirm-title" className="text-[16px] font-semibold" style={{ color: 'var(--aurora-text)' }}>{title}</h2>
-        <p className="text-[13px] mt-2" style={{ color: 'var(--aurora-text-muted)' }}>{message}</p>
-        <div className="flex justify-end gap-2 mt-6">
-          <button
-            ref={cancelRef}
-            onClick={handleCancel}
-            disabled={loading}
-            className="px-4 py-2 text-[13px] font-medium border rounded-lg hover:bg-[var(--aurora-bg-subtle)] transition-colors disabled:opacity-50"
-            style={{ color: 'var(--aurora-text-secondary)', borderColor: 'var(--aurora-border)' }}
+          <div
+            className="mb-4 flex h-10 w-10 items-center justify-center rounded-full"
+            style={{
+              background:
+                variant === 'danger'
+                  ? 'var(--aurora-danger-bg)'
+                  : variant === 'warning'
+                    ? 'var(--aurora-warning-bg)'
+                    : 'var(--aurora-primary-subtle)',
+              color:
+                variant === 'danger'
+                  ? 'var(--aurora-danger-text)'
+                  : variant === 'warning'
+                    ? 'var(--aurora-warning-text)'
+                    : 'var(--aurora-primary-text)',
+            }}
           >
-            {cancelLabel}
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={loading}
-            className="px-4 py-2 text-[13px] font-medium rounded-lg transition-colors disabled:opacity-50"
-            style={BTN_VARIANTS[variant]}
+            {variant === 'default' ? (
+              <CheckCircle2 aria-hidden className="h-5 w-5" />
+            ) : (
+              <AlertTriangle aria-hidden className="h-5 w-5" />
+            )}
+          </div>
+          <h2
+            id={titleId}
+            className="text-[16px] font-semibold"
+            style={{ color: 'var(--aurora-text)' }}
           >
-            {loading ? 'Please wait…' : confirmLabel}
-          </button>
+            {title}
+          </h2>
+          <p className="text-[13px] mt-2" style={{ color: 'var(--aurora-text-muted)' }}>
+            {message}
+          </p>
+          <div className="flex justify-end gap-2 mt-6">
+            <button
+              ref={cancelRef}
+              onClick={handleCancel}
+              disabled={loading}
+              className="px-4 py-2 text-[13px] font-medium border rounded-lg hover:bg-[var(--aurora-bg-subtle)] transition-colors disabled:opacity-50"
+              style={{ color: 'var(--aurora-text-secondary)', borderColor: 'var(--aurora-border)' }}
+            >
+              {cancelLabel}
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={loading}
+              className="px-4 py-2 text-[13px] font-medium rounded-lg transition-colors disabled:opacity-50"
+              style={BTN_VARIANTS[variant]}
+            >
+              {loading ? 'Please wait…' : confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }

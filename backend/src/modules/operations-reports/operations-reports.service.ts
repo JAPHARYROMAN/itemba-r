@@ -168,7 +168,7 @@ export class OperationsReportsService {
           branch: { select: { id: true, name: true, code: true } },
           unit: { select: { id: true, name: true, symbol: true } },
         },
-        orderBy: { movementDate: 'desc' },
+        orderBy: [{ movementDate: 'desc' }, { id: 'desc' }],
         skip: (safePage - 1) * safePageSize,
         take: safePageSize,
       }),
@@ -515,11 +515,13 @@ export class OperationsReportsService {
 
   async getStockAdjustments(query: OperationsReportQuery, user: AuthUser) {
     const stockAdjustment = await this.stockAdjustmentWhere(query, user);
+    const where = { stockAdjustment, ...(query.productId ? { productId: query.productId } : {}) };
+    const paginated = query.page !== undefined;
+    const parsedPage = Number(query.page);
+    const page = Number.isFinite(parsedPage) ? Math.max(1, Math.floor(parsedPage)) : 1;
+    const pageSize = Math.floor(this.limit(query));
     const rows = await this.prisma.stockAdjustmentLine.findMany({
-      where: {
-        stockAdjustment,
-        ...(query.productId ? { productId: query.productId } : {}),
-      },
+      where,
       include: {
         stockAdjustment: {
           select: {
@@ -534,11 +536,12 @@ export class OperationsReportsService {
         product: { select: { productCode: true, sku: true, name: true } },
         unit: { select: { name: true, symbol: true } },
       },
-      orderBy: { createdAt: 'desc' },
-      take: this.limit(query),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: pageSize,
+      ...(paginated ? { skip: (page - 1) * pageSize } : {}),
     });
 
-    return rows.map((line) => ({
+    const result = rows.map((line) => ({
       adjustmentNumber: line.stockAdjustment.adjustmentNumber,
       date: line.stockAdjustment.postedAt ?? line.stockAdjustment.createdAt,
       branch: this.branchLabel(line.stockAdjustment.branch),
@@ -553,6 +556,16 @@ export class OperationsReportsService {
       headerReason: line.stockAdjustment.reason,
       lineReason: line.reason,
     }));
+    // Keep the legacy array response for existing report consumers.
+    return paginated
+      ? {
+          rows: result,
+          total: await this.prisma.stockAdjustmentLine.count({ where }),
+          page,
+          pageSize,
+          generatedAt: new Date().toISOString(),
+        }
+      : result;
   }
 
   /**

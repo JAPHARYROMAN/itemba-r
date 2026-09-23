@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -83,6 +85,10 @@ function detailPreview(details: ReadinessCheck['details']) {
 }
 
 export default function ProcurementDashboardPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
+  const canView = hasPermission('procurement.dashboard');
+
   const [stats, setStats] = useState<ProcurementSummary>({
     openRequisitions: 0,
     pendingGrns: 0,
@@ -95,15 +101,19 @@ export default function ProcurementDashboardPage() {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const loadSummary = useCallback(async () => {
-    setError('');
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoadError('');
     setRefreshing(true);
     try {
-      const response = await fetch('/api/backend/procurement/summary');
+      const response = await fetch('/api/backend/procurement/summary', { signal: request.signal });
+      if (!request.current()) return;
       if (!response.ok) throw new Error(`Procurement summary failed (${response.status})`);
       const result = await response.json();
+      if (!request.current()) return;
       const data = result.data ?? result;
       setStats({
         openRequisitions: data.openRequisitions ?? 0,
@@ -117,14 +127,17 @@ export default function ProcurementDashboardPage() {
         readiness: data.readiness,
       });
     } catch (err) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Failed to load procurement summary';
-      setError(message);
+      setLoadError(message);
       showToast('error', 'Procurement dashboard unavailable', message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request.current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
     void loadSummary();
@@ -167,6 +180,28 @@ export default function ProcurementDashboardPage() {
     },
   ];
 
+  if (authLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader title="Procurement" subtitle="Procure-to-pay command center: requisitions, orders, receiving, and AP handoff" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Loading</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader title="Procurement" subtitle="Procure-to-pay command center: requisitions, orders, receiving, and AP handoff" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading)
     return (
       <div className="space-y-6 p-6">
@@ -199,9 +234,12 @@ export default function ProcurementDashboardPage() {
         }
       />
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+      {loadError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+          <button type="button" className="ml-3 font-medium underline" onClick={() => void loadSummary()}>
+            Try again
+          </button>
         </div>
       )}
 

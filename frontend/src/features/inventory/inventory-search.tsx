@@ -81,6 +81,7 @@ function secondaryLabel(product: InventorySearchProduct) {
 function availableLabel(product: InventorySearchProduct, branchSelected: boolean) {
   if (!branchSelected) return '';
   const value = product.inventoryBalance?.availableQuantity ?? product.availableQuantity;
+  if (value == null || value === '') return '';
   const quantity = Number(value);
   if (!Number.isFinite(quantity)) return '';
   const unit = product.unitSymbol || product.baseUnit?.symbol;
@@ -105,6 +106,7 @@ export default function InventorySearch({
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     setValue(query);
@@ -128,6 +130,8 @@ export default function InventorySearch({
 
     setLoading(true);
     setFailed(false);
+    setResults([]);
+    setTotal(0);
     const searchTimer = window.setTimeout(() => {
       backendPage<InventorySearchProduct>('/products', {
         query: {
@@ -141,11 +145,13 @@ export default function InventorySearch({
         signal: controller.signal,
       })
         .then((page) => {
+          if (controller.signal.aborted) return;
           setResults(page.data);
           setTotal(page.total);
           setHighlighted(0);
         })
         .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
           if (error instanceof DOMException && error.name === 'AbortError') return;
           setResults([]);
           setTotal(0);
@@ -161,7 +167,7 @@ export default function InventorySearch({
       window.clearTimeout(searchTimer);
       controller.abort();
     };
-  }, [onQueryChange, scope.branchId, scope.companyId, scope.divisionId, value]);
+  }, [onQueryChange, scope.branchId, scope.companyId, scope.divisionId, value, revision]);
 
   useEffect(() => {
     if (!open) return;
@@ -185,14 +191,18 @@ export default function InventorySearch({
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setOpen(true);
-      setHighlighted((current) => Math.min(current + 1, Math.max(results.length - 1, 0)));
+      setHighlighted(0);
+      if (!loading)
+        rootRef.current?.querySelector<HTMLButtonElement>('[data-search-product]')?.focus();
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setHighlighted((current) => Math.max(current - 1, 0));
-    } else if (event.key === 'Enter' && results[highlighted]) {
+    } else if (event.key === 'Enter' && open && !loading && !failed && results[highlighted]) {
       event.preventDefault();
       openProduct(results[highlighted]);
     } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
       setOpen(false);
     }
   };
@@ -221,6 +231,7 @@ export default function InventorySearch({
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           aria-label="Search inventory"
+          aria-haspopup="dialog"
           aria-controls={showResults ? resultsId : undefined}
           aria-expanded={showResults}
           placeholder="Search products, codes, SKUs, barcodes, categories…"
@@ -250,6 +261,16 @@ export default function InventorySearch({
           className="absolute left-0 right-0 z-40 mt-1 max-h-[min(70vh,32rem)] overflow-y-auto rounded-lg border shadow-[var(--aurora-shadow-lg)]"
           style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
           aria-live="polite"
+          role="dialog"
+          aria-label="Inventory search results"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              rootRef.current?.querySelector('input')?.focus();
+              setOpen(false);
+            }
+          }}
         >
           {loading ? (
             <div
@@ -262,6 +283,13 @@ export default function InventorySearch({
           ) : failed ? (
             <div className="px-4 py-5 text-sm" style={{ color: 'var(--aurora-danger)' }}>
               Inventory search is temporarily unavailable.
+              <button
+                type="button"
+                className="block mt-3 underline"
+                onClick={() => setRevision((v) => v + 1)}
+              >
+                Try search again
+              </button>
             </div>
           ) : results.length === 0 ? (
             <div className="px-4 py-5 text-sm" style={{ color: 'var(--aurora-text-secondary)' }}>
@@ -282,6 +310,22 @@ export default function InventorySearch({
                     >
                       <button
                         type="button"
+                        data-search-product
+                        onKeyDown={(event) => {
+                          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                          event.preventDefault();
+                          const next =
+                            event.key === 'ArrowDown'
+                              ? Math.min(index + 1, results.length - 1)
+                              : index - 1;
+                          if (next < 0) rootRef.current?.querySelector('input')?.focus();
+                          else {
+                            setHighlighted(next);
+                            rootRef.current
+                              ?.querySelectorAll<HTMLButtonElement>('[data-search-product]')
+                              [next]?.focus();
+                          }
+                        }}
                         onClick={() => openProduct(product)}
                         className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left"
                       >

@@ -170,6 +170,76 @@ So a healthy container is itself most of the evidence. Beyond that:
 
 ---
 
+## Staging chat benchmark (explicit read-only overlay)
+
+Ordinary `docker-compose.staging.yml` deliberately does not mount production
+operator inputs. For an approved live chat test, add
+`docker-compose.staging-msaidizi-chat.yml` after the staging base file. Do not
+combine this overlay with production or add it to the production deployment
+workflow.
+
+Use real provider-contract evidence from steps 1–3 for the staging account,
+credential label and exact model set. Install only the signed attestation and
+public verification key on the staging host; keep the signing private key offline.
+In the operator-owned `.env.staging`, populate the optional benchmark section
+from `.env.staging.example`:
+
+- `MSAIDIZI_STAGING_CONTRACT_ATTESTATION_HOST_PATH` and
+  `MSAIDIZI_STAGING_CONTRACT_PUBLIC_KEY_HOST_PATH`: absolute paths to existing
+  files on that host, distinct from production operator inputs.
+- The five provider identity/digest variables printed by the signing tool.
+- `ANTHROPIC_API_KEY` through the approved secret-management process, and the
+  exact attested `MSAIDIZI_MODEL` and `MSAIDIZI_CLASSIFIER_MODEL` values.
+
+The overlay fixes the two container paths, mounts those files read-only with
+`create_host_path: false`, enables chat/tool search, and forces `read-only` mode.
+All autonomous, workstation, enrollment, evaluator, recovery and update execution
+switches remain false even if the environment attempts to enable them. It does
+not override the global kill switch or human permission filtering.
+
+Operator commands, from the repository on the approved staging host:
+
+```bash
+# Configuration validation only; avoid printing resolved credentials.
+docker compose --env-file .env.staging -f docker-compose.staging.yml -f docker-compose.staging-msaidizi-chat.yml config --quiet
+# Deploy only after the staging change has been approved.
+docker compose --env-file .env.staging -f docker-compose.staging.yml -f docker-compose.staging-msaidizi-chat.yml up -d backend
+```
+
+Compose rejects empty required inputs and missing bind sources; the backend's
+existing verifier additionally rejects invalid signatures, digests, account/model
+scope, expiry or contract claims. Passing `config` is not evidence of a valid
+contract or a healthy deployment.
+
+Once backend readiness succeeds, run the seven prompts from a benchmark runner
+with `MSAIDIZI_API` set to the approved staging API base (including `/api/v1`),
+`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` supplied securely for an authorized
+fixture account, and `MSAIDIZI_BENCHMARK_REQUIRE_FAST_PATH=true`. Leave
+`MSAIDIZI_BENCHMARK_CASE` unset to cover all seven:
+
+```bash
+node backend/test/benchmarks/tool-search-compare.mjs staging-fast-path.json
+```
+
+Use synthetic business fixtures, retain the report as test evidence, and review
+the answers against those records. Reports may contain business data; keep them
+out of public artifacts. See `backend/test/benchmarks/README.md` for scoring and
+the scripted ERP write proof. A live read-only pass does not authorize writes or
+workstation rollout.
+
+To disable the experiment, set the base staging `MSAIDIZI_ENABLED=false` (and
+leave autonomous switches false), then recreate the backend using only the base
+staging file. Simply omitting the overlay does not override an independently
+enabled base environment flag.
+
+The deployment validator tests the merged overlay using synthetic config only,
+including each missing input, attempted flag/path overrides, and unchanged
+non-backend services. It never contacts the model or signs an attestation:
+
+```bash
+node scripts/validate-deployment.mjs --staging-only
+```
+
 ## Reissuing
 
 Whenever the contract document changes, the API account or credential label

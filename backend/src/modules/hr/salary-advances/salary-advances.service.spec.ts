@@ -1,5 +1,8 @@
 import { SalaryAdvancesService } from './salary-advances.service';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { SalaryAdvancesQueryDto } from '../../../common/dto/resource-query.dto';
 
 function user(id: string): AuthUser {
   return {
@@ -67,5 +70,59 @@ describe('SalaryAdvancesService pay idempotency', () => {
     });
     expect(postings.postAdvancePayment).toHaveBeenCalledTimes(1);
     expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Salary advance workspace search', () => {
+  it('retains company, employee and status scope in both paged results and count', async () => {
+    const delegate = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const companyWhereFor = jest
+      .fn()
+      .mockResolvedValue({ companyId: { in: ['company-1'] }, AND: { id: { not: 'excluded' } } });
+    const service = new SalaryAdvancesService(
+      { salaryAdvance: delegate } as never,
+      {} as never,
+      {} as never,
+      { companyWhereFor } as never,
+      {} as never,
+    );
+    const query = plainToInstance(SalaryAdvancesQueryDto, {
+      page: '2',
+      limit: '20',
+      companyId: 'company-1',
+      employeeId: 'employee',
+      status: 'REQUESTED',
+      search: ' Alex ',
+    });
+    expect(await validate(query, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
+    await service.findAll(user('operator'), query);
+    const args = delegate.findMany.mock.calls[0][0];
+    expect(args).toMatchObject({
+      skip: 20,
+      take: 20,
+      where: {
+        deletedAt: null,
+        companyId: { in: ['company-1'] },
+        employeeId: 'employee',
+        status: 'REQUESTED',
+      },
+    });
+    expect(args.where.AND).toEqual([
+      { id: { not: 'excluded' } },
+      {
+        OR: [
+          { advanceNumber: { contains: 'Alex', mode: 'insensitive' } },
+          { employee: { fullName: { contains: 'Alex', mode: 'insensitive' } } },
+          { employee: { employeeCode: { contains: 'Alex', mode: 'insensitive' } } },
+        ],
+      },
+    ]);
+    expect(delegate.count).toHaveBeenCalledWith({ where: args.where });
+    companyWhereFor.mockRejectedValueOnce(new Error('No access'));
+    await expect(service.findAll(user('operator'), query)).rejects.toThrow('No access');
+    expect(delegate.findMany).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { Card, PageHeader, PageToolbar, StatCard, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string; code: string }
 
@@ -95,7 +97,7 @@ function AccountModal({ mode, initial, companies, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'Create Account' : 'Edit Account'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>{mode === 'create' ? 'Create' : 'Save Changes'}</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="space-y-3">
         <FormSelect label="Company" required disabled={mode === 'edit'} value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select company…">
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
@@ -135,10 +137,12 @@ function DeleteConfirm({ acc, onClose, onDeleted }: { acc: Account; onClose: () 
 }
 
 export default function ChartOfAccountsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<Account> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [accountType, setAccountType] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
@@ -152,32 +156,52 @@ export default function ChartOfAccountsPage() {
   const canManage = hasPermission('chart_of_accounts.manage');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (companyId) params.set('companyId', companyId);
       if (accountType) params.set('accountType', accountType);
       if (activeFilter) params.set('isActive', activeFilter);
       if (search.trim()) params.set('search', search.trim());
-      const res = await fetch(`/api/backend/chart-of-accounts?${params}`);
+      const res = await fetch(`/api/backend/chart-of-accounts?${params}`, { signal: request.signal });
       const json = await res.json();
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(json.message ?? 'Unable to load accounts');
       setData(json.data ?? null);
-    } finally { setLoading(false); }
-  }, [canView, page, companyId, accountType, activeFilter, search]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Unable to load accounts');
+      setData(null);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, companyId, accountType, activeFilter, search]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Chart of Accounts" subtitle="Manage chart of accounts" />
-        <div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div>
+        <div className="mt-8 text-center"><p className="text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</p></div>
       </div>
     );
   }
@@ -193,6 +217,13 @@ export default function ChartOfAccountsPage() {
 
       <PageHeader title="Chart of Accounts" subtitle="Define account hierarchy for ledger" />
 
+      {loadError && (
+        <div role="alert" className="workspace-load-error">
+          {loadError}
+          <button onClick={() => void load()}>Try again</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total Accounts" value={data?.total ?? 0} />
         <StatCard label="Active" value={data?.data.filter((a) => a.isActive).length ?? 0} />
@@ -206,15 +237,15 @@ export default function ChartOfAccountsPage() {
         searchPlaceholder="Search code or name…"
         filters={
           <>
-            <select value={companyId} onChange={(e) => { setCompanyId(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={companyId} onChange={(e) => { setCompanyId(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={accountType} onChange={(e) => { setAccountType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={accountType} onChange={(e) => { setAccountType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
             </select>
-            <select value={activeFilter} onChange={(e) => { setActiveFilter(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={activeFilter} onChange={(e) => { setActiveFilter(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               <option value="true">Active</option>
               <option value="false">Inactive</option>
@@ -226,7 +257,7 @@ export default function ChartOfAccountsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
+          <WorkspaceTable className="w-full text-sm min-w-[800px]">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -272,7 +303,7 @@ export default function ChartOfAccountsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
 
         {data && data.totalPages > 1 && (

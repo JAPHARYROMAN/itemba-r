@@ -1,6 +1,7 @@
 // Core layout & display
 export { PageHeader } from './page-header';
 export { Card } from './card';
+export { WorkspaceTable } from './workspace-table';
 export { StatCard } from './stat-card';
 export type { StatCardTrend } from './stat-card';
 export { StatusBadge } from './status-badge';
@@ -28,7 +29,17 @@ export { ScopeSelector, scopeToQueryString } from './scope-selector';
 export type { ScopeValue } from './scope-selector';
 
 // Forms
-export { FormInput, FormSelect, FormTextarea, DateInput, FileUpload } from './forms';
+export { FormInput, FormSelect, FormTextarea, FileUpload } from './forms';
+export { FormDateField } from './date-field';
+export type { FormDateFieldProps } from './date-field';
+export {
+  DATE_DISPLAY_LOCALE,
+  formatIsoDate,
+  formatIsoDateTime,
+  parseIsoDate,
+  parseIsoDateTime,
+} from './date-value';
+export type { DateFieldGranularity } from './use-date-draft';
 export { ProductPicker } from './product-picker';
 export type { ProductPickerOption } from './product-picker';
 export { BusinessPartyPicker, CustomerPicker, SupplierPicker } from './business-party-picker';

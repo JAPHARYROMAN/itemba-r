@@ -1,7 +1,16 @@
 'use client';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Btn, FormInput, FormSelect, FormTextarea, Modal, showToast } from '@/components/ui';
+import {
+  Btn,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  showToast,
+} from '@/components/ui';
 import { backendList, backendPatch } from '@/lib/api-client';
 import { ACCOUNT_TYPE_LABELS } from '@/lib/sales-order-constants';
 
@@ -54,7 +63,7 @@ export function RecordSalesOrderPaymentModal({
   currency,
   outstanding,
   orderLabel,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   receivableId: string;
@@ -74,6 +83,13 @@ export function RecordSalesOrderPaymentModal({
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [error, setError] = useState('');
+  const draft = useFormGuard({ amount, paymentDate, cashAccountId, notes }, (baseline) => {
+    setAmount(baseline.amount);
+    setPaymentDate(baseline.paymentDate);
+    setCashAccountId(baseline.cashAccountId);
+    setNotes(baseline.notes);
+  });
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -151,6 +167,7 @@ export function RecordSalesOrderPaymentModal({
           selectedAccount ? ` in ${selectedAccount.accountName}` : ''
         }. Balance: ${money(newOutstanding, currency)}`,
       );
+      draft.markSaved();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record payment');
@@ -161,6 +178,7 @@ export function RecordSalesOrderPaymentModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title="Record Sales Order Payment"
@@ -228,11 +246,10 @@ export function RecordSalesOrderPaymentModal({
             Finance &gt; Cash Accounts.
           </p>
         )}
-        <FormInput
+        <FormDateField
           label="Payment Date"
-          type="date"
           value={paymentDate}
-          onChange={(event) => setPaymentDate(event.target.value)}
+          onChange={(value) => setPaymentDate(value)}
         />
         <FormTextarea
           label="Notes"

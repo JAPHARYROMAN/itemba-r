@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Link2, Plus, QrCode, RotateCw, Smartphone, WifiOff } from 'lucide-react';
 import {
   Btn,
@@ -14,6 +14,7 @@ import {
 import { InstallQrCode } from '@/components/westsides/mobile-pos-install/InstallQrCode';
 import { backendList, backendPatch, backendPost } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 type ScopeOption = { id: string; name: string; code?: string | null; divisionId?: string | null };
 type Employee = {
@@ -77,8 +78,10 @@ function employeeLabel(employee: Employee) {
 }
 
 export function MobilePosTerminalAdmin() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [loadError, setLoadError] = useState('');
   const [companies, setCompanies] = useState<ScopeOption[]>([]);
   const [divisions, setDivisions] = useState<ScopeOption[]>([]);
   const [branches, setBranches] = useState<ScopeOption[]>([]);
@@ -116,25 +119,36 @@ export function MobilePosTerminalAdmin() {
     [branches, divisionId],
   );
 
-  async function refreshTerminals() {
+  const refreshTerminals = useCallback(async () => {
+    const request = beginRequest();
+    setLoadError('');
     try {
-      setTerminals(await backendList<Terminal>('/mobile-pos-lite/terminals'));
+      const rows = await backendList<Terminal>('/mobile-pos-lite/terminals', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setTerminals(rows);
     } catch (error) {
-      showToast(
-        'error',
-        'Could not load terminals',
-        error instanceof Error ? error.message : undefined,
-      );
+      if (!request.current()) return;
+      const message = error instanceof Error ? error.message : 'Could not load terminals';
+      setLoadError(message);
+      showToast('error', 'Could not load terminals', message);
     }
-  }
+  }, [beginRequest]);
 
   useEffect(() => {
-    if (!canManage) return;
+    if (authLoading || !canManage) return;
+    const controller = new AbortController();
     void refreshTerminals();
-    backendList<ScopeOption>('/companies', { query: { limit: 200 } })
-      .then(setCompanies)
-      .catch(() => setCompanies([]));
-  }, [canManage]);
+    backendList<ScopeOption>('/companies', { query: { limit: 200 }, signal: controller.signal })
+      .then((rows) => {
+        if (!controller.signal.aborted) setCompanies(rows);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canManage, refreshTerminals]);
 
   useEffect(() => {
     setDivisionId('');
@@ -316,6 +330,7 @@ export function MobilePosTerminalAdmin() {
     }
   }
 
+  if (authLoading) return null;
   if (!canManage)
     return (
       <PermissionDeniedState description="Mobile POS terminal setup is limited to Group Admins." />
@@ -327,6 +342,17 @@ export function MobilePosTerminalAdmin() {
         title="Mobile POS Lite"
         subtitle="Set up one locked sales terminal for each sales rep and branch."
       />
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void refreshTerminals()}>
+            Try again
+          </Btn>
+        </div>
+      )}
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
         <form

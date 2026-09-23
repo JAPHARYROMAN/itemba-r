@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { ResponsiveDataTable } from '@/components/aurora';
 import type { ResponsiveColumn } from '@/components/aurora';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface TaxType { id: string; name: string }
 interface TaxRate extends Record<string, unknown> {
@@ -80,8 +81,8 @@ function RateModal({ mode, initial, taxTypes, onClose, onSaved }: { mode: 'creat
         <FormSelect label="Calculation" value={form.calculationMethod} onChange={(e) => set('calculationMethod', e.target.value)}>
           {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
         </FormSelect>
-        <FormInput label="Effective From" type="date" value={form.effectiveFrom} onChange={(e) => set('effectiveFrom', e.target.value)} />
-        <FormInput label="Effective To" type="date" value={form.effectiveTo} onChange={(e) => set('effectiveTo', e.target.value)} />
+        <FormDateField label="Effective From" value={form.effectiveFrom} onChange={(value) => set('effectiveFrom', value)} />
+        <FormDateField label="Effective To" value={form.effectiveTo} onChange={(value) => set('effectiveTo', value)} />
         <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
       </div>
     </Modal>
@@ -89,9 +90,10 @@ function RateModal({ mode, initial, taxTypes, onClose, onSaved }: { mode: 'creat
 }
 
 export default function TaxRatesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('tax_rates.manage');
   const canView = hasPermission('tax_rates.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<TaxRate[]>([]);
   const [taxTypes, setTaxTypes] = useState<TaxType[]>([]);
@@ -108,26 +110,42 @@ export default function TaxRatesPage() {
   const [actingId, setActingId] = useState('');
 
   useEffect(() => {
-    fetch('/api/backend/tax/types?limit=100').then((r) => r.json()).then((j) => setTaxTypes(j.data?.data ?? j.data ?? []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const read = (url: string, apply: (j: any) => void) => {
+      fetch(url, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((j) => { if (!controller.signal.aborted) apply(j); })
+        .catch(() => undefined);
+    };
+    read('/api/backend/tax/types?limit=100', (j) => { setTaxTypes(j.data?.data ?? j.data ?? []); });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (taxTypeId) params.set('taxTypeId', taxTypeId);
     if (status) params.set('status', status);
-    try {
-      const j = await fetch(`/api/backend/tax/rates?${params}`).then((r) => r.json());
+        try {
+      const res = await fetch(`/api/backend/tax/rates?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load tax rates');
+      const j = await res.json();
+      if (!request.current()) return;
       const p: Paginated<TaxRate> = j.data ?? {};
       setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    } catch {
-      setLoadError('Failed to load tax rates');
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load tax rates');
       setItems([]); setTotal(0); setTotalPages(1);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [page, taxTypeId, status]);
+  }, [authLoading, beginRequest, canView, page, taxTypeId, status]);
 
   useEffect(() => { load(); }, [load]);
   const reset = (fn: (v: string) => void) => (v: string) => { fn(v); setPage(1); };
@@ -146,6 +164,7 @@ export default function TaxRatesPage() {
   const activeCount = items.filter((r) => r.status === 'ACTIVE').length;
   const draftCount = items.filter((r) => r.status === 'DRAFT').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Tax Rates" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Tax Rates" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   const columns: ResponsiveColumn<TaxRate>[] = [

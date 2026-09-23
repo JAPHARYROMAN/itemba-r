@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Btn, PageSpinner, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface WebhookEvent {
   id: string;
@@ -15,6 +18,10 @@ interface WebhookEvent {
 }
 
 export default function WebhookEventsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('webhook_events.view');
+  const beginRequest = useRequestGuard();
+
   const [events, setEvents] = useState<WebhookEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterProcessing, setFilterProcessing] = useState('');
@@ -22,18 +29,29 @@ export default function WebhookEventsPage() {
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterProcessing) params.set('processingStatus', filterProcessing);
     if (filterVerification) params.set('verificationStatus', filterVerification);
-    fetch(`/api/backend/webhook-events?${params}`)
-      .then(r => r.json())
-      .then(data => setEvents(unwrapList(data)))
-      .catch(() => { setEvents([]); setLoadError('Failed to load webhook events.'); })
-      .finally(() => setLoading(false));
-  }, [filterProcessing, filterVerification]);
+    try {
+      const res = await fetch(`/api/backend/webhook-events?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load webhook events.');
+      setEvents(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setEvents([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load webhook events.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterProcessing, filterVerification]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -46,6 +64,9 @@ export default function WebhookEventsPage() {
     finally { setReprocessingId(null); }
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Webhook Events" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Webhook Events" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader title="Webhook Events" subtitle="Incoming webhook events log" />
@@ -53,11 +74,11 @@ export default function WebhookEventsPage() {
       <PageToolbar
         filters={
           <>
-            <select value={filterProcessing} onChange={e => setFilterProcessing(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Processing Status" value={filterProcessing} onChange={e => setFilterProcessing(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Processing Status</option>
               {['PROCESSED','PENDING','FAILED','SKIPPED'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select value={filterVerification} onChange={e => setFilterVerification(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Verification Status" value={filterVerification} onChange={e => setFilterVerification(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Verification Status</option>
               {['VERIFIED','UNVERIFIED','FAILED'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -67,7 +88,7 @@ export default function WebhookEventsPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Number</th>
@@ -98,7 +119,7 @@ export default function WebhookEventsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
     </div>

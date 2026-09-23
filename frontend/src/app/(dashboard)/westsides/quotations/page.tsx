@@ -1,20 +1,13 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { DocumentPreviewLink } from '@/components/documents';
-import {
-  Btn,
-  Card,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  Modal,
-  PageHeader,
-  PageSpinner,
-  StatusBadge,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, showToast, StatusBadge } from '@/components/ui';
 import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { WestsidesGate } from '../_components/route-gate';
 import {
   OrderLineEditor,
   mergeOrderProductOptions,
@@ -502,7 +495,7 @@ function QuotationModal({
       }
     >
       {error && (
-        <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <div role="alert" className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
           {error}
         </div>
       )}
@@ -616,18 +609,16 @@ function QuotationModal({
             ))}
           </FormSelect>
 
-          <FormInput
+          <FormDateField
             label="Quotation Date"
             required
-            type="date"
             value={form.quotationDate}
-            onChange={(event) => setField('quotationDate', event.target.value)}
+            onChange={(value) => setField('quotationDate', value)}
           />
-          <FormInput
+          <FormDateField
             label="Valid Until"
-            type="date"
             value={form.validUntil}
-            onChange={(event) => setField('validUntil', event.target.value)}
+            onChange={(value) => setField('validUntil', value)}
           />
           <FormSelect
             label="Currency"
@@ -690,6 +681,9 @@ const STATUS_ACTIONS: Record<
 };
 
 export default function QuotationsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('quotations.view');
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [items, setItems] = useState<Paginated<Quotation> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -700,6 +694,7 @@ export default function QuotationsPage() {
   const [actioning, setActioning] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading || !canView) return;
     let cancelled = false;
     backendList<Company>('/companies', { query: { limit: 200 } })
       .then((rows) => {
@@ -711,24 +706,28 @@ export default function QuotationsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
-      setItems(
-        await backendPage<Quotation>('/westsides/quotations', {
-          query: { limit: 100 },
-        }),
-      );
+      const page = await backendPage<Quotation>('/westsides/quotations', {
+        query: { limit: 100 },
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setItems(page);
     } catch (err) {
+      if (!request.current()) return;
       setItems({ data: [], total: 0, page: 1, totalPages: 1 });
       setError(err instanceof Error ? err.message : 'Failed to load quotations');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
     void load();
@@ -774,6 +773,10 @@ export default function QuotationsPage() {
 
   const rows = items?.data ?? [];
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Quotations" loading={authLoading} />;
+  }
+
   return (
     <div className="space-y-5 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -787,8 +790,14 @@ export default function QuotationsPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-          {error}
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
 
@@ -802,7 +811,7 @@ export default function QuotationsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead className="bg-slate-900/40">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-400">
@@ -887,7 +896,7 @@ export default function QuotationsPage() {
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>

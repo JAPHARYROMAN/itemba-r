@@ -6,6 +6,7 @@ import { QueryUnitDto } from './dto/query-unit.dto';
 import { CreateUnitConversionDto } from './dto/create-unit-conversion.dto';
 import { UpdateUnitConversionDto } from './dto/update-unit-conversion.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller()
@@ -56,6 +57,15 @@ export class UnitsController {
   @RequirePermissions('units.manage')
   createConversion(@Body() dto: CreateUnitConversionDto, @CurrentUser() user: AuthUser) {
     return this.service.createConversion(dto, user);
+  }
+
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
+  @Get('unit-conversions/:id')
+  @AgentExcluded()
+  @RequirePermissions('units.view')
+  findOneConversion(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOneConversion(id, user);
   }
 
   @Patch('unit-conversions/:id')

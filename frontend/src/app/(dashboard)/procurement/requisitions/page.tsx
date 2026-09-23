@@ -1,26 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  ConfirmDialog,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  Modal,
-  PageHeader,
-  PermissionDeniedState,
-  ProductPicker,
-  StatCard,
-  StatusBadge,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, ConfirmDialog, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PermissionDeniedState, ProductPicker, showToast, StatCard, StatusBadge } from '@/components/ui';
 import {
   ResponsiveDataTable,
   type ResponsiveColumn,
 } from '@/components/aurora/data-display/ResponsiveDataTable';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendList, backendPost } from '@/lib/api-client';
 import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
@@ -148,7 +135,8 @@ const PRIORITY_TONE: Record<RequisitionPriority, string> = {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function PurchaseRequisitionsPage() {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const canView = hasPermission('purchase_requisitions.list');
   const canCreate = hasPermission('purchase_requisitions.create');
   const canUpdate = hasPermission('purchase_requisitions.update');
@@ -233,36 +221,36 @@ export default function PurchaseRequisitionsPage() {
   // ── Reference data ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<Company>('/companies', { query: { limit: 100 } })
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { query: { limit: 100 }, signal: controller.signal })
       .then((items) => {
-        if (!cancelled) setCompanies(items);
+        if (!controller.signal.aborted) setCompanies(items);
       })
       .catch(() => {
-        if (!cancelled) setCompanies([]);
+        if (!controller.signal.aborted) setCompanies([]);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [canView]);
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    if (!canView || !canReadUsers) return;
-    let cancelled = false;
+    if (authLoading || !canView || !canReadUsers) return;
+    const controller = new AbortController();
     // Best-effort: only used to resolve requester UUIDs to names. Guarded by
     // permission and a silent catch so the page still works without it.
-    backendList<UserRef>('/users')
+    backendList<UserRef>('/users', { signal: controller.signal })
       .then((items) => {
-        if (!cancelled) setUsers(items);
+        if (!controller.signal.aborted) setUsers(items);
       })
       .catch(() => {
-        if (!cancelled) setUsers([]);
+        if (!controller.signal.aborted) setUsers([]);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [canView, canReadUsers]);
+  }, [authLoading, canView, canReadUsers]);
 
   // ── Debounced search ─────────────────────────────────────────────────────────
 
@@ -277,10 +265,8 @@ export default function PurchaseRequisitionsPage() {
   // ── Load list ────────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    if (!canView) {
-      setLoading(false);
-      return;
-    }
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
@@ -289,6 +275,7 @@ export default function PurchaseRequisitionsPage() {
       const result = await backendGet<ListEnvelope | PurchaseRequisition[]>(
         '/purchase-requisitions',
         {
+          signal: request.signal,
           query: {
             page,
             limit: PAGE_LIMIT,
@@ -297,6 +284,7 @@ export default function PurchaseRequisitionsPage() {
           },
         },
       );
+      if (!request.current()) return;
       const items = Array.isArray(result)
         ? result
         : (result.items ?? result.data ?? []);
@@ -305,13 +293,14 @@ export default function PurchaseRequisitionsPage() {
         Array.isArray(result) ? items.length : Number(result.total ?? items.length),
       );
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load purchase requisitions');
       setRows([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, companyId, page, status]);
+  }, [authLoading, beginRequest, canView, companyId, page, status]);
 
   useEffect(() => {
     void load();
@@ -658,6 +647,20 @@ export default function PurchaseRequisitionsPage() {
 
   // ── Access gate ──────────────────────────────────────────────────────────────
 
+  if (authLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <PageHeader
+          title="Purchase Requisitions"
+          subtitle="Raise and track internal purchase requests before they become purchase orders"
+        />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Loading</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!canView) {
     return (
       <div className="p-6 space-y-6">
@@ -889,17 +892,15 @@ export default function PurchaseRequisitionsPage() {
                   </option>
                 ))}
               </FormSelect>
-              <FormInput
+              <FormDateField
                 label="Request Date"
-                type="date"
                 value={form.requestDate}
-                onChange={(e) => setForm((f) => ({ ...f, requestDate: e.target.value }))}
+                onChange={(value) => setForm((f) => ({ ...f, requestDate: value }))}
               />
-              <FormInput
+              <FormDateField
                 label="Needed By"
-                type="date"
                 value={form.neededByDate}
-                onChange={(e) => setForm((f) => ({ ...f, neededByDate: e.target.value }))}
+                onChange={(value) => setForm((f) => ({ ...f, neededByDate: value }))}
               />
               <FormInput
                 label="Purpose"

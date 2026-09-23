@@ -157,10 +157,10 @@ public sealed record PrivilegedCommandSupervisorOptions
       || !SafeAbsoluteLocalPath(JournalPath)
       || !SafeAbsoluteLocalPath(KillSwitchPath)
       || !SafeDevicePath(DriverDevicePath)
-      || !CanonicalSha256(ExpectedCompanionImageSha256)
-      || !CanonicalSha256(ExpectedSupervisorImageSha256)
-      || !CanonicalSha256(IsolationPolicySha256)
-      || !CanonicalSha256(DriverMeasurementSha256)
+      || !PayloadDigest.IsProvisionedSha256(ExpectedCompanionImageSha256)
+      || !PayloadDigest.IsProvisionedSha256(ExpectedSupervisorImageSha256)
+      || !PayloadDigest.IsProvisionedSha256(IsolationPolicySha256)
+      || !PayloadDigest.IsProvisionedSha256(DriverMeasurementSha256)
       || MaximumFrameBytes is < 4_096 or > 262_144
       || MaximumConcurrentClients is < 1 or > 32
       || !Duration(OperationTimeout, TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(30))

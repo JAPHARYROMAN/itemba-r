@@ -23,6 +23,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // The suite is written against the ITEMBA OS shell. The switched-off shell
+    // has its own tests that stub this back (itemba-os-flag.test.tsx).
+    env: { NEXT_PUBLIC_ITEMBA_OS_ENABLED: 'true' },
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', '.next', 'dist'],
     coverage: {

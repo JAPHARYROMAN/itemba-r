@@ -2,14 +2,37 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Building2, Globe2, MonitorCog, RotateCcw, Save, ShieldCheck } from 'lucide-react';
-import { Card, PageHeader, FormSelect, Btn, SkeletonCardGrid, ConfirmDialog, showToast } from '@/components/ui';
+import {
+  Card,
+  PageHeader,
+  FormSelect,
+  Btn,
+  SkeletonCardGrid,
+  ConfirmDialog,
+  showToast,
+} from '@/components/ui';
 import { FormSwitch } from '@/components/aurora/forms/FormSwitch';
 import { useMotionPreference } from '@/hooks/use-motion-preference';
 import { useTheme, type ThemeMode } from '@/hooks/use-theme';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 
-interface Company { id: string; name: string; code: string; }
-interface Division { id: string; name: string; code: string; companyId: string; }
-interface Branch { id: string; name: string; code: string; divisionId: string; }
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+  companyId: string;
+}
+interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  divisionId: string;
+}
 
 interface UserPreference {
   theme: ThemeMode;
@@ -90,6 +113,10 @@ export default function UserPreferencesPage() {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const draft = useFormGuard(prefs, (baseline) => {
+    setPrefs(baseline);
+    setThemeMode(baseline.theme);
+  });
 
   // Load companies once.
   useEffect(() => {
@@ -97,7 +124,11 @@ export default function UserPreferencesPage() {
       .then((r) => r.json())
       .then((j) => {
         const inner = j.data?.data ?? j.data;
-        const rows: Company[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
+        const rows: Company[] = Array.isArray(inner)
+          ? inner
+          : Array.isArray(inner?.data)
+            ? inner.data
+            : [];
         setCompanies(rows);
       })
       // Dropdown options only: the preferences form still loads and saves; failure just leaves the company select empty.
@@ -106,12 +137,19 @@ export default function UserPreferencesPage() {
 
   // Cascade divisions → branches when defaults change.
   useEffect(() => {
-    if (!prefs.defaultCompanyId) { setDivisions([]); return; }
+    if (!prefs.defaultCompanyId) {
+      setDivisions([]);
+      return;
+    }
     fetch(`/api/backend/divisions?companyId=${prefs.defaultCompanyId}&limit=50`)
       .then((r) => r.json())
       .then((j) => {
         const inner = j.data?.data ?? j.data;
-        const rows: Division[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
+        const rows: Division[] = Array.isArray(inner)
+          ? inner
+          : Array.isArray(inner?.data)
+            ? inner.data
+            : [];
         setDivisions(rows);
       })
       // Dropdown options only: failure just leaves the division select empty.
@@ -119,12 +157,19 @@ export default function UserPreferencesPage() {
   }, [prefs.defaultCompanyId]);
 
   useEffect(() => {
-    if (!prefs.defaultDivisionId) { setBranches([]); return; }
+    if (!prefs.defaultDivisionId) {
+      setBranches([]);
+      return;
+    }
     fetch(`/api/backend/branches?divisionId=${prefs.defaultDivisionId}&limit=50`)
       .then((r) => r.json())
       .then((j) => {
         const inner = j.data?.data ?? j.data;
-        const rows: Branch[] = Array.isArray(inner) ? inner : Array.isArray(inner?.data) ? inner.data : [];
+        const rows: Branch[] = Array.isArray(inner)
+          ? inner
+          : Array.isArray(inner?.data)
+            ? inner.data
+            : [];
         setBranches(rows);
       })
       // Dropdown options only: failure just leaves the branch select empty.
@@ -133,7 +178,8 @@ export default function UserPreferencesPage() {
 
   // Load my prefs.
   const loadPrefs = useCallback(async () => {
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
       const res = await fetch('/api/backend/user-preferences/me');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -151,13 +197,21 @@ export default function UserPreferencesPage() {
     }
   }, [setThemeMode]);
 
-  useEffect(() => { loadPrefs(); }, [loadPrefs]);
+  useEffect(() => {
+    loadPrefs();
+  }, [loadPrefs]);
 
   const update = <K extends keyof UserPreference>(key: K, value: UserPreference[K]) => {
+    draft.touch();
     setPrefs((p) => {
       // Cascade: clearing or changing company invalidates division+branch defaults.
       if (key === 'defaultCompanyId') {
-        return { ...p, defaultCompanyId: value as string | null, defaultDivisionId: null, defaultBranchId: null };
+        return {
+          ...p,
+          defaultCompanyId: value as string | null,
+          defaultDivisionId: null,
+          defaultBranchId: null,
+        };
       }
       if (key === 'defaultDivisionId') {
         return { ...p, defaultDivisionId: value as string | null, defaultBranchId: null };
@@ -169,7 +223,9 @@ export default function UserPreferencesPage() {
   };
 
   const save = async () => {
-    setSaving(true); setError(''); setInfo('');
+    setSaving(true);
+    setError('');
+    setInfo('');
     try {
       const body: Record<string, unknown> = {
         theme: prefs.theme,
@@ -197,6 +253,7 @@ export default function UserPreferencesPage() {
       setPrefs(nextPrefs);
       setThemeMode(nextPrefs.theme);
       setInfo('Preferences saved.');
+      draft.markSaved();
       showToast('success', 'Preferences saved', 'Your account preferences were updated.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save';
@@ -209,11 +266,14 @@ export default function UserPreferencesPage() {
 
   const reset = async () => {
     setConfirmingReset(false);
-    setSaving(true); setError(''); setInfo('');
+    setSaving(true);
+    setError('');
+    setInfo('');
     try {
       const res = await fetch('/api/backend/user-preferences/me', { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPrefs(DEFAULTS);
+      draft.markSaved();
       setThemeMode(DEFAULTS.theme);
       setMotionMode('system');
       setInfo('Your workspace settings were reset to defaults.');
@@ -228,7 +288,7 @@ export default function UserPreferencesPage() {
   };
 
   return (
-    <div className="p-6 space-y-4">
+    <div data-workspace-page className="p-6 space-y-4">
       <PageHeader
         title="My Workspace Settings"
         subtitle="Personal display, formatting, and default company scope. These affect only your account."
@@ -285,8 +345,16 @@ export default function UserPreferencesPage() {
         />
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
-      {info && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">{info}</div>}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">
+          {info}
+        </div>
+      )}
       {loading && <SkeletonCardGrid count={4} className="grid grid-cols-1 gap-4 md:grid-cols-2" />}
 
       {!loading && (
@@ -365,7 +433,8 @@ export default function UserPreferencesPage() {
               description="Pre-select the business area you normally work in."
             />
             <p className="text-[12px] text-slate-500 -mt-1">
-              Pages that ask &quot;which company?&quot; will pre-select these. You can still override on any page.
+              Pages that ask &quot;which company?&quot; will pre-select these. You can still
+              override on any page.
             </p>
             <div className="aurora-stagger grid grid-cols-1 gap-4 md:grid-cols-3">
               <FormSelect
@@ -425,7 +494,9 @@ function PreferenceSummary({
           {icon}
         </div>
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {title}
+          </div>
           <div className="mt-1 truncate text-sm font-semibold text-slate-900">{value}</div>
           <div className="mt-1 text-xs leading-5 text-slate-500">{note}</div>
         </div>

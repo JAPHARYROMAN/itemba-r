@@ -12,7 +12,8 @@ export class GlobalSearchController {
     @Query('q') q?: string,
     @Query('limit') limit?: string,
     @Query('companyId') companyId?: string,
+    @Query('category') category?: string,
   ) {
-    return this.service.search({ q, limit, companyId }, user);
+    return this.service.search({ q, limit, companyId, category }, user);
   }
 }

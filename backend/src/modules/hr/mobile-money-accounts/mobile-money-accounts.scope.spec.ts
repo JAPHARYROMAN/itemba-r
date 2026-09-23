@@ -37,11 +37,9 @@ describe('MobileMoneyAccountsService read scope', () => {
     expect(companyScope.companyWhereFor).toHaveBeenCalledWith(USER);
     expect(employeeFindFirst).toHaveBeenCalledWith({
       where: {
-        id: 'employee-a',
-        deletedAt: null,
-        companyId: { in: ['company-a'] },
+        AND: [{ id: 'employee-a', deletedAt: null }, { companyId: { in: ['company-a'] } }],
       },
-      select: { id: true },
+      select: { id: true, companyId: true },
     });
     expect(accountFindMany).toHaveBeenCalledWith({
       where: { employeeId: 'employee-a', deletedAt: null },
@@ -80,6 +78,7 @@ describe('MobileMoneyAccountsService remove company scope', () => {
     } as any;
     const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
     const companyScope = {
+      companyWhereFor: jest.fn().mockResolvedValue({ companyId: { in: ['company-a'] } }),
       assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     } as any;
     const service = new MobileMoneyAccountsService(prisma, audit, companyScope);

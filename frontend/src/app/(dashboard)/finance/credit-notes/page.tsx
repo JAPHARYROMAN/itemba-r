@@ -1,15 +1,17 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
+  FormDateField,
   PageHeader,
   PageToolbar,
-  StatCard,
-  StatusBadge,
   PermissionDeniedState,
   ProductPicker,
   showToast,
+  StatCard,
+  StatusBadge,
 } from '@/components/ui';
 import { Modal, ConfirmDialog } from '@/components/aurora/overlays';
 import {
@@ -25,6 +27,7 @@ import {
   FormActions,
 } from '@/components/aurora/forms';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { DocumentArtifactButton } from '@/components/documents';
 import { backendGet, backendList, backendPatch, backendPost } from '@/lib/api-client';
 
@@ -778,7 +781,10 @@ export function CreateModal({
     <Modal open onClose={onClose} title="Create Credit Note" size="xl">
       <div className="max-h-[75vh] overflow-y-auto p-5">
         {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+          >
             {error}
           </div>
         )}
@@ -835,12 +841,11 @@ export function CreateModal({
               onChange={(e) => set('customerName', e.target.value)}
               placeholder="Customer name (if unlinked)"
             />
-            <FormInput
+            <FormDateField
               label="Issue Date"
               required
-              type="date"
               value={form.issueDate}
-              onChange={(e) => set('issueDate', e.target.value)}
+              onChange={(value) => set('issueDate', value)}
             />
             <FormInput
               label="Reason"
@@ -943,7 +948,10 @@ function VoidModal({
     >
       <div className="p-5">
         {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+          >
             {error}
           </div>
         )}
@@ -1025,7 +1033,10 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
     >
       <div className="max-h-[75vh] overflow-y-auto p-5">
         {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+          >
             {error}
           </div>
         )}
@@ -1088,7 +1099,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                 className="overflow-x-auto rounded-lg border"
                 style={{ borderColor: 'var(--aurora-border)' }}
               >
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead>
                     <tr
                       className="text-left text-[11px] uppercase"
@@ -1152,7 +1163,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                       </tr>
                     )}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
               {hasReturns && (
                 <p className="mt-1 text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -1183,7 +1194,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     className="overflow-x-auto rounded-lg border"
                     style={{ borderColor: 'var(--aurora-border)' }}
                   >
-                    <table className="w-full text-sm">
+                    <WorkspaceTable className="w-full text-sm">
                       <thead>
                         <tr
                           className="text-left text-[11px] uppercase"
@@ -1217,7 +1228,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </WorkspaceTable>
                   </div>
                 </div>
               ) : (
@@ -1260,7 +1271,8 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CreditNotesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const canView = hasPermission('receivables.view');
   const canManage = hasPermission('receivables.manage');
 
@@ -1282,7 +1294,7 @@ export default function CreditNotesPage() {
   const [issueBusy, setIssueBusy] = useState(false);
 
   useEffect(() => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
     let cancelled = false;
     backendList<Company>('/companies', { query: { limit: 200 } })
       .then((rows) => {
@@ -1294,16 +1306,18 @@ export default function CreditNotesPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView]);
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
       // The credit-notes list endpoint returns { items, total, page, limit,
       // totalPages }; read that shape directly rather than via backendPage.
       const result = await backendGet<CreditNotePage>('/credit-notes', {
+        signal: request.signal,
         query: {
           page,
           limit: PAGE_SIZE,
@@ -1313,6 +1327,7 @@ export default function CreditNotesPage() {
           dateTo: dateTo || undefined,
         },
       });
+      if (!request.current()) return;
       setData({
         items: Array.isArray(result?.items) ? result.items : [],
         total: num(result?.total),
@@ -1321,12 +1336,13 @@ export default function CreditNotesPage() {
         totalPages: num(result?.totalPages) || 1,
       });
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load credit notes');
       setData({ items: [], total: 0, page, limit: PAGE_SIZE, totalPages: 1 });
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status, dateFrom, dateTo]);
+  }, [authLoading, beginRequest, canView, page, companyId, status, dateFrom, dateTo]);
 
   useEffect(() => {
     void load();
@@ -1441,11 +1457,11 @@ export default function CreditNotesPage() {
     },
   ];
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6 space-y-6">
-        <PageHeader title="Credit Notes" subtitle="Customer credit notes (AR reversals)" />
-        <PermissionDeniedState />
+        <PageHeader title="Credit Notes" subtitle={authLoading ? 'Loading' : 'Access Restricted'} />
+        {!authLoading && <PermissionDeniedState />}
       </div>
     );
   }
@@ -1545,27 +1561,23 @@ export default function CreditNotesPage() {
                 </option>
               ))}
             </select>
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter from date"
               value={dateFrom}
-              onChange={(e) => {
-                setDateFrom(e.target.value);
+              onChange={(value) => {
+                setDateFrom(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter to date"
               value={dateTo}
-              onChange={(e) => {
-                setDateTo(e.target.value);
+              onChange={(value) => {
+                setDateTo(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
           </>
         }

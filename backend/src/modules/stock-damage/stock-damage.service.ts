@@ -25,6 +25,23 @@ type StockDamageReferenceIds = {
   batchId?: string | null;
 };
 
+const damageWorkspaceInclude = {
+  company: { select: { id: true, name: true } },
+  branch: {
+    select: {
+      id: true,
+      name: true,
+      divisionId: true,
+      division: { select: { id: true, name: true } },
+    },
+  },
+  product: { select: { id: true, name: true, productCode: true, sku: true, barcode: true } },
+  unit: { select: { id: true, name: true, symbol: true } },
+  batch: { select: { id: true, batchNumber: true } },
+  reportedBy: { select: { id: true, fullName: true } },
+  approvedBy: { select: { id: true, fullName: true } },
+} satisfies Prisma.StockDamageInclude;
+
 @Injectable()
 export class StockDamageService {
   constructor(
@@ -74,10 +91,7 @@ export class StockDamageService {
   // batch) belongs to the damage record's company (and, for the batch, the same
   // product/branch) so a caller cannot bind another company's rows to a record
   // and later corrupt/deplete them on post.
-  private async assertReferencesBelongToCompany(
-    companyId: string,
-    refs: StockDamageReferenceIds,
-  ) {
+  private async assertReferencesBelongToCompany(companyId: string, refs: StockDamageReferenceIds) {
     if (refs.branchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: refs.branchId, deletedAt: null },
@@ -163,20 +177,50 @@ export class StockDamageService {
   }
 
   async findAll(query: QueryStockDamageDto, user?: any) {
-    const { page = 1, limit = 20, companyId, branchId, status, productId } = query;
+    const {
+      page = 1,
+      limit = 20,
+      companyId,
+      branchId,
+      divisionId,
+      status,
+      productId,
+      search,
+      damageType,
+    } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (productId) where.productId = productId;
+    if (divisionId) where.branch = { divisionId };
+    if (damageType) where.damageType = damageType;
+    if (search?.trim()) {
+      const contains = { contains: search.trim(), mode: 'insensitive' };
+      where.AND = [
+        {
+          OR: [
+            { damageNumber: contains },
+            { notes: contains },
+            { product: { name: contains } },
+            { product: { productCode: contains } },
+            { product: { sku: contains } },
+            { product: { barcode: contains } },
+            { branch: { name: contains } },
+            { batch: { batchNumber: contains } },
+          ],
+        },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.stockDamage.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: damageWorkspaceInclude,
       }),
       this.prisma.stockDamage.count({ where }),
     ]);
@@ -184,7 +228,10 @@ export class StockDamageService {
   }
 
   async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
-    const record = await this.prisma.stockDamage.findFirst({ where: { id, deletedAt: null } });
+    const record = await this.prisma.stockDamage.findFirst({
+      where: { id, deletedAt: null },
+      include: damageWorkspaceInclude,
+    });
     if (!record) throw new NotFoundException('Stock damage not found');
     if (user) {
       await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
@@ -327,12 +374,7 @@ export class StockDamageService {
       // movement, apply the movement, then re-read totalValue and post the exact
       // delta. This guarantees the GL credit to INVENTORY_ASSET equals the
       // subledger reduction to the cent. (Mirrors stock-adjustments.post.)
-      const beforeValue = await this.readBalanceValueForUpdate(
-        tx,
-        companyId,
-        productId,
-        branchId,
-      );
+      const beforeValue = await this.readBalanceValueForUpdate(tx, companyId, productId, branchId);
 
       await this.inventoryMovements.createMovement({
         companyId,
@@ -348,12 +390,7 @@ export class StockDamageService {
         tx,
       });
 
-      const afterValue = await this.readBalanceValueForUpdate(
-        tx,
-        companyId,
-        productId,
-        branchId,
-      );
+      const afterValue = await this.readBalanceValueForUpdate(tx, companyId, productId, branchId);
       // Relief = before - after (>= 0 for an outbound DAMAGE). Round to money
       // precision (2 dp) so the balanced JE ties to the cent.
       const writeOffValue = beforeValue.minus(afterValue).toDecimalPlaces(2);

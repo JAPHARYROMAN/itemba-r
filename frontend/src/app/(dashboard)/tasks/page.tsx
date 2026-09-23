@@ -1,8 +1,10 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { Btn, ConfirmDialog, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageSpinner } from '@/components/ui';
 import { backendPost, backendPatch, backendDelete } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -66,9 +68,11 @@ function TaskModal({ mode, initial, users, companies, onClose, onSaved }: {
   } : { ...BLANK });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const setValue = (k: keyof TaskForm) => (value: string) =>
+    setForm((f) => ({ ...f, [k]: value }));
   const set = (k: keyof TaskForm) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-      setForm((f) => ({ ...f, [k]: e.target.value }));
+      setValue(k)(e.target.value);
 
   const submit = async () => {
     if (!form.title.trim()) { setError('Title is required'); return; }
@@ -100,7 +104,7 @@ function TaskModal({ mode, initial, users, companies, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Task' : 'Edit Task'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
           <FormInput label="Title" required value={form.title} onChange={set('title')} />
@@ -120,18 +124,21 @@ function TaskModal({ mode, initial, users, companies, onClose, onSaved }: {
         ) : (
           <div />
         )}
-        <FormInput label="Due Date" type="date" value={form.dueDate} onChange={set('dueDate')} />
+        <FormDateField label="Due Date" value={form.dueDate} onChange={setValue('dueDate')} />
       </div>
     </Modal>
   );
 }
 
 export default function TasksPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('tasks.view');
   const canCreate = hasPermission('tasks.create');
   const canUpdate = hasPermission('tasks.update');
   const canComplete = hasPermission('tasks.complete');
   const canCancel = hasPermission('tasks.cancel');
+  const canReadUsers = hasPermission('users.read');
+  const beginRequest = useRequestGuard();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,35 +152,55 @@ export default function TasksPage() {
   const [actionError, setActionError] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const endpoint = activeTab === 'my' ? '/api/backend/tasks/my-tasks' : '/api/backend/tasks';
-    fetch(endpoint)
-      .then(r => r.json())
-      .then((res: any) => setTasks(res.data?.data ?? []))
-      .catch(() => {
-        setTasks([]);
-        setLoadError('Failed to load tasks. Check your connection and try again.');
-      })
-      .finally(() => setLoading(false));
-  }, [activeTab]);
+    try {
+      const response = await fetch(endpoint, { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load tasks.');
+      const res = await response.json();
+      if (!request.current()) return;
+      setTasks(Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setTasks([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load tasks.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [activeTab, authLoading, beginRequest, canView]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!canCreate && !canUpdate) return;
-    if (hasPermission('users.read')) {
-      fetch('/api/backend/users?limit=100')
+    if (authLoading || !canView || (!canCreate && !canUpdate)) return;
+    const controller = new AbortController();
+    if (canReadUsers) {
+      fetch('/api/backend/users?limit=100', { signal: controller.signal })
         .then((r) => r.json())
-        .then((j) => setUsers(j.data?.data ?? j.data ?? []))
-        .catch(() => setUsers([]));
+        .then((j) => {
+          if (controller.signal.aborted) return;
+          setUsers(j.data?.data ?? j.data ?? []);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setUsers([]);
+        });
     }
-    fetch('/api/backend/companies?limit=100')
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(j.data?.data ?? j.data ?? []))
-      .catch(() => setCompanies([]));
-  }, [canCreate, canUpdate, hasPermission]);
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(j.data?.data ?? j.data ?? []);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canCreate, canReadUsers, canUpdate, canView]);
 
   const onSaved = () => { setCreating(false); setEditing(null); load(); };
 
@@ -203,6 +230,15 @@ export default function TasksPage() {
     const diffDays = (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
     if (diffDays < 3) return 'text-orange-500 font-medium';
     return 'text-gray-500';
+  }
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
   }
 
   return (
@@ -238,13 +274,6 @@ export default function TasksPage() {
         ))}
       </div>
 
-      {loadError && (
-        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <span>{loadError}</span>
-          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
-        </div>
-      )}
-
       {actionError && (
         <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           <span>{actionError}</span>
@@ -254,9 +283,11 @@ export default function TasksPage() {
 
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
+          <WorkspaceTable className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 {['Task #', 'Title', 'Type', 'Priority', 'Status', 'Assigned To', 'Due Date', 'Actions'].map(h => (
@@ -313,7 +344,7 @@ export default function TasksPage() {
                 <tr><td colSpan={8} className="px-6 py-10 text-center text-gray-400">No tasks found</td></tr>
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorState, PageSpinner, showToast } from '@/components/ui';
 import { ApiError, backendPage, backendPatch } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -20,23 +23,38 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function SecurityEventsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('security_events.view');
+  const beginRequest = useRequestGuard();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    backendPage<any>('security-events', { query: { severity, status } })
-      .then((page) => setData(page.data))
-      .catch(() => { setData([]); setLoadError('Failed to load security events.'); })
-      .finally(() => setLoading(false));
-  }, [severity, status]);
+    try {
+      const page = await backendPage<any>('security-events', {
+        query: { severity, status },
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setData(page.data);
+    } catch {
+      if (!request.current()) return;
+      setData([]);
+      setLoadError('Failed to load security events.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, severity, status]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   async function handleAction(id: string, action: 'review' | 'resolve') {
@@ -46,7 +64,16 @@ export default function SecurityEventsPage() {
       showToast('error', `Failed to ${action} security event`, err instanceof ApiError ? err.message : undefined);
       return;
     }
-    load();
+    void load();
+  }
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Security Events</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
   }
 
   return (
@@ -57,7 +84,7 @@ export default function SecurityEventsPage() {
       </div>
 
       <div className="flex gap-3 mb-4">
-        <select
+        <select aria-label="All Severities"
           value={severity}
           onChange={(e) => setSeverity(e.target.value)}
           className="border rounded-lg px-3 py-2 text-sm"
@@ -67,7 +94,7 @@ export default function SecurityEventsPage() {
             <option key={s}>{s}</option>
           ))}
         </select>
-        <select
+        <select aria-label="All Statuses"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           className="border rounded-lg px-3 py-2 text-sm"
@@ -82,10 +109,10 @@ export default function SecurityEventsPage() {
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : loadError ? (
-        <ErrorState message={loadError} onRetry={load} />
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Event #</th>
@@ -153,7 +180,7 @@ export default function SecurityEventsPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
     </div>

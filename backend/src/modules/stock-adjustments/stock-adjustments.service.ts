@@ -66,6 +66,7 @@ export class StockAdjustmentsService {
       locationId,
       dateFrom,
       dateTo,
+      search,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -81,7 +82,28 @@ export class StockAdjustmentsService {
     if (branchId) where.branchId = branchId;
     if (status) where.status = status;
     if (locationId) where.branchId = locationId;
+    if (search?.trim()) {
+      const contains = { contains: search.trim(), mode: 'insensitive' as const };
+      where.AND = [
+        {
+          OR: [
+            { adjustmentNumber: contains },
+            { reason: contains },
+            { notes: contains },
+            { company: { name: contains } },
+            { branch: { name: contains } },
+          ],
+        },
+      ];
+    }
     if (dateFrom || dateTo) {
+      if (
+        (dateFrom && !Number.isFinite(Date.parse(dateFrom))) ||
+        (dateTo && !Number.isFinite(Date.parse(dateTo))) ||
+        (dateFrom && dateTo && Date.parse(dateFrom) > Date.parse(dateTo))
+      ) {
+        throw new BadRequestException('Choose a valid date range.');
+      }
       where.createdAt = {};
       if (dateFrom) where.createdAt.gte = new Date(dateFrom);
       if (dateTo) where.createdAt.lte = new Date(dateTo);
@@ -93,10 +115,11 @@ export class StockAdjustmentsService {
         include: {
           company: { select: { id: true, name: true, code: true } },
           branch: { select: { id: true, name: true, code: true } },
+          division: { select: { id: true, name: true } },
           createdBy: { select: { id: true, fullName: true } },
           _count: { select: { lines: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
       }),
@@ -112,6 +135,7 @@ export class StockAdjustmentsService {
       include: {
         company: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true } },
+        division: { select: { id: true, name: true } },
         createdBy: { select: { id: true, fullName: true } },
         approvedBy: { select: { id: true, fullName: true } },
         postedBy: { select: { id: true, fullName: true } },

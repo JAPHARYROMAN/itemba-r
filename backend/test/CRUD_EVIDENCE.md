@@ -116,6 +116,43 @@ Choose an actually free port rather than assuming `55432` is unused. The
 runner still creates and drops its own allowlisted schema inside this disposable
 database; it does not run fixtures in `public`.
 
+## Unsigned local diagnostics (not release evidence)
+
+Use `npm run diagnostic:crud` to execute the same complete real loopback matrix
+without a signing key or release publication. This is a development check only:
+the coverage endpoint does not accept its unsigned payload. The signed runner,
+protected release workflow and production acceptance gates are unchanged.
+
+Create a separate disposable database first. This runner accepts only an explicit
+PostgreSQL URL on `127.0.0.1`, a database named
+`msaidizi_crud_diagnostic_<lowercase-alphanumeric-suffix>`, and an exact
+host/port/database acknowledgement. URL queries and fragments are rejected;
+there is no `.env` fallback. For example, after creating that database on an
+owned local test cluster (choose its actual port and user):
+
+```powershell
+$env:DATABASE_URL = 'postgresql://proof@127.0.0.1:55440/msaidizi_crud_diagnostic_local'
+$env:CRUD_COVERAGE_DISPOSABLE_DATABASE_ACK = '127.0.0.1:55440/msaidizi_crud_diagnostic_local'
+npm run diagnostic:crud
+```
+
+Do not edit the checkout or dependencies while it runs. The parent hashes the
+execution inputs and Prisma tree before and after execution, applies all
+migrations in a newly created schema, disables external/model/device/worker
+paths, then runs the matrix without Jest cache. The child receives no signing
+or publication handles. The parent independently validates the unsigned result;
+a failed case, test failure, input drift or validation failure exits nonzero.
+
+The runner prints a unique temporary directory containing `run.log`,
+`unsigned-payload.json` (when produced) and `diagnostic-summary.json`. The summary
+always says `unsigned: true` and `releaseEligible: false`, even on success.
+Retain these files for diagnosis; never mount them as accepted release evidence.
+Cleanup drops only the successfully created, exact random schema, not the
+database or logs. Inspect `cleanupComplete`; an interrupted parent may require
+manual cleanup of that exact schema after its children have stopped. The schema
+name stays within PostgreSQL's 63-byte identifier limit; regression tests cover
+that limit and unsafe target rejection through `npm run test:evidence-runner`.
+
 ## Consume evidence
 
 Configure all five runtime inputs together. Copy the application value from the

@@ -1,8 +1,10 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { PageSpinner, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
 import { backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -102,7 +104,7 @@ function RuleModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Alert Rule' : 'Edit Alert Rule'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
         <FormSelect label="Alert Type" required value={form.alertType} onChange={(e) => set('alertType', e.target.value)}>
@@ -138,8 +140,10 @@ function RuleModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
 }
 
 export default function AlertRulesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('alert_rules.view');
   const canManage = hasPermission('alert_rules.manage');
+  const beginRequest = useRequestGuard();
 
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -150,26 +154,40 @@ export default function AlertRulesPage() {
   const [actionLoading, setActionLoading] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
     setLoadError('');
-    fetch('/api/backend/alert-rules').then(r => r.json())
-      .then((res: any) => setRules(res.data?.data ?? []))
-      .catch(() => {
-        setRules([]);
-        setLoadError('Failed to load alert rules. Check your connection and try again.');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const response = await fetch('/api/backend/alert-rules', { signal: request.signal });
+      if (!request.current()) return;
+      const body = await response.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(body?.message ?? 'Failed to load alert rules');
+      setRules(body.data?.data ?? []);
+    } catch (err) {
+      if (!request.current()) return;
+      setRules([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load alert rules. Check your connection and try again.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (!canManage) return;
-    // Company dropdown options for the rule modal only; failure just shows "All companies".
-    fetch('/api/backend/companies?limit=100').then(r => r.json())
-      .then((res: any) => setCompanies(res.data?.data ?? res.data ?? []))
+    if (authLoading || !canView || !canManage) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((res: any) => {
+        if (!controller.signal.aborted) setCompanies(res.data?.data ?? res.data ?? []);
+      })
       .catch(() => undefined);
-  }, [canManage]);
+    return () => controller.abort();
+  }, [authLoading, canManage, canView]);
 
   const onSaved = () => {
     setCreating(false); setEditing(null); load();
@@ -199,6 +217,15 @@ export default function AlertRulesPage() {
     }
   };
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Alert Rules</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -216,7 +243,9 @@ export default function AlertRulesPage() {
       {loadError && (
         <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           <span>{loadError}</span>
-          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
 
@@ -224,7 +253,7 @@ export default function AlertRulesPage() {
         <PageSpinner label="Loading records" />
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
+          <WorkspaceTable className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 {['Code', 'Name', 'Type', 'Priority', 'Frequency', 'Active', ...(canManage ? ['Actions'] : [])].map(h => (
@@ -264,7 +293,7 @@ export default function AlertRulesPage() {
                 <tr><td colSpan={canManage ? 7 : 6} className="px-6 py-10 text-center text-gray-400">No alert rules found</td></tr>
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

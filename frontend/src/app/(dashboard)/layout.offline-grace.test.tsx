@@ -18,7 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { AuthProvider, useAuthContext } from '@/contexts/auth-context';
-import { AuthGate } from './layout';
+import { AuthGate } from '@/components/os/dashboard-layout';
 
 const { replaceMock, pathnameRef } = vi.hoisted(() => ({
   replaceMock: vi.fn(),

@@ -28,15 +28,7 @@ export class MobileMoneyAccountsService {
   ) {}
 
   async findByEmployee(employeeId: string, user: AuthUser) {
-    const employee = await this.prisma.employee.findFirst({
-      where: {
-        id: employeeId,
-        deletedAt: null,
-        ...(await this.companyScope.companyWhereFor(user)),
-      },
-      select: { id: true },
-    });
-    if (!employee) throw new NotFoundException('Employee not found');
+    const employee = await this.employeeFor(employeeId, user);
 
     return this.prisma.mobileMoneyAccount.findMany({
       where: { employeeId: employee.id, deletedAt: null },
@@ -44,15 +36,36 @@ export class MobileMoneyAccountsService {
     });
   }
 
-  async findOne(id: string) {
+  private async employeeFor(employeeId: string, user: AuthUser) {
+    if (!employeeId) throw new BadRequestException('Choose an employee.');
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        AND: [{ id: employeeId, deletedAt: null }, await this.companyScope.companyWhereFor(user)],
+      },
+      select: { id: true, companyId: true },
+    });
+    if (!employee) throw new NotFoundException('Employee not found');
+    return employee;
+  }
+
+  async findOne(id: string, user: AuthUser) {
     const row = await this.prisma.mobileMoneyAccount.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        deletedAt: null,
+        employee: {
+          AND: [{ deletedAt: null }, await this.companyScope.companyWhereFor(user)],
+        },
+      },
+      include: { employee: { select: { companyId: true } } },
     });
     if (!row) throw new NotFoundException('Mobile money account not found');
     return row;
   }
 
-  async create(dto: CreateMobileMoneyAccountDto, userId: string) {
+  async create(dto: CreateMobileMoneyAccountDto, user: AuthUser) {
+    const employee = await this.employeeFor(dto.employeeId, user);
+    await this.companyScope.assertCanAccessCompany(user, employee.companyId, AccessLevel.WRITE);
     const msisdn = normaliseMsisdn(dto.msisdn);
 
     try {
@@ -79,7 +92,8 @@ export class MobileMoneyAccountsService {
       });
 
       await this.audit.log({
-        userId,
+        userId: user.id,
+        companyId: employee.companyId,
         action: 'CREATE',
         entityType: 'MobileMoneyAccount',
         entityId: row.id,
@@ -91,8 +105,15 @@ export class MobileMoneyAccountsService {
     }
   }
 
-  async update(id: string, dto: UpdateMobileMoneyAccountDto, userId: string) {
-    const existing = await this.findOne(id);
+  async update(id: string, dto: UpdateMobileMoneyAccountDto, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    await this.companyScope.assertCanAccessCompany(
+      user,
+      existing.employee.companyId,
+      AccessLevel.WRITE,
+    );
+    if (dto.employeeId !== undefined && dto.employeeId !== existing.employeeId)
+      throw new BadRequestException('A mobile money account cannot be moved to another employee');
 
     const data: Record<string, unknown> = {};
     if (dto.provider !== undefined) data.provider = dto.provider;
@@ -120,7 +141,8 @@ export class MobileMoneyAccountsService {
       });
 
       await this.audit.log({
-        userId,
+        userId: user.id,
+        companyId: existing.employee.companyId,
         action: 'UPDATE',
         entityType: 'MobileMoneyAccount',
         entityId: id,
@@ -134,11 +156,7 @@ export class MobileMoneyAccountsService {
   }
 
   async remove(id: string, user: AuthUser) {
-    const existing = await this.prisma.mobileMoneyAccount.findFirst({
-      where: { id, deletedAt: null },
-      include: { employee: { select: { companyId: true } } },
-    });
-    if (!existing) throw new NotFoundException('Mobile money account not found');
+    const existing = await this.findOne(id, user);
 
     await this.companyScope.assertCanAccessCompany(
       user,

@@ -676,6 +676,8 @@ export class ReceivablesService {
       if (dateTo) where.issueDate.lte = dateRangeEnd(dateTo);
     }
 
+    const search = query.search?.trim();
+    if (search) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ receivableNumber: { contains: search, mode: 'insensitive' } }, { customerName: { contains: search, mode: 'insensitive' } }, { customer: { name: { contains: search, mode: 'insensitive' } } }] }];
     return where;
   }
 

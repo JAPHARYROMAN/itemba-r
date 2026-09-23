@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 interface ExportItem {
@@ -62,7 +64,7 @@ function CreateExportModal({ companies, onClose, onSaved }: { companies: Company
   return (
     <Modal open onClose={onClose} title="Request Export" size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Request</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Code" required value={form.exportCode} onChange={(e) => set('exportCode', e.target.value)} />
         <FormSelect label="Company" required value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select…">
@@ -74,8 +76,8 @@ function CreateExportModal({ companies, onClose, onSaved }: { companies: Company
         <FormSelect label="Format" value={form.format} onChange={(e) => set('format', e.target.value)}>
           {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
         </FormSelect>
-        <FormInput label="Period Start" type="date" value={form.periodStart} onChange={(e) => set('periodStart', e.target.value)} />
-        <FormInput label="Period End" type="date" value={form.periodEnd} onChange={(e) => set('periodEnd', e.target.value)} />
+        <FormDateField label="Period Start" value={form.periodStart} onChange={(value) => set('periodStart', value)} />
+        <FormDateField label="Period End" value={form.periodEnd} onChange={(value) => set('periodEnd', value)} />
         <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
       </div>
     </Modal>
@@ -83,9 +85,10 @@ function CreateExportModal({ companies, onClose, onSaved }: { companies: Company
 }
 
 export default function ComplianceExportsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('data_exports.create');
   const canView = hasPermission('data_exports.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<ExportItem[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -93,6 +96,7 @@ export default function ComplianceExportsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState('');
   const [exportType, setExportType] = useState('');
   const [format, setFormat] = useState('');
@@ -100,21 +104,44 @@ export default function ComplianceExportsPage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const read = (url: string, apply: (j: any) => void) => {
+      fetch(url, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((j) => { if (!controller.signal.aborted) apply(j); })
+        .catch(() => undefined);
+    };
+    read('/api/backend/companies?limit=100', (j) => { setCompanies(j.data?.data ?? j.data ?? []); });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (companyId) params.set('companyId', companyId);
     if (exportType) params.set('exportType', exportType);
     if (format) params.set('format', format);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/data-exports?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<ExportItem> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
-  }, [page, companyId, exportType, format, status]);
+        try {
+      const res = await fetch(`/api/backend/data-exports?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load exports');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<ExportItem> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load exports');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, companyId, exportType, format, status]);
 
   useEffect(() => { load(); }, [load]);
   const reset = (fn: (v: string) => void) => (v: string) => { fn(v); setPage(1); };
@@ -122,6 +149,7 @@ export default function ComplianceExportsPage() {
   const completed = items.filter((x) => x.status === 'COMPLETED').length;
   const failed = items.filter((x) => x.status === 'FAILED').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Compliance Exports" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Compliance Exports" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -137,19 +165,19 @@ export default function ComplianceExportsPage() {
       <PageToolbar
         filters={
           <>
-            <select value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={exportType} onChange={(e) => reset(setExportType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={exportType} onChange={(e) => reset(setExportType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select value={format} onChange={(e) => reset(setFormat)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Formats" value={format} onChange={(e) => reset(setFormat)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Formats</option>
               {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
-            <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -159,11 +187,11 @@ export default function ComplianceExportsPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No exports</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Code</th>
@@ -190,7 +218,7 @@ export default function ComplianceExportsPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
         {totalPages > 1 && (

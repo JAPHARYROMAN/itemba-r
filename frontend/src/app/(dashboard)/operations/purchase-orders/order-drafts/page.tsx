@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Copy, FilePlus2, Send, Trash2 } from 'lucide-react';
@@ -9,6 +10,7 @@ import {
   ConfirmDialog,
   EmptyState,
   FormSelect,
+  FormDateField,
   PageHeader,
   PageToolbar,
   SkeletonTable,
@@ -24,6 +26,7 @@ import {
   backendPost,
 } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { PurchaseOrderTabs } from '../_components/PurchaseOrderTabs';
 import { SupplierOrderDraftForm } from '../_components/SupplierOrderDraftForm';
 import type {
@@ -80,6 +83,7 @@ export default function SupplierOrderDraftsPage() {
   const canUpdate = hasPermission('supplier_order_drafts.update');
   const canSend = hasPermission('supplier_order_drafts.send');
   const canManage = hasPermission('supplier_order_drafts.manage');
+  const beginRequest = useRequestGuard();
 
   useEffect(() => {
     if (!canView) return;
@@ -116,6 +120,7 @@ export default function SupplierOrderDraftsPage() {
 
   const load = useCallback(async () => {
     if (!canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
@@ -132,14 +137,18 @@ export default function SupplierOrderDraftsPage() {
           page,
           limit: 25,
         },
+        signal: request.signal,
       });
+      if (!request.current()) return;
       setData(result);
     } catch (cause) {
+      if (!request.current()) return;
       setError(cause instanceof Error ? cause.message : 'Could not load supplier order drafts');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
   }, [
+    beginRequest,
     canView,
     companyId,
     divisionId,
@@ -340,25 +349,23 @@ export default function SupplierOrderDraftsPage() {
               placeholder="All statuses"
               options={statuses.map((value) => ({ value, label: value.replaceAll('_', ' ') }))}
             />
-            <input
+            <FormDateField
               aria-label="From date"
-              className="aurora-input rounded-lg border px-3 py-2 text-[13px]"
-              type="date"
               value={dateFrom}
-              onChange={(event) => {
-                setDateFrom(event.target.value);
+              onChange={(value) => {
+                setDateFrom(value);
                 setPage(1);
               }}
+              className="ui-date-field-inline"
             />
-            <input
+            <FormDateField
               aria-label="To date"
-              className="aurora-input rounded-lg border px-3 py-2 text-[13px]"
-              type="date"
               value={dateTo}
-              onChange={(event) => {
-                setDateTo(event.target.value);
+              onChange={(value) => {
+                setDateTo(value);
                 setPage(1);
               }}
+              className="ui-date-field-inline"
             />
           </>
         }
@@ -374,9 +381,12 @@ export default function SupplierOrderDraftsPage() {
       {error && (
         <div
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
         >
-          {error}
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
       <Card padding="none" className="overflow-hidden">
@@ -394,7 +404,7 @@ export default function SupplierOrderDraftsPage() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
+            <WorkspaceTable className="w-full text-left text-[13px]">
               <thead
                 style={{ background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-muted)' }}
               >
@@ -507,7 +517,7 @@ export default function SupplierOrderDraftsPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Card>

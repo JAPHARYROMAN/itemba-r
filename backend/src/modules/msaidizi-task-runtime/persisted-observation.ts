@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { sanitizePersistedValue } from '../../common/utils/persistent-secret-redaction';
+import { sha256Canonical } from '../msaidizi-tasks/msaidizi-input-bindings';
 
 /**
  * Small successful tool results may be checkpointed for adaptive reasoning.
@@ -69,6 +70,7 @@ export function preparePersistedUntrustedObservation(
     };
   }
 
+  const persistedValue = JSON.parse(sanitizedText) as Prisma.InputJsonValue;
   return {
     observation: {
       available: true,
@@ -78,7 +80,13 @@ export function preparePersistedUntrustedObservation(
       sourceBytes,
       persistedBytes,
       redactionsApplied: sanitized.redactionsApplied,
-      value: JSON.parse(sanitizedText) as Prisma.InputJsonValue,
+      // JSONB may reorder keys. Keep sourceSha256 as the original byte digest,
+      // and bind the persisted JSON value with an order-independent protocol.
+      valueDigest: {
+        algorithm: 'canonical-json-sha256-v1',
+        sha256: sha256Canonical(persistedValue),
+      },
+      value: persistedValue,
     },
   };
 }

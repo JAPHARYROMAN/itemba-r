@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
+import { Card, ErrorState, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
 import { backendGet } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 type ReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -94,6 +96,9 @@ function detailPreview(details: SecurityReadinessCheck['details']) {
 }
 
 export default function SecurityDashboardPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('security.dashboard.view');
+  const beginRequest = useRequestGuard();
   const [stats, setStats] = useState<SecurityStats>({
     totalEvents: 0,
     activeSessions: 0,
@@ -107,10 +112,13 @@ export default function SecurityDashboardPage() {
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setError('');
     setRefreshing(true);
     try {
-      const data = await backendGet<any>('security/dashboard');
+      const data = await backendGet<any>('security/dashboard', { signal: request.signal });
+      if (!request.current()) return;
       const totalEvents = Array.isArray(data.eventsBySeverity)
         ? data.eventsBySeverity.reduce(
             (sum: number, row: any) => sum + Number(row._count?.id ?? 0),
@@ -127,14 +135,17 @@ export default function SecurityDashboardPage() {
       });
       setEvents(Array.isArray(data.recentCriticalEvents) ? data.recentCriticalEvents : []);
     } catch (err) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Failed to load security dashboard';
       setError(message);
       showToast('error', 'Security dashboard unavailable', message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request.current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
     void load();
@@ -174,6 +185,17 @@ export default function SecurityDashboardPage() {
     { label: 'Users', href: '/users', desc: 'User access, status, and company assignments' },
   ];
 
+  if (authLoading || !canView) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="Security Dashboard"
+          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
+        />
+      </div>
+    );
+  }
+
   if (loading)
     return (
       <div className="space-y-6 p-6">
@@ -206,11 +228,7 @@ export default function SecurityDashboardPage() {
         }
       />
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       <div className="aurora-stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Security Events (30d)" value={stats.totalEvents} variant="purple" />

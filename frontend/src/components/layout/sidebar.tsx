@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { usePersonalization } from '@/hooks/use-personalization';
+import { APPS, isAppPath, INVENTORY_APP_PERMISSIONS } from '@/lib/apps';
+import { ITEMBA_OS_ENABLED } from '@/lib/itemba-os-flag';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────────
 function Icon({ d, className = '' }: { d: string; className?: string }) {
@@ -118,6 +120,8 @@ const ICONS = {
 
 // ─── Nav Structure ────────────────────────────────────────────────────────────
 export type NavLeaf = {
+  /** Keep a launcher in search, titles and favorites without a primary sidebar row. */
+  sidebarHidden?: boolean;
   href: string;
   label: string;
   iconKey: keyof typeof ICONS;
@@ -141,17 +145,29 @@ export function isGroup(item: NavItem): item is NavGroup {
 
 export const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', iconKey: 'dashboard' },
+  // The app library is part of the OS shell; with the shell off it has no page.
+  { href: '/apps', label: 'Apps', iconKey: 'grid', sidebarHidden: !ITEMBA_OS_ENABLED },
+  {
+    href: '/fuel-reporting',
+    label: 'Fuel Reporting',
+    iconKey: 'fuelGrid',
+    permission: 'fuel_reporting.read',
+  },
   // One leaf puts Msaidizi in the sidebar, the command palette, the tab title
   // and the recents store at once — and makes it correctly INVISIBLE to anyone
   // without `msaidizi.use`, which is the UI expression of the backend's rule
   // that an unpermitted capability is invisible rather than refused.
   { href: '/msaidizi', label: 'Msaidizi', iconKey: 'assistant', permission: 'msaidizi.use' },
-  {
-    href: '/fuel-grid',
-    label: 'Fuel Grid',
-    iconKey: 'fuelGrid',
-    permission: 'fuel_grid.access',
-  },
+  ...APPS.map((app) => ({
+    href: app.href,
+    label: app.label,
+    iconKey: app.iconKey,
+    permission: app.permission,
+    permissionsAny: app.permissionsAny,
+    // With the OS shell off there is no app library, so Fuel Grid keeps the
+    // sidebar row it had before the OS.
+    sidebarHidden: ITEMBA_OS_ENABLED || app.id !== 'fuel-grid',
+  })),
   {
     label: 'Records Book',
     iconKey: 'clipboardList',
@@ -280,24 +296,7 @@ export const NAV: NavItem[] = [
         href: '/inventory',
         label: 'Inventory',
         iconKey: 'box',
-        permissionsAny: [
-          'inventory.view',
-          'inventory.movements.view',
-          'inventory.adjustments.create',
-          'inventory.adjustments.approve',
-          'inventory.adjustments.post',
-          'products.view',
-          'product_categories.view',
-          'units.view',
-          'product_batches.view',
-          'product_batches.manage',
-          'stock_damage.view',
-          'stock_damage.create',
-          'stock_damage.approve',
-          'stock_damage.post',
-          'operations.reports.view',
-          'westsides.reports.view',
-        ],
+        permissionsAny: INVENTORY_APP_PERMISSIONS,
       },
       {
         href: '/operations/sales-orders',
@@ -984,6 +983,7 @@ export const NAV: NavItem[] = [
 // ─── Helper: is path active ───────────────────────────────────────────────────
 function isActive(href: string, pathname: string) {
   if (href === '/dashboard') return pathname === '/dashboard';
+  if (href === '/apps' && isAppPath(pathname)) return true;
   return pathname === href || pathname.startsWith(href + '/');
 }
 
@@ -1160,6 +1160,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ) : (
             NAV.map((item) => {
               if (!isGroup(item)) {
+                if (item.sidebarHidden) return null;
                 if (!canSee(item.permission, item.permissionsAny)) return null;
                 const active = isActive(item.href, pathname);
                 return (

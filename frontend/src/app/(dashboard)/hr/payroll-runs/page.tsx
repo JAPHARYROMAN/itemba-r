@@ -1,623 +1,300 @@
 'use client';
-
-import { Suspense, useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
+import { Plus, RefreshCw } from 'lucide-react';
 import {
-  Card,
-  PageHeader,
-  StatusBadge,
-  FormSelect,
-  Modal,
   Btn,
-  PageToolbar,
+  FormSelect,
+  PageHeader,
   PageSpinner,
-  showToast,
+  PageToolbar,
+  PermissionDeniedState,
 } from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRouter as useGuardedRouter } from '@/components/workspace/workspace-navigation';
+import { PayrollFilesDialog } from '@/components/workspace/payroll-run-dialogs';
+import {
+  PayrollPeriodChoice,
+  PayrollRunRecord,
+  payrollActionLabels,
+  payrollActions,
+  payrollLabel,
+  payrollMoney,
+  periodName,
+  runName,
+} from '@/components/workspace/payroll-types';
 import { useAuth } from '@/hooks/use-auth';
-
-interface DisbursementFile {
-  filename: string;
-  mimeType: string;
-  rowCount: number;
-  total: number;
-  content: string;
-}
-
-interface DisbursementManifest {
-  runNumber: string;
-  companyName: string;
-  generatedAt: string;
-  summary: { totalEmployees: number; viaBank: number; viaMobileMoney: number; unmapped: number };
-  files: DisbursementFile[];
-}
-
-function downloadCsv(file: DisbursementFile) {
-  const blob = new Blob([file.content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = file.filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface PayrollRun {
-  id: string;
-  runNumber: string;
-  period?: string;
-  periodId?: string;
-  runType: string;
-  totalGross?: number;
-  totalNet?: number;
-  status: string;
-  hrApprovedById?: string | null;
-  financeApprovedById?: string | null;
-}
-
-interface FormState {
-  periodId: string;
-  runType: string;
-}
-
-const empty: FormState = { periodId: '', runType: 'REGULAR' };
-
-interface ChartAccount {
-  id: string;
-  accountCode: string;
-  accountName: string;
-  accountType: string;
-}
-
-type RawPayrollRun = Partial<PayrollRun> & {
-  payrollRunNumber?: string;
-  payrollPeriod?: { name?: string };
-  payrollPeriodId?: string;
-  payrollType?: string;
-  totalGrossPay?: number | string;
-  totalNetPay?: number | string;
-};
-
-function normalizePayrollRun(row: RawPayrollRun): PayrollRun {
-  return {
-    id: row.id ?? '',
-    runNumber: row.runNumber ?? row.payrollRunNumber ?? '—',
-    period: row.period ?? row.payrollPeriod?.name ?? row.periodId ?? row.payrollPeriodId,
-    periodId: row.periodId ?? row.payrollPeriodId,
-    runType: row.runType ?? row.payrollType ?? 'REGULAR',
-    totalGross: Number(row.totalGross ?? row.totalGrossPay ?? 0),
-    totalNet: Number(row.totalNet ?? row.totalNetPay ?? 0),
-    status: row.status ?? 'DRAFT',
-    hrApprovedById: row.hrApprovedById ?? null,
-    financeApprovedById: row.financeApprovedById ?? null,
-  };
-}
-
+import { useOrgScope } from '@/hooks/use-org-scope';
+import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
+import '@/components/workspace/workspace.css';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+const statuses = ['DRAFT', 'CALCULATED', 'SUBMITTED', 'APPROVED', 'PAID', 'CANCELLED'];
 function PayrollRunsContent() {
-  const searchParams = useSearchParams();
-  const { user, hasPermission } = useAuth();
-  const [rows, setRows] = useState<PayrollRun[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState<FormState>(empty);
-  const [saving, setSaving] = useState(false);
-  const [actionLoading, setActionLoading] = useState('');
-  const [periodFilter, setPeriodFilter] = useState(
-    searchParams.get('payrollPeriodId') ?? searchParams.get('periodId') ?? '',
+  const searchParams = useSearchParams(),
+    router = useGuardedRouter();
+  const urlPeriod = searchParams.get('payrollPeriodId') ?? searchParams.get('periodId') ?? '';
+  const urlCompany = searchParams.get('companyId') ?? '';
+  const urlStatus = statuses.includes(searchParams.get('status') ?? '')
+    ? searchParams.get('status')!
+    : '';
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('payroll.view'),
+    canCreate = hasPermission('payroll.manage');
+  const stateKey = usePayrollStateKey('payroll-runs');
+  const urlKey = JSON.stringify([urlCompany, urlPeriod, urlStatus]);
+  const [querySource, setQuerySource] = useWorkspaceState(stateKey + '.querySource', urlKey);
+  const [period, setPeriod] = useWorkspaceState(stateKey + '.period', urlPeriod),
+    [company, setCompany] = useWorkspaceState(stateKey + '.company', urlCompany),
+    [status, setStatus] = useWorkspaceState(stateKey + '.status', urlStatus),
+    [page, setPage] = useWorkspaceState(stateKey + '.page', 1),
+    [search, setSearch] = useWorkspaceState(stateKey + '.search', ''),
+    [query, setQuery] = useState(search.trim());
+  useEffect(() => {
+    if (querySource !== urlKey) {
+      setPeriod(urlPeriod);
+      setCompany(urlCompany);
+      setStatus(urlStatus);
+      setPage(1);
+    }
+    setQuerySource(urlKey);
+  }, [
+    querySource,
+    urlKey,
+    urlPeriod,
+    urlCompany,
+    urlStatus,
+    setPeriod,
+    setCompany,
+    setStatus,
+    setPage,
+    setQuerySource,
+  ]);
+  useEffect(() => {
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
+  const result = useWorkspaceRecords<PayrollRunRecord>(
+    '/hr/payroll-runs',
+    { page, limit: 20, payrollPeriodId: period, companyId: company, status, search: query },
+    canRead,
   );
-  const [periods, setPeriods] = useState<{ id: string; name?: string; payrollPeriodCode?: string; companyId?: string }[]>([]);
-  const [filesManifest, setFilesManifest] = useState<DisbursementManifest | null>(null);
-  const [filesError, setFilesError] = useState('');
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [payModalRunId, setPayModalRunId] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<ChartAccount[]>([]);
-  const [disbursingAccountId, setDisbursingAccountId] = useState('');
-  const [paySubmitting, setPaySubmitting] = useState(false);
-  const [payError, setPayError] = useState('');
-
-  const openDisbursementFiles = async (runId: string) => {
-    setFilesError('');
-    setFilesLoading(true);
-    setFilesManifest({
-      runNumber: '…',
-      companyName: '',
-      generatedAt: '',
-      summary: { totalEmployees: 0, viaBank: 0, viaMobileMoney: 0, unmapped: 0 },
-      files: [],
-    });
-    try {
-      const res = await fetch(`/api/backend/hr/payroll-runs/${runId}/disbursement-files`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(
-          Array.isArray(j?.message) ? j.message.join(', ') : (j?.message ?? 'Generation failed'),
-        );
-      }
-      const j = await res.json();
-      setFilesManifest(j.data ?? j);
-    } catch (err: unknown) {
-      setFilesError(err instanceof Error ? err.message : 'Failed');
-      setFilesManifest(null);
-    } finally {
-      setFilesLoading(false);
-    }
-  };
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (periodFilter) params.set('payrollPeriodId', periodFilter);
-    const r = await fetch(`/api/backend/hr/payroll-runs?${params}`);
-    const j = await r.json();
-    const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
-    setRows(list.map(normalizePayrollRun));
-    setLoading(false);
-  }, [periodFilter]);
-
+  const scope = useOrgScope(undefined, {
+    skipBranches: true,
+    skipDivisions: true,
+    skipEmployees: true,
+  });
+  const periods = useWorkspaceChoices<PayrollPeriodChoice>(
+    '/hr/payroll-periods',
+    { companyId: company },
+    canRead,
+  );
+  const periodOptions = periods.rows.map((p) => ({
+    value: p.id,
+    label: [p.payrollPeriodCode, p.name, p.company?.name].filter(Boolean).join(' · '),
+  }));
+  if (period && !periodOptions.some((p) => p.value === period))
+    periodOptions.unshift({ value: period, label: 'Selected period' });
+  const [notice, setNotice] = useState(''),
+    [filesRun, setFilesRun] = useState<PayrollRunRecord | null>(null);
+  const entry = usePayrollDraftEditor(['payroll-run', 'payroll-action'], (message) => {
+    setNotice(message);
+    void result.reload();
+  });
   useEffect(() => {
-    load();
-  }, [load]);
-
-  // Period options for the New Run modal (also carry companyId, which the
-  // create DTO requires).
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/backend/hr/payroll-periods?limit=100')
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        const list = Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [];
-        setPeriods(list);
-      })
-      .catch(() => {
-        if (!cancelled) setPeriods([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const period = periods.find((p) => p.id === form.periodId);
-    try {
-      const res = await fetch('/api/backend/hr/payroll-runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          payrollPeriodId: form.periodId,
-          companyId: period?.companyId,
-          payrollType: form.runType,
-          createdById: user?.id,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the payroll run.'));
-        return;
-      }
-      setShowModal(false);
-      load();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const doAction = async (id: string, action: string) => {
-    if (action === 'pay') {
-      setPayError('');
-      setDisbursingAccountId('');
-      setPayModalRunId(id);
-      // Lazy-load accounts the first time the Pay modal opens.
-      if (accounts.length === 0) {
-        try {
-          // The backend caps chart-of-accounts page size at 200.
-          const r = await fetch('/api/backend/chart-of-accounts?limit=200');
-          const j = await r.json();
-          const list: ChartAccount[] = Array.isArray(j.data?.data)
-            ? j.data.data
-            : Array.isArray(j.data)
-              ? j.data
-              : [];
-          // Cash + Bank accounts are the natural disbursing accounts.
-          setAccounts(list.filter((a) => a.accountType === 'ASSET'));
-        } catch {
-          // Non-blocking: submitting without a selection uses the backend default account.
-          setPayError(
-            'Could not load the account list — you can still submit and the default disbursing account will be used.',
-          );
-        }
-      }
-      return;
-    }
-    setActionLoading(`${id}-${action}`);
-    try {
-      const res = await fetch(`/api/backend/hr/payroll-runs/${id}/${action}`, { method: 'PATCH' });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this run.`));
-      }
-    } finally {
-      setActionLoading('');
-      load();
-    }
-  };
-
-  const submitPay = async () => {
-    if (!payModalRunId) return;
-    setPaySubmitting(true);
-    setPayError('');
-    try {
-      const res = await fetch(`/api/backend/hr/payroll-runs/${payModalRunId}/pay`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          disbursingAccountId ? { disbursingChartOfAccountId: disbursingAccountId } : {},
-        ),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(
-          Array.isArray(j?.message) ? j.message.join(', ') : (j?.message ?? 'Pay failed'),
-        );
-      }
-      setPayModalRunId(null);
-      load();
-    } catch (err) {
-      setPayError(err instanceof Error ? err.message : 'Failed');
-    } finally {
-      setPaySubmitting(false);
-    }
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((p) => ({ ...p, [k]: e.target.value }));
-
-  const actionsFor = (
-    run: PayrollRun,
-  ): { action: string; label: string; variant: 'primary' | 'warning' | 'success' | 'danger' }[] => {
-    if (run.status === 'DRAFT') {
-      return hasPermission('payroll.calculate')
-        ? [{ action: 'calculate', label: 'Calculate', variant: 'primary' }]
-        : [];
-    }
-    if (run.status === 'CALCULATED') {
-      return hasPermission('payroll.submit')
-        ? [{ action: 'submit', label: 'Submit', variant: 'warning' }]
-        : [];
-    }
-    if (run.status === 'SUBMITTED') {
-      const actions: { action: string; label: string; variant: 'success' | 'danger' }[] = [];
-      if (!run.hrApprovedById && hasPermission('payroll.approve.hr')) {
-        actions.push({ action: 'approve-hr', label: 'HR Sign', variant: 'success' });
-      }
-      if (!run.financeApprovedById && hasPermission('payroll.approve.finance')) {
-        actions.push({ action: 'approve-finance', label: 'Finance Sign', variant: 'success' });
-      }
-      if (hasPermission('payroll.cancel')) {
-        actions.push({ action: 'cancel', label: 'Cancel', variant: 'danger' });
-      }
-      return actions;
-    }
-    if (run.status === 'APPROVED') {
-      return hasPermission('payroll.pay')
-        ? [{ action: 'pay', label: 'Pay', variant: 'success' }]
-        : [];
-    }
-    return [];
-  };
-
+    if (!result.loading && !result.error && page > 1 && !result.rows.length)
+      setPage(Math.max(1, Math.ceil(result.total / 20)));
+  }, [result.loading, result.error, result.rows.length, result.total, page, setPage]);
+  if (!canRead) return <PermissionDeniedState description="Your role cannot view payroll runs." />;
   return (
-    <div className="p-6">
-      <PageHeader title="Payroll Runs" subtitle="Process and manage payroll runs" />
+    <div className="business-workspace record-workspace">
+      <PageHeader
+        title="Payroll runs"
+        subtitle="Review, calculate and sign off each pay cycle."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Payroll runs' }]}
+        actions={
+          canCreate && (
+            <Btn
+              icon={<Plus size={16} />}
+              onClick={() =>
+                entry.open({ kind: 'payroll-run', companyId: company, periodId: period })
+              }
+            >
+              New run
+            </Btn>
+          )
+        }
+      />
+      <div className="workspace-summary">
+        <div>
+          <span>Matching runs</span>
+          <strong>{result.total}</strong>
+        </div>
+        <div>
+          <span>Awaiting sign-off on this page</span>
+          <strong>{result.rows.filter((r) => r.status === 'SUBMITTED').length}</strong>
+        </div>
+      </div>
+      {notice && (
+        <div role="status" className="workspace-notice">
+          {notice}
+        </div>
+      )}
+      {scope.error && (
+        <div role="alert" className="workspace-notice">
+          {scope.error}{' '}
+          <Btn variant="ghost" onClick={scope.retry}>
+            Retry companies
+          </Btn>
+        </div>
+      )}
+      {periods.error && (
+        <div role="alert" className="workspace-notice">
+          {periods.error}{' '}
+          <Btn variant="ghost" onClick={periods.retry}>
+            Retry periods
+          </Btn>
+        </div>
+      )}
       <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search by run number or period…"
+        collapsibleFilters
+        activeFilterCount={Number(!!company) + Number(!!period) + Number(!!status)}
         filters={
-          <input
-            type="text"
-            placeholder="Filter by period ID…"
-            value={periodFilter}
-            onChange={(e) => setPeriodFilter(e.target.value)}
-            className="text-sm border rounded-lg px-3 py-1.5 w-56 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            style={{
-              borderColor: 'var(--aurora-border)',
-              background: 'var(--aurora-card)',
-              color: 'var(--aurora-text)',
-            }}
-          />
+          <>
+            <FormSelect
+              label="Company filter"
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                setPeriod('');
+                setPage(1);
+              }}
+              options={scope.companyOptions}
+              placeholder="All companies"
+            />
+            <FormSelect
+              label="Period filter"
+              value={period}
+              disabled={periods.loading}
+              onChange={(e) => {
+                setPeriod(e.target.value);
+                setPage(1);
+              }}
+              options={periodOptions}
+              placeholder={periods.loading ? 'Loading periods…' : 'All periods'}
+            />
+            <FormSelect
+              label="Status filter"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+              options={statuses.map((value) => ({ value, label: payrollLabel(value) }))}
+              placeholder="All statuses"
+            />
+          </>
         }
         actions={
           <Btn
-            variant="primary"
-            onClick={() => {
-              setForm(empty);
-              setShowModal(true);
-            }}
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            onClick={result.reload}
+            disabled={result.loading}
           >
-            + New Run
+            Reload
           </Btn>
         }
       />
-
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead
-                className="bg-slate-50 border-b border-slate-100"
-                style={{ color: 'var(--aurora-text-muted)' }}
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.selection'}
+        selectionScope={JSON.stringify([period, company, status, query])}
+        title="Payroll runs"
+        records={result.rows}
+        name={runName}
+        reference={periodName}
+        status={(r) => r.status}
+        page={page}
+        pageSize={20}
+        total={result.total}
+        onPage={setPage}
+        loading={result.loading}
+        error={result.error}
+        onRetry={result.reload}
+        fields={[
+          { label: 'Gross pay', value: (r) => payrollMoney(r.totalGrossPay ?? r.totalGross) },
+          { label: 'Net pay', value: (r) => payrollMoney(r.totalNetPay ?? r.totalNet) },
+        ]}
+        details={[
+          { label: 'Company', value: (r) => r.company?.name || '—' },
+          {
+            label: 'Run type',
+            value: (r) => payrollLabel(r.payrollType || r.runType || 'REGULAR'),
+          },
+          { label: 'HR sign-off', value: (r) => (r.hrApprovedById ? 'Recorded' : 'Not recorded') },
+          {
+            label: 'Finance sign-off',
+            value: (r) => (r.financeApprovedById ? 'Recorded' : 'Not recorded'),
+          },
+          {
+            label: 'Run date',
+            value: (r) => (r.runDate ? new Date(r.runDate).toLocaleDateString('en-GB') : '—'),
+          },
+          { label: 'Notes', value: (r) => r.notes || '—' },
+        ]}
+        actions={(r) => (
+          <>
+            <Btn
+              variant="secondary"
+              onClick={() =>
+                router.push('/hr/payroll-entries?payrollRunId=' + encodeURIComponent(r.id))
+              }
+            >
+              View entries
+            </Btn>
+            {payrollActions(r, hasPermission).map((a) => (
+              <Btn
+                key={a}
+                variant="ghost"
+                onClick={() => entry.open({ kind: 'payroll-action', record: r, action: a })}
               >
-                <tr>
-                  <th className={thCls}>Run #</th>
-                  <th className={thCls}>Period</th>
-                  <th className={thCls}>Type</th>
-                  <th className={thCls}>Total Gross</th>
-                  <th className={thCls}>Total Net</th>
-                  <th className={thCls}>Status</th>
-                  <th className={thCls}>HR</th>
-                  <th className={thCls}>Finance</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-mono font-medium`}>{r.runNumber}</td>
-                    <td className={tdCls}>{r.period ?? r.periodId ?? '—'}</td>
-                    <td className={tdCls}>{r.runType}</td>
-                    <td className={tdCls}>
-                      {r.totalGross != null
-                        ? `TZS ${Number.isFinite(Number(r.totalGross)) ? Number(r.totalGross).toLocaleString('en-TZ') : '0'}`
-                        : '—'}
-                    </td>
-                    <td className={tdCls}>
-                      {r.totalNet != null
-                        ? `TZS ${Number.isFinite(Number(r.totalNet)) ? Number(r.totalNet).toLocaleString('en-TZ') : '0'}`
-                        : '—'}
-                    </td>
-                    <td className={tdCls}>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td className={tdCls}>
-                      <StatusBadge status={r.hrApprovedById ? 'SIGNED' : 'PENDING'} />
-                    </td>
-                    <td className={tdCls}>
-                      <StatusBadge status={r.financeApprovedById ? 'SIGNED' : 'PENDING'} />
-                    </td>
-                    <td className={tdCls}>
-                      <div className="flex flex-wrap gap-1">
-                        {actionsFor(r).map((act) => (
-                          <Btn
-                            key={act.action}
-                            variant={act.variant}
-                            size="xs"
-                            onClick={() => doAction(r.id, act.action)}
-                            disabled={actionLoading === `${r.id}-${act.action}`}
-                          >
-                            {actionLoading === `${r.id}-${act.action}` ? '…' : act.label}
-                          </Btn>
-                        ))}
-                        {['CALCULATED', 'APPROVED', 'PAID'].includes(r.status) && (
-                          <>
-                            <Btn
-                              variant="ghost"
-                              size="xs"
-                              onClick={() => openDisbursementFiles(r.id)}
-                            >
-                              Files
-                            </Btn>
-                            <Link href={`/hr/payroll-runs/${r.id}/payslips`}>
-                              <Btn variant="ghost" size="xs">
-                                Payslips
-                              </Btn>
-                            </Link>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="text-center py-8 text-sm"
-                      style={{ color: 'var(--aurora-text-muted)' }}
-                    >
-                      No payroll runs found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <Modal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        title="New Payroll Run"
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setShowModal(false)}>
-              Cancel
-            </Btn>
-            <Btn variant="primary" type="submit" form="payroll-run-form" loading={saving}>
-              Create
-            </Btn>
-          </>
-        }
-      >
-        <form id="payroll-run-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormSelect
-            label="Payroll Period"
-            value={form.periodId}
-            onChange={f('periodId')}
-            options={periods.map((p) => ({
-              value: p.id,
-              label: `${p.payrollPeriodCode ? p.payrollPeriodCode + ' — ' : ''}${p.name ?? p.id}`,
-            }))}
-            placeholder="Select payroll period"
-            required
-          />
-          <FormSelect
-            label="Run Type"
-            value={form.runType}
-            onChange={f('runType')}
-            options={[
-              { value: 'REGULAR', label: 'Regular' },
-              { value: 'BONUS', label: 'Bonus' },
-              { value: 'ADVANCE', label: 'Advance' },
-              { value: 'FINAL_SETTLEMENT', label: 'Final Settlement' },
-              { value: 'ADJUSTMENT', label: 'Adjustment' },
-            ]}
-          />
-        </form>
-      </Modal>
-
-      <Modal
-        open={!!filesManifest}
-        onClose={() => setFilesManifest(null)}
-        title="Disbursement files"
-        size="lg"
-        footer={
-          <Btn variant="secondary" onClick={() => setFilesManifest(null)}>
-            Close
-          </Btn>
-        }
-      >
-        {filesLoading ? (
-          <PageSpinner />
-        ) : filesError ? (
-          <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
-            {filesError}
-          </div>
-        ) : filesManifest ? (
-          <div className="space-y-4">
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
-              <div>
-                <strong>Run:</strong> {filesManifest.runNumber} · {filesManifest.companyName}
-              </div>
-              <div>
-                <strong>Generated:</strong>{' '}
-                {filesManifest.generatedAt &&
-                  new Date(filesManifest.generatedAt).toLocaleString('en-GB')}
-              </div>
-              <div className="flex gap-3 mt-2">
-                <span>
-                  <strong>{filesManifest.summary.totalEmployees}</strong> employees
-                </span>
-                <span>
-                  via bank: <strong>{filesManifest.summary.viaBank}</strong>
-                </span>
-                <span>
-                  via mobile money: <strong>{filesManifest.summary.viaMobileMoney}</strong>
-                </span>
-                {filesManifest.summary.unmapped > 0 && (
-                  <span className="text-amber-700">
-                    Unmapped: <strong>{filesManifest.summary.unmapped}</strong>
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {filesManifest.files.length === 0 ? (
-              <p className="text-sm text-slate-500 italic">
-                No files generated. Make sure employees have bank or mobile-money accounts on file.
-              </p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th className={thCls}>Filename</th>
-                    <th className={thCls}>Rows</th>
-                    <th className={thCls}>Total (TZS)</th>
-                    <th className={thCls + ' text-right'}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filesManifest.files.map((file) => (
-                    <tr key={file.filename} className="border-b border-slate-100">
-                      <td className={`${tdCls} font-mono text-xs`}>{file.filename}</td>
-                      <td className={tdCls}>{file.rowCount}</td>
-                      <td className={tdCls}>
-                        {Number.isFinite(Number(file.total))
-                          ? Number(file.total).toLocaleString('en-TZ', { minimumFractionDigits: 2 })
-                          : '0.00'}
-                      </td>
-                      <td className={tdCls + ' text-right'}>
-                        <Btn variant="primary" size="xs" onClick={() => downloadCsv(file)}>
-                          Download
-                        </Btn>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                {a === 'calculate' && r.status === 'CALCULATED'
+                  ? 'Recalculate run'
+                  : payrollActionLabels[a]}
+              </Btn>
+            ))}
+            {['CALCULATED', 'SUBMITTED', 'APPROVED', 'PAID'].includes(r.status) && (
+              <Btn
+                variant="ghost"
+                onClick={() =>
+                  router.push('/hr/payroll-runs/' + encodeURIComponent(r.id) + '/payslips')
+                }
+              >
+                Payslips
+              </Btn>
             )}
-
-            <p className="text-xs text-slate-500">
-              Files are generated on demand and not stored on the server. Download each, sign off,
-              and upload to the corresponding bank or mobile-money portal.
-            </p>
-          </div>
-        ) : null}
-      </Modal>
-
-      <Modal
-        open={!!payModalRunId}
-        onClose={() => setPayModalRunId(null)}
-        title="Pay payroll run"
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setPayModalRunId(null)}>
-              Cancel
-            </Btn>
-            <Btn variant="success" onClick={submitPay} loading={paySubmitting}>
-              Confirm payment
-            </Btn>
+            {hasPermission('payroll.pay') &&
+              ['CALCULATED', 'APPROVED', 'PAID'].includes(r.status) && (
+                <Btn variant="ghost" onClick={() => setFilesRun(r)}>
+                  Disbursement files
+                </Btn>
+              )}
           </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600">
-            Choose the cash or bank account from which the net pay will be disbursed. The journal
-            entry will credit this account; if left blank, the generic Bank (1010) is used as a
-            fallback.
-          </p>
-          <FormSelect
-            label="Disbursing account"
-            value={disbursingAccountId}
-            onChange={(e) => setDisbursingAccountId(e.target.value)}
-            options={[
-              { value: '', label: '— Use default Bank (1010) —' },
-              ...accounts.map((a) => ({
-                value: a.id,
-                label: `${a.accountCode} — ${a.accountName}`,
-              })),
-            ]}
-          />
-          {payError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
-              {payError}
-            </div>
-          )}
-        </div>
-      </Modal>
+        )}
+      />
+      {filesRun && <PayrollFilesDialog run={filesRun} onClose={() => setFilesRun(null)} />}
     </div>
   );
 }
-
 export default function PayrollRunsPage() {
   return (
     <Suspense fallback={<PageSpinner />}>

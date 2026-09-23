@@ -1,7 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-200 text-red-900',
@@ -19,30 +22,56 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function DataIsolationIssuesPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('data_isolation.view');
+  const canResolve = hasPermission('data_isolation.resolve_issues');
+  const beginRequest = useRequestGuard();
   const [issues, setIssues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
 
-  const fetchIssues = useCallback(() => {
+  const fetchIssues = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams();
     if (statusFilter) params.set('status', statusFilter);
     if (severityFilter) params.set('severity', severityFilter);
-    fetch(`/api/backend/data-isolation-issues?${params}`)
-      .then(r => r.json())
-      .then(res => setIssues(res.data ?? res.issues ?? res ?? []))
-      .catch(() => { setIssues([]); setLoadError('Failed to load isolation issues.'); })
-      .finally(() => setLoading(false));
-  }, [statusFilter, severityFilter]);
+    try {
+      const response = await fetch(`/api/backend/data-isolation-issues?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load isolation issues.');
+      const body = await response.json();
+      if (!request.current()) return;
+      const rows = body.data ?? body.issues ?? body ?? [];
+      setIssues(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setIssues([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load isolation issues.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, severityFilter, statusFilter]);
 
-  useEffect(() => { fetchIssues(); }, [fetchIssues]);
+  useEffect(() => { void fetchIssues(); }, [fetchIssues]);
 
   async function updateIssue(id: string, action: 'acknowledge' | 'resolve' | 'dismiss') {
+    if (!canResolve) return;
     await fetch(`/api/backend/data-isolation-issues/${id}/${action}`, { method: 'PUT' });
-    fetchIssues();
+    void fetchIssues();
+  }
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Isolation Issues</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
   }
 
   return (
@@ -54,14 +83,14 @@ export default function DataIsolationIssuesPage() {
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex gap-3">
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700">
+        <select aria-label="All Statuses" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700">
           <option value="">All Statuses</option>
           <option value="OPEN">Open</option>
           <option value="ACKNOWLEDGED">Acknowledged</option>
           <option value="RESOLVED">Resolved</option>
           <option value="DISMISSED">Dismissed</option>
         </select>
-        <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700">
+        <select aria-label="All Severities" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700">
           <option value="">All Severities</option>
           <option value="CRITICAL">Critical</option>
           <option value="HIGH">High</option>
@@ -72,7 +101,7 @@ export default function DataIsolationIssuesPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <table className="w-full text-sm">
+        <WorkspaceTable className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
               <th className="px-4 py-3">Issue Type</th>
@@ -106,16 +135,18 @@ export default function DataIsolationIssuesPage() {
                 <td className="px-4 py-3 text-gray-500 font-mono text-xs">{issue.testRunId?.slice(0, 8) ?? '—'}</td>
                 <td className="px-4 py-3 text-gray-400">{issue.createdAt ? new Date(issue.createdAt).toLocaleString() : '—'}</td>
                 <td className="px-4 py-3">
+                  {canResolve && (
                   <div className="flex gap-1">
                     <button onClick={() => updateIssue(issue.id, 'acknowledge')} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Ack</button>
                     <button onClick={() => updateIssue(issue.id, 'resolve')} className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">Resolve</button>
                     <button onClick={() => updateIssue(issue.id, 'dismiss')} className="px-2 py-1 text-xs bg-gray-50 text-gray-600 rounded hover:bg-gray-100">Dismiss</button>
                   </div>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </WorkspaceTable>
       </div>
     </div>
   );

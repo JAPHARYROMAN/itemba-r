@@ -1,0 +1,158 @@
+/* Shared ERP surfaces. Specific app workspaces retain their own layouts. */
+.os-route-content > :is(.p-6, .p-4, .p-8) {
+  padding: 30px;
+  min-height: 100%;
+}
+.os-route-content [data-page-header] {
+  margin-bottom: 26px;
+}
+.os-route-content [data-page-header] p {
+  max-width: 70ch;
+  line-height: 1.65;
+  margin-top: 7px;
+}
+.os-route-content [data-workspace-card] {
+  box-shadow: none !important;
+}
+.os-route-content [data-page-toolbar] {
+  padding: 4px 0 10px;
+  gap: 10px;
+}
+.os-route-content [data-stat-card] {
+  box-shadow: none !important;
+}
+.os-route-content [data-stat-card] .aurora-display {
+  font-family: inherit;
+  letter-spacing: -0.025em;
+  font-weight: 550;
+  font-size: 23px;
+  overflow-wrap: anywhere;
+}
+:is(.itemba-os, .os-system-layer) [data-os-dialog] {
+  max-height: calc(100dvh - 32px);
+}
+:is(.itemba-os, .os-system-layer) [data-dialog-body] {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+:is(.itemba-os, .os-system-layer) [data-dialog-footer] {
+  flex-wrap: wrap;
+}
+:is(.itemba-os, .os-system-layer) [data-os-dialog] h2 {
+  white-space: normal;
+}
+.os-legacy-dialog-content > :is(form, div) {
+  padding-left: 0;
+  padding-right: 0;
+}
+.os-legacy-dialog-content :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  border-color: var(--aurora-border);
+}
+.os-legacy-dialog-content :is(.flex.justify-end, .flex.items-center.justify-between, .flex.gap-3) {
+  flex-wrap: wrap;
+}
+:is(.itemba-os, .os-system-layer) [data-os-button='secondary'] {
+  background: var(--aurora-card);
+  border-color: var(--aurora-border);
+  color: var(--aurora-text);
+}
+:is(.itemba-os, .os-system-layer) [data-os-button='ghost'] {
+  color: var(--aurora-text-secondary);
+}
+:is(.itemba-os, .os-system-layer) [data-os-button='ghost']:hover {
+  background: var(--aurora-bg-subtle);
+}
+:is(.itemba-os, .os-system-layer) :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 2px;
+}
+:is(.itemba-os, .os-system-layer) .os-section-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--aurora-border);
+  padding-bottom: 10px;
+}
+.os-section-tabs button {
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: var(--aurora-text-secondary);
+}
+.os-section-tabs button[aria-pressed='true'] {
+  color: var(--aurora-primary);
+  background: var(--aurora-primary-subtle);
+  font-weight: 550;
+}
+.dark :is(.itemba-os, .os-system-layer) .os-workspace-table a,
+.dark :is(.itemba-os, .os-system-layer) .os-split-detail > header button,
+.dark :is(.itemba-os, .os-system-layer) .os-section-tabs button[aria-pressed='true'] {
+  color: #a6c9ff;
+}
+@media (max-width: 700px) {
+  .os-route-content > :is(.p-6, .p-4, .p-8) {
+    padding: 20px 16px;
+  }
+  .os-route-content [data-page-header] h1 {
+    font-size: 23px;
+  }
+  .os-route-content [data-page-header] > *,
+  .os-route-content [data-page-actions] {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .os-route-content [data-page-toolbar] > * {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .os-route-content [data-page-toolbar] [data-toolbar-search] {
+    flex: 1 0 100%;
+    max-width: none;
+  }
+  .os-route-content [data-page-toolbar] input {
+    min-height: 40px;
+  }
+  .os-route-content [data-page-toolbar] select {
+    max-width: 100%;
+    min-height: 40px;
+  }
+  :is(.itemba-os, .os-system-layer) [data-os-button] {
+    min-height: 40px;
+  }
+  :is(.itemba-os, .os-system-layer) [data-os-dialog] {
+    max-height: calc(100dvh - 16px);
+  }
+  :is(.itemba-os, .os-system-layer) [data-dialog-body],
+  :is(.itemba-os, .os-system-layer) [data-dialog-footer],
+  :is(.itemba-os, .os-system-layer) [data-dialog-header] {
+    padding: 18px;
+  }
+  :is(.itemba-os, .os-system-layer) [data-dialog-body] .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :is(.itemba-os, .os-system-layer) [data-dialog-body] .grid > * {
+    grid-column: auto;
+    min-width: 0;
+  }
+  :is(.itemba-os, .os-system-layer)
+    [data-dialog-body]
+    :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+    font-size: 16px;
+  }
+  :is(.itemba-os, .os-system-layer) [data-dialog-footer] > button {
+    flex: 1;
+  }
+  :is(.itemba-os, .os-system-layer) [data-dialog-header] > button {
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.motion-full) :is(.itemba-os, .os-system-layer) [data-os-dialog],
+  html:not(.motion-full) :is(.itemba-os, .os-system-layer) [data-os-button] {
+    animation: none !important;
+    transition: none !important;
+  }
+}

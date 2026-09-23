@@ -269,6 +269,38 @@ public sealed partial class NetworkIsolationProtocolV3Tests
       async () => await session.GetVerifiedHealthAsync(CancellationToken.None));
   }
 
+  [Theory]
+  [InlineData("status")]
+  [InlineData("wfp")]
+  [InlineData("driver-provisioned")]
+  [InlineData("boot-provisioned")]
+  [InlineData("kill")]
+  [InlineData("unloading")]
+  [InlineData("boot-time")]
+  [InlineData("callout-v4")]
+  [InlineData("callout-v6")]
+  [InlineData("boot-measurement")]
+  [InlineData("driver-measurement")]
+  public async Task IncompleteHealthPostureLatchesSessionBeforeAnyPolicyMutation(string fault)
+  {
+    var transport = new FakeV3DeviceTransport { HealthFault = fault };
+    await using var session = new NetworkIsolationDriverSessionV3(
+      transport,
+      transport.DriverMeasurementSha256Hex);
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+      await session.EnsureDenyAllPolicyAsync(
+        checked((ulong)DateTime.UtcNow.AddMinutes(10).ToFileTimeUtc()),
+        Guid.NewGuid(),
+        CancellationToken.None));
+    var exchanges = transport.ControlCodes.Count;
+    await Assert.ThrowsAsync<IOException>(async () =>
+      await session.GetVerifiedHealthAsync(CancellationToken.None));
+    Assert.Equal(exchanges, transport.ControlCodes.Count);
+    Assert.Equal(0, transport.PolicyIoctls);
+    Assert.Equal(0, transport.EnrollmentIoctls);
+  }
+
   [Fact]
   public async Task HighLevelBindAndSettleMapToV3AndKeepSignedAttestationMandatory()
   {
@@ -801,6 +833,8 @@ public sealed partial class NetworkIsolationProtocolV3Tests
 
     public bool CorruptHealthChallenge { get; init; }
 
+    public string? HealthFault { get; init; }
+
     public uint? ForcedMutationStatus { get; init; }
 
     public ValueTask<byte[]> ExchangeAsync(
@@ -879,6 +913,29 @@ public sealed partial class NetworkIsolationProtocolV3Tests
         checked((uint)_processes.Count));
       BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(216, 4), 11);
       BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(220, 4), 12);
+      // Mutate before hashing: these are authentic challenge responses with
+      // unacceptable posture, not corrupted frames rejected by the parser.
+      flags = HealthFault switch
+      {
+        "wfp" => flags & ~NetworkIsolationProtocolV3.HealthWfpRegistered,
+        "driver-provisioned" => flags & ~NetworkIsolationProtocolV3.HealthDriverMeasurementProvisioned,
+        "boot-provisioned" => flags & ~NetworkIsolationProtocolV3.HealthBootMeasurementProvisioned,
+        "kill" => flags | NetworkIsolationProtocolV3.HealthKillActive,
+        "unloading" => flags | NetworkIsolationProtocolV3.HealthUnloading,
+        _ => flags,
+      };
+      BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(68, 4), flags);
+      switch (HealthFault)
+      {
+        case "status":
+          BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(64, 4), NetworkIsolationProtocolV3.StatusReplay);
+          break;
+        case "boot-time": output.AsSpan(72, 8).Clear(); break;
+        case "callout-v4": output.AsSpan(216, 4).Clear(); break;
+        case "callout-v6": output.AsSpan(220, 4).Clear(); break;
+        case "boot-measurement": output.AsSpan(144, 32).Clear(); break;
+        case "driver-measurement": output[176] ^= 1; break;
+      }
       using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
       hash.AppendData(HealthDomain);
       hash.AppendData(request[64..96]);

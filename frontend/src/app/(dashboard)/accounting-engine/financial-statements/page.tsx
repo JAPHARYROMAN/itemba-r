@@ -1,17 +1,12 @@
 'use client';
+import '@/components/workspace/workspace.css';
+import { WorkspaceSplit } from '@/components/workspace/workspace-split';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  FormInput,
-  FormSelect,
-  Modal,
-  PageHeader,
-  PageSpinner,
-  StatCard,
-  StatusBadge,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, Modal, PageHeader, PageSpinner, StatCard, StatusBadge } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { unwrapList, unwrapOne } from '@/lib/unwrap';
 
 interface Company {
@@ -113,6 +108,9 @@ function trialRows(summary: unknown): TrialBalanceRow[] {
 }
 
 export default function FinancialStatementsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('accounting_engine.dashboard');
+  const beginRequest = useRequestGuard();
   const [rows, setRows] = useState<StatementRun[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
@@ -120,6 +118,7 @@ export default function FinancialStatementsPage() {
   const [selected, setSelected] = useState<StatementRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
@@ -131,28 +130,46 @@ export default function FinancialStatementsPage() {
   });
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(unwrapList<Company>(j)))
-      .catch(() => setCompanies([]));
-  }, []);
+      .then((j) => {
+        if (!controller.signal.aborted) setCompanies(unwrapList<Company>(j));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const params = new URLSearchParams({ limit: '100' });
       if (companyId) params.set('companyId', companyId);
-      const json = await fetch(`/api/backend/financial-statements?${params}`).then((r) => r.json());
+      const response = await fetch(`/api/backend/financial-statements?${params}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      const json = await response.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!response.ok) {
+        throw new Error(json?.message ?? 'Failed to load financial statement runs');
+      }
       const list = unwrapList<StatementRun>(json);
       setRows(list);
       setSelected((current) => current ? list.find((row) => row.id === current.id) ?? current : null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load financial statement runs');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load financial statement runs');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId]);
+  }, [authLoading, beginRequest, canView, companyId]);
 
   useEffect(() => {
     load();
@@ -208,8 +225,16 @@ export default function FinancialStatementsPage() {
     }
   };
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Financial Statements" subtitle={authLoading ? 'Loading' : 'Access restricted'} />
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace accounting-workspace space-y-6">
       <PageHeader
         title="Financial Statements"
         subtitle="Generate statement runs from posted journal entries and review the generated balances"
@@ -248,15 +273,26 @@ export default function FinancialStatementsPage() {
         </div>
       </Card>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
+      {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_460px] gap-5">
+      <WorkspaceSplit selectedKey={selected?.id} onClose={() => setSelected(null)}>
         <Card className="overflow-hidden">
           {loading ? (
             <PageSpinner />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                     <th className="px-4 py-3">Run</th>
@@ -292,7 +328,7 @@ export default function FinancialStatementsPage() {
                     ))
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>
@@ -311,7 +347,7 @@ export default function FinancialStatementsPage() {
                 </div>
               </div>
               {selected.errorMessage && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   {selected.errorMessage}
                 </div>
               )}
@@ -335,7 +371,7 @@ export default function FinancialStatementsPage() {
             </>
           )}
         </Card>
-      </div>
+      </WorkspaceSplit>
 
       {creating && (
         <Modal
@@ -369,8 +405,8 @@ export default function FinancialStatementsPage() {
             >
               {STATEMENT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
             </FormSelect>
-            <FormInput label="Period Start" required type="date" value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />
-            <FormInput label="Period End" required type="date" value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />
+            <FormDateField label="Period Start" required value={form.periodStart} onChange={(value) => setForm((f) => ({ ...f, periodStart: value }))} />
+            <FormDateField label="Period End" required value={form.periodEnd} onChange={(value) => setForm((f) => ({ ...f, periodEnd: value }))} />
             <FormInput label="Currency" value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))} />
           </div>
         </Modal>

@@ -10,6 +10,7 @@ export function Card({ children, className = '', padding = 'md' }: CardProps) {
   const pad = { none: '', sm: 'p-4', md: 'p-5', lg: 'p-6' }[padding];
   return (
     <div
+      data-workspace-card
       className={`min-w-0 rounded-xl ${pad} ${className}`}
       style={{
         background: 'var(--aurora-card)',

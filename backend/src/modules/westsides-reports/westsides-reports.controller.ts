@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WestsidesReportsService } from './westsides-reports.service';
-import { QueryReportDto } from './dto/query-report.dto';
+import { QueryReportDto, QueryInventoryReportDto } from './dto/query-report.dto';
 import { SaveDailyCloseDto } from './dto/save-daily-close.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
@@ -93,14 +93,14 @@ export class WestsidesReportsController {
   @Get('batch-status')
   @RequirePermissions('westsides.reports.view')
   @ApiOperation({ summary: 'Batch status report' })
-  batchStatus(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+  batchStatus(@Query() query: QueryInventoryReportDto, @CurrentUser() user: AuthUser) {
     return this.service.batchStatus(query, user);
   }
 
   @Get('stock-damage-report')
   @RequirePermissions('westsides.reports.view')
   @ApiOperation({ summary: 'Stock damage report by type' })
-  stockDamageReport(@Query() query: QueryReportDto, @CurrentUser() user: AuthUser) {
+  stockDamageReport(@Query() query: QueryInventoryReportDto, @CurrentUser() user: AuthUser) {
     return this.service.stockDamageReport(query, user);
   }
 

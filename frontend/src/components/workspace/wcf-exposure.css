@@ -1,0 +1,73 @@
+.wcf-exposure-workspace .record-browser {
+  min-height: 560px;
+}
+.wcf-company-months {
+  margin: 0 0 24px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.wcf-company-months summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+.wcf-company-months summary:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 4px;
+}
+.wcf-months {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wcf-months li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--aurora-border);
+}
+.wcf-months li:last-child {
+  border-bottom: 0;
+}
+.wcf-months strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.wcf-months p {
+  font-size: 12px;
+  color: var(--aurora-text-muted);
+}
+.wcf-months dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.wcf-months dt {
+  font-size: 12px;
+  color: var(--aurora-text-muted);
+}
+.wcf-months dd {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.wcf-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 24px;
+}
+@media (max-width: 700px) {
+  .wcf-month-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+  }
+}
+
+/* Adapt the Payroll screen to its app window. */
+@container os-workspace (max-width: 700px) {
+  .wcf-month-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+  }
+}

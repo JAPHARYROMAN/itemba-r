@@ -1,10 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, ConfirmDialog, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, showToast, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
 import { backendPost, backendPatch, backendDelete, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface MessageTemplate {
   id: string;
@@ -24,8 +26,10 @@ const TEMPLATE_TYPES = ['GENERAL', 'PAYMENT_RECEIPT', 'APPROVAL_NOTIFICATION', '
 const EMPTY_FORM = { templateCode: '', name: '', channel: 'SMS', templateType: 'GENERAL', subject: '', body: '', variables: '{}', status: 'ACTIVE' };
 
 export default function MessageTemplatesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('message_templates.view');
   const canManage = hasPermission('message_templates.manage');
+  const beginRequest = useRequestGuard();
 
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,15 +41,26 @@ export default function MessageTemplatesPage() {
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    fetch('/api/backend/message-templates?limit=50')
-      .then(r => r.json())
-      .then(data => setTemplates(unwrapList(data)))
-      .catch(() => { setTemplates([]); setLoadError('Failed to load message templates.'); })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const res = await fetch('/api/backend/message-templates?limit=50', { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load message templates.');
+      setTemplates(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setTemplates([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load message templates.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -86,6 +101,9 @@ export default function MessageTemplatesPage() {
     }
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Message Templates" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Message Templates" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader title="Message Templates" subtitle="Manage reusable message templates" />
@@ -96,7 +114,7 @@ export default function MessageTemplatesPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -126,7 +144,7 @@ export default function MessageTemplatesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -142,7 +160,7 @@ export default function MessageTemplatesPage() {
           </>
         }
       >
-        {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="space-y-3">
           <FormInput label="Template Code" required disabled={!!editing} value={form.templateCode} onChange={e => setForm(f => ({ ...f, templateCode: e.target.value }))} />
           <FormInput label="Name" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />

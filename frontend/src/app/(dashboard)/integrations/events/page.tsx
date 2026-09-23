@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface IntegrationEvent {
   id: string;
@@ -19,6 +22,10 @@ interface IntegrationEvent {
 }
 
 export default function IntegrationEventsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('integration_events.view');
+  const beginRequest = useRequestGuard();
+
   const [events, setEvents] = useState<IntegrationEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState('');
@@ -27,21 +34,35 @@ export default function IntegrationEventsPage() {
   const [selected, setSelected] = useState<IntegrationEvent | null>(null);
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterType) params.set('eventType', filterType);
     if (filterStatus) params.set('status', filterStatus);
     if (filterDirection) params.set('direction', filterDirection);
-    fetch(`/api/backend/integration-events?${params}`)
-      .then(r => r.json())
-      .then(data => setEvents(unwrapList(data)))
-      .catch(() => { setEvents([]); setLoadError('Failed to load integration events.'); })
-      .finally(() => setLoading(false));
-  }, [filterType, filterStatus, filterDirection]);
+    try {
+      const res = await fetch(`/api/backend/integration-events?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load integration events.');
+      setEvents(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setEvents([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load integration events.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterType, filterStatus, filterDirection]);
 
   useEffect(() => { load(); }, [load]);
+
+  if (authLoading) return <div className="p-6"><PageHeader title="Integration Events" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Integration Events" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
     <div className="p-6 space-y-4">
@@ -53,11 +74,11 @@ export default function IntegrationEventsPage() {
         searchPlaceholder="Event type…"
         filters={
           <>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Status</option>
               {['SUCCESS','FAILED','PENDING','PROCESSING'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select value={filterDirection} onChange={e => setFilterDirection(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Directions" value={filterDirection} onChange={e => setFilterDirection(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Directions</option>
               {['INBOUND','OUTBOUND'].map(d => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -67,7 +88,7 @@ export default function IntegrationEventsPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Number</th>
@@ -94,7 +115,7 @@ export default function IntegrationEventsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -116,7 +137,7 @@ export default function IntegrationEventsPage() {
               <div><span style={{ color: 'var(--aurora-text-muted)' }}>Created:</span> <span>{selected.createdAt ? new Date(selected.createdAt).toLocaleString() : '—'}</span></div>
             </div>
             {selected.errorMessage && (
-              <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700"><strong>Error:</strong> {selected.errorMessage}</div>
+              <div role="alert" className="mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700"><strong>Error:</strong> {selected.errorMessage}</div>
             )}
             {!!selected.requestPayload && (
               <div className="mb-3">

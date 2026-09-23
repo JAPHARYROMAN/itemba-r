@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface TaxType {
   id: string;
@@ -76,7 +78,7 @@ function TaxTypeModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'e
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Tax Type' : 'Edit Tax Type'} size="xl"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Code" required value={form.taxTypeCode} onChange={(e) => set('taxTypeCode', e.target.value)} />
         <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
@@ -107,15 +109,17 @@ function TaxTypeModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'e
 }
 
 export default function TaxTypesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('tax_types.manage');
   const canView = hasPermission('tax_types.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<TaxType[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [taxCategory, setTaxCategory] = useState('');
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
@@ -123,15 +127,29 @@ export default function TaxTypesPage() {
   const [deleting, setDeleting] = useState<TaxType | null>(null);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (taxCategory) params.set('taxCategory', taxCategory);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/tax/types?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<TaxType> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
-  }, [page, taxCategory, status]);
+        try {
+      const res = await fetch(`/api/backend/tax/types?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load tax types');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<TaxType> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load tax types');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, taxCategory, status]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -148,6 +166,7 @@ export default function TaxTypesPage() {
   const activeCount = items.filter((t) => t.status === 'ACTIVE').length;
   const whtCount = items.filter((t) => t.isWithholding).length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Tax Types" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Tax Types" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -163,11 +182,11 @@ export default function TaxTypesPage() {
       <PageToolbar
         filters={
           <>
-            <select value={taxCategory} onChange={(e) => reset(setTaxCategory)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Categories" value={taxCategory} onChange={(e) => reset(setTaxCategory)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Categories</option>
               {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -177,11 +196,11 @@ export default function TaxTypesPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No tax types</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Code</th>
@@ -215,7 +234,7 @@ export default function TaxTypesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
 

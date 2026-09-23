@@ -181,6 +181,50 @@ describe('UnitsService base unit guard', () => {
   });
 });
 
+describe('UnitsService partial base-unit edits', () => {
+  it('checks the existing base status when only the type changes', async () => {
+    const { service, prisma } = makeHarness();
+    prisma.unitOfMeasure.findFirst
+      .mockResolvedValueOnce({
+        id: 'unit-1',
+        companyId: 'company-1',
+        unitType: UnitType.PIECE,
+        isBaseUnit: true,
+        isSystemUnit: false,
+      })
+      .mockResolvedValueOnce({ id: 'other', name: 'Existing weight base' });
+    await expect(
+      service.updateUnit('unit-1', { unitType: UnitType.WEIGHT }, user()),
+    ).rejects.toThrow('A base unit already exists');
+    expect(prisma.unitOfMeasure.update).not.toHaveBeenCalled();
+    expect(prisma.unitOfMeasure.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          unitType: UnitType.WEIGHT,
+          isBaseUnit: true,
+          id: { not: 'unit-1' },
+        }),
+      }),
+    );
+  });
+  it('allows moving a unit while explicitly clearing its base status', async () => {
+    const { service, prisma } = makeHarness();
+    prisma.unitOfMeasure.findFirst.mockResolvedValueOnce({
+      id: 'unit-1',
+      companyId: 'company-1',
+      unitType: UnitType.PIECE,
+      isBaseUnit: true,
+      isSystemUnit: false,
+    });
+    await service.updateUnit('unit-1', { unitType: UnitType.WEIGHT, isBaseUnit: false }, user());
+    expect(prisma.unitOfMeasure.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.unitOfMeasure.update).toHaveBeenCalledWith({
+      where: { id: 'unit-1' },
+      data: { unitType: UnitType.WEIGHT, isBaseUnit: false },
+    });
+  });
+});
+
 describe('UnitsService conversionFactor precision', () => {
   beforeEach(() => jest.clearAllMocks());
 

@@ -1,14 +1,16 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
+  FormDateField,
   PageHeader,
   PageToolbar,
-  StatCard,
-  StatusBadge,
   PermissionDeniedState,
   showToast,
+  StatCard,
+  StatusBadge,
 } from '@/components/ui';
 import { Modal, ConfirmDialog } from '@/components/aurora/overlays';
 import {
@@ -25,6 +27,7 @@ import {
 } from '@/components/aurora/forms';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
 
 // ─── Types (shapes mirror the customer-payments controller / service includes) ─
@@ -436,7 +439,10 @@ function ReceivePaymentModal({
     <Modal open onClose={onClose} title="Receive Payment" size="xl">
       <div className="max-h-[78vh] overflow-y-auto p-5">
         {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+          >
             {error}
           </div>
         )}
@@ -500,12 +506,11 @@ function ReceivePaymentModal({
                 label: `${a.accountName}${a.accountType ? ` · ${a.accountType}` : ''}`,
               }))}
             />
-            <FormInput
+            <FormDateField
               label="Payment Date"
               required
-              type="date"
               value={paymentDate}
-              onChange={(e) => setPaymentDate(e.target.value)}
+              onChange={(value) => setPaymentDate(value)}
             />
             <FormInput
               label="Reference"
@@ -562,7 +567,7 @@ function ReceivePaymentModal({
                 className="overflow-x-auto rounded-lg border"
                 style={{ borderColor: 'var(--aurora-border)' }}
               >
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead>
                     <tr
                       className="text-left text-[11px] uppercase"
@@ -635,7 +640,7 @@ function ReceivePaymentModal({
                       );
                     })}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             )}
 
@@ -753,7 +758,10 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
     >
       <div className="max-h-[75vh] overflow-y-auto p-5">
         {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+          >
             {error}
           </div>
         )}
@@ -793,7 +801,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                 className="overflow-x-auto rounded-lg border"
                 style={{ borderColor: 'var(--aurora-border)' }}
               >
-                <table className="w-full text-sm">
+                <WorkspaceTable className="w-full text-sm">
                   <thead>
                     <tr
                       className="text-left text-[11px] uppercase"
@@ -841,7 +849,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                       </tr>
                     )}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             </div>
 
@@ -866,7 +874,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                     className="overflow-x-auto rounded-lg border"
                     style={{ borderColor: 'var(--aurora-border)' }}
                   >
-                    <table className="w-full text-sm">
+                    <WorkspaceTable className="w-full text-sm">
                       <thead>
                         <tr
                           className="text-left text-[11px] uppercase"
@@ -900,7 +908,7 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </WorkspaceTable>
                   </div>
                 </div>
               ) : (
@@ -944,7 +952,8 @@ function DetailModal({ id, onClose }: { id: string; onClose: () => void }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CustomerPaymentsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const canView = hasPermission('customer-payments.view');
   const canManage = hasPermission('customer-payments.manage');
 
@@ -970,7 +979,7 @@ export default function CustomerPaymentsPage() {
   const [reverseBusy, setReverseBusy] = useState(false);
 
   useEffect(() => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
     let cancelled = false;
     backendList<Company>('/companies', { query: { limit: 200 } })
       .then((rows) => {
@@ -982,14 +991,16 @@ export default function CustomerPaymentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView]);
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
       const result = await backendPage<CustomerPayment>('/customer-payments', {
+        signal: request.signal,
         query: {
           page,
           limit: PAGE_SIZE,
@@ -999,6 +1010,7 @@ export default function CustomerPaymentsPage() {
           dateTo: dateTo || undefined,
         },
       });
+      if (!request.current()) return;
       setData({
         items: result.data,
         total: result.total,
@@ -1006,12 +1018,13 @@ export default function CustomerPaymentsPage() {
         totalPages: result.totalPages || 1,
       });
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load payments');
       setData({ items: [], total: 0, page, totalPages: 1 });
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status, dateFrom, dateTo]);
+  }, [authLoading, beginRequest, canView, page, companyId, status, dateFrom, dateTo]);
 
   useEffect(() => {
     void load();
@@ -1132,14 +1145,14 @@ export default function CustomerPaymentsPage() {
     },
   ];
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6 space-y-6">
         <PageHeader
           title="Customer Payments"
-          subtitle="Receive & allocate customer payments (AR)"
+          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
         />
-        <PermissionDeniedState />
+        {!authLoading && <PermissionDeniedState />}
       </div>
     );
   }
@@ -1230,27 +1243,23 @@ export default function CustomerPaymentsPage() {
                 </option>
               ))}
             </select>
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter from date"
               value={dateFrom}
-              onChange={(e) => {
-                setDateFrom(e.target.value);
+              onChange={(value) => {
+                setDateFrom(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
-            <input
-              type="date"
+            <FormDateField
               aria-label="Filter to date"
               value={dateTo}
-              onChange={(e) => {
-                setDateTo(e.target.value);
+              onChange={(value) => {
+                setDateTo(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
+              className="ui-date-field-inline"
             />
           </>
         }

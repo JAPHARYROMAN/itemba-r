@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { GeneratedDocumentsQueryDto } from '../../common/dto/resource-query.dto';
 import { Request, Response } from 'express';
 import {
@@ -10,6 +10,11 @@ import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator'
 import { GeneratedDocumentsService } from './generated-documents.service';
 import { GenerateBusinessPdfDto } from './dto/generate-business-pdf.dto';
 import { GenerateTablePdfDto } from './dto/generate-table-pdf.dto';
+import {
+  ExportBusinessDocumentDto,
+  ExportTableDocumentDto,
+  ExportLetterDto,
+} from './dto/export-document.dto';
 
 const BUSINESS_PDF_SOURCE_PERMISSIONS = [
   'documents.manage',
@@ -42,6 +47,68 @@ function safeDispositionFileName(fileName: string): string {
 @Controller('generated-documents')
 export class GeneratedDocumentsController {
   constructor(private readonly service: GeneratedDocumentsService) {}
+
+  @Get('letterhead')
+  letterhead(@Query('companyId') companyId: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.letterhead(companyId, user);
+  }
+
+  @Get('letterhead-companies')
+  letterheadCompanies(@CurrentUser() user: AuthUser) {
+    return this.service.letterheadCompanies(user);
+  }
+
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
+  @Post('export')
+  @AgentExcluded()
+  @RequireAnyPermissions(...BUSINESS_PDF_SOURCE_PERMISSIONS)
+  async exportBusiness(
+    @Body() dto: ExportBusinessDocumentDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    this.sendExport(res, await this.service.exportBusinessDocument(dto, user, req.ip));
+  }
+
+  // Authenticated, client-supplied report data; company letterhead is scoped separately.
+  @Post('table-export')
+  async exportTable(
+    @Body() dto: ExportTableDocumentDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    this.sendExport(res, await this.service.exportTableDocument(dto, user, req.ip));
+  }
+
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
+  @Post('letter')
+  @AgentExcluded()
+  @RequirePermissions('documents.manage')
+  async exportLetter(
+    @Body() dto: ExportLetterDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    this.sendExport(res, await this.service.exportLetter(dto, user, req.ip));
+  }
+
+  private sendExport(
+    res: Response,
+    result: { buffer: Buffer; fileName: string; mimeType: string },
+  ) {
+    res.set({
+      'Content-Type': result.mimeType,
+      'Content-Disposition': `attachment; filename="${safeDispositionFileName(result.fileName)}"`,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+    });
+    res.send(result.buffer);
+  }
 
   @Get()
   @RequirePermissions('generated_documents.list')
@@ -107,8 +174,17 @@ export class GeneratedDocumentsController {
       'Content-Type': sf.doc.mimeType,
       'Content-Disposition': `${disposition}; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(sf.doc.fileName)}`,
       'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
     });
     return sf;
+  }
+
+  @Get(':id/preview')
+  @AgentExcluded('read_writes_audit_ledger')
+  @RequireAnyPermissions(...BUSINESS_PDF_SOURCE_PERMISSIONS, 'generated_documents.view')
+  @Header('Cache-Control', 'private, no-store')
+  preview(@Param('id') id: string, @CurrentUser() user: AuthUser, @Req() req: Request) {
+    return this.service.preview(id, user, req.ip);
   }
 
   @Get(':id')

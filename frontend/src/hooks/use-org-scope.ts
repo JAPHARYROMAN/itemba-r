@@ -1,8 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { backendPage } from '@/lib/api-client';
 
-export interface OrgCompany { id: string; name: string; code: string }
+export interface OrgCompany {
+  id: string;
+  name: string;
+  code: string;
+}
 export interface OrgBranch {
   id: string;
   name: string;
@@ -11,7 +16,12 @@ export interface OrgBranch {
   divisionId?: string;
   division?: { id?: string; companyId?: string };
 }
-export interface OrgDivision { id: string; name: string; code?: string; companyId?: string }
+export interface OrgDivision {
+  id: string;
+  name: string;
+  code?: string;
+  companyId?: string;
+}
 export interface OrgEmployee {
   id: string;
   fullName?: string | null;
@@ -24,135 +34,112 @@ interface OrgScopeState {
   branches: OrgBranch[];
   divisions: OrgDivision[];
   employees: OrgEmployee[];
-  loading: boolean;
 }
 
-/**
- * Shared hook for HR/payroll forms. Loads the company list once on mount,
- * then cascades branches/divisions/employees when the active company changes.
- *
- * Usage:
- *   const { companies, branches, divisions, employees, companyOptions,
- *           branchOptions, divisionOptions, employeeOptions } =
- *     useOrgScope(form.companyId);
- *
- * The "*Options" fields are pre-mapped to the FormSelect `options` shape so
- * the page can drop them in directly. Pass `{ skipBranches: true }` etc. to
- * skip fetches you don't need.
- */
+// Selectors must include every accessible option, not only the first API page.
+async function allOptions<T>(path: string, signal: AbortSignal, companyId?: string): Promise<T[]> {
+  const rows: T[] = [];
+  let page = 1;
+  while (!signal.aborted) {
+    const result = await backendPage<T>(path, { query: { companyId, page, limit: 100 }, signal });
+    rows.push(...result.data);
+    if (result.data.length === 0 || rows.length >= result.total) break;
+    page += 1;
+  }
+  return rows;
+}
+
+/** Accessible company and hierarchy choices for HR forms, with stale-response protection. */
 export function useOrgScope(
   companyId: string | undefined,
-  opts: { skipBranches?: boolean; skipDivisions?: boolean; skipEmployees?: boolean } = {},
+  {
+    skipBranches = false,
+    skipDivisions = false,
+    skipEmployees = false,
+  }: {
+    skipBranches?: boolean;
+    skipDivisions?: boolean;
+    skipEmployees?: boolean;
+  } = {},
 ) {
   const [state, setState] = useState<OrgScopeState>({
     companies: [],
     branches: [],
     divisions: [],
     employees: [],
-    loading: true,
   });
+  const [companiesLoading, setCompaniesLoading] = useState(true);
+  const [scopeLoading, setScopeLoading] = useState(false);
+  const [companiesError, setCompaniesError] = useState('');
+  const [scopeError, setScopeError] = useState('');
+  const [revision, setRevision] = useState(0);
+  const retry = useCallback(() => setRevision((value) => value + 1), []);
 
-  // Load companies once.
   useEffect(() => {
-    let cancelled = false;
-    fetch('/api/backend/companies?limit=100')
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        const list: OrgCompany[] = Array.isArray(j.data?.data)
-          ? j.data.data
-          : Array.isArray(j.data)
-            ? j.data
-            : [];
-        setState((s) => ({ ...s, companies: list, loading: false }));
+    const controller = new AbortController();
+    setCompaniesLoading(true);
+    setCompaniesError('');
+    allOptions<OrgCompany>('/companies', controller.signal)
+      .then((companies) => {
+        if (!controller.signal.aborted) setState((current) => ({ ...current, companies }));
       })
       .catch(() => {
-        if (cancelled) return;
-        setState((s) => ({ ...s, loading: false }));
+        if (!controller.signal.aborted) setCompaniesError('Company choices could not be loaded.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCompaniesLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => controller.abort();
+  }, [revision]);
 
-  // Cascade branches/divisions/employees when company changes.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    setState((current) => ({ ...current, branches: [], divisions: [], employees: [] }));
+    setScopeError('');
     if (!companyId) {
-      setState((s) => ({ ...s, branches: [], divisions: [], employees: [] }));
-      return;
+      setScopeLoading(false);
+      return () => controller.abort();
     }
-    const tasks: Array<Promise<void>> = [];
-
-    if (!opts.skipBranches) {
-      tasks.push(
-        fetch(`/api/backend/branches?companyId=${companyId}&limit=200`)
-          .then((r) => r.json())
-          .then((j) => {
-            if (cancelled) return;
-            const raw: OrgBranch[] = Array.isArray(j.data?.data)
-              ? j.data.data
-              : Array.isArray(j.data)
-                ? j.data
-                : [];
-            const list = raw.map((b) => ({
-              ...b,
-              companyId: b.companyId ?? b.division?.companyId,
-              divisionId: b.divisionId ?? b.division?.id,
-            }));
-            setState((s) => ({ ...s, branches: list }));
-          })
-          .catch(() => {
-            if (!cancelled) setState((s) => ({ ...s, branches: [] }));
-          }),
-      );
-    }
-
-    if (!opts.skipDivisions) {
-      tasks.push(
-        fetch(`/api/backend/divisions?companyId=${companyId}&limit=200`)
-          .then((r) => r.json())
-          .then((j) => {
-            if (cancelled) return;
-            const list: OrgDivision[] = Array.isArray(j.data?.data)
-              ? j.data.data
-              : Array.isArray(j.data)
-                ? j.data
-                : [];
-            setState((s) => ({ ...s, divisions: list }));
-          })
-          .catch(() => {
-            if (!cancelled) setState((s) => ({ ...s, divisions: [] }));
-          }),
-      );
-    }
-
-    if (!opts.skipEmployees) {
-      tasks.push(
-        fetch(`/api/backend/hr/employees?companyId=${companyId}&limit=500`)
-          .then((r) => r.json())
-          .then((j) => {
-            if (cancelled) return;
-            const list: OrgEmployee[] = Array.isArray(j.data?.data)
-              ? j.data.data
-              : Array.isArray(j.data)
-                ? j.data
-                : [];
-            setState((s) => ({ ...s, employees: list }));
-          })
-          .catch(() => {
-            if (!cancelled) setState((s) => ({ ...s, employees: [] }));
-          }),
-      );
-    }
-
-    void Promise.all(tasks);
-    return () => {
-      cancelled = true;
-    };
-    // opts is destructured into primitives at call time; don't add to deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+    setScopeLoading(true);
+    const tasks = [
+      skipBranches
+        ? Promise.resolve([] as OrgBranch[])
+        : allOptions<OrgBranch>('/branches', controller.signal, companyId),
+      skipDivisions
+        ? Promise.resolve([] as OrgDivision[])
+        : allOptions<OrgDivision>('/divisions', controller.signal, companyId),
+      skipEmployees
+        ? Promise.resolve([] as OrgEmployee[])
+        : allOptions<OrgEmployee>('/hr/employees', controller.signal, companyId),
+    ] as const;
+    void Promise.allSettled(tasks).then(([branches, divisions, employees]) => {
+      if (controller.signal.aborted) return;
+      setState((current) => ({
+        ...current,
+        branches:
+          branches.status === 'fulfilled'
+            ? branches.value.map((branch) => ({
+                ...branch,
+                companyId: branch.companyId ?? branch.division?.companyId,
+                divisionId: branch.divisionId ?? branch.division?.id,
+              }))
+            : [],
+        divisions: divisions.status === 'fulfilled' ? divisions.value : [],
+        employees: employees.status === 'fulfilled' ? employees.value : [],
+      }));
+      const failed = [
+        branches.status === 'rejected' && 'branches',
+        divisions.status === 'rejected' && 'divisions',
+        employees.status === 'rejected' && 'employees',
+      ].filter(Boolean);
+      if (failed.length)
+        setScopeError(
+          `Could not load ${failed.join(', ')}. Try again before editing the organisation assignment.`,
+        );
+      setScopeLoading(false);
+    });
+    return () => controller.abort();
+  }, [companyId, skipBranches, skipDivisions, skipEmployees, revision]);
 
   const companyOptions = useMemo(
     () => state.companies.map((c) => ({ value: c.id, label: `${c.name} (${c.code})` })),
@@ -185,6 +172,12 @@ export function useOrgScope(
 
   return {
     ...state,
+    loading: companiesLoading || scopeLoading,
+    scopeLoading,
+    companiesError,
+    scopeError,
+    error: [companiesError, scopeError].filter(Boolean).join(' '),
+    retry,
     companyOptions,
     branchOptions,
     divisionOptions,

@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -15,6 +16,7 @@ import {
 } from '@/components/ui';
 import { backendGet, backendPatch } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { RecordSalesOrderPaymentModal } from '../../_components/record-sales-order-payment-modal';
 import {
   ApprovalTimeline,
@@ -240,22 +242,30 @@ export default function SalesOrderDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [recordingPayment, setRecordingPayment] = useState(false);
 
+  const canView = hasPermission('sales.view');
   const canConfirm = hasPermission('sales.confirm');
   const canCancel = hasPermission('sales.cancel');
   const canRecordPayment = hasPermission('receivables.manage');
+  const beginRequest = useRequestGuard();
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
-      setData(await backendGet<SalesOrderControlCenter>(`/sales-orders/${id}/control-center`));
+      const next = await backendGet<SalesOrderControlCenter>(`/sales-orders/${id}/control-center`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      setData(next);
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load sales order');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [id]);
+  }, [beginRequest, canView, id]);
 
   useEffect(() => {
     load();
@@ -295,6 +305,19 @@ export default function SalesOrderDetailPage() {
       setActionLoading(null);
     }
   };
+
+  if (!canView) {
+    return (
+      <div className="p-6 space-y-6">
+        <PageHeader title="Sales Order" subtitle="Control center" />
+        <Card className="p-6">
+          <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+            Access Restricted
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -402,7 +425,10 @@ export default function SalesOrderDetailPage() {
       />
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
           {error}
         </div>
       )}
@@ -501,7 +527,7 @@ export default function SalesOrderDetailPage() {
         >
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] text-sm">
+              <WorkspaceTable className="w-full min-w-[1100px] text-sm">
                 <caption className="sr-only">Order lines and stock availability</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
@@ -567,7 +593,7 @@ export default function SalesOrderDetailPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
         </div>
@@ -651,7 +677,7 @@ export default function SalesOrderDetailPage() {
             <div>
               <h3 className="mb-3 font-semibold">Inventory Issue Movements</h3>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[800px] text-sm">
+                <WorkspaceTable className="w-full min-w-[800px] text-sm">
                   <caption className="sr-only">Inventory issue movements for this order</caption>
                   <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                     <tr>
@@ -697,7 +723,7 @@ export default function SalesOrderDetailPage() {
                       </tr>
                     )}
                   </tbody>
-                </table>
+                </WorkspaceTable>
               </div>
             </div>
           </Card>
@@ -727,7 +753,7 @@ export default function SalesOrderDetailPage() {
               />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] text-sm">
+              <WorkspaceTable className="w-full min-w-[1000px] text-sm">
                 <caption className="sr-only">Per-line profit and margin</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
@@ -781,7 +807,7 @@ export default function SalesOrderDetailPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
         </div>
@@ -804,7 +830,7 @@ export default function SalesOrderDetailPage() {
               <InfoRow label="Description" value={data.ledger?.journalEntry?.description} />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-sm">
+              <WorkspaceTable className="w-full min-w-[900px] text-sm">
                 <caption className="sr-only">Journal entry lines</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
@@ -848,7 +874,7 @@ export default function SalesOrderDetailPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
         </div>
@@ -862,7 +888,7 @@ export default function SalesOrderDetailPage() {
         >
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px] text-sm">
+              <WorkspaceTable className="w-full min-w-[800px] text-sm">
                 <caption className="sr-only">Commission rows for this order</caption>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
@@ -910,7 +936,7 @@ export default function SalesOrderDetailPage() {
                     </tr>
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
         </div>

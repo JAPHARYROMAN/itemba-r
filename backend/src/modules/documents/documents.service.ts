@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -15,6 +16,8 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { QueryDocumentDto } from './dto/query-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
+
+import { previewDocument } from './document-preview';
 
 const DEFAULT_STORAGE_ROOT = path.join(process.cwd(), 'uploads');
 
@@ -77,7 +80,7 @@ export class DocumentsService {
       await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
       const uploadedById = user.id;
 
-      const storageKey = `${Date.now()}-${safeStorageFileName(file.originalname)}`;
+      const storageKey = `${randomUUID()}-${safeStorageFileName(file.originalname)}`;
       destPath = resolveStoragePath(storageKey);
 
       const uploadsDir = documentsStorageDir();
@@ -160,7 +163,7 @@ export class DocumentsService {
   ) {
     await this.companyScope.assertCanAccessCompany(user, input.companyId, accessLevel);
 
-    const storageKey = `${Date.now()}-${safeStorageFileName(input.fileName)}`;
+    const storageKey = `${randomUUID()}-${safeStorageFileName(input.fileName)}`;
     const destPath = resolveStoragePath(storageKey);
     const uploadsDir = documentsStorageDir();
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -328,6 +331,15 @@ export class DocumentsService {
     };
     sf.doc = { fileName: doc.fileName, mimeType: doc.mimeType };
     return sf;
+  }
+
+  async preview(id: string, user: AuthUser, ipAddress?: string) {
+    // Uses the same scope and audit checks as opening document metadata.
+    const doc = await this.findOne(id, user, ipAddress);
+    if (Number(doc.fileSizeBytes ?? 0) > 10 * 1024 * 1024)
+      return { kind: 'download', note: 'Files over 10 MB are available as downloads.' };
+    const file = await this.readFileBuffer(id, user);
+    return previewDocument(file.buffer, file.mimeType);
   }
 
   async readFileBuffer(id: string, user: AuthUser) {

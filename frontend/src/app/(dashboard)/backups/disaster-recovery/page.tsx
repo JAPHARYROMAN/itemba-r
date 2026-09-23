@@ -1,6 +1,8 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import Link from 'next/link';
+import { useAuth } from '@/hooks/use-auth';
 
 const recoveryObjectives = [
   { label: 'Target RTO', value: '< 4 hours', detail: 'Maximum acceptable time to restore core ERP access.' },
@@ -33,6 +35,18 @@ const contactRows = [
 ];
 
 export default function DisasterRecoveryPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('disaster_recovery.view');
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Disaster Recovery</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -121,7 +135,7 @@ export default function DisasterRecoveryPage() {
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                 <th className="px-5 py-3">Role</th>
@@ -138,7 +152,7 @@ export default function DisasterRecoveryPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       </section>
     </div>

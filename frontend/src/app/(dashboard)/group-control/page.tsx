@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   AuroraPage,
@@ -20,6 +20,7 @@ import type { Column } from '@/components/aurora/data-display/DataTable';
 import { AppIcon, type AppIconName } from '@/components/ui';
 import { getStatusVariant } from '@/lib/design-system';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ─── Types (mirror dashboard's executive-summary payload) ─────────────────────
 
@@ -183,31 +184,39 @@ const SECTIONS: Array<{ href: string; label: string; desc: string; icon: AppIcon
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function GroupControlPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('group-control.view');
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!canView) {
-      setLoading(false);
-      return;
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/backend/dashboard/executive-summary', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { data: Summary };
+      if (!request.current()) return;
+      setData(json.data);
+    } catch (e) {
+      if (!request.current()) return;
+      setError(String(e));
+    } finally {
+      if (request.current()) setLoading(false);
     }
-    (async () => {
-      try {
-        const res = await fetch('/api/backend/dashboard/executive-summary');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = (await res.json()) as { data: Summary };
-        setData(json.data);
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [canView]);
+  }, [authLoading, beginRequest, canView]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const totalAlerts = !data
     ? 0
@@ -237,7 +246,9 @@ export default function GroupControlPage() {
         }
       />
 
-      {!canView ? (
+      {authLoading ? (
+        <LoadingState title="Loading" />
+      ) : !canView ? (
         <div className="px-6">
           <RestrictedDataState requiredPermission="group-control.view" />
         </div>
@@ -249,6 +260,7 @@ export default function GroupControlPage() {
               title="Group Control Unavailable"
               description={`Failed to load: ${error}`}
               className="mx-6 mt-6"
+              onRetry={() => void load()}
             />
           )}
 

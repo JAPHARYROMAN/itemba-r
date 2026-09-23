@@ -1,25 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import {
-  Btn,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  Modal,
-  PageHeader,
-  PageToolbar,
-  SkeletonTable,
-  StatCard,
-  StatusBadge,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, ConfirmDialog, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, showToast, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import {
   backendGet,
   backendList,
@@ -508,7 +495,7 @@ function InvoiceModal({
       }
     >
       {error && (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
           {error}
         </div>
       )}
@@ -571,18 +558,16 @@ function InvoiceModal({
           onChange={(e) => set('invoiceReference', e.target.value)}
           placeholder="Delivery note or supplier reference"
         />
-        <FormInput
+        <FormDateField
           label="Invoice Date"
           required
-          type="date"
           value={form.invoiceDate}
-          onChange={(e) => set('invoiceDate', e.target.value)}
+          onChange={(value) => set('invoiceDate', value)}
         />
-        <FormInput
+        <FormDateField
           label="Due Date"
-          type="date"
           value={form.dueDate}
-          onChange={(e) => set('dueDate', e.target.value)}
+          onChange={(value) => set('dueDate', value)}
         />
         <FormSelect
           label="Currency"
@@ -660,7 +645,7 @@ function InvoiceModal({
         className="mt-4 overflow-x-auto rounded-lg border"
         style={{ borderColor: 'var(--aurora-border)' }}
       >
-        <table className="w-full min-w-[900px] text-sm">
+        <WorkspaceTable className="w-full min-w-[900px] text-sm">
           <caption className="sr-only">Invoice line items</caption>
           <thead>
             <tr
@@ -781,7 +766,7 @@ function InvoiceModal({
               </tr>
             ))}
           </tbody>
-        </table>
+        </WorkspaceTable>
       </div>
 
       <div className="mt-3 flex items-start justify-between gap-4">
@@ -914,10 +899,12 @@ export function VoidInvoiceModal({
 }
 
 export default function SupplierInvoicesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<SupplierInvoice> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -945,19 +932,19 @@ export default function SupplierInvoicesPage() {
   const canVoid = hasPermission('supplier_invoices.void');
 
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<Company>('/companies', { query: { limit: 100 } })
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { query: { limit: 100 }, signal: controller.signal })
       .then((items) => {
-        if (!cancelled) setCompanies(items);
+        if (!controller.signal.aborted) setCompanies(items);
       })
       .catch(() => {
-        if (!cancelled) setCompanies([]);
+        if (!controller.signal.aborted) setCompanies([]);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [canView]);
+  }, [authLoading, canView]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -968,11 +955,13 @@ export default function SupplierInvoicesPage() {
   }, [searchInput]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const result = await backendPage<SupplierInvoice>('/supplier-invoices', {
+        signal: request.signal,
         query: {
           page,
           limit: 20,
@@ -981,14 +970,16 @@ export default function SupplierInvoicesPage() {
           search: search.trim() || undefined,
         },
       });
+      if (!request.current()) return;
       setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load supplier invoices');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load supplier invoices');
       setData(emptyPage<SupplierInvoice>(page));
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, companyId, page, search, status]);
+  }, [authLoading, beginRequest, canView, companyId, page, search, status]);
 
   useEffect(() => {
     void load();
@@ -1018,6 +1009,15 @@ export default function SupplierInvoicesPage() {
       setBusyId(null);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Supplier Invoices" subtitle="Process supplier tax invoices" />
+        <div className="mt-8 text-center text-sm text-slate-500">Loading</div>
+      </div>
+    );
+  }
 
   if (!canView) {
     return (
@@ -1226,15 +1226,24 @@ export default function SupplierInvoicesPage() {
         }
       />
 
+      {loadError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+          <button type="button" className="ml-3 font-medium underline" onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
+      )}
+
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-sm">
+          <WorkspaceTable className="w-full min-w-[1100px] text-sm">
             <caption className="sr-only">Supplier invoice register</caption>
             <thead>
               <tr
@@ -1424,7 +1433,7 @@ export default function SupplierInvoicesPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
         {data && data.totalPages > 1 && (
           <div

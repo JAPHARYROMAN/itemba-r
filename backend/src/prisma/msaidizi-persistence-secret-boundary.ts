@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PersistenceSecretGuard } from '../common/services/persistence-secret-guard.service';
 import { restoreBoundNullPlaceholders } from '../modules/msaidizi-tasks/msaidizi-binding-authority';
+import { sanitizeScheduleTaskTemplate } from '../modules/msaidizi-control-plane/msaidizi-schedule-template-persistence';
 
 type FieldPolicy = Readonly<{
   text?: readonly string[];
@@ -36,7 +37,7 @@ export const MSAIDIZI_PERSISTENCE_SECRET_FIELDS: Readonly<Record<string, FieldPo
     // Rewriting it under the generic sensitive-key heuristic would invalidate
     // the reviewed plan; the immutable-boundary guard still rejects any actual
     // process-declared secret bytes.
-    rejectJson: ['inputBindings'],
+    rejectJson: ['inputBindings', 'dependencyLineage'],
   },
   MsaidiziToolAttempt: {
     text: ['rejectionReason', 'errorMessage'],
@@ -149,6 +150,13 @@ function sanitizeModelData(
     if (textFields.has(key)) {
       output[key] = sanitizeTextField(value, secrets);
     } else if (jsonFields.has(key)) {
+      if (
+        (modelName === 'MsaidiziSchedule' || modelName === 'MsaidiziScheduleVersion') &&
+        key === 'taskTemplate'
+      ) {
+        output[key] = sanitizeScheduleTaskTemplate(value, secrets);
+        continue;
+      }
       const sanitized = sanitizeJsonField(value, secrets);
       output[key] =
         modelName === 'MsaidiziTaskStep' &&

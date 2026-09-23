@@ -1,0 +1,95 @@
+.employee-profile {
+  max-width: 1500px;
+  margin-inline: auto;
+}
+.employee-summary {
+  padding-block: 2px 8px;
+}
+.employee-tabs {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 5px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+  background: var(--aurora-bg-subtle);
+}
+.employee-tabs button {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+  transition: background 120ms ease;
+}
+.employee-tabs button[aria-selected='true'] {
+  color: var(--aurora-text);
+  background: var(--aurora-surface, var(--aurora-bg));
+  box-shadow: 0 1px 4px #0000000d;
+  font-weight: 600;
+}
+.employee-tabs button:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: -2px;
+}
+.employee-profile h3 {
+  font-size: 16px;
+  margin-bottom: 20px;
+}
+.employee-profile [role='tabpanel'] > .grid > div {
+  padding: 24px;
+}
+.employee-facts {
+  display: grid;
+  gap: 0;
+}
+.employee-facts > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 38%) minmax(0, 1fr);
+  gap: 16px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--aurora-border);
+}
+.employee-facts > div:last-child {
+  border-bottom: 0;
+}
+.employee-facts dd {
+  overflow-wrap: anywhere;
+}
+.employee-form-wide {
+  grid-column: 1 / -1;
+}
+.employee-profile .record-browser {
+  min-height: 360px;
+}
+@media (max-width: 600px) {
+  .employee-profile [role='tabpanel'] > .grid > div {
+    padding: 18px;
+  }
+  .employee-facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+  .employee-tabs {
+    border-radius: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .employee-tabs button {
+    transition: none;
+  }
+}
+
+/* Adapt the Payroll screen to its app window. */
+@container os-workspace (max-width: 600px) {
+  .employee-profile [role='tabpanel'] > .grid > div {
+    padding: 18px;
+  }
+  .employee-facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+  .employee-tabs {
+    border-radius: 12px;
+  }
+}

@@ -38,6 +38,11 @@ export function perms(module: string, actions: string[], isGroupControl = false)
 }
 
 export const ALL_PERMISSIONS: PermDef[] = [
+  ...perms('sales_desk', ['view', 'manage', 'payments']),
+  ...perms('cash_desk', ['view', 'manage', 'record', 'reverse']),
+  ...perms('invoice_desk', ['view', 'manage', 'payments']),
+  ...perms('fuel_reporting', ['read', 'manage']),
+  ...perms('fuel_reporting', ['admin'], true),
   // Group governance
   ...perms('groups', ['read', 'update']),
   ...perms('audit-logs', ['read', 'export']),
@@ -2001,8 +2006,17 @@ export const ROLES: RoleDef[] = BASE_ROLES.map((role) => {
   return {
     ...role,
     filter: (permission) =>
-      (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
-      (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
-      role.filter(permission),
+      ['sales_desk', 'cash_desk', 'invoice_desk'].includes(permission.module)
+        ? role.name === 'GROUP_SUPER_ADMIN'
+        : permission.module === 'fuel_reporting'
+        ? role.name === 'GROUP_SUPER_ADMIN' ||
+          (role.name === 'BRANCH_MANAGER' && permission.action !== 'admin') ||
+          (['COMPANY_MANAGER', 'GROUP_DIRECTOR', 'GROUP_AUDITOR', 'ACCOUNTANT'].includes(
+            role.name,
+          ) &&
+            permission.action === 'read')
+        : (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
+          (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
+          role.filter(permission),
   };
 });

@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Btn, ErrorState, Modal, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { ApiError, backendPost, backendPut } from '@/lib/api-client';
 import Link from 'next/link';
 
@@ -133,8 +135,10 @@ function LogIssueModal({ run, onClose, onSaved }: { run: TestRun; onClose: () =>
 }
 
 export default function DataIsolationTestRunsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('data_isolation.view');
   const canRunTests = hasPermission('data_isolation.run_tests');
+  const beginRequest = useRequestGuard();
 
   const [testRuns, setTestRuns] = useState<TestRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,17 +150,29 @@ export default function DataIsolationTestRunsPage() {
   const [completing, setCompleting] = useState<TestRun | null>(null);
   const [loggingIssue, setLoggingIssue] = useState<TestRun | null>(null);
 
-  const fetchTestRuns = useCallback(() => {
+  const fetchTestRuns = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    fetch('/api/backend/data-isolation-tests')
-      .then(r => r.json())
-      .then(res => setTestRuns(res.data ?? res.testRuns ?? res ?? []))
-      .catch(() => { setTestRuns([]); setLoadError('Failed to load isolation test runs.'); })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const response = await fetch('/api/backend/data-isolation-tests', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load isolation test runs.');
+      const body = await response.json();
+      if (!request.current()) return;
+      const rows = body.data ?? body.testRuns ?? body ?? [];
+      setTestRuns(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setTestRuns([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load isolation test runs.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
-  useEffect(() => { fetchTestRuns(); }, [fetchTestRuns]);
+  useEffect(() => { void fetchTestRuns(); }, [fetchTestRuns]);
 
   async function runNewTest() {
     setSaving(true);
@@ -181,6 +197,15 @@ export default function DataIsolationTestRunsPage() {
 
   const colCount = canRunTests ? 9 : 8;
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Isolation Test Runs</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -196,7 +221,7 @@ export default function DataIsolationTestRunsPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <table className="w-full text-sm">
+        <WorkspaceTable className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
               <th className="px-4 py-3">Test Run #</th>
@@ -244,19 +269,17 @@ export default function DataIsolationTestRunsPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </WorkspaceTable>
       </div>
 
       {/* Run New Test Modal */}
       {showModal && (
-        <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
-          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Run New Isolation Test</h2>
+        <Modal open title="Run New Isolation Test" onClose={() => { if (!saving) setShowModal(false); }} size="sm"><div className="os-legacy-dialog-content">
+
             {runError && <div className={errorBanner}>{runError}</div>}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Run Type *</label>
-              <select value={runType} onChange={e => setRunType(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <select aria-label="Run Type *" value={runType} onChange={e => setRunType(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                 {RUN_TYPES.map(rt => <option key={rt.value} value={rt.value}>{rt.label}</option>)}
               </select>
             </div>
@@ -266,8 +289,7 @@ export default function DataIsolationTestRunsPage() {
                 {saving ? 'Running...' : 'Run Test'}
               </button>
             </div>
-          </div>
-        </div>
+          </div></Modal>
       )}
 
       {completing && <CompleteRunModal run={completing} onClose={() => setCompleting(null)} onSaved={() => { setCompleting(null); fetchTestRuns(); }} />}

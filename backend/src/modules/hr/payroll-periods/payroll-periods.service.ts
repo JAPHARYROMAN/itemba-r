@@ -25,6 +25,13 @@ export class PayrollPeriodsService {
     const where: any = { deletedAt: null, ...this.companyFilter(user) };
     applyCompanyScopeWhere(where, user, companyId);
     if (status) where.status = status;
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      where.AND = [{ OR: [
+        { name: { contains, mode: 'insensitive' } },
+        { payrollPeriodCode: { contains, mode: 'insensitive' } },
+      ] }];
+    }
     const [data, total] = await Promise.all([
       this.prisma.payrollPeriod.findMany({
         where, skip, take: Number(limit), orderBy: { startDate: 'desc' },

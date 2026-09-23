@@ -1,5 +1,6 @@
 import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
 import { DocumentCategory, DocumentOwnerType, DocumentStatus } from '@prisma/client';
+import { Transform } from 'class-transformer';
 
 export class CreateDocumentDto {
   @IsString() title!: string;
@@ -9,7 +10,13 @@ export class CreateDocumentDto {
   @IsOptional() @IsEnum(DocumentStatus) status?: DocumentStatus;
   @IsOptional() @IsString() documentCode?: string;
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsBoolean() isConfidential?: boolean;
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw: unknown = obj[key];
+    return raw === true || raw === 'true' ? true : raw === false || raw === 'false' ? false : raw;
+  })
+  @IsBoolean()
+  isConfidential?: boolean;
   @IsOptional() @IsDateString() expiryDate?: string;
   @IsOptional() @IsDateString() renewalDate?: string;
   @IsOptional() @IsString({ each: true }) tags?: string[];

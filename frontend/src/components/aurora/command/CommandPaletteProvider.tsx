@@ -61,9 +61,23 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if (
+        !e.defaultPrevented &&
+        !e.repeat &&
+        !e.isComposing &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.metaKey || e.ctrlKey) &&
+        e.key.toLowerCase() === 'k'
+      ) {
+        const dialog =
+          (e.target instanceof Element ? e.target.closest('[role="dialog"], dialog') : null) ??
+          document.querySelector(
+            '[role="dialog"][aria-modal="true"]:not([aria-hidden="true"]), dialog[open]',
+          );
+        if (dialog && !dialog.querySelector('[data-os-search]')) return;
         e.preventDefault();
-        setIsOpen(prev => !prev);
+        setIsOpen((prev) => !prev);
       }
     }
     document.addEventListener('keydown', handleKey);
@@ -87,11 +101,13 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   }, [pathname]);
 
   return (
-    <Ctx.Provider value={{
-      open: () => setIsOpen(true),
-      close: () => setIsOpen(false),
-      toggle: () => setIsOpen(p => !p),
-    }}>
+    <Ctx.Provider
+      value={{
+        open: () => setIsOpen(true),
+        close: () => setIsOpen(false),
+        toggle: () => setIsOpen((p) => !p),
+      }}
+    >
       {children}
       <CommandPalette open={isOpen} onClose={() => setIsOpen(false)} />
     </Ctx.Provider>

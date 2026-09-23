@@ -27,6 +27,20 @@ afterEach(() => {
   cleanup();
 });
 
+// jsdom doesn't implement ResizeObserver, which the desktop shell constructs to
+// track its work area. A no-op stub is faithful rather than a shortcut: the
+// shell measures once directly after observing, and jsdom reports a zero-sized
+// box for every element, so a firing observer would deliver the same zeroes the
+// direct call already produced. Suites that assert on resize behaviour should
+// still install their own implementation.
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+
 // jsdom doesn't ship a fetch implementation; tests that need it should mock
 // per-suite, but we provide a sensible default that fails loudly so missing
 // mocks don't silently produce undefined.

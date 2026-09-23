@@ -1,0 +1,414 @@
+.os-workspace-layout {
+  position: absolute;
+  inset: 67px 24px calc(120px + max(0px, env(safe-area-inset-bottom) - 14px));
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+}
+.itemba-os.os-maximized .os-workspace-layout {
+  inset: 48px 0 calc(110px + max(0px, env(safe-area-inset-bottom) - 14px));
+}
+.os-workspace-grid {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.os-workspace-layout[data-paired='true'][data-single='false'] .os-workspace-grid {
+  grid-template-columns: minmax(0, calc((100% - 16px) * var(--os-pane-ratio) / 100)) 16px minmax(
+      0,
+      1fr
+    );
+}
+.os-workspace-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  container: os-workspace / inline-size;
+  outline: none;
+}
+.itemba-os .os-workspace-layout .os-window {
+  position: relative;
+  inset: auto;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+.os-workspace-layout[hidden],
+.os-workspace-layout [hidden] {
+  display: none !important;
+}
+.os-workspace-pane:focus-visible > .os-window {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 2px;
+}
+.os-workspace-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.os-pane-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--os-line);
+  background: var(--os-glass);
+  border-radius: 12px;
+}
+.os-pane-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  color: var(--aurora-text-secondary);
+  font-size: 12px;
+  font-weight: 550;
+  text-align: left;
+}
+.os-pane-tabs button[aria-pressed='true'] {
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  box-shadow: 0 1px 4px #1522370d;
+}
+.os-pane-dot {
+  flex: 0 0 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--aurora-text-muted);
+}
+.os-pane-tabs [aria-pressed='true'] .os-pane-dot {
+  background: var(--aurora-primary);
+}
+.os-focus-workspace {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-height: 40px;
+  margin-left: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--os-glass);
+  color: var(--aurora-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.os-workspace-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  color: var(--aurora-text-secondary);
+  touch-action: none;
+  border-radius: 8px;
+  user-select: none;
+}
+.os-workspace-divider:hover,
+.os-workspace-divider:focus-visible {
+  background: var(--aurora-primary-subtle);
+  color: var(--aurora-primary);
+}
+.os-workspace-layout :is(button, [role='separator']):focus-visible,
+.os-companion-choices button:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 2px;
+}
+.os-companion-pane .os-titlebar {
+  gap: 12px;
+}
+.os-companion-pane .os-window-tools {
+  margin-left: auto;
+}
+.os-workspace-layout .os-window-tools > button {
+  min-width: 30px;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+}
+.os-workspace-layout .os-window-tools > button:hover {
+  background: var(--os-line);
+}
+.os-companion-content {
+  overscroll-behavior: contain;
+}
+.os-companion-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-companion-choices button {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  text-align: left;
+  padding: 14px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+}
+.os-companion-choices button:hover {
+  background: var(--aurora-bg-subtle);
+  border-color: var(--aurora-border-strong);
+}
+.os-companion-choices button > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.os-companion-choices strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--aurora-text);
+}
+.os-companion-choices small {
+  display: block;
+  margin-top: 5px;
+  color: var(--aurora-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.os-companion-choices p,
+.os-companion-error {
+  padding: 24px;
+  color: var(--aurora-text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.os-companion-error h2 {
+  font-size: 20px;
+  color: var(--aurora-text);
+  margin-bottom: 10px;
+}
+.os-navigable-app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.os-app-surface {
+  flex: 1;
+  min-width: 0;
+}
+.os-app-history {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--os-line);
+  background: var(--aurora-card);
+}
+.os-app-history > :is(button, a) {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  color: var(--aurora-text-secondary);
+}
+.os-app-history > :is(button, a):hover:not(:disabled) {
+  background: var(--aurora-bg-subtle);
+  color: var(--aurora-text);
+}
+.os-app-history button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.os-app-history > span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  color: var(--aurora-text-secondary);
+  font-size: 11px;
+}
+.os-app-history .os-glyph {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+}
+.os-app-history .os-glyph svg {
+  width: 14px;
+  height: 14px;
+}
+@container os-workspace (max-width: 760px) {
+  .os-window .os-titlebar {
+    padding-inline: 14px;
+    gap: 10px;
+  }
+  .os-window .os-window-caption {
+    display: none;
+  }
+  .os-window .os-window-controls {
+    gap: 6px;
+    margin-right: 0;
+  }
+  .os-window .os-sidebar {
+    width: 158px;
+    padding-inline: 7px;
+  }
+  .os-window .os-window-tools {
+    gap: 3px;
+  }
+  .os-window .os-window-tools > button > span {
+    display: none;
+  }
+  .os-window .os-titlebar > strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .invoice-desk .desk-rail nav {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  .invoice-desk .desk-rail nav button {
+    flex: 1 0 auto;
+    min-height: 44px;
+  }
+}
+@media (max-width: 1000px) {
+  .os-workspace-layout {
+    inset: 61px 12px calc(112px + max(0px, env(safe-area-inset-bottom) - 14px));
+  }
+  .os-pane-tabs {
+    flex: 1;
+  }
+  .os-pane-tabs button {
+    flex: 1;
+    min-height: 44px;
+  }
+}
+@media (max-width: 700px) {
+  .itemba-os .os-workspace-layout,
+  .itemba-os.os-maximized .os-workspace-layout {
+    inset: 48px 0 calc(99px + max(0px, env(safe-area-inset-bottom) - 8px));
+    gap: 0;
+  }
+  .os-workspace-strip {
+    padding: 7px 8px;
+    background: var(--os-glass);
+  }
+  .os-pane-tabs {
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+  .os-pane-tabs button {
+    padding-inline: 10px;
+    font-size: 11px;
+  }
+  .os-workspace-layout .os-window-tools > button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+@media (forced-colors: active) {
+  .os-pane-tabs button[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+  }
+  .os-pane-dot {
+    background: ButtonText;
+  }
+  .os-workspace-divider {
+    border: 1px solid ButtonText;
+  }
+}
+@container os-workspace (max-width: 1000px) {
+  .os-workspace-pane .record-workspace {
+    height: auto;
+    display: block;
+  }
+  .os-workspace-pane .record-browser,
+  .os-workspace-pane .record-workspace > .record-browser {
+    height: auto;
+    min-height: 0;
+  }
+  .os-workspace-pane .record-inspector {
+    overflow: visible;
+  }
+  .os-workspace-pane .record-inspector dl,
+  .os-workspace-pane .record-inspector .record-actions {
+    max-height: none;
+    overflow: visible;
+    flex: initial;
+  }
+}
+@media print {
+  body:has(.os-workspace-layout)
+    :is(
+      .itemba-os,
+      .os-workspace-layout,
+      .os-workspace-grid,
+      .os-workspace-pane,
+      .os-window,
+      .os-window-body,
+      .os-page,
+      .os-route-content,
+      .os-app-surface,
+      .os-navigable-app
+    ) {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    contain: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+  .itemba-os {
+    background: white !important;
+    --aurora-card: #fff;
+    --aurora-bg: #fff;
+    --aurora-text: #111;
+    --aurora-text-secondary: #444;
+  }
+  .itemba-os
+    :is(
+      .os-desktop,
+      .os-workspace-strip,
+      .os-workspace-divider,
+      .os-app-history,
+      .os-menubar,
+      .os-dock,
+      .os-titlebar,
+      .os-skip,
+      .os-sidebar
+    ) {
+    display: none !important;
+  }
+  .itemba-os .os-workspace-layout .os-workspace-pane:not([data-os-active='true']) {
+    display: none !important;
+  }
+  body:has([data-os-print-target]) .itemba-os .os-workspace-layout .os-workspace-pane {
+    display: none !important;
+  }
+  body:has([data-os-print-target])
+    .itemba-os
+    .os-workspace-layout
+    .os-workspace-pane[data-os-print-target] {
+    display: block !important;
+  }
+  .itemba-os .os-workspace-layout[hidden],
+  .itemba-os .os-workspace-layout [hidden] {
+    display: none !important;
+  }
+}

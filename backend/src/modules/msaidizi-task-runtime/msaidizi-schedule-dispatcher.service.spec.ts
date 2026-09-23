@@ -120,6 +120,13 @@ function dueSchedule(overrides: Record<string, unknown> = {}) {
 function transactionHarness(options: { claimCounts?: number[]; overlapping?: unknown } = {}) {
   const claimCounts = [...(options.claimCounts ?? [1])];
   const tx = {
+    $queryRaw: jest
+      .fn()
+      .mockImplementation(async (query: { sql: string }) =>
+        query.sql.includes('msaidizi_principals')
+          ? [{ status: MsaidiziPrincipalStatus.ACTIVE }]
+          : [dueSchedule().mandate],
+      ),
     msaidiziSchedule: {
       updateMany: jest.fn().mockImplementation(async () => ({ count: claimCounts.shift() ?? 0 })),
       findUnique: jest.fn(),
@@ -153,6 +160,13 @@ function transactionHarness(options: { claimCounts?: number[]; overlapping?: unk
 }
 
 describe('MsaidiziScheduleDispatcherService', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-25T05:00:01Z'));
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
   it('atomically queues one governed task and advances the durable occurrence cursor', async () => {
     const schedule = dueSchedule();
     const { prisma, tx, audit } = transactionHarness();
@@ -170,7 +184,11 @@ describe('MsaidiziScheduleDispatcherService', () => {
 
     expect(tx.msaidiziSchedule.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ nextRunAt: schedule.nextRunAt }),
+        where: expect.objectContaining({
+          nextRunAt: schedule.nextRunAt,
+          version: schedule.version,
+          updatedAt: schedule.updatedAt,
+        }),
         data: {
           lastRunAt: schedule.nextRunAt,
           nextRunAt: new Date('2026-08-26T05:00:00.000Z'),
@@ -195,11 +213,26 @@ describe('MsaidiziScheduleDispatcherService', () => {
     expect(createdAt).toBeInstanceOf(Date);
     expect(tx.msaidiziTaskStep.createMany.mock.calls[0][0].data[0].createdAt).toBe(createdAt);
     expect(tx.msaidiziTaskEvent.createMany).toHaveBeenCalledTimes(1);
+    const creationAuthority = {
+      protocol: 'MSAIDIZI_SCHEDULE_AUTHORITY_V1',
+      principalId: schedule.principalId,
+      companyId: schedule.mandate.companyId,
+      scheduleId: schedule.id,
+      scheduleVersion: schedule.version,
+      scheduleUpdatedAt: schedule.updatedAt.toISOString(),
+      mandateId: schedule.mandateId,
+      mandateVersion: schedule.mandate.version,
+      mandateUpdatedAt: schedule.mandate.updatedAt.toISOString(),
+    };
+    expect(
+      tx.msaidiziTaskEvent.createMany.mock.calls[0][0].data[0].payload.creationAuthority,
+    ).toEqual(creationAuthority);
     expect(tx.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           action: 'MSAIDIZI_SCHEDULE_DISPATCH',
           mandateId: schedule.mandateId,
+          newValue: expect.objectContaining({ creationAuthority }),
         }),
       }),
     );
@@ -222,6 +255,112 @@ describe('MsaidiziScheduleDispatcherService', () => {
     expect(first.dispatched).toBe(1);
     expect(second.skipped).toBe(1);
     expect(tx.msaidiziTask.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops later occurrences when the kill switch changes during a batch', async () => {
+    const { prisma, tx, audit } = transactionHarness({ claimCounts: [1, 1] });
+    prisma.msaidiziSchedule.findMany.mockResolvedValue([
+      dueSchedule(),
+      dueSchedule({ id: 'schedule-2' }),
+    ]);
+    const runtime = new ConfigService({
+      JOB_WORKER_ENABLED: 'true',
+      MSAIDIZI_TASK_WORKER_ENABLED: 'true',
+      MSAIDIZI_GLOBAL_KILL_SWITCH: 'false',
+    });
+    audit.logStrictInTransaction.mockImplementationOnce(async (client, input) => {
+      const result = await client.auditLog.create({ data: input });
+      runtime.set('MSAIDIZI_GLOBAL_KILL_SWITCH', 'true');
+      return result;
+    });
+    const service = new MsaidiziScheduleDispatcherService(
+      prisma as unknown as PrismaService,
+      autonomy(),
+      runtime,
+      audit as never,
+    );
+    expect(await service.dispatchDueSchedules(20, new Date('2026-08-25T05:00:01Z'))).toMatchObject({
+      dispatched: 1,
+      skipped: 1,
+    });
+    expect(tx.msaidiziTask.create).toHaveBeenCalledTimes(1);
+    expect(tx.msaidiziSchedule.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks the kill switch after waiting for the transaction connection', async () => {
+    const { prisma, tx, audit } = transactionHarness();
+    prisma.msaidiziSchedule.findMany.mockResolvedValue([dueSchedule()]);
+    const runtime = new ConfigService({
+      JOB_WORKER_ENABLED: 'true',
+      MSAIDIZI_TASK_WORKER_ENABLED: 'true',
+      MSAIDIZI_GLOBAL_KILL_SWITCH: 'false',
+    });
+    prisma.$transaction.mockImplementationOnce((work) => {
+      runtime.set('MSAIDIZI_GLOBAL_KILL_SWITCH', 'true');
+      return work(tx);
+    });
+    const service = new MsaidiziScheduleDispatcherService(
+      prisma as unknown as PrismaService,
+      autonomy(),
+      runtime,
+      audit as never,
+    );
+    expect(await service.dispatchDueSchedules(20, new Date('2026-08-25T05:00:01Z'))).toMatchObject({
+      dispatched: 0,
+      skipped: 1,
+    });
+    expect(tx.msaidiziSchedule.updateMany).not.toHaveBeenCalled();
+    expect(tx.msaidiziTask.create).not.toHaveBeenCalled();
+    expect(audit.logStrictInTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'principal-disabled',
+    'mandate-missing',
+    'mandate-revoked',
+    'mandate-version',
+    'mandate-timestamp',
+    'mandate-expired',
+    'kill-after-lock',
+  ])('refuses a stale authority claim: %s', async (change) => {
+    const { prisma, tx, audit } = transactionHarness();
+    const schedule = dueSchedule();
+    prisma.msaidiziSchedule.findMany.mockResolvedValue([schedule]);
+    const runtime = new ConfigService({
+      JOB_WORKER_ENABLED: 'true',
+      MSAIDIZI_TASK_WORKER_ENABLED: 'true',
+      MSAIDIZI_GLOBAL_KILL_SWITCH: 'false',
+    });
+    tx.$queryRaw.mockImplementation(async (query: { sql: string }) => {
+      expect(query.sql).toContain('FOR UPDATE');
+      if (query.sql.includes('msaidizi_principals'))
+        return [{ status: change === 'principal-disabled' ? 'DISABLED' : 'ACTIVE' }];
+      if (change === 'mandate-missing') return [];
+      if (change === 'kill-after-lock') runtime.set('MSAIDIZI_GLOBAL_KILL_SWITCH', 'true');
+      if (change === 'mandate-expired') jest.setSystemTime(schedule.mandate.expiresAt);
+      return [
+        {
+          ...schedule.mandate,
+          ...(change === 'mandate-revoked' && { status: 'REVOKED' }),
+          ...(change === 'mandate-version' && { version: 2 }),
+          ...(change === 'mandate-timestamp' && { updatedAt: new Date('2026-08-25T00:00:00Z') }),
+        },
+      ];
+    });
+    const service = new MsaidiziScheduleDispatcherService(
+      prisma as unknown as PrismaService,
+      autonomy(),
+      runtime,
+      audit as never,
+    );
+    expect(await service.dispatchDueSchedules(20, new Date('2026-08-25T05:00:01Z'))).toMatchObject({
+      dispatched: 0,
+      skipped: 1,
+    });
+    expect(tx.msaidiziSchedule.updateMany).not.toHaveBeenCalled();
+    expect(tx.msaidiziTask.create).not.toHaveBeenCalled();
+    expect(tx.msaidiziTaskEvent.createMany).not.toHaveBeenCalled();
+    expect(audit.logStrictInTransaction).not.toHaveBeenCalled();
   });
 
   it('retries an unacknowledged transaction at the same occurrence without duplicating work', async () => {
@@ -251,6 +390,41 @@ describe('MsaidiziScheduleDispatcherService', () => {
         }),
       }),
     );
+  });
+
+  it('records recovery-time authority without inventing historical creation authority', async () => {
+    const schedule = dueSchedule({ version: 8 });
+    const { prisma, tx, audit } = transactionHarness();
+    prisma.msaidiziSchedule.findMany.mockResolvedValue([schedule]);
+    tx.msaidiziTask.findUnique.mockResolvedValue({
+      id: 'old-task',
+      scheduleId: schedule.id,
+      status: MsaidiziTaskStatus.READY,
+      stateVersion: 1,
+    });
+    const service = new MsaidiziScheduleDispatcherService(
+      prisma as unknown as PrismaService,
+      autonomy(),
+      switches(),
+      audit as never,
+    );
+    expect(
+      (await service.dispatchDueSchedules(20, new Date('2026-08-25T05:00:01Z'))).dispatched,
+    ).toBe(1);
+    expect(tx.msaidiziTask.create).not.toHaveBeenCalled();
+    expect(tx.msaidiziTaskEvent.createMany).not.toHaveBeenCalled();
+    const event = tx.msaidiziTaskEvent.create.mock.calls[0][0].data;
+    expect(event).toMatchObject({
+      type: 'task.queued',
+      payload: { recovered: true, observedAuthority: { scheduleVersion: 8, mandateVersion: 1 } },
+    });
+    expect(event.payload).not.toHaveProperty('creationAuthority');
+    const evidence = tx.auditLog.create.mock.calls[0][0].data;
+    expect(evidence).toMatchObject({
+      action: 'MSAIDIZI_SCHEDULE_DISPATCH_RECONCILED',
+      newValue: { observedAuthority: event.payload.observedAuthority },
+    });
+    expect(evidence.newValue).not.toHaveProperty('creationAuthority');
   });
 
   it('advances and records a SKIP occurrence without creating overlapping work', async () => {

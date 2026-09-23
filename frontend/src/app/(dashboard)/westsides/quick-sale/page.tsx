@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { WestsidesGate } from '../_components/route-gate';
 import { backendList } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -325,7 +327,8 @@ function saveSettings(userId: string, s: Settings): void {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function QuickSalePage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, hasPermission } = useAuth();
+  const canSell = hasPermission('sales.create');
   const [settings, setSettings] = useState<Settings>(blankSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -378,25 +381,32 @@ export default function QuickSalePage() {
 
   // Load companies + units once.
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canSell) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
       .then((j) =>
         setCompanies(
           Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
         ),
       )
-      .catch(() => setCompanies([]));
-    fetch('/api/backend/units?limit=200')
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    fetch('/api/backend/units?limit=200', { signal: controller.signal })
       .then((r) => r.json())
       .then((j) =>
         setUnits(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []),
       )
-      .catch(() => setUnits([]));
-  }, []);
+      .catch(() => {
+        if (!controller.signal.aborted) setUnits([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canSell]);
 
   // Reload branch / division / location / cashAccount / customer lists when company changes.
   useEffect(() => {
-    if (!settings.companyId) {
+    if (authLoading || !canSell || !settings.companyId) {
       setBranches([]);
       setDivisions([]);
       setCashAccounts([]);
@@ -404,49 +414,50 @@ export default function QuickSalePage() {
       setCustomers([]);
       return;
     }
+    const controller = new AbortController();
     const cid = settings.companyId;
-    fetch(`/api/backend/branches?companyId=${cid}&limit=200`)
-      .then((r) => r.json())
-      .then((j) =>
-        setBranches(
-          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setBranches([]));
-    fetch(`/api/backend/divisions?companyId=${cid}&limit=200`)
-      .then((r) => r.json())
-      .then((j) =>
-        setDivisions(
-          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setDivisions([]));
-    fetch(`/api/backend/customers?companyId=${cid}&limit=500`)
-      .then((r) => r.json())
-      .then((j) =>
-        setCustomers(
-          Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      )
-      .catch(() => setCustomers([]));
-  }, [settings.companyId]);
+    const readList = async (path: string) => {
+      const response = await fetch(path, { signal: controller.signal });
+      const json = await response.json();
+      return Array.isArray(json.data?.data) ? json.data.data : Array.isArray(json.data) ? json.data : [];
+    };
+    void Promise.all([
+      readList(`/api/backend/branches?companyId=${cid}&limit=200`),
+      readList(`/api/backend/divisions?companyId=${cid}&limit=200`),
+      readList(`/api/backend/customers?companyId=${cid}&limit=500`),
+    ])
+      .then(([branchRows, divisionRows, customerRows]) => {
+        if (controller.signal.aborted) return;
+        setBranches(branchRows);
+        setDivisions(divisionRows);
+        setCustomers(customerRows);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setBranches([]);
+        setDivisions([]);
+        setCustomers([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canSell, settings.companyId]);
 
   // Receipt account lookup is intentionally scoped to sales.create, not the
   // finance cash-account permission, so counter users can select a valid
   // receipt account without full Finance > Cash Accounts access.
   useEffect(() => {
-    if (!settings.companyId || !settings.divisionId || !settings.branchId) {
+    if (authLoading || !canSell || !settings.companyId || !settings.divisionId || !settings.branchId) {
       setCashAccounts([]);
       setCashAccountsError('');
       setCashAccountsLoading(false);
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     setCashAccountsLoading(true);
     setCashAccountsError('');
     setCashAccounts([]);
     backendList<CashAccount>('/sales-orders/receipt-accounts', {
+      signal: controller.signal,
       query: {
         companyId: settings.companyId,
         divisionId: settings.divisionId,
@@ -456,24 +467,29 @@ export default function QuickSalePage() {
       },
     })
       .then((rows) => {
-        if (!cancelled) setCashAccounts(rows);
+        if (controller.signal.aborted) return;
+        setCashAccounts(rows);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setCashAccounts([]);
-          setCashAccountsError(
-            err instanceof Error ? err.message : 'Could not load receipt accounts',
-          );
-        }
+        if (controller.signal.aborted) return;
+        setCashAccounts([]);
+        setCashAccountsError(
+          err instanceof Error ? err.message : 'Could not load receipt accounts',
+        );
       })
       .finally(() => {
-        if (!cancelled) setCashAccountsLoading(false);
+        if (!controller.signal.aborted) setCashAccountsLoading(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [settings.branchId, settings.companyId, settings.divisionId, settings.paymentMethod]);
+    return () => controller.abort();
+  }, [
+    authLoading,
+    canSell,
+    settings.branchId,
+    settings.companyId,
+    settings.divisionId,
+    settings.paymentMethod,
+  ]);
 
   // Debounced product search — scoped to the selected division (if any).
   // Backend returns SKUs tagged to the division PLUS company-wide SKUs.
@@ -815,7 +831,8 @@ export default function QuickSalePage() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  if (!hydrated) return <PageSpinner />;
+  if (authLoading || !hydrated) return <PageSpinner />;
+  if (!canSell) return <WestsidesGate title="Quick Sale" loading={false} />;
 
   return (
     <div className="p-6 quick-sale-page">
@@ -837,7 +854,7 @@ export default function QuickSalePage() {
       </Card>
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+        <div role="alert" className="mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -851,7 +868,7 @@ export default function QuickSalePage() {
             </label>
             <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_7rem_8rem]">
               <div className="relative">
-                <input
+                <input aria-label="Product Query"
                   ref={searchInputRef}
                   type="text"
                   autoFocus
@@ -995,7 +1012,7 @@ export default function QuickSalePage() {
           </Card>
 
           <Card className="overflow-hidden">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">
@@ -1073,7 +1090,7 @@ export default function QuickSalePage() {
                           >
                             −
                           </button>
-                          <input
+                          <input aria-label="Qty"
                             type="number"
                             value={l.qty}
                             step="any"
@@ -1098,7 +1115,7 @@ export default function QuickSalePage() {
                         </div>
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <input
+                        <input aria-label="Unit Price"
                           type="number"
                           value={l.unitPrice}
                           step="any"
@@ -1125,7 +1142,7 @@ export default function QuickSalePage() {
                   );
                 })}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </Card>
         </div>
 
@@ -1446,7 +1463,7 @@ function Receipt({ order, cashier }: { order: ConfirmedOrder; cashier?: string }
           </div>
         )}
       </div>
-      <table className="w-full text-xs my-2">
+      <WorkspaceTable className="w-full text-xs my-2">
         <thead>
           <tr className="border-b border-slate-300">
             <th className="text-left pb-1">Item</th>
@@ -1467,7 +1484,7 @@ function Receipt({ order, cashier }: { order: ConfirmedOrder; cashier?: string }
             </tr>
           ))}
         </tbody>
-      </table>
+      </WorkspaceTable>
       <div className="border-t border-slate-300 pt-2 mt-2 space-y-1 text-xs">
         <div className="flex justify-between">
           <span>Subtotal</span>

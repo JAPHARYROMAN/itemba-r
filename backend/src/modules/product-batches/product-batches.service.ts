@@ -139,20 +139,50 @@ export class ProductBatchesService {
   }
 
   async findAll(query: QueryProductBatchDto, user?: any) {
-    const { page = 1, limit = 20, companyId, productId, status, branchId } = query;
+    const { page = 1, limit = 20, companyId, productId, status, branchId, divisionId, search, review } = query;
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
     applyCompanyScopeWhere(where, user, companyId);
     if (productId) where.productId = productId;
     if (status) where.status = status;
     if (branchId) where.branchId = branchId;
+    if (divisionId) where.branch = { divisionId };
+    if (search?.trim()) {
+      const contains = { contains: search.trim(), mode: 'insensitive' };
+      where.OR = [
+        { batchNumber: contains },
+        { product: { name: contains } },
+        { product: { productCode: contains } },
+        { product: { sku: contains } },
+        { product: { barcode: contains } },
+        { supplier: { name: contains } },
+      ];
+    }
+    // Match the existing expiry review rules, while retaining every register filter.
+    const now = new Date();
+    if (review === 'expiring') {
+      where.AND = [{ status: 'ACTIVE' }];
+      where.expiryDate = { gte: now, lte: new Date(now.getTime() + 30 * 86400000), not: null };
+    } else if (review === 'expired') {
+      where.AND = [{ status: { in: ['ACTIVE', 'EXPIRED'] } }];
+      where.expiryDate = { lt: now };
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.productBatch.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: review && review !== 'all'
+          ? [{ expiryDate: 'asc' }, { id: 'asc' }]
+          : [{ createdAt: 'desc' }, { id: 'asc' }],
+        include: {
+          product: { select: { id: true, name: true, productCode: true, sku: true, barcode: true } },
+          company: { select: { id: true, name: true } },
+          branch: { select: { id: true, name: true, divisionId: true, division: { select: { id: true, name: true } } } },
+          supplier: { select: { id: true, name: true } },
+          unit: { select: { id: true, name: true, symbol: true } },
+        },
       }),
       this.prisma.productBatch.count({ where }),
     ]);

@@ -1,0 +1,93 @@
+.workspace-draft-shelf {
+  margin: 16px 0 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--aurora-border);
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  border-radius: 16px;
+}
+.workspace-draft-shelf header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.workspace-draft-shelf strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-draft-shelf p,
+.workspace-draft-hint {
+  color: var(--aurora-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.workspace-draft-shelf ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.workspace-draft-shelf li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--aurora-border);
+  padding: 10px 0 0;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.workspace-draft-shelf li > span {
+  flex: 1;
+  min-width: 120px;
+}
+.workspace-draft-shelf small {
+  display: block;
+  color: var(--aurora-text-muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.workspace-draft-shelf li > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.workspace-draft-shelf li > button:hover {
+  background: var(--aurora-bg-subtle);
+}
+.workspace-draft-shelf li > button:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 2px;
+}
+.workspace-draft-shelf button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.workspace-draft-shelf [role='alert'] {
+  margin-top: 12px;
+  color: var(--aurora-danger, #b91c1c);
+}
+.workspace-draft-review {
+  border: 1px solid var(--aurora-border-strong);
+  border-radius: 12px;
+  background: var(--aurora-bg-subtle);
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.workspace-draft-review label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding-top: 12px;
+}
+.workspace-draft-review input {
+  margin-top: 4px;
+}
+.unsaved-work-dialog .unsaved-keep {
+  background: var(--aurora-primary-subtle);
+  color: var(--aurora-primary-text);
+}

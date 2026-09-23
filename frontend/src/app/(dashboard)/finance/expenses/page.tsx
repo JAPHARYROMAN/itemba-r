@@ -1,20 +1,15 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
+
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Card,
-  PageHeader,
-  PageToolbar,
-  StatCard,
-  StatusBadge,
-  Modal,
-  Btn,
-  PageSpinner,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { downloadTablePdf } from '@/lib/export-download';
 import { DocumentArtifactButton } from '@/components/documents/DocumentArtifactButton';
@@ -159,7 +154,7 @@ function fmtMoney(currency: string, amount: number | string) {
 
 function RejectDialog({
   expense,
-  onClose,
+  onClose: closeWithoutGuard,
   onDone,
 }: {
   expense: Expense;
@@ -167,6 +162,8 @@ function RejectDialog({
   onDone: () => void;
 }) {
   const [reason, setReason] = useState('');
+  const draft = useFormGuard(reason, setReason);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -187,6 +184,7 @@ function RejectDialog({
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Rejection failed');
       }
+      draft.markSaved();
       onDone();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -197,6 +195,7 @@ function RejectDialog({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title="Reject Expense"
@@ -214,7 +213,7 @@ function RejectDialog({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -232,7 +231,7 @@ function RejectDialog({
 
 function PayExpenseDialog({
   expense,
-  onClose,
+  onClose: closeWithoutGuard,
   onPaid,
 }: {
   expense: Expense;
@@ -243,6 +242,11 @@ function PayExpenseDialog({
   const [cashAccountId, setCashAccountId] = useState(expense.cashAccountId ?? '');
   const [paymentMethod, setPaymentMethod] = useState(expense.paymentMethod ?? 'CASH');
   const [loading, setLoading] = useState(true);
+  const draft = useFormGuard({ cashAccountId, paymentMethod }, (baseline) => {
+    setCashAccountId(baseline.cashAccountId);
+    setPaymentMethod(baseline.paymentMethod);
+  });
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -291,6 +295,7 @@ function PayExpenseDialog({
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.message ?? 'Expense payment failed');
+      draft.markSaved();
       onPaid();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Expense payment failed');
@@ -301,6 +306,7 @@ function PayExpenseDialog({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title="Pay Expense"
@@ -323,11 +329,11 @@ function PayExpenseDialog({
       }
     >
       {error && (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       )}
-      <div className="space-y-4">
+      <div className="workspace-form space-y-4">
         <FormSelect
           label="Cash / Bank Account"
           required
@@ -484,13 +490,13 @@ function ExpenseDetailDialog({
       {loading ? (
         <PageSpinner />
       ) : error && !expense ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       ) : expense ? (
         <div className="space-y-5">
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
           )}
@@ -612,7 +618,7 @@ function ExpenseModal({
   mode,
   initial,
   companies,
-  onClose,
+  onClose: closeWithoutGuard,
   onSaved,
 }: {
   mode: 'create' | 'edit';
@@ -643,6 +649,8 @@ function ExpenseModal({
   );
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -736,6 +744,7 @@ function ExpenseModal({
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Save failed');
       }
+      draft.markSaved();
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -746,6 +755,7 @@ function ExpenseModal({
 
   return (
     <Modal
+      onChangeCapture={draft.touch}
       open
       onClose={onClose}
       title={mode === 'create' ? 'Create Expense' : 'Edit Expense'}
@@ -762,7 +772,7 @@ function ExpenseModal({
       }
     >
       {error && (
-        <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -864,12 +874,11 @@ function ExpenseModal({
           )}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <FormInput
+          <FormDateField
             label="Expense Date"
             required
-            type="date"
             value={form.expenseDate}
-            onChange={(e) => set('expenseDate', e.target.value)}
+            onChange={(value) => set('expenseDate', value)}
           />
           <FormInput
             label="Vendor Name"
@@ -960,7 +969,7 @@ function DeleteConfirm({
       }
     >
       {error && (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -977,17 +986,29 @@ function DeleteConfirm({
 }
 
 export default function ExpensesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [data, setData] = useState<Paginated<Expense> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [layout, setLayout] = useWorkspaceLayout('/finance/expenses');
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQuery(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
@@ -998,45 +1019,85 @@ export default function ExpensesPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
 
+  const [scopeReady, setScopeReady] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setCompanyId(params.get('companyId') ?? '');
+    setStatus(params.get('status') ?? '');
+    setScopeReady(true);
+  }, []);
+
   const canView = hasPermission('expenses.view');
   const canCreate = hasPermission('expenses.create');
   const canApprove = hasPermission('expenses.approve');
   const canPay = hasPermission('expenses.pay');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) =>
+      .then((j) => {
+        if (controller.signal.aborted) return;
         setCompanies(
           Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      );
-    fetch('/api/backend/expense-categories?limit=200')
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    fetch('/api/backend/expense-categories?limit=200', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) =>
+      .then((j) => {
+        if (controller.signal.aborted) return;
         setCategories(
           Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : [],
-        ),
-      );
-  }, []);
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCategories([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView || !scopeReady) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
+      if (query.trim()) params.set('search', query.trim());
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
       if (categoryId) params.set('expenseCategoryId', categoryId);
       if (dateFrom) params.set('dateFrom', dateFrom);
       if (dateTo) params.set('dateTo', dateTo);
-      const res = await fetch(`/api/backend/expenses?${params}`);
+      const res = await fetch(`/api/backend/expenses?${params}`, { signal: request.signal });
       const json = await res.json();
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(json.message ?? 'Unable to load records');
       setData(json.data ?? null);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Unable to load records');
+      setData(null);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status, categoryId, dateFrom, dateTo]);
+  }, [
+    authLoading,
+    beginRequest,
+    canView,
+    scopeReady,
+    query,
+    page,
+    companyId,
+    status,
+    categoryId,
+    dateFrom,
+    dateTo,
+  ]);
 
   useEffect(() => {
     load();
@@ -1068,6 +1129,7 @@ export default function ExpensesPage() {
     setActionMsg('');
     try {
       const params = new URLSearchParams({ page: '1', limit: '5000' });
+      if (query.trim()) params.set('search', query.trim());
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
       if (categoryId) params.set('expenseCategoryId', categoryId);
@@ -1147,16 +1209,67 @@ export default function ExpensesPage() {
     setPage(1);
   };
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Expenses" subtitle="Manage expenses" />
         <div className="mt-8 text-center">
-          <p className="text-sm text-slate-500">Access Restricted</p>
+          <p className="text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</p>
         </div>
       </div>
     );
   }
+
+  const renderRecordActions = (exp: Expense) => (
+    <>
+      <Btn variant="secondary" size="xs" onClick={() => setViewingId(exp.id)}>
+        View
+      </Btn>
+      {exp.status === 'DRAFT' && canCreate && (
+        <>
+          <Btn
+            variant="primary"
+            size="xs"
+            onClick={() => handleAction(exp.id, 'submit')}
+            loading={actionLoading === exp.id + 'submit'}
+          >
+            Submit
+          </Btn>
+          <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>
+            Edit
+          </Btn>
+          <Btn variant="danger" size="xs" onClick={() => setDeleting(exp)}>
+            Delete
+          </Btn>
+        </>
+      )}
+      {exp.status === 'PENDING_APPROVAL' && canApprove && (
+        <>
+          <Btn
+            variant="success"
+            size="xs"
+            onClick={() => handleAction(exp.id, 'approve')}
+            loading={actionLoading === exp.id + 'approve'}
+          >
+            Approve
+          </Btn>
+          <Btn variant="danger" size="xs" onClick={() => setRejecting(exp)}>
+            Reject
+          </Btn>
+        </>
+      )}
+      {exp.status === 'PENDING_APPROVAL' && canCreate && (
+        <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>
+          Edit
+        </Btn>
+      )}
+      {exp.status === 'APPROVED' && canPay && (
+        <Btn variant="primary" size="xs" onClick={() => setPaying(exp)}>
+          Pay
+        </Btn>
+      )}
+    </>
+  );
 
   const filterSelectCls =
     'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
@@ -1167,7 +1280,7 @@ export default function ExpensesPage() {
   } as const;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="business-workspace space-y-6">
       {creating && (
         <ExpenseModal
           mode="create"
@@ -1257,15 +1370,21 @@ export default function ExpensesPage() {
       </div>
 
       {actionMsg && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">
           {actionMsg}
         </div>
       )}
 
       <PageToolbar
+        collapsibleFilters
+        activeFilterCount={[companyId, status, categoryId, dateFrom, dateTo].filter(Boolean).length}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search expenses…"
         filters={
           <>
             <select
+              aria-label="Filter by company"
               value={companyId}
               onChange={(e) => reset(setCompanyId)(e.target.value)}
               className={filterSelectCls}
@@ -1278,7 +1397,7 @@ export default function ExpensesPage() {
                 </option>
               ))}
             </select>
-            <select
+            <select aria-label="All Categories"
               value={categoryId}
               onChange={(e) => reset(setCategoryId)(e.target.value)}
               className={filterSelectCls}
@@ -1292,6 +1411,7 @@ export default function ExpensesPage() {
               ))}
             </select>
             <select
+              aria-label="Filter by status"
               value={status}
               onChange={(e) => reset(setStatus)(e.target.value)}
               className={filterSelectCls}
@@ -1304,21 +1424,17 @@ export default function ExpensesPage() {
               <option value="REJECTED">Rejected</option>
               <option value="PAID">Paid</option>
             </select>
-            <input
-              type="date"
+            <FormDateField
+              aria-label="From date"
               value={dateFrom}
-              onChange={(e) => reset(setDateFrom)(e.target.value)}
-              className={filterSelectCls}
-              style={filterStyle}
-              title="From date"
+              onChange={(value) => reset(setDateFrom)(value)}
+              className="ui-date-field-inline"
             />
-            <input
-              type="date"
+            <FormDateField
+              aria-label="To date"
               value={dateTo}
-              onChange={(e) => reset(setDateTo)(e.target.value)}
-              className={filterSelectCls}
-              style={filterStyle}
-              title="To date"
+              onChange={(value) => reset(setDateTo)(value)}
+              className="ui-date-field-inline"
             />
           </>
         }
@@ -1336,146 +1452,144 @@ export default function ExpensesPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
-            <thead>
-              <tr
-                className="text-left text-xs uppercase bg-gray-50"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <th className="px-4 py-3">Expense #</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Vendor</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={7}>
-                    <PageSpinner />
-                  </td>
+      {loadError && layout === 'ledger' && (
+        <div role="alert" className="workspace-load-error">
+          {loadError}
+          <button onClick={load}>Try again</button>
+        </div>
+      )}
+      <div className="workspace-view-bar">
+        <p>Select a record to review details and actions.</p>
+        <WorkspaceViewSwitch value={layout} onChange={setLayout} />
+      </div>
+      {layout === 'focus' ? (
+        <RecordBrowser
+          title="Expenses"
+          records={data?.data ?? []}
+          name={(exp) => exp.expenseNumber ?? exp.id.slice(0, 8)}
+          reference={(exp) => exp.vendorName || exp.description || 'Expense'}
+          status={(exp) => exp.status}
+          fields={[
+            {
+              label: 'Amount',
+              value: (exp) =>
+                `${exp.currency} ${Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+            },
+            { label: 'Date', value: (exp) => fmtDate(exp.expenseDate) },
+          ]}
+          details={[
+            { label: 'Category', value: (exp) => exp.expenseCategory?.name || '—' },
+            { label: 'Description', value: (exp) => exp.description || '—' },
+            { label: 'Company', value: (exp) => exp.company?.name || '—' },
+          ]}
+          actions={renderRecordActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={data?.total ?? 0}
+          onPage={setPage}
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <WorkspaceTable className="w-full text-sm min-w-[800px]">
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase bg-gray-50"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th className="px-4 py-3">Expense #</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Vendor</th>
+                  <th className="px-4 py-3">Category</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
-              ) : !data?.data.length ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-sm"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    No expenses found
-                  </td>
-                </tr>
-              ) : (
-                data.data.map((exp) => (
-                  <tr key={exp.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">
-                      {exp.expenseNumber ?? exp.id.slice(0, 8)}
-                    </td>
-                    <td className="px-4 py-3">{fmtDate(exp.expenseDate)}</td>
-                    <td className="px-4 py-3">{exp.vendorName ?? '—'}</td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                      {exp.expenseCategory?.name ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">
-                      {exp.currency}{' '}
-                      {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(
-                        exp.amount,
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={exp.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Btn variant="secondary" size="xs" onClick={() => setViewingId(exp.id)}>
-                          View
-                        </Btn>
-                        {exp.status === 'DRAFT' && canCreate && (
-                          <>
-                            <Btn
-                              variant="primary"
-                              size="xs"
-                              onClick={() => handleAction(exp.id, 'submit')}
-                              loading={actionLoading === exp.id + 'submit'}
-                            >
-                              Submit
-                            </Btn>
-                            <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>
-                              Edit
-                            </Btn>
-                            <Btn variant="danger" size="xs" onClick={() => setDeleting(exp)}>
-                              Delete
-                            </Btn>
-                          </>
-                        )}
-                        {exp.status === 'PENDING_APPROVAL' && canApprove && (
-                          <>
-                            <Btn
-                              variant="success"
-                              size="xs"
-                              onClick={() => handleAction(exp.id, 'approve')}
-                              loading={actionLoading === exp.id + 'approve'}
-                            >
-                              Approve
-                            </Btn>
-                            <Btn variant="danger" size="xs" onClick={() => setRejecting(exp)}>
-                              Reject
-                            </Btn>
-                          </>
-                        )}
-                        {exp.status === 'PENDING_APPROVAL' && canCreate && (
-                          <Btn variant="ghost" size="xs" onClick={() => setEditing(exp)}>
-                            Edit
-                          </Btn>
-                        )}
-                        {exp.status === 'APPROVED' && canPay && (
-                          <Btn variant="primary" size="xs" onClick={() => setPaying(exp)}>
-                            Pay
-                          </Btn>
-                        )}
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <PageSpinner />
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {data && data.totalPages > 1 && (
-          <div
-            className="px-5 py-3 border-t flex items-center justify-between"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Page {data.page} of {data.totalPages} · {data.total} total
-            </span>
-            <div className="flex gap-2">
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Btn>
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page >= data.totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Btn>
-            </div>
+                ) : !data?.data.length ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-4 py-10 text-center text-sm"
+                      style={{ color: 'var(--aurora-text-muted)' }}
+                    >
+                      No expenses found
+                    </td>
+                  </tr>
+                ) : (
+                  data.data.map((exp) => (
+                    <tr key={exp.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {exp.expenseNumber ?? exp.id.slice(0, 8)}
+                      </td>
+                      <td className="px-4 py-3">{fmtDate(exp.expenseDate)}</td>
+                      <td className="px-4 py-3">{exp.vendorName ?? '—'}</td>
+                      <td
+                        className="px-4 py-3 text-xs"
+                        style={{ color: 'var(--aurora-text-muted)' }}
+                      >
+                        {exp.expenseCategory?.name ?? '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {exp.currency}{' '}
+                        {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(
+                          exp.amount,
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={exp.status} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {renderRecordActions(exp)}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </WorkspaceTable>
           </div>
-        )}
-      </Card>
+
+          {data && data.totalPages > 1 && (
+            <div
+              className="px-5 py-3 border-t flex items-center justify-between"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Page {data.page} of {data.totalPages} · {data.total} total
+              </span>
+              <div className="flex gap-2">
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Previous
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page >= data.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   crudMutationRecoveryPlan,
   validateCrudMutationFixtureContract,
 } from './crud-mutation-evidence';
+import { CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS } from './crud-redesign-suspended-evidence';
 
 interface PermissionContract {
   permissions: readonly string[];
@@ -156,9 +157,14 @@ describe('standalone autonomy release positive mutation evidence tranche', () =>
       if (!capability) continue;
       const permissions = EXPECTED_PERMISSIONS[candidate.capabilityId as ExpectedId];
       expect(capability.verb).not.toBe('GET');
-      expect(capability.agentExcluded).toBe(false);
+      // PayrollRunsController.pay: the ITEMBA OS redesign (4a155f19) changed its
+      // money-moving contract, so the route is agent-excluded and this retained
+      // envelope is not bound to the live route until it is re-reviewed.
+      const suspended = CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS.has(candidate.capabilityId);
+      expect(capability.agentExcluded).toBe(suspended);
       expect(capability.permissions).toEqual(permissions.permissions);
       expect(capability.anyPermissions).toEqual(permissions.anyPermissions);
+      if (suspended) continue;
       expect(Object.keys(candidate.request.path ?? {}).sort()).toEqual(
         [...capability.params.path].sort(),
       );

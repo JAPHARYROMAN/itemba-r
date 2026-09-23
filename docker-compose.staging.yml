@@ -321,6 +321,8 @@ services:
         BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:3001/api/v1}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
         NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBSITE_URL:?NEXT_PUBLIC_WEBSITE_URL is required}
+        # ITEMBA OS shell switch; baked into the frontend build. Off unless exactly "true".
+        NEXT_PUBLIC_ITEMBA_OS_ENABLED: ${NEXT_PUBLIC_ITEMBA_OS_ENABLED:-false}
         AUTH_COOKIE_MAX_AGE_SECONDS: ${AUTH_COOKIE_MAX_AGE_SECONDS:-315360000}
     container_name: itemba_r_frontend_staging
     restart: unless-stopped

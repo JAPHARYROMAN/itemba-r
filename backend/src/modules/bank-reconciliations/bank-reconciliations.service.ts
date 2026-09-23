@@ -1,5 +1,14 @@
+import { mappedCashAccount } from '../../common/services/mapped-cash-account';
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  AccessLevel,
+  BankReconciliation,
+  BankReconciliationMatch,
+  BankStatementLine,
+  Prisma,
+} from '@prisma/client';
+import { ImportStatementDto } from './dto/import-statement.dto';
+import { normalizeStatementRow, statementEvidence, statementKey } from './statement-integrity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { applyCompanyScopeWhere, assertCanAccessCompanyFromUser } from '../../common/services';
@@ -48,12 +57,191 @@ const PRIORITY_REFERENCE_TYPES = new Set<string>([
  */
 @Injectable()
 export class BankReconciliationsService {
+  private lockHeld = false;
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
   ) {}
+
+  /** All changes share the parent row lock, so imports/matching cannot race approval. */
+  private async locked<T>(
+    id: string,
+    user: AuthUser,
+    action: (service: BankReconciliationsService) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM bank_reconciliations WHERE id = ${id} FOR UPDATE`;
+        const existing = await tx.bankReconciliation.findFirst({ where: { id, deletedAt: null } });
+        if (!existing) throw new NotFoundException('Bank reconciliation not found');
+        assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
+        // PostgreSQL returns void from advisory locks; Prisma cannot decode void.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`reconcile:${existing.companyId}`}))::text`;
+        // Existing adjustment code can reuse this transaction without opening a nested one.
+        const client = new Proxy(tx, {
+          get(target, key) {
+            if (key === '$transaction')
+              return (callback: (db: Prisma.TransactionClient) => Promise<unknown>) => callback(tx);
+            return Reflect.get(target, key);
+          },
+        }) as PrismaService;
+        const service = new BankReconciliationsService(
+          client,
+          this.auditLogs,
+          this.accountResolver,
+          this.postingEngine,
+        );
+        service.lockHeld = true;
+        return action(service);
+      },
+      { timeout: 30000 },
+    );
+  }
+
+  async importStatement(
+    id: string,
+    dto: ImportStatementDto,
+    user: AuthUser,
+  ): Promise<{ imported: number; skipped: number }> {
+    if (!this.lockHeld)
+      return this.locked(id, user, (service) => service.importStatement(id, dto, user));
+    const record = await this.findOne(id, user);
+    if (record.status !== 'DRAFT')
+      throw new BadRequestException('Only draft statements can be imported.');
+    const rows = dto.rows.map((row) =>
+      normalizeStatementRow(row, record.statementStartDate, record.statementEndDate),
+    );
+    const keys = new Set(record.statementLines.map(statementKey));
+    const fresh = rows.filter((row) => {
+      const key = statementKey(row);
+      if (keys.has(key)) return false;
+      keys.add(key);
+      return true;
+    });
+    await this.prisma.bankStatementLine.createMany({
+      data: fresh.map((row) => ({ ...row, bankReconciliationId: id })),
+    });
+    await this.recomputeBalances(id);
+    await this.auditLogs.logStrictInTransaction(this.prisma, {
+      action: 'IMPORT',
+      entityType: 'BankReconciliation',
+      entityId: id,
+      companyId: record.companyId,
+      userId: user.id,
+      metadata: { imported: fresh.length, skipped: rows.length - fresh.length },
+    });
+    return { imported: fresh.length, skipped: rows.length - fresh.length };
+  }
+
+  async evidence(id: string, user: AuthUser) {
+    const record = await this.findOne(id, user);
+    const evidence = statementEvidence(record);
+    const profile = await this.prisma.companyProfile.findUnique({
+      where: { companyId: record.companyId },
+      select: { currency: true },
+    });
+    if (!profile || profile.currency !== record.currency)
+      evidence.issues.push(
+        'Reconciliation currency must match the company accounting currency; foreign-currency reconciliation needs a separate FX workflow.',
+      );
+    const cash = await this.prisma.cashAccount.findFirst({
+      where: {
+        id: record.cashAccountId,
+        companyId: record.companyId,
+        deletedAt: null,
+        isActive: true,
+      },
+    });
+    if (!cash || cash.currency !== record.currency)
+      evidence.issues.push(
+        'The cash account is inactive, inaccessible or has a different currency.',
+      );
+    if (!cash) return { ...evidence, ready: false };
+    let account;
+    try {
+      account = (
+        await mappedCashAccount(
+          this.prisma,
+          record.companyId,
+          record.cashAccountId,
+          record.currency,
+        )
+      ).ledger;
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      evidence.issues.push(error.message);
+      return { ...evidence, ready: false };
+    }
+    const journalLines = await this.prisma.journalEntryLine.findMany({
+      where: {
+        companyId: record.companyId,
+        accountId: account.id,
+        OR: [
+          { id: { in: record.matches.map((m) => m.matchedEntityId) } },
+          {
+            journalEntry: {
+              transactionDate: { gte: record.statementStartDate, lte: record.statementEndDate },
+              status: { in: ['POSTED', 'REVERSED'] },
+              deletedAt: null,
+            },
+          },
+        ],
+      },
+      include: { journalEntry: true },
+    });
+    const otherMatches = await this.prisma.bankReconciliationMatch.count({
+      where: {
+        bankReconciliationId: { not: id },
+        matchedEntityType: 'JournalEntryLine',
+        matchedEntityId: { in: record.matches.map((m) => m.matchedEntityId) },
+        bankReconciliation: { deletedAt: null },
+      },
+    });
+    if (otherMatches)
+      evidence.issues.push('A journal line is also matched in another reconciliation.');
+    const used = new Set<string>();
+    for (const line of record.statementLines) {
+      const matches = record.matches.filter((m) => m.bankStatementLineId === line.id);
+      if (matches.length !== 1) {
+        evidence.issues.push('Each statement line must have exactly one journal match.');
+        continue;
+      }
+      const match = matches[0],
+        journal = journalLines.find((j) => j.id === match.matchedEntityId);
+      if (used.has(match.matchedEntityId))
+        evidence.issues.push('A journal line has been used more than once.');
+      used.add(match.matchedEntityId);
+      const signed = line.creditAmount.minus(line.debitAmount);
+      if (
+        match.matchedEntityType !== 'JournalEntryLine' ||
+        !journal ||
+        !['POSTED', 'REVERSED'].includes(journal.journalEntry.status) ||
+        journal.journalEntry.deletedAt ||
+        journal.journalEntry.companyId !== record.companyId ||
+        !journal.debit.minus(journal.credit).eq(signed) ||
+        !match.amount.eq(signed.abs())
+      )
+        evidence.issues.push(
+          'A match has the wrong account, direction, amount, company or journal status.',
+        );
+    }
+    if (
+      journalLines.some(
+        (j) => ['POSTED', 'REVERSED'].includes(j.journalEntry.status) && !used.has(j.id),
+      )
+    )
+      evidence.issues.push(
+        'The cash/bank control account has unmatched book entries in this period.',
+      );
+    evidence.issues = [...new Set(evidence.issues)];
+    return {
+      ...evidence,
+      ready: evidence.issues.length === 0,
+      note: 'Checks use this cash account�s dedicated ledger account. Opening balances are supplied by the preparer; original postings and their dated reversals are both included.',
+    };
+  }
 
   async findAll(query: QueryBankReconciliationDto, user?: AuthUser) {
     const { companyId, bankAccountId, status, page = 1, limit = 20 } = query;
@@ -85,9 +273,25 @@ export class BankReconciliationsService {
   }
 
   async create(dto: CreateBankReconciliationDto, user: AuthUser) {
-    assertCanAccessCompanyFromUser(user, dto.companyId);
+    assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
+    const start = new Date(dto.statementStartDate),
+      end = new Date(dto.statementEndDate);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end)
+      throw new BadRequestException('Enter a valid statement period.');
+    const cash = await this.prisma.cashAccount.findFirst({
+      where: { id: dto.cashAccountId, companyId: dto.companyId, deletedAt: null, isActive: true },
+    });
+    if (!cash || (dto.currency && cash.currency !== dto.currency))
+      throw new BadRequestException('Choose an active cash account in this company and currency.');
     const item = await this.prisma.bankReconciliation.create({
-      data: { ...dto, status: 'DRAFT', preparedById: user.id },
+      data: {
+        ...dto,
+        statementStartDate: start,
+        statementEndDate: end,
+        currency: cash.currency,
+        status: 'DRAFT',
+        preparedById: user.id,
+      },
     });
     await this.auditLogs.log({
       action: 'CREATE',
@@ -99,15 +303,45 @@ export class BankReconciliationsService {
     return item;
   }
 
-  async update(id: string, dto: UpsertBankReconciliationDto, user: AuthUser) {
+  async update(
+    id: string,
+    dto: UpsertBankReconciliationDto,
+    user: AuthUser,
+  ): Promise<BankReconciliation> {
+    if (!this.lockHeld) return this.locked(id, user, (service) => service.update(id, dto, user));
     const existing = await this.findOne(id, user);
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT reconciliations can be updated');
     }
     if (dto.companyId && dto.companyId !== existing.companyId) {
-      assertCanAccessCompanyFromUser(user, dto.companyId);
+      throw new BadRequestException('A reconciliation cannot be moved to another company.');
     }
-    const updated = await this.prisma.bankReconciliation.update({ where: { id }, data: dto });
+    if (
+      existing.statementLines.length &&
+      (dto.cashAccountId || dto.statementStartDate || dto.statementEndDate || dto.currency)
+    )
+      throw new BadRequestException(
+        'Account, currency and dates cannot change after statement lines are added.',
+      );
+    const start = dto.statementStartDate
+      ? new Date(dto.statementStartDate)
+      : existing.statementStartDate;
+    const end = dto.statementEndDate ? new Date(dto.statementEndDate) : existing.statementEndDate;
+    if (start > end) throw new BadRequestException('Enter a valid statement period.');
+    const cash = await this.prisma.cashAccount.findFirst({
+      where: {
+        id: dto.cashAccountId ?? existing.cashAccountId,
+        companyId: existing.companyId,
+        deletedAt: null,
+        isActive: true,
+      },
+    });
+    if (!cash || cash.currency !== (dto.currency ?? existing.currency))
+      throw new BadRequestException('Choose an active cash account in this company and currency.');
+    const updated = await this.prisma.bankReconciliation.update({
+      where: { id },
+      data: { ...dto, statementStartDate: start, statementEndDate: end },
+    });
     await this.auditLogs.log({
       action: 'UPDATE',
       entityType: 'BankReconciliation',
@@ -127,13 +361,31 @@ export class BankReconciliationsService {
     });
   }
 
-  async addLine(reconciliationId: string, dto: AddBankStatementLineDto, user: AuthUser) {
+  async addLine(
+    reconciliationId: string,
+    dto: AddBankStatementLineDto,
+    user: AuthUser,
+  ): Promise<BankStatementLine> {
+    if (!this.lockHeld)
+      return this.locked(reconciliationId, user, (service) =>
+        service.addLine(reconciliationId, dto, user),
+      );
     const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
       throw new BadRequestException('Statement lines can only be added to DRAFT reconciliations');
     }
+    const normalized = normalizeStatementRow(
+      {
+        ...dto,
+        transactionDate: dto.transactionDate.slice(0, 10),
+        debitAmount: String(dto.debitAmount ?? 0),
+        creditAmount: String(dto.creditAmount ?? 0),
+      },
+      reconciliation.statementStartDate,
+      reconciliation.statementEndDate,
+    );
     const line = await this.prisma.bankStatementLine.create({
-      data: { ...dto, bankReconciliationId: reconciliationId },
+      data: { ...dto, ...normalized, bankReconciliationId: reconciliationId },
     });
     await this.auditLogs.log({
       action: 'CREATE',
@@ -157,7 +409,14 @@ export class BankReconciliationsService {
     reconciliationId: string,
     user: AuthUser,
     options: { dateWindowDays?: number; amountToleranceCents?: number } = {},
-  ) {
+  ): Promise<{
+    summary: { totalLines: number; autoMatched: number; ambiguous: number; stillUnmatched: number };
+    perLine: Array<Record<string, unknown>>;
+  }> {
+    if (!this.lockHeld)
+      return this.locked(reconciliationId, user, (service) =>
+        service.runMatching(reconciliationId, user, options),
+      );
     const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
       throw new BadRequestException('Matching can only run on DRAFT reconciliations');
@@ -165,26 +424,36 @@ export class BankReconciliationsService {
 
     const dateWindowDays = options.dateWindowDays ?? 3;
     const tolerance = (options.amountToleranceCents ?? 1) / 100;
+    if (
+      !Number.isInteger(dateWindowDays) ||
+      dateWindowDays < 0 ||
+      dateWindowDays > 31 ||
+      tolerance < 0 ||
+      tolerance > 1
+    )
+      throw new BadRequestException(
+        'Matching requires a 0–31 day window and a tolerance between 0 and 100 cents.',
+      );
+    const alreadyUsed = new Set(
+      (
+        await this.prisma.bankReconciliationMatch.findMany({
+          where: {
+            matchedEntityType: 'JournalEntryLine',
+            bankReconciliation: { companyId: reconciliation.companyId, deletedAt: null },
+          },
+          select: { matchedEntityId: true },
+        })
+      ).map((m) => m.matchedEntityId),
+    );
 
     const unmatched = reconciliation.statementLines.filter((l) => !l.matched);
 
-    // JournalEntryLine.accountId is a FK to ChartOfAccount, NOT to CashAccount.
-    // Resolve the GL cash/bank account for this reconciliation the same way
-    // postAdjustment does (by semantic role derived from the CashAccount type),
-    // then match statement lines against journal lines posted to THAT account.
-    // Querying by reconciliation.cashAccountId (a CashAccount PK) never matches
-    // a JournalEntryLine.accountId (a ChartOfAccount PK) — they are disjoint id
-    // pools — so the previous behaviour returned zero candidates for every line.
-    const cashAccount = await this.prisma.cashAccount.findFirst({
-      where: {
-        id: reconciliation.cashAccountId,
-        companyId: reconciliation.companyId,
-        deletedAt: null,
-      },
-      select: { accountType: true },
-    });
-    const cashRole = cashAccount?.accountType === 'BANK' ? 'BANK' : 'CASH_ON_HAND';
-    const cashChart = await this.accountResolver.resolve(reconciliation.companyId, cashRole);
+    const { ledger: cashChart } = await mappedCashAccount(
+      this.prisma,
+      reconciliation.companyId,
+      reconciliation.cashAccountId,
+      reconciliation.currency,
+    );
     const cashChartAccountId = cashChart.id;
 
     let autoMatched = 0;
@@ -219,7 +488,7 @@ export class BankReconciliationsService {
           accountId: cashChartAccountId,
           companyId: reconciliation.companyId,
           journalEntry: {
-            status: 'POSTED',
+            status: { in: ['POSTED', 'REVERSED'] },
             transactionDate: { gte: start, lte: end },
             deletedAt: null,
           },
@@ -243,7 +512,11 @@ export class BankReconciliationsService {
         const candidateAmount = new Prisma.Decimal(c.debit).gt(0)
           ? new Prisma.Decimal(c.debit)
           : new Prisma.Decimal(c.credit).negated();
-        return candidateAmount.abs().minus(absAmount).abs().lte(tolerance);
+        return (
+          !alreadyUsed.has(c.id) &&
+          candidateAmount.isPositive() === lineAmount.isPositive() &&
+          candidateAmount.abs().minus(absAmount).abs().lte(tolerance)
+        );
       });
 
       // Disambiguation: when multiple candidates tie on amount and date, prefer
@@ -262,6 +535,7 @@ export class BankReconciliationsService {
 
       if (winningMatch) {
         const m = winningMatch;
+        alreadyUsed.add(m.id);
         const matchAmount = new Prisma.Decimal(m.debit).gt(0)
           ? new Prisma.Decimal(m.debit)
           : new Prisma.Decimal(m.credit);
@@ -347,7 +621,11 @@ export class BankReconciliationsService {
     statementLineId: string,
     journalEntryLineId: string,
     user: AuthUser,
-  ) {
+  ): Promise<BankReconciliationMatch> {
+    if (!this.lockHeld)
+      return this.locked(reconciliationId, user, (service) =>
+        service.manualMatch(reconciliationId, statementLineId, journalEntryLineId, user),
+      );
     const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
       throw new BadRequestException('Statement lines can only be matched on DRAFT reconciliations');
@@ -357,10 +635,43 @@ export class BankReconciliationsService {
 
     const jeLine = await this.prisma.journalEntryLine.findUniqueOrThrow({
       where: { id: journalEntryLineId },
+      include: { journalEntry: true },
     });
     if (jeLine.companyId !== reconciliation.companyId) {
       throw new BadRequestException('Journal entry line belongs to another company');
     }
+    const cash = await this.prisma.cashAccount.findFirst({
+      where: {
+        id: reconciliation.cashAccountId,
+        companyId: reconciliation.companyId,
+        deletedAt: null,
+      },
+    });
+    if (!cash) throw new BadRequestException('Cash account is unavailable.');
+    const { ledger: account } = await mappedCashAccount(
+      this.prisma,
+      reconciliation.companyId,
+      reconciliation.cashAccountId,
+      reconciliation.currency,
+    );
+    const used = await this.prisma.bankReconciliationMatch.count({
+      where: {
+        matchedEntityType: 'JournalEntryLine',
+        matchedEntityId: journalEntryLineId,
+        bankReconciliation: { deletedAt: null },
+      },
+    });
+    if (
+      line.matched ||
+      used ||
+      jeLine.accountId !== account.id ||
+      !['POSTED', 'REVERSED'].includes(jeLine.journalEntry.status) ||
+      jeLine.journalEntry.deletedAt ||
+      !jeLine.debit.minus(jeLine.credit).eq(line.creditAmount.minus(line.debitAmount))
+    )
+      throw new BadRequestException(
+        'Choose an unused posted journal line on the cash/bank account with the exact amount and direction.',
+      );
 
     const matchAmount = new Prisma.Decimal(jeLine.debit).gt(0)
       ? new Prisma.Decimal(jeLine.debit)
@@ -401,12 +712,20 @@ export class BankReconciliationsService {
     return created;
   }
 
-  async unmatch(reconciliationId: string, statementLineId: string, user: AuthUser) {
+  async unmatch(reconciliationId: string, statementLineId: string, user: AuthUser): Promise<void> {
+    if (!this.lockHeld)
+      return this.locked(reconciliationId, user, (service) =>
+        service.unmatch(reconciliationId, statementLineId, user),
+      );
     const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
-      throw new BadRequestException('Statement lines can only be unmatched on DRAFT reconciliations');
+      throw new BadRequestException(
+        'Statement lines can only be unmatched on DRAFT reconciliations',
+      );
     }
-    const line = reconciliation.statementLines.find((candidate) => candidate.id === statementLineId);
+    const line = reconciliation.statementLines.find(
+      (candidate) => candidate.id === statementLineId,
+    );
     if (!line) {
       // Authorisation is rooted in the reconciliation. Never let an otherwise
       // authorised reconciliation id become a confused-deputy path to a line
@@ -441,7 +760,11 @@ export class BankReconciliationsService {
       transactionDate?: string;
     },
     user: AuthUser,
-  ) {
+  ): Promise<{ journalEntryId: string; journalNumber: string; matchId?: string }> {
+    if (!this.lockHeld)
+      return this.locked(reconciliationId, user, (service) =>
+        service.postAdjustment(reconciliationId, dto, user),
+      );
     const reconciliation = await this.findOne(reconciliationId, user);
     if (reconciliation.status !== 'DRAFT') {
       throw new BadRequestException('Adjustments can only be posted on DRAFT reconciliations');
@@ -454,6 +777,14 @@ export class BankReconciliationsService {
     if (!['INCREASE_CASH', 'DECREASE_CASH'].includes(dto.direction)) {
       throw new BadRequestException('Adjustment direction is invalid');
     }
+    if (dto.statementLineId) {
+      const line = reconciliation.statementLines.find((l) => l.id === dto.statementLineId);
+      const signed = new Prisma.Decimal(dto.amount).mul(dto.direction === 'INCREASE_CASH' ? 1 : -1);
+      if (!line || line.matched || !line.creditAmount.minus(line.debitAmount).eq(signed))
+        throw new BadRequestException(
+          'The adjustment must match an unmatched statement line with the exact amount and direction.',
+        );
+    }
 
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: {
@@ -463,10 +794,14 @@ export class BankReconciliationsService {
       },
       select: { accountType: true, divisionId: true, branchId: true },
     });
-    const cashRole = cashAccount?.accountType === 'BANK' ? 'BANK' : 'CASH_ON_HAND';
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const cashChart = await this.accountResolver.resolve(reconciliation.companyId, cashRole, tx);
+      const { ledger: cashChart } = await mappedCashAccount(
+        tx,
+        reconciliation.companyId,
+        reconciliation.cashAccountId,
+        reconciliation.currency,
+      );
       const offsetChart = dto.offsetAccountId
         ? await tx.chartOfAccount.findFirst({
             where: {
@@ -478,6 +813,8 @@ export class BankReconciliationsService {
           })
         : await this.accountResolver.resolve(reconciliation.companyId, 'GENERAL_EXPENSE', tx);
       if (!offsetChart) throw new BadRequestException('Offset account not found');
+      if (offsetChart.id === cashChart.id)
+        throw new BadRequestException('The offset account must differ from the cash/bank account.');
 
       const description =
         dto.description || `Bank reconciliation adjustment ${reconciliation.reconciliationNumber}`;
@@ -554,15 +891,13 @@ export class BankReconciliationsService {
     return result;
   }
 
-  async approve(id: string, user: AuthUser) {
+  async approve(id: string, user: AuthUser): Promise<BankReconciliation> {
+    if (!this.lockHeld) return this.locked(id, user, (service) => service.approve(id, user));
     const existing = await this.findOne(id, user);
     if (existing.status !== 'DRAFT')
       throw new BadRequestException('Only DRAFT reconciliations can be approved');
-    if (new Prisma.Decimal(existing.differenceAmount).abs().gt(0.01)) {
-      throw new BadRequestException(
-        `Reconciliation cannot be approved while it has an unexplained difference of ${existing.differenceAmount}`,
-      );
-    }
+    const evidence = await this.evidence(id, user);
+    if (!evidence.ready) throw new BadRequestException(evidence.issues.join(' '));
     if (existing.preparedById === user.id) {
       throw new BadRequestException(
         'Maker-checker: the preparer cannot approve their own reconciliation',
@@ -570,9 +905,15 @@ export class BankReconciliationsService {
     }
     const updated = await this.prisma.bankReconciliation.update({
       where: { id },
-      data: { status: 'APPROVED', approvedAt: new Date(), approvedById: user.id },
+      data: {
+        status: 'APPROVED',
+        approvedAt: new Date(),
+        approvedById: user.id,
+        reconciledBalance: evidence.bookClose,
+        differenceAmount: 0,
+      },
     });
-    await this.auditLogs.log({
+    await this.auditLogs.logStrictInTransaction(this.prisma, {
       action: 'APPROVE',
       entityType: 'BankReconciliation',
       entityId: id,
@@ -581,15 +922,18 @@ export class BankReconciliationsService {
     return updated;
   }
 
-  async close(id: string, user: AuthUser) {
+  async close(id: string, user: AuthUser): Promise<BankReconciliation> {
+    if (!this.lockHeld) return this.locked(id, user, (service) => service.close(id, user));
     const existing = await this.findOne(id, user);
     if (existing.status !== 'APPROVED')
       throw new BadRequestException('Only APPROVED reconciliations can be closed');
+    const evidence = await this.evidence(id, user);
+    if (!evidence.ready) throw new BadRequestException(evidence.issues.join(' '));
     const updated = await this.prisma.bankReconciliation.update({
       where: { id },
       data: { status: 'CLOSED', closedAt: new Date(), closedById: user.id },
     });
-    await this.auditLogs.log({
+    await this.auditLogs.logStrictInTransaction(this.prisma, {
       action: 'CLOSE',
       entityType: 'BankReconciliation',
       entityId: id,

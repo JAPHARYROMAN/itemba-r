@@ -21,6 +21,7 @@ import {
 import { StatusBadge } from '@/components/aurora/data-display/StatusBadge';
 import { AuroraButton } from '@/components/aurora/actions';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import {
   ApiError,
   backendDelete,
@@ -350,8 +351,9 @@ function RuleModal({
 }
 
 export default function AutomationRulesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('automation_rules.list');
+  const beginRequest = useRequestGuard();
   // The backend guards both activate + pause with automation_rules.activate.
   const canToggle = hasPermission('automation_rules.activate');
   const canCreate = hasPermission('automation_rules.create');
@@ -373,26 +375,26 @@ export default function AutomationRulesPage() {
   const [deleting, setDeleting] = useState<AutomationRule | null>(null);
 
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<Company>('/companies', { query: { limit: 200 } })
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { signal: controller.signal, query: { limit: 200 } })
       .then((rows) => {
-        if (!cancelled) setCompanies(rows);
+        if (!controller.signal.aborted) setCompanies(rows);
       })
       .catch(() => {
-        if (!cancelled) setCompanies([]);
+        if (!controller.signal.aborted) setCompanies([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView]);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
       const result = await backendGet<RulePage>('/automation-rules', {
+        signal: request.signal,
         query: {
           page,
           limit: PAGE_SIZE,
@@ -400,6 +402,7 @@ export default function AutomationRulesPage() {
           status: status || undefined,
         },
       });
+      if (!request.current()) return;
       setData({
         items: Array.isArray(result?.items) ? result.items : [],
         total: num(result?.total),
@@ -407,12 +410,13 @@ export default function AutomationRulesPage() {
         limit: num(result?.limit) || PAGE_SIZE,
       });
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load automation rules');
       setData({ items: [], total: 0, page, limit: PAGE_SIZE });
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, page, companyId, status]);
+  }, [authLoading, beginRequest, canView, page, companyId, status]);
 
   useEffect(() => {
     void load();
@@ -590,6 +594,14 @@ export default function AutomationRulesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canToggle, canUpdate, canDelete, pendingAction],
   );
+
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Automation Rules" subtitle="Loading" />
+      </div>
+    );
+  }
 
   if (!canView) {
     return (

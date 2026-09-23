@@ -1,12 +1,15 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
   Card,
   EmptyState,
+  ErrorState,
+  FormDateField,
   FormInput,
   FormSelect,
   PageHeader,
@@ -14,6 +17,7 @@ import {
   StatCard,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import {
   BACKEND_PROXY_URL,
   backendGet,
@@ -23,7 +27,7 @@ import {
 } from '@/lib/api-client';
 import { filenameFromDisposition } from '@/lib/export-download';
 import { downloadTextFile } from '@/lib/report-export';
-import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
+import { useDocumentLetterhead } from '@/hooks/use-document-letterhead';
 import { RecordBookNav, recordBookMoney } from './record-book-ui';
 
 export type ReportKey =
@@ -187,9 +191,10 @@ export function RecordBookReportsClient({
 }: {
   initialReportKey?: ReportKey;
 }) {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('record_book.view');
   const canExport = hasPermission('record_book.export');
+  const beginRequest = useRequestGuard();
   const [reportKey, setReportKey] = useState<ReportKey>(initialReportKey);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
@@ -210,9 +215,9 @@ export function RecordBookReportsClient({
   });
   const [report, setReport] = useState<ReportResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState('');
-  const requestIdRef = useRef(0);
   const debouncedSearch = useDebouncedValue(filters.search);
 
   const scopedDivisions = useMemo(
@@ -243,15 +248,22 @@ export function RecordBookReportsClient({
     [categories, filters.companyId],
   );
   const selectedCompany = companies.find((company) => company.id === filters.companyId);
+  const letterhead = useDocumentLetterhead(filters.companyId, !authLoading && canView);
   const selectedDivision = divisions.find((division) => division.id === filters.divisionId);
   const selectedBranch = branches.find((branch) => branch.id === filters.branchId);
 
   useEffect(() => {
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
     Promise.all([
-      backendGet<ScopeOptions>('/record-book/scope-options'),
-      backendList<Category>('/record-book/expense-categories', { query: { limit: 500 } }),
+      backendGet<ScopeOptions>('/record-book/scope-options', { signal: controller.signal }),
+      backendList<Category>('/record-book/expense-categories', {
+        query: { limit: 500 },
+        signal: controller.signal,
+      }),
     ])
       .then(([scope, categoryRows]) => {
+        if (controller.signal.aborted) return;
         setCompanies(scope.companies);
         setDivisions(scope.divisions);
         setBranches(scope.branches);
@@ -262,10 +274,12 @@ export function RecordBookReportsClient({
             : { ...current, companyId: scope.companies[0].id },
         );
       })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Could not load report filters'),
-      );
-  }, []);
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : 'Could not load report filters');
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const query = useMemo(
     () => ({
@@ -297,25 +311,28 @@ export function RecordBookReportsClient({
   );
 
   const loadReport = useCallback(async () => {
-    if (!canView) return;
-    const requestId = ++requestIdRef.current;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
-      const data = await backendGet<ReportResult>(`/record-book/reports/${reportKey}`, { query });
-      if (requestId !== requestIdRef.current) return;
+      const data = await backendGet<ReportResult>(`/record-book/reports/${reportKey}`, {
+        query,
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       setReport(data);
     } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setError(err instanceof Error ? err.message : 'Could not run report');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Could not run report');
       setReport(null);
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, query, reportKey]);
+  }, [authLoading, beginRequest, canView, query, reportKey]);
 
   useEffect(() => {
-    loadReport();
+    void loadReport();
   }, [loadReport]);
 
   const auditClientExport = async (format: 'pdf' | 'print' | 'json') => {
@@ -379,16 +396,21 @@ export function RecordBookReportsClient({
     printHiddenColumnKeys.add('status');
   }
 
+  if (authLoading) {
+    return (
+      <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
+        <PageHeader title="Records Book Reports" subtitle="Loading" />
+      </div>
+    );
+  }
+
   if (!canView) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader title="Records Book Reports" subtitle="Permission required" />
-        <Card>
-          <EmptyState
-            title="Permission required"
-            description="You need record_book.view to run Records Book reports."
-          />
-        </Card>
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
       </div>
     );
   }
@@ -692,21 +714,15 @@ export function RecordBookReportsClient({
             <option value="ACTIVE">Draft + finalized</option>
             <option value="ALL">All statuses</option>
           </FormSelect>
-          <FormInput
+          <FormDateField
             label="From"
-            type="date"
             value={filters.dateFrom}
-            onChange={(event) =>
-              setFilters((current) => ({ ...current, dateFrom: event.target.value }))
-            }
+            onChange={(value) => setFilters((current) => ({ ...current, dateFrom: value }))}
           />
-          <FormInput
+          <FormDateField
             label="To"
-            type="date"
             value={filters.dateTo}
-            onChange={(event) =>
-              setFilters((current) => ({ ...current, dateTo: event.target.value }))
-            }
+            onChange={(value) => setFilters((current) => ({ ...current, dateTo: value }))}
           />
           <FormSelect
             label="Currency"
@@ -847,6 +863,10 @@ export function RecordBookReportsClient({
 
       {loading ? (
         <SkeletonTable rows={8} cols={7} />
+      ) : loadError ? (
+        <Card>
+          <ErrorState message={loadError} onRetry={() => void loadReport()} />
+        </Card>
       ) : !report || !report.rows.length ? (
         <Card>
           <EmptyState
@@ -860,15 +880,13 @@ export function RecordBookReportsClient({
             <div className="record-book-print-letterhead">
               <Image
                 className="record-book-print-logo"
-                src="/brand/itemba-group-logo.png"
+                src={letterhead.logoUrl}
                 alt="Itemba Group"
                 width={48}
                 height={48}
               />
               <div>
-                <div className="record-book-print-group">
-                  {ITEMBA_DOCUMENT_LETTERHEAD.groupName}
-                </div>
+                <div className="record-book-print-group">{letterhead.groupName}</div>
                 <div className="record-book-print-company">
                   {selectedCompany?.name ?? 'All Accessible Companies'}
                 </div>
@@ -876,19 +894,14 @@ export function RecordBookReportsClient({
                   {selectedCompany?.code ? `${selectedCompany.code} | ` : ''}
                   Records Book - independent manual control records
                 </div>
+                <div className="record-book-print-contact">Address: {letterhead.address}</div>
                 <div className="record-book-print-contact">
-                  Address: {ITEMBA_DOCUMENT_LETTERHEAD.address}
+                  Tel: {letterhead.telephone} | Phone: {letterhead.phone}
                 </div>
+                <div className="record-book-print-contact">Email: {letterhead.email}</div>
                 <div className="record-book-print-contact">
-                  Tel: {ITEMBA_DOCUMENT_LETTERHEAD.telephone} | Phone:{' '}
-                  {ITEMBA_DOCUMENT_LETTERHEAD.phone}
-                </div>
-                <div className="record-book-print-contact">
-                  Email: {ITEMBA_DOCUMENT_LETTERHEAD.email}
-                </div>
-                <div className="record-book-print-contact">
-                  TIN: {ITEMBA_DOCUMENT_LETTERHEAD.tin} | VRN: {ITEMBA_DOCUMENT_LETTERHEAD.vrn} |
-                  Reg No: {ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber}
+                  TIN: {letterhead.tin} | VRN: {letterhead.vrn} | Reg No:{' '}
+                  {letterhead.registrationNumber}
                 </div>
               </div>
               <div className="record-book-print-title">
@@ -1026,7 +1039,7 @@ export function RecordBookReportsClient({
 
           <Card className="record-book-print-table-card">
             <div className="overflow-x-auto rounded-lg border border-slate-800">
-              <table className="record-book-print-table w-full text-sm">
+              <WorkspaceTable className="record-book-print-table w-full text-sm">
                 <thead className="bg-slate-900/70 text-left text-slate-400">
                   <tr>
                     {report.columns.map((column) => (
@@ -1068,7 +1081,7 @@ export function RecordBookReportsClient({
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </Card>
           <p className="record-book-print-only record-book-print-note">

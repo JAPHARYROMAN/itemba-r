@@ -1,427 +1,312 @@
 'use client';
-
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, Card, EmptyState, PageSpinner, showToast } from '@/components/ui';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Btn,
+  EmptyState,
+  FormSelect,
+  PageHeader,
+  PageSpinner,
+  PermissionDeniedState,
+} from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
 import { useAuth } from '@/hooks/use-auth';
-import { backendGet } from '@/lib/api-client';
-import { downloadTablePdf } from '@/lib/export-download';
-import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
+import { downloadTablePdf, TABLE_PDF_MAX_ROWS } from '@/lib/export-download';
+import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { useInventoryWorkspace } from './inventory-workspace-context';
-
-type ReportDefinition = {
-  key: string;
-  title: string;
-  description: string;
-  endpoint: string;
-  source: 'operations' | 'westsides';
-  columns: string[];
-};
-
-const REPORTS: ReportDefinition[] = [
-  {
-    key: 'stock-valuation',
-    title: 'Stock valuation',
-    description: 'Stock on hand, availability, average cost, and total stock value.',
-    endpoint: '/operations-reports/stock-valuation',
-    source: 'operations',
-    columns: [
-      'productCode',
-      'product',
-      'category',
-      'branch',
-      'quantityOnHand',
-      'availableQuantity',
-      'averageCost',
-      'totalValue',
-      'stockStatus',
-    ],
-  },
-  {
-    key: 'low-stock',
-    title: 'Low stock',
-    description: 'Products at or below their reorder or minimum stock level.',
-    endpoint: '/operations-reports/low-stock',
-    source: 'operations',
-    columns: [
-      'productCode',
-      'product',
-      'category',
-      'branch',
-      'quantityOnHand',
-      'availableQuantity',
-      'reorderLevel',
-      'shortageQuantity',
-      'totalValue',
-    ],
-  },
-  {
-    key: 'stock-ageing',
-    title: 'Stock ageing',
-    description: 'Slow-moving stock and value exposure by product and branch.',
-    endpoint: '/operations-reports/stock-ageing',
-    source: 'operations',
-    columns: [
-      'productCode',
-      'product',
-      'category',
-      'branch',
-      'quantityOnHand',
-      'totalValue',
-      'daysSinceMovement',
-    ],
-  },
-  {
-    key: 'inventory-movements',
-    title: 'Inventory movements',
-    description: 'Stock receipts, issues, transfers, adjustments, costs, and references.',
-    endpoint: '/operations-reports/inventory-movements',
-    source: 'operations',
-    columns: [
-      'movementNumber',
-      'movementDate',
-      'movementType',
-      'branch',
-      'productCode',
-      'product',
-      'quantity',
-      'unit',
-      'unitCost',
-      'totalCost',
-      'referenceType',
-    ],
-  },
-  {
-    key: 'stock-adjustments',
-    title: 'Stock adjustments',
-    description: 'Count evidence showing system, counted, and variance quantities.',
-    endpoint: '/operations-reports/stock-adjustments',
-    source: 'operations',
-    columns: [
-      'adjustmentNumber',
-      'date',
-      'branch',
-      'status',
-      'productCode',
-      'product',
-      'systemQuantity',
-      'countedQuantity',
-      'varianceQuantity',
-      'unit',
-    ],
-  },
-  {
-    key: 'batch-status',
-    title: 'Batch status',
-    description: 'Batch quantity, cost, expiry exposure, and current status.',
-    endpoint: '/westsides/reports/batch-status',
-    source: 'westsides',
-    columns: [
-      'batchNumber',
-      'productName',
-      'sku',
-      'remainingQuantity',
-      'unitCost',
-      'expiryDate',
-      'status',
-    ],
-  },
-  {
-    key: 'stock-damage',
-    title: 'Stock damage',
-    description: 'Damage and breakage by type, status, quantity, and estimated value.',
-    endpoint: '/westsides/reports/stock-damage-report',
-    source: 'westsides',
-    columns: ['damageType', 'status', 'reportCount', 'quantity', 'estimatedValue'],
-  },
-];
-
-function normalizeRows(payload: unknown): Record<string, unknown>[] {
-  if (Array.isArray(payload)) return payload as Record<string, unknown>[];
-  if (!payload || typeof payload !== 'object') return [];
-  const object = payload as Record<string, unknown>;
-  if (Array.isArray(object.rows)) return object.rows as Record<string, unknown>[];
-  if (Array.isArray(object.items)) return object.items as Record<string, unknown>[];
-  const list = Object.values(object).find((value) => Array.isArray(value));
-  if (Array.isArray(list)) return list as Record<string, unknown>[];
-  return [object];
-}
-
-function columnsFor(rows: Record<string, unknown>[], report: ReportDefinition) {
-  const available = new Set(
-    rows.flatMap((row) =>
-      Object.keys(row).filter((key) => !key.endsWith('Id') && !key.startsWith('_')),
-    ),
-  );
-  const preferred = report.columns.filter((column) => available.has(column));
-  return [...preferred, ...Array.from(available).filter((column) => !preferred.includes(column))];
-}
-
-function heading(value: string) {
-  return value
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/_/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function printableValue(column: string, value: unknown) {
-  if (value === null || value === undefined || value === '') return '-';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (value instanceof Date) return value.toLocaleDateString('en-GB');
-  if (typeof value === 'number') {
-    return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 2 }).format(value);
-  }
-  if (typeof value === 'object') return '';
-  if (/(date|expiry|movementat)$/i.test(column)) {
-    const date = new Date(String(value));
-    if (!Number.isNaN(date.getTime())) return date.toLocaleDateString('en-GB');
-  }
-  return String(value).replace(/_/g, ' ');
-}
+import {
+  INVENTORY_REPORTS,
+  normalizeInventoryReport,
+  reportColumns,
+  reportHeading,
+  reportIsPaged,
+  reportMeasures,
+  reportName,
+  reportReview,
+  reportValue,
+  type ReportResult,
+  type ReportRow,
+} from './inventory-report-data';
+import { loadInventoryReport } from './inventory-report-loader';
+import './inventory-workspace.css';
 
 export default function InventoryReports() {
   const workspace = useInventoryWorkspace();
-  const { hasPermission } = useAuth();
-  const [activeKey, setActiveKey] = useState('stock-valuation');
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [exporting, setExporting] = useState<false | 'csv' | 'pdf'>(false);
-
-  const visibleReports = useMemo(
-    () =>
-      REPORTS.filter((report) =>
-        report.source === 'operations'
-          ? hasPermission('operations.reports.view')
-          : hasPermission('westsides.reports.view'),
+  const { hasPermission, loading: authLoading } = useAuth();
+  const available = INVENTORY_REPORTS.filter(
+    (r) =>
+      !authLoading &&
+      hasPermission(
+        r.source === 'operations' ? 'operations.reports.view' : 'westsides.reports.view',
       ),
-    [hasPermission],
   );
-  const activeReport =
-    visibleReports.find((report) => report.key === activeKey) ?? visibleReports[0];
-
-  useEffect(() => {
-    if (activeReport && activeReport.key !== activeKey) setActiveKey(activeReport.key);
-  }, [activeKey, activeReport]);
-
-  // Read the scope out of the workspace ONCE, into plain locals. An optional
-  // chain in a dependency array is not something the React Compiler can track,
-  // so `[workspace?.scope.companyId]` makes it skip the memoization it would
-  // otherwise preserve — which is the lint error, not a style preference.
-  const scopeCompanyId = workspace?.scope.companyId;
-  const scopeDivisionId = workspace?.scope.divisionId;
-  const scopeBranchId = workspace?.scope.branchId;
-
-  const load = useCallback(async () => {
-    // Inventory reports are company-scoped. Do not issue an accidental
-    // unscoped request while the operator is still choosing a workspace scope.
-    if (!activeReport || !scopeCompanyId) {
-      setRows([]);
-      setError('');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const payload = await backendGet<unknown>(activeReport.endpoint, {
-        query: {
-          companyId: scopeCompanyId || undefined,
-          divisionId: scopeDivisionId || undefined,
-          branchId: scopeBranchId || undefined,
-          locationId: scopeBranchId || undefined,
-        },
-      });
-      setRows(normalizeRows(payload));
-    } catch (reason) {
-      setRows([]);
-      setError(reason instanceof Error ? reason.message : 'Could not load the selected report');
-    } finally {
-      setLoading(false);
-    }
-  }, [activeReport, scopeBranchId, scopeCompanyId, scopeDivisionId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  if (!activeReport) {
-    return (
-      <EmptyState
-        title="Reports unavailable"
-        description="Your role does not include inventory report access."
-      />
-    );
-  }
-
-  if (!workspace?.scope.companyId) {
-    return (
-      <EmptyState
-        title="Select a company to run reports"
-        description="Choose a company above. You can leave Branch blank to report across all of its branches."
-      />
-    );
-  }
-
-  const columns = columnsFor(rows, activeReport);
-  const scopeLabel = [
-    'Selected company',
-    workspace?.scope.divisionId ? 'Selected division' : '',
-    workspace?.scope.branchId ? 'Selected branch' : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  const exportReport = async (format: 'csv' | 'pdf') => {
-    if (!rows.length) return;
-    setExporting(format);
-    try {
-      if (format === 'csv') {
-        const exportRows = rows.map((row) =>
-          Object.fromEntries(
-            columns.map((column) => [heading(column), printableValue(column, row[column])]),
-          ),
-        );
-        downloadTextFile(
-          `${activeReport.key}-${new Date().toISOString().slice(0, 10)}.csv`,
-          'text/csv;charset=utf-8',
-          rowsToCsv(exportRows, columns.map(heading)),
-        );
-      } else {
-        await downloadTablePdf({
-          title: activeReport.title,
-          subtitle: scopeLabel,
-          companyId: workspace?.scope.companyId || undefined,
-          columns: columns.map(heading),
-          rows: rows.map((row) => columns.map((column) => printableValue(column, row[column]))),
-          baseName: activeReport.key,
-        });
-      }
-    } catch (reason) {
-      showToast(
-        'error',
-        'Could not export report',
-        reason instanceof Error ? reason.message : undefined,
-      );
-    } finally {
-      setExporting(false);
-    }
+  const [selected, setSelected] = useState('stock-valuation');
+  const report = available.find((r) => r.key === selected) || available[0];
+  const scope = workspace?.scope || { companyId: '', divisionId: '', branchId: '' };
+  const key = JSON.stringify([report?.key, scope]);
+  const [paging, setPaging] = useState({ key: '', page: 1 });
+  const page = paging.key === key ? paging.page : 1;
+  const query = {
+    ...scope,
+    ...(report && reportIsPaged(report.key) ? { page, pageSize: 20 } : {}),
   };
-
+  const result = useWorkspaceResource<unknown>(
+    report?.endpoint || '',
+    query,
+    !!report && !!scope.companyId,
+  );
+  const companies = useWorkspaceChoices<{ id: string; name: string }>(
+    '/companies',
+    {},
+    !!report && hasPermission('companies.read'),
+  );
+  const divisions = useWorkspaceChoices<{ id: string; name: string }>(
+    '/divisions',
+    { companyId: scope.companyId },
+    !!report && !!scope.companyId && hasPermission('divisions.read'),
+  );
+  const branches = useWorkspaceChoices<{ id: string; name: string }>(
+    '/branches',
+    { companyId: scope.companyId },
+    !!report && !!scope.companyId && hasPermission('branches.read'),
+  );
+  const scopeLabels = [
+    companies.rows.find((r) => r.id === scope.companyId)?.name || scope.companyId,
+    scope.divisionId
+      ? divisions.rows.find((r) => r.id === scope.divisionId)?.name || scope.divisionId
+      : 'All divisions',
+    scope.branchId
+      ? branches.rows.find((r) => r.id === scope.branchId)?.name || scope.branchId
+      : 'All branches',
+  ];
+  let data: ReportResult | null = null,
+    invalid = '';
+  if (result.data !== null) {
+    try {
+      data = normalizeInventoryReport(result.data);
+    } catch (error) {
+      invalid = error instanceof Error ? error.message : 'Unable to read report.';
+    }
+  }
+  const total = data?.total || 0;
+  const hasData = !!data;
+  useEffect(() => {
+    if (hasData && page > Math.max(1, Math.ceil(total / 20)))
+      setPaging({ key, page: Math.max(1, Math.ceil(total / 20)) });
+  }, [key, total, page, hasData]);
+  const [exporting, setExporting] = useState(false),
+    [exportError, setExportError] = useState('');
+  const exportRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    exportRef.current?.abort();
+    setExporting(false);
+    setExportError('');
+    return () => exportRef.current?.abort();
+  }, [key]);
+  const refresh = () => {
+    exportRef.current?.abort();
+    setExporting(false);
+    setExportError('');
+    result.reload();
+  };
+  async function exportReport(format: 'csv' | 'pdf') {
+    if (!report || !data || result.loading || result.error || exporting) return;
+    const controller = new AbortController();
+    exportRef.current = controller;
+    setExporting(true);
+    setExportError('');
+    try {
+      const complete = await loadInventoryReport(
+        report,
+        { ...scope },
+        controller.signal,
+        format === 'pdf' ? TABLE_PDF_MAX_ROWS : Infinity,
+      );
+      if (!complete.rows.length)
+        throw new Error('There are no rows to export. Refresh the report.');
+      const columns = reportColumns(complete.rows, report);
+      const review = complete.rows.some((row) => reportReview(row) !== '—');
+      const headers = [...columns.map(reportHeading), ...(review ? ['Review note'] : [])];
+      const matrix = complete.rows.map((row) => [
+        ...columns.map((column) => cellToString(row[column])),
+        ...(review ? [reportReview(row)] : []),
+      ]);
+      controller.signal.throwIfAborted();
+      if (format === 'csv') {
+        const records = matrix.map((row) =>
+          Object.fromEntries(headers.map((header, index) => [header, row[index]])),
+        );
+        const csv = rowsToCsv(records, headers);
+        const metadata = rowsToCsv([
+          { Field: 'Report', Value: report.title },
+          { Field: 'Scope', Value: scopeLabels.join(' · ') },
+          { Field: 'Rows', Value: String(complete.total) },
+          { Field: 'Generated at', Value: complete.generatedAt || new Date().toISOString() },
+          ...(complete.notice ? [{ Field: 'Note', Value: complete.notice }] : []),
+        ]);
+        downloadTextFile(
+          report.key + '.csv',
+          'text/csv;charset=utf-8',
+          csv + '\r\n\r\n' + metadata,
+        );
+      } else
+        await downloadTablePdf(
+          {
+            title: report.title,
+            subtitle: scopeLabels.join(' · '),
+            companyId: scope.companyId,
+            columns: headers,
+            rows: matrix,
+            orientation: 'landscape',
+            meta: [
+              { label: 'Company', value: scopeLabels[0] },
+              { label: 'Division', value: scopeLabels[1] },
+              { label: 'Branch', value: scopeLabels[2] },
+              { label: 'Rows', value: String(complete.total) },
+            ],
+            note: complete.notice,
+            baseName: report.key,
+          },
+          controller.signal,
+        );
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setExportError(error instanceof Error ? error.message : 'Unable to export report.');
+    } finally {
+      if (!controller.signal.aborted) setExporting(false);
+    }
+  }
+  if (authLoading) return <PageSpinner label="Loading report access" />;
+  if (!report)
+    return (
+      <PermissionDeniedState description="Your role does not include inventory report access." />
+    );
+  const measures = reportMeasures(report.key);
+  const columns = reportColumns(data?.rows || [], report);
+  const rows = reportIsPaged(report.key)
+    ? data?.rows || []
+    : (data?.rows || []).slice((page - 1) * 20, page * 20);
+  const records: (ReportRow & { id: string })[] = rows.map((row, index) => ({
+    ...row,
+    id: String((page - 1) * 20 + index),
+  }));
+  const disabled = exporting || result.loading || !!result.error || !!invalid || !total;
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {visibleReports.map((report) => {
-          const active = report.key === activeReport.key;
-          return (
-            <button
-              key={report.key}
-              type="button"
-              onClick={() => setActiveKey(report.key)}
-              className="rounded-lg border p-4 text-left transition-colors"
-              style={{
-                borderColor: active ? 'var(--aurora-primary)' : 'var(--aurora-border)',
-                background: active ? 'var(--aurora-primary-subtle)' : 'var(--aurora-card)',
-              }}
-            >
-              <span className="block text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                {report.title}
-              </span>
-              <span
-                className="mt-1 block text-xs"
-                style={{ color: 'var(--aurora-text-secondary)' }}
-              >
-                {report.description}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      <Card className="overflow-hidden">
-        <div
-          className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3"
-          style={{ borderColor: 'var(--aurora-border)' }}
+    <div className="business-workspace inventory-overview inventory-reports">
+      <PageHeader
+        title="Inventory reports"
+        subtitle="Review stock, movements and losses in one place."
+      />
+      <div className="inventory-report-toolbar">
+        <FormSelect
+          label="Inventory report"
+          value={report.key}
+          onChange={(event) => setSelected(event.target.value)}
         >
-          <div>
-            <h2 className="text-base font-semibold" style={{ color: 'var(--aurora-text)' }}>
-              {activeReport.title}
-            </h2>
-            <p className="text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
-              {scopeLabel}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Btn variant="secondary" size="sm" onClick={() => void load()} loading={loading}>
-              Refresh
-            </Btn>
-            <Btn
-              variant="secondary"
-              size="sm"
-              onClick={() => void exportReport('csv')}
-              disabled={!rows.length || exporting !== false}
-            >
-              Export CSV
-            </Btn>
-            <Btn
-              variant="secondary"
-              size="sm"
-              onClick={() => void exportReport('pdf')}
-              disabled={!rows.length || exporting !== false}
-              loading={exporting === 'pdf'}
-            >
-              Export PDF
-            </Btn>
-          </div>
+          {available.map((item) => (
+            <option key={item.key} value={item.key}>
+              {item.title}
+            </option>
+          ))}
+        </FormSelect>
+        <div className="inventory-actions">
+          <Btn variant="ghost" disabled={!scope.companyId || result.loading} onClick={refresh}>
+            Refresh report
+          </Btn>
+          <Btn variant="secondary" disabled={disabled} onClick={() => void exportReport('csv')}>
+            Export CSV
+          </Btn>
+          <Btn variant="secondary" disabled={disabled} onClick={() => void exportReport('pdf')}>
+            Export PDF
+          </Btn>
         </div>
-
-        {error ? (
+      </div>
+      <div className="inventory-section-heading">
+        <div>
+          <h2>{report.title}</h2>
+          <p>{report.description}</p>
+        </div>
+      </div>
+      {!scope.companyId ? (
+        <EmptyState
+          title="Select a company to run reports"
+          description="Choose a company above. Division and branch can remain unselected to include all of its stock."
+        />
+      ) : (
+        <>
+          <p className="inventory-register-note">
+            {scopeLabels.join(' · ')}. Quantities are shown in each row’s unit; monetary values are
+            in TZS.
+          </p>
+          {data?.notice && (
+            <p role="note" className="workspace-notice">
+              {data.notice}
+            </p>
+          )}
+          {exporting && (
+            <p role="status" className="inventory-register-note">
+              Preparing the complete report…
+            </p>
+          )}
+          {exportError && (
+            <p role="alert" className="workspace-notice">
+              {exportError}
+            </p>
+          )}
           <div
-            role="alert"
-            className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            className="inventory-report-results"
+            style={
+              {
+                '--report-first-label': JSON.stringify(reportHeading(measures[0])),
+                '--report-second-label': JSON.stringify(reportHeading(measures[1])),
+              } as React.CSSProperties
+            }
           >
-            {error}
+            <RecordBrowser<ReportRow & { id: string }>
+              key={key + ':' + page}
+              title={report.title}
+              records={records}
+              name={reportName}
+              reference={(row) =>
+                [row.productCode, row.branch, row.unit].filter(Boolean).join(' · ')
+              }
+              status={(row) =>
+                String(
+                  row.status ||
+                    row.stockStatus ||
+                    row.readinessStatus ||
+                    row.movementType ||
+                    'REPORTED',
+                )
+              }
+              fields={measures.map((column) => ({
+                label: reportHeading(column),
+                value: (row) =>
+                  reportValue(column, row[column]) +
+                  (/quantity/i.test(column) && row.unit ? ' ' + row.unit : ''),
+              }))}
+              details={[
+                ...columns
+                  .filter((column) => !measures.includes(column))
+                  .map((column) => ({
+                    label: reportHeading(column),
+                    value: (row: (typeof records)[number]) => reportValue(column, row[column]),
+                  })),
+                { label: 'Review note', value: reportReview },
+              ]}
+              loading={result.loading}
+              error={result.error || invalid}
+              onRetry={refresh}
+              empty="No records match the selected inventory scope."
+              page={page}
+              total={total}
+              pageSize={20}
+              onPage={(next) => setPaging({ key, page: next })}
+            />
           </div>
-        ) : loading ? (
-          <PageSpinner label="Running report" />
-        ) : !rows.length ? (
-          <EmptyState
-            title="No report rows"
-            description="No records match the selected inventory scope."
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr
-                  className="border-b text-left text-xs uppercase"
-                  style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
-                >
-                  {columns.map((column) => (
-                    <th key={column} className="whitespace-nowrap px-4 py-3 font-medium">
-                      {heading(column)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={`${activeReport.key}-${rowIndex}`}
-                    className="border-b"
-                    style={{ borderColor: 'var(--aurora-border-subtle)' }}
-                  >
-                    {columns.map((column) => (
-                      <td key={column} className="whitespace-nowrap px-4 py-3">
-                        {printableValue(column, row[column])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+        </>
+      )}
     </div>
   );
 }

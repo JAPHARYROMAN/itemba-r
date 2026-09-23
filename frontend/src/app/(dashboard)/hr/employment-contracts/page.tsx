@@ -1,202 +1,188 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, StatusBadge, FormInput, FormSelect, Modal, Btn, PageSpinner, showToast } from '@/components/ui';
+import { Btn, FormSelect, PageHeader, PageToolbar, PermissionDeniedState } from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
-
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface Contract {
-  id: string;
-  contractCode: string;
-  employee?: string | { fullName?: string; employeeCode?: string };
-  employeeId?: string;
-  company?: string | { name?: string };
-  contractType: string;
-  startDate?: string;
-  endDate?: string;
-  salaryAmount?: number;
-  status: string;
-}
-
-interface FormState {
-  code: string;
-  employeeId: string;
-  companyId: string;
-  contractType: string;
-  startDate: string;
-  endDate: string;
-  baseSalary: string;
-  currency: string;
-}
-
-const empty: FormState = { code: '', employeeId: '', companyId: '', contractType: 'PERMANENT', startDate: '', endDate: '', baseSalary: '', currency: 'TZS' };
+import { Plus, RefreshCw } from 'lucide-react';
+import '@/components/workspace/workspace.css';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+import {
+  type Contract,
+  employeeName,
+  companyName,
+  date,
+  label,
+  options,
+  statuses,
+} from '@/features/payroll/contract-workflow';
 
 export default function EmploymentContractsPage() {
-  const [rows, setRows] = useState<Contract[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState<FormState>(empty);
-  const [saving, setSaving] = useState(false);
-  const [actionLoading, setActionLoading] = useState('');
-  const { companyOptions, employeeOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true });
-  const { user } = useAuth();
-
-  const load = async () => {
-    setLoading(true);
-    const r = await fetch('/api/backend/hr/employment-contracts');
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const res = await fetch('/api/backend/hr/employment-contracts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contractCode: form.code || undefined,
-          employeeId: form.employeeId,
-          companyId: form.companyId,
-          contractType: form.contractType,
-          startDate: form.startDate,
-          endDate: form.endDate || undefined,
-          salaryAmount: Number(form.baseSalary),
-          currency: form.currency,
-          createdById: user?.id,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not create the contract.'));
-        return;
-      }
-      setShowModal(false);
-      load();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const doAction = async (id: string, action: string) => {
-    setActionLoading(`${id}-${action}`);
-    try {
-      const res = await fetch(`/api/backend/hr/employment-contracts/${id}/${action}`, { method: 'PATCH' });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Action failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? `Could not ${action} this contract.`));
-      }
-    } finally {
-      setActionLoading('');
-      load();
-    }
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(p => ({ ...p, [k]: e.target.value }));
-
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('employment_contracts.view');
+  const canCreate = hasPermission('employment_contracts.create');
+  const canApprove = hasPermission('employment_contracts.approve');
+  const canTerminate = hasPermission('employment_contracts.terminate');
+  const stateKey = usePayrollStateKey('employment-contracts');
+  const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
+  const [search, setSearch] = useWorkspaceState(stateKey + '.search', '');
+  const [query, setQuery] = useState(search.trim());
+  const [company, setCompany] = useWorkspaceState(stateKey + '.company', '');
+  const [status, setStatus] = useWorkspaceState(stateKey + '.status', '');
+  const result = useWorkspaceRecords<Contract>(
+    '/hr/employment-contracts',
+    { page, limit: 20, search: query, companyId: company, status },
+    canRead,
+  );
+  useEffect(() => {
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
+  useEffect(() => {
+    if (!result.loading && !result.error && page > 1 && !result.rows.length)
+      setPage(Math.max(1, Math.ceil(result.total / 20)));
+  }, [result.loading, result.error, result.rows.length, result.total, page, setPage]);
+  const [notice, setNotice] = useState('');
+  const scope = useOrgScope(undefined, {
+    skipBranches: true,
+    skipDivisions: true,
+    skipEmployees: true,
+  });
+  const entry = usePayrollDraftEditor(['contract', 'contract-action'], (message) => {
+    setNotice(message);
+    void result.reload();
+  });
+  const openAction = (record: Contract, action: 'approve' | 'terminate') =>
+    entry.open({ kind: 'contract-action', record, action });
+  if (!canRead)
+    return <PermissionDeniedState description="Your role cannot view employment contracts." />;
   return (
-    <div className="p-6">
+    <div className="business-workspace record-workspace">
       <PageHeader
-        title="Employment Contracts"
-        subtitle="Employee contracts and agreements"
-        actions={<Btn variant="primary" onClick={() => { setForm(empty); setShowModal(true); }}>+ New Contract</Btn>}
+        title="Employment contracts"
+        subtitle="Agreements, dates and terms for your people."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Contracts' }]}
+        actions={
+          canCreate && (
+            <Btn icon={<Plus size={16} />} onClick={() => entry.open({ kind: 'contract' })}>
+              New contract
+            </Btn>
+          )
+        }
       />
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-100" style={{ color: 'var(--aurora-text-muted)' }}>
-                <tr>
-                  <th className={thCls}>Code</th>
-                  <th className={thCls}>Employee</th>
-                  <th className={thCls}>Company</th>
-                  <th className={thCls}>Type</th>
-                  <th className={thCls}>Start</th>
-                  <th className={thCls}>End</th>
-                  <th className={thCls}>Salary</th>
-                  <th className={thCls}>Status</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map(c => (
-                  <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-mono`}>{c.contractCode}</td>
-                    <td className={`${tdCls} font-medium`}>
-                      {typeof c.employee === 'string'
-                        ? c.employee
-                        : (c.employee?.fullName ?? c.employee?.employeeCode ?? c.employeeId ?? '—')}
-                    </td>
-                    <td className={tdCls}>{typeof c.company === 'string' ? c.company : (c.company?.name ?? '—')}</td>
-                    <td className={tdCls}>{c.contractType}</td>
-                    <td className={tdCls}>{c.startDate ? new Date(c.startDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{c.endDate ? new Date(c.endDate).toLocaleDateString('en-GB') : '—'}</td>
-                    <td className={tdCls}>{c.salaryAmount != null ? `TZS ${(Number.isFinite(Number(c.salaryAmount)) ? Number(c.salaryAmount).toLocaleString('en-TZ') : '0')}` : '—'}</td>
-                    <td className={tdCls}><StatusBadge status={c.status} /></td>
-                    <td className={tdCls}>
-                      <div className="flex flex-wrap gap-1">
-                        {c.status === 'DRAFT' && (
-                          <Btn variant="success" size="xs" onClick={() => doAction(c.id, 'approve')} disabled={actionLoading === `${c.id}-approve`}>
-                            {actionLoading === `${c.id}-approve` ? '…' : 'Approve'}
-                          </Btn>
-                        )}
-                        {['ACTIVE', 'APPROVED'].includes(c.status) && (
-                          <Btn variant="danger" size="xs" onClick={() => doAction(c.id, 'terminate')} disabled={actionLoading === `${c.id}-terminate`}>
-                            {actionLoading === `${c.id}-terminate` ? '…' : 'Terminate'}
-                          </Btn>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && <tr><td colSpan={9} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No contracts found</td></tr>}
-              </tbody>
-            </table>
-          </div>
+      <div className="workspace-summary">
+        <div>
+          <span>Matching contracts</span>
+          <strong>{result.total}</strong>
+        </div>
+        <div>
+          <span>Active on this page</span>
+          <strong>{result.rows.filter((r) => r.status === 'ACTIVE').length}</strong>
+        </div>
+      </div>
+      {notice && (
+        <div role="status" className="workspace-notice">
+          {notice}
+        </div>
+      )}
+      <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search contracts by code or employee…"
+        collapsibleFilters
+        activeFilterCount={Number(Boolean(company)) + Number(Boolean(status))}
+        filters={
+          <>
+            <FormSelect
+              label="Company filter"
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                setPage(1);
+              }}
+              options={scope.companyOptions}
+              placeholder="All companies"
+            />
+            <FormSelect
+              label="Status filter"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+              options={options(statuses)}
+              placeholder="All statuses"
+            />
+          </>
+        }
+        actions={
+          <Btn
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            disabled={result.loading}
+            onClick={result.reload}
+          >
+            Reload
+          </Btn>
+        }
+      />
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.selection'}
+        selectionScope={JSON.stringify([company, status, query])}
+        title="Contracts"
+        records={result.rows}
+        name={(r) => r.contractCode}
+        reference={employeeName}
+        status={(r) => r.status}
+        fields={[
+          { label: 'Employee', value: employeeName },
+          { label: 'Company', value: companyName },
+        ]}
+        details={[
+          { label: 'Contract type', value: (r) => label(r.contractType) },
+          { label: 'Start date', value: (r) => date(r.startDate) },
+          { label: 'End date', value: (r) => date(r.endDate) },
+          { label: 'Probation ends', value: (r) => date(r.probationEndDate) },
+          {
+            label: 'Salary',
+            value: (r) =>
+              r.salaryAmount == null
+                ? '—'
+                : `${r.currency || 'TZS'} ${Number(r.salaryAmount).toLocaleString('en-TZ')}`,
+          },
+          {
+            label: 'Payment frequency',
+            value: (r) => (r.paymentFrequency ? label(r.paymentFrequency) : '—'),
+          },
+          { label: 'Terms', value: (r) => r.terms || '—' },
+        ]}
+        loading={result.loading}
+        error={result.error}
+        onRetry={result.reload}
+        page={page}
+        total={result.total}
+        onPage={setPage}
+        actions={(r) => (
+          <>
+            {canApprove && r.status === 'DRAFT' && (
+              <Btn onClick={() => openAction(r, 'approve')}>Approve contract</Btn>
+            )}
+            {canTerminate && ['ACTIVE', 'APPROVED'].includes(r.status) && (
+              <Btn variant="ghost" onClick={() => openAction(r, 'terminate')}>
+                Terminate contract
+              </Btn>
+            )}
+          </>
         )}
-      </Card>
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Employment Contract" footer={<><Btn variant="secondary" onClick={() => setShowModal(false)}>Cancel</Btn><Btn variant="primary" type="submit" form="contract-form" loading={saving}>Save</Btn></>}>
-        <form id="contract-form" onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Code" value={form.code} onChange={f('code')} placeholder="Auto-generated if blank" />
-            <FormSelect label="Contract Type" value={form.contractType} onChange={f('contractType')}
-              options={[
-                { value: 'PERMANENT', label: 'Permanent' },
-                { value: 'FIXED_TERM', label: 'Fixed Term' },
-                { value: 'CASUAL', label: 'Casual' },
-                { value: 'DAILY_WORKER', label: 'Daily Worker' },
-                { value: 'CONSULTANT', label: 'Consultant' },
-                { value: 'INTERNSHIP', label: 'Internship' },
-                { value: 'OTHER', label: 'Other' },
-              ]} />
-          </div>
-          <FormSelect label="Company" required value={form.companyId}
-            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value, employeeId: '' }))}
-            options={companyOptions} placeholder="Select company" />
-          <FormSelect label="Employee" required value={form.employeeId} onChange={f('employeeId')}
-            options={employeeOptions} placeholder={form.companyId ? 'Select employee' : 'Select company first'} />
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Start Date" type="date" value={form.startDate} onChange={f('startDate')} required />
-            <FormInput label="End Date" type="date" value={form.endDate} onChange={f('endDate')} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Base Salary" type="number" value={form.baseSalary} onChange={f('baseSalary')} required />
-            <FormSelect label="Currency" value={form.currency} onChange={f('currency')}
-              options={[{ value: 'TZS', label: 'TZS' }, { value: 'USD', label: 'USD' }]} />
-          </div>
-        </form>
-      </Modal>
+      />
     </div>
   );
 }

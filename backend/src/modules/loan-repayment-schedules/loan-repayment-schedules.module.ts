@@ -6,9 +6,10 @@ import { LoanRepaymentSchedulesService } from './loan-repayment-schedules.servic
 import { AccountingControlService } from '../../common/services/accounting-control.service';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { CompanyScopeService } from '../../common/services';
+import { LoanLifecycleModule } from '../loans/loan-lifecycle.module';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule],
+  imports: [PrismaModule, AuditLogsModule, LoanLifecycleModule],
   controllers: [LoanRepaymentSchedulesController],
   providers: [
     LoanRepaymentSchedulesService,

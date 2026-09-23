@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { ReactNode } from 'react';
 import { StatusBadge } from '@/components/ui';
 
@@ -187,7 +188,7 @@ export function DetailTable({
       className="overflow-x-auto rounded-lg border"
       style={{ borderColor: 'var(--aurora-border)' }}
     >
-      <table className="w-full min-w-[680px] text-sm">
+      <WorkspaceTable className="w-full min-w-[680px] text-sm">
         <thead>
           <tr
             className="text-left text-[11px] uppercase"
@@ -209,7 +210,7 @@ export function DetailTable({
             </tr>
           )}
         </tbody>
-      </table>
+      </WorkspaceTable>
     </div>
   );
 }

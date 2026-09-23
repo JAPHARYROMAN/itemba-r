@@ -26,6 +26,14 @@ export class EmploymentContractsService {
     applyCompanyScopeWhere(where, user, companyId);
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      where.AND = [...(where.AND ?? []), { OR: [
+        { contractCode: { contains, mode: 'insensitive' } },
+        { employee: { fullName: { contains, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains, mode: 'insensitive' } } },
+      ] }];
+    }
     const [data, total] = await Promise.all([
       this.prisma.employmentContract.findMany({
         where,

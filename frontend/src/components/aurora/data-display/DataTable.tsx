@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { ErrorState } from '../feedback/ErrorState';
 import { showToast } from '../feedback/Toast';
 import { rowsToCsv, downloadTextFile, cellToString } from '@/lib/report-export';
+import { DocumentExportButton } from '@/components/documents/DocumentExportButton';
 import { downloadTablePdf } from '@/lib/export-download';
 
 export interface Column<T> {
@@ -233,6 +234,14 @@ export function DataTable<T extends Record<string, unknown>>({
     }
   }
 
+  function documentExportTable() {
+    const { exportColumns, headers, records } = buildExportMatrix();
+    const cfg = typeof exportPdf === 'object' && exportPdf !== null ? exportPdf : {};
+    return { title: cfg.title ?? exportFileName, subtitle: cfg.subtitle, companyId: cfg.companyId,
+      columns: headers, rows: records.map(rec => headers.map(header => cellToString(rec[header]))),
+      numericColumns: exportColumns.flatMap((column, index) => column.align === 'right' ? [index] : []), baseName: exportFileName };
+  }
+
   const rowPad = compact ? 'px-4 py-2.5' : 'px-4 py-3.5';
   const thPad = compact ? 'px-4 py-2' : 'px-4 py-3';
   const stickyThStyle: React.CSSProperties = stickyHeader
@@ -243,6 +252,7 @@ export function DataTable<T extends Record<string, unknown>>({
     <div className={`rounded-aurora border overflow-hidden ${className}`}
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)', boxShadow: 'var(--aurora-shadow-sm)' }}>
 
+      {hasPdfExport && !onExportPdf && data.length > 0 && <div className="px-4 pt-3"><DocumentExportButton table={documentExportTable()} /></div>}
       {/* Toolbar */}
       {(searchable || actions || filters || exportable || hasPdfExport) && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 border-b"

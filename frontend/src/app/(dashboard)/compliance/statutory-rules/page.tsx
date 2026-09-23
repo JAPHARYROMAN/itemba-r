@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface StatutoryRule {
   id: string;
@@ -76,7 +78,7 @@ function RuleModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Statutory Rule' : 'Edit Statutory Rule'} size="xl"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Code" required value={form.ruleCode} onChange={(e) => set('ruleCode', e.target.value)} />
         <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
@@ -90,8 +92,8 @@ function RuleModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit
         <FormInput label="Employer Rate" type="number" step="0.0001" value={form.employerContributionRate} onChange={(e) => set('employerContributionRate', e.target.value)} />
         <FormInput label="Min Gross" type="number" step="0.01" value={form.minGrossForContribution} onChange={(e) => set('minGrossForContribution', e.target.value)} />
         <FormInput label="Max Base" type="number" step="0.01" value={form.maxContributionBase} onChange={(e) => set('maxContributionBase', e.target.value)} />
-        <FormInput label="Effective From" type="date" value={form.effectiveFrom} onChange={(e) => set('effectiveFrom', e.target.value)} />
-        <FormInput label="Effective To" type="date" value={form.effectiveTo} onChange={(e) => set('effectiveTo', e.target.value)} />
+        <FormDateField label="Effective From" value={form.effectiveFrom} onChange={(value) => set('effectiveFrom', value)} />
+        <FormDateField label="Effective To" value={form.effectiveTo} onChange={(value) => set('effectiveTo', value)} />
         <div className="col-span-2"><FormTextarea label="Description" rows={2} value={form.description} onChange={(e) => set('description', e.target.value)} /></div>
       </div>
     </Modal>
@@ -99,29 +101,45 @@ function RuleModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit
 }
 
 export default function StatutoryRulesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('statutory_rules.manage');
   const canView = hasPermission('statutory_rules.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<StatutoryRule[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<StatutoryRule | null>(null);
   const [deleting, setDeleting] = useState<StatutoryRule | null>(null);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/compliance/statutory-rules?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<StatutoryRule> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
-  }, [page, status]);
+        try {
+      const res = await fetch(`/api/backend/compliance/statutory-rules?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load statutory rules');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<StatutoryRule> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load statutory rules');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, status]);
 
   useEffect(() => { load(); }, [load]);
   const reset = (fn: (v: string) => void) => (v: string) => { fn(v); setPage(1); };
@@ -135,6 +153,7 @@ export default function StatutoryRulesPage() {
   const activeCount = items.filter((r) => r.status === 'ACTIVE').length;
   const draftCount = items.filter((r) => r.status === 'DRAFT').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Statutory Rules" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Statutory Rules" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -149,7 +168,7 @@ export default function StatutoryRulesPage() {
 
       <PageToolbar
         filters={
-          <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+          <select aria-label="All Status" value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
             <option value="">All Status</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -158,11 +177,11 @@ export default function StatutoryRulesPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No rules</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Code</th>
@@ -194,7 +213,7 @@ export default function StatutoryRulesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
         {totalPages > 1 && (

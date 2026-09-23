@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface WebhookEndpoint {
   id: string;
@@ -27,6 +30,10 @@ interface Connection {
 const EMPTY_FORM = { name: '', endpointPath: '', providerId: '', connectionId: '', allowedEventsInput: '' };
 
 export default function WebhookEndpointsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('webhook_endpoints.view');
+  const beginRequest = useRequestGuard();
+
   const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -39,22 +46,42 @@ export default function WebhookEndpointsPage() {
   const [secretModal, setSecretModal] = useState<{ secret: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    fetch('/api/backend/webhook-endpoints?limit=50')
-      .then(r => r.json())
-      .then(data => setWebhooks(unwrapList(data)))
-      .catch(() => { setWebhooks([]); setLoadError('Failed to load webhook endpoints.'); })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const res = await fetch('/api/backend/webhook-endpoints?limit=50', { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load webhook endpoints.');
+      setWebhooks(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setWebhooks([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load webhook endpoints.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
+
   useEffect(() => {
-    // optional lookups — on failure the provider/connection dropdowns simply stay empty
-    fetch('/api/backend/integration-providers?limit=100').then(r => r.json()).then(data => setProviders(unwrapList(data))).catch(() => undefined);
-    fetch('/api/backend/integration-connections?limit=100').then(r => r.json()).then(data => setConnections(unwrapList(data))).catch(() => undefined);
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    const read = (url: string, apply: (data: unknown) => void) => {
+      fetch(url, { signal: controller.signal })
+        .then(r => r.json())
+        .then(data => { if (!controller.signal.aborted) apply(data); })
+        .catch(() => undefined);
+    };
+    read('/api/backend/integration-providers?limit=100', (data) => setProviders(unwrapList(data)));
+    read('/api/backend/integration-connections?limit=100', (data) => setConnections(unwrapList(data)));
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   async function save() {
     setSaving(true); setError('');
@@ -79,6 +106,9 @@ export default function WebhookEndpointsPage() {
     navigator.clipboard.writeText(secret).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Webhook Endpoints" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="Webhook Endpoints" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -92,7 +122,7 @@ export default function WebhookEndpointsPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Code</th>
@@ -121,7 +151,7 @@ export default function WebhookEndpointsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -137,7 +167,7 @@ export default function WebhookEndpointsPage() {
           </>
         }
       >
-        {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="space-y-3">
           <FormInput label="Name" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           <FormInput label="Endpoint Path" required value={form.endpointPath} onChange={e => setForm(f => ({ ...f, endpointPath: e.target.value }))} placeholder="/webhooks/my-provider" />

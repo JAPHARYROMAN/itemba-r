@@ -1,6 +1,17 @@
 'use client';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useGuardedRouter } from '@/components/workspace/unsaved-work-provider';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useId } from 'react';
+
+import { Modal, ModalPortalProvider } from '@/components/ui/modal';
+import { FilePreviewDialog } from '@/components/documents/FilePreviewDialog';
+import {
+  filePreviewPaths,
+  type FilePreviewSource,
+} from '@/components/documents/file-preview-source';
+import { searchResultFile } from './search-result-file';
+import { APP_REGISTRY } from '@/lib/apps';
+import { safeNotificationActionUrl as safeTarget } from '@/lib/notification-links';
+import './command-palette.css';
 import { useAuth } from '@/hooks/use-auth';
 import { backendGet } from '@/lib/api-client';
 import { NAV, isGroup, type NavItem, type NavLeaf } from '@/components/layout/sidebar';
@@ -18,12 +29,13 @@ interface CommandItem {
   shortcut?: string;
   permission?: string;
   anyPermission?: string[];
-  source?: 'navigation' | 'record';
+  source?: 'navigation' | 'record' | 'app';
   badge?: string;
   date?: string;
   keywords?: string[];
   /** Sidebar icon key, carried so favoriting keeps a consistent icon everywhere. */
   iconKey?: string;
+  file?: FilePreviewSource;
 }
 
 interface GlobalSearchApiResult {
@@ -35,6 +47,7 @@ interface GlobalSearchApiResult {
   href: string;
   badge?: string;
   date?: string;
+  file?: unknown;
 }
 
 interface GlobalSearchApiGroup {
@@ -105,6 +118,25 @@ const NAV_ICON_LABELS: Record<string, string> = {
 };
 
 const EXTRA_ROUTE_COMMANDS: CommandItem[] = [
+  {
+    id: 'route:document-library',
+    label: 'Browse file library',
+    href: '/documents?view=library',
+    group: 'Documents',
+    permission: 'documents.view',
+    icon: <AppIcon name="document" size={16} />,
+    keywords: ['files', 'attachments', 'pdf', 'word', 'excel'],
+  },
+  {
+    id: 'route:write-letter',
+    label: 'Write a company letter',
+    href: '/documents?view=letter',
+    group: 'Documents',
+    permission: 'documents.manage',
+    anyPermission: ['documents.view'],
+    icon: <AppIcon name="document" size={16} />,
+    keywords: ['correspondence', 'letterhead', 'word', 'create letter'],
+  },
   {
     id: 'route:supplier-360-reports',
     label: 'Supplier 360 Reports',
@@ -422,6 +454,11 @@ interface CommandPaletteProps {
 }
 
 const RECORD_ICONS: Record<string, AppIconName> = {
+  'invoice-attachment': 'document',
+  'desk-invoice': 'order',
+  'desk-sale': 'order',
+  'desk-movement': 'cash',
+  document: 'document',
   customer: 'customer',
   supplier: 'company',
   product: 'product',
@@ -443,443 +480,382 @@ function iconForRecord(type: string) {
   return <AppIcon name={RECORD_ICONS[type] ?? 'search'} size={16} />;
 }
 
-export function CommandPalette({ open, onClose, additionalCommands = [] }: CommandPaletteProps) {
+const APP_COMMANDS: CommandItem[] = APP_REGISTRY.map((app) => ({
+  id: `app:${app.id}`,
+  label: app.label,
+  description: app.description,
+  href: app.href,
+  group: 'Apps',
+  source: 'app',
+  permission: app.permission,
+  anyPermission: app.permissionsAny,
+  keywords: [...app.keywords],
+  icon: <AppIcon name={app.icon} size={20} />,
+  iconKey: app.iconKey,
+}));
+const EMPTY_COMMANDS: CommandItem[] = [];
+type Filter = 'all' | 'apps' | 'pages' | 'records' | 'files';
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'apps', label: 'Apps' },
+  { id: 'pages', label: 'Pages & actions' },
+  { id: 'records', label: 'Records' },
+  { id: 'files', label: 'Files' },
+];
+
+export function CommandPalette(props: CommandPaletteProps) {
+  const { user } = useAuth();
+  // Search responses and queries never survive an account/permission boundary or close.
+  const boundary = JSON.stringify([user?.id, user?.companyId, user?.permissions]);
+  return props.open && user ? <SearchSession key={boundary} {...props} /> : null;
+}
+
+function SearchSession({ onClose, additionalCommands = EMPTY_COMMANDS }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState(0);
-  const [remoteGroups, setRemoteGroups] = useState<GlobalSearchApiGroup[]>([]);
-  const [remoteLoading, setRemoteLoading] = useState(false);
-  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [preview, setPreview] = useState<FilePreviewSource | null>(null);
+  const [remote, setRemote] = useState<{
+    key: string;
+    groups: GlobalSearchApiGroup[];
+    loading: boolean;
+    error: string;
+  }>({ key: '', groups: [], loading: false, error: '' });
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
-  const { user, hasPermission } = useAuth();
+  const listId = useId();
+  const router = useGuardedRouter();
+  const { hasPermission } = useAuth();
   const { favorites, recent, isFavorite, toggleFavorite } = usePersonalization();
+  const trimmed = query.trim();
+  const category = filter === 'files' ? 'files' : 'all';
+  const recordSearch = ['all', 'records', 'files'].includes(filter) && trimmed.length >= 2;
+  const requestKey = JSON.stringify([trimmed, retry, category]);
+  const remoteLoading = recordSearch && (remote.key !== requestKey || remote.loading);
+  const remoteError = recordSearch && remote.key === requestKey ? remote.error : '';
 
-  const allCommands = useMemo(
-    () => [...DEFAULT_COMMANDS, ...additionalCommands],
-    [additionalCommands],
-  );
-
-  const canSeeCommand = useCallback(
-    (command: CommandItem) => {
+  const visibleCommands = useMemo(() => {
+    const seen = new Set<string>();
+    return [...APP_COMMANDS, ...DEFAULT_COMMANDS, ...additionalCommands].filter((command) => {
       if (command.permission && !hasPermission(command.permission)) return false;
-      if (
-        command.anyPermission?.length &&
-        !command.anyPermission.some((permission) => user?.permissions.includes(permission))
-      ) {
+      if (command.anyPermission?.length && !command.anyPermission.some((p) => hasPermission(p)))
         return false;
-      }
+      const key = command.href || command.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
-    },
-    [hasPermission, user],
-  );
+    });
+  }, [additionalCommands, hasPermission]);
 
-  const visibleCommands = useMemo(
-    () => allCommands.filter(canSeeCommand),
-    [allCommands, canSeeCommand],
-  );
-
-  const isEmptyQuery = !query.trim();
-
-  // Resolve a stored personalization entry (href only) into the full command —
-  // preferring the canonical visible command so icon/permission stay consistent;
-  // falling back to a synthesized item if the route isn't in the command set.
-  const commandByHref = useMemo(() => {
-    const map = new Map<string, CommandItem>();
-    for (const c of visibleCommands) {
-      if (c.href && !map.has(c.href)) map.set(c.href, c);
-    }
-    return map;
-  }, [visibleCommands]);
-
-  const resolveEntry = useCallback(
-    (entry: PersonalizationEntry, groupOverride: string): CommandItem | null => {
-      const existing = commandByHref.get(entry.href);
-      if (existing) {
-        // Gate stored entries by current permissions via the visible command set.
-        return { ...existing, group: groupOverride };
-      }
-      // Route not in the command catalog (or not permitted) — skip it.
-      return null;
-    },
-    [commandByHref],
-  );
-
-  // When the query is empty, show "Recently viewed" + "Favorites" instead of the
-  // full nav dump. Otherwise, fuzzy-match across every visible command.
-  const filteredCommands = useMemo(() => {
-    if (isEmptyQuery) {
-      const items: CommandItem[] = [];
-      const seen = new Set<string>();
-      for (const fav of favorites) {
-        const cmd = resolveEntry(fav, 'Favorites');
-        if (cmd && !seen.has(cmd.id)) {
-          items.push(cmd);
-          seen.add(cmd.id);
-        }
-      }
-      for (const r of recent) {
-        // Don't repeat a favorite inside recents.
-        if (isFavorite(r.href)) continue;
-        const cmd = resolveEntry(r, 'Recently viewed');
-        if (cmd && !seen.has(cmd.id)) {
-          items.push(cmd);
-          seen.add(cmd.id);
-        }
-      }
-      return items;
-    }
-    const q = query.toLowerCase();
-    return visibleCommands.filter(
-      (c) =>
-        c.label.toLowerCase().includes(q) ||
-        c.description?.toLowerCase().includes(q) ||
-        c.group?.toLowerCase().includes(q) ||
-        c.href?.toLowerCase().includes(q) ||
-        c.keywords?.some((keyword) => keyword.toLowerCase().includes(q)),
+  const navigation = useMemo(() => {
+    const candidates = visibleCommands.filter((command) =>
+      filter === 'records' || filter === 'files'
+        ? false
+        : filter === 'apps'
+          ? command.source === 'app'
+          : filter === 'pages'
+            ? command.source !== 'app'
+            : true,
     );
-  }, [isEmptyQuery, query, visibleCommands, favorites, recent, isFavorite, resolveEntry]);
-
-  const remoteItems = useMemo<CommandItem[]>(() => {
-    return remoteGroups.flatMap((group) =>
-      group.results.map((result) => ({
-        id: `record:${result.type}:${result.id}`,
-        label: result.title,
-        description: [result.subtitle, result.date].filter(Boolean).join(' - '),
-        href: result.href,
-        group: group.label,
-        icon: iconForRecord(result.type),
-        source: 'record' as const,
-        badge: result.badge,
-      })),
-    );
-  }, [remoteGroups]);
-
-  const filtered = useMemo(() => {
-    return [...filteredCommands, ...remoteItems];
-  }, [filteredCommands, remoteItems]);
+    if (trimmed) {
+      const words = trimmed.toLowerCase().split(/\s+/);
+      return candidates.filter((command) => {
+        const text = [
+          command.label,
+          command.description,
+          command.group,
+          command.href,
+          ...(command.keywords ?? []),
+        ]
+          .join(' ')
+          .toLowerCase();
+        return words.every((word) => text.includes(word));
+      });
+    }
+    if (filter !== 'all') return candidates;
+    const byHref = new Map(candidates.filter((c) => c.href).map((c) => [c.href!, c]));
+    const entries: CommandItem[] = [];
+    const seen = new Set<string>();
+    const add = (entry: PersonalizationEntry, group: string) => {
+      const item = byHref.get(entry.href);
+      if (item && !seen.has(item.id)) {
+        entries.push({ ...item, group });
+        seen.add(item.id);
+      }
+    };
+    favorites.forEach((entry) => add(entry, 'Favorites'));
+    recent.forEach((entry) => add(entry, 'Recently viewed'));
+    candidates
+      .filter((item) => item.source === 'app' && !seen.has(item.id))
+      .forEach((item) => entries.push(item));
+    return entries;
+  }, [filter, trimmed, visibleCommands, favorites, recent]);
 
   const grouped = useMemo(() => {
-    const groups: Record<string, CommandItem[]> = {};
-    filtered.forEach((item) => {
-      const g = item.group ?? 'Other';
-      if (!groups[g]) groups[g] = [];
-      groups[g].push(item);
+    const records: CommandItem[] =
+      recordSearch && remote.key === requestKey
+        ? remote.groups.flatMap((group) =>
+            group.results.flatMap((result) => {
+              const href = safeTarget(result.href);
+              const file = searchResultFile(result, hasPermission);
+              return href && (filter !== 'files' || file)
+                ? [
+                    {
+                      id: `record:${result.type}:${result.id}`,
+                      label: result.title,
+                      description: [result.subtitle, result.date].filter(Boolean).join(' · '),
+                      href,
+                      group: group.label,
+                      source: 'record' as const,
+                      icon: iconForRecord(result.type),
+                      badge: result.badge,
+                      file,
+                    },
+                  ]
+                : [];
+            }),
+          )
+        : [];
+    const groups = new Map<string, CommandItem[]>();
+    [...navigation, ...records].forEach((item) => {
+      const key = item.group ?? 'Pages & actions';
+      groups.set(key, [...(groups.get(key) ?? []), item]);
     });
-    return groups;
-  }, [filtered]);
+    return [...groups.entries()];
+  }, [navigation, recordSearch, remote, requestKey, filter, hasPermission]);
+  const flatItems = useMemo(() => grouped.flatMap(([, items]) => items), [grouped]);
+  const index = Math.min(selected, Math.max(flatItems.length - 1, 0));
+  const activeItem = flatItems[index];
+  const activeId = activeItem ? `${listId}-option-${index}` : undefined;
+  const canPin = activeItem?.href && activeItem.source !== 'record';
+  const files = flatItems.flatMap((item) => (item.file ? [item.file] : []));
 
-  const flatItems = useMemo(() => {
-    const items: CommandItem[] = [];
-    Object.values(grouped).forEach((groupItems) => items.push(...groupItems));
-    return items;
-  }, [grouped]);
-
-  const executeCommand = useCallback(
+  const execute = useCallback(
     (item: CommandItem) => {
+      if (item.file) {
+        setPreview(item.file);
+        return;
+      }
+      onClose();
       if (item.action) item.action();
       if (item.href) router.push(item.href);
-      onClose();
     },
     [onClose, router],
   );
 
-  const handleToggleFavorite = useCallback(
-    (item: CommandItem) => {
-      if (!item.href) return;
-      toggleFavorite({
-        href: item.href,
-        label: item.label,
-        group: item.group,
-        iconKey: item.iconKey,
-      });
-    },
-    [toggleFavorite],
-  );
-
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setSelected(0);
-      setRemoteGroups([]);
-      setRemoteError(null);
-      setRemoteLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [open]);
-
+    inputRef.current?.focus();
+  }, []);
   useEffect(() => {
-    if (!open) return;
-
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setRemoteGroups([]);
-      setRemoteError(null);
-      setRemoteLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setRemoteError(null);
-    const timer = window.setTimeout(async () => {
-      setRemoteLoading(true);
-      try {
-        const response = await backendGet<GlobalSearchApiResponse>('/global-search', {
-          query: { q: trimmed, limit: 5 },
+    if (!recordSearch) return;
+    const controller = new AbortController();
+    const [q, , searchCategory] = JSON.parse(requestKey) as [string, number, string];
+    setRemote({ key: requestKey, groups: [], loading: true, error: '' });
+    const timer = window.setTimeout(() => {
+      backendGet<GlobalSearchApiResponse>('/global-search', {
+        query: { q, limit: 5, ...(searchCategory === 'files' ? { category: 'files' } : {}) },
+        signal: controller.signal,
+      })
+        .then((response) => {
+          if (!controller.signal.aborted)
+            setRemote({
+              key: requestKey,
+              groups: response.groups ?? [],
+              loading: false,
+              error: '',
+            });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted)
+            setRemote({
+              key: requestKey,
+              groups: [],
+              loading: false,
+              error: `${searchCategory === 'files' ? 'File' : 'Record'} search is unavailable. You can still open apps and pages.`,
+            });
         });
-        if (!cancelled) {
-          setRemoteGroups(response.groups ?? []);
-        }
-      } catch {
-        if (!cancelled) {
-          setRemoteGroups([]);
-          setRemoteError('Record search is unavailable');
-        }
-      } finally {
-        if (!cancelled) setRemoteLoading(false);
-      }
     }, 220);
-
     return () => {
-      cancelled = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
-  }, [open, query]);
-
+  }, [recordSearch, requestKey]);
   useEffect(() => {
-    if (!open) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose();
-        return;
-      }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelected((s) => Math.min(s + 1, Math.max(flatItems.length - 1, 0)));
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelected((s) => Math.max(s - 1, 0));
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const item = flatItems[selected];
-        if (item) executeCommand(item);
-      }
-    }
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [executeCommand, flatItems, onClose, open, selected]);
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeId, activeItem?.id]);
 
-  useEffect(() => {
-    setSelected((current) => Math.min(current, Math.max(flatItems.length - 1, 0)));
-  }, [flatItems.length]);
-
-  if (!open) return null;
+  const status = remoteLoading
+    ? filter === 'files'
+      ? 'Searching files…'
+      : 'Searching records…'
+    : remoteError
+      ? ''
+      : ['records', 'files'].includes(filter) && trimmed.length < 2
+        ? `Enter at least two characters to search ${filter === 'files' ? 'files' : 'records'}.`
+        : flatItems.length
+          ? `${flatItems.length} results`
+          : 'No results found.';
 
   return (
-    <div
-      className="fixed inset-0 flex items-start justify-center pt-20 px-4"
-      style={{ zIndex: 1500 }}
-    >
-      <div
-        className="absolute inset-0"
-        style={{ background: 'rgba(0,0,0,0.6)' }}
-        onClick={onClose}
-      />
-      <div
-        className="relative w-full max-w-2xl rounded-aurora-lg overflow-hidden"
-        style={{
-          background: 'var(--aurora-card)',
-          border: '1px solid var(--aurora-border)',
-          boxShadow: 'var(--aurora-shadow-lg, 0 25px 50px -12px rgba(0,0,0,0.25))',
-        }}
+    <ModalPortalProvider>
+      <Modal
+        open
+        onClose={onClose}
+        title="Search ITEMBA OS"
+        size="lg"
+        footer={
+          <div className="os-search-footer">
+            <span>↑ ↓ to browse · Enter to open · Esc to close</span>
+            {canPin && (
+              <button
+                type="button"
+                className="os-search-pin"
+                aria-pressed={isFavorite(activeItem.href!)}
+                onClick={() =>
+                  toggleFavorite({
+                    href: activeItem.href!,
+                    label: activeItem.label,
+                    group: activeItem.group,
+                    iconKey: activeItem.iconKey,
+                  })
+                }
+              >
+                {isFavorite(activeItem.href!) ? 'Unpin' : 'Pin'} {activeItem.label}
+              </button>
+            )}
+          </div>
+        }
       >
-        {/* Search */}
-        <div
-          className="flex items-center gap-3 px-4 py-3.5 border-b"
-          style={{ borderColor: 'var(--aurora-border)' }}
-        >
-          <svg
-            className="w-5 h-5 flex-shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-            style={{ color: 'var(--aurora-text-muted)' }}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
+        <div className="os-search" data-os-search>
+          <label className="sr-only" htmlFor={`${listId}-input`}>
+            Search apps, pages and records
+          </label>
           <input
+            id={`${listId}-input`}
             ref={inputRef}
-            type="text"
-            placeholder="Search pages, reports, customers, products, orders..."
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-activedescendant={activeId}
+            aria-describedby={`${listId}-status`}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Find an app, invoice, sale, person or document…"
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
+            onChange={(event) => {
+              setQuery(event.target.value);
               setSelected(0);
             }}
-            className="flex-1 text-sm outline-none bg-transparent"
-            style={{ color: 'var(--aurora-text)' }}
-          />
-          <kbd
-            className="hidden sm:block text-xs px-1.5 py-0.5 rounded"
-            style={{
-              background: 'var(--aurora-bg-muted)',
-              color: 'var(--aurora-text-muted)',
-              border: '1px solid var(--aurora-border)',
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                setSelected(
+                  Math.max(
+                    0,
+                    Math.min(flatItems.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)),
+                  ),
+                );
+              } else if (event.key === 'Enter' && activeItem) {
+                event.preventDefault();
+                execute(activeItem);
+              }
             }}
-          >
-            esc
-          </kbd>
-        </div>
-
-        {/* Results */}
-        <div className="max-h-[28rem] overflow-y-auto py-2">
-          {flatItems.length === 0 ? (
-            <p
-              className="px-4 py-8 text-sm text-center"
-              style={{ color: 'var(--aurora-text-muted)' }}
-            >
-              {remoteLoading
-                ? 'Searching records...'
-                : isEmptyQuery
-                  ? 'Star pages to pin them here, or start typing to search.'
-                  : 'No results found'}
-            </p>
-          ) : (
-            Object.entries(grouped).map(([group, items]) => {
-              return (
-                <div key={group}>
-                  <p
-                    className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider"
-                    style={{ color: 'var(--aurora-text-muted)' }}
-                  >
-                    {group}
-                  </p>
-                  {items.map((item) => {
-                    const itemIndex = flatItems.indexOf(item);
-                    const isSelected = itemIndex === selected;
-                    // Star toggle only applies to routes (navigation targets), not
-                    // dynamic record search results.
-                    const canFavorite = Boolean(item.href) && item.source !== 'record';
-                    const starred = item.href ? isFavorite(item.href) : false;
-                    return (
-                      <div
-                        key={item.id}
-                        className="group/cmd flex items-center transition-colors"
-                        style={{
-                          background: isSelected ? 'var(--aurora-primary-subtle)' : 'transparent',
-                        }}
-                      >
-                        <button
-                          onClick={() => executeCommand(item)}
-                          className="flex flex-1 min-w-0 items-center gap-3 px-4 py-2.5 text-left"
-                          style={{ color: 'var(--aurora-text)' }}
-                        >
-                          {item.icon && (
-                            <span
-                              className="w-5 flex items-center justify-center flex-shrink-0"
-                              style={{ color: 'var(--aurora-text-muted)' }}
-                            >
-                              {item.icon}
-                            </span>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{item.label}</p>
-                            {item.description && (
-                              <p
-                                className="text-xs truncate"
-                                style={{ color: 'var(--aurora-text-muted)' }}
-                              >
-                                {item.description}
-                              </p>
-                            )}
-                          </div>
-                          {item.badge && (
-                            <span
-                              className="max-w-28 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase"
-                              style={{
-                                background: 'var(--aurora-bg-muted)',
-                                color: 'var(--aurora-text-muted)',
-                                border: '1px solid var(--aurora-border)',
-                              }}
-                            >
-                              {item.badge}
-                            </span>
-                          )}
-                          {item.shortcut && (
-                            <kbd
-                              className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
-                              style={{
-                                background: 'var(--aurora-bg-muted)',
-                                color: 'var(--aurora-text-muted)',
-                                border: '1px solid var(--aurora-border)',
-                              }}
-                            >
-                              {item.shortcut}
-                            </kbd>
-                          )}
-                        </button>
-                        {canFavorite && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleToggleFavorite(item);
-                            }}
-                            aria-pressed={starred}
-                            aria-label={starred ? `Unpin ${item.label}` : `Pin ${item.label}`}
-                            title={starred ? 'Remove from favorites' : 'Add to favorites'}
-                            className={`mr-3 flex-shrink-0 rounded p-1.5 transition-opacity ${
-                              starred
-                                ? 'opacity-100'
-                                : 'opacity-0 group-hover/cmd:opacity-70 hover:!opacity-100 focus:opacity-100'
-                            }`}
-                            style={{ color: starred ? '#facc15' : 'var(--aurora-text-muted)' }}
-                          >
-                            <svg
-                              className="w-4 h-4"
-                              viewBox="0 0 24 24"
-                              fill={starred ? 'currentColor' : 'none'}
-                              stroke="currentColor"
-                              strokeWidth={1.75}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })
-          )}
-          {(remoteLoading || remoteError) && flatItems.length > 0 && (
-            <div
-              className="px-4 py-2 text-xs"
-              style={{ color: remoteError ? '#f87171' : 'var(--aurora-text-muted)' }}
-            >
-              {remoteError ?? 'Searching records...'}
+          />
+          <div className="os-search-filters" role="group" aria-label="Search categories">
+            {FILTERS.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                aria-pressed={filter === entry.id}
+                onClick={() => {
+                  setFilter(entry.id);
+                  setSelected(0);
+                  inputRef.current?.focus();
+                }}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <p id={`${listId}-status`} role="status" className="os-search-status">
+            {status}
+          </p>
+          {remoteError && (
+            <div role="alert" className="os-search-error">
+              <p>{remoteError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRetry((value) => value + 1);
+                  inputRef.current?.focus();
+                }}
+              >
+                Try again
+              </button>
             </div>
           )}
+          <div
+            id={listId}
+            role="listbox"
+            aria-label="Search results"
+            aria-busy={remoteLoading}
+            className="os-search-results"
+          >
+            {grouped.map(([group, items], groupIndex) => (
+              <div key={group} role="group" aria-labelledby={`${listId}-group-${groupIndex}`}>
+                <p id={`${listId}-group-${groupIndex}`} className="os-search-group">
+                  {group}
+                </p>
+                {items.map((item) => {
+                  const itemIndex = flatItems.indexOf(item);
+                  return (
+                    <div
+                      key={item.id}
+                      id={`${listId}-option-${itemIndex}`}
+                      role="option"
+                      aria-selected={itemIndex === index}
+                      className="os-search-option"
+                      onMouseEnter={() => setSelected(itemIndex)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => execute(item)}
+                    >
+                      <span aria-hidden="true" className="os-search-icon">
+                        {item.icon}
+                      </span>
+                      <span className="os-search-copy">
+                        <strong>{item.label}</strong>
+                        {item.description && <span>{item.description}</span>}
+                      </span>
+                      {item.badge && <span className="os-search-badge">{item.badge}</span>}
+                      {item.file && <span className="os-search-badge">Quick Look</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
-
-        {/* Footer */}
-        <div
-          className="flex items-center justify-between px-4 py-2.5 border-t text-xs"
-          style={{ borderColor: 'var(--aurora-border)', color: 'var(--aurora-text-muted)' }}
-        >
-          <span>↑↓ navigate</span>
-          <span>↵ select</span>
-          <span>★ favorite</span>
-          <span>esc close</span>
-        </div>
-      </div>
-    </div>
+      </Modal>
+      {preview && (
+        <FilePreviewDialog
+          sources={files}
+          initial={preview}
+          returnFocusRef={inputRef}
+          onClose={() => setPreview(null)}
+          onOpenRecord={(source) => {
+            const item = flatItems.find(
+              (entry) =>
+                entry.file && filePreviewPaths(entry.file).key === filePreviewPaths(source).key,
+            );
+            if (!item?.href) return;
+            setPreview(null);
+            onClose();
+            router.push(item.href);
+          }}
+        />
+      )}
+    </ModalPortalProvider>
   );
 }

@@ -1,23 +1,52 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { PageSpinner } from '@/components/ui';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useState } from 'react';
+import { ErrorState, PageSpinner } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 export default function SupplierStatementsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('supplier_statements.list');
+  const beginRequest = useRequestGuard();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/backend/supplier-statements', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load supplier statements');
+      const body = await response.json();
+      if (!request.current()) return;
+      setData(Array.isArray(body.data) ? body.data : Array.isArray(body.data?.data) ? body.data.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setData([]);
+      setError(err instanceof Error ? err.message : 'Failed to load supplier statements');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
+
   useEffect(() => {
-    fetch('/api/backend/supplier-statements')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch((err) => {
-        setData([]);
-        setError(err instanceof Error ? err.message : 'Failed to load supplier statements');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    void load();
+  }, [load]);
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Supplier Statements</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -26,16 +55,12 @@ export default function SupplierStatementsPage() {
         <p className="text-gray-500 mt-1">View supplier account statements by period</p>
       </div>
 
-      {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Run #</th>
@@ -68,7 +93,7 @@ export default function SupplierStatementsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
     </div>

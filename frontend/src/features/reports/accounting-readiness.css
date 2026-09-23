@@ -1,0 +1,185 @@
+.accounting-readiness {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.accounting-summary {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 20px;
+  background: var(--aurora-bg-elevated, var(--aurora-surface));
+}
+.accounting-summary > div {
+  flex: 1;
+}
+.accounting-summary p,
+.accounting-note {
+  font-size: 13px;
+  color: var(--aurora-text-muted);
+  line-height: 1.7;
+}
+.accounting-summary strong {
+  font-size: 20px;
+}
+.accounting-links,
+.accounting-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.accounting-links a {
+  font-size: 13px;
+  color: var(--aurora-primary);
+}
+.accounting-readiness button {
+  border: 1px solid var(--aurora-border);
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.accounting-toolbar button[aria-pressed='true'] {
+  background: var(--aurora-primary);
+  color: white;
+}
+.accounting-toolbar label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.accounting-readiness input,
+.accounting-readiness select {
+  border: 1px solid var(--aurora-border);
+  border-radius: 10px;
+  background: var(--aurora-bg-elevated);
+  padding: 10px;
+  color: inherit;
+}
+.accounting-table {
+  overflow: auto;
+  border: 1px solid var(--aurora-border);
+  border-radius: 16px;
+}
+.accounting-table table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.accounting-table th,
+.accounting-table td {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--aurora-border);
+}
+.accounting-table th {
+  font-weight: 500;
+  color: var(--aurora-text-muted);
+}
+.posting-status {
+  font-size: 12px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: #f59e0b16;
+  color: var(--aurora-text);
+}
+.posting-posted {
+  background: #10b98120;
+}
+.accounting-readiness summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.accounting-readiness details[open] summary {
+  margin-bottom: 18px;
+}
+@media (max-width: 600px) {
+  .accounting-summary {
+    padding: 16px;
+    align-items: start;
+  }
+  .accounting-summary strong {
+    font-size: 17px;
+  }
+  .accounting-toolbar label {
+    width: 100%;
+  }
+}
+.accounting-workspaces {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 5px;
+  width: fit-content;
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+  background: var(--aurora-bg-elevated);
+}
+.accounting-workspaces button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.accounting-workspaces button[aria-current='page'] {
+  background: var(--aurora-card);
+  color: var(--aurora-primary);
+  box-shadow: 0 1px 5px #0000000d;
+  font-weight: 600;
+}
+.cash-connection-title {
+  margin-top: 30px;
+  font-size: 19px;
+  font-weight: 600;
+}
+.posting-ack {
+  display: flex !important;
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.posting-ack input {
+  width: auto !important;
+  margin-top: 4px;
+}
+
+/* Respond to the width of an OS app window as well as the viewport. */
+@container os-workspace (max-width: 600px) {
+  .accounting-summary {
+    padding: 16px;
+    align-items: start;
+  }
+  .accounting-summary strong {
+    font-size: 17px;
+  }
+  .accounting-toolbar label {
+    width: 100%;
+  }
+}
+
+.accounting-table:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+.accounting-readiness button,
+.accounting-workspaces button {
+  min-height: 44px;
+}
+.posting-ack {
+  color: var(--aurora-text-secondary);
+  padding: 12px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  background: var(--aurora-bg-elevated);
+}
+.posting-ack input {
+  flex-shrink: 0;
+  accent-color: var(--aurora-primary);
+}

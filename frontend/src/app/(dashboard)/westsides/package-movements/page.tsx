@@ -1,8 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, Card, FormInput, FormSelect, Modal, PageHeader, showToast } from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, Modal, PageHeader, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { ApiError, backendPost } from '@/lib/api-client';
+import { WestsidesGate } from '../_components/route-gate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -189,7 +193,7 @@ function MovementModal({ packages, onClose, onSaved }: ModalProps) {
   return (
     <Modal open onClose={onClose} title="Record Package Movement"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Record Movement</Btn></>}>
-      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+      {error && <div role="alert" className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid grid-cols-2 gap-4">
         <FormSelect label="Company" required value={companyId} onChange={(e) => { setCompanyId(e.target.value); setReturnablePackageId(''); }} placeholder="Select…">
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -213,7 +217,7 @@ function MovementModal({ packages, onClose, onSaved }: ModalProps) {
           <div />
         )}
         <FormSelect label="Movement Type" required value={movementType} onChange={(e) => setMovementType(e.target.value)} options={movementTypeOptions} />
-        <FormInput label="Movement Date" required type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} />
+        <FormDateField label="Movement Date" required value={movementDate} onChange={(value) => setMovementDate(value)} />
         <FormInput label="Quantity" required type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
         <FormInput label="Deposit Amount (TZS)" type="number" min={0} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0" />
         <FormInput label="Reference Type" value={referenceType} onChange={(e) => setReferenceType(e.target.value)} placeholder="e.g. Delivery Note, Sales Order" />
@@ -226,6 +230,9 @@ function MovementModal({ packages, onClose, onSaved }: ModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PackageMovementsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('package_movements.view');
+  const beginRequest = useRequestGuard();
   const [items, setItems] = useState<PackageMovement[]>([]);
   const [packages, setPackages] = useState<ReturnablePackageOption[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -237,19 +244,29 @@ export default function PackageMovementsPage() {
   const [filterMovementType, setFilterMovementType] = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
     try {
       const params = new URLSearchParams({ limit: '100' });
       if (filterCustomerId) params.set('customerId', filterCustomerId);
       if (filterMovementType) params.set('movementType', filterMovementType);
-      const res = await fetch(`/api/backend/westsides/package-movements?${params}`);
+      const res = await fetch(`/api/backend/westsides/package-movements?${params}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) throw new Error('Failed to load package movements');
       const json = await res.json();
+      if (!request.current()) return;
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Error loading data');
-    } finally { setLoading(false); }
-  }, [filterCustomerId, filterMovementType]);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterCustomerId, filterMovementType]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -288,6 +305,10 @@ export default function PackageMovementsPage() {
     return parts.length ? parts.join(' ') : '—';
   };
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Package Movements" loading={authLoading} />;
+  }
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -301,14 +322,14 @@ export default function PackageMovementsPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className={labelCls}>Customer</label>
-            <select value={filterCustomerId} onChange={(e) => setFilterCustomerId(e.target.value)} className={fieldCls}>
+            <select aria-label="Customer" value={filterCustomerId} onChange={(e) => setFilterCustomerId(e.target.value)} className={fieldCls}>
               <option value="">All Customers</option>
               {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>
             <label className={labelCls}>Movement Type</label>
-            <select value={filterMovementType} onChange={(e) => setFilterMovementType(e.target.value)} className={fieldCls}>
+            <select aria-label="Movement Type" value={filterMovementType} onChange={(e) => setFilterMovementType(e.target.value)} className={fieldCls}>
               <option value="">All Types</option>
               {MOVEMENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
@@ -316,14 +337,24 @@ export default function PackageMovementsPage() {
         </div>
       </Card>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       {loading ? <Spinner /> : (
         <Card className="overflow-hidden">
           {items.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-10">No movements found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <WorkspaceTable className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className={thCls}>Movement #</th>
@@ -350,7 +381,7 @@ export default function PackageMovementsPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>

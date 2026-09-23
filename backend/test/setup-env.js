@@ -17,3 +17,22 @@ process.env.REFRESH_TOKEN_PEPPER =
 process.env.JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 process.env.THROTTLE_LIMIT = process.env.THROTTLE_LIMIT || '100000';
 process.env.THROTTLE_TTL = process.env.THROTTLE_TTL || '1';
+
+// The chat workflow explicitly replaces ModelClient. Start that disposable
+// process with cloud/host dispatch disabled, independent of a developer .env;
+// the fixture enables chat only after the scripted provider has been installed.
+if (process.env.MSAIDIZI_CHAT_DISPOSABLE_DB === '1') {
+  process.env.ANTHROPIC_API_KEY = '';
+  for (const name of [
+    'MSAIDIZI_ENABLED',
+    'MSAIDIZI_AUTONOMY_ENABLED',
+    'MSAIDIZI_AUTOPILOT_ENABLED',
+    'MSAIDIZI_HOST_EXECUTION_ENABLED',
+    'MSAIDIZI_TASK_WORKER_ENABLED',
+    'MSAIDIZI_ADAPTIVE_REASONING_ENABLED',
+    'MSAIDIZI_UPDATE_EVALUATOR_ENABLED',
+    'MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED',
+    'MSAIDIZI_DEVICE_CHANNEL_ENABLED',
+  ])
+    process.env[name] = 'false';
+}

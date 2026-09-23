@@ -15,6 +15,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const downloadTablePdf = vi.fn();
 
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({ hasPermission: () => true, loading: false }),
+}));
 vi.mock('@/hooks/use-org-scope', () => ({
   useOrgScope: () => ({
     companyOptions: [{ value: 'company-1', label: 'Westsides Trading' }],
@@ -125,7 +128,11 @@ describe('WestsideReportsPage — Undelivered Confirmed Orders', () => {
   it('is registered in the catalog and loads through the standard plumbing', async () => {
     const fetchMock = await renderUndeliveredReport();
 
-    const url = String(fetchMock.mock.calls[0][0]);
+    const url = String(
+      fetchMock.mock.calls.find(([path]) =>
+        String(path).includes('/westsides/reports/undelivered-confirmed-orders'),
+      )?.[0],
+    );
     expect(url).toContain('/api/backend/westsides/reports/undelivered-confirmed-orders');
     expect(url).toContain('companyId=company-1');
   });

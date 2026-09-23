@@ -1,0 +1,46 @@
+.unsaved-work-dialog {
+  margin: auto;
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--aurora-border);
+  border-radius: 18px;
+  padding: 28px;
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  box-shadow: 0 24px 80px #14203930;
+}
+.unsaved-work-dialog::backdrop {
+  background: #18213255;
+  backdrop-filter: blur(3px);
+}
+.unsaved-work-dialog h2 {
+  font-size: 22px;
+  font-weight: 550;
+  letter-spacing: -0.03em;
+}
+.unsaved-work-dialog p {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--aurora-text-secondary);
+  margin: 13px 0 24px;
+}
+.unsaved-work-dialog > div {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.unsaved-work-dialog button {
+  font-size: 13px;
+  padding: 10px 15px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 8px;
+}
+.unsaved-work-dialog button:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+.unsaved-work-dialog .unsaved-discard {
+  background: var(--aurora-primary);
+  color: white;
+  border-color: var(--aurora-primary);
+}

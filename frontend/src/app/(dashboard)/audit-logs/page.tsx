@@ -1,7 +1,10 @@
 'use client';
+import { FormDateField, Modal } from '@/components/ui';
 
-import { useEffect, useRef, useState } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendPage } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -86,36 +89,9 @@ function JsonBlock({ label, value }: { label: string; value: unknown }) {
 // ─── Detail modal ─────────────────────────────────────────────────────────────
 
 function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
-  const headerCls =
-    log.severity === 'CRITICAL'
-      ? 'bg-red-600'
-      : log.severity === 'HIGH'
-        ? 'bg-orange-500'
-        : log.severity === 'MEDIUM'
-          ? 'bg-yellow-400'
-          : 'bg-gray-200';
-  const textCls =
-    log.severity === 'LOW' || log.severity === 'MEDIUM' ? 'text-gray-800' : 'text-white';
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className={`px-6 py-4 rounded-t-xl flex items-center justify-between ${headerCls}`}>
-          <div>
-            <h2 className={`text-lg font-bold ${textCls}`}>{log.action.replace(/_/g, ' ')}</h2>
-            <p
-              className={`text-xs ${log.severity === 'LOW' || log.severity === 'MEDIUM' ? 'text-gray-600' : 'text-white/80'}`}
-            >
-              Audit Log — {new Date(log.createdAt).toLocaleString()}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className={`${textCls} text-2xl font-light leading-none opacity-70 hover:opacity-100`}
-          >
-            &times;
-          </button>
-        </div>
+    <Modal open title={log.action.replace(/_/g, ' ')} subtitle={new Date(log.createdAt).toLocaleString()} onClose={onClose} size="lg"><div className="os-legacy-dialog-content">
+
 
         <div className="p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4 text-sm">
@@ -154,8 +130,7 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
             <JsonBlock label="Metadata" value={log.metadata} />
           </div>
         </div>
-      </div>
-    </div>
+      </div></Modal>
   );
 }
 
@@ -164,8 +139,9 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
 const SEVERITY_OPTIONS = ['', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 export default function AuditLogsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('audit-logs.read');
+  const beginRequest = useRequestGuard();
 
   const [search, setSearch] = useState('');
   const [companyId, setCompanyId] = useState('');
@@ -181,34 +157,34 @@ export default function AuditLogsPage() {
   const [entityTypes, setEntityTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    void backendPage<Company>('companies', { signal: controller.signal, query: { limit: 100 } })
+      .then((page) => {
+        if (!controller.signal.aborted) setCompanies(page.data);
+      })
+      .catch(() => undefined);
+    void backendGet<string[]>('audit-logs/entity-types', { signal: controller.signal })
+      .then((types) => {
+        if (!controller.signal.aborted) setEntityTypes(Array.isArray(types) ? types : []);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    if (!canView) return;
-    // Filter-dropdown enrichment only: on failure the selects just show fewer
-    // options while the log table still loads, so silence is safe here.
-    void backendPage<Company>('companies', { query: { limit: 100 } })
-      .then((page) => setCompanies(page.data))
-      .catch(() => undefined);
-    void backendGet<string[]>('audit-logs/entity-types')
-      .then((types) => setEntityTypes(Array.isArray(types) ? types : []))
-      .catch(() => undefined);
-  }, [canView]);
-
-  useEffect(() => {
-    if (!canView) return;
-    if (abortRef.current) abortRef.current.abort();
-    abortRef.current = new AbortController();
-    const { signal } = abortRef.current;
-
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    (async () => {
+    void (async () => {
       try {
         const logs = await backendPage<AuditLog>('audit-logs', {
-          signal,
+          signal: request.signal,
           query: {
             search,
             companyId,
@@ -221,17 +197,29 @@ export default function AuditLogsPage() {
             limit: 50,
           },
         });
+        if (!request.current()) return;
         setResult(logs);
       } catch (err) {
-        // A superseded request aborts itself — only real failures are surfaced.
-        if ((err as { name?: string })?.name !== 'AbortError') {
-          setLoadError(err instanceof Error ? err.message : 'Failed to load audit logs');
-        }
+        if (!request.current()) return;
+        setLoadError(err instanceof Error ? err.message : 'Failed to load audit logs');
       } finally {
-        setLoading(false);
+        if (request.current()) setLoading(false);
       }
     })();
-  }, [search, companyId, action, entityType, severity, dateFrom, dateTo, page, canView]);
+  }, [
+    action,
+    authLoading,
+    beginRequest,
+    canView,
+    companyId,
+    dateFrom,
+    dateTo,
+    entityType,
+    page,
+    retry,
+    search,
+    severity,
+  ]);
 
   function resetFilters() {
     setSearch('');
@@ -242,6 +230,15 @@ export default function AuditLogsPage() {
     setDateFrom('');
     setDateTo('');
     setPage(1);
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Audit Trail</h1>
+        <p className="text-sm text-gray-500 mt-1">Loading</p>
+      </div>
+    );
   }
 
   if (!canView) {
@@ -294,7 +291,7 @@ export default function AuditLogsPage() {
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          <input
+          <input aria-label="Search action, entity, IP…"
             placeholder="Search action, entity, IP…"
             value={search}
             onChange={(e) => {
@@ -303,7 +300,7 @@ export default function AuditLogsPage() {
             }}
             className="col-span-1 md:col-span-2 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
           />
-          <select
+          <select aria-label="All Companies"
             value={companyId}
             onChange={(e) => {
               setCompanyId(e.target.value);
@@ -318,7 +315,7 @@ export default function AuditLogsPage() {
               </option>
             ))}
           </select>
-          <select
+          <select aria-label="Severity"
             value={severity}
             onChange={(e) => {
               setSeverity(e.target.value);
@@ -332,7 +329,7 @@ export default function AuditLogsPage() {
               </option>
             ))}
           </select>
-          <select
+          <select aria-label="All Entity Types"
             value={entityType}
             onChange={(e) => {
               setEntityType(e.target.value);
@@ -347,7 +344,7 @@ export default function AuditLogsPage() {
               </option>
             ))}
           </select>
-          <input
+          <input aria-label="Filter by action…"
             placeholder="Filter by action…"
             value={action}
             onChange={(e) => {
@@ -356,23 +353,23 @@ export default function AuditLogsPage() {
             }}
             className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
           />
-          <input
-            type="date"
+          <FormDateField
+            aria-label="Date From"
             value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
+            onChange={(value) => {
+              setDateFrom(value);
               setPage(1);
             }}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            className="ui-date-field-inline"
           />
-          <input
-            type="date"
+          <FormDateField
+            aria-label="Date To"
             value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
+            onChange={(value) => {
+              setDateTo(value);
               setPage(1);
             }}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            className="ui-date-field-inline"
           />
         </div>
         <div className="mt-3 flex justify-end">
@@ -386,8 +383,18 @@ export default function AuditLogsPage() {
       </div>
 
       {loadError && (
-        <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          {loadError}
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            className="font-medium text-red-700 hover:underline"
+            onClick={() => setRetry((current) => current + 1)}
+          >
+            Try again
+          </button>
         </div>
       )}
 
@@ -404,7 +411,7 @@ export default function AuditLogsPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-100 text-sm">
+              <WorkspaceTable className="min-w-full divide-y divide-gray-100 text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     {['Timestamp', 'Severity', 'Action', 'Entity', 'User', 'Company', 'IP', ''].map(
@@ -464,7 +471,7 @@ export default function AuditLogsPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
 
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50">

@@ -1,338 +1,263 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import {
-  Card,
-  PageHeader,
-  StatusBadge,
-  FormInput,
-  FormSelect,
-  Modal,
-  Btn,
-  PageToolbar,
-  PageSpinner,
-  showToast,
-} from '@/components/ui';
+import { useEffect, useState } from 'react';
+import { Plus, RefreshCw } from 'lucide-react';
+import { Btn, ConfirmDialog, FormDateField, FormSelect, PageHeader, PageToolbar, PermissionDeniedState } from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
-
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface Attendance {
-  id: string;
-  employee?: string | { fullName?: string; employeeCode?: string };
-  employeeId?: string;
-  companyId?: string;
-  attendanceDate?: string;
-  clockInTime?: string;
-  clockOutTime?: string;
-  totalHours?: number;
-  attendanceStatus?: string;
-  approvedById?: string | null;
-}
-
-interface FormState {
-  companyId: string;
-  employeeId: string;
-  date: string;
-  clockIn: string;
-  clockOut: string;
-  status: string;
-}
-
-const empty: FormState = {
-  companyId: '',
-  employeeId: '',
-  date: '',
-  clockIn: '',
-  clockOut: '',
-  status: 'PRESENT',
-};
+import { backendPatch } from '@/lib/api-client';
+import '@/components/workspace/workspace.css';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+import {
+  type Attendance,
+  employeeName,
+  companyName,
+  date,
+  timestamp,
+  label,
+  statuses,
+} from '@/features/payroll/attendance-workflow';
 
 export default function AttendancePage() {
-  const [rows, setRows] = useState<Attendance[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<Attendance | null>(null);
-  const [form, setForm] = useState<FormState>(empty);
-  const [saving, setSaving] = useState(false);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [empFilter, setEmpFilter] = useState('');
-  const [actionLoading, setActionLoading] = useState('');
-  const { companyOptions, employeeOptions } = useOrgScope(form.companyId, {
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('attendance.view');
+  const canCreate = hasPermission('attendance.create');
+  const canEdit = hasPermission('attendance.update');
+  const canApprove = hasPermission('attendance.approve');
+  const stateKey = usePayrollStateKey('attendance');
+  const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
+  const [search, setSearch] = useWorkspaceState(stateKey + '.search', '');
+  const [query, setQuery] = useState(search.trim());
+  const [company, setCompany] = useWorkspaceState(stateKey + '.company', '');
+  const [status, setStatus] = useWorkspaceState(stateKey + '.status', '');
+  const [dateFrom, setDateFrom] = useWorkspaceState(stateKey + '.dateFrom', '');
+  const [dateTo, setDateTo] = useWorkspaceState(stateKey + '.dateTo', '');
+  const invalidRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
+  const result = useWorkspaceRecords<Attendance>(
+    '/hr/attendance',
+    {
+      page,
+      limit: 20,
+      search: query,
+      companyId: company,
+      attendanceStatus: status,
+      dateFrom,
+      dateTo,
+    },
+    canRead && !invalidRange,
+  );
+  useEffect(() => {
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
+  useEffect(() => {
+    if (!result.loading && !result.error && page > 1 && !result.rows.length)
+      setPage(Math.max(1, Math.ceil(result.total / 20)));
+  }, [result.loading, result.error, result.rows.length, result.total, page, setPage]);
+  const [notice, setNotice] = useState('');
+  const scope = useOrgScope(undefined, {
     skipBranches: true,
     skipDivisions: true,
+    skipEmployees: true,
   });
-  const { user } = useAuth();
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (dateFrom) params.set('dateFrom', dateFrom);
-    if (dateTo) params.set('dateTo', dateTo);
-    if (empFilter) params.set('employeeId', empFilter);
-    const r = await fetch(`/api/backend/hr/attendance?${params}`);
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  }, [dateFrom, dateTo, empFilter]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const openCreate = () => {
-    setEditing(null);
-    setForm(empty);
-    setShowModal(true);
-  };
-  const toTime = (iso?: string) => (iso ? new Date(iso).toTimeString().slice(0, 5) : '');
-
-  const openEdit = (a: Attendance) => {
-    setEditing(a);
-    setForm({
-      companyId: a.companyId ?? '',
-      employeeId: a.employeeId ?? '',
-      date: a.attendanceDate ? a.attendanceDate.slice(0, 10) : '',
-      clockIn: toTime(a.clockInTime),
-      clockOut: toTime(a.clockOutTime),
-      status: a.attendanceStatus ?? 'PRESENT',
-    });
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const payload: Record<string, unknown> = {
-      companyId: form.companyId,
-      employeeId: form.employeeId,
-      attendanceDate: form.date,
-      clockInTime: form.clockIn ? `${form.date}T${form.clockIn}:00` : undefined,
-      clockOutTime: form.clockOut ? `${form.date}T${form.clockOut}:00` : undefined,
-      attendanceStatus: form.status,
-    };
-    if (!editing) payload.createdById = user?.id;
-    const url = editing ? `/api/backend/hr/attendance/${editing.id}` : '/api/backend/hr/attendance';
+  const [approval, setApproval] = useState<Attendance | null>(null);
+  const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
+  const entry = usePayrollDraftEditor('attendance', (message) => {
+    setNotice(message);
+    void result.reload();
+  });
+  const open = (record?: Attendance) => entry.open({ kind: 'attendance', record });
+  const approve = async () => {
+    if (!approval || approving || !canApprove) return;
+    setApproving(true);
+    setApprovalError('');
     try {
-      const res = await fetch(url, {
-        method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the attendance record.'));
-        return;
-      }
-      setShowModal(false);
-      load();
+      await backendPatch('/hr/attendance/' + approval.id + '/approve', {});
+      setApproval(null);
+      setNotice('Attendance approved.');
+      void result.reload();
+    } catch (err) {
+      setApprovalError(err instanceof Error ? err.message : 'Unable to approve attendance.');
     } finally {
-      setSaving(false);
+      setApproving(false);
     }
   };
-
-  const doApprove = async (id: string) => {
-    setActionLoading(id);
-    try {
-      const res = await fetch(`/api/backend/hr/attendance/${id}/approve`, { method: 'PATCH' });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Approve failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not approve this record.'));
-      }
-    } finally {
-      setActionLoading('');
-      load();
-    }
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((p) => ({ ...p, [k]: e.target.value }));
-
+  if (!canRead) return <PermissionDeniedState description="Your role cannot view attendance." />;
   return (
-    <div className="p-6">
-      <PageHeader title="Attendance" subtitle="Employee clock-in / clock-out records" />
-
+    <div className="business-workspace record-workspace">
+      <PageHeader
+        title="Attendance"
+        subtitle="Time at work, with the details in view."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Attendance' }]}
+        actions={
+          canCreate && (
+            <Btn icon={<Plus size={16} />} onClick={() => open()}>
+              Log attendance
+            </Btn>
+          )
+        }
+      />
+      <div className="workspace-summary">
+        <div>
+          <span>Matching records</span>
+          <strong>{result.total}</strong>
+        </div>
+        <div>
+          <span>Awaiting approval on this page</span>
+          <strong>{result.rows.filter((r) => !r.approvedById).length}</strong>
+        </div>
+      </div>
+      {notice && (
+        <div role="status" className="workspace-notice">
+          {notice}
+        </div>
+      )}
       <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search attendance by employee or reference…"
+        collapsibleFilters
+        activeFilterCount={[company, status, dateFrom, dateTo].filter(Boolean).length}
         filters={
           <>
-            <input
-              type="text"
-              placeholder="Employee ID…"
-              value={empFilter}
-              onChange={(e) => setEmpFilter(e.target.value)}
-              className="text-sm border rounded-lg px-3 py-1.5 w-44 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              style={{
-                borderColor: 'var(--aurora-border)',
-                background: 'var(--aurora-card)',
-                color: 'var(--aurora-text)',
+            <FormSelect
+              label="Company filter"
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                setPage(1);
               }}
+              options={scope.companyOptions}
+              placeholder="All companies"
             />
-            <input
-              type="date"
+            <FormSelect
+              label="Status filter"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+              options={statuses.map((value) => ({ value, label: label(value) }))}
+              placeholder="All statuses"
+            />
+            <FormDateField
+              label="From date"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              style={{
-                borderColor: 'var(--aurora-border)',
-                background: 'var(--aurora-card)',
-                color: 'var(--aurora-text)',
+              onChange={(value) => {
+                setDateFrom(value);
+                setPage(1);
               }}
             />
-            <input
-              type="date"
+            <FormDateField
+              label="To date"
+              min={dateFrom}
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              style={{
-                borderColor: 'var(--aurora-border)',
-                background: 'var(--aurora-card)',
-                color: 'var(--aurora-text)',
+              onChange={(value) => {
+                setDateTo(value);
+                setPage(1);
               }}
             />
           </>
         }
         actions={
-          <Btn variant="primary" onClick={openCreate}>
-            + Log Attendance
+          <Btn
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            disabled={result.loading || invalidRange}
+            onClick={result.reload}
+          >
+            Reload
           </Btn>
         }
       />
-
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead
-                className="bg-slate-50 border-b border-slate-100"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <tr>
-                  <th className={thCls}>Employee</th>
-                  <th className={thCls}>Date</th>
-                  <th className={thCls}>Clock In</th>
-                  <th className={thCls}>Clock Out</th>
-                  <th className={thCls}>Hours</th>
-                  <th className={thCls}>Status</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map((a) => (
-                  <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>
-                      {typeof a.employee === 'string'
-                        ? a.employee
-                        : (a.employee?.fullName ?? a.employee?.employeeCode ?? a.employeeId ?? '—')}
-                    </td>
-                    <td className={tdCls}>
-                      {a.attendanceDate ? new Date(a.attendanceDate).toLocaleDateString('en-GB') : '—'}
-                    </td>
-                    <td className={tdCls}>{a.clockInTime ? new Date(a.clockInTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                    <td className={tdCls}>{a.clockOutTime ? new Date(a.clockOutTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                    <td className={tdCls}>{a.totalHours != null ? `${Number(a.totalHours)}h` : '—'}</td>
-                    <td className={tdCls}>
-                      <StatusBadge status={a.attendanceStatus ?? 'UNKNOWN'} />
-                    </td>
-                    <td className={tdCls}>
-                      <div className="flex gap-2">
-                        <Btn variant="ghost" size="xs" onClick={() => openEdit(a)}>
-                          Edit
-                        </Btn>
-                        {!a.approvedById && (
-                          <Btn
-                            variant="success"
-                            size="xs"
-                            onClick={() => doApprove(a.id)}
-                            disabled={actionLoading === a.id}
-                          >
-                            {actionLoading === a.id ? '…' : 'Approve'}
-                          </Btn>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="text-center py-8 text-sm"
-                      style={{ color: 'var(--aurora-text-muted)' }}
-                    >
-                      No attendance records found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <Modal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        title={editing ? 'Edit Attendance' : 'New Attendance Record'}
-        footer={
-          <>
-            <Btn variant="secondary" onClick={() => setShowModal(false)}>
-              Cancel
-            </Btn>
-            <Btn variant="primary" type="submit" form="attendance-form" loading={saving}>
-              Save
-            </Btn>
-          </>
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.selection'}
+        selectionScope={JSON.stringify([company, status, dateFrom, dateTo, query])}
+        title="Attendance"
+        records={result.rows}
+        name={employeeName}
+        reference={(r) => r.attendanceNumber || companyName(r)}
+        status={(r) => r.attendanceStatus || 'UNKNOWN'}
+        loading={result.loading}
+        error={
+          invalidRange ? 'The end of the date range must be on or after its start.' : result.error
         }
-      >
-        <form id="attendance-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormSelect
-            label="Company"
-            required
-            value={form.companyId}
-            onChange={(e) => setForm((p) => ({ ...p, companyId: e.target.value, employeeId: '' }))}
-            options={companyOptions}
-            placeholder="Select company"
-          />
-          <FormSelect
-            label="Employee"
-            required
-            value={form.employeeId}
-            onChange={f('employeeId')}
-            options={employeeOptions}
-            placeholder={form.companyId ? 'Select employee' : 'Select company first'}
-          />
-          <FormInput label="Date" type="date" value={form.date} onChange={f('date')} required />
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Clock In" type="time" value={form.clockIn} onChange={f('clockIn')} />
-            <FormInput
-              label="Clock Out"
-              type="time"
-              value={form.clockOut}
-              onChange={f('clockOut')}
-            />
-          </div>
-          <FormSelect
-            label="Status"
-            value={form.status}
-            onChange={f('status')}
-            options={[
-              { value: 'PRESENT', label: 'Present' },
-              { value: 'ABSENT', label: 'Absent' },
-              { value: 'LATE', label: 'Late' },
-              { value: 'HALF_DAY', label: 'Half Day' },
-              { value: 'ON_LEAVE', label: 'On Leave' },
-              { value: 'HOLIDAY', label: 'Holiday' },
-              { value: 'SICK', label: 'Sick' },
-              { value: 'UNPAID_ABSENT', label: 'Unpaid Absent' },
-            ]}
-          />
-        </form>
-      </Modal>
+        onRetry={invalidRange ? undefined : result.reload}
+        page={page}
+        total={result.total}
+        pageSize={20}
+        onPage={setPage}
+        fields={[
+          { label: 'Date', value: (r) => date(r.attendanceDate) },
+          {
+            label: 'Hours',
+            value: (r) => (r.totalHours != null ? Number(r.totalHours) + ' h' : '—'),
+          },
+        ]}
+        details={[
+          { label: 'Company', value: companyName },
+          { label: 'Clock-in (local time)', value: (r) => timestamp(r.clockInTime) },
+          { label: 'Clock-out (local time)', value: (r) => timestamp(r.clockOutTime) },
+          { label: 'Overtime', value: (r) => Number(r.overtimeHours || 0) + ' h' },
+          {
+            label: 'Late / early leave',
+            value: (r) => (r.lateMinutes || 0) + ' / ' + (r.earlyLeaveMinutes || 0) + ' min',
+          },
+          {
+            label: 'Approval',
+            value: (r) =>
+              r.approvedById
+                ? 'Approved' + (r.approvedAt ? ' · ' + timestamp(r.approvedAt) : '')
+                : 'Awaiting approval',
+          },
+          { label: 'Source', value: (r) => (r.source ? label(r.source) : '—') },
+          { label: 'Notes', value: (r) => r.notes || '—' },
+        ]}
+        actions={(r) => (
+          <>
+            {canEdit && (
+              <Btn variant="secondary" onClick={() => open(r)}>
+                Edit attendance
+              </Btn>
+            )}
+            {canApprove && !r.approvedById && (
+              <Btn
+                onClick={() => {
+                  setApproval(r);
+                  setApprovalError('');
+                }}
+              >
+                Approve attendance
+              </Btn>
+            )}
+          </>
+        )}
+      />
+      <ConfirmDialog
+        open={!!approval}
+        title={'Approve attendance' + (approval ? ' for ' + employeeName(approval) : '') + '?'}
+        message={
+          (approvalError ? approvalError + '\n\n' : '') +
+          'Confirm the attendance for ' +
+          (approval ? date(approval.attendanceDate) : 'this day') +
+          '. Review the recorded times and status before approving.'
+        }
+        confirmLabel="Approve attendance"
+        loading={approving}
+        onConfirm={approve}
+        onCancel={() => {
+          if (!approving) setApproval(null);
+        }}
+      />
     </div>
   );
 }

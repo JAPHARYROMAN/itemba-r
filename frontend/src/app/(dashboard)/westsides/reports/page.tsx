@@ -1,11 +1,16 @@
 'use client';
+import { downloadBinaryExport } from '@/lib/export-download';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { Card, PageHeader, StatCard, showToast } from '@/components/ui';
+import { Card, FormDateField, PageHeader, StatCard, Btn, showToast } from '@/components/ui';
 import { downloadTablePdf } from '@/lib/export-download';
 import { useOrgScope } from '@/hooks/use-org-scope';
-import { ITEMBA_DOCUMENT_LETTERHEAD } from '@/lib/document-letterhead';
+import { useDocumentLetterhead } from '@/hooks/use-document-letterhead';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { WestsidesGate } from '../_components/route-gate';
 
 type QueryMode = 'range' | 'daily-close';
 
@@ -641,14 +646,6 @@ function csvEscape(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-function escapeHtml(value: unknown) {
-  return rawExportValue(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function downloadText(filename: string, mimeType: string, content: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -703,7 +700,7 @@ function ReportTable({ rows, report }: { rows: Record<string, unknown>[]; report
   const columns = visibleColumns(rows, report);
   return (
     <div className="overflow-x-auto print-table-wrap">
-      <table className="w-full min-w-[980px] text-sm print-table">
+      <WorkspaceTable className="w-full min-w-[980px] text-sm print-table">
         <thead>
           <tr>
             {columns.map((column) => (
@@ -724,7 +721,7 @@ function ReportTable({ rows, report }: { rows: Record<string, unknown>[]; report
             </tr>
           ))}
         </tbody>
-      </table>
+      </WorkspaceTable>
     </div>
   );
 }
@@ -864,13 +861,24 @@ function PrintStyles() {
           font-size: 7px !important;
           line-height: 1.15 !important;
         }
+        .print-table thead {
+          display: table-header-group;
+        }
+        .print-table tr {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
       }
     `}</style>
   );
 }
 
 export default function WestsideReportsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('westsides.reports.view');
+  const beginRequest = useRequestGuard();
   const [companyId, setCompanyId] = useState('');
+  const letterhead = useDocumentLetterhead(companyId);
   const [branchId, setBranchId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -964,6 +972,7 @@ export default function WestsideReportsPage() {
   }, [activeKey, branchId, companyId, dateFrom, dateTo, hydrated]);
 
   const loadReport = useCallback(async () => {
+    if (authLoading || !canView) return;
     setReportResult({ rows: [], raw: null });
     if (!companyId) {
       const message = 'Select a company before loading a report.';
@@ -971,6 +980,7 @@ export default function WestsideReportsPage() {
       showToast('warning', 'Company required', message);
       return;
     }
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
@@ -984,8 +994,12 @@ export default function WestsideReportsPage() {
         if (dateFrom) params.set('dateFrom', dateFrom);
         if (dateTo) params.set('dateTo', dateTo);
       }
-      const response = await fetch(`${activeReport.endpoint}?${params.toString()}`);
+      const response = await fetch(`${activeReport.endpoint}?${params.toString()}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       const json = await response.json().catch(() => ({}));
+      if (!request.current()) return;
       if (!response.ok) throw new Error(errorMessage(json, `HTTP ${response.status}`));
       setReportResult({
         ...normalizePayload(json, activeReport),
@@ -1000,15 +1014,19 @@ export default function WestsideReportsPage() {
         },
       });
     } catch (err) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Error loading report';
       setError(message);
       showToast('error', 'Westsides report unavailable', message);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
   }, [
     activeReport,
+    authLoading,
+    beginRequest,
     branchId,
+    canView,
     companyId,
     currentBranchLabel,
     currentCompanyLabel,
@@ -1078,32 +1096,35 @@ export default function WestsideReportsPage() {
     );
   }
 
-  function exportExcel() {
-    if (reportResult.rows.length === 0) return;
-    const header = columns
-      .map((column) => `<th>${escapeHtml(formatHeading(column))}</th>`)
-      .join('');
-    const body = reportResult.rows
-      .map(
-        (row) =>
-          `<tr>${columns
-            .map((column) => `<td>${escapeHtml(formatValue(column, row[column]))}</td>`)
-            .join('')}</tr>`,
-      )
-      .join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body>
-      <h1>${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.groupName)}</h1>
-      <h2>${escapeHtml(currentCompanyLabel ?? 'ITEMBA-R Group')}</h2>
-      <p>Address: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.address)}<br />
-      Tel: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.telephone)} | Phone: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.phone)}<br />
-      Email: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.email)}<br />
-      TIN: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.tin)} | VRN: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.vrn)} | Reg No: ${escapeHtml(ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber)}</p>
-      <h3>${escapeHtml(activeReport.title)}</h3>
-      <p>${escapeHtml(currentBranchLabel ?? 'All branches')} | ${escapeHtml(dateFrom || 'Open')} to ${escapeHtml(dateTo || 'Open')}</p>
-      <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
-      ${reportResult.notice ? `<p>Note: ${escapeHtml(reportResult.notice)}</p>` : ''}
-    </body></html>`;
-    downloadText(`${reportFilename(activeReport)}.xls`, 'application/vnd.ms-excel', html);
+  async function exportExcel() {
+    if (!reportResult.rows.length) return;
+    try {
+      await downloadBinaryExport(
+        '/generated-documents/table-export',
+        {
+          format: 'xlsx',
+          title: activeReport.title,
+          companyId: companyId || undefined,
+          columns: columns.map(formatHeading),
+          rows: reportResult.rows.map((row) => columns.map((column) => String(row[column] ?? ''))),
+          meta: [
+            { label: 'Branch', value: currentBranchLabel ?? 'All branches' },
+            { label: 'Period', value: `${dateFrom || 'Open'} to ${dateTo || 'Open'}` },
+          ],
+        },
+        `${reportFilename(activeReport)}.xlsx`,
+      );
+    } catch (err) {
+      showToast(
+        'error',
+        'Could not export Excel',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    }
+  }
+
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Westsides Reports" loading={authLoading} />;
   }
 
   return (
@@ -1210,49 +1231,35 @@ export default function WestsideReportsPage() {
         </div>
 
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <label className="block">
-            <span
-              className="text-xs font-semibold uppercase"
-              style={{ color: 'var(--aurora-text-muted)' }}
-            >
-              Date From
-            </span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className={`${inputClass} mt-2 w-full`}
-              style={controlStyle}
-            />
-          </label>
-          <label className="block">
-            <span
-              className="text-xs font-semibold uppercase"
-              style={{ color: 'var(--aurora-text-muted)' }}
-            >
-              Date To
-            </span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className={`${inputClass} mt-2 w-full`}
-              style={controlStyle}
-            />
-          </label>
+          <FormDateField
+            label="Date From"
+            value={dateFrom}
+            onChange={setDateFrom}
+          />
+          <FormDateField
+            label="Date To"
+            value={dateTo}
+            onChange={setDateTo}
+          />
         </div>
       </Card>
 
       {error && (
-        <div className="no-print rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-          {error}
+        <div
+          role="alert"
+          className="no-print flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void loadReport()}>
+            Try again
+          </Btn>
         </div>
       )}
 
       <Card className="print-area overflow-hidden" padding="none">
         <div className="print-letterhead px-5 pt-5">
           <Image
-            src="/brand/itemba-group-logo.png"
+            src={letterhead.logoUrl}
             alt="ITEMBA Group logo"
             width={54}
             height={54}
@@ -1260,19 +1267,18 @@ export default function WestsideReportsPage() {
             unoptimized
           />
           <div className="print-letterhead-copy">
-            <div className="print-letterhead-group">{ITEMBA_DOCUMENT_LETTERHEAD.groupName}</div>
+            <div className="print-letterhead-group">{letterhead.groupName}</div>
             <div className="print-letterhead-company">
               {currentCompanyLabel ?? 'ITEMBA-R Group'}
             </div>
-            <div>Address: {ITEMBA_DOCUMENT_LETTERHEAD.address}</div>
+            <div>Address: {letterhead.address}</div>
             <div>
-              Tel: {ITEMBA_DOCUMENT_LETTERHEAD.telephone} | Phone:{' '}
-              {ITEMBA_DOCUMENT_LETTERHEAD.phone}
+              Tel: {letterhead.telephone} | Phone: {letterhead.phone}
             </div>
-            <div>Email: {ITEMBA_DOCUMENT_LETTERHEAD.email}</div>
+            <div>Email: {letterhead.email}</div>
             <div>
-              TIN: {ITEMBA_DOCUMENT_LETTERHEAD.tin} | VRN: {ITEMBA_DOCUMENT_LETTERHEAD.vrn} | Reg
-              No: {ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber}
+              TIN: {letterhead.tin} | VRN: {letterhead.vrn} | Reg No:{' '}
+              {letterhead.registrationNumber}
             </div>
           </div>
           <div className="print-letterhead-report">

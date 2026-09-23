@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Card,
@@ -12,10 +13,12 @@ import {
   Modal,
   Btn,
   PageSpinner,
+  ErrorState,
   showToast,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
 const tdCls = 'px-4 py-2 text-sm';
@@ -93,28 +96,44 @@ export default function SalesCommissionsPage() {
   const [empFilter, setEmpFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const { companyOptions, employeeOptions } = useOrgScope(form.companyId, {
     skipBranches: true,
     skipDivisions: true,
   });
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('sales_orders.view');
   const canManage = hasPermission('sales_orders.create');
   const canApprove = hasPermission('sales_orders.confirm');
+  const beginRequest = useRequestGuard();
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     const params = new URLSearchParams();
     if (empFilter) params.set('employeeId', empFilter);
     if (statusFilter) params.set('status', statusFilter);
-    const r = await fetch(`/api/backend/sales-commissions?${params}`);
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  }, [empFilter, statusFilter]);
+    try {
+      const r = await fetch(`/api/backend/sales-commissions?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const j = await r.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!r.ok) throw new Error(j?.message ?? 'Failed to load sales commissions.');
+      setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setRows([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load sales commissions.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, empFilter, statusFilter]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const summary = useMemo(() => {
@@ -242,6 +261,18 @@ export default function SalesCommissionsPage() {
     CANCELLED: [],
   };
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <PageHeader
+          title="Sales Commissions"
+          subtitle={authLoading ? 'Loading' : 'Access Restricted'}
+          breadcrumbs={[{ label: 'Sales', href: '/sales' }, { label: 'Commissions' }]}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <PageHeader
@@ -264,7 +295,7 @@ export default function SalesCommissionsPage() {
       <PageToolbar
         filters={
           <>
-            <input
+            <input aria-label="Filter by employee ID…"
               type="text"
               placeholder="Filter by employee ID…"
               value={empFilter}
@@ -276,7 +307,7 @@ export default function SalesCommissionsPage() {
                 color: 'var(--aurora-text)',
               }}
             />
-            <select
+            <select aria-label="All statuses"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -314,9 +345,13 @@ export default function SalesCommissionsPage() {
       <Card className="overflow-hidden">
         {loading ? (
           <PageSpinner />
+        ) : loadError ? (
+          <div className="p-6">
+            <ErrorState message={loadError} onRetry={() => void load()} />
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <WorkspaceTable className="w-full">
               <thead
                 className="bg-slate-50 border-b border-slate-100"
                 style={{ color: 'var(--aurora-text-muted)' }}
@@ -398,7 +433,7 @@ export default function SalesCommissionsPage() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
       </Card>
@@ -494,7 +529,7 @@ export default function SalesCommissionsPage() {
           />
           <FormTextarea label="Notes" value={form.notes} onChange={f('notes')} rows={2} />
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+            <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
               {error}
             </div>
           )}

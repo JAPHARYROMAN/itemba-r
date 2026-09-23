@@ -1,8 +1,12 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DocumentPreviewLink } from '@/components/documents';
-import { Btn, Card, Modal, PageHeader, StatusBadge, showToast } from '@/components/ui';
+import { Btn, Card, FormDateField, Modal, PageHeader, StatusBadge, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { WestsidesGate } from '../_components/route-gate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -285,7 +289,7 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
     <Modal open onClose={onClose} title={item ? 'Edit Delivery Note' : 'New Delivery Note'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>{item ? 'Update' : 'Create'}</Btn></>}>
       <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
-          {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
+          {error && <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>}
 
           {/* Sales-order lookup — replaces the raw SO id field and drives line prefill. */}
           {!item && (
@@ -296,13 +300,13 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
                 </label>
                 {selectedSo && <StatusBadge value={selectedSo.status} />}
               </div>
-              <input
+              <input aria-label="Search confirmed orders by number or customer…"
                 value={soSearch}
                 onChange={(e) => setSoSearch(e.target.value)}
                 className={fieldCls}
                 placeholder="Search confirmed orders by number or customer…"
               />
-              <select
+              <select aria-label="Sales Order Id"
                 id="dn-so-picker"
                 value={salesOrderId}
                 onChange={(e) => handleSelectSalesOrder(e.target.value)}
@@ -327,7 +331,7 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
               ) : selectedSo ? (
                 lines.length ? (
                   <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                    <table className="w-full">
+                    <WorkspaceTable className="w-full">
                       <thead className="bg-slate-50 border-b border-slate-200">
                         <tr>
                           <th className={thCls}>Item</th>
@@ -356,7 +360,7 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </WorkspaceTable>
                   </div>
                 ) : (
                   <p className="text-xs text-slate-500">This sales order has no lines to deliver.</p>
@@ -372,7 +376,7 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls}>Customer</label>
-              <input
+              <input aria-label="Customer"
                 value={item ? (item.customerName ?? '—') : (selectedSo?.customer?.name ?? selectedSo?.customerName ?? '')}
                 disabled
                 className={`${fieldCls} disabled:bg-slate-50 disabled:text-slate-500`}
@@ -380,20 +384,24 @@ function DeliveryNoteModal({ item, onClose, onSaved }: ModalProps) {
               />
             </div>
             <div>
-              <label className={labelCls}>Delivery Date *</label>
-              <input type="date" required value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} className={fieldCls} />
+              <FormDateField
+                label="Delivery Date"
+                required
+                value={deliveryDate}
+                onChange={setDeliveryDate}
+              />
             </div>
             <div>
               <label className={labelCls}>Driver name</label>
-              <input value={driverName} onChange={(e) => setDriverName(e.target.value)} className={fieldCls} placeholder="e.g. Juma Hassan (optional)" />
+              <input aria-label="Driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={fieldCls} placeholder="e.g. Juma Hassan (optional)" />
             </div>
             <div>
               <label className={labelCls}>Vehicle</label>
-              <input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={fieldCls} placeholder="e.g. T 123 ABC (optional)" />
+              <input aria-label="Vehicle" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={fieldCls} placeholder="e.g. T 123 ABC (optional)" />
             </div>
             <div className="col-span-2">
               <label className={labelCls}>Notes</label>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={fieldCls} placeholder="Delivery notes…" />
+              <textarea aria-label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={fieldCls} placeholder="Delivery notes…" />
             </div>
           </div>
       </form>
@@ -432,6 +440,9 @@ const ACTION_DONE: Record<DNAction, string> = {
 };
 
 export default function DeliveryNotesPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('delivery_notes.view');
+  const beginRequest = useRequestGuard();
   const [items, setItems] = useState<DeliveryNote[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -440,16 +451,26 @@ export default function DeliveryNotesPage() {
   const [actioning, setActioning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch('/api/backend/westsides/delivery-notes?limit=100');
+      const res = await fetch('/api/backend/westsides/delivery-notes?limit=100', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) throw new Error('Failed to load delivery notes');
       const json = await res.json();
+      if (!request.current()) return;
       setItems(json.data?.data ?? json.data ?? []);
     } catch (err: unknown) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Error loading data');
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -468,6 +489,10 @@ export default function DeliveryNotesPage() {
     } finally { setActioning(null); }
   };
 
+  if (authLoading || !canView) {
+    return <WestsidesGate title="Delivery Notes" loading={authLoading} />;
+  }
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -477,14 +502,24 @@ export default function DeliveryNotesPage() {
         </button>
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
       {loading ? <Spinner /> : (
         <Card className="overflow-hidden">
           {items.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-10">No delivery notes found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <WorkspaceTable className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className={thCls}>DN #</th>
@@ -529,7 +564,7 @@ export default function DeliveryNotesPage() {
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>

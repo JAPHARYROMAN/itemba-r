@@ -1,0 +1,66 @@
+.os-glyph {
+  --glyph-top: #66849a;
+  --glyph-bottom: #365d75;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  color: #fff;
+  background: linear-gradient(150deg, var(--glyph-top), var(--glyph-bottom));
+  border: 1px solid rgb(255 255 255 / 25%);
+  box-shadow:
+    inset 0 1px 1px rgb(255 255 255 / 40%),
+    0 4px 9px rgb(12 23 43 / 13%);
+}
+.os-glyph-small {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+.os-glyph-large {
+  width: 72px;
+  height: 72px;
+  border-radius: 21px;
+}
+.os-glyph[data-app='itemba-r'] {
+  --glyph-top: #458eea;
+  --glyph-bottom: #215dc1;
+}
+.os-glyph[data-app='fuel-grid'] {
+  --glyph-top: #ed9b45;
+  --glyph-bottom: #bd591e;
+}
+.os-glyph[data-app='invoice-desk'] {
+  --glyph-top: #7874e3;
+  --glyph-bottom: #5040a9;
+}
+.os-glyph[data-app='cash-desk'] {
+  --glyph-top: #42a88d;
+  --glyph-bottom: #197462;
+}
+.os-glyph[data-app='inventory'] {
+  --glyph-top: #cb9560;
+  --glyph-bottom: #966037;
+}
+.os-glyph[data-app='sales-desk'] {
+  --glyph-top: #e07e89;
+  --glyph-bottom: #b44363;
+}
+.os-glyph[data-app='payroll'] {
+  --glyph-top: #6b93d3;
+  --glyph-bottom: #45659b;
+}
+.os-glyph[data-app='documents'] {
+  --glyph-top: #66a4c2;
+  --glyph-bottom: #316e91;
+}
+.os-glyph[data-app='reports'] {
+  --glyph-top: #8d80ba;
+  --glyph-bottom: #655087;
+}
+.os-glyph[data-app='settings'] {
+  --glyph-top: #8b96a8;
+  --glyph-bottom: #596578;
+}

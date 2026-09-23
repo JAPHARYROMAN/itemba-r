@@ -1,12 +1,14 @@
 'use client';
+import '@/components/workspace/workspace.css';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Card, PageHeader, PermissionDeniedState } from '@/components/ui';
+import { useFormGuard, useGuardedRouter } from '@/components/workspace/unsaved-work-provider';
+import { Card, ErrorState, PageHeader, PermissionDeniedState } from '@/components/ui';
 import { FormInput } from '@/components/aurora/forms/FormInput';
 import { FormSelect } from '@/components/aurora/forms/FormSelect';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendPost } from '@/lib/api-client';
 
 const STATUS_OPTIONS = [
@@ -27,11 +29,14 @@ interface CreatedCompany {
 }
 
 export default function NewCompanyPage() {
-  const router = useRouter();
-  const { hasPermission } = useAuth();
+  const router = useGuardedRouter();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canCreate = hasPermission('companies.create');
+  const beginRequest = useRequestGuard();
   const [groups, setGroups] = useState<Group[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     groupId: '',
@@ -44,38 +49,36 @@ export default function NewCompanyPage() {
     website: '',
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadGroups() {
-      setLoadingGroups(true);
-      setError(null);
-      try {
-        const data = await backendGet<Group[]>('/groups');
-        if (cancelled) return;
-        setGroups(Array.isArray(data) ? data : []);
-        setForm((current) => ({
-          ...current,
-          groupId: current.groupId || data?.[0]?.id || '',
-        }));
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load groups');
-        }
-      } finally {
-        if (!cancelled) setLoadingGroups(false);
-      }
-    }
+  const draft = useFormGuard(form, setForm);
 
-    if (hasPermission('companies.create')) {
-      void loadGroups();
-    } else {
+  const loadGroups = useCallback(async () => {
+    if (authLoading || !canCreate) {
       setLoadingGroups(false);
+      return;
     }
+    const request = beginRequest();
+    setLoadingGroups(true);
+    setLoadError(null);
+    try {
+      const data = await backendGet<Group[]>('/groups', { signal: request.signal });
+      if (!request.current()) return;
+      const rows = Array.isArray(data) ? data : [];
+      setGroups(rows);
+      setForm((current) => ({
+        ...current,
+        groupId: current.groupId || rows[0]?.id || '',
+      }));
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load groups');
+    } finally {
+      if (request.current()) setLoadingGroups(false);
+    }
+  }, [authLoading, beginRequest, canCreate]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [hasPermission]);
+  useEffect(() => {
+    void loadGroups();
+  }, [loadGroups]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -99,6 +102,7 @@ export default function NewCompanyPage() {
         website: optionalString(form.website),
       };
       const created = await backendPost<CreatedCompany>('/companies', payload);
+      draft.markSaved();
       router.push(`/companies/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create company');
@@ -107,7 +111,15 @@ export default function NewCompanyPage() {
     }
   }
 
-  if (!hasPermission('companies.create')) {
+  if (authLoading) {
+    return (
+      <main className="p-6 flex-1 bg-slate-50 min-h-screen">
+        <PageHeader title="Add Company" description="Loading" />
+      </main>
+    );
+  }
+
+  if (!canCreate) {
     return (
       <main className="p-6 flex-1 bg-slate-50 min-h-screen">
         <PageHeader title="Add Company" description="Create a legal company record." />
@@ -119,7 +131,7 @@ export default function NewCompanyPage() {
   }
 
   return (
-    <main className="p-6 flex-1 bg-slate-50 min-h-screen">
+    <main className="business-workspace workspace-form">
       <PageHeader
         title="Add Company"
         description="Create a legally separate company record under the group."
@@ -134,8 +146,9 @@ export default function NewCompanyPage() {
       />
 
       <Card className="max-w-3xl p-5">
-        <form onSubmit={onSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <form {...draft.capture} onSubmit={onSubmit} className="space-y-5">
+          <fieldset className="workspace-form-section grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <legend>Company identity</legend>
             <FormSelect
               label="Group"
               required
@@ -177,6 +190,9 @@ export default function NewCompanyPage() {
               onChange={(e) => setForm({ ...form, industryType: e.target.value })}
               placeholder="Petroleum, logistics, agriculture"
             />
+          </fieldset>
+          <fieldset className="workspace-form-section grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <legend>Contact details</legend>
             <FormInput
               label="Phone"
               type="tel"
@@ -199,7 +215,9 @@ export default function NewCompanyPage() {
               onChange={(e) => setForm({ ...form, website: e.target.value })}
               placeholder="https://example.com"
             />
-          </div>
+          </fieldset>
+
+          {loadError && <ErrorState message={loadError} onRetry={() => void loadGroups()} />}
 
           {error && (
             <div

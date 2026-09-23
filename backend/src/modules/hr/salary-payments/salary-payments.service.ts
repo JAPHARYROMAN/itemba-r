@@ -26,9 +26,25 @@ export class SalaryPaymentsService {
     };
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
+    const search = query.search?.trim();
+    if (search)
+      where.AND = [
+        ...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []),
+        {
+          OR: [
+            { salaryPaymentNumber: { contains: search, mode: 'insensitive' } },
+            { reference: { contains: search, mode: 'insensitive' } },
+            { employee: { fullName: { contains: search, mode: 'insensitive' } } },
+            { employee: { employeeCode: { contains: search, mode: 'insensitive' } } },
+          ],
+        },
+      ];
     const [data, total] = await Promise.all([
       this.prisma.salaryPayment.findMany({
-        where, skip, take: Number(limit), orderBy: { paymentDate: 'desc' },
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { paymentDate: 'desc' },
         include: {
           employee: { select: { id: true, fullName: true, employeeCode: true } },
           company: { select: { id: true, name: true } },
@@ -53,6 +69,10 @@ export class SalaryPaymentsService {
   }
 
   async create(dto: CreateSalaryPaymentDto, user: AuthUser) {
+    if (dto.payrollRunId)
+      throw new BadRequestException(
+        'Record payroll run payments in Payroll runs to connect cash and accounting.',
+      );
     if ((dto as any).companyId) {
       await this.companyScope.assertCanAccessCompany(
         user,
@@ -79,6 +99,10 @@ export class SalaryPaymentsService {
 
   async update(id: string, dto: UpdateSalaryPaymentDto, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (dto.payrollRunId && dto.payrollRunId !== existing.payrollRunId)
+      throw new BadRequestException('Record payroll run payments in Payroll runs.');
+    if (existing.cashMovementId)
+      throw new BadRequestException('Correct connected payments through Payroll runs.');
     const record = await this.prisma.salaryPayment.update({
       where: { id },
       data: { ...dto, paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : undefined } as any,
@@ -96,6 +120,8 @@ export class SalaryPaymentsService {
 
   async reverse(id: string, reason: string | undefined, user: AuthUser) {
     const record = await this.findOne(id, user, AccessLevel.WRITE);
+    if (record.cashMovementId)
+      throw new BadRequestException('Reverse connected payments through Payroll runs.');
     if (record.status === 'REVERSED') throw new BadRequestException('Payment already reversed');
     const updated = await this.prisma.salaryPayment.update({
       where: { id },
@@ -114,6 +140,10 @@ export class SalaryPaymentsService {
 
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.cashMovementId)
+      throw new BadRequestException(
+        'Connected salary payments are retained as payroll payment history.',
+      );
     await this.prisma.salaryPayment.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       userId: user.id,

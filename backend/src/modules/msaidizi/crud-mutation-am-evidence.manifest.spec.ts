@@ -15,6 +15,7 @@ import {
   crudMutationBusinessDeltaModels,
   crudMutationRecoveryPlan,
 } from './crud-mutation-evidence';
+import { CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS } from './crud-redesign-suspended-evidence';
 
 const PRISMA_MODEL_BY_NAME = new Map(
   Prisma.dmmf.datamodel.models.map((model) => [model.name, model]),
@@ -109,17 +110,44 @@ describe('A-M mutation evidence against the live capability manifest', () => {
     (blocker) => eligibleCapabilityIds.has(blocker.capabilityId),
   );
   const capabilityById = new Map(manifest.map((capability) => [capability.id, capability]));
+  // Static definitions retained for re-review of routes the ITEMBA OS redesign
+  // (4a155f19) changed; each such route is @AgentExcluded() and out of the tranche.
+  const suspendedFixtures = fixtures.filter((fixture) =>
+    CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS.has(fixture.capabilityId),
+  );
+  const liveFixtures = fixtures.filter(
+    (fixture) => !CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS.has(fixture.capabilityId),
+  );
 
   it('partitions the exact live A-M agent-eligible mutation inventory', () => {
-    const registered = fixtures.map((fixture) => fixture.capabilityId);
+    const registered = liveFixtures.map((fixture) => fixture.capabilityId);
     const blocked = blockers.map((blocker) => blocker.capabilityId);
     const controllers = new Set(tranche.map((capability) => capability.controller));
 
-    expect(tranche).toHaveLength(323);
+    // 323/281/42/34 before the ITEMBA OS redesign (4a155f19). It suspended five
+    // A-M positives (ApprovalDelegationsController.create/.update,
+    // ApprovalWorkflowsController.create/.update, LoansController.create) and
+    // agent-excluded two exact-effect blockers
+    // (LoanRepaymentSchedulesController.recordPayment,
+    // LoansController.recordRepayment); all seven left the eligible tranche.
+    expect(tranche).toHaveLength(316);
     expect(controllers.size).toBe(89);
     expect(packs.map((pack) => pack.fixtures.length)).toEqual([6, 81, 73, 121]);
-    expect(registered).toHaveLength(281);
-    expect(blocked).toHaveLength(42);
+    expect(suspendedFixtures.map((fixture) => fixture.capabilityId).sort()).toEqual([
+      'ApprovalDelegationsController.create',
+      'ApprovalDelegationsController.update',
+      'ApprovalWorkflowsController.create',
+      'ApprovalWorkflowsController.update',
+      'LoansController.create',
+    ]);
+    for (const fixture of suspendedFixtures) {
+      expect(capabilityById.get(fixture.capabilityId)).toMatchObject({
+        agentExcluded: true,
+        agentExclusionReason: 'agent_excluded',
+      });
+    }
+    expect(registered).toHaveLength(276);
+    expect(blocked).toHaveLength(40);
     expect(blockers.filter((blocker) => blocker.reason === 'body_schema_not_strict')).toHaveLength(
       0,
     );
@@ -131,7 +159,7 @@ describe('A-M mutation evidence against the live capability manifest', () => {
     ).toHaveLength(8);
     expect(
       blockers.filter((blocker) => blocker.reason === 'exact_effect_not_represented'),
-    ).toHaveLength(34);
+    ).toHaveLength(32);
     expect(new Set(registered).size).toBe(registered.length);
     expect(new Set(blocked).size).toBe(blocked.length);
     expect(registered.filter((capabilityId) => blocked.includes(capabilityId))).toEqual([]);
@@ -142,7 +170,7 @@ describe('A-M mutation evidence against the live capability manifest', () => {
   });
 
   it('binds every positive to the exact strict manifest envelope', () => {
-    for (const fixture of fixtures) {
+    for (const fixture of liveFixtures) {
       const capability = capabilityById.get(fixture.capabilityId);
       expect(capability).toBeDefined();
       if (!capability) continue;
@@ -256,6 +284,19 @@ describe('A-M mutation evidence against the live capability manifest', () => {
     expect(formerInventory.size).toBe(60);
     for (const capabilityId of RESOLVED_SCHEMA_ROUTES) {
       const capability = capabilityById.get(capabilityId);
+      if (CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS.has(capabilityId)) {
+        // The ITEMBA OS redesign (4a155f19) changed this body contract; the
+        // route is agent-excluded rather than represented by a stale envelope.
+        expect(capability).toMatchObject({
+          agentExcluded: true,
+          agentExclusionReason: 'agent_excluded',
+        });
+        expect(liveFixtures.some((fixture) => fixture.capabilityId === capabilityId)).toBe(false);
+        expect(
+          blockers.find((candidate) => candidate.capabilityId === capabilityId),
+        ).toBeUndefined();
+        continue;
+      }
       expect(capability?.params.bodySchema?.quality).toBe('strict');
       const registered = fixtures.some((fixture) => fixture.capabilityId === capabilityId);
       const blocker = blockers.find((candidate) => candidate.capabilityId === capabilityId);

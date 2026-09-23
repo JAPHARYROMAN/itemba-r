@@ -111,58 +111,87 @@ export class CashAccountsService {
   }
 
   async update(id: string, dto: UpdateCashAccountDto, user: AuthUser) {
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    const { companyId, ...data } = dto;
-    if (companyId !== undefined && companyId !== existing.companyId) {
-      throw new BadRequestException('Cash account company cannot be changed');
-    }
-    await this.assertCashAccountScope({
-      companyId: existing.companyId,
-      divisionId:
-        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
-      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
-      accountType: dto.accountType ?? existing.accountType,
-      linkedBankAccountId:
-        dto.linkedBankAccountId !== undefined
-          ? dto.linkedBankAccountId || null
-          : existing.linkedBankAccountId || null,
-    });
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${id} FOR UPDATE`;
+        const existing = await this.findOne(id, user, AccessLevel.WRITE);
+        const { companyId, ...data } = dto;
+        if (
+          existing.ledgerAccountId &&
+          ((dto.currency !== undefined && dto.currency !== existing.currency) ||
+            (dto.divisionId !== undefined && (dto.divisionId || null) !== existing.divisionId) ||
+            (dto.branchId !== undefined && (dto.branchId || null) !== existing.branchId) ||
+            (dto.accountType !== undefined && dto.accountType !== existing.accountType) ||
+            dto.openingBalance !== undefined ||
+            dto.currentBalance !== undefined ||
+            dto.isActive === false)
+        )
+          throw new BadRequestException(
+            'Connected accounts retain their currency, organisation and balance history. Correct balances with a financial transaction.',
+          );
+        if (companyId !== undefined && companyId !== existing.companyId) {
+          throw new BadRequestException('Cash account company cannot be changed');
+        }
+        await this.assertCashAccountScope({
+          companyId: existing.companyId,
+          divisionId:
+            dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
+          branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
+          accountType: dto.accountType ?? existing.accountType,
+          linkedBankAccountId:
+            dto.linkedBankAccountId !== undefined
+              ? dto.linkedBankAccountId || null
+              : existing.linkedBankAccountId || null,
+        });
 
-    const record = await this.prisma.cashAccount.update({
-      where: { id },
-      data: {
-        ...data,
-        ...(dto.divisionId !== undefined && { divisionId: dto.divisionId || null }),
-        ...(dto.branchId !== undefined && { branchId: dto.branchId || null }),
-        ...(dto.linkedBankAccountId !== undefined && {
-          linkedBankAccountId: dto.linkedBankAccountId || null,
-        }),
+        const record = await tx.cashAccount.update({
+          where: { id },
+          data: {
+            ...data,
+            ...(dto.divisionId !== undefined && { divisionId: dto.divisionId || null }),
+            ...(dto.branchId !== undefined && { branchId: dto.branchId || null }),
+            ...(dto.linkedBankAccountId !== undefined && {
+              linkedBankAccountId: dto.linkedBankAccountId || null,
+            }),
+          },
+        });
+        await this.auditLogs.logStrictInTransaction(tx, {
+          action: 'CASH_ACCOUNT_UPDATE',
+          entityType: 'CashAccount',
+          entityId: id,
+          userId: user.id,
+          companyId: record.companyId,
+          oldValue: existing as any,
+          newValue: record as any,
+        });
+        return record;
       },
-    });
-    await this.auditLogs.log({
-      action: 'CASH_ACCOUNT_UPDATE',
-      entityType: 'CashAccount',
-      entityId: id,
-      userId: user.id,
-      companyId: record.companyId,
-      oldValue: existing as any,
-      newValue: record as any,
-    });
-    return record;
+      { timeout: 30000 },
+    );
   }
 
   async remove(id: string, user: AuthUser) {
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    await this.prisma.cashAccount.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.auditLogs.log({
-      action: 'CASH_ACCOUNT_DELETE',
-      entityType: 'CashAccount',
-      entityId: id,
-      userId: user.id,
-      companyId: existing.companyId,
-      oldValue: existing as any,
-    });
-    return { success: true };
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${id} FOR UPDATE`;
+        const existing = await this.findOne(id, user, AccessLevel.WRITE);
+        if (existing.ledgerAccountId)
+          throw new BadRequestException(
+            'Connected cash accounts must be retained for their financial history.',
+          );
+        await tx.cashAccount.update({ where: { id }, data: { deletedAt: new Date() } });
+        await this.auditLogs.logStrictInTransaction(tx, {
+          action: 'CASH_ACCOUNT_DELETE',
+          entityType: 'CashAccount',
+          entityId: id,
+          userId: user.id,
+          companyId: existing.companyId,
+          oldValue: existing as any,
+        });
+        return { success: true };
+      },
+      { timeout: 30000 },
+    );
   }
 
   private async assertCashAccountScope(input: {

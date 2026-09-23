@@ -17,6 +17,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { auditErpAttemptResult } from './msaidizi-action-audit';
 import { actionArgumentDigest } from '../../common/utils/canonical-digest';
 import { capabilityEffect } from '../../common/capabilities/capability-manifest';
 import { MSAIDIZI_SERVICE_PRINCIPAL_TYPE } from '../../common/context/request-context';
@@ -82,6 +83,12 @@ interface StepPayload {
 interface ReservedAttempt {
   id: string;
   number: number;
+}
+
+interface IncompleteResponseProvenance {
+  responseIncomplete: true;
+  responseBytes: number;
+  responseSha256: string;
 }
 
 interface ErpEgressSettlement {
@@ -215,6 +222,17 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
       throw new Error('Mutation retry was blocked by an existing terminal attempt');
     }
 
+    if (
+      !loaded.step.mutation &&
+      loaded.step.idempotent &&
+      loaded.step.target === MsaidiziExecutionTarget.ERP &&
+      loaded.step.attemptCount > 0
+    ) {
+      if (!(await this.reconcileAbandonedRead(context, loaded.task.id, loaded.step.id))) {
+        return { data: { skipped: true, reason: 'read retry no longer owns its lease' } };
+      }
+    }
+
     const stepBudgetError = stepBudgetPolicyError(loaded.task, loaded.step);
     if (stepBudgetError) {
       await this.rejectWithoutDispatch(loaded.task.id, loaded.step.id, stepBudgetError);
@@ -258,6 +276,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
             loaded.step.id,
             attempt.id,
             loaded.step.arguments,
+            loaded.step.target,
           );
       if (hasInputBindings(loaded.step.inputBindings)) {
         await this.bindResolvedInputs(loaded, attempt.id, resolvedInputs);
@@ -499,6 +518,9 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
       return { data: { skipped: true, reason: 'task state changed before dispatch' } };
     }
 
+    // The v1 egress protocol binds typed adapter input, not the HTTP-normalized
+    // JWT scope digest. Preserve that independent receipt contract.
+    const egressArgumentsSha256 = actionArgumentDigest(resolvedInputs.arguments);
     const result = await this.invoker.invoke({
       capability,
       args: resolvedInputs.arguments,
@@ -515,7 +537,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
               attemptId: attempt.id,
               capabilityId: capability.id,
               capabilityVersion: loaded.step.capabilityVersion,
-              argumentsSha256: resolvedInputs.argumentsSha256,
+              argumentsSha256: egressArgumentsSha256,
               reservedExternalEgressBytes: egressReservation,
             } satisfies ErpEgressInvocationBinding,
           }
@@ -525,6 +547,9 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     const resultBytes =
       result.responseBytes ?? (result.status === 0 ? 0 : Buffer.byteLength(resultText, 'utf8'));
     const resultSha256 = result.responseSha256 ?? sha256Hex(result.status === 0 ? '' : resultText);
+    const incompleteResponse: IncompleteResponseProvenance | undefined = result.responseIncomplete
+      ? { responseIncomplete: true, responseBytes: resultBytes, responseSha256: resultSha256 }
+      : undefined;
     const resultEntityIdentifiers = extractEntityIdentifiers(result.body);
     const egressSettlement =
       egressReservation === undefined
@@ -538,7 +563,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
               attemptId: attempt.id,
               capabilityId: capability.id,
               capabilityVersion: loaded.step.capabilityVersion,
-              argumentsSha256: resolvedInputs.argumentsSha256,
+              argumentsSha256: egressArgumentsSha256,
               reservedExternalEgressBytes: egressReservation,
             },
             resultSha256,
@@ -592,6 +617,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
         attempt.id,
         result.status,
         egressSettlement,
+        incompleteResponse,
       );
       return {
         data: {
@@ -661,6 +687,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
         result.status,
         result.error,
         egressSettlement,
+        incompleteResponse,
       );
       return { data: { ok: false, uncertainOutcome: true } };
     }
@@ -680,6 +707,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
       resultBytes,
       resultSha256,
       egressSettlement,
+      incompleteResponse,
     );
     if (transientRead && !finalAttempt) {
       throw new Error(`Transient ERP read failed (${result.status || 'transport'})`);
@@ -700,6 +728,82 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     return { task, step, plan: step.planVersion };
   }
 
+  private async reconcileAbandonedRead(
+    context: JobContext,
+    taskId: string,
+    stepId: string,
+  ): Promise<boolean> {
+    if (!context.leaseOwner || !Number.isSafeInteger(context.attempts) || context.attempts < 1)
+      return false;
+    return this.prisma.$transaction(async (tx) => {
+      const task = await tx.$queryRaw<Array<{ status: MsaidiziTaskStatus }>>(
+        Prisma.sql`SELECT "status" FROM "msaidizi_tasks" WHERE "id" = ${taskId} FOR UPDATE`,
+      );
+      if (task[0]?.status !== MsaidiziTaskStatus.RUNNING) return false;
+      // Bind both the stable step job and this worker generation. A late former
+      // owner cannot close a newer attempt. Keep this lock through ledger append.
+      const jobs = await tx.$queryRaw<Array<{ attempts: number }>>(
+        Prisma.sql`SELECT "attempts" FROM "background_jobs"
+          WHERE "id" = ${context.jobId} AND "status" = 'RUNNING'
+            AND "jobType" = 'MSAIDIZI_TASK_STEP' AND "correlationId" = ${taskId}
+            AND "idempotencyKey" = ${`msaidizi-step:${stepId}`}
+            AND "leaseOwner" = ${context.leaseOwner} AND "attempts" = ${context.attempts} FOR UPDATE`,
+      );
+      if (!jobs[0] || jobs[0].attempts < 1) return false;
+      const step = await tx.msaidiziTaskStep.findFirst({
+        where: {
+          id: stepId,
+          taskId,
+          target: MsaidiziExecutionTarget.ERP,
+          expectedEffect: MsaidiziEffect.READ,
+          mutation: false,
+          idempotent: true,
+          status: { in: [MsaidiziTaskStepStatus.LEASED, MsaidiziTaskStepStatus.RUNNING] },
+          attemptCount: { lte: jobs[0].attempts },
+        },
+      });
+      if (!step) return false;
+      const abandoned = await tx.msaidiziToolAttempt.findMany({
+        where: {
+          taskId,
+          stepId,
+          attemptNumber: { lte: step.attemptCount },
+          status: { in: [MsaidiziToolAttemptStatus.REQUESTED, MsaidiziToolAttemptStatus.RUNNING] },
+        },
+        select: { id: true, status: true },
+      });
+      for (const attempt of abandoned) {
+        const reason = 'READ_WORKER_LEASE_LOST';
+        const changed = await tx.msaidiziToolAttempt.updateMany({
+          where: { id: attempt.id, taskId, stepId, status: attempt.status },
+          data: {
+            status: MsaidiziToolAttemptStatus.FAILED,
+            errorCode: reason,
+            errorMessage:
+              'The prior read response was not durably settled before its worker lease was replaced.',
+            endedAt: new Date(),
+          },
+        });
+        if (changed.count !== 1) throw new Error('Read recovery attempt CAS lost');
+        const evidence = {
+          reason,
+          jobId: context.jobId,
+          priorStatus: attempt.status,
+          retainedIoReservation: true,
+        };
+        await this.event(tx, taskId, 'tool.read_attempt_reconciled', {
+          stepId,
+          attemptId: attempt.id,
+          ...evidence,
+        });
+        await this.auditAttemptResult(tx, taskId, stepId, attempt.id, 'FAILED', evidence);
+      }
+      // Do not refund unknown IO, reset counters/start clocks, or invent a
+      // successful result. The next reservation still checks the original caps.
+      return true;
+    });
+  }
+
   private async reserveAttempt(
     task: {
       id: string;
@@ -718,6 +822,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     },
     step: {
       id: string;
+      target: MsaidiziExecutionTarget;
       status: MsaidiziTaskStepStatus;
       attemptCount: number;
       mutation: boolean;
@@ -744,7 +849,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     const id = `attempt-${step.id}-${attemptNumber}`;
     const staticInputs = hasInputBindings(step.inputBindings)
       ? null
-      : staticStepInputs(task.id, step.planVersionId, step.id, id, step.arguments);
+      : staticStepInputs(task.id, step.planVersionId, step.id, id, step.arguments, step.target);
     const initialArgsDigest =
       staticInputs?.argumentsSha256 ??
       actionArgumentDigest(step.arguments as Record<string, unknown>);
@@ -1594,6 +1699,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     attemptId: string,
     status: number,
     egress: ErpEgressSettlement,
+    incompleteResponse?: IncompleteResponseProvenance,
   ): Promise<void> {
     const reason = egress.errorCode ?? 'ERP_EGRESS_RECEIPT_UNVERIFIABLE';
     await this.prisma.$transaction(async (tx) => {
@@ -1605,7 +1711,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
           status: MsaidiziToolAttemptStatus.UNKNOWN,
           uncertainOutcome: true,
           errorCode: reason,
-          resultSummary: { externalEgress: erpEgressSummary(egress) },
+          resultSummary: { externalEgress: erpEgressSummary(egress), ...incompleteResponse },
           endedAt: new Date(),
         },
         egress,
@@ -1630,6 +1736,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
         httpStatus: status,
         reason,
         externalEgress: erpEgressSummary(egress),
+        ...incompleteResponse,
       });
     });
   }
@@ -1697,6 +1804,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     status: number,
     error?: string,
     egress?: ErpEgressSettlement,
+    incompleteResponse?: IncompleteResponseProvenance,
   ) {
     await this.prisma.$transaction(async (tx) => {
       await this.settleAttemptInTransaction(
@@ -1708,7 +1816,14 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
           uncertainOutcome: true,
           errorCode: status ? `HTTP_${status}` : 'TRANSPORT_UNKNOWN',
           errorMessage: error ? redactSensitiveFields(error) : undefined,
-          ...(egress ? { resultSummary: { externalEgress: erpEgressSummary(egress) } } : {}),
+          ...(egress || incompleteResponse
+            ? {
+                resultSummary: {
+                  ...(egress ? { externalEgress: erpEgressSummary(egress) } : {}),
+                  ...incompleteResponse,
+                },
+              }
+            : {}),
           endedAt: new Date(),
         },
         egress,
@@ -1725,6 +1840,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
       await this.event(tx, taskId, 'step.outcome_unknown', { stepId, attemptId, status });
       await this.auditAttemptResult(tx, taskId, stepId, attemptId, 'UNKNOWN', {
         httpStatus: status,
+        ...incompleteResponse,
         ...(egress ? { externalEgress: erpEgressSummary(egress) } : {}),
       });
     });
@@ -1796,6 +1912,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     responseBytes: number,
     responseSha256: string,
     egress?: ErpEgressSettlement,
+    incompleteResponse?: IncompleteResponseProvenance,
   ) {
     await this.prisma.$transaction(async (tx) => {
       await this.settleAttemptInTransaction(
@@ -1811,6 +1928,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
             httpStatus: status,
             responseBytes,
             responseSha256,
+            ...incompleteResponse,
             ...(egress ? { externalEgress: erpEgressSummary(egress) } : {}),
           },
           endedAt: new Date(),
@@ -1844,6 +1962,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
         final ? 'FAILED' : 'RETRY_SCHEDULED',
         {
           httpStatus: status,
+          ...incompleteResponse,
           ...(egress ? { externalEgress: erpEgressSummary(egress) } : {}),
         },
       );
@@ -1931,34 +2050,7 @@ export class MsaidiziTaskStepHandler implements OnModuleInit {
     outcome: string,
     metadata: Record<string, unknown>,
   ): Promise<void> {
-    const task = await tx.msaidiziTask.findUnique({
-      where: { id: taskId },
-      select: {
-        principalId: true,
-        initiatedByUserId: true,
-        mandateId: true,
-        companyId: true,
-      },
-    });
-    if (!task) throw new Error('Msaidizi task disappeared while writing action evidence');
-    await this.audit.logStrictInTransaction(tx, {
-      action: `MSAIDIZI_ERP_ACTION_${outcome}`,
-      entityType: 'MsaidiziToolAttempt',
-      entityId: attemptId,
-      userId: task.initiatedByUserId,
-      companyId: task.companyId,
-      scopeKind: task.companyId ? AuditScopeKind.COMPANY : AuditScopeKind.GROUP,
-      newValue: redactSensitiveFields({ outcome, ...metadata }) as Prisma.InputJsonObject,
-      severity: outcome === 'SUCCEEDED' ? AuditSeverity.LOW : AuditSeverity.HIGH,
-      channel: AuditChannel.AGENT,
-      agentSessionId: taskSessionId(taskId),
-      principalType: MSAIDIZI_SERVICE_PRINCIPAL_TYPE,
-      principalId: task.principalId,
-      mandateId: task.mandateId,
-      initiatedByUserId: task.initiatedByUserId,
-      taskId,
-      stepId,
-    });
+    await auditErpAttemptResult(this.audit, tx, taskId, stepId, attemptId, outcome, metadata);
   }
 
   private async event(

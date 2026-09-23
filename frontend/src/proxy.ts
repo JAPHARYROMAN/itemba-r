@@ -21,6 +21,7 @@ export function proxy(req: NextRequest) {
 
   // Allow all public routes and static files
   if (
+    pathname === '/fuel-reporting/login' ||
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
@@ -34,7 +35,10 @@ export function proxy(req: NextRequest) {
 
   if (!isAuthenticated) {
     const loginUrl = req.nextUrl.clone();
-    loginUrl.pathname = '/login';
+    loginUrl.pathname =
+      pathname === '/fuel-reporting' || pathname.startsWith('/fuel-reporting/')
+        ? '/fuel-reporting/login'
+        : '/login';
     // Keep the query string inside `from` so deep links survive login — e.g.
     // the POS activation QR (?terminal=…&code=…) must not force reps to
     // retype codes after signing in.

@@ -43,6 +43,7 @@ export class EmploymentDisputesController {
         branchId: q.branchId,
         employeeId: q.employeeId,
         status: q.status,
+        search: q.search,
         directToGroupHr: q.directToGroupHr === undefined ? undefined : q.directToGroupHr === 'true',
       },
       user,

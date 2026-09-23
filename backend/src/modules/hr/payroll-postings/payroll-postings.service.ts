@@ -258,7 +258,11 @@ export class PayrollPostingsService {
     cr('HESLB_PAYABLE', totals.heslb, 'HESLB — to Loans Board');
     // Salary-advance recovery relieves the Employee Receivable asset (1110) —
     // clears the advance booked by postAdvancePayment as it is withheld.
-    cr('EMPLOYEE_RECEIVABLE', totals.advanceRecovery, 'Salary advance recovery — relieve receivable');
+    cr(
+      'EMPLOYEE_RECEIVABLE',
+      totals.advanceRecovery,
+      'Salary advance recovery — relieve receivable',
+    );
     // Capped non-statutory deductions withheld pending remittance.
     cr(
       'OTHER_DEDUCTIONS_PAYABLE',
@@ -403,145 +407,6 @@ export class PayrollPostingsService {
     });
 
     return reversal;
-  }
-
-  /**
-   * Post the **payment-side** journal entry — closes the loop opened by
-   * `postRun()` (the accrual JE). Posted on `PATCH /payroll-runs/:id/pay`.
-   *
-   *   Dr Salaries Payable (Net)         (sum of net pay)
-   *      Cr <disbursing account>        (sum of net pay)
-   *
-   * The credit side resolves to `run.disbursingChartOfAccountId` if the operator
-   * specified one when paying (e.g. NMB Operating, M-Pesa Float, Petty Cash);
-   * otherwise it falls back to the generic Bank account (1010). The JE is
-   * linked back to the run via `payrollRun.paymentJournalEntryId`.
-   *
-   * Idempotent — checks for an existing payment JE referencing this run.
-   */
-  async postPayment(payrollRunId: string, userId: string, tx?: Prisma.TransactionClient) {
-    const db: DbClient = tx ?? this.prisma;
-    const run = await db.payrollRun.findFirst({
-      where: { id: payrollRunId, deletedAt: null },
-      include: {
-        company: { select: { id: true } },
-        payrollPeriod: { select: { paymentDate: true, name: true } },
-      },
-    });
-    if (!run) throw new NotFoundException('Payroll run not found');
-
-    // Idempotency — find any existing payment JE for this run.
-    const existing = await db.journalEntry.findFirst({
-      where: {
-        companyId: run.companyId,
-        referenceType: 'PayrollRunPayment',
-        referenceId: run.id,
-        deletedAt: null,
-      },
-      include: { lines: true },
-    });
-    if (existing) return existing;
-
-    // Sum net pay across entries.
-    const entriesAgg = await db.payrollEntry.aggregate({
-      where: { payrollRunId, deletedAt: null },
-      _sum: { netPay: true },
-    });
-    const totalNet = round2(Number(entriesAgg._sum.netPay ?? 0));
-    if (totalNet <= 0) {
-      throw new BadRequestException('Run has no net pay to disburse — calculate it first.');
-    }
-
-    // Resolve the disbursing (credit) account: prefer the run's specified
-    // account, fall back to the generic Bank account (1010) if not set.
-    let creditAccountId: string | undefined;
-    let creditAccountLabel = 'bank transfer';
-    if (run.disbursingChartOfAccountId) {
-      const acct = await db.chartOfAccount.findFirst({
-        where: { id: run.disbursingChartOfAccountId, companyId: run.companyId, deletedAt: null },
-        select: { id: true, accountCode: true, accountName: true },
-      });
-      if (!acct) {
-        throw new BadRequestException(
-          'Selected disbursing account does not belong to this company or has been deleted.',
-        );
-      }
-      creditAccountId = acct.id;
-      creditAccountLabel = `${acct.accountCode} — ${acct.accountName}`;
-    }
-
-    // Resolve required accounts (Salaries Payable always; Bank only if needed as fallback).
-    const codesToFetch = creditAccountId
-      ? [ACCOUNT_CODES.SALARIES_PAYABLE]
-      : [ACCOUNT_CODES.SALARIES_PAYABLE, '1010'];
-    const accounts = await db.chartOfAccount.findMany({
-      where: { companyId: run.companyId, deletedAt: null, accountCode: { in: codesToFetch } },
-      select: { id: true, accountCode: true },
-    });
-    const salariesPayableId = accounts.find(
-      (a) => a.accountCode === ACCOUNT_CODES.SALARIES_PAYABLE,
-    )?.id;
-    if (!salariesPayableId) {
-      throw new BadRequestException(
-        'Missing chart of accounts entry — Salaries Payable (2270). Re-run the seed.',
-      );
-    }
-    if (!creditAccountId) {
-      creditAccountId = accounts.find((a) => a.accountCode === '1010')?.id;
-      if (!creditAccountId) {
-        throw new BadRequestException(
-          'No disbursing account specified and fallback Bank (1010) is missing. Re-run the seed or pick an account.',
-        );
-      }
-    }
-
-    const txDate = run.payrollPeriod?.paymentDate ?? new Date();
-    const journalNumber = await this.codes.next({
-      entityType: 'JournalEntry',
-      companyId: run.companyId,
-      tx,
-    });
-    const je = await db.journalEntry.create({
-      data: {
-        journalNumber,
-        companyId: run.companyId,
-        transactionDate: txDate,
-        description: `Payroll payment — ${run.payrollRunNumber}${run.payrollPeriod?.name ? ` (${run.payrollPeriod.name})` : ''}`,
-        referenceType: 'PayrollRunPayment',
-        referenceId: run.id,
-        status: 'DRAFT',
-        totalDebit: totalNet,
-        totalCredit: totalNet,
-        createdById: userId,
-        lines: {
-          create: [
-            {
-              accountId: salariesPayableId,
-              description: 'Net pay disbursed — clear payable',
-              debit: totalNet,
-              credit: 0,
-              companyId: run.companyId,
-            },
-            {
-              accountId: creditAccountId,
-              description: `Net pay disbursed via ${creditAccountLabel}`,
-              debit: 0,
-              credit: totalNet,
-              companyId: run.companyId,
-            },
-          ],
-        },
-      },
-      include: { lines: true },
-    });
-
-    // Link the payment JE back to the run for audit traceability.
-    await db.payrollRun.update({
-      where: { id: run.id },
-      data: { paymentJournalEntryId: je.id },
-    });
-
-    return je;
   }
 
   /**

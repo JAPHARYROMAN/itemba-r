@@ -1,9 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  BackgroundJob,
   BackgroundJobPriority,
   BackgroundJobStatus,
   BackgroundJobType,
+  MsaidiziEffect,
+  MsaidiziExecutionTarget,
   MsaidiziHostActionStatus,
   MsaidiziTaskStatus,
   MsaidiziTaskStepStatus,
@@ -12,11 +15,13 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { redactSensitiveFields } from '../audit-logs/audit-logs.service';
+import { AuditLogsService, redactSensitiveFields } from '../audit-logs/audit-logs.service';
+import { auditErpAttemptResult } from './msaidizi-action-audit';
 import { AutonomyConfig } from '../msaidizi-tasks/autonomy.config';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MsaidiziScheduleDispatcherService } from './msaidizi-schedule-dispatcher.service';
 import { MsaidiziAdaptiveReasoningService } from './msaidizi-adaptive-reasoning.service';
+import { cancelTaskReasoning } from './msaidizi-reasoning-cancellation';
 import { MsaidiziDevicesService } from '../msaidizi-devices/msaidizi-devices.service';
 import {
   evaluateStepStopConditions,
@@ -54,6 +59,7 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
     @Optional() private readonly devices?: MsaidiziDevicesService,
     @Optional() private readonly observability?: MsaidiziObservabilityService,
     @Optional() private readonly runtimeMemory?: MsaidiziRuntimeMemoryService,
+    @Optional() private readonly audit?: AuditLogsService,
   ) {}
 
   onModuleInit(): void {
@@ -438,17 +444,31 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
         toolAttempts: {
           orderBy: { attemptNumber: 'desc' },
           take: 1,
-          select: { resultSummary: true },
+          select: { resultSummary: true, status: true },
         },
       },
     });
     const invalidIo = steps.find((step) => {
       const state = stepLocalIoState(step);
+      // An ERP response reservation can occupy the exact remaining budget
+      // while its attempt is unresolved. Let the owner settle it (or reconcile
+      // an abandoned read) before treating zero remaining bytes as exhaustion.
+      // Negative/invalid accounting still fails immediately; the worker checks
+      // the unchanged ceiling before reserving or dispatching another call.
+      const unsettledReservation =
+        step.target === 'ERP' &&
+        step.status === MsaidiziTaskStepStatus.RUNNING &&
+        step.toolAttempts.some(
+          (attempt) =>
+            attempt.status === MsaidiziToolAttemptStatus.REQUESTED ||
+            attempt.status === MsaidiziToolAttemptStatus.RUNNING,
+        );
       return (
         !state.ok ||
         (state.remaining !== null &&
           (state.remaining < 0n ||
             (state.remaining === 0n &&
+              !unsettledReservation &&
               step.status !== MsaidiziTaskStepStatus.SUCCEEDED &&
               step.status !== MsaidiziTaskStepStatus.FAILED &&
               step.status !== MsaidiziTaskStepStatus.CANCELLED &&
@@ -478,8 +498,30 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
       return 0;
     }
     if (task.attemptedToolCalls >= task.maxAttemptedToolCalls) {
-      await this.finishTask(task.id, MsaidiziTaskStatus.NEEDS_ATTENTION, 'TOOL_BUDGET_EXHAUSTED');
-      return 0;
+      const atLimit = task.attemptedToolCalls === task.maxAttemptedToolCalls;
+      // The last permitted call may still own its result. Do not terminalize
+      // underneath it merely because reservation consumed the final slot.
+      if (
+        atLimit &&
+        steps.some(
+          (step) =>
+            step.status === MsaidiziTaskStepStatus.RUNNING &&
+            step.toolAttempts.some(
+              (attempt) =>
+                attempt.status === MsaidiziToolAttemptStatus.REQUESTED ||
+                attempt.status === MsaidiziToolAttemptStatus.RUNNING,
+            ),
+        )
+      )
+        return 0;
+      // Exactly using the ceiling is not exceeding it. A settled successful
+      // plan must still pass the adaptive outcome gate before finalization.
+      const allSucceeded =
+        steps.length > 0 && steps.every((step) => step.status === MsaidiziTaskStepStatus.SUCCEEDED);
+      if (!atLimit || !allSucceeded) {
+        await this.finishTask(task.id, MsaidiziTaskStatus.NEEDS_ATTENTION, 'TOOL_BUDGET_EXHAUSTED');
+        return 0;
+      }
     }
     if (
       this.adaptiveReasoning &&
@@ -558,12 +600,12 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
       if (activeSibling > 0) return false;
 
       const won = await tx.msaidiziTaskStep.updateMany({
-        where: { id: step.id, status: MsaidiziTaskStepStatus.READY },
+        where: { id: step.id, taskId, status: MsaidiziTaskStepStatus.READY },
         data: { status: MsaidiziTaskStepStatus.LEASED },
       });
       if (won.count !== 1) return false;
 
-      await tx.backgroundJob.upsert({
+      const job = await tx.backgroundJob.upsert({
         where: { idempotencyKey: `msaidizi-step:${step.id}` },
         update: {},
         create: {
@@ -584,38 +626,220 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
           scheduledAt: new Date(),
         },
       });
+      if (
+        job.status === BackgroundJobStatus.CANCELLED ||
+        job.status === BackgroundJobStatus.COMPLETED
+      ) {
+        // Pause cancels queued work; a worker that observes the pause before
+        // reservation may instead finish with a no-op. The stable per-step job
+        // key survives both. Re-arm provably unattempted work under the
+        // same task/step locks used by attempt reservation. Settled transient
+        // idempotent reads may use their remaining individual-step retries.
+        // Never reset attempts or retry a completed/uncertain mutation.
+        const skippedForPause =
+          job.status === BackgroundJobStatus.COMPLETED &&
+          job.result !== null &&
+          typeof job.result === 'object' &&
+          !Array.isArray(job.result) &&
+          job.result.skipped === true &&
+          ['task is PAUSING', 'task is PAUSED'].includes(String(job.result.reason));
+        const unattempted = await tx.msaidiziTaskStep.count({
+          where: {
+            id: step.id,
+            taskId,
+            status: MsaidiziTaskStepStatus.LEASED,
+            attemptCount: 0,
+            startedAt: null,
+            toolAttempts: { none: {} },
+            hostActions: { none: {} },
+          },
+        });
+        const readRetry = await this.isSettledReadRetry(tx, taskId, step.id, job, 'LEASED');
+        if (
+          (unattempted !== 1 && !readRetry) ||
+          (job.status === BackgroundJobStatus.COMPLETED && !skippedForPause)
+        ) {
+          throw new Error('Paused step job lacks safe resume evidence');
+        }
+        const rearmed = await tx.backgroundJob.updateMany({
+          where: {
+            id: job.id,
+            jobType: BackgroundJobType.MSAIDIZI_TASK_STEP,
+            correlationId: taskId,
+            status: job.status,
+            attempts: readRetry ? job.attempts : 0,
+            leaseOwner: null,
+          },
+          data: {
+            status: BackgroundJobStatus.QUEUED,
+            scheduledAt: new Date(),
+            startedAt: null,
+            completedAt: null,
+            leaseHeartbeatAt: null,
+            result: Prisma.DbNull,
+          },
+        });
+        if (rearmed.count !== 1) throw new Error('Paused step job requeue CAS lost');
+        await this.event(
+          tx,
+          taskId,
+          readRetry ? 'step.read_retry_resumed' : 'step.resumed_before_dispatch',
+          {
+            stepId: step.id,
+            jobId: job.id,
+            priorJobStatus: job.status,
+          },
+        );
+      }
       await this.event(tx, taskId, 'step.enqueued', { stepId: step.id });
       return true;
     });
   }
 
-  private async pauseRemaining(taskId: string): Promise<void> {
-    await this.cancelQueuedStepJobs(taskId);
-    await this.prisma.msaidiziTaskStep.updateMany({
-      where: { taskId, status: MsaidiziTaskStepStatus.LEASED },
-      data: { status: MsaidiziTaskStepStatus.READY },
-    });
-    const inFlight = await this.prisma.msaidiziTaskStep.count({
+  private async isSettledReadRetry(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    stepId: string,
+    job: BackgroundJob,
+    status: MsaidiziTaskStepStatus,
+  ): Promise<boolean> {
+    if (
+      job.jobType !== BackgroundJobType.MSAIDIZI_TASK_STEP ||
+      job.correlationId !== taskId ||
+      job.leaseOwner !== null ||
+      job.attempts < 1 ||
+      job.attempts >= job.maxAttempts ||
+      job.maxAttempts !== 3 ||
+      jsonString(job.payload, 'taskId') !== taskId ||
+      jsonString(job.payload, 'stepId') !== stepId ||
+      (job.status !== BackgroundJobStatus.CANCELLED && job.status !== BackgroundJobStatus.COMPLETED)
+    )
+      return false;
+    if (
+      job.status === BackgroundJobStatus.COMPLETED &&
+      (job.result === null ||
+        typeof job.result !== 'object' ||
+        Array.isArray(job.result) ||
+        job.result.skipped !== true ||
+        !['task is PAUSING', 'task is PAUSED'].includes(String(job.result.reason)))
+    )
+      return false;
+    const step = await tx.msaidiziTaskStep.findFirst({
       where: {
+        id: stepId,
         taskId,
-        status: MsaidiziTaskStepStatus.RUNNING,
-        OR: [
-          // ERP steps have no host action and must finish before pausing.
-          { hostActions: { none: {} } },
-          // A host action already handed to a device is the current step and
-          // may finish. A merely QUEUED action has not escaped the broker and
-          // can remain staged while the task is PAUSED.
-          {
-            hostActions: {
-              some: {
-                status: { in: ['DISPATCHED', 'RUNNING'] },
-              },
-            },
-          },
-        ],
+        status,
+        mutation: false,
+        idempotent: true,
+        attemptCount: job.attempts,
+        startedAt: { not: null },
+        hostActions: { none: {} },
+      },
+      include: { toolAttempts: { orderBy: { attemptNumber: 'asc' } } },
+    });
+    // Counts and sequence must agree with the durable attempt ledger. UNKNOWN,
+    // running, rejected, successful or missing outcomes cannot authorize retry.
+    return (
+      !!step &&
+      step.toolAttempts.length === job.attempts &&
+      step.toolAttempts.every(
+        (attempt, index) =>
+          attempt.taskId === taskId &&
+          attempt.attemptNumber === index + 1 &&
+          attempt.status === MsaidiziToolAttemptStatus.FAILED &&
+          attempt.endedAt !== null &&
+          (attempt.errorCode === 'TRANSPORT_FAILURE' ||
+            /^HTTP_5\d\d$/.test(attempt.errorCode ?? '')),
+      )
+    );
+  }
+
+  private async parkSettledReadRetries(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+  ): Promise<void> {
+    const jobs = await tx.backgroundJob.findMany({
+      where: {
+        jobType: BackgroundJobType.MSAIDIZI_TASK_STEP,
+        correlationId: taskId,
+        status: { in: [BackgroundJobStatus.CANCELLED, BackgroundJobStatus.COMPLETED] },
+        leaseOwner: null,
+        attempts: { gt: 0 },
       },
     });
-    if (inFlight === 0) await this.finishTask(taskId, MsaidiziTaskStatus.PAUSED, null);
+    for (const job of jobs) {
+      const stepId = jsonString(job.payload, 'stepId');
+      if (!stepId || !(await this.isSettledReadRetry(tx, taskId, stepId, job, 'RUNNING'))) continue;
+      const changed = await tx.msaidiziTaskStep.updateMany({
+        where: {
+          id: stepId,
+          taskId,
+          status: MsaidiziTaskStepStatus.RUNNING,
+          attemptCount: job.attempts,
+        },
+        data: { status: MsaidiziTaskStepStatus.READY, checkpointedAt: new Date() },
+      });
+      if (changed.count === 1)
+        await this.event(tx, taskId, 'step.read_retry_paused', { stepId, jobId: job.id });
+    }
+  }
+
+  private async pauseRemaining(taskId: string): Promise<void> {
+    // Pause cannot hide a model invocation abandoned after reservation. This
+    // reconciliation does not enqueue work or call a model and also runs when
+    // the global kill switch bypasses the normal adaptive gate.
+    await this.adaptiveReasoning?.reconcileDeadTurns(taskId);
+    await this.prisma.$transaction(async (tx) => {
+      // A stale pause tick must not cancel/reset a resumed step. Serialize all
+      // cleanup with enqueue/reservation and revalidate the task's current intent.
+      const locked = await tx.$queryRaw<Array<{ status: MsaidiziTaskStatus }>>(
+        Prisma.sql`SELECT "status" FROM "msaidizi_tasks" WHERE "id" = ${taskId} FOR UPDATE`,
+      );
+      if (locked[0]?.status !== MsaidiziTaskStatus.PAUSING) return false;
+      await this.cancelQueuedStepJobs(taskId, tx, true);
+      // A claimed worker may still be returning its pre-reservation pause no-op.
+      // Do not publish PAUSED (and permit resume) until that lease settles; its
+      // late COMPLETED write would otherwise strand the newly leased step.
+      const runningJobs = await tx.backgroundJob.count({
+        where: {
+          jobType: {
+            in: [
+              BackgroundJobType.MSAIDIZI_TASK_STEP,
+              'MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType,
+            ],
+          },
+          correlationId: taskId,
+          status: BackgroundJobStatus.RUNNING,
+        },
+      });
+      if (runningJobs > 0) return false;
+      await this.parkSettledReadRetries(tx, taskId);
+      await tx.msaidiziTaskStep.updateMany({
+        where: { taskId, status: MsaidiziTaskStepStatus.LEASED },
+        data: { status: MsaidiziTaskStepStatus.READY },
+      });
+      const inFlight = await tx.msaidiziTaskStep.count({
+        where: {
+          taskId,
+          status: MsaidiziTaskStepStatus.RUNNING,
+          OR: [
+            // ERP steps have no host action and must finish before pausing.
+            { hostActions: { none: {} } },
+            // A host action already handed to a device is the current step and
+            // may finish. A merely QUEUED action has not escaped the broker and
+            // can remain staged while the task is PAUSED.
+            {
+              hostActions: {
+                some: {
+                  status: { in: ['DISPATCHED', 'RUNNING'] },
+                },
+              },
+            },
+          ],
+        },
+      });
+      if (inFlight === 0) await this.finishTask(taskId, MsaidiziTaskStatus.PAUSED, null, tx);
+    });
   }
 
   private async cancelRemaining(taskId: string): Promise<void> {
@@ -623,64 +847,137 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
     // bypassing advance(). Reconcile dead mutation leases first so an unknown
     // write can never be relabelled as a clean cancellation.
     await this.reconcileDeadStepJobs(taskId);
-    await this.cancelQueuedStepJobs(taskId);
     await this.devices?.cancelUndispatchedTaskActions(taskId);
-    await this.prisma.msaidiziTaskStep.updateMany({
-      where: {
-        taskId,
-        status: {
-          in: [
-            MsaidiziTaskStepStatus.PENDING,
-            MsaidiziTaskStepStatus.READY,
-            MsaidiziTaskStepStatus.LEASED,
-          ],
+    await this.prisma.$transaction(async (tx) => {
+      const task = await tx.$queryRaw<Array<{ status: MsaidiziTaskStatus }>>(
+        Prisma.sql`SELECT "status" FROM "msaidizi_tasks" WHERE "id" = ${taskId} FOR UPDATE`,
+      );
+      if (task[0]?.status !== MsaidiziTaskStatus.CANCELLING) return;
+      await this.cancelQueuedStepJobs(taskId, tx);
+      const reasoningInFlight = await cancelTaskReasoning(tx, taskId);
+      // Hold queue rows through settlement so a lease cannot appear between
+      // discovering orphaned reads and closing their attempts. Lock order is
+      // task then jobs, shared with read recovery and pause/resume.
+      const jobs = await tx.$queryRaw<
+        Array<{
+          id: string;
+          status: BackgroundJobStatus;
+          payload: Prisma.JsonValue;
+          idempotencyKey: string | null;
+          attempts: number;
+          result: Prisma.JsonValue;
+        }>
+      >(
+        Prisma.sql`SELECT "id", "status", "payload", "idempotencyKey", "attempts", "result"
+          FROM "background_jobs" WHERE "jobType" = 'MSAIDIZI_TASK_STEP'
+          AND "correlationId" = ${taskId} ORDER BY "id" FOR UPDATE`,
+      );
+      const protectedStepIds = Array.from(
+        new Set(
+          jobs
+            .filter((job) => job.status === BackgroundJobStatus.RUNNING)
+            .flatMap((job) => [
+              jsonString(job.payload, 'stepId'),
+              job.idempotencyKey?.startsWith('msaidizi-step:')
+                ? job.idempotencyKey.slice('msaidizi-step:'.length)
+                : null,
+            ])
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      const noLiveLease = protectedStepIds.length > 0 ? { id: { notIn: protectedStepIds } } : {};
+      const reads = await tx.msaidiziTaskStep.findMany({
+        where: {
+          taskId,
+          ...noLiveLease,
+          target: MsaidiziExecutionTarget.ERP,
+          expectedEffect: MsaidiziEffect.READ,
+          mutation: false,
+          status: { in: [MsaidiziTaskStepStatus.LEASED, MsaidiziTaskStepStatus.RUNNING] },
+          hostActions: { none: {} },
         },
-      },
-      data: { status: MsaidiziTaskStepStatus.CANCELLED, endedAt: new Date() },
-    });
-    const runningJobs = await this.prisma.backgroundJob.findMany({
-      where: {
-        jobType: BackgroundJobType.MSAIDIZI_TASK_STEP,
-        correlationId: taskId,
-        status: BackgroundJobStatus.RUNNING,
-      },
-      select: { payload: true },
-    });
-    const protectedStepIds = Array.from(
-      new Set(
-        runningJobs
-          .map((job) => jsonString(job.payload, 'stepId'))
-          .filter((stepId): stepId is string => Boolean(stepId)),
-      ),
-    );
-    // A transient read failure leaves its step RUNNING while the generic job is
-    // RETRYING. Once cancellation has cancelled that queued retry, no worker is
-    // left to settle the step. Close only provably non-mutating orphaned reads;
-    // live worker leases and device-crossed host actions remain in flight.
-    await this.prisma.msaidiziTaskStep.updateMany({
-      where: {
-        taskId,
-        mutation: false,
-        status: MsaidiziTaskStepStatus.RUNNING,
-        ...(protectedStepIds.length > 0 ? { id: { notIn: protectedStepIds } } : {}),
-        hostActions: {
-          none: {
-            status: {
-              in: [MsaidiziHostActionStatus.DISPATCHED, MsaidiziHostActionStatus.RUNNING],
+        select: { id: true, attemptCount: true },
+      });
+      for (const step of reads) {
+        const job = jobs.find(
+          (candidate) =>
+            candidate.idempotencyKey === `msaidizi-step:${step.id}` &&
+            jsonString(candidate.payload, 'stepId') === step.id &&
+            (candidate.status === BackgroundJobStatus.CANCELLED ||
+              (candidate.status === BackgroundJobStatus.COMPLETED &&
+                cancelledHandlerNoOp(candidate.result))) &&
+            candidate.attempts >= step.attemptCount,
+        );
+        if (!job) continue;
+        await this.settleAbandonedReadAttempts(
+          tx,
+          taskId,
+          step,
+          job.id,
+          'READ_CANCELLED_AFTER_LEASE_LOSS',
+        );
+      }
+      await tx.msaidiziTaskStep.updateMany({
+        where: {
+          taskId,
+          ...noLiveLease,
+          toolAttempts: {
+            none: {
+              status: {
+                in: [MsaidiziToolAttemptStatus.REQUESTED, MsaidiziToolAttemptStatus.RUNNING],
+              },
+            },
+          },
+          status: {
+            in: [
+              MsaidiziTaskStepStatus.PENDING,
+              MsaidiziTaskStepStatus.READY,
+              MsaidiziTaskStepStatus.LEASED,
+            ],
+          },
+        },
+        data: { status: MsaidiziTaskStepStatus.CANCELLED, endedAt: new Date() },
+      });
+      // A transient read failure leaves its step RUNNING while the generic job is
+      // RETRYING. Once cancellation has cancelled that queued retry, no worker is
+      // left to settle the step. Close only provably non-mutating orphaned reads;
+      // live worker leases and device-crossed host actions remain in flight.
+      await tx.msaidiziTaskStep.updateMany({
+        where: {
+          taskId,
+          mutation: false,
+          status: MsaidiziTaskStepStatus.RUNNING,
+          ...noLiveLease,
+          toolAttempts: {
+            none: {
+              status: {
+                in: [MsaidiziToolAttemptStatus.REQUESTED, MsaidiziToolAttemptStatus.RUNNING],
+              },
+            },
+          },
+          hostActions: {
+            none: {
+              status: {
+                in: [MsaidiziHostActionStatus.DISPATCHED, MsaidiziHostActionStatus.RUNNING],
+              },
             },
           },
         },
-      },
-      data: {
-        status: MsaidiziTaskStepStatus.CANCELLED,
-        checkpointedAt: new Date(),
-        endedAt: new Date(),
-      },
+        data: {
+          status: MsaidiziTaskStepStatus.CANCELLED,
+          checkpointedAt: new Date(),
+          endedAt: new Date(),
+        },
+      });
+      const inFlight = await tx.msaidiziTaskStep.count({
+        where: {
+          taskId,
+          status: { in: [MsaidiziTaskStepStatus.LEASED, MsaidiziTaskStepStatus.RUNNING] },
+        },
+      });
+      if (inFlight === 0 && reasoningInFlight === 0)
+        await this.finishTask(taskId, MsaidiziTaskStatus.CANCELLED, null, tx);
     });
-    const inFlight = await this.prisma.msaidiziTaskStep.count({
-      where: { taskId, status: MsaidiziTaskStepStatus.RUNNING },
-    });
-    if (inFlight === 0) await this.finishTask(taskId, MsaidiziTaskStatus.CANCELLED, null);
   }
 
   /**
@@ -759,13 +1056,34 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
     });
   }
 
-  private async cancelQueuedStepJobs(taskId: string): Promise<void> {
-    await this.prisma.backgroundJob.updateMany({
+  private async cancelQueuedStepJobs(
+    taskId: string,
+    tx: Prisma.TransactionClient = this.prisma,
+    forPause = false,
+  ): Promise<void> {
+    if (forPause) {
+      // This durable no-call marker distinguishes a pause from cancellation.
+      // A claimed job is left alone; PAUSED is not published until it settles.
+      await tx.backgroundJob.updateMany({
+        where: {
+          jobType: 'MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType,
+          correlationId: taskId,
+          status: { in: [BackgroundJobStatus.QUEUED, BackgroundJobStatus.RETRYING] },
+          leaseOwner: null,
+        },
+        data: {
+          status: BackgroundJobStatus.CANCELLED,
+          completedAt: new Date(),
+          result: { skipped: true, reason: 'task is PAUSING' },
+        },
+      });
+    }
+    await tx.backgroundJob.updateMany({
       where: {
         jobType: {
           in: [
             BackgroundJobType.MSAIDIZI_TASK_STEP,
-            'MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType,
+            ...(forPause ? [] : ['MSAIDIZI_REASONING_CHECKPOINT' as BackgroundJobType]),
           ],
         },
         correlationId: taskId,
@@ -797,7 +1115,16 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
         where: {
           id: stepId,
           taskId,
-          status: { in: [MsaidiziTaskStepStatus.LEASED, MsaidiziTaskStepStatus.RUNNING] },
+          OR: [
+            { status: { in: [MsaidiziTaskStepStatus.LEASED, MsaidiziTaskStepStatus.RUNNING] } },
+            // Repair a previously closed step whose attempt ledger was left open.
+            {
+              status: MsaidiziTaskStepStatus.FAILED,
+              mutation: false,
+              target: MsaidiziExecutionTarget.ERP,
+              expectedEffect: MsaidiziEffect.READ,
+            },
+          ],
           // Once queueHostAction commits, the device state machine—not the
           // short-lived step job—owns the durable mutation. A worker dying
           // after that handoff must not relabel the live action as unknown.
@@ -813,9 +1140,17 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
             },
           },
         },
-        select: { id: true, mutation: true },
+        select: { id: true, mutation: true, target: true, expectedEffect: true },
       });
       if (!step) continue;
+      if (
+        !step.mutation &&
+        step.target === MsaidiziExecutionTarget.ERP &&
+        step.expectedEffect === MsaidiziEffect.READ
+      ) {
+        changed = (await this.reconcileDeadReadJob(taskId, step.id, job.id)) || changed;
+        continue;
+      }
       const reconciled = await this.prisma.$transaction(async (tx) => {
         const next = step.mutation
           ? MsaidiziTaskStepStatus.NEEDS_ATTENTION
@@ -900,6 +1235,21 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
                 throw new Error('Dead mutation attempt reconciliation CAS lost');
               }
             }
+            if (unsettled && step.target === MsaidiziExecutionTarget.ERP) {
+              if (!this.audit)
+                throw new Error('Mutation recovery requires the strict audit ledger');
+              await auditErpAttemptResult(this.audit, tx, taskId, step.id, latest.id, 'UNKNOWN', {
+                reason: 'WORKER_LEASE_LOST',
+                jobId: job.id,
+                priorStatus: latest.status,
+                ...(reservation !== null
+                  ? deadWorkerEgressSummary(
+                      reservation,
+                      latest.status === MsaidiziToolAttemptStatus.RUNNING,
+                    )
+                  : {}),
+              });
+            }
           }
           const taskWon = await tx.msaidiziTask.updateMany({
             where: {
@@ -941,6 +1291,106 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
     return changed;
   }
 
+  private async reconcileDeadReadJob(
+    taskId: string,
+    stepId: string,
+    jobId: string,
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const task = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "msaidizi_tasks" WHERE "id" = ${taskId} FOR UPDATE`,
+      );
+      if (!task[0]) return false;
+      const jobs = await tx.$queryRaw<Array<{ attempts: number; payload: Prisma.JsonValue }>>(
+        Prisma.sql`SELECT "attempts", "payload" FROM "background_jobs"
+          WHERE "id" = ${jobId} AND "jobType" = 'MSAIDIZI_TASK_STEP'
+            AND "correlationId" = ${taskId} AND "idempotencyKey" = ${`msaidizi-step:${stepId}`}
+            AND "status" = 'DEAD_LETTER' AND "leaseOwner" IS NULL FOR UPDATE`,
+      );
+      const job = jobs[0];
+      if (!job || jsonString(job.payload, 'stepId') !== stepId) return false;
+      const step = await tx.msaidiziTaskStep.findFirst({
+        where: {
+          id: stepId,
+          taskId,
+          target: MsaidiziExecutionTarget.ERP,
+          expectedEffect: MsaidiziEffect.READ,
+          mutation: false,
+          status: {
+            in: [
+              MsaidiziTaskStepStatus.LEASED,
+              MsaidiziTaskStepStatus.RUNNING,
+              MsaidiziTaskStepStatus.FAILED,
+            ],
+          },
+          attemptCount: { lte: job.attempts },
+          hostActions: { none: {} },
+        },
+        select: { id: true, attemptCount: true, status: true },
+      });
+      if (!step) return false;
+      const settled = await this.settleAbandonedReadAttempts(
+        tx,
+        taskId,
+        step,
+        jobId,
+        'READ_JOB_TERMINATED',
+      );
+      if (step.status === MsaidiziTaskStepStatus.FAILED) return settled > 0;
+      const won = await tx.msaidiziTaskStep.updateMany({
+        where: { id: stepId, taskId, status: step.status },
+        data: {
+          status: MsaidiziTaskStepStatus.FAILED,
+          checkpointedAt: new Date(),
+          endedAt: new Date(),
+        },
+      });
+      if (won.count !== 1) throw new Error('Dead read step reconciliation CAS lost');
+      await this.event(tx, taskId, 'step.failed', { stepId, jobId, reason: 'READ_JOB_TERMINATED' });
+      return true;
+    });
+  }
+
+  /** Caller holds the task and stable job locks; no IO/counter refunds are inferred. */
+  private async settleAbandonedReadAttempts(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    step: { id: string; attemptCount: number },
+    jobId: string,
+    reason: 'READ_CANCELLED_AFTER_LEASE_LOSS' | 'READ_JOB_TERMINATED',
+  ): Promise<number> {
+    const attempts = await tx.msaidiziToolAttempt.findMany({
+      where: {
+        taskId,
+        stepId: step.id,
+        attemptNumber: { lte: step.attemptCount },
+        status: { in: [MsaidiziToolAttemptStatus.REQUESTED, MsaidiziToolAttemptStatus.RUNNING] },
+      },
+      select: { id: true, status: true },
+    });
+    for (const attempt of attempts) {
+      if (!this.audit) throw new Error('Read reconciliation requires the strict audit ledger');
+      const won = await tx.msaidiziToolAttempt.updateMany({
+        where: { id: attempt.id, taskId, stepId: step.id, status: attempt.status },
+        data: {
+          status: MsaidiziToolAttemptStatus.FAILED,
+          errorCode: reason,
+          errorMessage: 'Read outcome was not durably recorded before its job terminated.',
+          endedAt: new Date(),
+        },
+      });
+      if (won.count !== 1) throw new Error('Read reconciliation attempt CAS lost');
+      const evidence = { reason, jobId, priorStatus: attempt.status, retainedIoReservation: true };
+      await this.event(tx, taskId, 'tool.read_attempt_reconciled', {
+        stepId: step.id,
+        attemptId: attempt.id,
+        ...evidence,
+      });
+      await auditErpAttemptResult(this.audit, tx, taskId, step.id, attempt.id, 'FAILED', evidence);
+    }
+    return attempts.length;
+  }
+
   private async finalizeIfSettled(
     taskId: string,
     snapshot: Array<{ status: MsaidiziTaskStepStatus }>,
@@ -962,9 +1412,10 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
     taskId: string,
     status: MsaidiziTaskStatus,
     failureCode: string | null,
+    transaction?: Prisma.TransactionClient,
   ): Promise<void> {
     const expectedSource = terminalSourceState(status);
-    await this.prisma.$transaction(async (tx) => {
+    const finish = async (tx: Prisma.TransactionClient) => {
       const won = await tx.msaidiziTask.updateMany({
         where: {
           id: taskId,
@@ -984,7 +1435,9 @@ export class MsaidiziTaskDispatcherService implements OnModuleInit, OnModuleDest
           await this.notifications?.notifyMsaidiziTaskTerminal(tx, taskId, status);
         }
       }
-    });
+    };
+    if (transaction) await finish(transaction);
+    else await this.prisma.$transaction(finish);
   }
 
   private async markStep(id: string, status: MsaidiziTaskStepStatus): Promise<void> {
@@ -1101,6 +1554,17 @@ function notifiableTask(
 
 function truthy(value: string): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function cancelledHandlerNoOp(value: Prisma.JsonValue): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 2 &&
+    value.skipped === true &&
+    value.reason === 'task is CANCELLING'
+  );
 }
 
 function jsonString(value: Prisma.JsonValue | null, key: string): string | null {

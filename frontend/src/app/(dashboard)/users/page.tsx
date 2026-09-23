@@ -1,8 +1,11 @@
 'use client';
+import { Modal } from '@/components/ui/modal';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useEffect, useState, useCallback } from 'react';
-import { PageHeader, Card, ConfirmDialog, showToast } from '@/components/ui';
+import { ErrorState, PageHeader, Card, ConfirmDialog, showToast } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { unwrapList } from '@/lib/unwrap';
 import { RolesModal } from './_components/RolesModal';
 
@@ -133,22 +136,16 @@ function UserModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">
-            {mode === 'create' ? 'Add User' : 'Edit User'}
-          </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
-        </div>
+    <Modal open title={mode === 'create' ? 'Add User' : 'Edit User'} onClose={() => { if (!saving) onClose(); }} size="md"><div className="os-legacy-dialog-content">
+
         <form onSubmit={submit} autoComplete="off" className="px-6 py-5 space-y-4">
           {error && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+            <div role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
           )}
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Full Name *</label>
-            <input
+            <input aria-label="Full Name *"
               required value={form.fullName} onChange={set('fullName')}
               autoComplete="off"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -158,7 +155,7 @@ function UserModal({
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Email *</label>
-            <input
+            <input aria-label="Email *"
               required type="email" value={form.email} onChange={set('email')}
               disabled={mode === 'edit'}
               autoComplete="off"
@@ -171,7 +168,7 @@ function UserModal({
             <label className="block text-xs font-medium text-slate-600 mb-1">
               Password {mode === 'create' ? '*' : '(leave blank to keep current)'}
             </label>
-            <input
+            <input aria-label="Password"
               required={mode === 'create'} type="password" value={form.password} onChange={set('password')}
               minLength={8}
               autoComplete="new-password"
@@ -182,7 +179,7 @@ function UserModal({
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Company</label>
-            <select
+            <select aria-label="Company"
               value={form.companyId} onChange={set('companyId')}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
@@ -196,7 +193,7 @@ function UserModal({
           {mode === 'edit' && (
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
-              <select
+              <select aria-label="Status"
                 value={form.status} onChange={set('status')}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
@@ -219,15 +216,18 @@ function UserModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </div></Modal>
   );
 }
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('users.read');
+  const canCreate = hasPermission('users.create');
+  const canAssignRoles = hasPermission('users.assign_roles');
+  const beginRequest = useRequestGuard();
   const [users, setUsers] = useState<User[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -239,52 +239,60 @@ export default function UsersPage() {
   const [rolesModalUser, setRolesModalUser] = useState<User | null>(null);
 
   const fetchUsers = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/backend/users');
+      const res = await fetch('/api/backend/users', { signal: request.signal });
+      if (!request.current()) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      if (!request.current()) return;
       setUsers(unwrapList(json));
     } catch (e) {
+      if (!request.current()) return;
       setError(e instanceof Error ? e.message : 'Failed to load users');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
-  const fetchCompanies = useCallback(async () => {
+  const fetchCompanies = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await fetch('/api/backend/companies?limit=100');
-      if (!res.ok) return;
+      const res = await fetch('/api/backend/companies?limit=100', { signal });
+      if (signal.aborted || !res.ok) return;
       const json = await res.json();
+      if (signal.aborted) return;
       setCompanies(unwrapList(json));
     } catch {
       // Enrichment only (company-name resolution + modal dropdown): the users
       // table still loads and surfaces its own errors, so silence is safe.
-      setCompanies([]);
+      if (!signal.aborted) setCompanies([]);
     }
   }, []);
 
-  const fetchRoles = useCallback(async () => {
+  const fetchRoles = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await fetch('/api/backend/roles?limit=200');
-      if (!res.ok) return;
+      const res = await fetch('/api/backend/roles?limit=200', { signal });
+      if (signal.aborted || !res.ok) return;
       const json = await res.json();
+      if (signal.aborted) return;
       setRoles(unwrapList(json));
     } catch {
       // Enrichment only (assign-roles modal options); users table has its own error state.
-      setRoles([]);
+      if (!signal.aborted) setRoles([]);
     }
   }, []);
 
   useEffect(() => {
-    fetchUsers();
-    fetchCompanies();
-    if (hasPermission('users.assign_roles')) {
-      fetchRoles();
-    }
-  }, [fetchUsers, fetchCompanies, fetchRoles, hasPermission]);
+    if (authLoading || !canView) return;
+    void fetchUsers();
+    const controller = new AbortController();
+    void fetchCompanies(controller.signal);
+    if (canAssignRoles) void fetchRoles(controller.signal);
+    return () => controller.abort();
+  }, [authLoading, canAssignRoles, canView, fetchCompanies, fetchRoles, fetchUsers]);
 
   // Client-side filter — name/email search runs in render below.
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,6 +313,17 @@ export default function UsersPage() {
 
   const totalActive = users.filter((u) => u.status === 'ACTIVE').length;
   const totalInactive = users.filter((u) => u.status !== 'ACTIVE').length;
+
+  if (authLoading || !canView) {
+    return (
+      <main className="p-6 flex-1 bg-slate-50 min-h-screen">
+        <PageHeader
+          title="Users"
+          description={authLoading ? 'Loading' : 'Access Restricted'}
+        />
+      </main>
+    );
+  }
 
   return (
     <>
@@ -332,7 +351,7 @@ export default function UsersPage() {
           title="Users"
           description="All people with access to ITEMBA-R."
           action={
-            hasPermission('users.create') ? (
+            canCreate ? (
               <button
                 onClick={() => setModal({ mode: 'create' })}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
@@ -365,14 +384,14 @@ export default function UsersPage() {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-5">
-          <input
+          <input aria-label="Search by name or email…"
             type="text"
             value={search}
             onChange={handleSearchChange}
             placeholder="Search by name or email…"
             className="flex-1 min-w-[200px] max-w-sm px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
           />
-          <select
+          <select aria-label="All Statuses"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -400,8 +419,8 @@ export default function UsersPage() {
             </div>
           )}
 
-          {error && (
-            <div className="p-6 text-sm text-red-600">{error}</div>
+          {!loading && error && (
+            <ErrorState message={error} onRetry={() => void fetchUsers()} />
           )}
 
           {!loading && !error && filtered.length === 0 && (
@@ -412,7 +431,7 @@ export default function UsersPage() {
 
           {!loading && !error && filtered.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
                     <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">User</th>
@@ -442,7 +461,7 @@ export default function UsersPage() {
                     />
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>

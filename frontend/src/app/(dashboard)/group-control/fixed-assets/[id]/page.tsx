@@ -1,35 +1,69 @@
 'use client';
 
+import { DocumentQuickLookButton } from '@/components/documents/DocumentQuickLookButton';
+import { Modal } from '@/components/ui/modal';
+
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AppIcon, Card } from '@/components/ui';
+import { AppIcon, Card, FormDateField, PageHeader } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface FixedAsset {
-  id: string; assetCode: string; name: string; category: string; description?: string;
-  ownershipLevel: string; collateralStatus: string; insuranceStatus: string;
-  financingStatus: string; condition?: string; status: string;
-  acquisitionCost: string; currentBookValue: string; currency: string;
-  acquisitionDate: string; depreciationRate?: string; usefulLifeYears?: number;
-  residualValue?: string; disposalDate?: string; disposalValue?: string;
-  serialNumber?: string; registrationNo?: string; make?: string; model?: string;
-  location?: string; notes?: string; createdAt: string; updatedAt: string;
+  id: string;
+  assetCode: string;
+  name: string;
+  category: string;
+  description?: string;
+  ownershipLevel: string;
+  collateralStatus: string;
+  insuranceStatus: string;
+  financingStatus: string;
+  condition?: string;
+  status: string;
+  acquisitionCost: string;
+  currentBookValue: string;
+  currency: string;
+  acquisitionDate: string;
+  depreciationRate?: string;
+  usefulLifeYears?: number;
+  residualValue?: string;
+  disposalDate?: string;
+  disposalValue?: string;
+  serialNumber?: string;
+  registrationNo?: string;
+  make?: string;
+  model?: string;
+  location?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
   company?: { id: string; name: string; code: string } | null;
   group?: { id: string; name: string; code: string } | null;
   division?: { id: string; name: string; code: string } | null;
   branch?: { id: string; name: string } | null;
   documents: Array<{
-    id: string; title: string; fileName: string; mimeType: string;
-    fileSizeBytes?: number; isConfidential: boolean; createdAt: string;
+    id: string;
+    title: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes?: number;
+    isConfidential: boolean;
+    createdAt: string;
   }>;
 }
 
 interface AuditEntry {
-  id: string; action: string; createdAt: string; ipAddress?: string;
-  oldValue?: Record<string, unknown>; newValue?: Record<string, unknown>;
+  id: string;
+  action: string;
+  createdAt: string;
+  ipAddress?: string;
+  oldValue?: Record<string, unknown>;
+  newValue?: Record<string, unknown>;
   user?: { fullName: string; email: string } | null;
 }
 
@@ -43,7 +77,11 @@ function fmt(n: number | string | undefined | null) {
 }
 function fmtDate(d?: string | null) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 function fmtPct(v?: string | null) {
   if (!v) return '—';
@@ -77,7 +115,9 @@ function StatusBadge({ status }: { status: string }) {
     BEYOND_REPAIR: 'bg-red-100 text-red-700',
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] ?? 'bg-slate-100 text-slate-500'}`}>
+    <span
+      className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] ?? 'bg-slate-100 text-slate-500'}`}
+    >
       {status.replace(/_/g, ' ')}
     </span>
   );
@@ -106,13 +146,16 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function FixedAssetDetailPage() {
-  useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('fixed-assets.read');
+  const beginRequest = useRequestGuard();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
   const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<'overview' | 'valuation' | 'documents' | 'audit'>('overview');
 
   const [disposing, setDisposing] = useState(false);
@@ -124,29 +167,49 @@ export default function FixedAssetDetailPage() {
   const [collateralStatus, setCollateralStatus] = useState('');
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const [assetRes, auditRes] = await Promise.all([
-        fetch(`/api/backend/fixed-assets/${id}`),
-        fetch(`/api/backend/fixed-assets/${id}/audit-history`),
+        fetch(`/api/backend/fixed-assets/${id}`, { signal: request.signal }),
+        fetch(`/api/backend/fixed-assets/${id}/audit-history`, { signal: request.signal }),
       ]);
+      if (!request.current()) return;
       const [assetJson, auditJson] = await Promise.all([assetRes.json(), auditRes.json()]);
+      if (!request.current()) return;
+      if (!assetRes.ok) throw new Error(assetJson.message ?? `Error ${assetRes.status}`);
       setAsset(assetJson.data ?? null);
       setAudit(auditJson.data ?? []);
-    } finally { setLoading(false); }
-  }, [id]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load asset');
+      setAsset(null);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function handleDispose() {
     if (!disposeDate) return;
     const res = await fetch(`/api/backend/fixed-assets/${id}/dispose`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ disposalStatus: disposeStatus, disposalDate: disposeDate, disposalValue: disposeValue || undefined }),
+      body: JSON.stringify({
+        disposalStatus: disposeStatus,
+        disposalDate: disposeDate,
+        disposalValue: disposeValue || undefined,
+      }),
     });
-    if (res.ok) { setDisposing(false); load(); }
+    if (res.ok) {
+      setDisposing(false);
+      void load();
+    }
   }
 
   async function handleCollateral() {
@@ -156,7 +219,33 @@ export default function FixedAssetDetailPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ collateralStatus }),
     });
-    if (res.ok) { setSettingCollateral(false); load(); }
+    if (res.ok) {
+      setSettingCollateral(false);
+      void load();
+    }
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-3xl mx-auto px-6 py-8">
+          <PageHeader title="Fixed Asset" subtitle="Loading" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-3xl mx-auto px-6 py-8">
+          <PageHeader title="Fixed Asset" />
+          <div className="mt-8 text-center">
+            <p className="text-sm text-slate-500">Access Restricted</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (loading) {
@@ -169,12 +258,24 @@ export default function FixedAssetDetailPage() {
     );
   }
 
-  if (!asset) {
+  if (loadError || !asset) {
     return (
       <div className="min-h-screen bg-slate-50">
         <div className="max-w-3xl mx-auto px-6 py-16 text-center">
-          <p className="text-slate-500 text-lg">Asset not found.</p>
-          <Link href="/group-control/fixed-assets" className="mt-4 inline-block text-brand-600 hover:underline">
+          <p className="text-slate-500 text-lg">{loadError || 'Asset not found.'}</p>
+          {loadError && (
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="mt-4 inline-block text-brand-600 hover:underline"
+            >
+              Try again
+            </button>
+          )}
+          <Link
+            href="/group-control/fixed-assets"
+            className="mt-4 inline-block text-brand-600 hover:underline"
+          >
             ← Back to Registry
           </Link>
         </div>
@@ -188,12 +289,15 @@ export default function FixedAssetDetailPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-screen-xl mx-auto px-6 py-8 space-y-6">
-
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/group-control" className="hover:text-brand-600">Group Control</Link>
+          <Link href="/group-control" className="hover:text-brand-600">
+            Group Control
+          </Link>
           <span>/</span>
-          <Link href="/group-control/fixed-assets" className="hover:text-brand-600">Fixed Assets</Link>
+          <Link href="/group-control/fixed-assets" className="hover:text-brand-600">
+            Fixed Assets
+          </Link>
           <span>/</span>
           <span className="text-slate-800 font-mono">{asset.assetCode}</span>
         </div>
@@ -211,12 +315,16 @@ export default function FixedAssetDetailPage() {
           </div>
           {isActive && (
             <div className="flex gap-2">
-              <button onClick={() => setSettingCollateral(true)}
-                className="px-4 py-2 text-sm border border-rose-200 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors">
+              <button
+                onClick={() => setSettingCollateral(true)}
+                className="px-4 py-2 text-sm border border-rose-200 text-rose-700 rounded-lg hover:bg-rose-50 transition-colors"
+              >
                 Update Collateral
               </button>
-              <button onClick={() => setDisposing(true)}
-                className="px-4 py-2 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors">
+              <button
+                onClick={() => setDisposing(true)}
+                className="px-4 py-2 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
                 Dispose / Sell
               </button>
             </div>
@@ -241,12 +349,15 @@ export default function FixedAssetDetailPage() {
         {/* Tabs */}
         <div className="flex gap-1 border-b border-slate-200">
           {(['overview', 'valuation', 'documents', 'audit'] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)}
+            <button
+              key={t}
+              onClick={() => setTab(t)}
               className={`px-5 py-2.5 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
                 tab === t
                   ? 'border-brand-600 text-brand-700'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}>
+              }`}
+            >
               {t === 'audit' ? 'Audit History' : t.charAt(0).toUpperCase() + t.slice(1)}
               {t === 'documents' && asset.documents.length > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full">
@@ -263,15 +374,21 @@ export default function FixedAssetDetailPage() {
             <Card>
               <div className="p-6 space-y-6">
                 <Section title="Identity & Classification">
-                  <Field label="Asset Code" value={<span className="font-mono">{asset.assetCode}</span>} />
+                  <Field
+                    label="Asset Code"
+                    value={<span className="font-mono">{asset.assetCode}</span>}
+                  />
                   <Field label="Asset Name" value={asset.name} />
-                  <Field label="Category" value={asset.category.replace(/_/g,' ')} />
+                  <Field label="Category" value={asset.category.replace(/_/g, ' ')} />
                   <Field label="Make / Brand" value={asset.make} />
                   <Field label="Model" value={asset.model} />
                   <Field label="Serial Number" value={asset.serialNumber} />
                   <Field label="Registration No." value={asset.registrationNo} />
                   <Field label="Location" value={asset.location} />
-                  <Field label="Condition" value={asset.condition ? <StatusBadge status={asset.condition} /> : '—'} />
+                  <Field
+                    label="Condition"
+                    value={asset.condition ? <StatusBadge status={asset.condition} /> : '—'}
+                  />
                 </Section>
               </div>
             </Card>
@@ -279,22 +396,33 @@ export default function FixedAssetDetailPage() {
             <Card>
               <div className="p-6 space-y-6">
                 <Section title="Ownership & Assignment">
-                  <Field label="Ownership Level" value={<StatusBadge status={asset.ownershipLevel} />} />
+                  <Field
+                    label="Ownership Level"
+                    value={<StatusBadge status={asset.ownershipLevel} />}
+                  />
                   <Field label="Owning Entity" value={ownerName} />
                   <Field label="Assigned Division" value={asset.division?.name} />
                   <Field label="Assigned Branch" value={asset.branch?.name} />
                 </Section>
 
                 <Section title="Governance Flags">
-                  <Field label="Collateral Status" value={<StatusBadge status={asset.collateralStatus} />} />
-                  <Field label="Insurance Status" value={<StatusBadge status={asset.insuranceStatus} />} />
+                  <Field
+                    label="Collateral Status"
+                    value={<StatusBadge status={asset.collateralStatus} />}
+                  />
+                  <Field
+                    label="Insurance Status"
+                    value={<StatusBadge status={asset.insuranceStatus} />}
+                  />
                   <Field label="Financing" value={<StatusBadge status={asset.financingStatus} />} />
                   <Field label="Operational Status" value={<StatusBadge status={asset.status} />} />
                 </Section>
 
                 {asset.description && (
                   <div>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Notes</h3>
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                      Notes
+                    </h3>
                     <p className="text-sm text-slate-600 leading-relaxed">{asset.description}</p>
                   </div>
                 )}
@@ -308,21 +436,44 @@ export default function FixedAssetDetailPage() {
             <div className="p-6 space-y-6">
               <Section title="Acquisition">
                 <Field label="Acquisition Date" value={fmtDate(asset.acquisitionDate)} />
-                <Field label="Acquisition Cost" value={`${asset.currency} ${fmt(asset.acquisitionCost)}`} />
+                <Field
+                  label="Acquisition Cost"
+                  value={`${asset.currency} ${fmt(asset.acquisitionCost)}`}
+                />
                 <Field label="Currency" value={asset.currency} />
               </Section>
 
               <Section title="Current Valuation">
-                <Field label="Current Book Value" value={`${asset.currency} ${fmt(asset.currentBookValue)}`} />
+                <Field
+                  label="Current Book Value"
+                  value={`${asset.currency} ${fmt(asset.currentBookValue)}`}
+                />
                 <Field label="Depreciation Rate" value={fmtPct(asset.depreciationRate)} />
-                <Field label="Useful Life" value={asset.usefulLifeYears ? `${asset.usefulLifeYears} years` : undefined} />
-                <Field label="Residual Value" value={asset.residualValue ? `${asset.currency} ${fmt(asset.residualValue)}` : undefined} />
+                <Field
+                  label="Useful Life"
+                  value={asset.usefulLifeYears ? `${asset.usefulLifeYears} years` : undefined}
+                />
+                <Field
+                  label="Residual Value"
+                  value={
+                    asset.residualValue
+                      ? `${asset.currency} ${fmt(asset.residualValue)}`
+                      : undefined
+                  }
+                />
               </Section>
 
               {(asset.disposalDate || asset.disposalValue) && (
                 <Section title="Disposal">
                   <Field label="Disposal Date" value={fmtDate(asset.disposalDate)} />
-                  <Field label="Disposal Value" value={asset.disposalValue ? `${asset.currency} ${fmt(asset.disposalValue)}` : undefined} />
+                  <Field
+                    label="Disposal Value"
+                    value={
+                      asset.disposalValue
+                        ? `${asset.currency} ${fmt(asset.disposalValue)}`
+                        : undefined
+                    }
+                  />
                   <Field label="Disposal Status" value={<StatusBadge status={asset.status} />} />
                 </Section>
               )}
@@ -347,7 +498,7 @@ export default function FixedAssetDetailPage() {
                 <p>No documents attached to this asset yet.</p>
               </div>
             ) : (
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead className="text-left text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-100">
                   <tr>
                     <th className="px-5 py-3">Title</th>
@@ -360,19 +511,30 @@ export default function FixedAssetDetailPage() {
                 <tbody className="divide-y divide-slate-100">
                   {asset.documents.map((d) => (
                     <tr key={d.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-3 font-medium">{d.title}</td>
+                      <td className="px-5 py-3 font-medium">
+                        <div className="flex flex-wrap items-center gap-3">
+                          {d.title}
+                          <DocumentQuickLookButton document={d} documents={asset.documents} />
+                        </div>
+                      </td>
                       <td className="px-5 py-3 text-slate-500 text-xs font-mono">{d.fileName}</td>
                       <td className="px-5 py-3 text-slate-400 text-xs">{d.mimeType}</td>
                       <td className="px-5 py-3">
-                        {d.isConfidential
-                          ? <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700">Confidential</span>
-                          : <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-500">Open</span>}
+                        {d.isConfidential ? (
+                          <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700">
+                            Confidential
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-500">
+                            Open
+                          </span>
+                        )}
                       </td>
                       <td className="px-5 py-3 text-slate-400 text-xs">{fmtDate(d.createdAt)}</td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             )}
           </Card>
         )}
@@ -395,22 +557,30 @@ export default function FixedAssetDetailPage() {
                         <span className="text-xs font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
                           {e.action}
                         </span>
-                        <span className="text-xs text-slate-500">{e.user?.fullName ?? 'System'}</span>
+                        <span className="text-xs text-slate-500">
+                          {e.user?.fullName ?? 'System'}
+                        </span>
                         <span className="text-xs text-slate-400">{fmtDate(e.createdAt)}</span>
-                        {e.ipAddress && <span className="text-xs text-slate-300">{e.ipAddress}</span>}
+                        {e.ipAddress && (
+                          <span className="text-xs text-slate-300">{e.ipAddress}</span>
+                        )}
                       </div>
                       {(e.oldValue || e.newValue) && (
                         <div className="mt-2 flex gap-4 text-xs">
                           {e.oldValue && (
                             <div>
                               <span className="text-slate-400">Before: </span>
-                              <span className="text-slate-600 font-mono">{JSON.stringify(e.oldValue)}</span>
+                              <span className="text-slate-600 font-mono">
+                                {JSON.stringify(e.oldValue)}
+                              </span>
                             </div>
                           )}
                           {e.newValue && (
                             <div>
                               <span className="text-slate-400">After: </span>
-                              <span className="text-slate-600 font-mono">{JSON.stringify(e.newValue)}</span>
+                              <span className="text-slate-600 font-mono">
+                                {JSON.stringify(e.newValue)}
+                              </span>
                             </div>
                           )}
                         </div>
@@ -425,15 +595,22 @@ export default function FixedAssetDetailPage() {
 
         {/* Dispose Modal */}
         {disposing && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
-              <h2 className="text-lg font-semibold text-slate-800">Dispose / Sell Asset</h2>
-              <p className="text-sm text-slate-500">This action will mark the asset as no longer active.</p>
+          <Modal open title="Dispose / Sell Asset" onClose={() => setDisposing(false)} size="md">
+            <div className="os-legacy-dialog-content">
+              <p className="text-sm text-slate-500">
+                This action will mark the asset as no longer active.
+              </p>
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">Disposal Type</label>
-                  <select value={disposeStatus} onChange={(e) => setDisposeStatus(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                  <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">
+                    Disposal Type
+                  </label>
+                  <select
+                    aria-label="Disposal Type"
+                    value={disposeStatus}
+                    onChange={(e) => setDisposeStatus(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
                     <option value="DISPOSED">Disposed</option>
                     <option value="SOLD">Sold</option>
                     <option value="WRITTEN_OFF">Written Off</option>
@@ -441,37 +618,65 @@ export default function FixedAssetDetailPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">Disposal Date *</label>
-                  <input type="date" value={disposeDate} onChange={(e) => setDisposeDate(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <FormDateField
+                    label="Disposal Date"
+                    required
+                    value={disposeDate}
+                    onChange={setDisposeDate}
+                  />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">Disposal Value (optional)</label>
-                  <input type="number" placeholder="0.00" value={disposeValue} onChange={(e) => setDisposeValue(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">
+                    Disposal Value (optional)
+                  </label>
+                  <input
+                    aria-label="Disposal Value (optional)"
+                    type="number"
+                    placeholder="0.00"
+                    value={disposeValue}
+                    onChange={(e) => setDisposeValue(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setDisposing(false)}
-                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
-                <button onClick={handleDispose} disabled={!disposeDate}
-                  className="flex-1 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-900 disabled:opacity-50">
+                <button
+                  onClick={() => setDisposing(false)}
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDispose}
+                  disabled={!disposeDate}
+                  className="flex-1 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-900 disabled:opacity-50"
+                >
                   Confirm Disposal
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* Collateral Modal */}
         {settingCollateral && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 space-y-4">
-              <h2 className="text-lg font-semibold text-slate-800">Update Collateral Status</h2>
+          <Modal
+            open
+            title="Update Collateral Status"
+            onClose={() => setSettingCollateral(false)}
+            size="sm"
+          >
+            <div className="os-legacy-dialog-content">
               <div>
-                <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">Collateral Status</label>
-                <select value={collateralStatus} onChange={(e) => setCollateralStatus(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <label className="text-xs text-slate-500 uppercase tracking-wide block mb-1">
+                  Collateral Status
+                </label>
+                <select
+                  aria-label="Collateral Status"
+                  value={collateralStatus}
+                  onChange={(e) => setCollateralStatus(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
                   <option value="">— Select —</option>
                   <option value="NOT_COLLATERAL">Not Collateral</option>
                   <option value="USED_AS_COLLATERAL">Used as Collateral</option>
@@ -479,17 +684,23 @@ export default function FixedAssetDetailPage() {
                 </select>
               </div>
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setSettingCollateral(false)}
-                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
-                <button onClick={handleCollateral} disabled={!collateralStatus}
-                  className="flex-1 px-4 py-2 bg-rose-600 text-white rounded-lg text-sm hover:bg-rose-700 disabled:opacity-50">
+                <button
+                  onClick={() => setSettingCollateral(false)}
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCollateral}
+                  disabled={!collateralStatus}
+                  className="flex-1 px-4 py-2 bg-rose-600 text-white rounded-lg text-sm hover:bg-rose-700 disabled:opacity-50"
+                >
                   Update
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
-
       </div>
     </div>
   );

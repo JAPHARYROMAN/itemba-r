@@ -967,8 +967,6 @@ const companyScopeUnenforcedCapabilities = new Set([
   'CommunicationLogsController.findOne',
   'CustomerPriceAgreementsController.findOne',
   'ExpenseCategoriesController.findOne',
-  'LoanRepaymentSchedulesController.findOne',
-  'LoanRepaymentSchedulesController.getPayments',
   'MedicalExamRecordsController.findOne',
   'MessageTemplatesController.findOne',
   'OshaRegistrationsController.findOne',
@@ -986,6 +984,7 @@ const companyScopeUnenforcedCapabilities = new Set([
 ]);
 
 export type CrudPathReadBlockerReason =
+  | 'agent_excluded'
   | 'company_scope_not_enforced'
   | 'read_writes_audit_ledger'
   | 'device_headers_not_represented'
@@ -1000,19 +999,29 @@ export interface CrudPathReadBlocker {
 }
 
 const scopeBlockers: readonly CrudPathReadBlocker[] = [
-  ...[
-    ...companyScopeUnenforcedCapabilities,
-    'CcmNoticesController.cmaReferral',
-    'CcmNoticesController.termination',
-  ]
-    .sort()
-    .map((capabilityId) => ({
-      capabilityId,
-      reason: 'company_scope_not_enforced' as const,
-      detail:
-        'The company-owned path read does not carry the authenticated actor into a company-scope check.',
-    })),
+  ...[...companyScopeUnenforcedCapabilities].sort().map((capabilityId) => ({
+    capabilityId,
+    reason: 'company_scope_not_enforced' as const,
+    detail:
+      'The company-owned path read does not carry the authenticated actor into a company-scope check.',
+  })),
 ];
+
+// These four reads were company_scope_not_enforced blockers. The ITEMBA OS
+// redesign (4a155f19) now passes the authenticated actor into their company
+// scope check, but that new contract has not been reviewed for agent
+// eligibility, so each route carries a plain @AgentExcluded() (fail closed).
+const redesignUnreviewedBlockers: readonly CrudPathReadBlocker[] = [
+  'CcmNoticesController.cmaReferral',
+  'CcmNoticesController.termination',
+  'LoanRepaymentSchedulesController.findOne',
+  'LoanRepaymentSchedulesController.getPayments',
+].map((capabilityId) => ({
+  capabilityId,
+  reason: 'agent_excluded' as const,
+  detail:
+    'The read gained actor company scoping in the ITEMBA OS redesign and is excluded until that contract is reviewed for agent eligibility.',
+}));
 
 const auditMutationBlockers: readonly CrudPathReadBlocker[] = [
   'BankAccountsController.findOne',
@@ -1047,6 +1056,7 @@ const auditMutationBlockers: readonly CrudPathReadBlocker[] = [
 export const CRUD_PATH_READ_REMAINING_BLOCKERS: readonly CrudPathReadBlocker[] = Object.freeze(
   [
     ...scopeBlockers,
+    ...redesignUnreviewedBlockers,
     ...auditMutationBlockers,
     ...['MobilePosLiteController.dayReportPdf', 'MobilePosLiteController.saleReceipt'].map(
       (capabilityId) => ({

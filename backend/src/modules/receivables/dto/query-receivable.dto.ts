@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { ReceivableStatus } from '@prisma/client';
 
 export class QueryReceivableDto {
+  @IsOptional() @IsString() search?: string;
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;

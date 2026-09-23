@@ -1,0 +1,286 @@
+.fuel-portal {
+  /* Shared sign-in utilities must not inherit the ERP's dark theme tokens. */
+  --aurora-card: #fff;
+  --aurora-bg-subtle: #f1f5f4;
+  --aurora-border: #dce6e2;
+  --aurora-border-strong: #cbd8d3;
+  --aurora-text: #173b40;
+  --aurora-text-secondary: #526e6d;
+  --aurora-text-muted: #607572;
+  --aurora-danger-bg: #fef2f2;
+  --aurora-danger-text: #991b1b;
+  --aurora-warning-bg: #fffbeb;
+  --aurora-warning-text: #92400e;
+  color-scheme: light;
+  min-height: 100dvh;
+  background: #edf3f2;
+  color: #173b40;
+  font-family: Arial, Helvetica, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+.fuel-portal input,
+.fuel-portal select,
+.fuel-portal textarea,
+.dark .fuel-portal input,
+.dark .fuel-portal select,
+.dark .fuel-portal textarea {
+  background-color: #fff !important;
+  color: #173b40 !important;
+  caret-color: #173b40;
+}
+.fuel-portal input:-webkit-autofill {
+  -webkit-text-fill-color: #173b40;
+  box-shadow: 0 0 0 1000px #fff inset;
+}
+.fuel-portal * {
+  box-sizing: border-box;
+}
+.fp-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px max(28px, calc((100vw - 1600px) / 2));
+  background: #fff;
+  border-bottom: 1px solid #dbe6e3;
+}
+.fp-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: #133d40;
+  font-size: 19px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.fp-brand-icon {
+  display: grid;
+  place-items: center;
+  background: #086b63;
+  color: #fff;
+  border-radius: 12px;
+  width: 43px;
+  height: 43px;
+}
+.fp-brand small {
+  display: block;
+  margin-top: 3px;
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  color: #637a7b;
+}
+.fp-itemba {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+  border: 1px solid #d2dfdc;
+  border-radius: 8px;
+  color: #335b5c;
+  text-decoration: none;
+}
+.fp-itemba:hover {
+  background: #edf5f2;
+}
+.fp-workspace {
+  flex: 1;
+  padding: 30px 28px;
+}
+.fp-workspace:focus {
+  outline: none;
+}
+.fp-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1656px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 18px 28px;
+  font-size: 12px;
+  color: #5c7473;
+}
+.fp-footer > span:first-child {
+  font-weight: 700;
+}
+.fp-login {
+  max-width: 1120px;
+  margin: 30px auto 44px;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  align-items: center;
+  gap: 80px;
+}
+.fp-company {
+  display: inline-block;
+  padding: 7px 11px;
+  border: 1px solid #bdd8ce;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  color: #176753;
+}
+.fp-intro h1 {
+  font-size: clamp(36px, 4vw, 54px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -2px;
+  margin: 24px 0 20px;
+  color: #113e40;
+}
+.fp-intro h1 em {
+  font-style: normal;
+  color: #087363;
+}
+.fp-intro > p {
+  max-width: 445px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #526e6d;
+}
+.fp-features {
+  display: grid;
+  gap: 22px;
+  list-style: none;
+  margin: 30px 0;
+  padding: 0;
+}
+.fp-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.fp-features svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #087363;
+  width: 21px;
+  height: 21px;
+}
+.fp-features strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+.fp-features span {
+  display: block;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #526e6d;
+}
+.fp-intro-note {
+  padding-top: 20px;
+  border-top: 1px solid #d3e2dd;
+  font-size: 12px;
+  color: #526e6d;
+}
+.fp-login-card {
+  background: #fff;
+  border: 1px solid #dce6e2;
+  border-top: 4px solid #0a7767;
+  border-radius: 18px;
+  padding: 38px;
+  box-shadow: 0 20px 60px #164d3d0a;
+}
+.fp-login-help {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid #e1e9e6;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #607572;
+}
+.fp-access {
+  padding: 60px 24px;
+  text-align: center;
+}
+.fp-access h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.fp-access button {
+  margin-top: 20px;
+  background: #086b63;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+}
+.fp-skip {
+  position: absolute;
+  top: -60px;
+  left: 16px;
+  z-index: 100;
+  padding: 10px 16px;
+  background: #fff;
+  color: #086b63;
+}
+.fp-skip:focus {
+  top: 8px;
+}
+.fuel-portal :focus-visible {
+  outline: 3px solid #ca9d3b;
+  outline-offset: 3px;
+}
+@media (max-width: 900px) {
+  .fp-login {
+    gap: 32px;
+    margin-top: 12px;
+  }
+  .fp-login-card {
+    padding: 28px;
+  }
+}
+@media (max-width: 680px) {
+  .fp-topbar {
+    padding: 14px 16px;
+    gap: 12px;
+  }
+  .fp-brand {
+    font-size: 16px;
+  }
+  .fp-itemba {
+    padding: 10px;
+    font-size: 12px;
+  }
+  .fp-workspace {
+    padding: 18px 12px;
+  }
+  .fp-login {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    margin: 8px auto 20px;
+    max-width: 460px;
+  }
+  .fp-intro {
+    padding: 0 8px;
+  }
+  .fp-intro h1 {
+    font-size: 38px;
+    margin: 18px 0;
+  }
+  .fp-intro h1 br {
+    display: none;
+  }
+  .fp-intro h1 em {
+    display: block;
+  }
+  .fp-features,
+  .fp-intro-note {
+    display: none;
+  }
+  .fp-login-card {
+    width: 100%;
+    padding: 26px;
+  }
+  .fp-footer {
+    flex-direction: column;
+    gap: 5px;
+    padding: 16px 20px;
+  }
+}

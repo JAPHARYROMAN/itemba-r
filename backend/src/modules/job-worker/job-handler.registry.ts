@@ -8,6 +8,8 @@ export interface JobContext {
   payload: Record<string, unknown>;
   correlationId: string | null;
   attempts: number;
+  /** Runtime-owned generation used by handlers that reconcile a replaced lease. */
+  leaseOwner?: string;
   /** Aborted when the worker timeout fires or periodic/checkpoint renewal loses the lease. */
   signal?: AbortSignal;
   /**

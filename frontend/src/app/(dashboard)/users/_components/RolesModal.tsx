@@ -1,4 +1,5 @@
 'use client';
+import { Modal } from '@/components/ui/modal';
 
 import { useState } from 'react';
 
@@ -80,24 +81,8 @@ export function RolesModal({ user, allRoles, onClose, onSaved }: Props) {
   })).filter((g) => g.roles.length > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Manage Roles</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {user.fullName} · {user.email}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="text-slate-400 hover:text-slate-600 text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
+    <Modal open title="Manage Roles" subtitle={`${user.fullName} · ${user.email}`} onClose={() => { if (!saving) onClose(); }} size="lg"><div className="os-legacy-dialog-content">
+        
         <form onSubmit={submit} className="flex flex-col flex-1 overflow-hidden">
           <div className="px-6 py-4 overflow-y-auto flex-1 space-y-5">
             {error && (
@@ -165,7 +150,6 @@ export function RolesModal({ user, allRoles, onClose, onSaved }: Props) {
             </div>
           </div>
         </form>
-      </div>
-    </div>
+      </div></Modal>
   );
 }

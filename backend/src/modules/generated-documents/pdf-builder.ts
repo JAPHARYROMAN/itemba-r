@@ -38,6 +38,8 @@ export interface BusinessPdfTable {
 
 export interface BusinessPdfSection {
   title: string;
+  /** Correspondence uses plain paragraphs instead of a shaded notes panel. */
+  plainParagraphs?: boolean;
   /** Starts this section on a clean continuation page. */
   pageBreakBefore?: boolean;
   items?: Array<{ label: string; value: string }>;
@@ -230,12 +232,20 @@ class SimplePdf {
     const rightX = this.pageWidth - MARGIN - rightWidth;
     const docTitle = cleanText(model.title).toUpperCase();
     this.text('DOCUMENT', rightX, headerTop + 7, 7.5, 'F2', rightWidth, 'right', TEXT_DARK);
-    this.text(model.reference, rightX, headerTop + 23, 12, 'F2', rightWidth, 'right', TEXT_DARK);
+    const referenceEnd = this.wrappedText(
+      model.reference,
+      rightX,
+      headerTop + 23,
+      10,
+      rightWidth,
+      'F2',
+      TEXT_DARK,
+    );
     if (model.status)
       this.text(
         cleanText(model.status).toUpperCase(),
         rightX,
-        headerTop + 39,
+        referenceEnd + 3,
         8.5,
         'F1',
         rightWidth,
@@ -243,13 +253,21 @@ class SimplePdf {
         TEXT_DARK,
       );
 
-    this.y = Math.max(orgY + 2, headerTop + 70);
+    this.y = Math.max(orgY + 2, headerTop + 70, referenceEnd + (model.status ? 16 : 2));
     this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.9, TEXT_DARK);
 
     const titleWidth = this.contentWidth - 175;
     const titleSize = docTitle.length * 22 * TITLE_WIDTH_FACTOR > titleWidth ? 18 : 22;
     const titleBaseline = this.y + 23;
-    this.text(docTitle, MARGIN, titleBaseline, titleSize, 'F2', titleWidth, 'left', TEXT_DARK);
+    const titleEnd = this.wrappedText(
+      docTitle,
+      MARGIN,
+      titleBaseline,
+      titleSize,
+      titleWidth,
+      'F2',
+      TEXT_DARK,
+    );
     this.text(
       model.reference,
       this.pageWidth - MARGIN - 165,
@@ -260,7 +278,7 @@ class SimplePdf {
       'right',
       TEXT_DARK,
     );
-    this.y = titleBaseline + 18;
+    this.y = Math.max(titleBaseline + 18, titleEnd + 5);
 
     if (model.subtitle) {
       this.y =
@@ -499,10 +517,21 @@ class SimplePdf {
       !section.totals?.length;
     this.ensureSpace(signatureOnly ? 70 : 36);
     this.y += 5;
-    this.text(section.title.toUpperCase(), MARGIN, this.y, 9, 'F2', undefined, 'left', TEXT_MUTED);
-    this.y += 7;
-    this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
-    this.y += 9;
+    if (section.title) {
+      this.text(
+        section.title.toUpperCase(),
+        MARGIN,
+        this.y,
+        9,
+        'F2',
+        undefined,
+        'left',
+        TEXT_MUTED,
+      );
+      this.y += 7;
+      this.line(MARGIN, this.y, this.pageWidth - MARGIN, this.y, 0.7, HAIRLINE);
+      this.y += 9;
+    }
 
     if (section.items?.length) {
       this.keyValues(section.items, 2);
@@ -510,6 +539,7 @@ class SimplePdf {
     }
 
     const isNotesPanel =
+      !section.plainParagraphs &&
       !!section.paragraphs?.length &&
       !section.items?.length &&
       !section.table &&
@@ -519,8 +549,20 @@ class SimplePdf {
       this.notesPanel(section.paragraphs ?? []);
     } else {
       for (const paragraph of section.paragraphs ?? []) {
+        if (!paragraph.trim()) {
+          this.y += 10;
+          continue;
+        }
         this.y =
-          this.wrappedText(paragraph, MARGIN, this.y, 9, this.contentWidth, 'F1', TEXT_DARK) + 8;
+          this.wrappedText(
+            paragraph,
+            MARGIN,
+            this.y,
+            section.plainParagraphs ? 11 : 9,
+            this.contentWidth,
+            'F1',
+            TEXT_DARK,
+          ) + 8;
       }
     }
 
@@ -888,7 +930,9 @@ class SimplePdf {
     color?: Rgb,
   ) {
     const clean = cleanText(value);
-    const approxWidth = clean.length * size * (font === 'F2' ? 0.58 : 0.55);
+    const naturalWidth = measureText(clean, size, font);
+    if (width && naturalWidth > width) size *= width / naturalWidth;
+    const approxWidth = measureText(clean, size, font);
     const offset =
       align === 'right' && width
         ? Math.max(0, width - approxWidth)
@@ -1277,6 +1321,18 @@ function pngPixelsToImage(
   }
 
   return image;
+}
+
+// PDFKit's standard font metrics keep long references and table values inside
+// their measured columns. This object is used only for synchronous measurement.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const PdfMetrics = require('pdfkit');
+const pdfMetrics = new PdfMetrics({ autoFirstPage: false });
+function measureText(value: string, size: number, font: FontName) {
+  return pdfMetrics
+    .font(font === 'F2' ? 'Helvetica-Bold' : 'Helvetica')
+    .fontSize(size)
+    .widthOfString(value) as number;
 }
 
 function wrapText(value: string, width: number, size: number): string[] {

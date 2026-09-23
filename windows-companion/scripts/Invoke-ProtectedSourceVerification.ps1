@@ -98,7 +98,7 @@ function Invoke-HashPinnedPowerShellScript {
 # These hashes are part of this runner's reviewed bytes. The signed release
 # policy separately pins this runner, so neither downstream static verifier can
 # be changed between review and execution without failing closed.
-$companionStaticSha256 = '00BE7EA968CCD930DA10BDEBF5B3613D22D7DDFEDD333973073D70C0158B79A7'
+$companionStaticSha256 = 'ADDCA92A5D2B08F0383AC3225C828B34C245EEE0ED91F8179C40FCB02FE81BCD'
 $installerStaticSha256 = '2B0A946CB3E63D98A13B243ADB217908A51DEF0B009633C8395B8E322F28D4FB'
 $releaseBootstrapPolicySha256 = 'B3407BFE7FB5DB1A009E22C45FF2E6A3B65670EB5B73DE01A02D4F3B59D318BE'
 $releasePathPolicySha256 = 'B59396510B3A7F81FB8AAA55F99E5294D8202F052820727423BEED72CE81943E'

@@ -142,7 +142,7 @@ export class HrDashboardService {
       this.prisma.employmentDispute.count({
         where: {
           ...(filter as any),
-          status: { notIn: ['RESOLVED', 'DISMISSED'] },
+          status: { notIn: ['RESOLVED', 'DISMISSED', 'WITHDRAWN'] },
           deletedAt: null,
         },
       }),
@@ -174,7 +174,7 @@ export class HrDashboardService {
         where: { ...(filter as any), deletedAt: null },
         _count: { _all: true },
       }),
-      this.prisma.employee.findMany({
+      user.permissions?.includes('employees.view') ? this.prisma.employee.findMany({
         where: filter,
         select: {
           id: true,
@@ -188,8 +188,8 @@ export class HrDashboardService {
         },
         orderBy: { createdAt: 'desc' },
         take: 8,
-      }),
-      this.prisma.employmentContract.findMany({
+      }) : Promise.resolve([]),
+      user.permissions?.includes('employment_contracts.view') ? this.prisma.employmentContract.findMany({
         where: {
           ...(filter as any),
           status: 'ACTIVE',
@@ -206,7 +206,7 @@ export class HrDashboardService {
         },
         orderBy: { endDate: 'asc' },
         take: 8,
-      }),
+      }) : Promise.resolve([]),
     ]);
 
     const companyIds = employeesByCompany.map((row) => row.companyId);

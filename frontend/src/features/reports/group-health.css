@@ -1,0 +1,230 @@
+.health-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+.health-filter-panel {
+  margin: 12px 0 20px;
+}
+.health-filter-panel > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--r-text);
+  padding: 10px 0;
+  width: fit-content;
+}
+.health-filter-panel[open] > summary {
+  margin-bottom: 12px;
+}
+.health-heading > button {
+  align-self: flex-start;
+  padding: 10px;
+  border: 1px solid var(--r-line);
+  border-radius: 10px;
+}
+.health-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 24px 0;
+  padding: 20px;
+  border-radius: 16px;
+  background: color-mix(in srgb, #657da7 9%, var(--r-card));
+  color: var(--r-text);
+}
+.health-status > svg {
+  flex-shrink: 0;
+  color: #657da7;
+}
+.health-status p {
+  font-size: 12px;
+  color: var(--r-muted);
+  margin-top: 5px;
+  line-height: 1.6;
+}
+.health-status label {
+  margin-left: auto;
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+}
+.health-status select {
+  background: var(--r-card);
+  border: 1px solid var(--r-line);
+  border-radius: 8px;
+  padding: 8px;
+}
+.health-metrics small {
+  display: block;
+  color: var(--r-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.health-unknown {
+  color: var(--r-muted);
+  font-size: 20px;
+  display: block;
+  margin: 12px 0;
+}
+.health-attention,
+.health-outlook,
+.health-coverage {
+  margin: 24px 0;
+  padding: 22px;
+  border: 1px solid var(--r-line);
+  border-radius: 16px;
+}
+.health-attention h2,
+.health-outlook h2 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.health-attention ul,
+.health-coverage ul {
+  list-style: disc;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.health-attention p,
+.health-outlook p,
+.health-coverage p {
+  color: var(--r-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+.health-outlook > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.health-outlook article {
+  padding: 18px;
+  background: color-mix(in srgb, var(--r-line) 20%, transparent);
+  border-radius: 12px;
+}
+.health-outlook strong {
+  display: block;
+  margin: 12px 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+.health-outlook small {
+  color: var(--r-muted);
+}
+.health-coverage summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.health-coverage > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.health-coverage article {
+  border-bottom: 1px solid var(--r-line);
+  padding-bottom: 12px;
+}
+.health-coverage article span,
+.health-coverage small {
+  display: block;
+  margin-top: 6px;
+  color: var(--r-muted);
+}
+.health-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.health-actions a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--r-line);
+  border-radius: 10px;
+}
+.health-entry {
+  margin: 20px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding: 22px;
+  border: 1px solid var(--r-line);
+  border-radius: 16px;
+  background: color-mix(in srgb, #657da7 7%, var(--r-card));
+}
+.health-entry strong {
+  display: block;
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+.health-entry p {
+  color: var(--r-muted);
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .health-status {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .health-status label {
+    margin-left: 0;
+  }
+  .health-outlook > div,
+  .health-coverage > div {
+    grid-template-columns: 1fr;
+  }
+  .health-entry {
+    align-items: flex-start;
+  }
+  .health-attention,
+  .health-outlook,
+  .health-coverage {
+    padding: 16px;
+  }
+}
+@media print {
+  .health-actions,
+  .health-heading > button,
+  .health-status select {
+    display: none !important;
+  }
+  .health-outlook,
+  .health-attention {
+    break-inside: avoid;
+  }
+  .health-coverage {
+    font-size: 10px;
+  }
+}
+
+/* Respond to the width of an OS app window as well as the viewport. */
+@container os-workspace (max-width: 600px) {
+  .health-status {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .health-status label {
+    margin-left: 0;
+  }
+  .health-outlook > div,
+  .health-coverage > div {
+    grid-template-columns: 1fr;
+  }
+  .health-entry {
+    align-items: flex-start;
+  }
+  .health-attention,
+  .health-outlook,
+  .health-coverage {
+    padding: 16px;
+  }
+}

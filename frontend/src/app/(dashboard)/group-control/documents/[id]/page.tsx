@@ -1,10 +1,13 @@
 'use client';
+import { DocumentViewer } from '@/components/documents/DocumentViewer';
+import { Modal } from '@/components/ui/modal';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useWorkspacePathname, useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
 import Link from 'next/link';
-import { Card, ConfirmDialog } from '@/components/ui';
+import { Card, ConfirmDialog, FormDateField, PageHeader } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -149,41 +152,39 @@ function EditModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Edit Document Metadata</h2>
-          <button onClick={onClose} className="text-xs font-medium text-gray-400 hover:text-gray-600">Close</button>
-        </div>
+    <Modal open title="Edit Document Metadata" onClose={() => { if (!loading) onClose(); }} size="md"><div className="os-legacy-dialog-content">
+
         <form onSubmit={submit} className="p-6 space-y-4">
           {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-            <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            <input aria-label="Title" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-            <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <select aria-label="Status" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
               {DOC_STATUSES.map(s => <option key={s} value={s}>{fmtLabel(s)}</option>)}
             </select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
-              <input type="date" value={form.expiryDate} onChange={e => setForm(f => ({ ...f, expiryDate: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Renewal Date</label>
-              <input type="date" value={form.renewalDate} onChange={e => setForm(f => ({ ...f, renewalDate: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-            </div>
+            <FormDateField
+              label="Expiry Date"
+              value={form.expiryDate}
+              onChange={(value) => setForm((f) => ({ ...f, expiryDate: value }))}
+            />
+            <FormDateField
+              label="Renewal Date"
+              value={form.renewalDate}
+              onChange={(value) => setForm((f) => ({ ...f, renewalDate: value }))}
+            />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            <textarea aria-label="Description" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
           </div>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -198,48 +199,60 @@ function EditModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </div></Modal>
   );
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'links' | 'audit';
+type Tab = 'preview' | 'overview' | 'links' | 'audit';
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DocumentDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const router = useRouter();
-  const { hasPermission } = useAuth();
+  const id = useWorkspacePathname().split('/').at(-1)!;
+  const router = useWorkspaceRouter();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('documents.view');
+  const beginRequest = useRequestGuard();
 
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [loadError, setLoadError] = useState('');
+  const [tab, setTab] = useState<Tab>('preview');
   const [showEdit, setShowEdit] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
-  const canManage = hasPermission('documents.update');
+  const canManage = hasPermission('documents.manage');
 
   const fetchDoc = useCallback(async () => {
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const [docRes, auditRes] = await Promise.all([
-        fetch(`/api/backend/documents/${id}`),
-        fetch(`/api/backend/documents/${id}/audit-history`),
+        fetch(`/api/backend/documents/${id}`, { signal: request.signal }),
+        fetch(`/api/backend/documents/${id}/audit-history`, { signal: request.signal }),
       ]);
+      if (!request.current()) return;
       const [docJson, auditJson] = await Promise.all([docRes.json(), auditRes.json()]);
+      if (!request.current()) return;
+      if (!docRes.ok) throw new Error(docJson.message ?? `Error ${docRes.status}`);
       setDoc(docJson.data ?? null);
       setAudit(auditJson.data ?? []);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load document');
+      setDoc(null);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [id]);
+  }, [authLoading, beginRequest, canView, id]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
@@ -276,17 +289,39 @@ export default function DocumentDetailPage() {
     }
   };
 
+  if (authLoading) return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto px-6 py-8">
+        <PageHeader title="Document" subtitle="Loading" />
+      </div>
+    </div>
+  );
+
+  if (!canView) return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto px-6 py-8">
+        <PageHeader title="Document" />
+        <div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div>
+      </div>
+    </div>
+  );
+
   if (loading) return (
     <div className="min-h-screen bg-gray-50">
       <div className="flex items-center justify-center h-64 text-gray-500">Loading…</div>
     </div>
   );
 
-  if (!doc) return (
+  if (loadError || !doc) return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto px-6 py-16 text-center">
-        <p className="text-gray-500 mb-4">Document not found or has been deleted.</p>
-        <Link href="/group-control/documents" className="text-blue-600 hover:underline">← Back to Documents</Link>
+        <p className="text-gray-500 mb-4">{loadError || 'Document not found or has been deleted.'}</p>
+        {loadError && (
+          <button type="button" onClick={() => void fetchDoc()} className="text-blue-600 hover:underline mb-4">
+            Try again
+          </button>
+        )}
+        <Link href="/group-control/documents" className="text-blue-600 hover:underline block">← Back to Documents</Link>
       </div>
     </div>
   );
@@ -382,7 +417,7 @@ export default function DocumentDetailPage() {
         {/* Tabs */}
         <div className="border-b border-gray-200">
           <nav className="flex gap-1">
-            {([['overview','Overview'],['links','Linked Entities'],['audit','Audit Trail']] as [Tab, string][]).map(([t, label]) => (
+            {([['preview','Preview'],['overview','Overview'],['links','Linked Entities'],['audit','Audit Trail']] as [Tab, string][]).map(([t, label]) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -399,6 +434,7 @@ export default function DocumentDetailPage() {
         </div>
 
         {/* Tab Content */}
+        {tab === 'preview' && <DocumentViewer id={id} title={doc.title} fileName={doc.fileName} version={doc.version} />}
         {tab === 'overview' && (
           <Card>
             <dl className="divide-y divide-gray-100">

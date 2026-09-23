@@ -111,7 +111,10 @@ export function flattenForCsv(rows: Record<string, unknown>[]): {
 }
 
 export function toCsv(columns: string[], rows: string[][]): string {
-  const escape = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const escape = (value: string) => {
+    const s = /^[\s]*[=+@-]/.test(value) || /^[\t\r\n]/.test(value) ? `'${value}` : value;
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
   return [columns, ...rows].map((row) => row.map(escape).join(',')).join('\n');
 }
 

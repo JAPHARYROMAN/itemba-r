@@ -1,177 +1,206 @@
 'use client';
-
 import { useEffect, useState } from 'react';
-import { Card, PageHeader, FormInput, FormSelect, ConfirmDialog, Modal, Btn, PageSpinner, PageToolbar, showToast } from '@/components/ui';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { usePayrollDraftEditor, usePayrollStateKey } from '@/features/payroll/payroll-drafts';
+
+import { Plus, RefreshCw } from 'lucide-react';
+import {
+  Btn,
+  ConfirmDialog,
+  FormSelect,
+  PageHeader,
+  PageToolbar,
+  PermissionDeniedState,
+} from '@/components/ui';
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { useWorkspaceRecords } from '@/hooks/use-workspace-records';
 import { useOrgScope } from '@/hooks/use-org-scope';
+import { useAuth } from '@/hooks/use-auth';
+import { backendPut } from '@/lib/api-client';
+import '@/components/workspace/workspace.css';
 
-const thCls = 'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide';
-const tdCls = 'px-4 py-2 text-sm';
-
-interface LeaveType {
-  id: string;
-  name: string;
-  code: string;
-  companyId?: string;
-  paid: boolean;
-  annualAllowanceDays?: number;
-  carryForwardAllowed: boolean;
-  isActive: boolean;
-}
-
-interface FormState {
-  companyId: string;
-  name: string;
-  code: string;
-  isPaid: string;
-  annualDays: string;
-  carryForward: string;
-  isActive: string;
-}
-
-const empty: FormState = { companyId: '', name: '', code: '', isPaid: 'true', annualDays: '', carryForward: 'false', isActive: 'true' };
-
+import type { LeaveType } from '@/features/payroll/leave-type-workflow';
 export default function LeaveTypesPage() {
-  const [rows, setRows] = useState<LeaveType[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<LeaveType | null>(null);
-  const [form, setForm] = useState<FormState>(empty);
-  const [saving, setSaving] = useState(false);
-  const { companyOptions } = useOrgScope(form.companyId, { skipBranches: true, skipDivisions: true, skipEmployees: true });
-
-  const load = async () => {
-    setLoading(true);
-    const r = await fetch('/api/backend/hr/leave-types');
-    const j = await r.json();
-    setRows(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const openCreate = () => { setEditing(null); setForm(empty); setShowModal(true); };
-  const openEdit = (lt: LeaveType) => {
-    setEditing(lt);
-    setForm({ companyId: lt.companyId ?? '', name: lt.name, code: lt.code, isPaid: String(lt.paid), annualDays: String(lt.annualAllowanceDays ?? ''), carryForward: String(lt.carryForwardAllowed), isActive: String(lt.isActive) });
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const url = editing ? `/api/backend/hr/leave-types/${editing.id}` : '/api/backend/hr/leave-types';
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission('leave_types.view'),
+    canManage = hasPermission('leave_types.manage');
+  const stateKey = usePayrollStateKey('leave-types');
+  const [page, setPage] = useWorkspaceState(stateKey + '.page', 1),
+    [search, setSearch] = useWorkspaceState(stateKey + '.search', ''),
+    [query, setQuery] = useState(search.trim()),
+    [company, setCompany] = useWorkspaceState(stateKey + '.company', '');
+  const result = useWorkspaceRecords<LeaveType>(
+    '/hr/leave-types',
+    { page, limit: 20, search: query, companyId: company },
+    canRead,
+  );
+  useEffect(() => {
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setPage]);
+  const [notice, setNotice] = useState('');
+  const [toggle, setToggle] = useState<LeaveType | null>(null),
+    [toggleBusy, setToggleBusy] = useState(false),
+    [toggleError, setToggleError] = useState('');
+  const scope = useOrgScope(undefined, {
+    skipEmployees: true,
+    skipDivisions: true,
+    skipBranches: true,
+  });
+  const entry = usePayrollDraftEditor('leave-type', (message) => {
+    setNotice(message);
+    void result.reload();
+  });
+  const changeActive = async () => {
+    if (!toggle || toggleBusy || !canManage) return;
+    setToggleBusy(true);
+    setToggleError('');
     try {
-      const res = await fetch(url, {
-        method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyId: form.companyId,
-          name: form.name,
-          code: form.code,
-          paid: form.isPaid === 'true',
-          carryForwardAllowed: form.carryForward === 'true',
-          isActive: form.isActive === 'true',
-          annualAllowanceDays: form.annualDays ? Number(form.annualDays) : undefined,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast('error', 'Save failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not save the leave type.'));
-        return;
-      }
-      setShowModal(false);
-      load();
+      await backendPut('/hr/leave-types/' + toggle.id, { isActive: !toggle.isActive });
+      setToggle(null);
+      setNotice('Leave type updated.');
+      void result.reload();
+    } catch (err) {
+      setToggleError(err instanceof Error ? err.message : 'Unable to update leave type.');
     } finally {
-      setSaving(false);
+      setToggleBusy(false);
     }
   };
-
-  const doToggle = async (lt: LeaveType) => {
-    const res = await fetch(`/api/backend/hr/leave-types/${lt.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !lt.isActive }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      showToast('error', 'Update failed', Array.isArray(j.message) ? j.message.join(', ') : (j.message ?? 'Could not update the leave type.'));
-    }
-    load();
-  };
-
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(p => ({ ...p, [k]: e.target.value }));
-
-  const bool = (v: boolean) => v ? <span className="text-green-600 font-medium text-xs">Yes</span> : <span className="text-slate-400 text-xs">No</span>;
-
+  useEffect(() => {
+    if (!result.loading && !result.error && page > 1 && !result.rows.length)
+      setPage(Math.max(1, Math.ceil(result.total / 20)));
+  }, [result.loading, result.error, result.rows.length, result.total, page, setPage]);
+  if (!canRead) return <PermissionDeniedState description="Your role cannot view leave types." />;
   return (
-    <div className="p-6">
+    <div className="business-workspace record-workspace">
       <PageHeader
-        title="Leave Types"
-        subtitle="Configure types of employee leave"
+        title="Leave types"
+        subtitle="Clear policies for time away."
+        breadcrumbs={[{ label: 'Payroll', href: '/payroll' }, { label: 'Leave types' }]}
+        actions={
+          canManage && (
+            <Btn icon={<Plus size={16} />} onClick={() => entry.open({ kind: 'leave-type' })}>
+              New leave type
+            </Btn>
+          )
+        }
       />
-      <PageToolbar actions={<Btn variant="primary" onClick={openCreate}>+ Add Leave Type</Btn>} />
-      <Card className="overflow-hidden">
-        {loading ? (
-          <PageSpinner />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-100" style={{ color: 'var(--aurora-text-muted)' }}>
-                <tr>
-                  <th className={thCls}>Name</th>
-                  <th className={thCls}>Code</th>
-                  <th className={thCls}>Paid</th>
-                  <th className={thCls}>Annual Days</th>
-                  <th className={thCls}>Carry Forward</th>
-                  <th className={thCls}>Active</th>
-                  <th className={thCls}>Actions</th>
-                </tr>
-              </thead>
-              <tbody style={{ color: 'var(--aurora-text)' }}>
-                {rows.map(lt => (
-                  <tr key={lt.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className={`${tdCls} font-medium`}>{lt.name}</td>
-                    <td className={`${tdCls} font-mono`}>{lt.code}</td>
-                    <td className={tdCls}>{bool(lt.paid)}</td>
-                    <td className={tdCls}>{lt.annualAllowanceDays != null ? Number(lt.annualAllowanceDays) : '—'}</td>
-                    <td className={tdCls}>{bool(lt.carryForwardAllowed)}</td>
-                    <td className={tdCls}>{bool(lt.isActive)}</td>
-                    <td className={tdCls}>
-                      <div className="flex gap-2">
-                        <Btn variant="ghost" size="xs" onClick={() => openEdit(lt)}>Edit</Btn>
-                        <Btn variant={lt.isActive ? 'warning' : 'success'} size="xs" onClick={() => doToggle(lt)}>{lt.isActive ? 'Deactivate' : 'Activate'}</Btn>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No leave types found</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editing ? 'Edit Leave Type' : 'New Leave Type'} footer={<><Btn variant="secondary" onClick={() => setShowModal(false)}>Cancel</Btn><Btn variant="primary" type="submit" form="leave-type-form" loading={saving}>Save</Btn></>}>
-        <form id="leave-type-form" onSubmit={handleSubmit} className="space-y-3">
-          <FormSelect label="Company" required value={form.companyId}
-            onChange={(e) => setForm(p => ({ ...p, companyId: e.target.value }))}
-            options={companyOptions} placeholder="Select company" />
-          <div className="grid grid-cols-2 gap-3">
-            <FormInput label="Name" value={form.name} onChange={f('name')} required />
-            <FormInput label="Code" value={form.code} onChange={f('code')} required />
-          </div>
-          <FormInput label="Annual Days" type="number" value={form.annualDays} onChange={f('annualDays')} />
-          <div className="grid grid-cols-3 gap-3">
-            <FormSelect label="Paid?" value={form.isPaid} onChange={f('isPaid')}
-              options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
-            <FormSelect label="Carry Forward?" value={form.carryForward} onChange={f('carryForward')}
-              options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
-            <FormSelect label="Active?" value={form.isActive} onChange={f('isActive')}
-              options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
-          </div>
-        </form>
-      </Modal>
+      <div className="workspace-summary">
+        <div>
+          <span>Matching types</span>
+          <strong>{result.total}</strong>
+        </div>
+        <div>
+          <span>Active on this page</span>
+          <strong>{result.rows.filter((r) => r.isActive).length}</strong>
+        </div>
+      </div>
+      {notice && (
+        <div role="status" className="workspace-notice">
+          {notice}
+        </div>
+      )}
+      <PageToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search leave types by name…"
+        collapsibleFilters
+        activeFilterCount={Number(Boolean(company))}
+        filters={
+          <FormSelect
+            label="Company filter"
+            value={company}
+            onChange={(e) => {
+              setCompany(e.target.value);
+              setPage(1);
+            }}
+            options={scope.companyOptions}
+            placeholder="All companies"
+          />
+        }
+        actions={
+          <Btn
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            disabled={result.loading}
+            onClick={result.reload}
+          >
+            Reload
+          </Btn>
+        }
+      />
+      {entry.drafts}
+      <RecordBrowser
+        stateKey={stateKey + '.record'}
+        selectionScope={JSON.stringify([company, query])}
+        title="Leave types"
+        records={result.rows}
+        name={(r) => r.name}
+        reference={(r) => r.code}
+        status={(r) => (r.isActive ? 'ACTIVE' : 'INACTIVE')}
+        loading={result.loading}
+        error={result.error}
+        onRetry={result.reload}
+        page={page}
+        total={result.total}
+        pageSize={20}
+        onPage={setPage}
+        fields={[
+          { label: 'Paid', value: (r) => (r.paid ? 'Paid leave' : 'Unpaid leave') },
+          {
+            label: 'Annual days',
+            value: (r) =>
+              r.annualAllowanceDays == null ? 'Not set' : Number(r.annualAllowanceDays),
+          },
+        ]}
+        details={[
+          { label: 'Company', value: (r) => r.company?.name || '—' },
+          {
+            label: 'Carry forward',
+            value: (r) => (r.carryForwardAllowed ? 'Allowed' : 'Not allowed'),
+          },
+        ]}
+        actions={(r) =>
+          canManage && (
+            <>
+              <Btn onClick={() => entry.open({ kind: 'leave-type', record: r })}>
+                Edit leave type
+              </Btn>
+              <Btn
+                variant="secondary"
+                onClick={() => {
+                  setToggle(r);
+                  setToggleError('');
+                }}
+              >
+                {r.isActive ? 'Deactivate' : 'Activate'}
+              </Btn>
+            </>
+          )
+        }
+      />
+      <ConfirmDialog
+        open={!!toggle}
+        title={
+          (toggle?.isActive ? 'Deactivate ' : 'Activate ') + (toggle?.name || 'leave type') + '?'
+        }
+        message={
+          (toggleError ? toggleError + '\n\n' : '') +
+          (toggle?.isActive
+            ? 'This type will no longer be offered for new leave requests. Existing records remain available.'
+            : 'This type will be available for new leave requests.')
+        }
+        confirmLabel={toggle?.isActive ? 'Deactivate' : 'Activate'}
+        loading={toggleBusy}
+        onConfirm={changeActive}
+        onCancel={() => {
+          if (!toggleBusy) setToggle(null);
+        }}
+      />
     </div>
   );
 }

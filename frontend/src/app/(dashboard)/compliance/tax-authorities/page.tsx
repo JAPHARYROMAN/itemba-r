@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { ErrorState, Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface TaxAuthority {
   id: string;
@@ -70,7 +72,7 @@ function AuthorityModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Tax Authority' : 'Edit Tax Authority'} size="xl"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Code" required value={form.authorityCode} onChange={(e) => set('authorityCode', e.target.value)} />
         <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
@@ -92,15 +94,17 @@ function AuthorityModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 
 }
 
 export default function TaxAuthoritiesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('tax_authorities.manage');
   const canView = hasPermission('tax_authorities.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<TaxAuthority[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [authorityType, setAuthorityType] = useState('');
   const [status, setStatus] = useState('');
@@ -109,16 +113,30 @@ export default function TaxAuthoritiesPage() {
   const [deleting, setDeleting] = useState<TaxAuthority | null>(null);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (search) params.set('search', search);
     if (authorityType) params.set('authorityType', authorityType);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/tax/authorities?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<TaxAuthority> = j.data ?? {};
-    setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
-    setLoading(false);
-  }, [page, search, authorityType, status]);
+        try {
+      const res = await fetch(`/api/backend/tax/authorities?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load tax authorities');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<TaxAuthority> = j.data ?? {};
+      setItems(p.data ?? []); setTotal(p.total ?? 0); setTotalPages(p.totalPages ?? 1);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load tax authorities');
+      setItems([]); setTotal(0); setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, search, authorityType, status]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -133,6 +151,7 @@ export default function TaxAuthoritiesPage() {
   const activeCount = items.filter((a) => a.status === 'ACTIVE').length;
   const nationalCount = items.filter((a) => a.authorityType === 'NATIONAL').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Tax Authorities" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Tax Authorities" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -151,11 +170,11 @@ export default function TaxAuthoritiesPage() {
         searchPlaceholder="Search by name or code…"
         filters={
           <>
-            <select value={authorityType} onChange={(e) => reset(setAuthorityType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={authorityType} onChange={(e) => reset(setAuthorityType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -165,11 +184,11 @@ export default function TaxAuthoritiesPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No authorities</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Code</th>
@@ -199,7 +218,7 @@ export default function TaxAuthoritiesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { PayableStatus } from '@prisma/client';
 
 export class QueryPayableDto {
+  @IsOptional() @IsString() search?: string;
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;

@@ -4,6 +4,7 @@
  */
 
 import { Capability } from '../../common/capabilities/capability-manifest';
+import { createHash } from 'node:crypto';
 import { actionArgumentDigest } from '../../common/utils/canonical-digest';
 import {
   AGENT_SESSION_HEADER,
@@ -274,6 +275,41 @@ describe('CapabilityInvoker', () => {
     expect(result.responseSha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('retains byte provenance but not content when a response stream disconnects', async () => {
+    const prefix = Buffer.from('sensitive incomplete response');
+    const reader = {
+      read: jest
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: prefix })
+        .mockRejectedValueOnce(new Error('connection reset')),
+      cancel: jest.fn().mockResolvedValue(undefined),
+      releaseLock: jest.fn(),
+    };
+    global.fetch = jest.fn(async () => ({
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      body: { getReader: () => reader },
+    })) as unknown as typeof fetch;
+    const result = await new CapabilityInvoker(config).invoke({
+      capability: capability(),
+      args: {},
+      authorization: 'Bearer t',
+      agentSessionId: 'ms_partial',
+      maxResponseBytes: 100,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 0,
+      body: null,
+      responseIncomplete: true,
+      responseBytes: prefix.length,
+      responseSha256: createHash('sha256').update(prefix).digest('hex'),
+    });
+    expect(JSON.stringify(result)).not.toContain(prefix.toString());
+    expect(reader.releaseLock).toHaveBeenCalled();
+  });
+
   it('cancels a response that exceeds the parent-reserved byte budget', async () => {
     global.fetch = jest.fn(
       async () => new Response('123456789', { status: 200 }),
@@ -302,7 +338,9 @@ describe('CapabilityInvoker', () => {
   });
 
   it('issues a result-bound receipt from a strict adapter measurement for a durable task', async () => {
-    const args = { body: { message: 'hello' } };
+    // Receipt v1 retains typed adapter input even though task JWTs normalize
+    // these query scalars for their separate HTTP scope check.
+    const args = { path: {}, query: { batch: 1, preview: false }, body: { message: 'hello' } };
     const binding: ErpEgressInvocationBinding = {
       taskId: 'task-1',
       planVersionId: 'plan-1',

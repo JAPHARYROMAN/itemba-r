@@ -6,7 +6,12 @@ import type { AuthUser } from '@/lib/auth-types';
 import { SESSION_EXPIRED_EVENT } from '@/lib/api-client';
 
 // Pages that are reachable without a valid session — never redirect from these.
-const PUBLIC_PATHS = new Set<string>(['/login', '/forgot-password', '/reset-password']);
+const PUBLIC_PATHS = new Set<string>([
+  '/login',
+  '/fuel-reporting/login',
+  '/forgot-password',
+  '/reset-password',
+]);
 const SESSION_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const SESSION_REFRESH_RETRY_MS = 30 * 1000;
 
@@ -33,7 +38,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  loginPath = '/login',
+}: {
+  children: React.ReactNode;
+  loginPath?: string;
+}) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [authOffline, setAuthOffline] = useState(false);
@@ -171,18 +182,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       // A backend 401 that survived a refresh attempt is authoritative.
       setAuthOffline(false);
-      router.replace('/login?expired=1');
+      router.replace(`${loginPath}?expired=1`);
     };
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
-  }, [pathname, router]);
+  }, [pathname, router, loginPath]);
 
   const refreshUser = useCallback(async () => {
     await fetchUser();
   }, [fetchUser]);
 
   const logout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    const response = await fetch('/api/auth/logout', { method: 'POST' });
+    if (!response.ok) throw new Error('Could not sign out. Please try again.');
     setUser(null);
     // Explicit user sign-out is authoritative — never leave grace behind it.
     setAuthOffline(false);
@@ -190,8 +202,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = null;
     }
-    router.push('/login');
-  }, [router]);
+    router.push(loginPath);
+  }, [router, loginPath]);
 
   const hasPermission = useCallback(
     (...perms: string[]) => {

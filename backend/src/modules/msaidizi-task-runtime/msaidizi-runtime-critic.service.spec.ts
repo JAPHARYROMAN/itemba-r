@@ -24,7 +24,7 @@ describe('MsaidiziRuntimeCritic authority lock', () => {
         tierReason: 'read-verb',
         params: {
           path: [],
-          query: ['customerId'],
+          query: ['customerId', 'limit'],
           freeFormQuery: false,
           hasBody: false,
         },
@@ -48,6 +48,163 @@ describe('MsaidiziRuntimeCritic authority lock', () => {
       },
     ]);
     critic = new MsaidiziRuntimeCritic(manifest);
+  });
+
+  const binding = {
+    targetPath: '/query/customerId',
+    source: { kind: 'PLAN_INPUT', path: '/customerId' },
+    dataClass: 'internal',
+    expectedType: 'string',
+    expectedSchema: { type: 'string' },
+    transform: { name: 'IDENTITY', version: '1' },
+  };
+  it('fills an unbound read field while preserving an executor-managed placeholder', () => {
+    const lookup = readStep('lookup', 1);
+    lookup.arguments = { path: {}, query: { customerId: null } };
+    lookup.inputBindings = [binding];
+    const review = critic.review(
+      replan({
+        orderedPendingStepKeys: ['lookup'],
+        skippedPendingStepKeys: ['fallback'],
+        readArgumentFills: [{ stepKey: 'lookup', values: { query: { limit: '10' } } }],
+      }),
+      [lookup, readStep('fallback', 2)],
+      mandate(['CustomersController.findAll']),
+      new Date(),
+      { customerId: 'reviewed-customer' },
+    );
+    expect(review).toMatchObject({
+      acceptable: true,
+      issues: [],
+      replannedSteps: [
+        {
+          arguments: { path: {}, query: { customerId: null, limit: '10' } },
+          inputBindings: [binding],
+        },
+      ],
+    });
+    expect(lookup.arguments).toEqual({ path: {}, query: { customerId: null } });
+  });
+  it.each([{ query: { limit: 10 } }, { query: { undeclared: '10' } }, { body: { extra: true } }])(
+    'still rejects incompatible unbound fills beside a valid binding: %j',
+    (values) => {
+      const lookup = readStep('lookup', 1);
+      lookup.arguments = { path: {}, query: { customerId: null } };
+      lookup.inputBindings = [binding];
+      const review = critic.review(
+        replan({
+          orderedPendingStepKeys: ['lookup'],
+          skippedPendingStepKeys: [],
+          readArgumentFills: [{ stepKey: 'lookup', values }],
+        }),
+        [lookup],
+        mandate(['CustomersController.findAll']),
+        new Date(),
+        { customerId: 'reviewed-customer' },
+      );
+      expect(review.acceptable).toBe(false);
+      expect(review.issues).toContainEqual({
+        code: 'REPLAN_FILL_SCHEMA_MISMATCH',
+        stepKey: 'lookup',
+      });
+      expect(lookup.arguments).toEqual({ path: {}, query: { customerId: null } });
+    },
+  );
+  it.each([false, true])(
+    'preserves reviewed input bindings and refuses to fill their target (fill=%s)',
+    (fill) => {
+      const lookup = readStep('lookup', 1);
+      lookup.arguments = { path: {}, query: { customerId: null } };
+      lookup.inputBindings = [binding];
+      const review = critic.review(
+        replan({
+          orderedPendingStepKeys: ['lookup'],
+          skippedPendingStepKeys: ['fallback'],
+          readArgumentFills: fill
+            ? [{ stepKey: 'lookup', values: { query: { customerId: 'attacker-customer' } } }]
+            : [],
+        }),
+        [lookup, readStep('fallback', 2)],
+        mandate(['CustomersController.findAll']),
+        new Date(),
+        { customerId: 'reviewed-customer' },
+      );
+      expect(review.acceptable).toBe(!fill);
+      expect(review.replannedSteps[0].inputBindings).toEqual([binding]);
+      expect(lookup.arguments).toEqual({ path: {}, query: { customerId: null } });
+      if (fill)
+        expect(review.issues).toContainEqual({ code: 'INPUT_BINDING_TARGET_NOT_PLACEHOLDER' });
+    },
+  );
+
+  it.each([false, true])(
+    'retains pending and completed dependency binding authority (completed=%s)',
+    (completed) => {
+      const source = readStep('source', 1);
+      if (completed) source.status = MsaidiziTaskStepStatus.SUCCEEDED;
+      const lookup = readStep('lookup', 2);
+      lookup.arguments = { path: {}, query: { customerId: null } };
+      lookup.dependencies = ['source'];
+      lookup.inputBindings = [
+        {
+          ...binding,
+          source: { kind: 'DEPENDENCY_OUTPUT', dependencyStepKey: 'source', path: '/id' },
+        },
+      ];
+      const review = critic.review(
+        replan({
+          orderedPendingStepKeys: completed ? ['lookup'] : ['source', 'lookup'],
+          skippedPendingStepKeys: ['fallback'],
+          readArgumentFills: [{ stepKey: 'lookup', values: { query: { limit: '10' } } }],
+        }),
+        [source, lookup, readStep('fallback', 3)],
+        mandate(['CustomersController.findAll']),
+      );
+      expect(review.acceptable).toBe(true);
+      expect(review.replannedSteps[completed ? 0 : 1]).toMatchObject({
+        dependencies: completed ? [] : ['source'],
+        inputBindings: lookup.inputBindings,
+        arguments: { path: {}, query: { customerId: null, limit: '10' } },
+      });
+    },
+  );
+
+  it.each([
+    { inputs: {}, code: 'INPUT_BINDING_SOURCE_MISSING' },
+    { inputs: { customerId: 123 }, code: 'INPUT_BINDING_TYPE_MISMATCH' },
+  ])('validates immutable source inputs before accepting a version: $code', ({ inputs, code }) => {
+    const lookup = readStep('lookup', 1);
+    lookup.arguments = { path: {}, query: { customerId: null } };
+    lookup.inputBindings = [binding];
+    const review = critic.review(
+      replan({
+        orderedPendingStepKeys: ['lookup'],
+        skippedPendingStepKeys: ['fallback'],
+        readArgumentFills: [],
+      }),
+      [lookup, readStep('fallback', 2)],
+      mandate(['CustomersController.findAll']),
+      new Date(),
+      inputs,
+    );
+    expect(review.acceptable).toBe(false);
+    expect(review.issues).toContainEqual({ code });
+  });
+
+  it('rejects malformed persisted binding definitions before creating a version', () => {
+    const lookup = readStep('lookup', 1);
+    lookup.inputBindings = [{ ...binding, injected: true }];
+    const review = critic.review(
+      replan({
+        orderedPendingStepKeys: ['lookup'],
+        skippedPendingStepKeys: ['fallback'],
+        readArgumentFills: [],
+      }),
+      [lookup, readStep('fallback', 2)],
+      mandate(['CustomersController.findAll']),
+    );
+    expect(review.acceptable).toBe(false);
+    expect(review.issues).toContainEqual({ code: 'INPUT_BINDING_DEFINITION_TAMPERED' });
   });
 
   it('accepts only a fill-only ERP read replan over existing pending rows', () => {

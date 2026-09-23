@@ -1,20 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  EmptyState,
-  FormInput,
-  FormSelect,
-  FormTextarea,
-  Modal,
-  PageHeader,
-  SkeletonTable,
-  StatCard,
-  StatusBadge,
-} from '@/components/ui';
+import { Btn, Card, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendList, backendPost } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
@@ -86,7 +76,8 @@ function fmtMoney(amount: number | string | null | undefined, currency = 'TZS') 
 }
 
 export default function ThreeWayMatchingPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   // The list endpoint (three-way-matching.controller.ts findAll) requires
   // three_way_match.list, which is seeded — gate the page on the same code so a
   // user who can open the page can actually load it.
@@ -106,6 +97,7 @@ export default function ThreeWayMatchingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   // matchNumber and matchStatus are intentionally absent: the number is minted
   // server-side and the status is computed from the PO/GRN/invoice variance.
@@ -121,14 +113,20 @@ export default function ThreeWayMatchingPage() {
   });
 
   useEffect(() => {
-    if (!canView) return;
-    backendList<Company>('/companies', { query: { limit: 100 } })
-      .then((items) => setCompanies(items))
-      .catch(() => setCompanies([]));
-  }, [canView]);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { query: { limit: 100 }, signal: controller.signal })
+      .then((items) => {
+        if (!controller.signal.aborted) setCompanies(items);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   useEffect(() => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
     const id = form.companyId || companyId;
     if (!id) {
       setPurchaseOrders([]);
@@ -137,33 +135,51 @@ export default function ThreeWayMatchingPage() {
       return;
     }
 
+    const controller = new AbortController();
     Promise.allSettled([
-      backendList<PurchaseOrder>('/purchase-orders', { query: { companyId: id, limit: 200 } }),
-      backendList<GoodsReceivedNote>('/goods-received-notes', { query: { companyId: id, limit: 200 } }),
-      backendList<SupplierInvoice>('/supplier-invoices', { query: { companyId: id, limit: 200 } }),
+      backendList<PurchaseOrder>('/purchase-orders', {
+        query: { companyId: id, limit: 200 },
+        signal: controller.signal,
+      }),
+      backendList<GoodsReceivedNote>('/goods-received-notes', {
+        query: { companyId: id, limit: 200 },
+        signal: controller.signal,
+      }),
+      backendList<SupplierInvoice>('/supplier-invoices', {
+        query: { companyId: id, limit: 200 },
+        signal: controller.signal,
+      }),
     ]).then(([poResult, grnResult, invoiceResult]) => {
+      if (controller.signal.aborted) return;
       setPurchaseOrders(poResult.status === 'fulfilled' ? poResult.value : []);
       setGrns(grnResult.status === 'fulfilled' ? grnResult.value : []);
       setInvoices(invoiceResult.status === 'fulfilled' ? invoiceResult.value : []);
     });
-  }, [canView, companyId, form.companyId]);
+    return () => controller.abort();
+  }, [authLoading, canView, companyId, form.companyId]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const query: Record<string, string | number> = { limit: 100 };
       if (companyId) query.companyId = companyId;
       if (status) query.status = status;
-      const items = await backendList<ThreeWayMatch>('/three-way-matching', { query });
+      const items = await backendList<ThreeWayMatch>('/three-way-matching', {
+        query,
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       setRows(items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load matches');
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load matches');
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, companyId, status]);
+  }, [authLoading, beginRequest, canView, companyId, status]);
 
   useEffect(() => {
     load();
@@ -287,6 +303,17 @@ export default function ThreeWayMatchingPage() {
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Three-Way Matching" subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Loading</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!canView) {
     return (
       <div className="p-6">
@@ -330,6 +357,15 @@ export default function ThreeWayMatchingPage() {
         </div>
       </Card>
 
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+          {loadError}
+          <button type="button" className="ml-3 font-medium underline" onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
+      )}
+
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</div>}
 
       <div className="grid xl:grid-cols-[minmax(0,1fr)_440px] gap-5">
@@ -340,7 +376,7 @@ export default function ThreeWayMatchingPage() {
             <EmptyState title="No matches" description="No three-way matches were found for the current filters." />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <caption className="sr-only">Three-way matches between purchase orders, goods received notes, and supplier invoices</caption>
                 <thead>
                   <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -389,7 +425,7 @@ export default function ThreeWayMatchingPage() {
                     );
                   })}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           )}
         </Card>
@@ -444,7 +480,7 @@ export default function ThreeWayMatchingPage() {
             <FormSelect label="Purchase Order" required value={form.purchaseOrderId} onChange={(e) => setForm((f) => ({ ...f, purchaseOrderId: e.target.value, goodsReceivedNoteId: '', supplierInvoiceId: '' }))} placeholder={form.companyId ? 'Select PO' : 'Select company first'} disabled={!form.companyId}>
               {purchaseOrders.filter((po) => po.companyId === form.companyId).map((po) => <option key={po.id} value={po.id}>{poLabel(po)}</option>)}
             </FormSelect>
-            <FormInput label="Match Date" type="date" value={form.matchDate} onChange={(e) => setForm((f) => ({ ...f, matchDate: e.target.value }))} />
+            <FormDateField label="Match Date" value={form.matchDate} onChange={(value) => setForm((f) => ({ ...f, matchDate: value }))} />
             <FormSelect label="Goods Received Note" value={form.goodsReceivedNoteId} onChange={(e) => setForm((f) => ({ ...f, goodsReceivedNoteId: e.target.value }))} placeholder="Optional GRN" disabled={!form.purchaseOrderId}>
               {filteredGrns.map((grn) => <option key={grn.id} value={grn.id}>{grnLabel(grn)}</option>)}
             </FormSelect>

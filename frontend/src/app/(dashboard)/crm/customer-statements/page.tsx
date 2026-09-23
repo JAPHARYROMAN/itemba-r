@@ -1,9 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Btn,
+  FormDateField,
   PageHeader,
   PageToolbar,
   StatCard,
@@ -17,14 +19,9 @@ import {
   type ResponsiveColumn,
 } from '@/components/aurora/data-display/ResponsiveDataTable';
 import { DetailList } from '@/components/aurora/data-display/DetailList';
-import {
-  FormShell,
-  FormSection,
-  FormSelect,
-  FormDateInput,
-  FormActions,
-} from '@/components/aurora/forms';
+import { FormShell, FormSection, FormSelect, FormActions } from '@/components/aurora/forms';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendList, backendPage, backendPost, backendGet } from '@/lib/api-client';
 import { downloadBinaryExport } from '@/lib/export-download';
 
@@ -175,12 +172,13 @@ interface EmailStatementResponse {
 }
 
 export default function CustomerStatementsPage() {
-  const { hasPermission } = useAuth();
-
+  const { hasPermission, loading: authLoading } = useAuth();
   const canView =
     hasPermission('customer_statements.list') || hasPermission('customer_statements.view');
   const canViewDetail = hasPermission('customer_statements.view');
   const canGenerate = hasPermission('customer_statements.generate');
+  const beginList = useRequestGuard();
+  const beginDetail = useRequestGuard();
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -245,46 +243,45 @@ export default function CustomerStatementsPage() {
 
   // Load companies for filters, name resolution, and the generate form.
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    backendList<Company>('/companies', { query: { limit: 200 } })
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    backendList<Company>('/companies', { query: { limit: 200 }, signal: controller.signal })
       .then((items) => {
-        if (!cancelled) setCompanies(items);
+        if (!controller.signal.aborted) setCompanies(items);
       })
       .catch(() => {
-        if (!cancelled) setCompanies([]);
+        if (!controller.signal.aborted) setCompanies([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView]);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   // Load customers (scoped to the selected filter company, or all) for name
   // resolution and the filter dropdown. Requires customers.view; failures are
   // non-fatal — rows fall back to showing the raw customer id.
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
     backendList<Customer>('/customers', {
       query: { companyId: companyId || undefined, limit: 1000 },
+      signal: controller.signal,
     })
       .then((items) => {
-        if (!cancelled) setCustomers(items);
+        if (!controller.signal.aborted) setCustomers(items);
       })
       .catch(() => {
-        if (!cancelled) setCustomers([]);
+        if (!controller.signal.aborted) setCustomers([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView, companyId]);
+    return () => controller.abort();
+  }, [authLoading, canView, companyId]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginList();
     setLoading(true);
     setError(null);
     try {
       const result = await backendPage<StatementRun>('/customer-statements', {
+        signal: request.signal,
         query: {
           page,
           limit: PAGE_SIZE,
@@ -292,14 +289,16 @@ export default function CustomerStatementsPage() {
           customerId: customerId || undefined,
         },
       });
+      if (!request.current()) return;
       setData(result);
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Failed to load customer statements');
       setData(emptyPage<StatementRun>(page));
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [canView, companyId, customerId, page]);
+  }, [authLoading, beginList, canView, companyId, customerId, page]);
 
   useEffect(() => {
     void load();
@@ -308,22 +307,23 @@ export default function CustomerStatementsPage() {
   // Customers scoped to the company chosen inside the generate modal. The modal
   // company can differ from the filter company, so load its customers on demand.
   useEffect(() => {
-    if (!canGenerate || !generateOpen || !genCompanyId) {
+    if (authLoading || !canGenerate || !generateOpen || !genCompanyId) {
       setGenCustomers([]);
       return;
     }
-    let cancelled = false;
-    backendList<Customer>('/customers', { query: { companyId: genCompanyId, limit: 1000 } })
+    const controller = new AbortController();
+    backendList<Customer>('/customers', {
+      query: { companyId: genCompanyId, limit: 1000 },
+      signal: controller.signal,
+    })
       .then((items) => {
-        if (!cancelled) setGenCustomers(items);
+        if (!controller.signal.aborted) setGenCustomers(items);
       })
       .catch(() => {
-        if (!cancelled) setGenCustomers([]);
+        if (!controller.signal.aborted) setGenCustomers([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [canGenerate, generateOpen, genCompanyId]);
+    return () => controller.abort();
+  }, [authLoading, canGenerate, generateOpen, genCompanyId]);
 
   const openGenerate = () => {
     setGenCompanyId(companyId || (companies.length === 1 ? companies[0].id : ''));
@@ -404,11 +404,14 @@ export default function CustomerStatementsPage() {
   // ─── Statement of account (detail) ─────────────────────────────────────────
 
   const loadDetail = useCallback(async (sel: StatementSelection) => {
+    if (authLoading || !canViewDetail) return;
+    const request = beginDetail();
     setDetailLoading(true);
     setDetailError(null);
     setDetail(null);
     try {
       const result = await backendGet<StatementDetail>('/customer-statements/detail', {
+        signal: request.signal,
         query: {
           companyId: sel.companyId,
           customerId: sel.customerId,
@@ -417,15 +420,17 @@ export default function CustomerStatementsPage() {
           currency: sel.currency || undefined,
         },
       });
+      if (!request.current()) return;
       setDetail(result);
     } catch (err) {
+      if (!request.current()) return;
       setDetailError(
         err instanceof Error ? err.message : 'Failed to load statement of account',
       );
     } finally {
-      setDetailLoading(false);
+      if (request.current()) setDetailLoading(false);
     }
-  }, []);
+  }, [authLoading, beginDetail, canViewDetail]);
 
   const openDetail = useCallback(
     (sel: StatementSelection) => {
@@ -648,6 +653,14 @@ export default function CustomerStatementsPage() {
     },
   ];
 
+  if (authLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <PageHeader title="Customer Statements" subtitle="Loading" />
+      </div>
+    );
+  }
+
   if (!canView) {
     return (
       <div className="p-6 space-y-6">
@@ -794,21 +807,21 @@ export default function CustomerStatementsPage() {
                   options={genCustomers.map((c) => ({ value: c.id, label: c.name }))}
                 />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <FormDateInput
+                  <FormDateField
                     label="Period start"
                     required
                     value={genStart}
                     error={genErrors.periodStart}
                     max={genEnd || undefined}
-                    onChange={(e) => setGenStart(e.target.value)}
+                    onChange={setGenStart}
                   />
-                  <FormDateInput
+                  <FormDateField
                     label="Period end"
                     required
                     value={genEnd}
                     error={genErrors.periodEnd}
                     min={genStart || undefined}
-                    onChange={(e) => setGenEnd(e.target.value)}
+                    onChange={setGenEnd}
                   />
                 </div>
               </FormSection>
@@ -848,7 +861,7 @@ export default function CustomerStatementsPage() {
               </div>
               {detailSelection && (
                 <Btn variant="secondary" onClick={() => void loadDetail(detailSelection)}>
-                  Retry
+                  Try again
                 </Btn>
               )}
             </div>
@@ -913,7 +926,7 @@ export default function CustomerStatementsPage() {
                   className="overflow-x-auto rounded-lg border"
                   style={{ borderColor: 'var(--aurora-border)' }}
                 >
-                  <table className="w-full text-sm" style={{ color: 'var(--aurora-text)' }}>
+                  <WorkspaceTable className="w-full text-sm" style={{ color: 'var(--aurora-text)' }}>
                     <thead>
                       <tr
                         className="text-xs uppercase tracking-wider"
@@ -1025,7 +1038,7 @@ export default function CustomerStatementsPage() {
                         </td>
                       </tr>
                     </tbody>
-                  </table>
+                  </WorkspaceTable>
                 </div>
               </div>
 

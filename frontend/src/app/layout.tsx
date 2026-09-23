@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import '../styles/globals.css';
 
 export const metadata: Metadata = {
-  title: 'ITEMBA-R · Group Digital Governance',
-  description: 'Group Digital Governance and Enterprise Management System.',
+  title: 'ITEMBA OS',
+  description: 'Your business and tools, together in one workspace. Home to ITEMBA-R.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

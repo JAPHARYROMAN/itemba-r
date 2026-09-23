@@ -1,0 +1,120 @@
+.payslip-workspace {
+  min-width: 0;
+}
+.payslip-paper {
+  overflow-wrap: anywhere;
+}
+.payslip-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.payslip-table-scroll:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+.payslip-paper .payslip-table td:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+@media screen and (max-width: 700px) {
+  .payslip-workspace .payslip-paper {
+    padding: 20px 16px;
+  }
+  .payslip-heading,
+  .payslip-net {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .payslip-heading > .text-right {
+    text-align: left;
+  }
+  .payslip-paper .payslip-identity {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .payslip-deductions {
+    min-width: 460px;
+  }
+  .payslip-net {
+    padding: 16px;
+  }
+  .payslip-net .text-3xl {
+    font-size: 24px;
+  }
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html:has(.payslip-paper):not(:has(.os-workspace-layout)),
+  body:has(.payslip-paper):not(:has(.os-workspace-layout)),
+  body:not(:has(.os-workspace-layout)) *:has(.payslip-paper),
+  .os-workspace-pane :has(.payslip-paper) {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    position: static !important;
+    transform: none !important;
+    contain: none !important;
+  }
+  .payslip-paper {
+    position: static !important;
+    width: 100%;
+    max-width: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+  }
+  .payslip-table-scroll {
+    overflow: visible;
+  }
+  body:not(:has(.os-workspace-layout)):has(.payslip-paper)
+    > :not(:has(.payslip-paper)):not(.payslip-paper),
+  body:not(:has(.os-workspace-layout))
+    *:has(.payslip-paper)
+    > :not(:has(.payslip-paper)):not(.payslip-paper),
+  .os-workspace-pane :has(.payslip-paper) > :not(:has(.payslip-paper)):not(.payslip-paper) {
+    display: none !important;
+  }
+  .payslip-table tr,
+  .payslip-net,
+  .payslip-identity {
+    break-inside: avoid;
+  }
+  .payslip-sheet + .payslip-sheet {
+    break-before: page;
+  }
+}
+
+/* Adapt the Payroll screen to its app window. */
+@container os-workspace (max-width: 700px) {
+  .payslip-workspace .payslip-paper {
+    padding: 20px 16px;
+  }
+  .payslip-heading,
+  .payslip-net {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .payslip-heading > .text-right {
+    text-align: left;
+  }
+  .payslip-paper .payslip-identity {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .payslip-deductions {
+    min-width: 460px;
+  }
+  .payslip-net {
+    padding: 16px;
+  }
+  .payslip-net .text-3xl {
+    font-size: 24px;
+  }
+}

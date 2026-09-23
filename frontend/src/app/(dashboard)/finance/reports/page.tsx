@@ -1,17 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Btn,
-  Card,
-  FormInput,
-  FormSelect,
-  PageHeader,
-  PageSpinner,
-  StatCard,
-  showToast,
-} from '@/components/ui';
+import { Btn, Card, FormDateField, FormSelect, PageHeader, PageSpinner, showToast, StatCard } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 import { downloadReportCsv } from '@/lib/report-export';
 import { downloadReportPdf } from '@/lib/export-download';
 
@@ -84,7 +77,8 @@ function uniqueCount(rows: ReportLine[] = []) {
 }
 
 export default function FinanceReportsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -97,6 +91,7 @@ export default function FinanceReportsPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>('trial-balance');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [loadFailed, setLoadFailed] = useState(false);
   const [report, setReport] = useState<any>(null);
   const [loadedCompanyId, setLoadedCompanyId] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -106,13 +101,22 @@ export default function FinanceReportsPage() {
   const branchOptions = divisionId ? branches.filter((branch) => branch.divisionId === divisionId) : [];
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100')
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCompanies(unwrapList<Company>(j)))
-      .catch(() => setCompanies([]));
-  }, []);
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(unwrapList<Company>(j));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   useEffect(() => {
+    if (authLoading || !canView) return;
     if (!companyId) {
       setDivisions([]);
       setBranches([]);
@@ -120,22 +124,29 @@ export default function FinanceReportsPage() {
       setBranchId('');
       return;
     }
+    const controller = new AbortController();
     Promise.allSettled([
-      fetch(`/api/backend/divisions?companyId=${companyId}&limit=200`).then((r) => r.json()),
-      fetch(`/api/backend/branches?companyId=${companyId}&activeOnly=true&limit=500`).then((r) => r.json()),
+      fetch(`/api/backend/divisions?companyId=${companyId}&limit=200`, { signal: controller.signal }).then((r) => r.json()),
+      fetch(`/api/backend/branches?companyId=${companyId}&activeOnly=true&limit=500`, { signal: controller.signal }).then((r) => r.json()),
     ]).then(([divisionResult, branchResult]) => {
+      if (controller.signal.aborted) return;
       setDivisions(divisionResult.status === 'fulfilled' ? unwrapList<Division>(divisionResult.value) : []);
       setBranches(branchResult.status === 'fulfilled' ? unwrapList<Branch>(branchResult.value) : []);
     });
-  }, [companyId]);
+    return () => controller.abort();
+  }, [authLoading, canView, companyId]);
 
   const loadReport = useCallback(async () => {
+    if (authLoading || !canView) return;
     if (currentTab.company && !companyId) {
       setError('Select a company first');
+      setLoadFailed(false);
       return;
     }
+    const request = beginRequest();
     setLoading(true);
     setError('');
+    setLoadFailed(false);
     setReport(null);
     try {
       const params = new URLSearchParams();
@@ -169,17 +180,20 @@ export default function FinanceReportsPage() {
         'consolidated-cash-flow': withQuery('/api/backend/financial-reports/group/consolidated/cash-flow'),
       };
 
-      const response = await fetch(endpoints[activeTab]);
+      const response = await fetch(endpoints[activeTab], { signal: request.signal });
       const json = await response.json();
+      if (!request.current()) return;
       if (!response.ok) throw new Error(json.message ?? 'Failed to load report');
       setReport(json.data ?? json);
       setLoadedCompanyId(currentTab.company ? companyId : '');
     } catch (err) {
+      if (!request.current()) return;
       setError(err instanceof Error ? err.message : 'Load failed');
+      setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [activeTab, asOf, branchId, companyId, currentTab, dateFrom, dateTo, divisionId]);
+  }, [activeTab, asOf, authLoading, beginRequest, branchId, canView, companyId, currentTab, dateFrom, dateTo, divisionId]);
 
   const reportRows = useMemo(() => report?.rows ?? report?.statementLines ?? [], [report]);
 
@@ -209,11 +223,11 @@ export default function FinanceReportsPage() {
     }
   }, [report, activeTab, currentTab, loadedCompanyId]);
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Financial Reports" subtitle="Reports and analytics" />
-        <div className="mt-8 text-center text-sm text-slate-500">Access Restricted</div>
+        <div className="mt-8 text-center text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</div>
       </div>
     );
   }
@@ -271,8 +285,8 @@ export default function FinanceReportsPage() {
               <option key={branch.id} value={branch.id}>{optionLabel(branch)}</option>
             ))}
           </FormSelect>
-          <FormInput label={currentTab.asOf ? 'As Of' : 'From'} type="date" value={currentTab.asOf ? asOf : dateFrom} onChange={(e) => currentTab.asOf ? setAsOf(e.target.value) : setDateFrom(e.target.value)} />
-          <FormInput label="To" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} disabled={!currentTab.period || activeTab.includes('balance-sheet')} />
+          <FormDateField label={currentTab.asOf ? 'As Of' : 'From'} value={currentTab.asOf ? asOf : dateFrom} onChange={(value) => currentTab.asOf ? setAsOf(value) : setDateFrom(value)} />
+          <FormDateField label="To" value={dateTo} onChange={(value) => setDateTo(value)} disabled={!currentTab.period || activeTab.includes('balance-sheet')} />
           <Btn variant="primary" onClick={loadReport} loading={loading}>Load</Btn>
         </div>
       </Card>
@@ -281,7 +295,7 @@ export default function FinanceReportsPage() {
         {TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setActiveTab(tab.key); setReport(null); setError(''); }}
+            onClick={() => { setActiveTab(tab.key); setReport(null); setError(''); setLoadFailed(false); }}
             className={`px-3 py-2 text-[12px] font-medium rounded-t-lg transition border-b-2 -mb-px ${activeTab === tab.key ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
             {tab.label}
@@ -289,7 +303,12 @@ export default function FinanceReportsPage() {
         ))}
       </div>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+          {loadFailed && <button onClick={() => void loadReport()}>Try again</button>}
+        </div>
+      )}
       {loading ? <PageSpinner /> : !report ? (
         <Card className="p-12 text-center text-sm text-slate-500">Load a report to view results.</Card>
       ) : (
@@ -320,7 +339,7 @@ function TrialBalanceView({ rows, totalDebit, totalCredit }: { rows: ReportLine[
   return (
     <div className="overflow-x-auto">
       <h3 className="text-lg font-semibold mb-3">Trial Balance</h3>
-      <table className="w-full text-sm">
+      <WorkspaceTable className="w-full text-sm">
         <thead><tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}><th className="px-4 py-2">Code</th><th className="px-4 py-2">Account</th><th className="px-4 py-2 text-right">Debit</th><th className="px-4 py-2 text-right">Credit</th><th className="px-4 py-2 text-right">Balance</th><th className="px-4 py-2 text-right">JEs</th></tr></thead>
         <tbody className="divide-y divide-slate-100">
           {rows.map((row) => (
@@ -335,7 +354,7 @@ function TrialBalanceView({ rows, totalDebit, totalCredit }: { rows: ReportLine[
           ))}
           <tr className="bg-gray-50 font-semibold"><td className="px-4 py-2" colSpan={2}>Totals</td><td className="px-4 py-2 text-right">{fmtMoney(totalDebit)}</td><td className="px-4 py-2 text-right">{fmtMoney(totalCredit)}</td><td colSpan={2} /></tr>
         </tbody>
-      </table>
+      </WorkspaceTable>
     </div>
   );
 }
@@ -397,12 +416,12 @@ function RollupTable({ title, rows }: { title: string; rows: any[] }) {
   return (
     <div className="overflow-x-auto">
       <h3 className="text-lg font-semibold mb-3">{title}</h3>
-      <table className="w-full text-sm">
+      <WorkspaceTable className="w-full text-sm">
         <thead><tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}><th className="px-3 py-2">Scope</th><th className="px-3 py-2 text-right">Income</th><th className="px-3 py-2 text-right">Expenses</th><th className="px-3 py-2 text-right">Net</th><th className="px-3 py-2 text-right">JEs</th></tr></thead>
         <tbody className="divide-y divide-slate-100">
           {rows.map((row) => <tr key={row.id ?? row.name}><td className="px-3 py-2">{row.name}</td><td className="px-3 py-2 text-right">{fmtMoney(row.income)}</td><td className="px-3 py-2 text-right">{fmtMoney(row.expenses + row.cogs)}</td><td className="px-3 py-2 text-right">{fmtMoney(row.netIncome)}</td><td className="px-3 py-2 text-right">{row.journalEntryIds?.length ?? 0}</td></tr>)}
         </tbody>
-      </table>
+      </WorkspaceTable>
     </div>
   );
 }

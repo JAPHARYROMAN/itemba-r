@@ -53,7 +53,10 @@ describe('NotificationsPage governed Msaidizi links', () => {
     render(<NotificationsPage />);
 
     expect(await screen.findByText('37')).toBeInTheDocument();
-    expect(h.get).toHaveBeenCalledWith('/notifications/unread-count');
+    expect(h.get).toHaveBeenCalledWith(
+      '/notifications/unread-count',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute('href', TASK_URL);
   });
 

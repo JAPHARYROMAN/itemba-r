@@ -20,6 +20,36 @@ describe('AccountingControlService', () => {
     prisma.accountingLock.findFirst.mockResolvedValue(null);
   });
 
+  it.each(['2026-04-01', '2026-04-30'])(
+    'finds the open period on its boundary day %s',
+    async (day) => {
+      const period = {
+        id: 'period-1',
+        companyId: 'company-1',
+        status: 'OPEN',
+        startDate: new Date('2026-04-01'),
+        endDate: new Date('2026-04-30'),
+        fiscalYear: { id: 'fy-1', status: 'OPEN' },
+      };
+      prisma.accountingPeriod.findFirst.mockImplementation(async ({ where }) =>
+        where.startDate.lte >= period.startDate && where.endDate.gte <= period.endDate
+          ? period
+          : null,
+      );
+      await expect(
+        service.assertPostingAllowed({ companyId: 'company-1', transactionDate: new Date(day) }),
+      ).resolves.toBe(period);
+      expect(prisma.accountingPeriod.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            startDate: { lte: new Date(day) },
+            endDate: { gte: new Date(day) },
+          }),
+        }),
+      );
+    },
+  );
+
   it('allows posting into an open period that contains the transaction date', async () => {
     prisma.accountingPeriod.findUnique.mockResolvedValue({
       id: 'period-1',

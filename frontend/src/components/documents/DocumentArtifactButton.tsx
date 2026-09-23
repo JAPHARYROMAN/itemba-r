@@ -1,7 +1,10 @@
 'use client';
-
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { backendPost } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { Btn } from '@/components/ui/btn';
+import { FilePreviewDialog } from './FilePreviewDialog';
+import type { FilePreviewSource } from './file-preview-source';
 
 export type DocumentEntityType =
   | 'SALES_ORDER'
@@ -20,75 +23,96 @@ export type DocumentEntityType =
   | 'EXPENSE_VOUCHER';
 
 interface GeneratedDocumentResponse {
-  generatedDocument?: {
-    id: string;
-  };
-  document: {
-    id: string;
-    fileName: string;
-  };
+  generatedDocument?: { id: string };
+  document: { id: string; fileName?: string };
 }
-
-export function DocumentArtifactButton({
-  entityType,
-  entityId,
-  buttonLabel = 'Generate PDF',
-  compact = false,
-}: {
+interface Props {
   entityType: DocumentEntityType;
   entityId: string;
   buttonLabel?: string;
   compact?: boolean;
-}) {
-  const [downloadHref, setDownloadHref] = useState<string | null>(null);
+}
+export function DocumentArtifactButton(props: Props) {
+  const { user } = useAuth();
+  const key = JSON.stringify([
+    props.entityType,
+    props.entityId,
+    user?.id,
+    user?.companyId,
+    user?.permissions,
+  ]);
+  return <ArtifactButton key={key} {...props} />;
+}
+function ArtifactButton({
+  entityType,
+  entityId,
+  buttonLabel = 'Generate PDF',
+  compact = false,
+}: Props) {
+  const [file, setFile] = useState<FilePreviewSource | null>(null);
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
+  const pending = useRef<AbortController | null>(null);
+  useEffect(() => () => pending.current?.abort(), []);
   async function generate() {
+    if (pending.current) return;
+    const controller = new AbortController();
+    pending.current = controller;
     setBusy(true);
     setError('');
     try {
-      const result = await backendPost<GeneratedDocumentResponse>('/generated-documents/pdf', {
-        entityType,
-        entityId,
+      const result = await backendPost<GeneratedDocumentResponse>(
+        '/generated-documents/pdf',
+        {
+          entityType,
+          entityId,
+        },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      const id = result.generatedDocument?.id || result.document?.id;
+      if (!id) throw new Error('The generated file is unavailable. Try again.');
+      const fileName =
+        result.document?.fileName || `${entityType.toLowerCase().replaceAll('_', '-')}.pdf`;
+      setFile({
+        kind: result.generatedDocument?.id ? 'generated-document' : 'document',
+        id,
+        title: fileName,
+        fileName,
       });
-      const href = result.generatedDocument?.id
-        ? `/api/backend/generated-documents/${result.generatedDocument.id}/download?inline=1`
-        : `/api/backend/documents/${result.document.id}/download?inline=1`;
-      setDownloadHref(href);
-      window.open(href, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not generate PDF');
+      setOpen(true);
+    } catch (cause) {
+      if (!controller.signal.aborted)
+        setError(cause instanceof Error ? cause.message : 'Could not generate PDF');
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
+      if (pending.current === controller) pending.current = null;
     }
   }
-
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={generate}
-        disabled={busy}
-        className={`inline-flex items-center justify-center rounded-lg border border-zinc-900 bg-zinc-900 font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 ${
-          compact ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-[12px]'
-        }`}
-      >
-        {busy ? 'Generating...' : buttonLabel}
-      </button>
-      {downloadHref && (
-        <a
-          href={downloadHref}
-          target="_blank"
-          rel="noreferrer"
-          className={`inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white font-medium text-zinc-700 transition-colors hover:bg-zinc-50 ${
-            compact ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-[12px]'
-          }`}
+      <Btn type="button" onClick={generate} loading={busy} size={compact ? 'xs' : 'sm'}>
+        {busy ? 'Generating…' : buttonLabel}
+      </Btn>
+      {file && (
+        <Btn
+          type="button"
+          variant="secondary"
+          size={compact ? 'xs' : 'sm'}
+          onClick={() => setOpen(true)}
         >
-          Open PDF
-        </a>
+          Preview PDF
+        </Btn>
       )}
-      {error && <span className="text-[12px] font-medium text-red-600">{error}</span>}
+      {open && file && (
+        <FilePreviewDialog sources={[file]} initial={file} onClose={() => setOpen(false)} />
+      )}
+      {error && (
+        <p role="alert" className="text-xs" style={{ color: 'var(--aurora-danger, #b42318)' }}>
+          {error}
+        </p>
+      )}
     </div>
   );
 }

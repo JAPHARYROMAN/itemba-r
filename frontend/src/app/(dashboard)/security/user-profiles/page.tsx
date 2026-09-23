@@ -1,9 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
-import { PageSpinner, Modal, Btn, FormInput, FormSelect, ErrorState } from '@/components/ui';
+import { PageSpinner, Modal, Btn, FormDateField, FormInput, FormSelect, ErrorState } from '@/components/ui';
 import { backendList, backendPost, backendPatch } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const RISK_COLORS: Record<string, string> = {
   LOW: 'bg-green-100 text-green-700',
@@ -113,7 +115,7 @@ function ProfileModal({ mode, initial, users, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Security Profile' : 'Edit Security Profile'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         {mode === 'create' ? (
           users.length > 0 ? (
@@ -149,10 +151,19 @@ function ProfileModal({ mode, initial, users, onClose, onSaved }: {
         </FormSelect>
         {mode === 'edit' && (
           <>
-            <FormInput label="Locked Until" type="datetime-local" hint="Clear to unlock the account"
-              value={form.lockedUntil} onChange={(e) => set('lockedUntil', e.target.value)} />
-            <FormInput label="Password Expires At" type="datetime-local"
-              value={form.passwordExpiresAt} onChange={(e) => set('passwordExpiresAt', e.target.value)} />
+            <FormDateField
+              label="Locked Until"
+              hint="Clear to unlock the account"
+              granularity="minute"
+              value={form.lockedUntil}
+              onChange={(value) => set('lockedUntil', value)}
+            />
+            <FormDateField
+              label="Password Expires At"
+              granularity="minute"
+              value={form.passwordExpiresAt}
+              onChange={(value) => set('passwordExpiresAt', value)}
+            />
           </>
         )}
       </div>
@@ -161,9 +172,11 @@ function ProfileModal({ mode, initial, users, onClose, onSaved }: {
 }
 
 export default function UserSecurityProfilesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('user_security_profiles.view');
   const canManage = hasPermission('user_security_profiles.manage');
   const canReadUsers = hasPermission('users.read');
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,24 +185,55 @@ export default function UserSecurityProfilesPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
     setLoadError('');
-    backendList<any>('user-security-profiles')
-      .then(setData)
-      .catch(() => { setData([]); setLoadError('Failed to load user security profiles.'); })
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+    try {
+      const rows = await backendList<any>('user-security-profiles', { signal: request.signal });
+      if (!request.current()) return;
+      setData(rows);
+    } catch {
+      if (!request.current()) return;
+      setData([]);
+      setLoadError('Failed to load user security profiles.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
-    if (!canManage || !canReadUsers) return;
-    backendList<UserRef>('users', { query: { limit: 1000 } })
-      .then(setUsers)
-      .catch(() => setUsers([]));
-  }, [canManage, canReadUsers]);
+    void load();
+  }, [load]);
 
-  const onSaved = () => { setCreating(false); setEditing(null); load(); };
+  useEffect(() => {
+    if (authLoading || !canManage || !canReadUsers) return;
+    const controller = new AbortController();
+    backendList<UserRef>('users', { query: { limit: 1000 }, signal: controller.signal })
+      .then((rows) => {
+        if (!controller.signal.aborted) setUsers(rows);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setUsers([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canManage, canReadUsers]);
+
+  const onSaved = () => {
+    setCreating(false);
+    setEditing(null);
+    void load();
+  };
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">User Security Profiles</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -206,10 +250,10 @@ export default function UserSecurityProfilesPage() {
       {loading ? (
         <PageSpinner label="Loading records" />
       ) : loadError ? (
-        <ErrorState message={loadError} onRetry={load} />
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">User</th>
@@ -266,7 +310,7 @@ export default function UserSecurityProfilesPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

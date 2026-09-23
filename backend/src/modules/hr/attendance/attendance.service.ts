@@ -37,6 +37,14 @@ export class AttendanceService {
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
     if (employeeId) where.employeeId = employeeId;
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      where.AND = [...(where.AND ?? []), { OR: [
+        { attendanceNumber: { contains, mode: 'insensitive' } },
+        { employee: { fullName: { contains, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains, mode: 'insensitive' } } },
+      ] }];
+    }
     if (attendanceStatus) where.attendanceStatus = attendanceStatus;
     if (dateFrom || dateTo) {
       where.attendanceDate = {};
@@ -153,8 +161,8 @@ export class AttendanceService {
       createdById: existing.createdById,
       attendanceDate: String(dto.attendanceDate ?? existing.attendanceDate.toISOString()),
       shiftScheduleId: (dto as any).shiftScheduleId ?? existing.shiftScheduleId ?? undefined,
-      clockInTime: dto.clockInTime ?? existing.clockInTime?.toISOString(),
-      clockOutTime: dto.clockOutTime ?? existing.clockOutTime?.toISOString(),
+      clockInTime: dto.clockInTime === undefined ? existing.clockInTime?.toISOString() : dto.clockInTime,
+      clockOutTime: dto.clockOutTime === undefined ? existing.clockOutTime?.toISOString() : dto.clockOutTime,
       overtimeHours: dto.overtimeHours ?? Number(existing.overtimeHours ?? 0),
       lateMinutes: dto.lateMinutes ?? existing.lateMinutes,
       earlyLeaveMinutes: dto.earlyLeaveMinutes ?? existing.earlyLeaveMinutes,
@@ -169,8 +177,8 @@ export class AttendanceService {
         divisionId: hierarchy.divisionId,
         branchId: hierarchy.branchId,
         attendanceDate: dto.attendanceDate ? new Date(dto.attendanceDate) : undefined,
-        clockInTime: dto.clockInTime ? new Date(dto.clockInTime) : undefined,
-        clockOutTime: dto.clockOutTime ? new Date(dto.clockOutTime) : undefined,
+        clockInTime: dto.clockInTime === null ? null : dto.clockInTime ? new Date(dto.clockInTime) : undefined,
+        clockOutTime: dto.clockOutTime === null ? null : dto.clockOutTime ? new Date(dto.clockOutTime) : undefined,
         totalHours: normalized.totalHours,
         lateMinutes: normalized.lateMinutes,
         earlyLeaveMinutes: normalized.earlyLeaveMinutes,
@@ -284,7 +292,10 @@ export class AttendanceService {
     }
   }
 
-  private async normalizeAttendance(dto: CreateAttendanceDto) {
+  private async normalizeAttendance(dto: Omit<CreateAttendanceDto, 'clockInTime' | 'clockOutTime'> & {
+    clockInTime?: string | null;
+    clockOutTime?: string | null;
+  }) {
     const clockIn = dto.clockInTime ? new Date(dto.clockInTime) : null;
     const clockOut = dto.clockOutTime ? new Date(dto.clockOutTime) : null;
     if (clockOut && !clockIn) {

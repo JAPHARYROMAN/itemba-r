@@ -22,6 +22,8 @@ import {
 import type { AppIconName } from '@/components/ui';
 import { useOrgScope } from '@/hooks/use-org-scope';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { WestsidesGate } from './_components/route-gate';
 
 type NumericValue = number | string | null | undefined;
 type Tone = 'neutral' | 'good' | 'warn' | 'danger' | 'info' | 'brand';
@@ -513,7 +515,9 @@ const TONE_STYLES: Record<
 };
 
 export default function WestsidesCockpitPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, hasPermission } = useAuth();
+  const canView = hasPermission('westsides.dashboard.view');
+  const beginRequest = useRequestGuard();
   const [companyId, setCompanyId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -554,30 +558,36 @@ export default function WestsidesCockpitPage() {
   }, [companyId, branchId, hydrated, user?.id]);
 
   const load = useCallback(async () => {
-    if (!companyId) {
-      setData(null);
+    if (authLoading || !canView || !companyId) {
+      if (!companyId) setData(null);
       return;
     }
+    const request = beginRequest();
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ companyId });
       if (branchId) params.set('branchId', branchId);
-      const res = await fetch(`/api/backend/westsides/dashboard/cockpit?${params}`);
+      const res = await fetch(`/api/backend/westsides/dashboard/cockpit?${params}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
       const body = await res.json();
+      if (!request.current()) return;
       setData((body.data ?? body) || null);
     } catch (err) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Load failed';
       setError(message);
       showToast('error', 'Westsides cockpit unavailable', message);
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
     }
-  }, [companyId, branchId]);
+  }, [authLoading, beginRequest, branchId, canView, companyId]);
 
   useEffect(() => {
     void load();
@@ -591,7 +601,8 @@ export default function WestsidesCockpitPage() {
 
   const model = useMemo(() => (data ? buildCockpitModel(data) : null), [data]);
 
-  if (!hydrated) return <PageSpinner />;
+  if (authLoading || !hydrated) return <PageSpinner />;
+  if (!canView) return <WestsidesGate title="Westsides Command Center" loading={false} />;
 
   return (
     <div className="p-4 sm:p-6 space-y-4 min-w-0">
@@ -639,7 +650,14 @@ export default function WestsidesCockpitPage() {
 
       {error && (
         <StatusPanel tone="danger">
-          <span className="font-semibold">Cockpit load failed.</span> {error}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              <span className="font-semibold">Cockpit load failed.</span> {error}
+            </span>
+            <Btn size="sm" variant="secondary" onClick={() => void load()}>
+              Try again
+            </Btn>
+          </div>
         </StatusPanel>
       )}
 

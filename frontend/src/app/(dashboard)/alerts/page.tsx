@@ -1,8 +1,10 @@
 'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Btn, ConfirmDialog, PageSpinner, showToast } from '@/components/ui';
 import { backendPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -37,7 +39,9 @@ const ACTION_PERMISSIONS: Record<AlertAction, string> = {
 };
 
 export default function AlertEventsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('alert_events.view');
+  const beginRequest = useRequestGuard();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -45,18 +49,28 @@ export default function AlertEventsPage() {
   const [actionLoading, setActionLoading] = useState('');
   const [dismissing, setDismissing] = useState<any | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
-    fetch(`/api/backend/alert-events?status=${activeTab}`)
-      .then(r => r.json())
-      .then((res: any) => setEvents(res.data?.data ?? []))
-      .catch(() => {
-        setEvents([]);
-        setLoadError('Failed to load alert events. Check your connection and try again.');
-      })
-      .finally(() => setLoading(false));
-  }, [activeTab]);
+    try {
+      const response = await fetch(`/api/backend/alert-events?status=${activeTab}`, {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
+      const body = await response.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!response.ok) throw new Error(body?.message ?? 'Failed to load alert events');
+      setEvents(body.data?.data ?? []);
+    } catch (err) {
+      if (!request.current()) return;
+      setEvents([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load alert events. Check your connection and try again.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [activeTab, authLoading, beginRequest, canView]);
 
   useEffect(() => {
     load();
@@ -80,6 +94,15 @@ export default function AlertEventsPage() {
     { key: 'ACKNOWLEDGED', label: 'Acknowledged' },
     { key: 'RESOLVED', label: 'Resolved' },
   ];
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Alert Events</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -107,7 +130,9 @@ export default function AlertEventsPage() {
       {loadError && (
         <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           <span>{loadError}</span>
-          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
         </div>
       )}
 
@@ -115,7 +140,7 @@ export default function AlertEventsPage() {
         <PageSpinner label="Loading records" />
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
+          <WorkspaceTable className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 {['Alert #', 'Type', 'Title', 'Priority', 'Company', 'Triggered At', 'Actions'].map(h => (
@@ -160,7 +185,7 @@ export default function AlertEventsPage() {
                 <tr><td colSpan={7} className="px-6 py-10 text-center text-gray-400">No {activeTab.toLowerCase()} alerts</td></tr>
               )}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

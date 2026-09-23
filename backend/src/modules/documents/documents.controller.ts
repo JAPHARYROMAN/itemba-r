@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   Patch,
   Post,
@@ -29,6 +30,15 @@ import { QueryDocumentDto } from './dto/query-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 
 const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  'application/msword',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'application/rtf',
+  'application/zip',
+  'application/json',
+  'image/webp',
   'application/pdf',
   'image/jpeg',
   'image/png',
@@ -41,6 +51,7 @@ const ALLOWED_UPLOAD_MIME_TYPES = new Set([
 ]);
 
 const INLINE_SAFE_MIME_TYPES = new Set([
+  'image/webp',
   'application/pdf',
   'image/jpeg',
   'image/png',
@@ -128,6 +139,14 @@ export class DocumentsController {
     return this.service.findOne(id, user, req.ip);
   }
 
+  @Get(':id/preview')
+  @Header('Cache-Control', 'private, no-store')
+  @AgentExcluded('read_writes_audit_ledger')
+  @RequirePermissions('documents.view')
+  preview(@Param('id') id: string, @CurrentUser() user: AuthUser, @Req() req: Request) {
+    return this.service.preview(id, user, req.ip);
+  }
+
   @Get(':id/download')
   @AgentExcluded('read_writes_audit_ledger')
   @RequirePermissions('documents.view')
@@ -147,6 +166,7 @@ export class DocumentsController {
       'Content-Type': sf.doc.mimeType,
       'Content-Disposition': `${disposition}; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(sf.doc.fileName)}`,
       'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
     });
     return sf;
   }

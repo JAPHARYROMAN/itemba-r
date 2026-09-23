@@ -12,6 +12,7 @@ export interface LeaveBalanceQuery {
   employeeId?: string;
   leaveTypeId?: string;
   year?: string | number;
+  search?: string;
 }
 
 export interface LeaveBalanceAllocationInput {
@@ -42,6 +43,20 @@ export class LeaveBalancesService {
     if (employeeId) where.employeeId = employeeId;
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;
     if (year) where.year = Number(year);
+    if (query.search?.trim()) {
+      const contains = query.search.trim();
+      const existingAnd = where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : [];
+      where.AND = [
+        ...existingAnd,
+        {
+          OR: [
+            { employee: { fullName: { contains, mode: 'insensitive' } } },
+            { employee: { employeeCode: { contains, mode: 'insensitive' } } },
+            { leaveType: { name: { contains, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.leaveBalance.findMany({

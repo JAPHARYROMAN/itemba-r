@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
+import { Btn, Card, PageHeader, SkeletonCardGrid, StatCard, showToast } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 type FinanceReadinessStatus = 'READY' | 'WARNING' | 'CRITICAL';
 
@@ -83,6 +85,9 @@ function StatusPill({ status }: { status: FinanceReadinessStatus }) {
 }
 
 export default function AccountingEngineDashboardPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('accounting_engine.dashboard');
+  const beginRequest = useRequestGuard();
   const [stats, setStats] = useState<AccountingEngineSummary>({
     pendingPostingRuns: 0,
     openAccountingLocks: 0,
@@ -94,12 +99,18 @@ export default function AccountingEngineDashboardPage() {
   const [error, setError] = useState('');
 
   const loadSummary = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setError('');
     setRefreshing(true);
     try {
-      const response = await fetch('/api/backend/accounting-engine/summary');
+      const response = await fetch('/api/backend/accounting-engine/summary', {
+        signal: request.signal,
+      });
+      if (!request.current()) return;
       if (!response.ok) throw new Error(`Accounting summary failed (${response.status})`);
       const result = await response.json();
+      if (!request.current()) return;
       const data = result.data ?? result;
       setStats({
         pendingPostingRuns: data.pendingPostingRuns ?? 0,
@@ -109,14 +120,17 @@ export default function AccountingEngineDashboardPage() {
         readiness: data.readiness,
       });
     } catch (err) {
+      if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Failed to load accounting summary';
       setError(message);
       showToast('error', 'Accounting engine unavailable', message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request.current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => {
     void loadSummary();
@@ -189,6 +203,17 @@ export default function AccountingEngineDashboardPage() {
     },
   ];
 
+  if (authLoading || !canView) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader
+          title="Accounting Engine"
+          subtitle={authLoading ? 'Loading' : 'Access restricted'}
+        />
+      </div>
+    );
+  }
+
   if (loading)
     return (
       <div className="space-y-6 p-6">
@@ -222,8 +247,14 @@ export default function AccountingEngineDashboardPage() {
       />
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <span>{error}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void loadSummary()}>
+            Try again
+          </Btn>
         </div>
       )}
 

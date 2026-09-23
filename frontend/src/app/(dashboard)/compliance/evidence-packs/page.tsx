@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea } from '@/components/ui';
+import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string }
 interface EvidencePack {
@@ -69,7 +71,7 @@ function PackModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Evidence Pack' : 'Edit Evidence Pack'} size="xl"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Pack Number" required value={form.evidencePackNumber} onChange={(e) => set('evidencePackNumber', e.target.value)} />
         <FormInput label="Title" required value={form.title} onChange={(e) => set('title', e.target.value)} />
@@ -83,8 +85,8 @@ function PackModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </FormSelect>
         <div />
-        <FormInput label="Period Start" type="date" value={form.periodStart} onChange={(e) => set('periodStart', e.target.value)} />
-        <FormInput label="Period End" type="date" value={form.periodEnd} onChange={(e) => set('periodEnd', e.target.value)} />
+        <FormDateField label="Period Start" value={form.periodStart} onChange={(value) => set('periodStart', value)} />
+        <FormDateField label="Period End" value={form.periodEnd} onChange={(value) => set('periodEnd', value)} />
         <div className="col-span-2"><FormTextarea label="Notes" rows={3} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
       </div>
     </Modal>
@@ -92,9 +94,10 @@ function PackModal({ mode, initial, companies, onClose, onSaved }: { mode: 'crea
 }
 
 export default function EvidencePacksPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
   const canManage = hasPermission('audit_evidence_packs.manage');
   const canView = hasPermission('audit_evidence_packs.view') || canManage;
+  const beginRequest = useRequestGuard();
 
   const [items, setItems] = useState<EvidencePack[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -102,6 +105,7 @@ export default function EvidencePacksPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState('');
   const [packType, setPackType] = useState('');
   const [status, setStatus] = useState('');
@@ -111,23 +115,47 @@ export default function EvidencePacksPage() {
   const [actingId, setActingId] = useState('');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json()).then((j) => setCompanies(j.data?.data ?? j.data ?? []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!controller.signal.aborted) setCompanies(j.data?.data ?? j.data ?? []);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (companyId) params.set('companyId', companyId);
     if (packType) params.set('packType', packType);
     if (status) params.set('status', status);
-    const j = await fetch(`/api/backend/audit-evidence-packs?${params}`).then((r) => r.json()).catch(() => ({}));
-    const p: Paginated<EvidencePack> = j.data ?? {};
-    const totalCount = p.total ?? 0;
-    setItems(p.data ?? []);
-    setTotal(totalCount);
-    setTotalPages(p.totalPages ?? Math.max(1, Math.ceil(totalCount / 20)));
-    setLoading(false);
-  }, [page, companyId, packType, status]);
+    try {
+      const res = await fetch(`/api/backend/audit-evidence-packs?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!res.ok) throw new Error('Failed to load evidence packs');
+      const j = await res.json();
+      if (!request.current()) return;
+      const p: Paginated<EvidencePack> = j.data ?? {};
+      const totalCount = p.total ?? 0;
+      setItems(p.data ?? []);
+      setTotal(totalCount);
+      setTotalPages(p.totalPages ?? Math.max(1, Math.ceil(totalCount / 20)));
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Failed to load evidence packs');
+      setItems([]);
+      setTotal(0);
+      setTotalPages(1);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, page, companyId, packType, status]);
 
   useEffect(() => { load(); }, [load]);
   const reset = (fn: (v: string) => void) => (v: string) => { fn(v); setPage(1); };
@@ -145,6 +173,7 @@ export default function EvidencePacksPage() {
 
   const readyCount = items.filter((p) => p.status === 'READY').length;
 
+  if (authLoading) return <div className="p-6"><PageHeader title="Evidence Packs" subtitle="Loading" /></div>;
   if (!canView) return <div className="p-6"><PageHeader title="Evidence Packs" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
@@ -160,15 +189,15 @@ export default function EvidencePacksPage() {
       <PageToolbar
         filters={
           <>
-            <select value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={companyId} onChange={(e) => reset(setCompanyId)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={packType} onChange={(e) => reset(setPackType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Types" value={packType} onChange={(e) => reset(setPackType)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Types</option>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={status} onChange={(e) => reset(setStatus)(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -178,11 +207,11 @@ export default function EvidencePacksPage() {
       />
 
       <Card className="overflow-hidden">
-        {loading ? <PageSpinner /> : items.length === 0 ? (
+        {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : items.length === 0 ? (
           <div className="p-8 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No packs</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-4 py-3">Code</th>
@@ -214,7 +243,7 @@ export default function EvidencePacksPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         )}
         {totalPages > 1 && (

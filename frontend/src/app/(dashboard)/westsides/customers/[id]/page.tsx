@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { DocumentPreviewLink } from '@/components/documents';
-import { Btn, Card, PageHeader, PageSpinner, StatusBadge } from '@/components/ui';
+import { Btn, Card, ErrorState, PageHeader, PageSpinner, StatusBadge } from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,33 +79,44 @@ const fmt = (n: number | string | undefined | null) =>
 export default function CustomerProfilePage() {
   const params = useParams<{ id: string }>();
   const id = params?.id as string;
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('customers.view');
+  const beginRequest = useRequestGuard();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (!id) return;
+  const load = useCallback(async () => {
+    if (authLoading || !canView || !id) return;
+    const request = beginRequest();
     setLoading(true);
     setError('');
-    fetch(`/api/backend/customers/${id}/profile`)
-      .then(async r => {
-        if (!r.ok) {
-          const j = await r.json().catch(() => ({}));
-          throw new Error(j?.message ?? `HTTP ${r.status}`);
-        }
-        return r.json();
-      })
-      .then(j => setProfile(j.data ?? j))
-      .catch(err => setError(err instanceof Error ? err.message : 'Load failed'))
-      .finally(() => setLoading(false));
-  }, [id]);
+    try {
+      const response = await fetch(`/api/backend/customers/${id}/profile`, { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.message ?? `HTTP ${response.status}`);
+      }
+      const body = await response.json();
+      if (!request.current()) return;
+      setProfile(body.data ?? body);
+    } catch (err) {
+      if (!request.current()) return;
+      setError(err instanceof Error ? err.message : 'Load failed');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, id]);
 
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (authLoading) return <PageSpinner />;
+  if (!canView) return <ErrorState message="Access Restricted" />;
   if (loading) return <PageSpinner />;
-  if (error) return (
-    <div className="p-6">
-      <Card className="p-4 bg-red-50 border-red-200 text-red-700 text-sm">{error}</Card>
-    </div>
-  );
+  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!profile) return null;
 
   const { customer, credit, lifetime, recentOrders, topProducts, recentPayments, preferredSalesperson } = profile;
@@ -184,7 +198,7 @@ export default function CustomerProfilePage() {
             <span className="text-xs text-slate-500">last 10</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Order</th>
@@ -210,7 +224,7 @@ export default function CustomerProfilePage() {
                   <tr><td colSpan={6} className="text-center py-6 text-sm text-slate-400 italic">No orders yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
 
@@ -249,7 +263,7 @@ export default function CustomerProfilePage() {
             <span className="text-xs text-slate-500">last 10 settled receivables</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr style={{ color: 'var(--aurora-text-muted)' }}>
                   <th className="px-3 py-2 text-left text-xs font-semibold uppercase">Receivable</th>
@@ -271,7 +285,7 @@ export default function CustomerProfilePage() {
                   <tr><td colSpan={4} className="text-center py-6 text-sm text-slate-400 italic">No settled payments yet.</td></tr>
                 )}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </Card>
 

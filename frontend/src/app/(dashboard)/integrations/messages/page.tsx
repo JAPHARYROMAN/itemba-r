@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect, FormTextarea, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface ExternalMessage {
   id: string;
@@ -25,6 +28,10 @@ interface Template {
 const EMPTY_FORM = { recipient: '', channel: 'SMS', subject: '', body: '', templateId: '', recipientType: 'PHONE' };
 
 export default function ExternalMessagesPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('external_messages.view');
+  const beginRequest = useRequestGuard();
+
   const [messages, setMessages] = useState<ExternalMessage[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,24 +43,41 @@ export default function ExternalMessagesPage() {
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterChannel) params.set('channel', filterChannel);
     if (filterStatus) params.set('status', filterStatus);
-    fetch(`/api/backend/external-messages?${params}`)
-      .then(r => r.json())
-      .then(data => setMessages(unwrapList(data)))
-      .catch(() => { setMessages([]); setLoadError('Failed to load external messages.'); })
-      .finally(() => setLoading(false));
-  }, [filterChannel, filterStatus]);
+    try {
+      const res = await fetch(`/api/backend/external-messages?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load external messages.');
+      setMessages(unwrapList(data));
+    } catch (err) {
+      if (!request.current()) return;
+      setMessages([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load external messages.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterChannel, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
+
   useEffect(() => {
-    // optional lookup — on failure the template dropdown simply stays empty
-    fetch('/api/backend/message-templates?limit=100').then(r => r.json()).then(data => setTemplates(unwrapList(data))).catch(() => undefined);
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/message-templates?limit=100', { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => { if (!controller.signal.aborted) setTemplates(unwrapList(data)); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   async function send() {
     setSaving(true); setError('');
@@ -68,6 +92,9 @@ export default function ExternalMessagesPage() {
     finally { setSaving(false); }
   }
 
+  if (authLoading) return <div className="p-6"><PageHeader title="External Messages" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="External Messages" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader title="External Messages" subtitle="Outgoing messages via SMS, Email, WhatsApp" />
@@ -75,11 +102,11 @@ export default function ExternalMessagesPage() {
       <PageToolbar
         filters={
           <>
-            <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Channels" value={filterChannel} onChange={e => setFilterChannel(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Channels</option>
               {['SMS','EMAIL','WHATSAPP','PUSH'].map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Status</option>
               {['QUEUED','PENDING','SENT','DELIVERED','FAILED'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -90,7 +117,7 @@ export default function ExternalMessagesPage() {
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Number</th>
@@ -119,7 +146,7 @@ export default function ExternalMessagesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
 
@@ -135,7 +162,7 @@ export default function ExternalMessagesPage() {
           </>
         }
       >
-        {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="space-y-3">
           <FormSelect label="Channel" value={form.channel} onChange={e => setForm(f => ({ ...f, channel: e.target.value }))}>
             {['SMS','EMAIL','WHATSAPP','PUSH'].map(c => <option key={c} value={c}>{c}</option>)}

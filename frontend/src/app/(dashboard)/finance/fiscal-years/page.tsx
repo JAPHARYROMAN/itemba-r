@@ -1,8 +1,10 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { Card, PageHeader, PageToolbar, StatCard, StatusBadge, Modal, Btn, PageSpinner, FormInput, FormSelect } from '@/components/ui';
+import { Btn, Card, FormDateField, FormInput, FormSelect, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface Company { id: string; name: string; code: string }
 
@@ -63,15 +65,15 @@ function FiscalYearModal({ mode, initial, companies, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'Create Fiscal Year' : 'Edit Fiscal Year'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={handleSubmit} loading={saving}>{mode === 'create' ? 'Create' : 'Save Changes'}</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="space-y-3">
         <FormSelect label="Company" required disabled={mode === 'edit'} value={form.companyId} onChange={(e) => set('companyId', e.target.value)} placeholder="Select company…">
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
         </FormSelect>
         <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. FY 2025" />
         <div className="grid grid-cols-2 gap-3">
-          <FormInput label="Start Date" required type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} />
-          <FormInput label="End Date" required type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} />
+          <FormDateField label="Start Date" required value={form.startDate} onChange={(value) => set('startDate', value)} />
+          <FormDateField label="End Date" required value={form.endDate} onChange={(value) => set('endDate', value)} />
         </div>
       </div>
     </Modal>
@@ -79,10 +81,12 @@ function FiscalYearModal({ mode, initial, companies, onClose, onSaved }: {
 }
 
 export default function FiscalYearsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [list, setList] = useState<FiscalYear[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
@@ -93,23 +97,42 @@ export default function FiscalYearsPage() {
   const canManage = hasPermission('fiscal_years.manage');
 
   useEffect(() => {
-    fetch('/api/backend/companies?limit=100').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-  }, []);
+    if (authLoading || !canView) return;
+    const controller = new AbortController();
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal }).then((r) => r.json())
+      .then((j) => {
+        if (controller.signal.aborted) return;
+        setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanies([]);
+      });
+    return () => controller.abort();
+  }, [authLoading, canView]);
 
   const load = useCallback(async () => {
-    if (!canView) return;
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams();
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
-      const res = await fetch(`/api/backend/fiscal-years?${params}`);
+      const res = await fetch(`/api/backend/fiscal-years?${params}`, { signal: request.signal });
       const json = await res.json();
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(json.message ?? 'Unable to load fiscal years');
       const arr = Array.isArray(json.data?.data) ? json.data.data : Array.isArray(json.data) ? json.data : [];
       setList(arr);
-    } finally { setLoading(false); }
-  }, [canView, companyId, status]);
+    } catch (err) {
+      if (!request.current()) return;
+      setLoadError(err instanceof Error ? err.message : 'Unable to load fiscal years');
+      setList([]);
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, companyId, status]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -121,11 +144,11 @@ export default function FiscalYearsPage() {
     } finally { setActionLoading(null); }
   };
 
-  if (!canView) {
+  if (authLoading || !canView) {
     return (
       <div className="p-6">
         <PageHeader title="Fiscal Years" subtitle="Manage fiscal years" />
-        <div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div>
+        <div className="mt-8 text-center"><p className="text-sm text-slate-500">{authLoading ? 'Loading' : 'Access Restricted'}</p></div>
       </div>
     );
   }
@@ -140,6 +163,13 @@ export default function FiscalYearsPage() {
 
       <PageHeader title="Fiscal Years" subtitle="Manage company fiscal years" />
 
+      {loadError && (
+        <div role="alert" className="workspace-load-error">
+          {loadError}
+          <button onClick={() => void load()}>Try again</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total" value={list.length} />
         <StatCard label="Open" value={list.filter((f) => f.status === 'OPEN').length} hint="Currently active" />
@@ -150,11 +180,11 @@ export default function FiscalYearsPage() {
       <PageToolbar
         filters={
           <>
-            <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Companies" value={companyId} onChange={(e) => setCompanyId(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Companies</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className={filterSelectCls} style={filterStyle}>
+            <select aria-label="All Status" value={status} onChange={(e) => setStatus(e.target.value)} className={filterSelectCls} style={filterStyle}>
               <option value="">All Status</option>
               <option value="OPEN">Open</option>
               <option value="CLOSED">Closed</option>
@@ -167,7 +197,7 @@ export default function FiscalYearsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
+          <WorkspaceTable className="w-full text-sm min-w-[700px]">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Name</th>
@@ -208,7 +238,7 @@ export default function FiscalYearsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       </Card>
     </div>

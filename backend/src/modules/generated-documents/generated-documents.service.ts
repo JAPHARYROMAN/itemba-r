@@ -37,6 +37,13 @@ import {
   buildBusinessPdf,
 } from './pdf-builder';
 
+import { DOCUMENT_MIME, DocumentFormat, renderDocument } from './document-renderer';
+import {
+  ExportBusinessDocumentDto,
+  ExportTableDocumentDto,
+  ExportLetterDto,
+} from './dto/export-document.dto';
+
 const DEFAULT_ITEMBA_LOGO_URL = '/brand/itemba-group-logo.png';
 const TABLE_PDF_ENTITY_TYPE = 'TABLE_EXPORT';
 const TABLE_PDF_MAX_CELL_LENGTH = 300;
@@ -60,6 +67,131 @@ export class GeneratedDocumentsService {
     private readonly documents: DocumentsService,
     private readonly companyScope: CompanyScopeService,
   ) {}
+
+  async letterhead(companyId: string | undefined, user: AuthUser) {
+    const id = companyId ?? user.companyId;
+    if (id) await this.companyScope.assertCanAccessCompany(user, id, AccessLevel.READ);
+    const company = id
+      ? await this.prisma.company.findFirst({
+          where: { id, deletedAt: null },
+          select: companySelect().select,
+        })
+      : null;
+    if (id && !company) throw new NotFoundException('Company not found');
+    return organization(company);
+  }
+
+  async letterheadCompanies(user: AuthUser) {
+    const ids = await this.companyScope.accessibleCompanyIds(user);
+    return this.prisma.company.findMany({
+      where: {
+        deletedAt: null,
+        ...(ids.length || !this.companyScope.isGroupScoped(user) ? { id: { in: ids } } : {}),
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  private async exportModel(
+    model: BusinessPdfModel,
+    format: DocumentFormat,
+    user: AuthUser,
+    companyId?: string | null,
+    ipAddress?: string,
+  ) {
+    await this.attachLogoImage(model.organization, user);
+    const buffer = await renderDocument(model, format);
+    const fileName = `${safeFileStem(model.title)}-${safeFileStem(model.reference)}.${format}`;
+    await this.auditLogs.log({
+      action: 'DOCUMENT_EXPORT',
+      entityType: 'DocumentExport',
+      entityId: model.reference,
+      userId: user.id,
+      companyId: companyId ?? undefined,
+      ipAddress,
+      metadata: { format, fileName, byteLength: buffer.length },
+    });
+    return { buffer, fileName, mimeType: DOCUMENT_MIME[format] };
+  }
+
+  async exportBusinessDocument(dto: ExportBusinessDocumentDto, user: AuthUser, ipAddress?: string) {
+    this.assertCanAccessBusinessPdfSource(dto.entityType, user);
+    const source = await this.buildBusinessPdfModel(dto.entityType, dto.entityId, user);
+    return this.exportModel(source.pdf, dto.format, user, source.companyId, ipAddress);
+  }
+
+  async exportTableDocument(dto: ExportTableDocumentDto, user: AuthUser, ipAddress?: string) {
+    const org = await this.letterhead(dto.companyId, user);
+    const sections: BusinessPdfSection[] = [];
+    if (dto.summary?.length) sections.push({ title: 'Summary', items: dto.summary });
+    sections.push({
+      title: dto.sectionTitle ?? 'Report details',
+      table: {
+        headers: dto.columns,
+        rows: dto.rows,
+        numericColumns: dto.numericColumns,
+        columnWeights: dto.columnWeights,
+        stripedRows: dto.stripedRows,
+      },
+    });
+    if (dto.note) sections.push({ title: 'Note', paragraphs: [dto.note] });
+    return this.exportModel(
+      {
+        title: dto.title,
+        subtitle: dto.subtitle,
+        status: dto.status,
+        orientation: dto.orientation,
+        reference: await this.generatedDocumentNumber('REPORT'),
+        organization: org,
+        generatedAt: new Date(),
+        meta: dto.meta ?? [],
+        sections,
+      },
+      dto.format,
+      user,
+      dto.companyId ?? user.companyId,
+      ipAddress,
+    );
+  }
+
+  async exportLetter(dto: ExportLetterDto, user: AuthUser, ipAddress?: string) {
+    if (!dto.title.trim() || !dto.body.trim())
+      throw new BadRequestException('A subject and letter body are required.');
+    // The existing PDF painter uses standard Latin fonts. Editable formats retain Unicode.
+    if (
+      dto.format === 'pdf' &&
+      /[^\x09\x0A\x0D\x20-\x7E\u2018\u2019\u201C\u201D\u2013\u2014]/.test(
+        [dto.title, dto.body, dto.recipient, dto.reference, dto.signatory]
+          .filter(Boolean)
+          .join(' '),
+      )
+    ) {
+      throw new BadRequestException(
+        'Some characters in this letter are not supported by the PDF font. Choose Word or text to preserve them.',
+      );
+    }
+    const org = await this.letterhead(dto.companyId, user);
+    const sections: BusinessPdfSection[] = [];
+    if (dto.recipient?.trim())
+      sections.push({ title: '', plainParagraphs: true, paragraphs: dto.recipient.split('\n') });
+    sections.push({ title: '', plainParagraphs: true, paragraphs: dto.body.split(/\r?\n/) });
+    if (dto.signatory?.trim()) sections.push({ title: 'Signed by', signatures: [dto.signatory] });
+    return this.exportModel(
+      {
+        title: dto.title,
+        reference: dto.reference?.trim() || (await this.generatedDocumentNumber('LETTER')),
+        organization: org,
+        generatedAt: new Date(),
+        meta: [],
+        sections,
+      },
+      dto.format,
+      user,
+      dto.companyId ?? user.companyId,
+      ipAddress,
+    );
+  }
 
   async findAll(query: any, user?: any) {
     const { companyId, templateId, entityType, entityId, page = 1, limit = 20 } = query;
@@ -313,6 +445,15 @@ export class GeneratedDocumentsService {
   }
 
   async download(id: string, user: AuthUser, ipAddress?: string) {
+    return this.documents.download(await this.fileForRead(id, user), user, ipAddress);
+  }
+
+  async preview(id: string, user: AuthUser, ipAddress?: string) {
+    return this.documents.preview(await this.fileForRead(id, user), user, ipAddress);
+  }
+
+  /** Preview and download must authorize the same generated record and source type. */
+  private async fileForRead(id: string, user: AuthUser) {
     const item = await this.prisma.generatedDocument.findFirst({
       where: { id, deletedAt: null },
     });
@@ -334,7 +475,7 @@ export class GeneratedDocumentsService {
     }
 
     if (!scoped.documentId) throw new NotFoundException('Generated document file not found');
-    return this.documents.download(scoped.documentId, user, ipAddress);
+    return scoped.documentId;
   }
 
   private async attachLogoImage(organization: BusinessPdfOrganization, user: AuthUser) {
@@ -2210,13 +2351,13 @@ function supplierSelect() {
 function organization(company: any, branch?: any): BusinessPdfOrganization {
   const profile = company?.profile;
   const group = company?.group;
-  const groupName = ITEMBA_DOCUMENT_LETTERHEAD.groupName;
+  const groupName = firstPresent(group?.name, ITEMBA_DOCUMENT_LETTERHEAD.groupName);
   const companyName =
     value(profile?.registeredName) !== 'N/A'
       ? value(profile?.registeredName)
       : value(company?.name) !== 'N/A'
         ? value(company?.name)
-        : 'ITEMBA-R Group';
+        : ITEMBA_DOCUMENT_LETTERHEAD.groupName;
 
   return {
     groupName,
@@ -2235,11 +2376,11 @@ function organization(company: any, branch?: any): BusinessPdfOrganization {
     phone: firstPresent(branch?.phone, ITEMBA_DOCUMENT_LETTERHEAD.phone),
     email: firstPresent(company?.email, group?.email, ITEMBA_DOCUMENT_LETTERHEAD.email),
     website: firstPresent(company?.website, group?.website, ITEMBA_DOCUMENT_LETTERHEAD.website),
-    tin: firstPresent(profile?.tin, ITEMBA_DOCUMENT_LETTERHEAD.tin),
-    vrn: firstPresent(profile?.vrn, ITEMBA_DOCUMENT_LETTERHEAD.vrn),
+    tin: firstPresent(profile?.tin, company ? null : ITEMBA_DOCUMENT_LETTERHEAD.tin),
+    vrn: firstPresent(profile?.vrn, company ? null : ITEMBA_DOCUMENT_LETTERHEAD.vrn),
     registrationNumber: firstPresent(
       profile?.brelaRegNumber,
-      ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber,
+      company ? null : ITEMBA_DOCUMENT_LETTERHEAD.registrationNumber,
     ),
     logoUrl: firstPresent(company?.logoUrl, DEFAULT_ITEMBA_LOGO_URL),
   };

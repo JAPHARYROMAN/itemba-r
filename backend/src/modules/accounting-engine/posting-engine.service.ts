@@ -131,12 +131,25 @@ export class PostingEngineService {
       // window where a concurrent period close could be straddled between the check
       // and the write — the resolved period is now read and consumed in the same
       // transactional flow that creates the entry.
-      const period = await this.accountingControl.assertPostingAllowed({
-        companyId: input.companyId,
-        accountingPeriodId: input.accountingPeriodId,
-        transactionDate: input.transactionDate,
-        moduleName: input.moduleName,
-      });
+      const period = await this.accountingControl.assertPostingAllowed(
+        {
+          companyId: input.companyId,
+          accountingPeriodId: input.accountingPeriodId,
+          transactionDate: input.transactionDate,
+          moduleName: input.moduleName,
+        },
+        db,
+      );
+      await db.$queryRaw`SELECT id FROM accounting_periods WHERE id = ${period.id} FOR UPDATE`;
+      await this.accountingControl.assertPostingAllowed(
+        {
+          companyId: input.companyId,
+          accountingPeriodId: period.id,
+          transactionDate: input.transactionDate,
+          moduleName: input.moduleName,
+        },
+        db,
+      );
 
       const totals = await this.validatePostingLines(db, input.companyId, input.lines);
       const journalNumber =

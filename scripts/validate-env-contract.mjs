@@ -57,6 +57,24 @@ const forbiddenExampleValues = new Set([
   'itemba-r-2fa-key-change-in-prod!',
 ]);
 
+// Optional inputs for the staging-only read-only Msaidizi benchmark overlay
+// (docker-compose.staging-msaidizi-chat.yml; MSAIDIZI_PROVIDER_CONTRACT_RUNBOOK.md
+// "Staging chat benchmark"). Production configures Msaidizi through its own
+// runbook, so these may exist in staging alone, and only as empty placeholders:
+// the example file must never carry a real provider key or attestation value.
+const stagingOnlyOptionalKeys = new Set([
+  'ANTHROPIC_API_KEY',
+  'MSAIDIZI_MODEL',
+  'MSAIDIZI_CLASSIFIER_MODEL',
+  'MSAIDIZI_STAGING_CONTRACT_ATTESTATION_HOST_PATH',
+  'MSAIDIZI_STAGING_CONTRACT_PUBLIC_KEY_HOST_PATH',
+  'MSAIDIZI_PROVIDER_CONTRACT_KEY_ID',
+  'MSAIDIZI_PROVIDER_CONTRACT_ATTESTATION_SHA256',
+  'MSAIDIZI_PROVIDER_CONTRACT_SIGNER_SPKI_SHA256',
+  'MSAIDIZI_PROVIDER_ACCOUNT_ID',
+  'MSAIDIZI_PROVIDER_CREDENTIAL_KEY_ID',
+]);
+
 const parsed = envFiles.map((target) => ({
   ...target,
   values: parseEnvExample(resolve(rootDir, target.file)),
@@ -125,7 +143,20 @@ function validateSameContract(targets) {
   for (const target of rest) {
     const keys = [...target.values.keys()].sort();
     const onlyInFirst = firstKeys.filter((key) => !target.values.has(key));
-    const onlyInTarget = keys.filter((key) => !first.values.has(key));
+    const onlyInTarget = keys.filter(
+      (key) =>
+        !first.values.has(key) && !(target.name === 'staging' && stagingOnlyOptionalKeys.has(key)),
+    );
+    if (target.name === 'staging') {
+      const populated = keys.filter(
+        (key) => stagingOnlyOptionalKeys.has(key) && target.values.get(key) !== '',
+      );
+      if (populated.length > 0) {
+        fail(
+          `staging: optional Msaidizi benchmark inputs must stay empty in the example: ${populated.join(', ')}`,
+        );
+      }
+    }
     if (onlyInFirst.length > 0 || onlyInTarget.length > 0) {
       fail(
         [

@@ -1,7 +1,9 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { BankReconciliationsService } from './bank-reconciliations.service';
+import { ImportStatementDto } from './dto/import-statement.dto';
 import {
   AddBankStatementLineDto,
   CreateBankReconciliationDto,
@@ -60,6 +62,28 @@ class PostBankAdjustmentDto {
 @Controller('bank-reconciliations')
 export class BankReconciliationsController {
   constructor(private readonly service: BankReconciliationsService) {}
+
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
+  @Get(':id/evidence')
+  @AgentExcluded()
+  @RequirePermissions('bank_reconciliations.view')
+  evidence(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.evidence(id, user);
+  }
+
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
+  @Post(':id/import')
+  @AgentExcluded()
+  @RequirePermissions('bank_reconciliations.update')
+  importStatement(
+    @Param('id') id: string,
+    @Body() dto: ImportStatementDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.importStatement(id, dto, user);
+  }
 
   @Get()
   @RequirePermissions('bank_reconciliations.list')

@@ -1,5 +1,7 @@
 # ITEMBA-R Release Checklist
 
+The ITEMBA OS overhaul has a separate [release verification record](releases/itemba-os-release-readiness.md). Its workflow, opening-data and operations gates remain on hold until the listed blockers and acceptance checks are closed.
+
 Use this checklist before deploying to production.
 
 ## Pre-Deployment

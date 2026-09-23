@@ -1,5 +1,6 @@
 import {
   MsaidiziEffect,
+  MsaidiziExecutionTarget,
   MsaidiziTaskStepStatus,
   MsaidiziToolAttemptStatus,
   Prisma,
@@ -7,8 +8,16 @@ import {
 import { createHash } from 'node:crypto';
 import { sanitizePersistedValue } from '../../common/utils/persistent-secret-redaction';
 import { actionArgumentDigest } from '../../common/utils/canonical-digest';
-import { PrismaService } from '../../prisma/prisma.service';
+import { exactActionEnvelopeDigest } from '../../common/utils/action-envelope';
+import type { PrismaService } from '../../prisma/prisma.service';
 import { MsaidiziInputBindingDto, MsaidiziPlanStepDto } from './dto/msaidizi-task.dto';
+import { MsaidiziInputBindingError } from './msaidizi-input-binding-error';
+import {
+  DependencyLineage,
+  parseDependencyLineage,
+  verifyDependencyLineage,
+} from './msaidizi-dependency-lineage';
+export { MsaidiziInputBindingError } from './msaidizi-input-binding-error';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const MAX_BINDING_SCHEMA_BYTES = 16 * 1024;
@@ -31,16 +40,6 @@ const SAFE_SCHEMA_KEYS = new Set([
 ]);
 const DEPENDENCY_KINDS = new Set(['DEPENDENCY_RESULT', 'DEPENDENCY_OUTPUT', 'DEPENDENCY_ARTIFACT']);
 const BINDING_TRANSFORMS = new Set(['IDENTITY', 'JSON_STRINGIFY', 'SHA256_HEX', 'BASE64URL']);
-
-export class MsaidiziInputBindingError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'MsaidiziInputBindingError';
-  }
-}
 
 export interface ResolvedStepInputs {
   taskId: string;
@@ -93,10 +92,11 @@ export function staticStepInputs(
   stepId: string,
   attemptId: string,
   argumentsValue: Prisma.JsonValue,
+  target: MsaidiziExecutionTarget = MsaidiziExecutionTarget.HOST,
 ): ResolvedStepInputs {
   const args = cloneJsonRecord(argumentsValue, 'INPUT_BINDING_ARGUMENT_TEMPLATE_INVALID');
   const argumentsJsonSha256 = sha256Canonical(args);
-  const argumentsSha256 = actionArgumentDigest(args);
+  const argumentsSha256 = executionArgumentDigest(args, target);
   const provenance: Prisma.InputJsonObject = {
     schemaVersion: 1,
     taskId,
@@ -211,9 +211,19 @@ export async function resolveStepInputs(
     fail('INPUT_BINDING_ATTEMPT_MISMATCH', 'The input binding attempt is not dispatchable');
   }
 
-  const bindings = parsePersistedBindings(step.inputBindings);
+  const bindings = parsePersistedInputBindings(step.inputBindings);
   const args = cloneJsonRecord(step.arguments, 'INPUT_BINDING_ARGUMENT_TEMPLATE_INVALID');
   const dependencies = stringArray(step.dependencies);
+  const dependencyLineage = parseDependencyLineage(step.dependencyLineage);
+  if (dependencyLineage.some((pin) => dependencies.includes(pin.dependencyStepKey)))
+    fail(
+      'INPUT_BINDING_LINEAGE_INVALID',
+      'Dependency cannot refer to both current and prior plans',
+    );
+  const authorizedDependencies = [
+    ...dependencies,
+    ...dependencyLineage.map((pin) => pin.dependencyStepKey),
+  ];
   assertRuntimeBindingAuthority(
     {
       key: step.stepKey,
@@ -222,7 +232,7 @@ export async function resolveStepInputs(
       capability: step.capability,
       capabilityVersion: step.capabilityVersion,
       arguments: args,
-      dependsOn: dependencies,
+      dependsOn: authorizedDependencies,
       inputBindings: bindings,
       expectedEffect: step.expectedEffect,
       dataClass: step.dataClass,
@@ -250,6 +260,8 @@ export async function resolveStepInputs(
       binding,
       taskId,
       planVersionId: step.planVersionId,
+      planVersionNumber: step.planVersion.version,
+      dependencyLineage,
       stepId,
       attemptId,
       capability: step.capability,
@@ -258,7 +270,7 @@ export async function resolveStepInputs(
       companyId: step.task.companyId,
       preconditions: record(step.preconditions),
       planInputs: step.planVersion.inputs,
-      dependencies,
+      dependencies: authorizedDependencies,
       materializeArtifact,
     });
     if (binding.source.kind !== 'SECRET_REFERENCE') {
@@ -287,7 +299,7 @@ export async function resolveStepInputs(
   }
 
   const argumentsJsonSha256 = sha256Canonical(args);
-  const argumentsSha256 = actionArgumentDigest(args);
+  const argumentsSha256 = executionArgumentDigest(args, step.target);
   const provenance: Prisma.InputJsonObject = {
     schemaVersion: 1,
     taskId,
@@ -311,10 +323,21 @@ export async function resolveStepInputs(
   };
 }
 
+/** ERP guards compare the HTTP representation; host protocols retain JSON types. */
+function executionArgumentDigest(args: JsonRecord, target: MsaidiziExecutionTarget): string {
+  if (target !== MsaidiziExecutionTarget.ERP) return actionArgumentDigest(args);
+  const digest = exactActionEnvelopeDigest(args);
+  if (!digest)
+    fail('INPUT_BINDING_ARGUMENT_TEMPLATE_INVALID', 'ERP inputs require an exact action envelope');
+  return digest;
+}
+
 interface ResolveSourceContext {
   binding: MsaidiziInputBindingDto;
   taskId: string;
   planVersionId: string;
+  planVersionNumber: number;
+  dependencyLineage: DependencyLineage[];
   stepId: string;
   attemptId: string;
   capability: string;
@@ -373,21 +396,24 @@ async function resolveSource(
       `Step does not declare dependency ${dependencyKey}`,
     );
   }
-  const dependency = await prisma.msaidiziTaskStep.findFirst({
-    where: {
-      taskId: context.taskId,
-      planVersionId: context.planVersionId,
-      stepKey: dependencyKey,
-    },
-    include: {
-      toolAttempts: {
-        where: { status: MsaidiziToolAttemptStatus.SUCCEEDED },
-        orderBy: { attemptNumber: 'desc' },
-        take: 1,
-      },
-      artifacts: { orderBy: { createdAt: 'asc' } },
-    },
-  });
+  const pin = context.dependencyLineage.find((entry) => entry.dependencyStepKey === dependencyKey);
+  const dependency = pin
+    ? await verifyDependencyLineage(prisma, context.taskId, context.planVersionNumber, pin)
+    : await prisma.msaidiziTaskStep.findFirst({
+        where: {
+          taskId: context.taskId,
+          planVersionId: context.planVersionId,
+          stepKey: dependencyKey,
+        },
+        include: {
+          toolAttempts: {
+            where: { status: MsaidiziToolAttemptStatus.SUCCEEDED },
+            orderBy: { attemptNumber: 'desc' },
+            take: 1,
+          },
+          artifacts: { orderBy: { createdAt: 'asc' } },
+        },
+      });
   if (!dependency || dependency.status !== MsaidiziTaskStepStatus.SUCCEEDED) {
     fail(
       'INPUT_BINDING_DEPENDENCY_NOT_SUCCESSFUL',
@@ -503,6 +529,13 @@ async function resolveSource(
         kind: 'DEPENDENCY_ARTIFACT',
         taskId: context.taskId,
         planVersionId: context.planVersionId,
+        ...(pin
+          ? {
+              sourcePlanVersionId: pin.sourcePlanVersionId,
+              lineageVersion: pin.version,
+              sourceResultSha256: pin.sourceResultSha256,
+            }
+          : {}),
         stepId: dependency.id,
         attemptId: sourceAttempt.id,
         artifactId: artifact.id,
@@ -520,6 +553,7 @@ async function resolveSource(
   }
   let sourceRoot: unknown = summary;
   let persistedValueSha256: string | null = null;
+  let outputValueDigestAlgorithm: string | null = null;
   if (binding.source.kind === 'DEPENDENCY_OUTPUT') {
     const observation = record(summary.observation);
     if (
@@ -534,8 +568,29 @@ async function resolveSource(
       );
     }
     sourceRoot = observation.value;
-    persistedValueSha256 = sha256JsonEncoding(sourceRoot);
-    if (!fixedDigest(persistedValueSha256, String(observation.sourceSha256).toLowerCase())) {
+    let expectedValueSha256: string;
+    if (Object.prototype.hasOwnProperty.call(observation, 'valueDigest')) {
+      const valueDigest = record(observation.valueDigest);
+      if (
+        valueDigest.algorithm !== 'canonical-json-sha256-v1' ||
+        typeof valueDigest.sha256 !== 'string'
+      ) {
+        fail(
+          'INPUT_BINDING_DEPENDENCY_DIGEST_MISMATCH',
+          'Dependency value digest protocol is invalid',
+        );
+      }
+      persistedValueSha256 = sha256Canonical(sourceRoot);
+      expectedValueSha256 = valueDigest.sha256;
+      outputValueDigestAlgorithm = 'canonical-json-sha256-v1';
+    } else {
+      // Legacy observations retain their exact byte check. Never manufacture
+      // a new digest for old records whose original key order was lost.
+      persistedValueSha256 = sha256JsonEncoding(sourceRoot);
+      expectedValueSha256 = String(observation.sourceSha256).toLowerCase();
+      outputValueDigestAlgorithm = 'json-encoding-sha256-v1';
+    }
+    if (!fixedDigest(persistedValueSha256, expectedValueSha256)) {
       fail('INPUT_BINDING_DEPENDENCY_DIGEST_MISMATCH', 'Dependency output digest is invalid');
     }
   }
@@ -547,10 +602,19 @@ async function resolveSource(
       kind: binding.source.kind,
       taskId: context.taskId,
       planVersionId: context.planVersionId,
+      ...(pin
+        ? {
+            sourcePlanVersionId: pin.sourcePlanVersionId,
+            lineageVersion: pin.version,
+            sourceResultSha256: pin.sourceResultSha256,
+          }
+        : {}),
       stepId: dependency.id,
       attemptId: sourceAttempt.id,
       resultSha256: resultDigest,
-      ...(persistedValueSha256 ? { outputValueSha256: persistedValueSha256 } : {}),
+      ...(persistedValueSha256
+        ? { outputValueSha256: persistedValueSha256, outputValueDigestAlgorithm }
+        : {}),
       sourcePath: binding.source.path ?? '',
       valueSha256: sha256Canonical(selected.value),
     },
@@ -722,7 +786,7 @@ function assertSecretScope(context: ResolveSourceContext): void {
   }
 }
 
-function parsePersistedBindings(value: Prisma.JsonValue): MsaidiziInputBindingDto[] {
+export function parsePersistedInputBindings(value: Prisma.JsonValue): MsaidiziInputBindingDto[] {
   if (!Array.isArray(value)) fail('INPUT_BINDING_DEFINITION_TAMPERED', 'Bindings are not an array');
   if (value.length > 100) {
     fail('INPUT_BINDING_DEFINITION_TAMPERED', 'Bindings exceed the reviewed plan limit');

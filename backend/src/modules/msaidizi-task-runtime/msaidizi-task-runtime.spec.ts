@@ -454,7 +454,8 @@ describe('Msaidizi task step execution', () => {
           attemptCount: 1,
           mutation: false,
           capability: 'erp.read',
-          arguments: { path: '/example', query: {}, body: null },
+          target: 'ERP',
+          arguments: { path: {}, query: {}, body: null },
           startedAt: firstStartedAt,
         },
       ),
@@ -1695,6 +1696,178 @@ describe('Msaidizi task step execution', () => {
 });
 
 describe('Msaidizi task dispatch retry units', () => {
+  it.each([
+    {
+      state: 'SUCCEEDED',
+      attemptState: 'SUCCEEDED',
+      used: 2,
+      adaptiveResult: 'READY',
+      expected: 'COMPLETED',
+    },
+    {
+      state: 'SUCCEEDED',
+      attemptState: 'SUCCEEDED',
+      used: 2,
+      adaptiveResult: 'BLOCKED',
+      expected: 'WAIT',
+    },
+    {
+      state: 'RUNNING',
+      attemptState: 'REQUESTED',
+      used: 2,
+      adaptiveResult: 'READY',
+      expected: 'WAIT',
+    },
+    {
+      state: 'RUNNING',
+      attemptState: 'RUNNING',
+      used: 2,
+      adaptiveResult: 'READY',
+      expected: 'WAIT',
+    },
+    {
+      state: 'READY',
+      attemptState: 'FAILED',
+      used: 2,
+      adaptiveResult: 'READY',
+      expected: 'EXHAUSTED',
+    },
+    {
+      state: 'SUCCEEDED',
+      attemptState: 'SUCCEEDED',
+      used: 3,
+      adaptiveResult: 'READY',
+      expected: 'EXHAUSTED',
+    },
+    {
+      state: 'RUNNING',
+      attemptState: 'RUNNING',
+      used: 3,
+      adaptiveResult: 'READY',
+      expected: 'EXHAUSTED',
+    },
+  ])(
+    'settles only the last permitted call without expanding its budget ($state/$attemptState/$used/$adaptiveResult)',
+    async ({ state, attemptState, used, adaptiveResult, expected }) => {
+      const step = {
+        id: 'last-step',
+        stepKey: 'last',
+        taskId: 'at-limit',
+        status: state,
+        target: 'ERP',
+        mutation: false,
+        dependencies: [],
+        stopConditions: {},
+        budgets: {},
+        bytesRead: 0n,
+        bytesWritten: 0n,
+        localIoAccountingValid: true,
+        toolAttempts: [{ status: attemptState, resultSummary: { ok: true } }],
+      };
+      const prisma = {
+        backgroundJob: { findMany: jest.fn().mockResolvedValue([]) },
+        msaidiziTaskStep: { findMany: jest.fn().mockResolvedValue([step]) },
+      };
+      const adaptive = { gate: jest.fn().mockResolvedValue(adaptiveResult) };
+      const dispatcher = new MsaidiziTaskDispatcherService(
+        prisma as never,
+        { enabled: true } as never,
+        config(),
+        undefined,
+        undefined,
+        adaptive as never,
+      );
+      const finish = jest.fn();
+      const enqueue = jest.fn();
+      const internals = dispatcher as unknown as {
+        finishTask: typeof finish;
+        enqueueStep: typeof enqueue;
+      };
+      internals.finishTask = finish;
+      internals.enqueueStep = enqueue;
+      await dispatcherTestApi(dispatcher).advance({
+        id: 'at-limit',
+        status: 'RUNNING',
+        activePlanVersion: 1,
+        startedAt: new Date(),
+        consumedWallTimeMs: 0n,
+        wallTimeCheckpointAt: new Date(),
+        maxWallTimeSeconds: 7200,
+        attemptedToolCalls: used,
+        maxAttemptedToolCalls: 2,
+        mutations: 0,
+        maxMutations: 0,
+      });
+      expect(enqueue).not.toHaveBeenCalled();
+      if (expected === 'COMPLETED')
+        expect(finish).toHaveBeenCalledWith('at-limit', 'COMPLETED', null);
+      else if (expected === 'EXHAUSTED')
+        expect(finish).toHaveBeenCalledWith('at-limit', 'NEEDS_ATTENTION', 'TOOL_BUDGET_EXHAUSTED');
+      else expect(finish).not.toHaveBeenCalled();
+      if (state === 'SUCCEEDED' && used === 2) expect(adaptive.gate).toHaveBeenCalledTimes(1);
+      else expect(adaptive.gate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { attemptStatus: 'RUNNING', bytesRead: 1000n, valid: true, stopped: false },
+    { attemptStatus: 'RUNNING', bytesRead: 1001n, valid: true, stopped: true },
+    { attemptStatus: 'FAILED', bytesRead: 1000n, valid: true, stopped: true },
+    { attemptStatus: 'REQUESTED', bytesRead: 1000n, valid: false, stopped: true },
+  ])(
+    'distinguishes an unsettled full reservation from invalid IO ($attemptStatus/$bytesRead/$valid)',
+    async ({ attemptStatus, bytesRead, valid, stopped }) => {
+      const step = {
+        id: 'step-reserved',
+        stepKey: 'reserved',
+        taskId: 'task-reserved',
+        status: 'RUNNING',
+        target: 'ERP',
+        mutation: false,
+        idempotent: true,
+        attemptCount: 1,
+        dependencies: [],
+        stopConditions: {},
+        budgets: { maxLocalBytes: 1000 },
+        bytesRead,
+        bytesWritten: 0n,
+        localIoAccountingValid: valid,
+        toolAttempts: [{ status: attemptStatus, resultSummary: null }],
+      };
+      const prisma = {
+        backgroundJob: { findMany: jest.fn().mockResolvedValue([]) },
+        msaidiziTaskStep: { findMany: jest.fn().mockResolvedValue([step]) },
+      };
+      const dispatcher = new MsaidiziTaskDispatcherService(
+        prisma as never,
+        { enabled: true } as never,
+        config(),
+      );
+      const finish = jest.fn();
+      (dispatcher as unknown as { finishTask: typeof finish }).finishTask = finish;
+      await dispatcherTestApi(dispatcher).advance({
+        id: 'task-reserved',
+        status: 'RUNNING',
+        activePlanVersion: 1,
+        startedAt: new Date(),
+        consumedWallTimeMs: 0n,
+        wallTimeCheckpointAt: new Date(),
+        maxWallTimeSeconds: 7200,
+        attemptedToolCalls: 1,
+        maxAttemptedToolCalls: 10,
+        mutations: 0,
+        maxMutations: 10,
+      });
+      if (stopped)
+        expect(finish).toHaveBeenCalledWith(
+          'task-reserved',
+          'NEEDS_ATTENTION',
+          'STEP_LOCAL_IO_ACCOUNTING_INVALID',
+        );
+      else expect(finish).not.toHaveBeenCalled();
+    },
+  );
+
   it('atomically stops on a committed step condition before leasing the next mutation', async () => {
     const nextMutation = {
       id: 'step-next-mutation',
@@ -1930,12 +2103,21 @@ describe('Msaidizi task dispatch retry units', () => {
 
   it('can finish pausing while an undispatched host action remains staged for explicit resume', async () => {
     const finish = jest.fn();
-    const prisma = {
-      backgroundJob: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ status: 'PAUSING' }]),
+      backgroundJob: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        count: jest.fn().mockResolvedValue(0),
+      },
       msaidiziTaskStep: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         count: jest.fn().mockResolvedValue(0),
       },
+    };
+    const prisma = {
+      ...tx,
+      $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
     };
     const dispatcher = new MsaidiziTaskDispatcherService(
       prisma as never,
@@ -1956,7 +2138,39 @@ describe('Msaidizi task dispatch retry units', () => {
         ]),
       }),
     });
-    expect(finish).toHaveBeenCalledWith('task-1', 'PAUSED', null);
+    expect(finish).toHaveBeenCalledWith('task-1', 'PAUSED', null, tx);
+  });
+
+  it('waits for a claimed step or reasoning worker before publishing PAUSED or resetting the step', async () => {
+    const finish = jest.fn();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ status: 'PAUSING' }]),
+      backgroundJob: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      msaidiziTaskStep: { updateMany: jest.fn(), count: jest.fn() },
+    };
+    const prisma = {
+      ...tx,
+      $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
+    };
+    const dispatcher = new MsaidiziTaskDispatcherService(
+      prisma as never,
+      { enabled: true } as never,
+      config(),
+    );
+    (dispatcher as unknown as { finishTask: typeof finish }).finishTask = finish;
+    await dispatcherTestApi(dispatcher).pauseRemaining('task-pausing');
+    expect(tx.backgroundJob.count).toHaveBeenCalledWith({
+      where: {
+        jobType: { in: ['MSAIDIZI_TASK_STEP', 'MSAIDIZI_REASONING_CHECKPOINT'] },
+        correlationId: 'task-pausing',
+        status: 'RUNNING',
+      },
+    });
+    expect(prisma.msaidiziTaskStep.updateMany).not.toHaveBeenCalled();
+    expect(finish).not.toHaveBeenCalled();
   });
 
   it('cannot overwrite a won cancellation request with a late completion', async () => {
@@ -1986,15 +2200,23 @@ describe('Msaidizi task dispatch retry units', () => {
     const finish = jest.fn();
     const devices = { cancelUndispatchedTaskActions: jest.fn().mockResolvedValue(undefined) };
     const prisma = {
+      msaidiziReasoningTurn: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(),
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ status: 'CANCELLING' }])
+        .mockResolvedValue([]),
       backgroundJob: {
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       msaidiziTaskStep: {
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         count: jest.fn().mockResolvedValue(0),
       },
     };
+    prisma.$transaction.mockImplementation((work) => work(prisma));
     const dispatcher = new MsaidiziTaskDispatcherService(
       prisma as never,
       { enabled: true } as never,
@@ -2009,13 +2231,19 @@ describe('Msaidizi task dispatch retry units', () => {
     await dispatcherTestApi(dispatcher).cancelRemaining('task-offline-device');
 
     expect(devices.cancelUndispatchedTaskActions).toHaveBeenCalledWith('task-offline-device');
-    expect(finish).toHaveBeenCalledWith('task-offline-device', 'CANCELLED', null);
+    expect(finish).toHaveBeenCalledWith('task-offline-device', 'CANCELLED', null, prisma);
   });
 
   it('closes a cancelled transient-read retry without touching live or mutation steps', async () => {
     const finish = jest.fn();
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      msaidiziReasoningTurn: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(),
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ status: 'CANCELLING' }])
+        .mockResolvedValue([{ status: 'RUNNING', payload: { stepId: 'step-live-read' } }]),
       backgroundJob: {
         findMany: jest
           .fn()
@@ -2024,11 +2252,13 @@ describe('Msaidizi task dispatch retry units', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       msaidiziTaskStep: {
+        findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn(),
         updateMany,
         count: jest.fn().mockResolvedValue(0),
       },
     };
+    prisma.$transaction.mockImplementation((work) => work(prisma));
     const dispatcher = new MsaidiziTaskDispatcherService(
       prisma as never,
       { enabled: true } as never,
@@ -2052,7 +2282,7 @@ describe('Msaidizi task dispatch retry units', () => {
         data: expect.objectContaining({ status: 'CANCELLED' }),
       }),
     );
-    expect(finish).toHaveBeenCalledWith('task-cancel-read-retry', 'CANCELLED', null);
+    expect(finish).toHaveBeenCalledWith('task-cancel-read-retry', 'CANCELLED', null, prisma);
   });
 
   it.each(['COMPLETED', 'PARTIAL', 'FAILED', 'NEEDS_ATTENTION'] as const)(
@@ -2247,6 +2477,7 @@ describe('Msaidizi task dispatch retry units', () => {
   });
 
   it('reconciles a dead mutation before finalizing a cancellation after restart', async () => {
+    const audit = auditHarness();
     const taskUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
     const cancelQueuedJobs = jest.fn();
     const tx = {
@@ -2267,7 +2498,15 @@ describe('Msaidizi task dispatch retry units', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({}),
       },
-      msaidiziTask: { updateMany: taskUpdateMany },
+      msaidiziTask: {
+        updateMany: taskUpdateMany,
+        findUnique: jest.fn().mockResolvedValue({
+          principalId: 'principal-1',
+          initiatedByUserId: 'user-1',
+          mandateId: null,
+          companyId: 'company-1',
+        }),
+      },
       msaidiziTaskEvent: { create: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
@@ -2282,7 +2521,7 @@ describe('Msaidizi task dispatch retry units', () => {
         updateMany: cancelQueuedJobs,
       },
       msaidiziTaskStep: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'step-write', mutation: true }),
+        findFirst: jest.fn().mockResolvedValue({ id: 'step-write', mutation: true, target: 'ERP' }),
       },
       $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
     };
@@ -2290,6 +2529,13 @@ describe('Msaidizi task dispatch retry units', () => {
       prisma as never,
       { enabled: true } as never,
       config(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      audit as never,
     );
 
     await expect(
@@ -2307,6 +2553,20 @@ describe('Msaidizi task dispatch retry units', () => {
         maxMutations: 10,
       }),
     ).resolves.toBe(0);
+
+    expect(audit.logStrictInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        action: 'MSAIDIZI_ERP_ACTION_UNKNOWN',
+        entityId: 'attempt-1',
+        principalId: 'principal-1',
+        taskId: 'task-cancelling',
+        stepId: 'step-write',
+        newValue: expect.objectContaining({
+          externalEgress: expect.objectContaining({ chargedExternalEgressBytes: 8192 }),
+        }),
+      }),
+    );
 
     expect(taskUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2442,12 +2702,15 @@ describe('Msaidizi task dispatch retry units', () => {
       where: {
         id: 'step-owned-by-host-action',
         taskId: 'task-host-owned',
-        status: { in: ['LEASED', 'RUNNING'] },
+        OR: [
+          { status: { in: ['LEASED', 'RUNNING'] } },
+          { status: 'FAILED', mutation: false, target: 'ERP', expectedEffect: 'READ' },
+        ],
         hostActions: {
           none: { status: { in: ['QUEUED', 'DISPATCHED', 'RUNNING'] } },
         },
       },
-      select: { id: true, mutation: true },
+      select: { id: true, mutation: true, target: true, expectedEffect: true },
     });
     expect(transaction).not.toHaveBeenCalled();
   });

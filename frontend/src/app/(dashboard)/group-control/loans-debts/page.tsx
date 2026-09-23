@@ -1,16 +1,33 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
-import {
-  Card, PageHeader, PageToolbar, StatCard, StatusBadge, Btn, PageSpinner,
-  Modal, FormInput, FormSelect, FormTextarea,
-} from '@/components/ui';
+import { Btn, EmptyState, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, PermissionDeniedState, showToast, StatusBadge } from '@/components/ui';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
+import '@/components/workspace/workspace.css';
+import '@/features/loans/loans-workspace.css';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { useAuth } from '@/hooks/use-auth';
+import { ScopeSelector } from '@/components/ui/scope-selector';
+import { LoanFundingFields, emptyFunding } from '@/features/loans/loan-finance';
 
-interface Company { id: string; name: string; code: string }
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
 
 interface Loan {
+  companyId?: string;
+  divisionId?: string;
+  branchId?: string;
+  notes?: string;
+  purpose?: string;
+  lenderType?: string;
+  lenderContact?: string;
+  disbursementDate?: string;
+  repaymentAmount?: string;
   id: string;
   lenderName: string;
   loanReference?: string | null;
@@ -53,7 +70,13 @@ interface LoanSummary {
   totalPrincipal: string | number;
   totalOutstandingBalance: string | number;
   monthlyRepaymentBurden: string | number;
-  byCompany?: { companyId: string | null; companyName: string; companyCode?: string; count: number; totalOutstanding: string | number | null }[];
+  byCompany?: {
+    companyId: string | null;
+    companyName: string;
+    companyCode?: string;
+    count: number;
+    totalOutstanding: string | number | null;
+  }[];
 }
 
 interface DebtSummary {
@@ -65,14 +88,50 @@ interface DebtSummary {
   totalOutstandingAmount: string | number;
 }
 
-interface Paginated<T> { data: T[]; total: number; page: number; totalPages: number }
+interface Paginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
 
-const LOAN_TYPES = ['BANK_LOAN', 'OVERDRAFT', 'SUPPLIER_CREDIT', 'ASSET_FINANCE', 'MORTGAGE', 'DIRECTOR_LOAN', 'INTER_COMPANY_LOAN', 'INSTITUTIONAL_DEBT', 'OTHER'];
-const LOAN_STATUSES = ['ACTIVE', 'SETTLED', 'DEFAULTED', 'RESTRUCTURED', 'CANCELLED', 'WRITTEN_OFF'];
-const DEBT_STATUSES = ['OUTSTANDING', 'PARTIALLY_PAID', 'PAID', 'DISPUTED', 'WRITTEN_OFF', 'RESTRUCTURED'];
+const LOAN_TYPES = [
+  'BANK_LOAN',
+  'OVERDRAFT',
+  'SUPPLIER_CREDIT',
+  'ASSET_FINANCE',
+  'MORTGAGE',
+  'DIRECTOR_LOAN',
+  'INTER_COMPANY_LOAN',
+  'INSTITUTIONAL_DEBT',
+  'OTHER',
+];
+const LOAN_STATUSES = [
+  'ACTIVE',
+  'SETTLED',
+  'DEFAULTED',
+  'RESTRUCTURED',
+  'CANCELLED',
+  'WRITTEN_OFF',
+];
+const DEBT_STATUSES = [
+  'OUTSTANDING',
+  'PARTIALLY_PAID',
+  'PAID',
+  'DISPUTED',
+  'WRITTEN_OFF',
+  'RESTRUCTURED',
+];
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const BORROWER_LEVELS = ['COMPANY', 'GROUP'];
-const REPAYMENT_FREQUENCIES = ['MONTHLY', 'QUARTERLY', 'SEMI_ANNUALLY', 'ANNUALLY', 'BULLET', 'OTHER'];
+const REPAYMENT_FREQUENCIES = [
+  'MONTHLY',
+  'QUARTERLY',
+  'SEMI_ANNUALLY',
+  'ANNUALLY',
+  'BULLET',
+  'OTHER',
+];
 const CURRENCIES = ['TZS', 'USD', 'EUR', 'GBP', 'KES', 'UGX'];
 
 function fmt(n: number | string) {
@@ -81,14 +140,21 @@ function fmt(n: number | string) {
 }
 function fmtDate(d?: string | null) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+  return new Date(d).toLocaleDateString('en-GB', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
 }
-function isOverdue(d?: string | null) { return !!d && new Date(d).getTime() < Date.now(); }
 
 // ─── Loan Modal ───────────────────────────────────────────────────────────────
 
 function LoanModal({
-  mode, initial, companies, onClose, onSaved,
+  mode,
+  initial,
+  companies,
+  onClose,
+  onSaved,
 }: {
   mode: 'create' | 'edit';
   initial?: Loan;
@@ -98,44 +164,75 @@ function LoanModal({
 }) {
   const [form, setForm] = useState({
     lenderName: initial?.lenderName ?? '',
-    lenderType: '' as string,
-    lenderContact: '',
+    lenderType: initial?.lenderType ?? '',
+    lenderContact: initial?.lenderContact ?? '',
     loanReference: initial?.loanReference ?? '',
     obligationType: initial?.obligationType ?? 'BANK_LOAN',
     borrowerLevel: initial?.borrowerLevel ?? 'COMPANY',
-    companyId: (initial as any)?.companyId ?? '',
+    companyId: initial?.companyId ?? '',
+    divisionId: initial?.divisionId ?? '',
+    branchId: initial?.branchId ?? '',
     principalAmount: initial?.principalAmount ?? '',
     outstandingBalance: initial?.outstandingBalance ?? '',
     interestRate: initial?.interestRate ?? '',
     currency: initial?.currency ?? 'TZS',
-    disbursementDate: '',
+    disbursementDate: initial?.disbursementDate?.slice(0, 10) ?? '',
     maturityDate: initial?.maturityDate?.slice(0, 10) ?? '',
     repaymentFrequency: initial?.repaymentFrequency ?? 'MONTHLY',
-    repaymentAmount: '',
+    repaymentAmount: initial?.repaymentAmount ?? '',
     status: initial?.status ?? 'ACTIVE',
     riskLevel: initial?.riskLevel ?? 'LOW',
-    purpose: '',
+    purpose: initial?.purpose ?? '',
     collateralDescription: initial?.collateralDescription ?? '',
-    notes: '',
+    notes: initial?.notes ?? '',
   });
+  const [funding, setFunding] = useState(emptyFunding);
+  const [ack, setAck] = useState(false);
+  const request = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const setField = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const draft = useFormGuard({ form, funding });
+  const close = () => {
+    if (!saving) draft.requestClose(onClose);
+  };
+  const setField = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    setAck(false);
+    if (k === 'companyId' || k === 'currency')
+      setFunding({ ...emptyFunding, fundingMode: funding.fundingMode });
+  };
 
   const handleSubmit = async () => {
-    if (!form.lenderName.trim()) { setError('Lender name is required'); return; }
+    if (saving) return;
+    if (mode === 'create' && !ack) {
+      setError('Review the accounting connection before saving.');
+      return;
+    }
+    if (!form.lenderName.trim()) {
+      setError('Lender name is required');
+      return;
+    }
     if (mode === 'create') {
-      if (!form.principalAmount || !form.interestRate || !form.disbursementDate || !form.maturityDate || !form.outstandingBalance) {
-        setError('Principal, interest rate, disbursement date, maturity, and outstanding balance are required');
+      if (
+        !form.principalAmount ||
+        !form.interestRate ||
+        !form.disbursementDate ||
+        !form.maturityDate ||
+        (funding.fundingMode === 'OPENING' && !form.outstandingBalance)
+      ) {
+        setError(
+          'Principal, interest rate, disbursement date, maturity, and outstanding balance are required',
+        );
         return;
       }
     }
-    if (form.borrowerLevel === 'COMPANY' && !form.companyId) {
-      setError('Select a company when borrower level is COMPANY');
+    if (!form.companyId) {
+      setError('Select the accounting company that holds this loan');
       return;
     }
 
-    setSaving(true); setError('');
+    setSaving(true);
+    setError('');
     try {
       const body: Record<string, unknown> = {
         lenderName: form.lenderName.trim(),
@@ -147,6 +244,10 @@ function LoanModal({
         riskLevel: form.riskLevel,
       };
       if (form.companyId) body.companyId = form.companyId;
+      if (mode === 'create') {
+        body.divisionId = form.divisionId || undefined;
+        body.branchId = form.branchId || undefined;
+      }
       if (form.lenderType) body.lenderType = form.lenderType;
       if (form.lenderContact) body.lenderContact = form.lenderContact;
       if (form.loanReference) body.loanReference = form.loanReference;
@@ -160,86 +261,312 @@ function LoanModal({
       if (form.collateralDescription) body.collateralDescription = form.collateralDescription;
       if (form.notes) body.notes = form.notes;
 
+      if (mode === 'create') {
+        request.current ??= crypto.randomUUID();
+        Object.assign(body, {
+          ...funding,
+          requestId: request.current,
+          cashDeskAccountId: funding.fundingMode === 'NEW' ? funding.cashDeskAccountId : undefined,
+          fees: funding.fundingMode === 'NEW' ? funding.fees : '0',
+          openingOffsetAccountId:
+            funding.fundingMode === 'OPENING' ? funding.openingOffsetAccountId : undefined,
+          recognitionDate: funding.recognitionDate || undefined,
+          feeAccountId: funding.feeAccountId || undefined,
+        });
+        if (funding.fundingMode === 'NEW') body.outstandingBalance = form.principalAmount;
+      } else {
+        for (const key of Object.keys(body))
+          if (
+            ![
+              'lenderName',
+              'lenderType',
+              'lenderContact',
+              'loanReference',
+              'riskLevel',
+              'purpose',
+              'collateralDescription',
+              'notes',
+            ].includes(key)
+          )
+            delete body[key];
+      }
       const url = mode === 'create' ? '/api/backend/loans' : `/api/backend/loans/${initial!.id}`;
       const method = mode === 'create' ? 'POST' : 'PUT';
       const res = await fetch(url, {
-        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        const message = (Array.isArray(j?.message) && j.message.join(', ')) || j?.message || `HTTP ${res.status}`;
+        const message =
+          (Array.isArray(j?.message) && j.message.join(', ')) || j?.message || `HTTP ${res.status}`;
         throw new Error(message);
       }
+      draft.markSaved();
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onChangeCapture={draft.touch}
+      onClose={close}
       title={mode === 'create' ? 'New Loan' : 'Edit Loan'}
-      subtitle="Group obligation — bank loan, supplier credit, asset finance, etc."
+      subtitle="Borrowing — bank loans, director loans and asset finance"
       size="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={handleSubmit} loading={saving}>
+          <Btn variant="secondary" onClick={close}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="primary"
+            onClick={handleSubmit}
+            loading={saving}
+            disabled={mode === 'create' && !ack}
+          >
             {mode === 'create' ? 'Create' : 'Save'}
           </Btn>
         </>
       }
     >
       {error && (
-        <div className="mb-3 text-sm rounded-lg px-3 py-2 border" style={{ color: 'var(--aurora-danger)', borderColor: 'var(--aurora-danger)', background: 'var(--aurora-danger-bg, #fef2f2)' }}>
+        <div
+          role="alert"
+          className="mb-3 text-sm rounded-lg px-3 py-2 border"
+          style={{
+            color: 'var(--aurora-danger)',
+            borderColor: 'var(--aurora-danger)',
+            background: 'var(--aurora-danger-bg, #fef2f2)',
+          }}
+        >
           {error}
         </div>
       )}
+      {mode === 'edit' && (
+        <p className="mb-3 text-sm text-slate-500">
+          Financial values are controlled by loan events. Only descriptive details can be edited
+          here.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3">
-        <FormInput label="Lender Name" required value={form.lenderName} onChange={(e) => setField('lenderName', e.target.value)} />
-        <FormInput label="Lender Type" placeholder="e.g. Bank, SACCO, Director" value={form.lenderType} onChange={(e) => setField('lenderType', e.target.value)} />
-        <FormInput label="Lender Contact" value={form.lenderContact} onChange={(e) => setField('lenderContact', e.target.value)} />
-        <FormInput label="Loan Reference" value={form.loanReference} onChange={(e) => setField('loanReference', e.target.value)} />
+        <FormInput
+          label="Lender Name"
+          required
+          value={form.lenderName}
+          onChange={(e) => setField('lenderName', e.target.value)}
+        />
+        <FormInput
+          label="Lender Type"
+          placeholder="e.g. Bank, SACCO, Director"
+          value={form.lenderType}
+          onChange={(e) => setField('lenderType', e.target.value)}
+        />
+        <FormInput
+          label="Lender Contact"
+          value={form.lenderContact}
+          onChange={(e) => setField('lenderContact', e.target.value)}
+        />
+        <FormInput
+          label="Loan Reference"
+          value={form.loanReference}
+          onChange={(e) => setField('loanReference', e.target.value)}
+        />
 
-        <FormSelect label="Obligation Type" value={form.obligationType} onChange={(e) => setField('obligationType', e.target.value)}>
-          {LOAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+        <FormSelect
+          label="Obligation Type"
+          disabled={mode === 'edit'}
+          value={form.obligationType}
+          onChange={(e) => setField('obligationType', e.target.value)}
+        >
+          {LOAN_TYPES.filter((t) => !['INTER_COMPANY_LOAN', 'SUPPLIER_CREDIT'].includes(t)).map(
+            (t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, ' ')}
+              </option>
+            ),
+          )}
         </FormSelect>
-        <FormSelect label="Borrower Level" value={form.borrowerLevel} onChange={(e) => setField('borrowerLevel', e.target.value)}>
-          {BORROWER_LEVELS.map((b) => <option key={b} value={b}>{b}</option>)}
+        <FormSelect
+          label="Borrower Level"
+          disabled={mode === 'edit'}
+          value={form.borrowerLevel}
+          onChange={(e) => setField('borrowerLevel', e.target.value)}
+        >
+          {BORROWER_LEVELS.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
         </FormSelect>
 
-        <FormSelect label="Company" value={form.companyId} onChange={(e) => setField('companyId', e.target.value)} placeholder="— Select —">
-          {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        <div className="col-span-2">
+          <ScopeSelector
+            value={{
+              companyId: form.companyId,
+              divisionId: form.divisionId,
+              branchId: form.branchId,
+            }}
+            disabled={mode === 'edit'}
+            onChange={(scope) => {
+              setForm((f) => ({ ...f, ...scope }));
+              setAck(false);
+              setFunding({ ...emptyFunding, fundingMode: funding.fundingMode });
+            }}
+          />
+        </div>
+        <FormSelect
+          label="Currency"
+          disabled={mode === 'edit'}
+          value={form.currency}
+          onChange={(e) => setField('currency', e.target.value)}
+        >
+          {CURRENCIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </FormSelect>
-        <FormSelect label="Currency" value={form.currency} onChange={(e) => setField('currency', e.target.value)}>
-          {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+
+        <FormInput
+          label="Principal Amount"
+          disabled={mode === 'edit'}
+          required={mode === 'create'}
+          type="number"
+          step="0.01"
+          value={form.principalAmount}
+          onChange={(e) => setField('principalAmount', e.target.value)}
+        />
+        <FormInput
+          label="Outstanding Balance"
+          disabled={mode === 'edit' || funding.fundingMode === 'NEW'}
+          required={mode === 'create'}
+          type="number"
+          step="0.01"
+          value={
+            funding.fundingMode === 'NEW' && mode === 'create'
+              ? form.principalAmount
+              : form.outstandingBalance
+          }
+          onChange={(e) => setField('outstandingBalance', e.target.value)}
+        />
+
+        <FormInput
+          label="Annual Interest Rate"
+          disabled={mode === 'edit'}
+          required={mode === 'create'}
+          type="number"
+          step="0.0001"
+          hint="0.18 = 18%"
+          value={form.interestRate}
+          onChange={(e) => setField('interestRate', e.target.value)}
+        />
+        <FormSelect
+          label="Repayment Frequency"
+          disabled={mode === 'edit'}
+          value={form.repaymentFrequency}
+          onChange={(e) => setField('repaymentFrequency', e.target.value)}
+        >
+          {REPAYMENT_FREQUENCIES.map((f) => (
+            <option key={f} value={f}>
+              {f.replace(/_/g, ' ')}
+            </option>
+          ))}
         </FormSelect>
 
-        <FormInput label="Principal Amount" required={mode === 'create'} type="number" step="0.01" value={form.principalAmount} onChange={(e) => setField('principalAmount', e.target.value)} />
-        <FormInput label="Outstanding Balance" required={mode === 'create'} type="number" step="0.01" value={form.outstandingBalance} onChange={(e) => setField('outstandingBalance', e.target.value)} />
+        <FormDateField
+          label="Disbursement Date"
+          disabled={mode === 'edit'}
+          required={mode === 'create'}
+          value={form.disbursementDate}
+          onChange={(value) => setField('disbursementDate', value)}
+        />
+        <FormDateField
+          label="Maturity Date"
+          disabled={mode === 'edit'}
+          required={mode === 'create'}
+          value={form.maturityDate}
+          onChange={(value) => setField('maturityDate', value)}
+        />
 
-        <FormInput label="Annual Interest Rate" required={mode === 'create'} type="number" step="0.0001" hint="0.18 = 18%" value={form.interestRate} onChange={(e) => setField('interestRate', e.target.value)} />
-        <FormSelect label="Repayment Frequency" value={form.repaymentFrequency} onChange={(e) => setField('repaymentFrequency', e.target.value)}>
-          {REPAYMENT_FREQUENCIES.map((f) => <option key={f} value={f}>{f.replace(/_/g, ' ')}</option>)}
+        <FormInput
+          label="Scheduled Repayment Amount"
+          disabled={mode === 'edit'}
+          type="number"
+          step="0.01"
+          value={form.repaymentAmount}
+          onChange={(e) => setField('repaymentAmount', e.target.value)}
+        />
+        <FormInput
+          label="Purpose"
+          value={form.purpose}
+          onChange={(e) => setField('purpose', e.target.value)}
+        />
+
+        <FormSelect
+          label="Status"
+          disabled
+          value={form.status}
+          onChange={(e) => setField('status', e.target.value)}
+        >
+          {LOAN_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s.replace(/_/g, ' ')}
+            </option>
+          ))}
+        </FormSelect>
+        <FormSelect
+          label="Risk Level"
+          value={form.riskLevel}
+          onChange={(e) => setField('riskLevel', e.target.value)}
+        >
+          {RISK_LEVELS.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
         </FormSelect>
 
-        <FormInput label="Disbursement Date" required={mode === 'create'} type="date" value={form.disbursementDate} onChange={(e) => setField('disbursementDate', e.target.value)} />
-        <FormInput label="Maturity Date" required={mode === 'create'} type="date" value={form.maturityDate} onChange={(e) => setField('maturityDate', e.target.value)} />
-
-        <FormInput label="Scheduled Repayment Amount" type="number" step="0.01" value={form.repaymentAmount} onChange={(e) => setField('repaymentAmount', e.target.value)} />
-        <FormInput label="Purpose" value={form.purpose} onChange={(e) => setField('purpose', e.target.value)} />
-
-        <FormSelect label="Status" value={form.status} onChange={(e) => setField('status', e.target.value)}>
-          {LOAN_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-        </FormSelect>
-        <FormSelect label="Risk Level" value={form.riskLevel} onChange={(e) => setField('riskLevel', e.target.value)}>
-          {RISK_LEVELS.map((r) => <option key={r} value={r}>{r}</option>)}
-        </FormSelect>
-
-        <div className="col-span-2"><FormTextarea label="Collateral Description" rows={2} value={form.collateralDescription} onChange={(e) => setField('collateralDescription', e.target.value)} /></div>
-        <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={form.notes} onChange={(e) => setField('notes', e.target.value)} /></div>
+        <div className="col-span-2">
+          <FormTextarea
+            label="Collateral Description"
+            rows={2}
+            value={form.collateralDescription}
+            onChange={(e) => setField('collateralDescription', e.target.value)}
+          />
+        </div>
+        {mode === 'create' && (
+          <LoanFundingFields
+            companyId={form.companyId}
+            currency={form.currency}
+            value={funding}
+            onChange={(value) => {
+              setFunding(value);
+              setAck(false);
+            }}
+          />
+        )}
+        {mode === 'create' && (
+          <label className="col-span-2 flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />I have
+            checked the accounts and confirmed this borrowing or opening balance has not already
+            been recorded.
+          </label>
+        )}
+        <div className="col-span-2">
+          <FormTextarea
+            label="Notes"
+            rows={2}
+            value={form.notes}
+            onChange={(e) => setField('notes', e.target.value)}
+          />
+        </div>
       </div>
     </Modal>
   );
@@ -248,7 +575,11 @@ function LoanModal({
 // ─── Debt Modal ───────────────────────────────────────────────────────────────
 
 function DebtModal({
-  mode, initial, companies, onClose, onSaved,
+  mode,
+  initial,
+  companies,
+  onClose,
+  onSaved,
 }: {
   mode: 'create' | 'edit';
   initial?: Debt;
@@ -272,16 +603,27 @@ function DebtModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const setField = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const draft = useFormGuard(form);
+  const close = () => {
+    if (!saving) draft.requestClose(onClose);
+  };
+  const setField = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
 
   const handleSubmit = async () => {
     if (mode === 'create') {
-      if (!form.companyId || !form.creditorName.trim() || !form.description.trim() || !form.amount) {
+      if (
+        !form.companyId ||
+        !form.creditorName.trim() ||
+        !form.description.trim() ||
+        !form.amount
+      ) {
         setError('Company, creditor, description and amount are required');
         return;
       }
     }
-    setSaving(true); setError('');
+    setSaving(true);
+    setError('');
     try {
       const body: Record<string, unknown> = {
         creditorName: form.creditorName.trim(),
@@ -301,29 +643,38 @@ function DebtModal({
       const url = mode === 'create' ? '/api/backend/debts' : `/api/backend/debts/${initial!.id}`;
       const method = mode === 'create' ? 'POST' : 'PUT';
       const res = await fetch(url, {
-        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        const message = (Array.isArray(j?.message) && j.message.join(', ')) || j?.message || `HTTP ${res.status}`;
+        const message =
+          (Array.isArray(j?.message) && j.message.join(', ')) || j?.message || `HTTP ${res.status}`;
         throw new Error(message);
       }
+      draft.markSaved();
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onChangeCapture={draft.touch}
+      onClose={close}
       title={mode === 'create' ? 'New Trade Debt / Payable' : 'Edit Debt'}
       subtitle="Amount owed to a creditor (trade payable, accrual, statutory obligation, etc.)."
       size="lg"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn variant="secondary" onClick={close}>
+            Cancel
+          </Btn>
           <Btn variant="primary" onClick={handleSubmit} loading={saving}>
             {mode === 'create' ? 'Create' : 'Save'}
           </Btn>
@@ -331,37 +682,122 @@ function DebtModal({
       }
     >
       {error && (
-        <div className="mb-3 text-sm rounded-lg px-3 py-2 border" style={{ color: 'var(--aurora-danger)', borderColor: 'var(--aurora-danger)', background: 'var(--aurora-danger-bg, #fef2f2)' }}>
+        <div
+          className="mb-3 text-sm rounded-lg px-3 py-2 border"
+          style={{
+            color: 'var(--aurora-danger)',
+            borderColor: 'var(--aurora-danger)',
+            background: 'var(--aurora-danger-bg, #fef2f2)',
+          }}
+        >
           {error}
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <FormSelect label="Company" required value={form.companyId} onChange={(e) => setField('companyId', e.target.value)} placeholder="— Select —">
-          {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        <FormSelect
+          label="Company"
+          required
+          value={form.companyId}
+          onChange={(e) => setField('companyId', e.target.value)}
+          placeholder="— Select —"
+        >
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
         </FormSelect>
-        <FormSelect label="Currency" value={form.currency} onChange={(e) => setField('currency', e.target.value)}>
-          {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        <FormSelect
+          label="Currency"
+          value={form.currency}
+          onChange={(e) => setField('currency', e.target.value)}
+        >
+          {CURRENCIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </FormSelect>
 
-        <FormInput label="Creditor Name" required value={form.creditorName} onChange={(e) => setField('creditorName', e.target.value)} />
-        <FormInput label="Creditor Contact" value={form.creditorContact} onChange={(e) => setField('creditorContact', e.target.value)} />
+        <FormInput
+          label="Creditor Name"
+          required
+          value={form.creditorName}
+          onChange={(e) => setField('creditorName', e.target.value)}
+        />
+        <FormInput
+          label="Creditor Contact"
+          value={form.creditorContact}
+          onChange={(e) => setField('creditorContact', e.target.value)}
+        />
 
-        <div className="col-span-2"><FormInput label="Description" required value={form.description} onChange={(e) => setField('description', e.target.value)} /></div>
+        <div className="col-span-2">
+          <FormInput
+            label="Description"
+            required
+            value={form.description}
+            onChange={(e) => setField('description', e.target.value)}
+          />
+        </div>
 
-        <FormInput label="Invoice Number" value={form.invoiceNumber} onChange={(e) => setField('invoiceNumber', e.target.value)} />
-        <FormInput label="Due Date" type="date" value={form.dueDate} onChange={(e) => setField('dueDate', e.target.value)} />
+        <FormInput
+          label="Invoice Number"
+          value={form.invoiceNumber}
+          onChange={(e) => setField('invoiceNumber', e.target.value)}
+        />
+        <FormDateField
+          label="Due Date"
+          value={form.dueDate}
+          onChange={(value) => setField('dueDate', value)}
+        />
 
-        <FormInput label="Amount" required={mode === 'create'} type="number" step="0.01" value={form.amount} onChange={(e) => setField('amount', e.target.value)} />
-        <FormInput label="Amount Paid" type="number" step="0.01" value={form.amountPaid} onChange={(e) => setField('amountPaid', e.target.value)} />
+        <FormInput
+          label="Amount"
+          required={mode === 'create'}
+          type="number"
+          step="0.01"
+          value={form.amount}
+          onChange={(e) => setField('amount', e.target.value)}
+        />
+        <FormInput
+          label="Amount Paid"
+          type="number"
+          step="0.01"
+          value={form.amountPaid}
+          onChange={(e) => setField('amountPaid', e.target.value)}
+        />
 
-        <FormSelect label="Status" value={form.status} onChange={(e) => setField('status', e.target.value)}>
-          {DEBT_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+        <FormSelect
+          label="Status"
+          value={form.status}
+          onChange={(e) => setField('status', e.target.value)}
+        >
+          {DEBT_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s.replace(/_/g, ' ')}
+            </option>
+          ))}
         </FormSelect>
-        <FormSelect label="Risk Level" value={form.riskLevel} onChange={(e) => setField('riskLevel', e.target.value)}>
-          {RISK_LEVELS.map((r) => <option key={r} value={r}>{r}</option>)}
+        <FormSelect
+          label="Risk Level"
+          value={form.riskLevel}
+          onChange={(e) => setField('riskLevel', e.target.value)}
+        >
+          {RISK_LEVELS.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
         </FormSelect>
 
-        <div className="col-span-2"><FormTextarea label="Notes" rows={2} value={form.notes} onChange={(e) => setField('notes', e.target.value)} /></div>
+        <div className="col-span-2">
+          <FormTextarea
+            label="Notes"
+            rows={2}
+            value={form.notes}
+            onChange={(e) => setField('notes', e.target.value)}
+          />
+        </div>
       </div>
     </Modal>
   );
@@ -370,7 +806,11 @@ function DebtModal({
 // ─── Delete Confirm (shared) ──────────────────────────────────────────────────
 
 function DeleteConfirm({
-  kind, label, id, onClose, onConfirmed,
+  kind,
+  label,
+  id,
+  onClose,
+  onConfirmed,
 }: {
   kind: 'loans' | 'debts';
   label: string;
@@ -381,7 +821,8 @@ function DeleteConfirm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const handleDelete = async () => {
-    setSaving(true); setError('');
+    setSaving(true);
+    setError('');
     try {
       const res = await fetch(`/api/backend/${kind}/${id}`, { method: 'DELETE' });
       if (!res.ok) {
@@ -391,7 +832,9 @@ function DeleteConfirm({
       onConfirmed();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
   return (
     <Modal
@@ -401,309 +844,581 @@ function DeleteConfirm({
       size="sm"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn variant="danger" onClick={handleDelete} loading={saving}>Delete</Btn>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="danger" onClick={handleDelete} loading={saving}>
+            Delete
+          </Btn>
         </>
       }
     >
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && (
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          {error}
+        </div>
+      )}
       <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
-        Soft-delete <strong>{label}</strong>? The record stays in the database for audit but is hidden from lists.
+        Soft-delete <strong>{label}</strong>? The record stays in the database for audit but is
+        hidden from lists.
       </p>
     </Modal>
   );
 }
 
 export default function LoansDebtsPage() {
-  const { hasPermission } = useAuth();
-  const [tab, setTab] = useState<'loans' | 'debts'>('loans');
-  const [companies, setCompanies] = useState<Company[]>([]);
-
-  const [loanData, setLoanData] = useState<Paginated<Loan> | null>(null);
-  const [debtData, setDebtData] = useState<Paginated<Debt> | null>(null);
-  const [loanSummary, setLoanSummary] = useState<LoanSummary | null>(null);
-  const [debtSummary, setDebtSummary] = useState<DebtSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-
+  const { hasPermission, loading: authLoading } = useAuth();
+  const readLoans = hasPermission('loans.read');
+  const readDebts = hasPermission('debts.read');
+  const [tab, setTab] = useState<'loans' | 'debts'>(readLoans ? 'loans' : 'debts');
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRisk, setFilterRisk] = useState('');
   const [page, setPage] = useState(1);
-
-  const canView = hasPermission('loans.read') || hasPermission('debts.read');
-  const canManageLoans = hasPermission('loans.create');
-  const canManageDebts = hasPermission('debts.create');
-
-  // CRUD modal state, kept separate per kind so a loan and a debt can never
-  // be open simultaneously and we don't mix shapes.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const inspector = useRef<HTMLHeadingElement>(null);
+  const selectionTrigger = useRef<HTMLButtonElement | null>(null);
   const [creatingLoan, setCreatingLoan] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [deletingLoan, setDeletingLoan] = useState<Loan | null>(null);
   const [creatingDebt, setCreatingDebt] = useState(false);
   const [editingDebt, setEditingDebt] = useState<Debt | null>(null);
   const [deletingDebt, setDeletingDebt] = useState<Debt | null>(null);
-
-  useEffect(() => {
-    fetch('/api/backend/companies?limit=50').then((r) => r.json())
-      .then((j) => setCompanies(Array.isArray(j.data?.data) ? j.data.data : Array.isArray(j.data) ? j.data : []));
-    fetch('/api/backend/loans/summary').then((r) => r.json()).then((j) => setLoanSummary(j.data ?? null));
-    fetch('/api/backend/debts/summary').then((r) => r.json()).then((j) => setDebtSummary(j.data ?? null));
-  }, []);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: '15' });
-      if (search.trim()) params.set('search', search.trim());
-      if (filterCompany) params.set('companyId', filterCompany);
-      if (filterStatus) params.set('status', filterStatus);
-      if (filterRisk) params.set('riskLevel', filterRisk);
-      if (tab === 'loans') {
-        if (filterType) params.set('obligationType', filterType);
-        const res = await fetch(`/api/backend/loans?${params}`);
-        const json = await res.json();
-        setLoanData(json.data ?? null);
-      } else {
-        const res = await fetch(`/api/backend/debts?${params}`);
-        const json = await res.json();
-        setDebtData(json.data ?? null);
-      }
-    } finally { setLoading(false); }
-  }, [tab, page, search, filterCompany, filterType, filterStatus, filterRisk]);
-
-  useEffect(() => { load(); }, [load]);
-
-  if (!canView) {
-    return <div className="p-6"><PageHeader title="Loans & Debts" subtitle="Group obligations" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
-  }
-
-  const filterSelectCls = 'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
-  const filterStyle = { borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' } as const;
-  const totalExposure = Number(loanSummary?.totalOutstandingBalance ?? 0) + Number(debtSummary?.totalOutstandingAmount ?? 0);
-
-  // Reload list + summary together after create/edit/delete.
-  const refresh = () => {
-    load();
-    fetch('/api/backend/loans/summary').then((r) => r.json()).then((j) => setLoanSummary(j.data ?? null));
-    fetch('/api/backend/debts/summary').then((r) => r.json()).then((j) => setDebtSummary(j.data ?? null));
+  const companies = useWorkspaceChoices<Company>('/companies', {}, readLoans || readDebts);
+  const query = {
+    page,
+    limit: 15,
+    ...(search.trim() ? { search: search.trim() } : {}),
+    ...(filterCompany ? { companyId: filterCompany } : {}),
+    ...(filterStatus ? { status: filterStatus } : {}),
+    ...(filterRisk ? { riskLevel: filterRisk } : {}),
+    ...(tab === 'loans' && filterType ? { obligationType: filterType } : {}),
   };
-
+  const records = useWorkspaceResource<Paginated<Loan | Debt>>(
+    `/${tab}`,
+    query,
+    tab === 'loans' ? readLoans : readDebts,
+  );
+  const loanSummary = useWorkspaceResource<LoanSummary>('/loans/summary', {}, readLoans);
+  const debtSummary = useWorkspaceResource<DebtSummary>('/debts/summary', {}, readDebts);
+  const rows = records.data?.data ?? [];
+  const selected = rows.find((row) => row.id === selectedId);
+  const loan = selected && tab === 'loans' ? (selected as Loan) : null;
+  const debt = selected && tab === 'debts' ? (selected as Debt) : null;
+  const canCreate = hasPermission(`${tab}.create`);
+  const canEdit = hasPermission(`${tab}.update`);
+  const canDelete = hasPermission(`${tab}.delete`);
+  const activeFilters = [filterCompany, filterType, filterStatus, filterRisk].filter(
+    Boolean,
+  ).length;
+  function changeFilter(setter: (value: string) => void, value: string) {
+    setter(value);
+    setPage(1);
+    setSelectedId(null);
+  }
+  function reset() {
+    setSearch('');
+    setFilterCompany('');
+    setFilterType('');
+    setFilterStatus('');
+    setFilterRisk('');
+    setPage(1);
+    setSelectedId(null);
+  }
+  function closeDetails() {
+    setSelectedId(null);
+    requestAnimationFrame(() => selectionTrigger.current?.focus());
+  }
+  function refresh() {
+    records.reload();
+    loanSummary.reload();
+    debtSummary.reload();
+  }
+  function saved() {
+    refresh();
+    showToast('success', 'Record saved');
+  }
+  function select(row: Loan | Debt, trigger: HTMLButtonElement) {
+    selectionTrigger.current = trigger;
+    setSelectedId(row.id);
+    requestAnimationFrame(() => inspector.current?.focus());
+  }
+  if (authLoading)
+    return (
+      <div className="business-workspace">
+        <PageHeader title="Loans & Debts" subtitle="Loading" />
+      </div>
+    );
+  if (!readLoans && !readDebts)
+    return (
+      <div className="business-workspace">
+        <PageHeader title="Loans & Debts" />
+        <PermissionDeniedState />
+      </div>
+    );
+  const description =
+    tab === 'loans'
+      ? 'Borrowing, balances and the next repayment, together.'
+      : 'Track creditors, due dates and outstanding trade obligations.';
   return (
-    <div className="p-6 space-y-6">
-      <PageHeader title="Loans & Debts" subtitle="Group obligations — loans, trade payables, and exposure" />
-
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard label="Active Loans" value={loanSummary?.activeCount ?? 0} hint={`TZS ${fmt(loanSummary?.totalOutstandingBalance ?? 0)}`} />
-        <StatCard label="Monthly Burden" value={fmt(loanSummary?.monthlyRepaymentBurden ?? 0)} hint="TZS / month" />
-        <StatCard label="High-Risk Loans" value={loanSummary?.highRiskCount ?? 0} hint="HIGH/CRITICAL" />
-        <StatCard label="Outstanding Debts" value={debtSummary?.outstandingCount ?? 0} hint={`TZS ${fmt(debtSummary?.totalOutstandingAmount ?? 0)}`} />
-        <StatCard label="Overdue Debts" value={debtSummary?.overdueCount ?? 0} hint="Past due" />
-        <StatCard label="Total Exposure" value={fmt(totalExposure)} hint="Loans + debts" />
-      </div>
-
-      {(loanSummary?.upcomingMaturity ?? 0) > 0 && (
-        <Card className="p-4 border-amber-300 bg-amber-50">
-          <div className="text-sm font-semibold text-amber-900">{loanSummary?.upcomingMaturity} loan(s) maturing within 90 days</div>
-        </Card>
-      )}
-
-      {tab === 'loans' && loanSummary?.byCompany?.length ? (
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--aurora-text)' }}>By Company</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {loanSummary.byCompany.map((row, i) => (
-              <div key={i} className="rounded-lg border p-3" style={{ borderColor: 'var(--aurora-border)' }}>
-                <div className="text-sm font-medium" style={{ color: 'var(--aurora-text)' }}>{row.companyName}</div>
-                {row.companyCode && <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{row.companyCode}</div>}
-                <div className="mt-2 text-2xl font-bold" style={{ color: 'var(--aurora-text)' }}>{row.count}</div>
-                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Outstanding: TZS {fmt(row.totalOutstanding ?? 0)}</div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
-
-      <div className="flex items-center justify-between border-b" style={{ borderColor: 'var(--aurora-border)' }}>
-        <div className="flex gap-2">
-          {(['loans', 'debts'] as const).map((k) => (
-            <button key={k} onClick={() => { setTab(k); setPage(1); setFilterStatus(''); setFilterType(''); }}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === k ? 'border-brand-600 text-brand-600' : 'border-transparent'}`}
-              style={tab === k ? {} : { color: 'var(--aurora-text-muted)' }}>
-              {k === 'loans' ? 'Loans' : 'Trade Debts & Payables'}
-            </button>
-          ))}
-        </div>
-        <div className="pb-1">
-          {tab === 'loans' && canManageLoans && (
-            <Btn variant="primary" size="sm" onClick={() => setCreatingLoan(true)}>+ New Loan</Btn>
-          )}
-          {tab === 'debts' && canManageDebts && (
-            <Btn variant="primary" size="sm" onClick={() => setCreatingDebt(true)}>+ New Debt</Btn>
-          )}
-        </div>
-      </div>
-
-      <PageToolbar
-        search={search} onSearch={(v) => { setSearch(v); setPage(1); }}
-        searchPlaceholder={tab === 'loans' ? 'Lender, reference…' : 'Creditor, invoice #…'}
-        filters={
+    <div className="business-workspace obligations-workspace">
+      <PageHeader
+        title="Loans & Debts"
+        subtitle={description}
+        actions={
           <>
-            <select value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
-              <option value="">All Companies</option>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            {tab === 'loans' && (
-              <select value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
-                <option value="">All Types</option>
-                {LOAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-              </select>
+            {hasPermission('loan_schedules.list') && (
+              <Link className="os-workspace-link" href="/accounting-engine/loan-repayments">
+                Repayment schedules
+              </Link>
             )}
-            <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
-              <option value="">All Status</option>
-              {(tab === 'loans' ? LOAN_STATUSES : DEBT_STATUSES).map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-            </select>
-            <select value={filterRisk} onChange={(e) => { setFilterRisk(e.target.value); setPage(1); }} className={filterSelectCls} style={filterStyle}>
-              <option value="">All Risk</option>
-              {RISK_LEVELS.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            {canCreate && (
+              <Btn
+                onClick={() => (tab === 'loans' ? setCreatingLoan(true) : setCreatingDebt(true))}
+              >
+                + New {tab === 'loans' ? 'loan' : 'debt'}
+              </Btn>
+            )}
           </>
         }
       />
-
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          {tab === 'loans' ? (
-            <table className="w-full text-sm min-w-[1200px]">
-              <thead>
-                <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
-                  <th className="px-4 py-3">Lender</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3 text-right">Principal</th>
-                  <th className="px-4 py-3 text-right">Outstanding</th>
-                  <th className="px-4 py-3 text-right">Rate</th>
-                  <th className="px-4 py-3">Maturity</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Risk</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? <tr><td colSpan={10}><PageSpinner /></td></tr>
-                  : !loanData?.data.length ? <tr><td colSpan={10} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No loans</td></tr>
-                  : loanData.data.map((l) => {
-                    const overdue = isOverdue(l.maturityDate) && l.status === 'ACTIVE';
-                    return (
-                      <tr key={l.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3">
-                          <Link href={`/group-control/loans-debts/loans/${l.id}`} className="text-brand-600 hover:underline">{l.lenderName}</Link>
-                          {l.loanReference && <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{l.loanReference}</div>}
-                        </td>
-                        <td className="px-4 py-3 text-xs">{l.obligationType.replace(/_/g, ' ')}</td>
-                        <td className="px-4 py-3 text-xs">{l.company?.name ?? '—'}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{l.currency} {fmt(l.principalAmount)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{l.currency} {fmt(l.outstandingBalance)}</td>
-                        <td className="px-4 py-3 text-right text-xs">{(Number(l.interestRate) * 100).toFixed(2)}%</td>
-                        <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue ? 'Overdue - ' : ''}{fmtDate(l.maturityDate)}</td>
-                        <td className="px-4 py-3"><StatusBadge value={l.status} /></td>
-                        <td className="px-4 py-3"><StatusBadge value={l.riskLevel} /></td>
-                        <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
-                          <Link
-                            href={`/group-control/loans-debts/loans/${l.id}`}
-                            className="inline-flex rounded-md px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
-                          >
-                            View
-                          </Link>
-                          {canManageLoans && (
-                            <>
-                            <Btn variant="ghost" size="xs" onClick={() => setEditingLoan(l)}>Edit</Btn>
-                            <Btn variant="ghost" size="xs" onClick={() => setDeletingLoan(l)}>Delete</Btn>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          ) : (
-            <table className="w-full text-sm min-w-[1100px]">
-              <thead>
-                <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
-                  <th className="px-4 py-3">Creditor</th>
-                  <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3">Invoice #</th>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3 text-right">Amount</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
-                  <th className="px-4 py-3">Due</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Risk</th>
-                  {canManageDebts && <th className="px-4 py-3 text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? <tr><td colSpan={canManageDebts ? 10 : 9}><PageSpinner /></td></tr>
-                  : !debtData?.data.length ? <tr><td colSpan={canManageDebts ? 10 : 9} className="px-4 py-10 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>No debts</td></tr>
-                  : debtData.data.map((d) => {
-                    const overdue = isOverdue(d.dueDate) && d.status !== 'PAID';
-                    return (
-                      <tr key={d.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3">{d.creditorName}</td>
-                        <td className="px-4 py-3 text-xs">{d.description}</td>
-                        <td className="px-4 py-3 font-mono text-xs">{d.invoiceNumber ?? '—'}</td>
-                        <td className="px-4 py-3 text-xs">{d.company?.name ?? '—'}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{d.currency} {fmt(d.amount)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{d.currency} {fmt(d.amountPaid)}</td>
-                        <td className={`px-4 py-3 text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{overdue ? 'Overdue - ' : ''}{fmtDate(d.dueDate)}</td>
-                        <td className="px-4 py-3"><StatusBadge value={d.status} /></td>
-                        <td className="px-4 py-3"><StatusBadge value={d.riskLevel} /></td>
-                        {canManageDebts && (
-                          <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
-                            <Btn variant="ghost" size="xs" onClick={() => setEditingDebt(d)}>Edit</Btn>
-                            <Btn variant="ghost" size="xs" onClick={() => setDeletingDebt(d)}>Delete</Btn>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          )}
-        </div>
-        {(() => {
-          const d = tab === 'loans' ? loanData : debtData;
-          if (!d || d.totalPages <= 1) return null;
-          return (
-            <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--aurora-border)' }}>
-              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>Page {d.page} of {d.totalPages} · {d.total} total</span>
-              <div className="flex gap-2">
-                <Btn variant="secondary" size="xs" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Btn>
-                <Btn variant="secondary" size="xs" disabled={page >= d.totalPages} onClick={() => setPage((p) => p + 1)}>Next</Btn>
-              </div>
+      <p className="text-xs mb-3" style={{ color: 'var(--aurora-text-muted)' }}>
+        Overview · all accessible companies
+      </p>
+      <div className="workspace-summary" aria-label="Obligation overview">
+        {readLoans && tab === 'loans' && (
+          <>
+            <div>
+              <span>Active loans</span>
+              <strong>{loanSummary.data?.activeCount ?? '—'}</strong>
             </div>
-          );
-        })()}
-      </Card>
-
-      {/* CRUD modals */}
+            <div>
+              <span>High-risk loans</span>
+              <strong>{loanSummary.data?.highRiskCount ?? '—'}</strong>
+            </div>
+            <div>
+              <span>Maturing within 90 days</span>
+              <strong>{loanSummary.data?.upcomingMaturity ?? '—'}</strong>
+            </div>
+          </>
+        )}
+        {readDebts && tab === 'debts' && (
+          <>
+            <div>
+              <span>Outstanding debts</span>
+              <strong>{debtSummary.data?.outstandingCount ?? '—'}</strong>
+            </div>
+            <div>
+              <span>Overdue debts</span>
+              <strong>{debtSummary.data?.overdueCount ?? '—'}</strong>
+            </div>
+          </>
+        )}
+      </div>
+      {(loanSummary.error || debtSummary.error) && (
+        <div role="alert" className="workspace-error my-4">
+          Summary unavailable. <button onClick={refresh}>Try again</button>
+        </div>
+      )}
+      <details className="obligation-exposure">
+        <summary>Exposure and company breakdown</summary>
+        <p>
+          All accessible companies. These recorded amounts are summed without currency conversion;
+          individual records show their currency.
+        </p>
+        <dl>
+          {readLoans && (
+            <>
+              <div>
+                <dt>Outstanding loans</dt>
+                <dd>{loanSummary.data ? fmt(loanSummary.data.totalOutstandingBalance) : '—'}</dd>
+              </div>
+              <div>
+                <dt>Monthly scheduled repayments</dt>
+                <dd>{loanSummary.data ? fmt(loanSummary.data.monthlyRepaymentBurden) : '—'}</dd>
+              </div>
+            </>
+          )}
+          {readDebts && (
+            <div>
+              <dt>Outstanding trade debts</dt>
+              <dd>{debtSummary.data ? fmt(debtSummary.data.totalOutstandingAmount) : '—'}</dd>
+            </div>
+          )}
+        </dl>
+        {!!loanSummary.data?.byCompany?.length && (
+          <ul>
+            {loanSummary.data.byCompany.map((company) => (
+              <li key={company.companyId ?? 'group'}>
+                <span>
+                  {company.companyName} · {company.count} loans
+                </span>
+                <strong>{fmt(company.totalOutstanding ?? 0)}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+      <div className="os-section-tabs my-5" role="group" aria-label="Obligation type">
+        {readLoans && (
+          <button
+            aria-pressed={tab === 'loans'}
+            onClick={() => {
+              setTab('loans');
+              reset();
+            }}
+          >
+            Loans
+          </button>
+        )}
+        {readDebts && (
+          <button
+            aria-pressed={tab === 'debts'}
+            onClick={() => {
+              setTab('debts');
+              reset();
+            }}
+          >
+            Trade debts & payables
+          </button>
+        )}
+      </div>
+      <PageToolbar
+        search={search}
+        onSearch={(value) => changeFilter(setSearch, value)}
+        searchPlaceholder={
+          tab === 'loans' ? 'Search lender or reference' : 'Search creditor or invoice'
+        }
+        collapsibleFilters
+        activeFilterCount={activeFilters}
+        actions={
+          <>
+            <Btn variant="secondary" onClick={refresh} disabled={records.loading}>
+              Refresh
+            </Btn>
+            {(activeFilters > 0 || search) && (
+              <Btn variant="ghost" onClick={reset}>
+                Reset
+              </Btn>
+            )}
+          </>
+        }
+        filters={
+          <>
+            <FormSelect
+              label="Company"
+              value={filterCompany}
+              onChange={(e) => changeFilter(setFilterCompany, e.target.value)}
+            >
+              <option value="">All companies</option>
+              {companies.rows.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </FormSelect>
+            {tab === 'loans' && (
+              <FormSelect
+                label="Loan type"
+                value={filterType}
+                onChange={(e) => changeFilter(setFilterType, e.target.value)}
+              >
+                <option value="">All types</option>
+                {LOAN_TYPES.map((value) => (
+                  <option key={value} value={value}>
+                    {value.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </FormSelect>
+            )}
+            <FormSelect
+              label="Status"
+              value={filterStatus}
+              onChange={(e) => changeFilter(setFilterStatus, e.target.value)}
+            >
+              <option value="">All statuses</option>
+              {(tab === 'loans' ? LOAN_STATUSES : DEBT_STATUSES).map((value) => (
+                <option key={value} value={value}>
+                  {value.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </FormSelect>
+            <FormSelect
+              label="Risk"
+              value={filterRisk}
+              onChange={(e) => changeFilter(setFilterRisk, e.target.value)}
+            >
+              <option value="">All risks</option>
+              {RISK_LEVELS.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </FormSelect>
+            {companies.error && (
+              <div role="alert">
+                {companies.error} <button onClick={companies.retry}>Retry companies</button>
+              </div>
+            )}
+          </>
+        }
+      />
+      <div className={`record-browser ${selected ? 'record-selected' : ''}`}>
+        <section
+          className="record-list"
+          aria-label={tab === 'loans' ? 'Loan register' : 'Debt register'}
+          aria-busy={records.loading}
+        >
+          <div className="record-list-heading">
+            <span>{tab === 'loans' ? 'Loan register' : 'Trade obligations'}</span>
+            <span aria-live="polite">
+              {records.loading ? 'Loading…' : `${records.data?.total ?? 0} records`}
+            </span>
+          </div>
+          {records.error ? (
+            <ErrorState message={records.error} onRetry={records.reload} />
+          ) : records.loading ? (
+            <PageSpinner />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title={search || activeFilters ? 'No matching obligations' : `No ${tab} recorded`}
+              description={
+                search || activeFilters
+                  ? 'Try another search or clear your filters.'
+                  : 'Add an obligation to keep its balance, due dates and history in one place.'
+              }
+              action={
+                search || activeFilters ? (
+                  <Btn variant="secondary" onClick={reset}>
+                    Clear filters
+                  </Btn>
+                ) : canCreate ? (
+                  <Btn
+                    onClick={() =>
+                      tab === 'loans' ? setCreatingLoan(true) : setCreatingDebt(true)
+                    }
+                  >
+                    Add {tab === 'loans' ? 'a loan' : 'a debt'}
+                  </Btn>
+                ) : undefined
+              }
+            />
+          ) : (
+            <ul className="obligation-list">
+              {rows.map((row) => {
+                const itemLoan = tab === 'loans' ? (row as Loan) : null;
+                const itemDebt = tab === 'debts' ? (row as Debt) : null;
+                const name = itemLoan?.lenderName ?? itemDebt?.creditorName ?? '';
+                const due = itemLoan?.maturityDate ?? itemDebt?.dueDate;
+                const amount =
+                  itemLoan?.outstandingBalance ??
+                  Number(itemDebt?.amount ?? 0) - Number(itemDebt?.amountPaid ?? 0);
+                return (
+                  <li key={row.id}>
+                    <button
+                      type="button"
+                      aria-pressed={selectedId === row.id}
+                      aria-label={`Review ${name}`}
+                      onClick={(event) => select(row, event.currentTarget)}
+                    >
+                      <div className="obligation-identity">
+                        <strong>{name}</strong>
+                        <span>
+                          {itemLoan?.loanReference ??
+                            itemDebt?.invoiceNumber ??
+                            row.company?.name ??
+                            'Group obligation'}
+                        </span>
+                        <small>
+                          {row.company?.name ?? 'Group'} ·{' '}
+                          {due ? `Due ${fmtDate(due)}` : 'No due date'}
+                        </small>
+                      </div>
+                      <div className="obligation-balance">
+                        <strong>
+                          {row.currency} {fmt(amount)}
+                        </strong>
+                        <span>Outstanding</span>
+                        <StatusBadge value={row.status} />
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {!!records.data && (
+            <div className="record-pagination">
+              <span>
+                Page {records.data.page} of {Math.max(1, records.data.totalPages)}
+              </span>
+              <button
+                disabled={page <= 1 || records.loading}
+                onClick={() => {
+                  setPage(page - 1);
+                  setSelectedId(null);
+                }}
+              >
+                Previous
+              </button>
+              <button
+                disabled={page >= records.data.totalPages || records.loading}
+                onClick={() => {
+                  setPage(page + 1);
+                  setSelectedId(null);
+                }}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </section>
+        <aside className="record-inspector" aria-label="Obligation details">
+          {selected ? (
+            <>
+              <header>
+                <span className="text-xs">{loan ? 'Loan overview' : 'Debt overview'}</span>
+                <button type="button" onClick={closeDetails}>
+                  Back to list
+                </button>
+              </header>
+              <h2 tabIndex={-1} ref={inspector}>
+                {loan?.lenderName ?? debt?.creditorName}
+              </h2>
+              <p className="record-reference">
+                {loan?.loanReference ??
+                  debt?.invoiceNumber ??
+                  selected.company?.name ??
+                  'Group obligation'}
+              </p>
+              <StatusBadge value={selected.status} />
+              <dl>
+                <div>
+                  <dt>Company</dt>
+                  <dd>{selected.company?.name ?? 'Group'}</dd>
+                </div>
+                <div>
+                  <dt>Outstanding balance</dt>
+                  <dd className="obligation-detail-amount">
+                    {selected.currency}{' '}
+                    {fmt(
+                      loan?.outstandingBalance ??
+                        Number(debt?.amount ?? 0) - Number(debt?.amountPaid ?? 0),
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{loan ? 'Principal' : 'Original amount'}</dt>
+                  <dd>
+                    {selected.currency} {fmt(loan?.principalAmount ?? debt?.amount ?? 0)}
+                  </dd>
+                </div>
+                {loan ? (
+                  <>
+                    <div>
+                      <dt>Loan type</dt>
+                      <dd>{loan.obligationType.replace(/_/g, ' ')}</dd>
+                    </div>
+                    <div>
+                      <dt>Interest rate</dt>
+                      <dd>{(Number(loan.interestRate) * 100).toFixed(2)}%</dd>
+                    </div>
+                    <div>
+                      <dt>Repayment frequency</dt>
+                      <dd>{loan.repaymentFrequency.replace(/_/g, ' ')}</dd>
+                    </div>
+                    <div>
+                      <dt>Maturity</dt>
+                      <dd>{fmtDate(loan.maturityDate)}</dd>
+                    </div>
+                    {loan.collateralDescription && (
+                      <div>
+                        <dt>Collateral</dt>
+                        <dd>{loan.collateralDescription}</dd>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <dt>Amount paid</dt>
+                      <dd>
+                        {selected.currency} {fmt(debt?.amountPaid ?? 0)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Due date</dt>
+                      <dd>{fmtDate(debt?.dueDate)}</dd>
+                    </div>
+                    <div>
+                      <dt>Description</dt>
+                      <dd>{debt?.description}</dd>
+                    </div>
+                  </>
+                )}
+                <div>
+                  <dt>Risk level</dt>
+                  <dd>
+                    <StatusBadge value={selected.riskLevel} />
+                  </dd>
+                </div>
+              </dl>
+              <div className="record-actions">
+                {loan && (
+                  <Link href={`/group-control/loans-debts/loans/${loan.id}`}>
+                    Open loan & payment history
+                  </Link>
+                )}
+                {canEdit && (
+                  <Btn
+                    variant="secondary"
+                    onClick={() => (loan ? setEditingLoan(loan) : setEditingDebt(debt))}
+                  >
+                    Edit details
+                  </Btn>
+                )}
+                {canDelete && (
+                  <Btn
+                    variant="ghost"
+                    onClick={() => (loan ? setDeletingLoan(loan) : setDeletingDebt(debt))}
+                  >
+                    Delete {loan ? 'loan' : 'debt'}
+                  </Btn>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="record-empty">
+              <h2>Your obligations, in focus</h2>
+              <p>Select a record to review its balance, dates and available actions.</p>
+            </div>
+          )}
+        </aside>
+      </div>
       {creatingLoan && (
         <LoanModal
           mode="create"
-          companies={companies}
+          companies={companies.rows}
           onClose={() => setCreatingLoan(false)}
-          onSaved={() => { setCreatingLoan(false); refresh(); }}
+          onSaved={() => {
+            setCreatingLoan(false);
+            saved();
+          }}
         />
       )}
       {editingLoan && (
         <LoanModal
           mode="edit"
           initial={editingLoan}
-          companies={companies}
+          companies={companies.rows}
           onClose={() => setEditingLoan(null)}
-          onSaved={() => { setEditingLoan(null); refresh(); }}
+          onSaved={() => {
+            setEditingLoan(null);
+            saved();
+          }}
         />
       )}
       {deletingLoan && (
@@ -712,25 +1427,35 @@ export default function LoansDebtsPage() {
           label={deletingLoan.lenderName}
           id={deletingLoan.id}
           onClose={() => setDeletingLoan(null)}
-          onConfirmed={() => { setDeletingLoan(null); refresh(); }}
+          onConfirmed={() => {
+            setDeletingLoan(null);
+            setSelectedId(null);
+            refresh();
+            showToast('success', 'Loan deleted');
+          }}
         />
       )}
-
       {creatingDebt && (
         <DebtModal
           mode="create"
-          companies={companies}
+          companies={companies.rows}
           onClose={() => setCreatingDebt(false)}
-          onSaved={() => { setCreatingDebt(false); refresh(); }}
+          onSaved={() => {
+            setCreatingDebt(false);
+            saved();
+          }}
         />
       )}
       {editingDebt && (
         <DebtModal
           mode="edit"
           initial={editingDebt}
-          companies={companies}
+          companies={companies.rows}
           onClose={() => setEditingDebt(null)}
-          onSaved={() => { setEditingDebt(null); refresh(); }}
+          onSaved={() => {
+            setEditingDebt(null);
+            saved();
+          }}
         />
       )}
       {deletingDebt && (
@@ -739,7 +1464,12 @@ export default function LoansDebtsPage() {
           label={deletingDebt.creditorName}
           id={deletingDebt.id}
           onClose={() => setDeletingDebt(null)}
-          onConfirmed={() => { setDeletingDebt(null); refresh(); }}
+          onConfirmed={() => {
+            setDeletingDebt(null);
+            setSelectedId(null);
+            refresh();
+            showToast('success', 'Debt deleted');
+          }}
         />
       )}
     </div>

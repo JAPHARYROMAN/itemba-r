@@ -182,6 +182,9 @@ function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (isObject(value)) {
     return `{${Object.keys(value)
+      // Optional DTO class fields exist as undefined in memory but are absent
+      // from the reviewed JSON. Compare the same canonical serialized scope.
+      .filter((key) => value[key] !== undefined)
       .sort()
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
       .join(',')}}`;

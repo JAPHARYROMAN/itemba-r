@@ -53,6 +53,15 @@ export class ProductsController {
     return this.service.findFamilies(query, user);
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
+  @Get('families/:id')
+  @AgentExcluded()
+  @RequireAnyPermissions('products.view', 'operations.dashboard.view')
+  findOneFamily(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOneFamily(id, user);
+  }
+
   @Post('families')
   @RequirePermissions('product_categories.manage')
   createFamily(@Body() dto: CreateProductFamilyDto, @CurrentUser() user: AuthUser) {

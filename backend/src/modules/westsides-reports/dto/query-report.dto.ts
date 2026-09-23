@@ -7,3 +7,8 @@ export class QueryReportDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;
 }
+
+/** Inventory snapshots support division scope without widening unrelated reports. */
+export class QueryInventoryReportDto extends QueryReportDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() divisionId?: string;
+}

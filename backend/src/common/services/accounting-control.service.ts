@@ -155,7 +155,9 @@ export class AccountingControlService {
     if (Number.isNaN(d.getTime())) {
       throw new BadRequestException('Transaction date is invalid');
     }
-    d.setHours(0, 0, 0, 0);
+    // Business dates and period boundaries are stored as UTC calendar dates.
+    // Local midnight shifts the first day into the previous period on TZ hosts.
+    d.setUTCHours(0, 0, 0, 0);
     return d;
   }
 }

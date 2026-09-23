@@ -72,6 +72,7 @@ export function StatCard({
 
   return (
     <div
+      data-stat-card
       className="rounded-xl border p-4 transition-shadow duration-200 hover:shadow-md"
       style={{
         background: 'var(--aurora-card)',

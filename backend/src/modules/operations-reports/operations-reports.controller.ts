@@ -61,6 +61,7 @@ class InventoryMovementsQueryDto {
 }
 
 class OperationsReportQueryDto {
+  @IsOptional() @IsNumberString() page?: string;
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;

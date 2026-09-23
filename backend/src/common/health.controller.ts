@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 import { Public } from './decorators/public.decorator';
@@ -45,7 +45,7 @@ export class HealthController {
     } catch {
       database = 'down';
     }
-    return {
+    const result = {
       status: database === 'up' ? 'ok' : 'critical',
       service: 'itemba-r-api',
       database,
@@ -53,5 +53,7 @@ export class HealthController {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     };
+    if (database === 'down') throw new ServiceUnavailableException(result);
+    return result;
   }
 }

@@ -1,9 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { Btn, ConfirmDialog, ErrorState, FormInput, FormSelect, Modal, PageSpinner, showToast } from '@/components/ui';
 import { ApiError, backendDelete, backendList, backendPatch, backendPost } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
@@ -81,7 +83,7 @@ function JobModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit'
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Backup Job' : 'Edit Backup Job'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2"><FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} /></div>
         <FormSelect label="Backup Type" required value={form.backupType} onChange={(e) => set('backupType', e.target.value)} disabled={mode === 'edit'}
@@ -104,8 +106,10 @@ function JobModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit'
 }
 
 export default function BackupJobsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('backup_jobs.view');
   const canManage = hasPermission('backup_jobs.manage');
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<BackupJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,13 +118,23 @@ export default function BackupJobsPage() {
   const [editing, setEditing] = useState<BackupJob | null>(null);
   const [deleting, setDeleting] = useState<BackupJob | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
     setLoadError('');
-    backendList<BackupJob>('/backup-jobs')
-      .then(setData)
-      .catch(() => { setData([]); setLoadError('Failed to load backup jobs.'); })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const rows = await backendList<BackupJob>('/backup-jobs', { signal: request.signal });
+      if (!request.current()) return;
+      setData(rows);
+    } catch (err) {
+      if (!request.current()) return;
+      setData([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load backup jobs.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -135,6 +149,15 @@ export default function BackupJobsPage() {
       showToast('error', 'Delete failed', err instanceof ApiError ? err.message : 'Could not delete backup job');
     }
   };
+
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Backup Jobs</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access restricted'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -152,7 +175,7 @@ export default function BackupJobsPage() {
         <ErrorState message={loadError} onRetry={load} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Code</th>
@@ -190,7 +213,7 @@ export default function BackupJobsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

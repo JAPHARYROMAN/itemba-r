@@ -19,6 +19,7 @@ export class DisciplinaryActionsService {
 
   private include() {
     return {
+      company: { select: { id: true, name: true } },
       employee: {
         select: { id: true, employeeCode: true, fullName: true, firstName: true, lastName: true },
       },
@@ -26,11 +27,6 @@ export class DisciplinaryActionsService {
       approvedBy: { select: { id: true, fullName: true } },
       dispute: { select: { id: true, disputeNumber: true, status: true } },
     };
-  }
-
-  private companyFilter(user: AuthUser): Record<string, string> {
-    if (user.role?.scope === 'GROUP' || !user.companyId) return {};
-    return { companyId: user.companyId };
   }
 
   async findAll(query: {
@@ -41,14 +37,22 @@ export class DisciplinaryActionsService {
     employeeId?: string;
     status?: string;
     type?: string;
+    search?: string;
   }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
-    const where: Record<string, unknown> = { deletedAt: null, ...this.companyFilter(query.user) };
+    const where: Record<string, unknown> = { deletedAt: null };
     applyCompanyScopeWhere(where, query.user, query.companyId);
     if (query.employeeId) where.employeeId = query.employeeId;
     if (query.status) where.status = query.status;
     if (query.type) where.type = query.type;
+    const search = query.search?.trim();
+    if (search)
+      where.OR = [
+        { actionNumber: { contains: search, mode: 'insensitive' } },
+        { employee: { fullName: { contains: search, mode: 'insensitive' } } },
+        { employee: { employeeCode: { contains: search, mode: 'insensitive' } } },
+      ];
     const [data, total] = await Promise.all([
       this.prisma.disciplinaryAction.findMany({
         where,
@@ -64,7 +68,7 @@ export class DisciplinaryActionsService {
 
   async findOne(id: string, user: AuthUser) {
     const row = await this.prisma.disciplinaryAction.findFirst({
-      where: { id, deletedAt: null, ...this.companyFilter(user) },
+      where: applyCompanyScopeWhere({ id, deletedAt: null }, user),
       include: this.include(),
     });
     if (!row) throw new NotFoundException('Disciplinary action not found');
@@ -73,6 +77,8 @@ export class DisciplinaryActionsService {
 
   async create(dto: CreateDisciplinaryActionDto, user: AuthUser) {
     assertCanAccessCompanyFromUser(user, dto.companyId, AccessLevel.WRITE);
+    await this.validateLinks(dto.companyId, dto.employeeId, dto.disputeId);
+    this.validateDates(dto.issuedAt, dto.effectiveFrom, dto.effectiveTo);
     const actionNumber = await this.codes.next({
       entityType: 'DisciplinaryAction',
       companyId: dto.companyId,
@@ -126,6 +132,7 @@ export class DisciplinaryActionsService {
    */
   async approve(actionId: string, user: AuthUser) {
     const action = await this.findOne(actionId, user);
+    assertCanAccessCompanyFromUser(user, action.companyId, AccessLevel.WRITE);
     const userId = user.id;
     this.assertCanApprove(action, userId);
     if (action.status !== 'PENDING_HR_APPROVAL' && action.status !== 'PENDING_GM_APPROVAL') {
@@ -226,6 +233,19 @@ export class DisciplinaryActionsService {
 
   async update(id: string, dto: UpdateDisciplinaryActionDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
+    if (
+      (dto.companyId !== undefined && dto.companyId !== existing.companyId) ||
+      (dto.employeeId !== undefined && dto.employeeId !== existing.employeeId)
+    )
+      throw new BadRequestException('The employee and company of this action cannot be changed.');
+    if (dto.disputeId)
+      await this.validateLinks(existing.companyId, existing.employeeId, dto.disputeId);
+    this.validateDates(
+      dto.issuedAt === undefined ? existing.issuedAt : dto.issuedAt,
+      dto.effectiveFrom === undefined ? existing.effectiveFrom : dto.effectiveFrom,
+      dto.effectiveTo === undefined ? existing.effectiveTo : dto.effectiveTo,
+    );
     const userId = user.id;
     const data: Record<string, unknown> = {};
     if (dto.type !== undefined) data.type = dto.type;
@@ -286,6 +306,7 @@ export class DisciplinaryActionsService {
 
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id, user);
+    assertCanAccessCompanyFromUser(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
     await this.prisma.disciplinaryAction.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
@@ -302,6 +323,33 @@ export class DisciplinaryActionsService {
     if (action.issuedById === userId) {
       throw new BadRequestException('Maker-checker: issuer cannot approve the disciplinary action');
     }
+  }
+
+  private async validateLinks(companyId: string, employeeId: string, disputeId?: string | null) {
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: employeeId, companyId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!employee) throw new BadRequestException('Choose an employee belonging to this company.');
+    if (disputeId) {
+      const dispute = await this.prisma.employmentDispute.findFirst({
+        where: { id: disputeId, companyId, employeeId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!dispute)
+        throw new BadRequestException('Choose a dispute belonging to this employee and company.');
+    }
+  }
+
+  private validateDates(
+    issuedAt: string | Date,
+    from?: string | Date | null,
+    to?: string | Date | null,
+  ) {
+    if (!issuedAt || !Number.isFinite(new Date(issuedAt).getTime()))
+      throw new BadRequestException('A valid issue date is required.');
+    if (from && to && new Date(to).getTime() < new Date(from).getTime())
+      throw new BadRequestException('Effective to must be on or after effective from.');
   }
 }
 

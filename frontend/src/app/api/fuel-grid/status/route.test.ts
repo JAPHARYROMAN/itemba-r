@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
+import { NextRequest, NextResponse } from 'next/server';
+vi.mock('@/app/api/auth/me/route', () => ({
+  GET: vi.fn(async () => NextResponse.json({ data: { permissions: ['fuel_grid.access'] } })),
+}));
+const request = () => new NextRequest('http://localhost/api/fuel-grid/status');
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -12,7 +17,7 @@ describe('Fuel Grid status route', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await GET();
+    const response = await GET(request());
     expect(await response.json()).toMatchObject({
       configured: false,
       available: false,
@@ -27,7 +32,7 @@ describe('Fuel Grid status route', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await GET();
+    const response = await GET(request());
     expect(await response.json()).toMatchObject({ configured: true, available: true });
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.fuelgrid.example.com/readyz',
@@ -39,7 +44,7 @@ describe('Fuel Grid status route', () => {
     vi.stubEnv('FUELGRID_APP_URL', 'https://fuelgrid.example.com');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unavailable')));
 
-    const response = await GET();
+    const response = await GET(request());
     expect(await response.json()).toMatchObject({ configured: true, available: false });
   });
 });

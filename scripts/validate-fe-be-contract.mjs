@@ -46,6 +46,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import ts from 'typescript';
 
 // Derived from this file's own location, not `process.cwd()`. The tree it walks
 // is a property of the checkout, not of where the command was typed, and a
@@ -154,7 +155,7 @@ function stripInterpolations(raw) {
       // A real path parameter always follows a '/'. An interpolation glued to
       // the previous segment (`...notifications${qs}`) or whose expression
       // builds a '?...' suffix is a query string — drop it.
-      const gluedToSegment = result.length > 0 && !result.endsWith('/');
+      const gluedToSegment = result.length > 0 && !result.endsWith('/') && j === raw.length;
       result += gluedToSegment || /['"`]\?/.test(expr) ? '' : ':param';
       i = j - 1;
     } else {
@@ -168,52 +169,6 @@ function normalizeCallPath(raw) {
   const templated = stripInterpolations(raw).split('?')[0];
   const normalized = `/${templated}`.replace(/\/+/g, '/').replace(/\/$/, '');
   return normalized === '' ? '/' : normalized;
-}
-
-function lineOf(source, index) {
-  return source.slice(0, index).split('\n').length;
-}
-
-/** Pull every HTTP-verb string out of a `method:` expression (handles ternaries). */
-function methodsFromOptions(optionsText) {
-  const methodExpr = optionsText.match(/method:\s*([^,}]+)/);
-  if (!methodExpr) return ['GET'];
-  const verbs = [...methodExpr[1].matchAll(/['"`](GET|POST|PUT|PATCH|DELETE)['"`]/g)].map(
-    (m) => m[1],
-  );
-  return verbs.length > 0 ? verbs : ['GET'];
-}
-
-/**
- * Walk a balanced argument list starting at the index of the opening paren.
- * Returns { span, firstArgEnd } — the full argument text and the offset (in
- * span) where the first top-level argument ends. Quote-aware so commas and
- * parens inside strings/templates don't confuse the depth counter.
- */
-function argumentSpan(source, openParen) {
-  let depth = 0;
-  let quote = null;
-  let firstArgEnd = -1;
-  for (let i = openParen; i < source.length; i += 1) {
-    const char = source[i];
-    if (quote) {
-      if (char === '\\') i += 1;
-      else if (char === quote) quote = null;
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') quote = char;
-    else if (char === '(' || char === '[' || char === '{') depth += 1;
-    else if (char === ')' || char === ']' || char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        const span = source.slice(openParen + 1, i);
-        return { span, firstArgEnd: firstArgEnd === -1 ? span.length : firstArgEnd };
-      }
-    } else if (char === ',' && depth === 1 && firstArgEnd === -1) {
-      firstArgEnd = i - openParen - 1;
-    }
-  }
-  return null;
 }
 
 /** All /api/backend path literals inside a first-argument expression. */
@@ -259,13 +214,6 @@ export function resolveBackendPaths(expression, constants, seen = new Set()) {
   return paths;
 }
 
-/** All plain path literals (helper calls take backend-relative paths). */
-function relativePathLiterals(argText) {
-  return [...argText.matchAll(/['"`]([^'"`]*)['"`]/g)]
-    .map((m) => m[1])
-    .filter((p) => p.startsWith('/') || /^[a-z][\w-]*(\/|$)/.test(p));
-}
-
 function pairPathsWithMethods(paths, methods) {
   if (paths.length === 0 || methods.length === 0) return [];
   // `cond ? createPath : editPath` + `method: cond ? 'POST' : 'PATCH'` line up
@@ -286,49 +234,122 @@ function pairPathsWithMethods(paths, methods) {
  * against real files can only assert what those files happen to contain today.
  */
 export function callsInSource(source, relative) {
+  return callsInSyntaxTree(source, relative);
+}
+
+// Parse expressions rather than treating every quoted substring as a URL.
+// Concatenations, nested templates and conditional endpoints are common in forms.
+function callsInSyntaxTree(source, relative) {
+  const tree = ts.createSourceFile(
+    relative,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const constants = new Map();
+  const gather = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const declarations = constants.get(node.name.text) ?? [];
+      declarations.push(node);
+      constants.set(node.name.text, declarations);
+    }
+    ts.forEachChild(node, gather);
+  };
+  gather(tree);
+  const unknown = '${dynamic}';
+  let conditions = new Map();
+  const product = (left, right) => left.flatMap((a) => right.map((b) => a + b));
+  const owner = (node) => {
+    for (let p = node.parent; p; p = p.parent) if (ts.isBlock(p) || ts.isSourceFile(p)) return p;
+  };
+  const contains = (scope, node) => scope && scope.pos <= node.pos && scope.end >= node.end;
+  function paths(node, seen = new Set()) {
+    if (!node) return [unknown];
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
+      return paths(node.expression, seen);
+    if (ts.isConditionalExpression(node)) {
+      const condition = conditions.get(node.condition.getText(tree));
+      if (condition !== undefined) return paths(condition ? node.whenTrue : node.whenFalse, seen);
+      return [...paths(node.whenTrue, seen), ...paths(node.whenFalse, seen)];
+    }
+    if (ts.isBinaryExpression(node)) {
+      if (node.operatorToken.kind === ts.SyntaxKind.PlusToken)
+        return product(paths(node.left, seen), paths(node.right, seen));
+      if (
+        [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(
+          node.operatorToken.kind,
+        )
+      )
+        return [...paths(node.left, seen), ...paths(node.right, seen)];
+    }
+    if (ts.isTemplateExpression(node)) {
+      let result = [node.head.text];
+      for (const part of node.templateSpans)
+        result = product(result, paths(part.expression, seen)).map((p) => p + part.literal.text);
+      return result;
+    }
+    if (ts.isIdentifier(node)) {
+      const declaration = (constants.get(node.text) ?? [])
+        .filter((d) => contains(owner(d), node))
+        .sort((a, b) => owner(a).end - owner(a).pos - (owner(b).end - owner(b).pos))[0];
+      if (declaration && !seen.has(declaration))
+        return paths(declaration.initializer, new Set([...seen, declaration]));
+    }
+    return [unknown];
+  }
   const calls = [];
   let dynamicCount = 0;
-  const constants = moduleConstants(source);
-  // `fetch\w*` rather than `fetch`: a module that takes its own `fetch` as an
-  // option calls it through a local alias (`fetchImpl`), and that indirection is
-  // exactly where an unchecked endpoint hides.
-  const callStartRe = new RegExp(
-    `\\b(fetch[A-Za-z_$]*|${Object.keys(HELPER_METHODS).join('|')}|backendFetch)(?:<[^>]*>)?\\(`,
-    'g',
-  );
-  let match;
-  while ((match = callStartRe.exec(source)) !== null) {
-    const callee = match[1];
-    const openParen = match.index + match[0].length - 1;
-    const spanInfo = argumentSpan(source, openParen);
-    if (!spanInfo) continue;
-    const firstArg = spanInfo.span.slice(0, spanInfo.firstArgEnd);
-    const rest = spanInfo.span.slice(spanInfo.firstArgEnd);
-    const line = lineOf(source, match.index);
-    let paths;
-    let methods;
-    if (callee.startsWith('fetch')) {
-      paths = resolveBackendPaths(firstArg, constants);
-      if (paths.length === 0) continue; // not a backend call (or fully dynamic URL)
-      methods = methodsFromOptions(rest);
-    } else {
-      paths = relativePathLiterals(firstArg);
-      if (paths.length === 0) {
-        dynamicCount += 1;
-        continue;
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const callee = node.expression.text;
+      const fetchCall = /^fetch[A-Za-z_$]*$/.test(callee);
+      if (fetchCall || callee in HELPER_METHODS || callee === 'backendFetch') {
+        conditions = new Map();
+        for (let child = node, parent = node.parent; parent; child = parent, parent = parent.parent)
+          if (ts.isIfStatement(parent))
+            conditions.set(parent.expression.getText(tree), child === parent.thenStatement);
+        const candidates = [...new Set(paths(node.arguments[0]))];
+        const resolved = candidates
+          .filter((p) =>
+            fetchCall
+              ? p.startsWith('/api/backend/')
+              : p !== unknown && (p.startsWith('/') || /^[a-z][\w-]*\//.test(p)),
+          )
+          .map((p) => (fetchCall ? p.slice('/api/backend/'.length) : p));
+        let methods = [HELPER_METHODS[callee] ?? 'GET'];
+        if (fetchCall || callee === 'backendFetch') {
+          const options = node.arguments[1];
+          const method =
+            options && ts.isObjectLiteralExpression(options)
+              ? options.properties.find(
+                  (p) =>
+                    ts.isPropertyAssignment(p) &&
+                    p.name.getText(tree).replace(/['"]/g, '') === 'method',
+                )
+              : null;
+          methods = method
+            ? paths(method.initializer).filter((v) => /^(GET|POST|PUT|PATCH|DELETE)$/.test(v))
+            : ['GET'];
+        }
+        if (!resolved.length && !fetchCall) dynamicCount++;
+        for (const pair of pairPathsWithMethods(resolved, methods))
+          calls.push({
+            method: pair.method,
+            route: normalizeCallPath(pair.path),
+            file: relative,
+            line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1,
+          });
       }
-      methods = callee === 'backendFetch' ? methodsFromOptions(rest) : [HELPER_METHODS[callee]];
     }
-    for (const pair of pairPathsWithMethods(paths, methods)) {
-      calls.push({
-        method: pair.method,
-        route: normalizeCallPath(pair.path),
-        file: relative,
-        line,
-      });
-    }
-  }
-  return { calls, dynamicCount };
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return {
+    calls: [...new Map(calls.map((c) => [`${c.line}:${c.method}:${c.route}`, c])).values()],
+    dynamicCount,
+  };
 }
 
 export function collectFrontendCalls() {
@@ -357,6 +378,13 @@ function segmentsMatch(callSegs, routeSegs) {
   return routeSegs.every((routeSeg, i) => {
     if (routeSeg.startsWith(':') || routeSeg === '*') return true;
     if (callSegs[i] === ':param') return true;
+    if (callSegs[i].includes(':param')) {
+      const pattern = callSegs[i]
+        .split(':param')
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('[^/]+');
+      return new RegExp(`^${pattern}$`).test(routeSeg);
+    }
     return routeSeg === callSegs[i];
   });
 }

@@ -1,4 +1,6 @@
 import { PERSISTED_SECRET_PLACEHOLDER } from '../../common/utils/persistent-secret-redaction';
+import { sha256Canonical } from '../msaidizi-tasks/msaidizi-input-bindings';
+import { createHash } from 'node:crypto';
 import {
   MAX_PERSISTED_OBSERVATION_BYTES,
   preparePersistedUntrustedObservation,
@@ -6,6 +8,17 @@ import {
 } from './persisted-observation';
 
 describe('persisted untrusted observations', () => {
+  it('retains original-byte evidence separately from canonical persisted-value evidence', () => {
+    const value = { z: 1, a: { z: true, a: ['one', 'two'] } };
+    const observation = persistedUntrustedObservation(value, 'ERP_RESULT');
+    expect(observation.sourceSha256).toBe(
+      createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+    );
+    expect(observation.valueDigest).toEqual({
+      algorithm: 'canonical-json-sha256-v1',
+      sha256: sha256Canonical({ a: { a: ['one', 'two'], z: true }, z: 1 }),
+    });
+  });
   it('retains a bounded ERP result for adaptive reasoning with explicit provenance', () => {
     const observation = persistedUntrustedObservation(
       { data: [{ id: 'invoice-1', amount: 1250 }], total: 1 },
@@ -34,6 +47,10 @@ describe('persisted untrusted observations', () => {
       value: { account: 'customer-1', accessToken: PERSISTED_SECRET_PLACEHOLDER },
     });
     expect(JSON.stringify(observation)).not.toContain('this-must-never-persist');
+    expect(observation.valueDigest).toEqual({
+      algorithm: 'canonical-json-sha256-v1',
+      sha256: sha256Canonical(observation.value),
+    });
   });
 
   it('requires the artifact path instead of truncating oversized JSON', () => {

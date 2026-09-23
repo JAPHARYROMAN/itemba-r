@@ -17,6 +17,8 @@ function makeBalance(over: Partial<Record<string, any>> = {}) {
   return {
     id: over.id ?? 'b1',
     productId: over.productId ?? 'p1',
+    companyId: over.companyId ?? 'company-A',
+    divisionId: over.divisionId ?? 'division-A',
     branchId: over.branchId ?? 'br1',
     quantityOnHand: new Prisma.Decimal(over.quantityOnHand ?? 0),
     quantityReserved: new Prisma.Decimal(over.quantityReserved ?? 0),
@@ -43,12 +45,97 @@ function makeService(balances: any[]) {
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-A' }),
   } as any;
   const service = new InventoryBalancesService(prisma, companyScope);
-  return { service, findMany };
+  return { service, findMany, companyScope };
 }
 
 const user = { id: 'u1', companyId: 'company-A', companyAccess: [] } as any;
 
 describe('InventoryBalancesService.liveStock risk KPIs', () => {
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid fallback %s before reading stock',
+    async (lowThreshold) => {
+      const { service, findMany } = makeService([]);
+      await expect(service.liveStock({ lowThreshold }, user)).rejects.toThrow(
+        'Low-stock threshold must be finite and non-negative',
+      );
+      expect(findMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps positive product thresholds authoritative and accepts a zero fallback', async () => {
+    const { service } = makeService([
+      makeBalance({
+        id: 'product-level',
+        quantityOnHand: 4,
+        reorderLevel: 5,
+        minimumStockLevel: 20,
+      }),
+      makeBalance({ id: 'fallback', quantityOnHand: 4 }),
+      makeBalance({ id: 'minimum', quantityOnHand: 4, minimumStockLevel: 8 }),
+    ]);
+    const result = await service.liveStock({ lowThreshold: 0 }, user);
+    const rows = result.locations.flatMap((l) => l.items);
+    expect(rows.find((r) => r.id === 'product-level')).toMatchObject({
+      lowThreshold: 5,
+      status: 'LOW',
+    });
+    expect(rows.find((r) => r.id === 'fallback')).toMatchObject({ lowThreshold: 0, status: 'OK' });
+    expect(rows.find((r) => r.id === 'minimum')).toMatchObject({ lowThreshold: 8, status: 'LOW' });
+  });
+
+  it('returns every stock position beyond the risk preview and preserves unassigned row scope', async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => ({
+      ...makeBalance({ id: String(i), quantityOnHand: 2 }),
+      branch: null,
+      branchId: null,
+      divisionId: null,
+    }));
+    const { service } = makeService(rows);
+    const result = await service.liveStock({ companyId: 'company-A' }, user);
+    expect(result.risk.criticalItems).toHaveLength(12);
+    expect(result.locations[0].items).toHaveLength(25);
+    expect(result.totals.totalSkus).toBe(25);
+    expect(result.locations[0]).toMatchObject({
+      locationId: 'unassigned',
+      branchId: null,
+      itemCount: 25,
+    });
+    expect(result.locations[0].items[0]).toMatchObject({
+      companyId: 'company-A',
+      divisionId: null,
+      branchId: null,
+      location: null,
+    });
+  });
+
+  it('combines product identifiers with scope and refuses inaccessible companies', async () => {
+    const { service, findMany, companyScope } = makeService([]);
+    await service.liveStock(
+      { companyId: 'company-A', divisionId: 'division', branchId: 'branch', search: 'cement' },
+      user,
+    );
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          companyId: 'company-A',
+          divisionId: 'division',
+          branchId: 'branch',
+          product: {
+            OR: ['name', 'productCode', 'sku', 'barcode'].map((key) => ({
+              [key]: { contains: 'cement', mode: 'insensitive' },
+            })),
+          },
+        },
+      }),
+    );
+    findMany.mockClear();
+    companyScope.companyWhereFor.mockRejectedValue(new Error('Company access denied'));
+    await expect(service.liveStock({ companyId: 'denied' }, user)).rejects.toThrow(
+      'Company access denied',
+    );
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it('applies division and branch filters without weakening company scope', async () => {
     const { service, findMany } = makeService([]);
 

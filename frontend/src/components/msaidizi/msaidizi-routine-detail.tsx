@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Skeleton } from '@/components/ui';
+import { FormDateField, Skeleton } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import {
   activateMsaidiziSchedule,
@@ -390,18 +390,13 @@ export function MsaidiziRoutineDetail({
               />
             </ControlField>
           </div>
-          <ControlField
+          <FormDateField
             label="Next run override"
             hint="Leave blank to clear the override and let activation/cadence choose the next run."
-          >
-            <input
-              type="datetime-local"
-              value={draft.nextRunAt}
-              onChange={(event) => setDraft({ ...draft, nextRunAt: event.target.value })}
-              className={CONTROL_INPUT_CLASS}
-              style={CONTROL_INPUT_STYLE}
-            />
-          </ControlField>
+            granularity="minute"
+            value={draft.nextRunAt}
+            onChange={(value) => setDraft({ ...draft, nextRunAt: value })}
+          />
           <ControlField label="Routine task template JSON">
             <textarea
               required

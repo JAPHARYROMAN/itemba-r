@@ -1,9 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import { PageSpinner, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, showToast } from '@/components/ui';
+import { PageSpinner, Modal, Btn, ConfirmDialog, FormInput, FormSelect, FormTextarea, showToast, ErrorState } from '@/components/ui';
 import { backendPost, backendPut, backendDelete, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 const TEMPLATE_TYPES = [
   'SALES_INVOICE', 'RECEIPT', 'DELIVERY_NOTE', 'PURCHASE_ORDER', 'QUOTATION', 'PROFORMA_INVOICE',
@@ -81,7 +83,7 @@ function TemplateModal({ mode, initial, companies, onClose, onSaved }: { mode: '
   return (
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Template' : 'Edit Template'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
-      {error && <div className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <FormInput label="Template Code" required value={form.templateCode} onChange={(e) => set('templateCode', e.target.value)} />
         <FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} />
@@ -106,11 +108,13 @@ function TemplateModal({ mode, initial, companies, onClose, onSaved }: { mode: '
 }
 
 export default function DocumentTemplatesPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('document_templates.list');
   const canCreate = hasPermission('document_templates.create');
   const canUpdate = hasPermission('document_templates.update');
   const canDelete = hasPermission('document_templates.delete');
   const showActions = canUpdate || canDelete;
+  const beginRequest = useRequestGuard();
 
   const [data, setData] = useState<DocumentTemplate[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -121,27 +125,41 @@ export default function DocumentTemplatesPage() {
   const [actionLoading, setActionLoading] = useState('');
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
+    setLoading(true);
     setLoadError('');
-    fetch('/api/backend/document-templates')
-      .then(r => r.json())
-      .then(res => setData(Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []))
-      .catch(() => {
-        setData([]);
-        setLoadError('Failed to load document templates. Check your connection and try again.');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const response = await fetch('/api/backend/document-templates', { signal: request.signal });
+      if (!request.current()) return;
+      if (!response.ok) throw new Error('Failed to load document templates.');
+      const res = await response.json();
+      if (!request.current()) return;
+      setData(Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : []);
+    } catch (err) {
+      if (!request.current()) return;
+      setData([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load document templates.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!canCreate && !canUpdate) return;
+    if (authLoading || !canView || (!canCreate && !canUpdate)) return;
+    const controller = new AbortController();
     // Company dropdown options for the template modal only; failure just shows "All companies".
-    fetch('/api/backend/companies?limit=100').then(r => r.json())
-      .then(res => setCompanies(res.data?.data ?? res.data ?? []))
+    fetch('/api/backend/companies?limit=100', { signal: controller.signal }).then(r => r.json())
+      .then(res => {
+        if (controller.signal.aborted) return;
+        setCompanies(res.data?.data ?? res.data ?? []);
+      })
       .catch(() => undefined);
-  }, [canCreate, canUpdate]);
+    return () => controller.abort();
+  }, [authLoading, canCreate, canUpdate, canView]);
 
   const onSaved = () => {
     setCreating(false); setEditing(null); load();
@@ -171,6 +189,15 @@ export default function DocumentTemplatesPage() {
     }
   };
 
+  if (authLoading || !canView) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900">Document Templates</h1>
+        <p className="text-gray-500 mt-1">{authLoading ? 'Loading' : 'Access Restricted'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -185,18 +212,13 @@ export default function DocumentTemplatesPage() {
         )}
       </div>
 
-      {loadError && (
-        <div className="mb-4 flex items-center justify-between text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <span>{loadError}</span>
-          <button onClick={load} className="text-red-700 font-medium hover:underline ml-3">Retry</button>
-        </div>
-      )}
-
       {loading ? (
         <PageSpinner label="Loading records" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => void load()} />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs uppercase bg-gray-50">
                 <th className="px-4 py-3">Template Code</th>
@@ -245,7 +267,7 @@ export default function DocumentTemplatesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
 

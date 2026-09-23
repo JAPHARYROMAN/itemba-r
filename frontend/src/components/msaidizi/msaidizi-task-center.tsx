@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EmptyState, ErrorState, Skeleton } from '@/components/ui';
+import { EmptyState, ErrorState, FormDateField, Skeleton } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import {
   activateMsaidiziMandate,
@@ -3164,18 +3164,13 @@ function MsaidiziMemoryWorkspace() {
               style={CONTROL_INPUT_STYLE}
             />
           </CompactField>
-          <CompactField
+          <FormDateField
             label="Expiry"
             hint="Optional. Leave blank to retain the memory indefinitely."
-          >
-            <input
-              type="datetime-local"
-              value={memoryExpiresAt}
-              onChange={(event) => setMemoryExpiresAt(event.target.value)}
-              className={CONTROL_INPUT_CLASS}
-              style={CONTROL_INPUT_STYLE}
-            />
-          </CompactField>
+            granularity="minute"
+            value={memoryExpiresAt}
+            onChange={setMemoryExpiresAt}
+          />
           <p className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
             Provenance: User supplied · Trust: Untrusted data (server enforced)
           </p>

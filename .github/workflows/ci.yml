@@ -86,9 +86,22 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.400'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify static boundary negative controls in isolated source copies
+        run: node --test scripts/verify-static-boundaries.test.mjs
       - name: Run tests, formatting, and fail-closed static verification
         run: |
           $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+          # `dotnet format` locates the CLI on its own rather than using the
+          # pinned path the runner passes, and on some runners it failed with
+          # "Unable to locate dotnet CLI" (main pushes of #58 and #59). Point
+          # every lookup it can make at the same pinned executable.
+          $dotnetRoot = Split-Path -Parent $dotnet
+          $env:DOTNET_HOST_PATH = $dotnet
+          $env:DOTNET_ROOT = $dotnetRoot
+          $env:PATH = "$dotnetRoot;$env:PATH"
           .\scripts\Invoke-ProtectedSourceVerification.ps1 -DotNetPath $dotnet
 
 
@@ -162,6 +175,8 @@ jobs:
         run: npx prisma generate --schema=../database/prisma/schema.prisma
       - name: Run tests (missing suites must fail the build)
         run: npm run test:ci
+      - name: Verify Msaidizi benchmark scoring
+        run: npm run test:msaidizi-benchmark-score
       - name: Run CRUD evidence and release-boundary tests
         run: npm run test:evidence-runner && npm run test:evidence-release && npm run test:evidence-promotion
       - name: Verify device-journal reconciliation source contract
@@ -212,6 +227,38 @@ jobs:
         run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
       - name: Run e2e smoke tests
         run: npm run test:e2e:ci
+      - name: Prove the Msaidizi chat expense workflow in a separate database
+        env:
+          DATABASE_URL: postgresql://itemba:1618@localhost:5432/msaidizi_chat_proof?schema=public
+          MSAIDIZI_CHAT_DISPOSABLE_DB: '1'
+          PGPASSWORD: '1618'
+        run: |
+          psql -h localhost -U itemba -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE msaidizi_chat_proof'
+          npx prisma migrate deploy --schema=../database/prisma/schema.prisma
+          npm run test:msaidizi-chat-workflow
+      - name: Verify durable Msaidizi pause, resume, cancellation and dead-worker recovery
+        env:
+          DATABASE_URL: postgresql://itemba:1618@localhost:5432/msaidizi_chat_proof?schema=public
+        run: npm run test:msaidizi-task-persistence
+      - name: Verify Msaidizi execution across owned worker-process restarts
+        env:
+          DATABASE_URL: postgresql://itemba:1618@localhost:5432/msaidizi_chat_proof?schema=public
+        run: |
+          npm run typecheck:msaidizi-worker-restart
+          npm run test:msaidizi-restart-guards
+          npm run test:msaidizi-worker-restart
+      - name: Verify authenticated Msaidizi task API across backend restarts
+        env:
+          DATABASE_URL: postgresql://itemba:1618@127.0.0.1:5432/msaidizi_chat_proof_api?schema=public
+          PGPASSWORD: '1618'
+        run: |
+          psql -h 127.0.0.1 -U itemba -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE msaidizi_chat_proof_api'
+          npx prisma migrate deploy --schema=../database/prisma/schema.prisma
+          npm run test:msaidizi-task-api-restart
+      - name: Verify cross-plan artifact preparation and I/O budgets across process restarts
+        env:
+          DATABASE_URL: postgresql://itemba:1618@127.0.0.1:5432/msaidizi_chat_proof_api?schema=public
+        run: npm run test:msaidizi-artifact-restart
       - name: Verify immutable Msaidizi plans, ceilings, and first-start clocks
         env:
           MSAIDIZI_PLAN_IMMUTABILITY_TEST_ALLOW_DISPOSABLE_DATABASE: 'true'
@@ -371,6 +418,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: Install release validation tooling
+        run: npm ci --ignore-scripts
       - name: Validate production and staging compose gates
         run: npm run verify:deploy
 

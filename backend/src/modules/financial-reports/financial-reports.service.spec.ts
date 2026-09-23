@@ -269,6 +269,27 @@ function jeLine(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe('FinancialReportsService reversal netting', () => {
+  it('recognizes dedicated cash mappings with custom account codes in cash flow', async () => {
+    const { service, findMany } = makeJournalService([
+      jeLine({
+        accountId: 'custom-cash',
+        debit: 100,
+        account: {
+          accountType: 'ASSET',
+          accountCode: 'CUSTOM-1',
+          accountSubType: null,
+          mappedCashAccount: { id: 'bank1' },
+        },
+      }),
+      jeLine({ credit: 100 }),
+    ]);
+    const report = await service.getCashFlow('co-1', '2026-09-01', '2026-09-30', user);
+    expect(report.reconciliation.cashMovementFromLedger).toBe(100);
+    expect(report.reconciliation.unexplainedDelta).toBe(0);
+    expect(findMany.mock.calls[0][0].include.account.select.mappedCashAccount).toEqual({
+      select: { id: true },
+    });
+  });
   it('getTrialBalance queries POSTED and REVERSED journal entries', async () => {
     const { service, findMany } = makeJournalService([]);
 

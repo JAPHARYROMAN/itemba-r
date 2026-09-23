@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -317,9 +317,7 @@ export class InventoryBalancesService {
    * status flag (OUT / LOW / OK) computed against `lowThreshold` (default 10).
    * Grouped by branch/location for the heatmap UI.
    *
-   * The schema has no per-SKU reorder point today, so the threshold is a
-   * single configurable knob; future work can replace it with a `Product.reorderPoint`
-   * field without breaking the response shape.
+   * Positive product reorder/minimum levels take precedence over the fallback.
    */
   async liveStock(
     query: {
@@ -332,6 +330,9 @@ export class InventoryBalancesService {
     user: AuthUser,
   ) {
     const lowThreshold = Number(query.lowThreshold ?? 10);
+    if (!Number.isFinite(lowThreshold) || lowThreshold < 0) {
+      throw new BadRequestException('Low-stock threshold must be finite and non-negative');
+    }
     const where: any = {};
     Object.assign(where, await this.companyScope.companyWhereFor(user, query.companyId));
     if (query.divisionId) {
@@ -402,6 +403,9 @@ export class InventoryBalancesService {
       const riskValueDecimal = status === 'OK' ? new Prisma.Decimal(0) : totalValueDecimal;
       return {
         id: b.id,
+        companyId: b.companyId,
+        divisionId: b.divisionId,
+        branchId: b.branchId,
         productId: b.productId,
         product: b.product,
         location: b.branch,

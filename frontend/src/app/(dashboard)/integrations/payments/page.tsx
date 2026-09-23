@@ -1,8 +1,11 @@
 'use client';
 
+import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, PageHeader, PageToolbar, StatusBadge, Btn, PageSpinner, StatCard, ErrorState } from '@/components/ui';
 import { unwrapList } from '@/lib/unwrap';
+import { useAuth } from '@/hooks/use-auth';
+import { useRequestGuard } from '@/hooks/use-request-guard';
 
 interface ExternalPayment {
   id: string;
@@ -18,6 +21,10 @@ interface ExternalPayment {
 }
 
 export default function ExternalPaymentsPage() {
+  const { hasPermission, loading: authLoading } = useAuth();
+  const canView = hasPermission('external_payments.view');
+  const beginRequest = useRequestGuard();
+
   const [payments, setPayments] = useState<ExternalPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ initiated: 0, successful: 0, failed: 0, pending: 0 });
@@ -27,28 +34,38 @@ export default function ExternalPaymentsPage() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (authLoading || !canView) return;
+    const request = beginRequest();
     setLoading(true);
     setLoadError('');
     const params = new URLSearchParams({ limit: '50' });
     if (filterStatus) params.set('status', filterStatus);
     if (filterContextType) params.set('paymentContextType', filterContextType);
     if (filterMethod) params.set('paymentMethod', filterMethod);
-    fetch(`/api/backend/external-payments?${params}`)
-      .then(r => r.json())
-      .then(data => {
-        const list = unwrapList<ExternalPayment>(data);
-        setPayments(list);
-        setStats({
-          initiated: list.filter(p => p.status === 'INITIATED').length,
-          successful: list.filter(p => p.status === 'SUCCESSFUL').length,
-          failed: list.filter(p => p.status === 'FAILED').length,
-          pending: list.filter(p => p.status === 'PENDING').length,
-        });
-      })
-      .catch(() => { setPayments([]); setLoadError('Failed to load external payments.'); })
-      .finally(() => setLoading(false));
-  }, [filterStatus, filterContextType, filterMethod]);
+    try {
+      const res = await fetch(`/api/backend/external-payments?${params}`, { signal: request.signal });
+      if (!request.current()) return;
+      const data = await res.json().catch(() => ({}));
+      if (!request.current()) return;
+      if (!res.ok) throw new Error(data?.message ?? 'Failed to load external payments.');
+      const list = unwrapList<ExternalPayment>(data);
+      setPayments(list);
+      setStats({
+        initiated: list.filter(p => p.status === 'INITIATED').length,
+        successful: list.filter(p => p.status === 'SUCCESSFUL').length,
+        failed: list.filter(p => p.status === 'FAILED').length,
+        pending: list.filter(p => p.status === 'PENDING').length,
+      });
+    } catch (err) {
+      if (!request.current()) return;
+      setPayments([]);
+      setStats({ initiated: 0, successful: 0, failed: 0, pending: 0 });
+      setLoadError(err instanceof Error ? err.message : 'Failed to load external payments.');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [authLoading, beginRequest, canView, filterStatus, filterContextType, filterMethod]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -60,6 +77,9 @@ export default function ExternalPaymentsPage() {
     } catch (e) { console.error(e); }
     finally { setActionId(null); }
   }
+
+  if (authLoading) return <div className="p-6"><PageHeader title="External Payments" subtitle="Loading" /></div>;
+  if (!canView) return <div className="p-6"><PageHeader title="External Payments" /><div className="mt-8 text-center"><p className="text-sm text-slate-500">Access Restricted</p></div></div>;
 
   return (
     <div className="p-6 space-y-4">
@@ -75,19 +95,19 @@ export default function ExternalPaymentsPage() {
       <PageToolbar
         filters={
           <>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
+            <select aria-label="All Status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }}>
               <option value="">All Status</option>
               {['INITIATED','PENDING','SUCCESSFUL','FAILED','REVERSED','CONFIRMED'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <input value={filterContextType} onChange={e => setFilterContextType(e.target.value)} placeholder="Context type…" className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }} />
-            <input value={filterMethod} onChange={e => setFilterMethod(e.target.value)} placeholder="Payment method…" className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }} />
+            <input aria-label="Context type…" value={filterContextType} onChange={e => setFilterContextType(e.target.value)} placeholder="Context type…" className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }} />
+            <input aria-label="Payment method…" value={filterMethod} onChange={e => setFilterMethod(e.target.value)} placeholder="Payment method…" className="text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500" style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)', color: 'var(--aurora-text)' }} />
           </>
         }
       />
 
       <Card className="overflow-hidden">
         {loading ? <PageSpinner /> : loadError ? <ErrorState message={loadError} onRetry={load} /> : (
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
                 <th className="px-4 py-3">Number</th>
@@ -130,7 +150,7 @@ export default function ExternalPaymentsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         )}
       </Card>
     </div>
