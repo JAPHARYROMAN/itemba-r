@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { usePersonalization } from '@/hooks/use-personalization';
 import { APPS, isAppPath, INVENTORY_APP_PERMISSIONS } from '@/lib/apps';
+import { ITEMBA_OS_ENABLED } from '@/lib/itemba-os-flag';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────────
 function Icon({ d, className = '' }: { d: string; className?: string }) {
@@ -144,7 +145,8 @@ export function isGroup(item: NavItem): item is NavGroup {
 
 export const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', iconKey: 'dashboard' },
-  { href: '/apps', label: 'Apps', iconKey: 'grid' },
+  // The app library is part of the OS shell; with the shell off it has no page.
+  { href: '/apps', label: 'Apps', iconKey: 'grid', sidebarHidden: !ITEMBA_OS_ENABLED },
   {
     href: '/fuel-reporting',
     label: 'Fuel Reporting',
@@ -162,7 +164,9 @@ export const NAV: NavItem[] = [
     iconKey: app.iconKey,
     permission: app.permission,
     permissionsAny: app.permissionsAny,
-    sidebarHidden: true,
+    // With the OS shell off there is no app library, so Fuel Grid keeps the
+    // sidebar row it had before the OS.
+    sidebarHidden: ITEMBA_OS_ENABLED || app.id !== 'fuel-grid',
   })),
   {
     label: 'Records Book',

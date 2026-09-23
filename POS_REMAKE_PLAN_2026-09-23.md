@@ -24,7 +24,7 @@ These were learned in production or in adversarial review. Every phase must keep
 5. **Company-scoped unique indexes** decide create races, not read-then-write checks.
 6. **One clock** for capture age (`capturedAgoMs`) and **one business-day timezone** for both ends.
 7. **Cost-blindness is structural.** POS reads use explicit `select`s and never `include`. No buying cost, margin or average cost ever reaches a rep's screen, including in error messages (this matters for price editing, §5).
-8. **Offline cash selling works from a cold start.** A bound terminal with a cached session must reach the till with no network. *This is currently broken on `itemba-os` (§3).*
+8. **Offline cash selling works from a cold start.** A bound terminal with a cached session must reach the till with no network. *Broken by the OS checkpoint and fixed in Phase 0 (§3).*
 9. Owner rulings still in force: purchases are for managers only; integer counting; **no camera scanning** (hardware scanners are fine, see §6); Swahili-first copy with an English toggle.
 
 ## 3. Prerequisites (before any new UI)
@@ -42,7 +42,7 @@ These were learned in production or in adversarial review. Every phase must keep
 |---|---|
 | P1 offline cold start | **Fixed.** `mobile-pos-lite.tsx` grants the POS when `!user && authOffline`. New `mobile-pos-lite.offline-auth.test.tsx` fails against the old code and passes now; it also pins that a signed-in user without `.use`, and a signed-out user with the server reachable, are still refused. |
 | P2 test fixtures | **Fixed.** The `useAuth` mock line was updated in all 8 POS suites (no assertion changed, characterization suite included): 16 files / 306 tests green. Also fixed four other stale fixtures from the phase 5 sweep (notifications, scheduled reports, Westsides reports, quotation print). |
-| P3 base branch | **Waiting on the owner.** Landing `itemba-os` on `main` ships the OS shell to every user on the next deploy, because the shell has no flag. That needs its own go-ahead: either a release decision or adding a flag first. |
+| P3 base branch | **Owner chose option 1: add a switch, then land on `main`.** The switch `NEXT_PUBLIC_ITEMBA_OS_ENABLED` (build-time, off unless exactly `"true"`) is added. Off gives back the pre-OS sidebar/topbar shell, the original sign-in page, `/` → `/dashboard`, and the Fuel Grid sidebar row; `/desktop` and `/apps` redirect to `/dashboard`. It is plumbed through the frontend Dockerfile, both compose files and the env examples (default `false`); tests and local dev run with it on. Pages, APIs, migrations and the POS are not switched, so they ship either way. Merging to `main` is the remaining step. |
 | P4 named container | **Fixed** in code (`.desktop-window-content` now declares `os-workspace`). **Live visual review still open.** A default 1080px window now triggers the ≤1100px and ≤1050px narrowing rules in several apps. |
 
 ## 4. Architecture

@@ -8,6 +8,8 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { NAV, isGroup, type NavItem } from '@/components/layout/sidebar';
 import { DesktopShell as OsShell } from '@/components/os/desktop-shell';
+import { LegacyShell } from '@/components/layout/legacy-shell';
+import { ITEMBA_OS_ENABLED } from '@/lib/itemba-os-flag';
 import { AuthProvider } from '@/contexts/auth-context';
 import { useAuth } from '@/hooks/use-auth';
 import { initTheme } from '@/lib/design-system/theme';
@@ -137,7 +139,8 @@ export default function DashboardClientLayout({
 
   useEffect(() => {
     const label = titleForPath(pathname ?? '');
-    document.title = label ? `${label} · ITEMBA OS` : 'ITEMBA OS';
+    if (ITEMBA_OS_ENABLED) document.title = label ? `${label} · ITEMBA OS` : 'ITEMBA OS';
+    else document.title = label ? `${label} · Itemba` : 'Itemba OS';
   }, [pathname]);
 
   return (
@@ -163,7 +166,11 @@ export default function DashboardClientLayout({
                     // button and no Ctrl+J — the boundary is structural, not a
                     // runtime pathname check anyone can forget to write.
                     <MsaidiziLauncherProvider>
-                      <OsShell appUrls={appUrls}>{children}</OsShell>
+                      {ITEMBA_OS_ENABLED ? (
+                        <OsShell appUrls={appUrls}>{children}</OsShell>
+                      ) : (
+                        <LegacyShell>{children}</LegacyShell>
+                      )}
                     </MsaidiziLauncherProvider>
                   )}
                 </CommandPaletteProvider>
