@@ -788,23 +788,23 @@ model MsaidiziTask {
   maxExternalEgressBytes BigInt  @default(262144000)
   maxModelCostUsd        Decimal @default(20.0) @db.Decimal(16, 6)
 
-  modelTurns                  Int     @default(0)
-  attemptedToolCalls          Int     @default(0)
-  executedToolCalls           Int     @default(0)
-  mutations                   Int     @default(0)
-  inputTokens                 BigInt  @default(0)
-  outputTokens                BigInt  @default(0)
-  modelCostUsd                Decimal @default(0) @db.Decimal(16, 6)
-  bytesRead                   BigInt  @default(0)
-  bytesWritten                BigInt  @default(0)
-  externalEgressBytes         BigInt  @default(0)
+  modelTurns                  Int       @default(0)
+  attemptedToolCalls          Int       @default(0)
+  executedToolCalls           Int       @default(0)
+  mutations                   Int       @default(0)
+  inputTokens                 BigInt    @default(0)
+  outputTokens                BigInt    @default(0)
+  modelCostUsd                Decimal   @default(0) @db.Decimal(16, 6)
+  bytesRead                   BigInt    @default(0)
+  bytesWritten                BigInt    @default(0)
+  externalEgressBytes         BigInt    @default(0)
   /// Egress ceilings already issued to active host actions. This is reserved,
   /// not spent, and is released atomically when the action settles.
-  reservedExternalEgressBytes BigInt  @default(0)
+  reservedExternalEgressBytes BigInt    @default(0)
   /// Database-clock wall time consumed since the task first entered RUNNING.
   /// This hard-clock continues through pause, cancellation, and replanning;
   /// the database trigger owns this value so application retries cannot reset it.
-  consumedWallTimeMs          BigInt  @default(0)
+  consumedWallTimeMs          BigInt    @default(0)
   /// Last database-clock boundary folded into consumedWallTimeMs. It remains
   /// live for every started, non-terminal task and is cleared on terminal state.
   wallTimeCheckpointAt        DateTime?
@@ -820,12 +820,12 @@ model MsaidiziTask {
   createdAt         DateTime  @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"))
   updatedAt         DateTime  @updatedAt
 
-  principal                MsaidiziPrincipal         @relation(fields: [principalId], references: [id], onDelete: Restrict)
-  initiatedByUser          User?                     @relation("MsaidiziTaskInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
-  company                  Company?                  @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  mandate                  MsaidiziMandate?          @relation(fields: [mandateId], references: [id], onDelete: SetNull)
-  schedule                 MsaidiziSchedule?         @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  proposalUsage            MsaidiziProposalUsage?    @relation(fields: [proposalUsageId], references: [id], onDelete: Restrict)
+  principal                MsaidiziPrincipal             @relation(fields: [principalId], references: [id], onDelete: Restrict)
+  initiatedByUser          User?                         @relation("MsaidiziTaskInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+  company                  Company?                      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  mandate                  MsaidiziMandate?              @relation(fields: [mandateId], references: [id], onDelete: SetNull)
+  schedule                 MsaidiziSchedule?             @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  proposalUsage            MsaidiziProposalUsage?        @relation(fields: [proposalUsageId], references: [id], onDelete: Restrict)
   planVersions             MsaidiziPlanVersion[]
   steps                    MsaidiziTaskStep[]
   toolAttempts             MsaidiziToolAttempt[]
@@ -862,8 +862,8 @@ model MsaidiziPlanVersion {
   sourceProposalDigest String?
   createdAt            DateTime @default(now())
 
-  task                     MsaidiziTask              @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  createdByUser            User?                     @relation("MsaidiziPlanVersionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  task                     MsaidiziTask                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdByUser            User?                         @relation("MsaidiziPlanVersionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   steps                    MsaidiziTaskStep[]
   reasoningTurns           MsaidiziReasoningTurn[]
   proposedUpdateCandidates MsaidiziUpdateCandidate[]
@@ -915,13 +915,13 @@ model MsaidiziTaskStep {
   createdAt              DateTime                @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"))
   updatedAt              DateTime                @updatedAt
 
-  task                     MsaidiziTask              @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  planVersion              MsaidiziPlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  task                     MsaidiziTask                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  planVersion              MsaidiziPlanVersion           @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
   toolAttempts             MsaidiziToolAttempt[]
   artifacts                MsaidiziArtifact[]
   deviceLeases             MsaidiziDeviceLease[]
   hostActions              MsaidiziHostAction[]
-  reasoningTurns           MsaidiziReasoningTurn[]   @relation("MsaidiziReasoningCheckpointStep")
+  reasoningTurns           MsaidiziReasoningTurn[]       @relation("MsaidiziReasoningCheckpointStep")
   proposedUpdateCandidates MsaidiziUpdateCandidate[]
   updateEvaluationRuns     MsaidiziUpdateEvaluationRun[]
 
@@ -933,35 +933,35 @@ model MsaidiziTaskStep {
 
 /// Every attempted dispatch, including policy rejection, is counted and kept.
 model MsaidiziToolAttempt {
-  id                   String                    @id @default(uuid())
-  taskId               String
-  stepId               String
-  attemptNumber        Int
-  toolName             String
-  argumentsRedacted    Json
-  argsDigest           String
-  idempotencyKey       String                    @unique
+  id                      String                    @id @default(uuid())
+  taskId                  String
+  stepId                  String
+  attemptNumber           Int
+  toolName                String
+  argumentsRedacted       Json
+  argsDigest              String
+  idempotencyKey          String                    @unique
   /// SHA-256 of the one-shot ERP task JWT jti. The bearer itself is never stored.
-  credentialJtiDigest  String?                   @unique
-  credentialConsumedAt DateTime?
-  status               MsaidiziToolAttemptStatus @default(REQUESTED)
-  rejectionReason      String?
-  resultSummary        Json?
+  credentialJtiDigest     String?                   @unique
+  credentialConsumedAt    DateTime?
+  status                  MsaidiziToolAttemptStatus @default(REQUESTED)
+  rejectionReason         String?
+  resultSummary           Json?
   /// Canonical value-free graph for the exact arguments dispatched by this
   /// attempt. Secret-reference identifiers never appear here, only digests.
   resolvedInputProvenance Json?
-  inputProvenanceSha256 String?                   @db.Char(64)
-  errorCode            String?
-  errorMessage         String?
-  uncertainOutcome     Boolean                   @default(false)
-  startedAt            DateTime?
-  endedAt              DateTime?
-  createdAt            DateTime                  @default(now())
+  inputProvenanceSha256   String?                   @db.Char(64)
+  errorCode               String?
+  errorMessage            String?
+  uncertainOutcome        Boolean                   @default(false)
+  startedAt               DateTime?
+  endedAt                 DateTime?
+  createdAt               DateTime                  @default(now())
 
-  task MsaidiziTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  step MsaidiziTaskStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  task                MsaidiziTask                 @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step                MsaidiziTaskStep             @relation(fields: [stepId], references: [id], onDelete: Cascade)
   updateEvaluationRun MsaidiziUpdateEvaluationRun?
-  hostAction MsaidiziHostAction?
+  hostAction          MsaidiziHostAction?
 
   @@unique([stepId, attemptNumber])
   @@index([taskId, createdAt])
@@ -1243,14 +1243,14 @@ model MsaidiziArtifact {
   provenance     Json
   createdAt      DateTime                        @default(now())
 
-  task               MsaidiziTask                     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  step               MsaidiziTaskStep?                @relation(fields: [stepId], references: [id], onDelete: SetNull)
-  sourceForUpdates   MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateSourceArtifact")
-  rollbackForUpdates MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateRollbackArtifact")
-  reportForUpdates   MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateReportArtifact")
-  generatedForUpdates MsaidiziUpdateCandidate[]       @relation("MsaidiziUpdateGeneratedArtifact")
-  generatedForEvaluationRuns MsaidiziUpdateEvaluationRun[] @relation("MsaidiziGeneratedUpdateArtifact")
-  trustedEvidence    MsaidiziTrustedArtifactEvidence?
+  task                       MsaidiziTask                     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  step                       MsaidiziTaskStep?                @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  sourceForUpdates           MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateSourceArtifact")
+  rollbackForUpdates         MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateRollbackArtifact")
+  reportForUpdates           MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateReportArtifact")
+  generatedForUpdates        MsaidiziUpdateCandidate[]        @relation("MsaidiziUpdateGeneratedArtifact")
+  generatedForEvaluationRuns MsaidiziUpdateEvaluationRun[]    @relation("MsaidiziGeneratedUpdateArtifact")
+  trustedEvidence            MsaidiziTrustedArtifactEvidence?
 
   @@index([taskId, createdAt])
   @@index([stepId, createdAt])
@@ -1335,11 +1335,11 @@ model MsaidiziDevice {
 /// Mutable CAS pointer only. The referenced records remain append-only and
 /// contain journal digests/identifiers, never payload JSON or tool output.
 model MsaidiziDeviceJournalHead {
-  deviceId     String   @id
-  sequence     Int      @default(0)
-  hashVersion  Int      @default(2)
-  entryHash    String   @db.Char(64)
-  reconciledAt DateTime @default(now())
+  deviceId            String    @id
+  sequence            Int       @default(0)
+  hashVersion         Int       @default(2)
+  entryHash           String    @db.Char(64)
+  reconciledAt        DateTime  @default(now())
   /// Null until the device has explicitly ACK-bound its complete local head.
   exactAcknowledgedAt DateTime?
 
@@ -1484,7 +1484,7 @@ model MsaidiziHostAction {
   /// Privacy-preserving route evidence; raw DNS answers and selected IPs are never stored.
   egressReservationDnsAnswerSetSha256   String?                  @db.Char(64)
   egressConnectionDnsAnswerSetSha256    String?                  @db.Char(64)
-  egressSelectedAddressSha256            String?                  @db.Char(64)
+  egressSelectedAddressSha256           String?                  @db.Char(64)
   errorCode                             String?
   queuedAt                              DateTime                 @default(now())
   dispatchedAt                          DateTime?
@@ -1540,25 +1540,25 @@ model MsaidiziHostActionDispatch {
 /// Durable protocol-v3 revocation state for an execute authorization whose
 /// short database lease expired before any device Prepared receipt arrived.
 model MsaidiziHostActionFence {
-  fenceId                     String                        @id @default(uuid())
-  hostActionId                String                        @unique
-  deviceId                    String
-  status                      MsaidiziHostActionFenceStatus @default(PENDING)
-  oldLeaseId                  String
-  oldLeaseFencingToken        BigInt
-  oldActionTokenDigest        String                        @db.Char(64)
-  journalPreviousSequence     Int
-  journalPreviousHash         String                        @db.Char(64)
-  dispatchCount               Int                           @default(0)
-  maxDispatches               Int                           @default(3)
-  dispatchedAt                DateTime?
-  receiptDigest               String?                       @unique @db.Char(64)
-  tombstoneSequence           Int?
-  tombstonePreviousHash       String?                       @db.Char(64)
-  tombstoneHash               String?                       @db.Char(64)
-  acknowledgedAt              DateTime?
-  createdAt                   DateTime                      @default(now())
-  updatedAt                   DateTime                      @updatedAt
+  fenceId                 String                        @id @default(uuid())
+  hostActionId            String                        @unique
+  deviceId                String
+  status                  MsaidiziHostActionFenceStatus @default(PENDING)
+  oldLeaseId              String
+  oldLeaseFencingToken    BigInt
+  oldActionTokenDigest    String                        @db.Char(64)
+  journalPreviousSequence Int
+  journalPreviousHash     String                        @db.Char(64)
+  dispatchCount           Int                           @default(0)
+  maxDispatches           Int                           @default(3)
+  dispatchedAt            DateTime?
+  receiptDigest           String?                       @unique @db.Char(64)
+  tombstoneSequence       Int?
+  tombstonePreviousHash   String?                       @db.Char(64)
+  tombstoneHash           String?                       @db.Char(64)
+  acknowledgedAt          DateTime?
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
 
   hostAction MsaidiziHostAction                @relation(fields: [hostActionId], references: [id], onDelete: Cascade)
   device     MsaidiziDevice                    @relation(fields: [deviceId], references: [id], onDelete: Restrict)
@@ -1714,64 +1714,64 @@ model MsaidiziUpdateCandidate {
 /// artifact-verifier, and two independent model-review attestations can move
 /// its candidate into APPROVED.
 model MsaidiziUpdateEvaluationRun {
-  id                         String                            @id @default(uuid())
-  candidateId                String                            @unique
-  taskId                     String
-  planVersionId              String
-  stepId                     String
-  attemptId                  String                            @unique
-  generationArtifactId       String                            @unique
-  generationArtifactSha256   String                            @db.Char(64)
-  generationManifestSha256   String                            @db.Char(64)
-  requestDigest              String                            @unique @db.Char(64)
-  evaluationRunId            String                            @unique
-  generatorPrincipalId       String
-  generatorModelId           String
-  policyVersion              String
-  policyDigest               String                            @db.Char(64)
-  requiredChecks             Json
-  provenance                 Json
-  status                     MsaidiziUpdateEvaluationRunStatus @default(QUEUED)
+  id                       String                            @id @default(uuid())
+  candidateId              String                            @unique
+  taskId                   String
+  planVersionId            String
+  stepId                   String
+  attemptId                String                            @unique
+  generationArtifactId     String                            @unique
+  generationArtifactSha256 String                            @db.Char(64)
+  generationManifestSha256 String                            @db.Char(64)
+  requestDigest            String                            @unique @db.Char(64)
+  evaluationRunId          String                            @unique
+  generatorPrincipalId     String
+  generatorModelId         String
+  policyVersion            String
+  policyDigest             String                            @db.Char(64)
+  requiredChecks           Json
+  provenance               Json
+  status                   MsaidiziUpdateEvaluationRunStatus @default(QUEUED)
 
-  maxWallTimeSeconds         Int
-  maxCpuTimeSeconds          Int
-  maxBytesRead               BigInt
-  maxBytesWritten            BigInt
-  maxExternalEgressBytes     BigInt
-  maxModelTurns              Int
-  maxModelInputTokens        BigInt
-  maxModelOutputTokens       BigInt
-  maxModelCostMicrousd       BigInt
+  maxWallTimeSeconds     Int
+  maxCpuTimeSeconds      Int
+  maxBytesRead           BigInt
+  maxBytesWritten        BigInt
+  maxExternalEgressBytes BigInt
+  maxModelTurns          Int
+  maxModelInputTokens    BigInt
+  maxModelOutputTokens   BigInt
+  maxModelCostMicrousd   BigInt
 
-  usedCpuTimeSeconds         Int                               @default(0)
-  usedBytesRead              BigInt                            @default(0)
-  usedBytesWritten           BigInt                            @default(0)
-  usedExternalEgressBytes    BigInt                            @default(0)
-  usedModelTurns             Int                               @default(0)
-  usedModelInputTokens       BigInt                            @default(0)
-  usedModelOutputTokens      BigInt                            @default(0)
-  usedModelCostMicrousd      BigInt                            @default(0)
+  usedCpuTimeSeconds      Int    @default(0)
+  usedBytesRead           BigInt @default(0)
+  usedBytesWritten        BigInt @default(0)
+  usedExternalEgressBytes BigInt @default(0)
+  usedModelTurns          Int    @default(0)
+  usedModelInputTokens    BigInt @default(0)
+  usedModelOutputTokens   BigInt @default(0)
+  usedModelCostMicrousd   BigInt @default(0)
 
-  leaseId                    String?                           @unique
-  leaseGeneration            Int                               @default(0)
-  leaseExpiresAt             DateTime?
-  dispatchCount              Int                               @default(0)
-  failureCode                String?
-  deadlineAt                 DateTime
-  queuedAt                   DateTime                          @default(now())
-  leasedAt                   DateTime?
-  startedAt                  DateTime?
-  lastHeartbeatAt            DateTime?
-  completedAt                DateTime?
-  createdAt                  DateTime                          @default(now())
-  updatedAt                  DateTime                          @updatedAt
+  leaseId         String?   @unique
+  leaseGeneration Int       @default(0)
+  leaseExpiresAt  DateTime?
+  dispatchCount   Int       @default(0)
+  failureCode     String?
+  deadlineAt      DateTime
+  queuedAt        DateTime  @default(now())
+  leasedAt        DateTime?
+  startedAt       DateTime?
+  lastHeartbeatAt DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   candidate          MsaidiziUpdateCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
   task               MsaidiziTask            @relation(fields: [taskId], references: [id], onDelete: Restrict)
-  planVersion        MsaidiziPlanVersion      @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
-  step               MsaidiziTaskStep         @relation(fields: [stepId], references: [id], onDelete: Restrict)
-  attempt            MsaidiziToolAttempt      @relation(fields: [attemptId], references: [id], onDelete: Restrict)
-  generationArtifact MsaidiziArtifact         @relation("MsaidiziGeneratedUpdateArtifact", fields: [generationArtifactId], references: [id], onDelete: Restrict)
+  planVersion        MsaidiziPlanVersion     @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  step               MsaidiziTaskStep        @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  attempt            MsaidiziToolAttempt     @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  generationArtifact MsaidiziArtifact        @relation("MsaidiziGeneratedUpdateArtifact", fields: [generationArtifactId], references: [id], onDelete: Restrict)
 
   @@index([status, queuedAt])
   @@index([taskId, createdAt])
@@ -1987,108 +1987,113 @@ model Group {
 /// Sensitive financial records (bank accounts, loans, etc.) are owned here
 /// but may only be accessed via GROUP-scoped permissions.
 model InvoiceDeskSupplier {
-  id String @id @default(uuid())
+  id        String               @id @default(uuid())
   companyId String
-  name String @db.VarChar(160)
-  nameKey String @db.VarChar(160)
-  email String? @db.VarChar(254)
-  phone String? @db.VarChar(60)
-  createdAt DateTime @default(now())
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  invoices InvoiceDeskInvoice[]
+  name      String               @db.VarChar(160)
+  nameKey   String               @db.VarChar(160)
+  email     String?              @db.VarChar(254)
+  phone     String?              @db.VarChar(60)
+  createdAt DateTime             @default(now())
+  company   Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoices  InvoiceDeskInvoice[]
+
   @@unique([companyId, nameKey])
   @@map("invoice_desk_suppliers")
 }
 
 model InvoiceDeskInvoice {
-  id String @id @default(uuid())
-  companyId String
-  divisionId String
-  branchId String
-  supplierId String
-  invoiceNumber String @db.VarChar(100)
-  numberKey String @db.VarChar(100)
-  description String @db.VarChar(500)
-  currency String @db.VarChar(3)
-  invoiceDate DateTime @db.Date
-  dueDate DateTime @db.Date
-  totalAmount Decimal @db.Decimal(18, 2)
-  paidAmount Decimal @default(0) @db.Decimal(18, 2)
-  notes String? @db.VarChar(4000)
-  voidedAt DateTime?
-  version Int @default(1)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division Division @relation(fields: [divisionId], references: [id], onDelete: Restrict)
-  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  supplier InvoiceDeskSupplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  payments InvoiceDeskPayment[]
-  attachments InvoiceDeskAttachment[]
-  events InvoiceDeskEvent[]
+  id            String                  @id @default(uuid())
+  companyId     String
+  divisionId    String
+  branchId      String
+  supplierId    String
+  invoiceNumber String                  @db.VarChar(100)
+  numberKey     String                  @db.VarChar(100)
+  description   String                  @db.VarChar(500)
+  currency      String                  @db.VarChar(3)
+  invoiceDate   DateTime                @db.Date
+  dueDate       DateTime                @db.Date
+  totalAmount   Decimal                 @db.Decimal(18, 2)
+  paidAmount    Decimal                 @default(0) @db.Decimal(18, 2)
+  notes         String?                 @db.VarChar(4000)
+  voidedAt      DateTime?
+  version       Int                     @default(1)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  company       Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division      Division                @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  branch        Branch                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier      InvoiceDeskSupplier     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  payments      InvoiceDeskPayment[]
+  attachments   InvoiceDeskAttachment[]
+  events        InvoiceDeskEvent[]
+
   @@unique([companyId, supplierId, numberKey])
   @@index([companyId, divisionId, branchId, dueDate])
   @@map("invoice_desk_invoices")
 }
 
 model InvoiceDeskPayment {
-  cashMovement CashDeskMovement?
-  id String @id @default(uuid())
-  invoiceId String
-  requestId String @unique
-  amount Decimal @db.Decimal(18, 2)
-  paymentDate DateTime @db.Date
-  method String @db.VarChar(40)
-  reference String @db.VarChar(160)
-  createdBy String
-  createdAt DateTime @default(now())
-  reversedAt DateTime?
-  reversalReason String? @db.VarChar(500)
-  invoice InvoiceDeskInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  cashMovement   CashDeskMovement?
+  id             String             @id @default(uuid())
+  invoiceId      String
+  requestId      String             @unique
+  amount         Decimal            @db.Decimal(18, 2)
+  paymentDate    DateTime           @db.Date
+  method         String             @db.VarChar(40)
+  reference      String             @db.VarChar(160)
+  createdBy      String
+  createdAt      DateTime           @default(now())
+  reversedAt     DateTime?
+  reversalReason String?            @db.VarChar(500)
+  invoice        InvoiceDeskInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
   @@index([invoiceId])
   @@map("invoice_desk_payments")
 }
 
 model InvoiceDeskAttachment {
-  id String @id @default(uuid())
+  id        String             @id @default(uuid())
   invoiceId String
-  name String @db.VarChar(200)
-  mimeType String
-  size Int
-  digest String
-  content Bytes
-  createdAt DateTime @default(now())
-  invoice InvoiceDeskInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  name      String             @db.VarChar(200)
+  mimeType  String
+  size      Int
+  digest    String
+  content   Bytes
+  createdAt DateTime           @default(now())
+  invoice   InvoiceDeskInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
   @@unique([invoiceId, digest])
   @@map("invoice_desk_attachments")
 }
 
 model InvoiceDeskEvent {
-  id String @id @default(uuid())
+  id        String             @id @default(uuid())
   invoiceId String
-  action String
-  actorId String
+  action    String
+  actorId   String
   actorName String
-  detail String @db.VarChar(1000)
-  createdAt DateTime @default(now())
-  invoice InvoiceDeskInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  detail    String             @db.VarChar(1000)
+  createdAt DateTime           @default(now())
+  invoice   InvoiceDeskInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
   @@index([invoiceId, createdAt])
   @@map("invoice_desk_events")
 }
 
 model Company {
-  deskCustomers SalesDeskCustomer[]
-  deskSales SalesDeskSale[]
-  deskCashAccounts CashDeskAccount[]
-  deskSuppliers InvoiceDeskSupplier[]
-  deskInvoices InvoiceDeskInvoice[]
-  fuelReports FuelReport[]
-  id                 String        @id @default(uuid())
+  deskCustomers      SalesDeskCustomer[]
+  deskSales          SalesDeskSale[]
+  deskCashAccounts   CashDeskAccount[]
+  deskSuppliers      InvoiceDeskSupplier[]
+  deskInvoices       InvoiceDeskInvoice[]
+  fuelReports        FuelReport[]
+  id                 String                @id @default(uuid())
   groupId            String
-  code               String        @unique
+  code               String                @unique
   name               String
   industryType       String?
-  status             CompanyStatus @default(ACTIVE)
+  status             CompanyStatus         @default(ACTIVE)
   phone              String?
   email              String?
   website            String?
@@ -2096,10 +2101,10 @@ model Company {
   /// Short prefix used by auto-generated entity codes (employees, etc.).
   /// Falls back to the first 4 chars of `code` if null. Convention: 4 upper
   /// chars matching the seeded codes — MWAN / WEST / ITEM.
-  employeeCodePrefix String?       @db.VarChar(8)
+  employeeCodePrefix String?               @db.VarChar(8)
   deletedAt          DateTime?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   group         Group               @relation(fields: [groupId], references: [id], onDelete: Restrict)
   profile       CompanyProfile?
@@ -2392,19 +2397,19 @@ model CompanyProfile {
 
 /// Business unit / product line within a Company.
 model Division {
-  deskSales SalesDeskSale[]
+  deskSales        SalesDeskSale[]
   deskCashAccounts CashDeskAccount[]
-  deskInvoices InvoiceDeskInvoice[]
-  id          String       @id @default(uuid())
-  companyId   String
-  name        String
-  code        String
-  type        DivisionType
-  description String?
-  isActive    Boolean      @default(true)
-  deletedAt   DateTime?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  deskInvoices     InvoiceDeskInvoice[]
+  id               String               @id @default(uuid())
+  companyId        String
+  name             String
+  code             String
+  type             DivisionType
+  description      String?
+  isActive         Boolean              @default(true)
+  deletedAt        DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   company        Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   branches       Branch[]
@@ -2509,22 +2514,22 @@ model Division {
 /// Operational unit within a Division.
 /// Can be a physical branch, project site, farm, warehouse, fuel station, etc.
 model Branch {
-  deskSales SalesDeskSale[]
+  deskSales        SalesDeskSale[]
   deskCashAccounts CashDeskAccount[]
-  deskInvoices InvoiceDeskInvoice[]
-  fuelReports FuelReport[]
-  id         String     @id @default(uuid())
-  divisionId String
-  name       String
-  code       String
-  type       BranchType
-  location   String?
-  address    String?
-  phone      String?
-  isActive   Boolean    @default(true)
-  deletedAt  DateTime?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  deskInvoices     InvoiceDeskInvoice[]
+  fuelReports      FuelReport[]
+  id               String               @id @default(uuid())
+  divisionId       String
+  name             String
+  code             String
+  type             BranchType
+  location         String?
+  address          String?
+  phone            String?
+  isActive         Boolean              @default(true)
+  deletedAt        DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   division     Division           @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   fixedAssets  FixedAsset[]
@@ -2623,36 +2628,36 @@ model Branch {
 
 model User {
   fuelReportRevisions FuelReportRevision[]
-  id                  String     @id @default(uuid())
-  email               String     @unique
+  id                  String               @id @default(uuid())
+  email               String               @unique
   passwordHash        String
   fullName            String
   phoneNumber         String?
   title               String?
-  status              UserStatus @default(ACTIVE)
-  mustChangePassword  Boolean    @default(false)
+  status              UserStatus           @default(ACTIVE)
+  mustChangePassword  Boolean              @default(false)
   lastLoginAt         DateTime?
   passwordChangedAt   DateTime?
-  failedLoginAttempts Int        @default(0)
+  failedLoginAttempts Int                  @default(0)
   lockedUntil         DateTime?
   /// Primary / home company for users who belong to one company.
   companyId           String?
   avatarUrl           String?
   deletedAt           DateTime?
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
-  company        Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  userRoles      UserRole[]
-  companyAccess  UserCompanyAccess[]
-  divisionAccess UserDivisionAccess[]
-  branchAccess   UserBranchAccess[]
-  auditLogs      AuditLog[]
-  uploads        Document[]           @relation("DocumentUploader")
-  refreshTokens  RefreshToken[]
-  preferences    UserPreference?      @relation("UserPrefs")
-  workspaceSessions WorkspaceSession[]
-  workspaceDrafts WorkspaceDraft[]
+  company             Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  userRoles           UserRole[]
+  companyAccess       UserCompanyAccess[]
+  divisionAccess      UserDivisionAccess[]
+  branchAccess        UserBranchAccess[]
+  auditLogs           AuditLog[]
+  uploads             Document[]           @relation("DocumentUploader")
+  refreshTokens       RefreshToken[]
+  preferences         UserPreference?      @relation("UserPrefs")
+  workspaceSessions   WorkspaceSession[]
+  workspaceDrafts     WorkspaceDraft[]
   workspaceWallpapers WorkspaceWallpaper[]
 
   // Finance (Milestone 3)
@@ -3220,54 +3225,54 @@ model BankAccount {
 /// inter-company loans, supplier credit, and institutional debt.
 /// Requires group-control permission: loans.read / loans.manage.
 model Loan {
-  fundingMode String @default("LEGACY")
+  fundingMode              String               @default("LEGACY")
   principalLedgerAccountId String?
-  principalLedgerAccount ChartOfAccount? @relation("LoanPrincipalLedger", fields: [principalLedgerAccountId], references: [id], onDelete: Restrict)
-  financialEvents LoanFinancialEvent[]
-  id                    String             @id @default(uuid())
+  principalLedgerAccount   ChartOfAccount?      @relation("LoanPrincipalLedger", fields: [principalLedgerAccountId], references: [id], onDelete: Restrict)
+  financialEvents          LoanFinancialEvent[]
+  id                       String               @id @default(uuid())
   /// The type of financial obligation.
-  obligationType        ObligationType     @default(BANK_LOAN)
+  obligationType           ObligationType       @default(BANK_LOAN)
   /// Whether this obligation belongs to the Group or a specific Company.
-  borrowerLevel         BorrowerLevel      @default(COMPANY)
+  borrowerLevel            BorrowerLevel        @default(COMPANY)
   /// Set when borrowerLevel = COMPANY.
-  companyId             String?
-  divisionId            String?
-  branchId              String?
+  companyId                String?
+  divisionId               String?
+  branchId                 String?
   /// Set when borrowerLevel = GROUP.
-  groupId               String?
-  loanReference         String?
-  lenderName            String
+  groupId                  String?
+  loanReference            String?
+  lenderName               String
   /// "Bank", "SACCO", "Individual", "Microfinance", "Director", etc.
-  lenderType            String?
-  lenderContact         String?
-  principalAmount       Decimal            @db.Decimal(18, 2)
-  currency              CurrencyCode       @default(TZS)
+  lenderType               String?
+  lenderContact            String?
+  principalAmount          Decimal              @db.Decimal(18, 2)
+  currency                 CurrencyCode         @default(TZS)
   /// Annual interest rate stored as a decimal fraction: 0.18 = 18%
-  interestRate          Decimal            @db.Decimal(6, 4)
-  disbursementDate      DateTime
-  maturityDate          DateTime
-  repaymentFrequency    RepaymentFrequency @default(MONTHLY)
+  interestRate             Decimal              @db.Decimal(6, 4)
+  disbursementDate         DateTime
+  maturityDate             DateTime
+  repaymentFrequency       RepaymentFrequency   @default(MONTHLY)
   /// Scheduled repayment amount per period.
-  repaymentAmount       Decimal?           @db.Decimal(18, 2)
+  repaymentAmount          Decimal?             @db.Decimal(18, 2)
   /// Current outstanding balance (updated after each repayment).
-  outstandingBalance    Decimal            @db.Decimal(18, 2)
-  status                LoanStatus         @default(ACTIVE)
-  riskLevel             RiskLevel          @default(LOW)
-  purpose               String?
-  collateralDescription String?
+  outstandingBalance       Decimal              @db.Decimal(18, 2)
+  status                   LoanStatus           @default(ACTIVE)
+  riskLevel                RiskLevel            @default(LOW)
+  purpose                  String?
+  collateralDescription    String?
   /// IDs of FixedAsset records used as collateral for this loan.
-  linkedAssetIds        String[]           @default([])
-  guarantorName         String?
-  guarantorContact      String?
-  guaranteeDetails      String?
-  bankAccountId         String?
-  notes                 String?
-  createdById           String?
-  approvedById          String?
-  approvedAt            DateTime?
-  deletedAt             DateTime?
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
+  linkedAssetIds           String[]             @default([])
+  guarantorName            String?
+  guarantorContact         String?
+  guaranteeDetails         String?
+  bankAccountId            String?
+  notes                    String?
+  createdById              String?
+  approvedById             String?
+  approvedAt               DateTime?
+  deletedAt                DateTime?
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
 
   company    Company?        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division   Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -3291,26 +3296,26 @@ model Loan {
 
 /// Individual repayment record for a Loan.
 model LoanRepayment {
-  financialEvent LoanFinancialEvent?
-  id               String       @id @default(uuid())
+  financialEvent   LoanFinancialEvent?
+  id               String              @id @default(uuid())
   loanId           String
   repaymentDate    DateTime
-  amount           Decimal      @db.Decimal(18, 2)
-  currency         CurrencyCode @default(TZS)
+  amount           Decimal             @db.Decimal(18, 2)
+  currency         CurrencyCode        @default(TZS)
   /// Portion applied to principal.
-  principal        Decimal?     @db.Decimal(18, 2)
+  principal        Decimal?            @db.Decimal(18, 2)
   /// Portion applied to interest.
-  interest         Decimal?     @db.Decimal(18, 2)
+  interest         Decimal?            @db.Decimal(18, 2)
   /// Any penalty or late fees.
-  penalties        Decimal?     @db.Decimal(18, 2)
+  penalties        Decimal?            @db.Decimal(18, 2)
   /// Remaining balance after this repayment.
-  remainingBalance Decimal?     @db.Decimal(18, 2)
+  remainingBalance Decimal?            @db.Decimal(18, 2)
   paymentMethod    String?
   referenceNumber  String?
   notes            String?
   recordedById     String?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
 
@@ -3774,23 +3779,23 @@ enum InterCompanyTxStatus {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model ChartOfAccount {
-  loanPrincipals Loan[] @relation("LoanPrincipalLedger")
+  loanPrincipals    Loan[]       @relation("LoanPrincipalLedger")
   mappedCashAccount CashAccount?
-  id              String      @id @default(uuid())
-  companyId       String
-  divisionId      String?
-  branchId        String?
-  accountCode     String
-  accountName     String
-  accountType     AccountType
-  accountSubType  String?
-  parentAccountId String?
-  description     String?
-  isSystemAccount Boolean     @default(false)
-  isActive        Boolean     @default(true)
-  deletedAt       DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                String       @id @default(uuid())
+  companyId         String
+  divisionId        String?
+  branchId          String?
+  accountCode       String
+  accountName       String
+  accountType       AccountType
+  accountSubType    String?
+  parentAccountId   String?
+  description       String?
+  isSystemAccount   Boolean      @default(false)
+  isActive          Boolean      @default(true)
+  deletedAt         DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   company              Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division             Division?                   @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -3864,31 +3869,31 @@ model AccountingPeriod {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model JournalEntry {
-  payrollCashMovement CashDeskMovement? @relation("PayrollCashJournal")
-  loanFinancialEvent LoanFinancialEvent?
-  id                 String             @id @default(uuid())
-  journalNumber      String
-  companyId          String
-  divisionId         String?
-  branchId           String?
-  accountingPeriodId String?
-  transactionDate    DateTime
-  description        String
-  referenceType      String?
-  referenceId        String?
-  status             JournalEntryStatus @default(DRAFT)
-  totalDebit         Decimal            @default(0) @db.Decimal(18, 2)
-  totalCredit        Decimal            @default(0) @db.Decimal(18, 2)
-  createdById        String
-  postedById         String?
-  postedAt           DateTime?
-  reversedById       String?
-  reversedAt         DateTime?
-  reversalReason     String?
-  reversalOfId       String?
-  deletedAt          DateTime?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  payrollCashMovement CashDeskMovement?   @relation("PayrollCashJournal")
+  loanFinancialEvent  LoanFinancialEvent?
+  id                  String              @id @default(uuid())
+  journalNumber       String
+  companyId           String
+  divisionId          String?
+  branchId            String?
+  accountingPeriodId  String?
+  transactionDate     DateTime
+  description         String
+  referenceType       String?
+  referenceId         String?
+  status              JournalEntryStatus  @default(DRAFT)
+  totalDebit          Decimal             @default(0) @db.Decimal(18, 2)
+  totalCredit         Decimal             @default(0) @db.Decimal(18, 2)
+  createdById         String
+  postedById          String?
+  postedAt            DateTime?
+  reversedById        String?
+  reversedAt          DateTime?
+  reversalReason      String?
+  reversalOfId        String?
+  deletedAt           DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   company                  Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   accountingPeriod         AccountingPeriod?         @relation(fields: [accountingPeriodId], references: [id], onDelete: SetNull)
@@ -3947,24 +3952,24 @@ model JournalEntryLine {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model CashAccount {
-  ledgerAccountId String? @unique
-  ledgerAccount ChartOfAccount? @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict)
-  deskAccount CashDeskAccount?
-  id                  String          @id @default(uuid())
+  ledgerAccountId     String?          @unique
+  ledgerAccount       ChartOfAccount?  @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict)
+  deskAccount         CashDeskAccount?
+  id                  String           @id @default(uuid())
   companyId           String
   divisionId          String?
   branchId            String?
   linkedBankAccountId String?
   accountName         String
-  accountType         CashAccountType @default(CASH_ON_HAND)
-  currency            CurrencyCode    @default(TZS)
-  openingBalance      Decimal         @default(0) @db.Decimal(18, 2)
-  currentBalance      Decimal         @default(0) @db.Decimal(18, 2)
-  isActive            Boolean         @default(true)
+  accountType         CashAccountType  @default(CASH_ON_HAND)
+  currency            CurrencyCode     @default(TZS)
+  openingBalance      Decimal          @default(0) @db.Decimal(18, 2)
+  currentBalance      Decimal          @default(0) @db.Decimal(18, 2)
+  isActive            Boolean          @default(true)
   notes               String?
   deletedAt           DateTime?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
   company              Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
   division             Division?                  @relation(fields: [divisionId], references: [id], onDelete: SetNull)
@@ -4382,17 +4387,17 @@ model CreditNote {
 }
 
 model CreditNoteLine {
-  id           String   @id @default(uuid())
-  creditNoteId String
-  companyId    String
-  productId    String?
-  unitId       String?
-  description  String
-  quantity     Decimal  @db.Decimal(18, 4)
-  unitPrice    Decimal  @db.Decimal(18, 2)
-  netAmount    Decimal  @db.Decimal(18, 2)
-  taxAmount    Decimal  @default(0) @db.Decimal(18, 2)
-  lineTotal    Decimal  @db.Decimal(18, 2)
+  id               String   @id @default(uuid())
+  creditNoteId     String
+  companyId        String
+  productId        String?
+  unitId           String?
+  description      String
+  quantity         Decimal  @db.Decimal(18, 4)
+  unitPrice        Decimal  @db.Decimal(18, 2)
+  netAmount        Decimal  @db.Decimal(18, 2)
+  taxAmount        Decimal  @default(0) @db.Decimal(18, 2)
+  lineTotal        Decimal  @db.Decimal(18, 2)
   // Physical-return restock (opt-in). When > 0 the line represents goods coming
   // back into stock: issue() creates a SALES_RETURN inventory movement for this
   // quantity and posts the reversing Dr Inventory / Cr COGS at restockUnitCost.
@@ -4402,8 +4407,8 @@ model CreditNoteLine {
   // create time so a later cost drift cannot skew the reversal.
   returnedQuantity Decimal? @db.Decimal(18, 4)
   restockUnitCost  Decimal? @db.Decimal(18, 4)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   creditNote CreditNote     @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
   product    Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -5323,16 +5328,17 @@ model SalesOrder {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
-  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division          Division?          @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  branch            Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer          Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  createdBy         User               @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  confirmedBy       User?              @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
-  receivable        Receivable?        @relation(fields: [receivableId], references: [id], onDelete: SetNull)
-  salesperson       Employee?          @relation("SalesOrderSalesperson", fields: [salespersonId], references: [id], onDelete: SetNull)
-  cashAccount       CashAccount?       @relation("SalesOrderCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
-  mobilePosTerminal MobilePosTerminal? @relation(fields: [mobilePosTerminalId], references: [id], onDelete: SetNull)
+  company                 Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division                Division?                @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch                  Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer                Customer?                @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy               User                     @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  confirmedBy             User?                    @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  receivable              Receivable?              @relation(fields: [receivableId], references: [id], onDelete: SetNull)
+  salesperson             Employee?                @relation("SalesOrderSalesperson", fields: [salespersonId], references: [id], onDelete: SetNull)
+  cashAccount             CashAccount?             @relation("SalesOrderCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
+  mobilePosTerminal       MobilePosTerminal?       @relation(fields: [mobilePosTerminalId], references: [id], onDelete: SetNull)
+  mobilePosPriceOverrides MobilePosPriceOverride[]
 
   lines           SalesOrderLine[]
   commissions     SalesCommission[]
@@ -5774,21 +5780,21 @@ enum FuelDailyReconciliationStatus {
 // labels; each revision preserves the complete report and calculated discrepancies.
 // These reports do not post a second time into the operational fuel ledger.
 model FuelReport {
-  id String @id @default(uuid())
-  companyId String
-  branchId String
-  businessDate DateTime @db.Date
-  shift String
-  status String @default("DRAFT")
-  version Int @default(1)
-  payload Json
-  summary Json
-  closedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  revisions FuelReportRevision[]
+  id           String               @id @default(uuid())
+  companyId    String
+  branchId     String
+  businessDate DateTime             @db.Date
+  shift        String
+  status       String               @default("DRAFT")
+  version      Int                  @default(1)
+  payload      Json
+  summary      Json
+  closedAt     DateTime?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch       Branch               @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  revisions    FuelReportRevision[]
 
   @@unique([branchId, businessDate, shift])
   @@index([companyId, businessDate])
@@ -5796,18 +5802,18 @@ model FuelReport {
 }
 
 model FuelReportRevision {
-  id String @id @default(uuid())
-  reportId String
-  version Int
-  action String
-  reason String?
-  payload Json
-  summary Json
-  authorId String
+  id         String     @id @default(uuid())
+  reportId   String
+  version    Int
+  action     String
+  reason     String?
+  payload    Json
+  summary    Json
+  authorId   String
   authorName String
-  createdAt DateTime @default(now())
-  report FuelReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
-  author User @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  createdAt  DateTime   @default(now())
+  report     FuelReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  author     User       @relation(fields: [authorId], references: [id], onDelete: Restrict)
 
   @@unique([reportId, version])
   @@map("fuel_report_revisions")
@@ -10270,18 +10276,18 @@ model PayrollPeriod {
 }
 
 model PayrollRun {
-  cashMovements CashDeskMovement[]
-  id                         String           @id @default(uuid())
+  cashMovements              CashDeskMovement[]
+  id                         String             @id @default(uuid())
   payrollRunNumber           String
   companyId                  String
   payrollPeriodId            String
   runDate                    DateTime
-  payrollType                PayrollType      @default(REGULAR)
-  status                     PayrollRunStatus @default(DRAFT)
-  totalGrossPay              Decimal          @default(0) @db.Decimal(18, 2)
-  totalAllowances            Decimal          @default(0) @db.Decimal(18, 2)
-  totalDeductions            Decimal          @default(0) @db.Decimal(18, 2)
-  totalNetPay                Decimal          @default(0) @db.Decimal(18, 2)
+  payrollType                PayrollType        @default(REGULAR)
+  status                     PayrollRunStatus   @default(DRAFT)
+  totalGrossPay              Decimal            @default(0) @db.Decimal(18, 2)
+  totalAllowances            Decimal            @default(0) @db.Decimal(18, 2)
+  totalDeductions            Decimal            @default(0) @db.Decimal(18, 2)
+  totalNetPay                Decimal            @default(0) @db.Decimal(18, 2)
   expenseId                  String?
   payableId                  String?
   journalEntryId             String?
@@ -10304,8 +10310,8 @@ model PayrollRun {
   paidById                   String?
   paidAt                     DateTime?
   notes                      String?
-  createdAt                  DateTime         @default(now())
-  updatedAt                  DateTime         @updatedAt
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
   deletedAt                  DateTime?
 
   company           Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -10457,8 +10463,8 @@ enum PayrollStatutoryBasis {
 }
 
 model SalaryPayment {
-  cashMovementId String?
-  cashMovement CashDeskMovement? @relation(fields: [cashMovementId], references: [id], onDelete: Restrict)
+  cashMovementId      String?
+  cashMovement        CashDeskMovement?   @relation(fields: [cashMovementId], references: [id], onDelete: Restrict)
   id                  String              @id @default(uuid())
   salaryPaymentNumber String
   companyId           String
@@ -12735,21 +12741,21 @@ model WorkspaceSession {
 }
 
 model WorkspaceDraft {
-  id          String   @id
-  userId      String
-  appId       String
-  formType    String
-  schemaVersion Int    @default(1)
-  companyId   String?
-  divisionId  String?
-  branchId    String?
-  encryptedContent String @db.Text
-  revision    Int      @default(1)
-  leaseToken  String?
-  leaseUntil  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String    @id
+  userId           String
+  appId            String
+  formType         String
+  schemaVersion    Int       @default(1)
+  companyId        String?
+  divisionId       String?
+  branchId         String?
+  encryptedContent String    @db.Text
+  revision         Int       @default(1)
+  leaseToken       String?
+  leaseUntil       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, updatedAt])
   @@map("workspace_drafts")
@@ -13438,9 +13444,13 @@ model MobilePosTerminal {
   creditEnabled       Boolean                 @default(false)
   offlineCashEnabled  Boolean                 @default(false)
   configVersion       Int                     @default(1)
-  /// Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell.
+  /// POS shell pilot flag: 1 = classic, 2 = Kaunta, 3 = new POS on ITEMBA OS.
   /// Lets 1-2 pilot branches run each reform phase for a week before fleet-wide.
   uiVersion           Int                     @default(1)
+  /// Largest price drop (percent of list) a rep holding mobile_pos_lite.edit_price
+  /// may give on this terminal. 0 = none; managers with
+  /// mobile_pos_lite.edit_price_unlimited are bounded only by the below-cost guard.
+  maxPriceDropPct     Decimal                 @default(0) @db.Decimal(5, 2)
   activationTokenHash String?
   activationExpiresAt DateTime?
   deviceSecretHash    String?
@@ -13458,6 +13468,7 @@ model MobilePosTerminal {
   generalCustomer Customer                   @relation("MobilePosTerminalGeneralCustomer", fields: [generalCustomerId], references: [id], onDelete: Restrict)
   paymentMethods  MobilePosTerminalPayment[]
   salesOrders     SalesOrder[]
+  priceOverrides  MobilePosPriceOverride[]
 
   @@index([companyId, divisionId, branchId, status])
   @@index([assignedUserId, status])
@@ -13613,36 +13624,36 @@ model SyncCheckpoint {
 }
 
 model ExternalPayment {
-  id                  String                 @id @default(uuid())
-  paymentNumber       String                 @unique
-  companyId           String
-  providerId          String?
-  connectionId        String?
-  paymentContextType  ExternalPaymentContext @default(GENERAL)
-  paymentContextId    String?
-  externalReference   String?
-  payerName           String?
-  payerPhone          String?
-  amount              Decimal                @db.Decimal(18, 2)
-  currency            String                 @default("TZS")
-  paymentMethod       ExternalPaymentMethod  @default(MOBILE_MONEY)
-  status              ExternalPaymentStatus  @default(INITIATED)
-  initiatedById       String?
-  confirmedById       String?
-  initiatedAt         DateTime               @default(now())
-  confirmedAt         DateTime?
-  failureReason       String?
-  rawProviderResponse Json?
+  id                     String                 @id @default(uuid())
+  paymentNumber          String                 @unique
+  companyId              String
+  providerId             String?
+  connectionId           String?
+  paymentContextType     ExternalPaymentContext @default(GENERAL)
+  paymentContextId       String?
+  externalReference      String?
+  payerName              String?
+  payerPhone             String?
+  amount                 Decimal                @db.Decimal(18, 2)
+  currency               String                 @default("TZS")
+  paymentMethod          ExternalPaymentMethod  @default(MOBILE_MONEY)
+  status                 ExternalPaymentStatus  @default(INITIATED)
+  initiatedById          String?
+  confirmedById          String?
+  initiatedAt            DateTime               @default(now())
+  confirmedAt            DateTime?
+  failureReason          String?
+  rawProviderResponse    Json?
   /// Client-supplied idempotency token to prevent duplicate payment initiations.
-  idempotencyKey      String?
+  idempotencyKey         String?
   /// CashAccount whose denormalised currentBalance the confirm posting actually
   /// incremented, stamped in the same transaction as the increment. Reversal
   /// unwinds exactly this account. Null = confirm bumped no balance cache (no
   /// currency-matching account existed) or the row predates this column.
   receivingCashAccountId String?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
-  deletedAt           DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  deletedAt              DateTime?
 
   company     Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
   provider    IntegrationProvider?   @relation(fields: [providerId], references: [id], onDelete: SetNull)
@@ -15136,24 +15147,24 @@ model DepreciationEntry {
 }
 
 model LoanRepaymentSchedule {
-  financialEvents LoanFinancialEvent[]
-  id                      String              @id @default(uuid())
-  repaymentScheduleNumber String              @unique
+  financialEvents         LoanFinancialEvent[]
+  id                      String               @id @default(uuid())
+  repaymentScheduleNumber String               @unique
   companyId               String
   loanDebtId              String
   installmentNumber       Int
   dueDate                 DateTime
-  principalAmount         Decimal             @default(0) @db.Decimal(18, 4)
-  interestAmount          Decimal             @default(0) @db.Decimal(18, 4)
-  feeAmount               Decimal             @default(0) @db.Decimal(18, 4)
-  totalAmount             Decimal             @db.Decimal(18, 4)
-  paidAmount              Decimal             @default(0) @db.Decimal(18, 4)
-  outstandingAmount       Decimal             @db.Decimal(18, 4)
-  status                  LoanRepaymentStatus @default(UPCOMING)
+  principalAmount         Decimal              @default(0) @db.Decimal(18, 4)
+  interestAmount          Decimal              @default(0) @db.Decimal(18, 4)
+  feeAmount               Decimal              @default(0) @db.Decimal(18, 4)
+  totalAmount             Decimal              @db.Decimal(18, 4)
+  paidAmount              Decimal              @default(0) @db.Decimal(18, 4)
+  outstandingAmount       Decimal              @db.Decimal(18, 4)
+  status                  LoanRepaymentStatus  @default(UPCOMING)
   payableId               String?
   journalEntryId          String?
-  createdAt               DateTime            @default(now())
-  updatedAt               DateTime            @updatedAt
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
   deletedAt               DateTime?
 
   company  Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -15164,21 +15175,21 @@ model LoanRepaymentSchedule {
 }
 
 model LoanRepaymentPayment {
-  financialEvent LoanFinancialEvent?
-  id                      String            @id @default(uuid())
-  repaymentPaymentNumber  String            @unique
+  financialEvent          LoanFinancialEvent?
+  id                      String              @id @default(uuid())
+  repaymentPaymentNumber  String              @unique
   companyId               String
   loanRepaymentScheduleId String
   paymentDate             DateTime
-  amount                  Decimal           @db.Decimal(18, 4)
-  currency                String            @default("TZS")
-  paymentMethod           LoanPaymentMethod @default(BANK_TRANSFER)
+  amount                  Decimal             @db.Decimal(18, 4)
+  currency                String              @default("TZS")
+  paymentMethod           LoanPaymentMethod   @default(BANK_TRANSFER)
   cashAccountId           String?
   reference               String?
   journalEntryId          String?
   paidById                String
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
   deletedAt               DateTime?
 
   company               Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -17163,82 +17174,85 @@ model WestsidesDailyClose {
 }
 
 model CashDeskAccount {
-  erpCashAccountId String? @unique
-  erpCashAccount CashAccount? @relation(fields: [erpCashAccountId], references: [id], onDelete: Restrict)
-  id String @id @default(uuid())
-  companyId String
-  divisionId String
-  branchId String
-  name String @db.VarChar(120)
-  nameKey String
-  kind String @db.VarChar(30)
-  currency String @db.VarChar(3)
-  openingDate DateTime @db.Date
-  balance Decimal @default(0) @db.Decimal(18, 2)
-  version Int @default(1)
-  createdAt DateTime @default(now())
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  division Division @relation(fields: [divisionId], references: [id], onDelete: Restrict)
-  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  entries CashDeskEntry[]
-  loansGiven CashDeskLoan[] @relation("CashLender")
-  loansTaken CashDeskLoan[] @relation("CashBorrower")
+  erpCashAccountId String?         @unique
+  erpCashAccount   CashAccount?    @relation(fields: [erpCashAccountId], references: [id], onDelete: Restrict)
+  id               String          @id @default(uuid())
+  companyId        String
+  divisionId       String
+  branchId         String
+  name             String          @db.VarChar(120)
+  nameKey          String
+  kind             String          @db.VarChar(30)
+  currency         String          @db.VarChar(3)
+  openingDate      DateTime        @db.Date
+  balance          Decimal         @default(0) @db.Decimal(18, 2)
+  version          Int             @default(1)
+  createdAt        DateTime        @default(now())
+  company          Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division         Division        @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  entries          CashDeskEntry[]
+  loansGiven       CashDeskLoan[]  @relation("CashLender")
+  loansTaken       CashDeskLoan[]  @relation("CashBorrower")
+
   @@unique([branchId, nameKey])
   @@index([companyId, divisionId, branchId])
   @@map("cash_desk_accounts")
 }
 
 model CashDeskMovement {
-  salaryPayments SalaryPayment[]
-  payrollRunId String?
-  payrollRun PayrollRun? @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
-  payrollJournalEntryId String? @unique
-  payrollJournalEntry JournalEntry? @relation("PayrollCashJournal", fields: [payrollJournalEntryId], references: [id], onDelete: Restrict)
-  loanPrincipal Decimal? @db.Decimal(18, 2)
-  loanInterest Decimal? @db.Decimal(18, 2)
-  loanFees Decimal? @db.Decimal(18, 2)
-  loanFinancialEvent LoanFinancialEvent?
-  salesPaymentId String? @unique
-  salesPayment SalesDeskPayment? @relation(fields: [salesPaymentId], references: [id], onDelete: Restrict)
-  expenseCategory String? @db.VarChar(40)
-  payee String? @db.VarChar(160)
-  expenseNotes String? @db.VarChar(2000)
-  id String @id @default(uuid())
-  requestId String @unique
-  payloadKey String
-  kind String @db.VarChar(30)
-  amount Decimal @db.Decimal(18, 2)
-  currency String @db.VarChar(3)
-  businessDate DateTime @db.Date
-  description String @db.VarChar(500)
-  reference String @db.VarChar(160)
-  createdBy String
-  actorName String
-  createdAt DateTime @default(now())
-  reversedAt DateTime?
-  reversalReason String? @db.VarChar(500)
-  reversalOfId String? @unique
-  reversalOf CashDeskMovement? @relation("CashReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversal CashDeskMovement? @relation("CashReversal")
-  dailySalesKey String? @unique
-  invoicePaymentId String? @unique
-  invoicePayment InvoiceDeskPayment? @relation(fields: [invoicePaymentId], references: [id], onDelete: Restrict)
-  loanId String?
-  loan CashDeskLoan? @relation(fields: [loanId], references: [id], onDelete: Restrict)
-  entries CashDeskEntry[]
+  salaryPayments        SalaryPayment[]
+  payrollRunId          String?
+  payrollRun            PayrollRun?         @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
+  payrollJournalEntryId String?             @unique
+  payrollJournalEntry   JournalEntry?       @relation("PayrollCashJournal", fields: [payrollJournalEntryId], references: [id], onDelete: Restrict)
+  loanPrincipal         Decimal?            @db.Decimal(18, 2)
+  loanInterest          Decimal?            @db.Decimal(18, 2)
+  loanFees              Decimal?            @db.Decimal(18, 2)
+  loanFinancialEvent    LoanFinancialEvent?
+  salesPaymentId        String?             @unique
+  salesPayment          SalesDeskPayment?   @relation(fields: [salesPaymentId], references: [id], onDelete: Restrict)
+  expenseCategory       String?             @db.VarChar(40)
+  payee                 String?             @db.VarChar(160)
+  expenseNotes          String?             @db.VarChar(2000)
+  id                    String              @id @default(uuid())
+  requestId             String              @unique
+  payloadKey            String
+  kind                  String              @db.VarChar(30)
+  amount                Decimal             @db.Decimal(18, 2)
+  currency              String              @db.VarChar(3)
+  businessDate          DateTime            @db.Date
+  description           String              @db.VarChar(500)
+  reference             String              @db.VarChar(160)
+  createdBy             String
+  actorName             String
+  createdAt             DateTime            @default(now())
+  reversedAt            DateTime?
+  reversalReason        String?             @db.VarChar(500)
+  reversalOfId          String?             @unique
+  reversalOf            CashDeskMovement?   @relation("CashReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal              CashDeskMovement?   @relation("CashReversal")
+  dailySalesKey         String?             @unique
+  invoicePaymentId      String?             @unique
+  invoicePayment        InvoiceDeskPayment? @relation(fields: [invoicePaymentId], references: [id], onDelete: Restrict)
+  loanId                String?
+  loan                  CashDeskLoan?       @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  entries               CashDeskEntry[]
+
   @@index([businessDate, createdAt])
   @@index([payrollRunId])
   @@map("cash_desk_movements")
 }
 
 model CashDeskEntry {
-  id String @id @default(uuid())
-  movementId String
-  accountId String
-  businessDate DateTime @db.Date
-  amount Decimal @db.Decimal(18, 2)
-  movement CashDeskMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
-  account CashDeskAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  id           String           @id @default(uuid())
+  movementId   String
+  accountId    String
+  businessDate DateTime         @db.Date
+  amount       Decimal          @db.Decimal(18, 2)
+  movement     CashDeskMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  account      CashDeskAccount  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
   @@unique([movementId, accountId])
   @@index([accountId, businessDate])
   @@map("cash_desk_entries")
@@ -17246,146 +17260,184 @@ model CashDeskEntry {
 
 model CashDeskLoan {
   receivableAccountId String?
-  payableAccountId String?
-  id String @id @default(uuid())
-  lenderAccountId String
-  borrowerAccountId String
-  currency String @db.VarChar(3)
-  principal Decimal @db.Decimal(18, 2)
-  outstanding Decimal @db.Decimal(18, 2)
-  loanDate DateTime @db.Date
-  dueDate DateTime? @db.Date
-  description String @db.VarChar(500)
-  version Int @default(1)
-  voidedAt DateTime?
-  createdAt DateTime @default(now())
-  lender CashDeskAccount @relation("CashLender", fields: [lenderAccountId], references: [id], onDelete: Restrict)
-  borrower CashDeskAccount @relation("CashBorrower", fields: [borrowerAccountId], references: [id], onDelete: Restrict)
-  movements CashDeskMovement[]
+  payableAccountId    String?
+  id                  String             @id @default(uuid())
+  lenderAccountId     String
+  borrowerAccountId   String
+  currency            String             @db.VarChar(3)
+  principal           Decimal            @db.Decimal(18, 2)
+  outstanding         Decimal            @db.Decimal(18, 2)
+  loanDate            DateTime           @db.Date
+  dueDate             DateTime?          @db.Date
+  description         String             @db.VarChar(500)
+  version             Int                @default(1)
+  voidedAt            DateTime?
+  createdAt           DateTime           @default(now())
+  lender              CashDeskAccount    @relation("CashLender", fields: [lenderAccountId], references: [id], onDelete: Restrict)
+  borrower            CashDeskAccount    @relation("CashBorrower", fields: [borrowerAccountId], references: [id], onDelete: Restrict)
+  movements           CashDeskMovement[]
+
   @@index([lenderAccountId])
   @@index([borrowerAccountId])
   @@map("cash_desk_loans")
 }
 
 model SalesDeskCustomer {
-  id String @id @default(uuid())
+  id        String          @id @default(uuid())
   companyId String
-  name String @db.VarChar(160)
-  nameKey String
-  email String? @db.VarChar(254)
-  phone String? @db.VarChar(60)
-  createdAt DateTime @default(now())
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  sales SalesDeskSale[]
+  name      String          @db.VarChar(160)
+  nameKey   String
+  email     String?         @db.VarChar(254)
+  phone     String?         @db.VarChar(60)
+  createdAt DateTime        @default(now())
+  company   Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sales     SalesDeskSale[]
+
   @@unique([companyId, nameKey])
   @@map("sales_desk_customers")
 }
 
 /// Immutable loan allocations tie the register, cash movement and journal together.
 model LoanFinancialEvent {
-  id String @id @default(uuid())
-  loanId String
-  requestId String @unique
-  payloadKey String
-  kind String @db.VarChar(30)
-  businessDate DateTime @db.Date
-  amount Decimal @db.Decimal(18, 2)
-  principal Decimal @db.Decimal(18, 2)
-  interest Decimal @default(0) @db.Decimal(18, 2)
-  fees Decimal @default(0) @db.Decimal(18, 2)
-  penalties Decimal @default(0) @db.Decimal(18, 2)
-  currency String @db.VarChar(3)
-  cashMovementId String? @unique
-  journalEntryId String @unique
-  scheduleId String?
-  repaymentId String? @unique
-  scheduledPaymentId String? @unique
-  reversalOfId String? @unique
-  reversedAt DateTime?
-  reversalReason String?
-  createdById String
-  createdAt DateTime @default(now())
-  loan Loan @relation(fields: [loanId], references: [id], onDelete: Restrict)
-  cashMovement CashDeskMovement? @relation(fields: [cashMovementId], references: [id], onDelete: Restrict)
-  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
-  schedule LoanRepaymentSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
-  repayment LoanRepayment? @relation(fields: [repaymentId], references: [id], onDelete: Restrict)
-  scheduledPayment LoanRepaymentPayment? @relation(fields: [scheduledPaymentId], references: [id], onDelete: Restrict)
-  reversalOf LoanFinancialEvent? @relation("LoanEventReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversal LoanFinancialEvent? @relation("LoanEventReversal")
+  id                 String                 @id @default(uuid())
+  loanId             String
+  requestId          String                 @unique
+  payloadKey         String
+  kind               String                 @db.VarChar(30)
+  businessDate       DateTime               @db.Date
+  amount             Decimal                @db.Decimal(18, 2)
+  principal          Decimal                @db.Decimal(18, 2)
+  interest           Decimal                @default(0) @db.Decimal(18, 2)
+  fees               Decimal                @default(0) @db.Decimal(18, 2)
+  penalties          Decimal                @default(0) @db.Decimal(18, 2)
+  currency           String                 @db.VarChar(3)
+  cashMovementId     String?                @unique
+  journalEntryId     String                 @unique
+  scheduleId         String?
+  repaymentId        String?                @unique
+  scheduledPaymentId String?                @unique
+  reversalOfId       String?                @unique
+  reversedAt         DateTime?
+  reversalReason     String?
+  createdById        String
+  createdAt          DateTime               @default(now())
+  loan               Loan                   @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  cashMovement       CashDeskMovement?      @relation(fields: [cashMovementId], references: [id], onDelete: Restrict)
+  journalEntry       JournalEntry           @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  schedule           LoanRepaymentSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  repayment          LoanRepayment?         @relation(fields: [repaymentId], references: [id], onDelete: Restrict)
+  scheduledPayment   LoanRepaymentPayment?  @relation(fields: [scheduledPaymentId], references: [id], onDelete: Restrict)
+  reversalOf         LoanFinancialEvent?    @relation("LoanEventReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal           LoanFinancialEvent?    @relation("LoanEventReversal")
+
   @@index([loanId, businessDate])
   @@index([scheduleId])
   @@map("loan_financial_events")
 }
+
 model SalesDeskSale {
-  id String @id @default(uuid())
-  requestId String @unique
-  payloadKey String
-  companyId String
-  divisionId String
-  branchId String
-  customerId String
-  saleNumber String @db.VarChar(100)
-  numberKey String
-  currency String @db.VarChar(3)
-  saleDate DateTime @db.Date
-  dueDate DateTime @db.Date
-  totalAmount Decimal @db.Decimal(18,2)
-  paidAmount Decimal @default(0) @db.Decimal(18,2)
-  notes String? @db.VarChar(2000)
-  version Int @default(1)
-  voidedAt DateTime?
-  createdBy String
-  createdAt DateTime @default(now())
-  company Company @relation(fields:[companyId],references:[id],onDelete:Restrict)
-  division Division @relation(fields:[divisionId],references:[id],onDelete:Restrict)
-  branch Branch @relation(fields:[branchId],references:[id],onDelete:Restrict)
-  customer SalesDeskCustomer @relation(fields:[customerId],references:[id],onDelete:Restrict)
-  lines SalesDeskLine[]
-  payments SalesDeskPayment[]
-  events SalesDeskEvent[]
-  @@unique([companyId,numberKey])
-  @@index([companyId,divisionId,branchId,saleDate])
+  id          String             @id @default(uuid())
+  requestId   String             @unique
+  payloadKey  String
+  companyId   String
+  divisionId  String
+  branchId    String
+  customerId  String
+  saleNumber  String             @db.VarChar(100)
+  numberKey   String
+  currency    String             @db.VarChar(3)
+  saleDate    DateTime           @db.Date
+  dueDate     DateTime           @db.Date
+  totalAmount Decimal            @db.Decimal(18, 2)
+  paidAmount  Decimal            @default(0) @db.Decimal(18, 2)
+  notes       String?            @db.VarChar(2000)
+  version     Int                @default(1)
+  voidedAt    DateTime?
+  createdBy   String
+  createdAt   DateTime           @default(now())
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division    Division           @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  branch      Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer    SalesDeskCustomer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines       SalesDeskLine[]
+  payments    SalesDeskPayment[]
+  events      SalesDeskEvent[]
+
+  @@unique([companyId, numberKey])
+  @@index([companyId, divisionId, branchId, saleDate])
   @@map("sales_desk_sales")
 }
+
 model SalesDeskLine {
-  id String @id @default(uuid())
-  saleId String
-  position Int
-  description String @db.VarChar(250)
-  quantity Decimal @db.Decimal(12,3)
-  unitPrice Decimal @db.Decimal(18,2)
-  totalAmount Decimal @db.Decimal(18,2)
-  sale SalesDeskSale @relation(fields:[saleId],references:[id],onDelete:Restrict)
-  @@unique([saleId,position])
+  id          String        @id @default(uuid())
+  saleId      String
+  position    Int
+  description String        @db.VarChar(250)
+  quantity    Decimal       @db.Decimal(12, 3)
+  unitPrice   Decimal       @db.Decimal(18, 2)
+  totalAmount Decimal       @db.Decimal(18, 2)
+  sale        SalesDeskSale @relation(fields: [saleId], references: [id], onDelete: Restrict)
+
+  @@unique([saleId, position])
   @@map("sales_desk_lines")
 }
+
 model SalesDeskPayment {
-  id String @id @default(uuid())
-  saleId String
-  requestId String @unique
-  payloadKey String
-  amount Decimal @db.Decimal(18,2)
-  paymentDate DateTime @db.Date
-  reference String @db.VarChar(160)
-  createdBy String
-  createdAt DateTime @default(now())
-  reversedAt DateTime?
-  reversalReason String? @db.VarChar(500)
-  sale SalesDeskSale @relation(fields:[saleId],references:[id],onDelete:Restrict)
-  cashMovement CashDeskMovement?
+  id             String            @id @default(uuid())
+  saleId         String
+  requestId      String            @unique
+  payloadKey     String
+  amount         Decimal           @db.Decimal(18, 2)
+  paymentDate    DateTime          @db.Date
+  reference      String            @db.VarChar(160)
+  createdBy      String
+  createdAt      DateTime          @default(now())
+  reversedAt     DateTime?
+  reversalReason String?           @db.VarChar(500)
+  sale           SalesDeskSale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  cashMovement   CashDeskMovement?
+
   @@index([saleId])
   @@map("sales_desk_payments")
 }
+
 model SalesDeskEvent {
-  id String @id @default(uuid())
-  saleId String
-  actorId String
+  id        String        @id @default(uuid())
+  saleId    String
+  actorId   String
   actorName String
-  action String
-  detail String
-  createdAt DateTime @default(now())
-  sale SalesDeskSale @relation(fields:[saleId],references:[id],onDelete:Restrict)
-  @@index([saleId,createdAt])
+  action    String
+  detail    String
+  createdAt DateTime      @default(now())
+  sale      SalesDeskSale @relation(fields: [saleId], references: [id], onDelete: Restrict)
+
+  @@index([saleId, createdAt])
   @@map("sales_desk_events")
+}
+
+/// A POS line sold at a price other than the product's list price
+/// (POS_REMAKE_PLAN_2026-09-23.md §5). Written in the same insert as its sales
+/// order, so a sale never exists without the record of who changed the price
+/// and why. Prices are VAT-inclusive, as the rep quoted them.
+model MobilePosPriceOverride {
+  id               String   @id @default(uuid())
+  companyId        String
+  salesOrderId     String
+  terminalId       String
+  productId        String
+  userId           String
+  listUnitPrice    Decimal  @db.Decimal(18, 4)
+  chargedUnitPrice Decimal  @db.Decimal(18, 4)
+  quantity         Decimal  @db.Decimal(18, 4)
+  reasonCode       String
+  note             String?
+  createdAt        DateTime @default(now())
+
+  salesOrder SalesOrder        @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  terminal   MobilePosTerminal @relation(fields: [terminalId], references: [id], onDelete: Restrict)
+
+  @@unique([salesOrderId, productId])
+  @@index([companyId, createdAt])
+  @@index([terminalId, createdAt])
+  @@map("mobile_pos_price_overrides")
 }

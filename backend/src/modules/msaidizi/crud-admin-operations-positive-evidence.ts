@@ -563,6 +563,8 @@ const definitions: readonly FixtureDefinition[] = [
             status: { kind: 'exact', value: literal('ACTIVE') },
             configVersion: { kind: 'exact', value: literal(1) },
             uiVersion: { kind: 'exact', value: literal(1) },
+            // A new terminal allows no price drop until an administrator sets one.
+            maxPriceDropPct: { kind: 'exact', value: literal(0) },
             activationTokenHash: {
               kind: 'response-secret-digest',
               responsePath: ['activation', 'activationCode'],

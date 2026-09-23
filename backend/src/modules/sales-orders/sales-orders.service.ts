@@ -46,8 +46,26 @@ type SalesOrderReferenceIds = {
   lines?: SalesOrderLineDto[];
 };
 
+/** One POS line sold at a price other than its list price (VAT-inclusive). */
+type MobilePosPriceOverrideRecord = {
+  companyId: string;
+  terminalId: string;
+  productId: string;
+  userId: string;
+  listUnitPrice: number;
+  chargedUnitPrice: number;
+  quantity: number;
+  reasonCode: string;
+  note: string | null;
+};
+
 type SalesOrderCreateContext = {
   mobilePosTerminalId?: string;
+  /**
+   * Written in the same insert as the order, so a POS sale can never exist
+   * without the record of who changed which price and why.
+   */
+  mobilePosPriceOverrides?: MobilePosPriceOverrideRecord[];
 };
 
 type LinkedReceivableSnapshot = {
@@ -1463,6 +1481,7 @@ export class SalesOrdersService {
     user: AuthUser,
     terminalId: string,
     terminalCode: string,
+    priceOverrides: MobilePosPriceOverrideRecord[] = [],
   ) {
     const safeDto: CreateSalesOrderDto = {
       ...dto,
@@ -1471,7 +1490,10 @@ export class SalesOrdersService {
         .filter(Boolean)
         .join('\n'),
     };
-    return this.createAndConfirm(safeDto, user, { mobilePosTerminalId: terminalId });
+    return this.createAndConfirm(safeDto, user, {
+      mobilePosTerminalId: terminalId,
+      mobilePosPriceOverrides: priceOverrides,
+    });
   }
 
   /**
@@ -1676,6 +1698,9 @@ export class SalesOrdersService {
           idempotencyKey: dto.idempotencyKey ?? null,
           mobilePosTerminalId: context.mobilePosTerminalId ?? null,
           createdById: userId,
+          ...(context.mobilePosPriceOverrides?.length
+            ? { mobilePosPriceOverrides: { create: context.mobilePosPriceOverrides } }
+            : {}),
         },
       });
 

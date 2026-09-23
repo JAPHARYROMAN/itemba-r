@@ -7,8 +7,10 @@ import {
   type KauntaShellProps,
 } from '@/components/westsides/mobile-pos-lite/KauntaShell';
 import { posErrorMessage } from '../core/pos-errors';
+import { lineUnitPrice } from '../core/pos-price';
 import { money, pendingTime } from '../core/pos-utils';
 import type { PosTranslate } from '../core/pos-types';
+import { PriceSheet } from './PriceSheet';
 import { usePosStep } from './use-pos-step';
 import './pos-app.css';
 
@@ -97,6 +99,7 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
     matches,
     addProduct,
     setQuantity,
+    setLinePrice,
     cartCount,
     total,
     beginSale,
@@ -131,6 +134,9 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
   } = props;
   const { step, go } = usePosStep();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [priceFor, setPriceFor] = useState<string | null>(null);
+  const canEditPrice = Boolean(session.priceEditEnabled && setLinePrice);
+  const pricedLine = priceFor ? cart.find((line) => line.product.id === priceFor) : undefined;
   const searchRef = useRef<HTMLInputElement>(null);
   const customerRef = useRef<HTMLInputElement>(null);
   const previousScreen = useRef(screen);
@@ -174,11 +180,18 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
     searchRef.current?.focus();
   }
 
-  // Till keyboard: F12 pays, F8 jumps to the customer. Enter in search adds
-  // the top result (and is what a keyboard-wedge scanner sends).
+  // Till keyboard: F12 pays, F8 jumps to the customer, F4 changes the price
+  // of the last line. Enter in search adds the top result (and is what a
+  // keyboard-wedge scanner sends). Nothing pays while the price sheet is open.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'F12') {
+      if (priceFor) return;
+      if (event.key === 'F4') {
+        event.preventDefault();
+        const last = cart[cart.length - 1];
+        if (canEditPrice && last && (step === 'sale' || step === 'pay'))
+          setPriceFor(last.product.id);
+      } else if (event.key === 'F12') {
         event.preventDefault();
         if (step === 'sale' || step === 'pay') finishSale();
       } else if (event.key === 'F8') {
@@ -437,9 +450,23 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
                     <div key={line.product.id} className="pos-line">
                       <div className="pos-line-text">
                         <strong>{line.product.name}</strong>
-                        <span className="pos-num">
-                          {t('posEachPrice', { price: money(line.product.sellingPrice) })}
-                        </span>
+                        {canEditPrice ? (
+                          <button
+                            type="button"
+                            className="pos-line-price pos-num"
+                            data-edited={Boolean(line.price)}
+                            aria-label={t('posEditPriceOf', { name: line.product.name })}
+                            onClick={() => setPriceFor(line.product.id)}
+                          >
+                            {line.price && <s>{money(line.product.sellingPrice)}</s>}
+                            {t('posEachPrice', { price: money(lineUnitPrice(line)) })}
+                            {line.price && <span className="pos-tag">{t('posPriceChanged')}</span>}
+                          </button>
+                        ) : (
+                          <span className="pos-num">
+                            {t('posEachPrice', { price: money(line.product.sellingPrice) })}
+                          </span>
+                        )}
                       </div>
                       <div className="pos-qty">
                         <button
@@ -468,7 +495,7 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
                         </button>
                       </div>
                       <span className="pos-line-total pos-num">
-                        {money(line.product.sellingPrice * line.quantity)}
+                        {money(lineUnitPrice(line) * line.quantity)}
                       </span>
                     </div>
                   ))}
@@ -667,6 +694,19 @@ function PosApp(props: PosShellProps & { openBridge: () => void }) {
               </button>
             </section>
           </div>
+
+          {pricedLine && setLinePrice && (
+            <PriceSheet
+              line={pricedLine}
+              session={session}
+              t={t}
+              onClose={() => setPriceFor(null)}
+              onSave={(price) => {
+                setLinePrice(pricedLine.product.id, price);
+                setPriceFor(null);
+              }}
+            />
+          )}
 
           <div className="pos-bar">
             <div className="pos-total-row">

@@ -5233,3 +5233,197 @@ describe('MobilePosLiteController history and day-report routes', () => {
     expect(service.counterDeliveryBackfill.mock.calls[0]).toHaveLength(2);
   });
 });
+
+/* ------------------------------------------------------------------------ *
+ * Price editing (POS_REMAKE_PLAN_2026-09-23.md section 5). The list price of
+ * saleProduct() is 5000.
+ * ------------------------------------------------------------------------ */
+describe('MobilePosLiteService createSale price editing', () => {
+  function priceUser(...extra: string[]): AuthUser {
+    return { ...repUser(), permissions: ['mobile_pos_lite.use', ...extra] };
+  }
+  function edited(unitPrice: number, extra: Record<string, unknown> = {}) {
+    return saleDto({
+      lines: [
+        {
+          productId: 'product-1',
+          quantity: 2,
+          unitPrice,
+          priceReason: 'REGULAR_CUSTOMER',
+          ...extra,
+        },
+      ],
+    });
+  }
+  function setup(terminal: Record<string, unknown> = {}) {
+    const harness = makeService();
+    harness.prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow(terminal));
+    harness.prisma.product.findMany.mockResolvedValue([saleProduct()]);
+    return harness;
+  }
+  const refusal = /^This price is below the allowed level for this product$/;
+
+  it('sells at the list price and records nothing when the sent price equals the list', async () => {
+    const { service, salesOrders } = setup();
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, edited(5000), priceUser());
+    const call = salesOrders.mobilePosLiteQuickSale.mock.calls[0];
+    expect(call[0].lines[0].unitPrice).toBe(5000);
+    expect(call).toHaveLength(4);
+  });
+
+  it('refuses a changed price from a rep without edit_price, before any sale', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(TERMINAL_CODE, DEVICE_SECRET, edited(4800), priceUser()),
+    ).rejects.toThrow('You cannot change prices on this terminal');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('requires a reason for a changed price', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4800, { priceReason: undefined }),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow('Choose a reason for the changed price');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('lets a rep raise a price with a reason, with no upper limit, and records it', async () => {
+    const { service, salesOrders } = setup();
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(6500, { priceNote: '  delivered to the door ' }),
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    const [dto, , , , overrides] = salesOrders.mobilePosLiteQuickSale.mock.calls[0];
+    expect(dto.lines[0].unitPrice).toBe(6500);
+    expect(overrides).toEqual([
+      {
+        companyId: 'company-1',
+        terminalId: 'terminal-1',
+        productId: 'product-1',
+        userId: 'rep-1',
+        listUnitPrice: 5000,
+        chargedUnitPrice: 6500,
+        quantity: 2,
+        reasonCode: 'REGULAR_CUSTOMER',
+        note: 'delivered to the door',
+      },
+    ]);
+  });
+
+  it('lets a rep lower a price within the terminal limit', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(4500),
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    expect(salesOrders.mobilePosLiteQuickSale.mock.calls[0][0].lines[0].unitPrice).toBe(4500);
+  });
+
+  it('refuses a drop past the terminal limit in the one cost-blind sentence', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4499),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow(refusal);
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('allows no drop at all on a terminal whose limit was never set', async () => {
+    const { service } = setup();
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4999),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow(refusal);
+  });
+
+  it('lets edit_price_unlimited go past the terminal limit', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(3000),
+      priceUser('mobile_pos_lite.edit_price', 'mobile_pos_lite.edit_price_unlimited'),
+    );
+    expect(salesOrders.mobilePosLiteQuickSale.mock.calls[0][0].lines[0].unitPrice).toBe(3000);
+  });
+
+  it('replaces the below-cost message, which names the cost, before it reaches the till', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    salesOrders.mobilePosLiteQuickSale.mockRejectedValue(
+      new BadRequestException(
+        'Maize Flour cannot be sold below cost. Net unit price TZS 3,814 must be greater than cost TZS 4,100.',
+      ),
+    );
+    const error = await service
+      .createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4500),
+        priceUser('mobile_pos_lite.edit_price'),
+      )
+      .catch((caught: Error) => caught);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toMatch(refusal);
+    expect((error as Error).message).not.toMatch(/\d/);
+  });
+
+  it('refuses two prices for one product in a sale', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        saleDto({
+          lines: [
+            { productId: 'product-1', quantity: 1, unitPrice: 4800, priceReason: 'OTHER' },
+            { productId: 'product-1', quantity: 1 },
+          ],
+        }),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow('Each product can have only one price in a sale');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('tells the phone what it may offer, from permissions and the terminal limit', async () => {
+    const { service } = setup({
+      maxPriceDropPct: '7.5',
+      paymentMethods: [
+        {
+          paymentMethod: 'CASH',
+          isEnabled: true,
+          cashAccountId: 'cash-1',
+          label: null,
+          cashAccount: { isActive: true },
+        },
+      ],
+    });
+    const session = await service.session(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    expect(session).toMatchObject({
+      priceEditEnabled: true,
+      priceEditUnlimited: false,
+      maxPriceDropPct: 7.5,
+    });
+  });
+});

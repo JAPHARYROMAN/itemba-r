@@ -41,6 +41,7 @@ import { applyPosThemeChrome, usePosTheme } from './pos-theme';
 import { useKauntaRouter, type KauntaRoute } from './pos-router';
 import type {
   CartLine,
+  CartLinePrice,
   Customer,
   DaySummary,
   PosScreen,
@@ -104,6 +105,8 @@ export type KauntaShellProps = {
   matches: MobilePosLiteProduct[];
   addProduct: (product: MobilePosLiteProduct) => void;
   setQuantity: (productId: string, next: number) => void;
+  /** Price editing: drawn only by the new POS (uiVersion 3); Kaunta ignores it. */
+  setLinePrice?: (productId: string, price: CartLinePrice | null) => void;
   cartCount: number;
   total: number;
   beginSale: () => void;

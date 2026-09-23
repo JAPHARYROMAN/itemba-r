@@ -218,6 +218,13 @@ type PosErrorRow = {
 };
 
 const ERROR_PATTERNS: ReadonlyArray<PosErrorRow> = [
+  // Price editing (mobile-pos-lite.service.ts resolveSaleLines / createSale).
+  // The first row is the ONE sentence for both the terminal limit and the
+  // below-cost guard, which the server swaps in so no cost reaches the till.
+  { pattern: /price is below the allowed level/i, key: 'errPriceNotAllowed' },
+  { pattern: /cannot change prices on this terminal/i, key: 'errPriceEditNotAllowed' },
+  { pattern: /choose a reason for the changed price/i, key: 'errPriceReasonRequired' },
+  { pattern: /can have only one price in a sale/i, key: 'errOnePricePerProduct' },
   // Insufficient stock (inventory-movements issue path)
   { pattern: /insufficient (available )?stock/i, key: 'errInsufficientStock' },
   // Product inactive / unpriced / not visible to this terminal

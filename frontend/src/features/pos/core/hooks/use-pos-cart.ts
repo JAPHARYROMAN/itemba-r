@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { backendGet } from '@/lib/api-client';
 import type { MobilePosLiteBinding, MobilePosLiteProduct } from '@/lib/mobile-pos-lite-store';
-import type { CartLine } from '../pos-types';
+import type { CartLine, CartLinePrice } from '../pos-types';
+import { lineUnitPrice } from '../pos-price';
 import { mergeProducts, terminalHeaders } from '../pos-utils';
 
 type UsePosCartArgs = {
@@ -37,6 +38,8 @@ export function usePosCart({
   quickPicks: MobilePosLiteProduct[];
   addProduct: (product: MobilePosLiteProduct) => void;
   setQuantity: (productId: string, next: number) => void;
+  /** Change (or, with null, restore) one line's price. Only the new POS calls it. */
+  setLinePrice: (productId: string, price: CartLinePrice | null) => void;
 } {
   const [query, setQuery] = useState('');
   const [remoteProducts, setRemoteProducts] = useState<MobilePosLiteProduct[]>([]);
@@ -84,7 +87,7 @@ export function usePosCart({
   }, [catalog, query, remoteProducts]);
 
   const total = useMemo(
-    () => cart.reduce((sum, line) => sum + line.product.sellingPrice * line.quantity, 0),
+    () => cart.reduce((sum, line) => sum + lineUnitPrice(line) * line.quantity, 0),
     [cart],
   );
   const cartCount = useMemo(() => cart.reduce((sum, line) => sum + line.quantity, 0), [cart]);
@@ -112,6 +115,19 @@ export function usePosCart({
     setRemoteProducts([]);
   }
 
+  function setLinePrice(productId: string, price: CartLinePrice | null) {
+    setCart((current) =>
+      current.map((line) => {
+        if (line.product.id !== productId) return line;
+        if (!price || price.unitPrice === line.product.sellingPrice) {
+          const { price: _dropped, ...unpriced } = line;
+          return unpriced;
+        }
+        return { ...line, price };
+      }),
+    );
+  }
+
   function setQuantity(productId: string, next: number) {
     setCart((current) =>
       next <= 0
@@ -133,5 +149,6 @@ export function usePosCart({
     quickPicks,
     addProduct,
     setQuantity,
+    setLinePrice,
   };
 }

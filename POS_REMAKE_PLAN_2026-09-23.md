@@ -99,6 +99,17 @@ Today `POST /mobile-pos-lite/sales` lines are `{productId, quantity}`, and the s
 - **Visibility.** Price edits appear in the day close (count and total given away), in the office day-report register and in a new "price overrides" report. The owner sees who changed what, when and why.
 - **Receipt.** The receipt shows the charged price. Whether it also shows "was / now" is decision D3.
 
+### Phase 3 status (23 September 2026, branch `pos-remake-phase-3`)
+
+Built as designed above, with these specifics and one pre-existing leak closed:
+
+- **Schema** (migration `20260923150000_mobile_pos_price_overrides`, additive): `mobile_pos_terminals.maxPriceDropPct` (default 0, so no terminal allows a drop until an administrator sets one) and `mobile_pos_price_overrides` (list price, charged price, quantity, reason, note, user, terminal), written in the **same insert** as the sales order.
+- **Permissions**: `mobile_pos_lite.edit_price` (cashier, salesperson, branch and company managers) and `mobile_pos_lite.edit_price_unlimited` (managers). Both were added to the dashboard's POS-only set; without that, a rep holding `edit_price` would have been sent from the till into the ERP shell.
+- **Rules** (server, `resolveSaleLines`): a changed price needs `edit_price` and a reason; raising has no cap (D2); lowering is capped by the terminal unless `edit_price_unlimited`; the below-cost guard always applies; one price per product per sale; a missing or unreadable limit counts as 0.
+- **Cost leak closed**: the profit guard's refusal names the product's cost ("…must be greater than cost TZS X"). That reached reps **before** this work whenever a list price sat below cost. On the POS route it is now replaced by one fixed sentence, used for both the terminal limit and the cost guard, so a refusal says nothing about where the cost is.
+- **Phone**: tap a line's price (or F4 on the till) for the approved price sheet; changes are shown as a percentage of list, never against a cost. An unedited line is sent exactly as before (`{ productId, quantity }`); Kaunta and classic never set a price.
+- **Still to do**: the day close and the office day-report register do not yet show price changes (they come with the phase 5 port); an office "price overrides" report is not built yet. Until then the records exist but are read only through the database. Repeated refusals could still be used to probe roughly where the cost is; the terminal limit and the audit log are the mitigations.
+
 ## 6. Hardware
 
 | Device | Approach | Notes |

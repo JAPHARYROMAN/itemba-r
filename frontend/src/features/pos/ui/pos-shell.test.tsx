@@ -78,8 +78,9 @@ vi.mock('@/lib/mobile-pos-lite-store', () => ({
   getDaylogEntry: vi.fn(async () => null),
 }));
 
-function makeSession(uiVersion: number) {
+function makeSession(uiVersion: number, extra: Record<string, unknown> = {}) {
   return {
+    ...extra,
     terminal: {
       id: 't1',
       code: 'T-001',
@@ -314,5 +315,156 @@ describe('offline custody on the new POS', () => {
     await user.click(screen.getByRole('button', { name: 'Ondoa' }));
     await user.click(screen.getByRole('button', { name: 'Ndiyo, ondoa' }));
     await waitFor(() => expect(h.state.outbox).toHaveLength(0));
+  });
+});
+
+describe('price editing on the new POS', () => {
+  const priceSession = () =>
+    makeSession(3, { priceEditEnabled: true, priceEditUnlimited: false, maxPriceDropPct: 10 });
+
+  async function openPriceSheet(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getByRole('button', { name: 'Badilisha bei ya Soda Baridi' }));
+    return within(screen.getByRole('dialog', { name: 'Badilisha bei' }));
+  }
+
+  it('offers no price change without edit_price', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    expect(screen.queryByRole('button', { name: 'Badilisha bei ya Soda Baridi' })).toBeNull();
+  });
+
+  it('lowers a price within the limit only with a reason, and sends it with the line', async () => {
+    h.state.session = priceSession();
+    const user = userEvent.setup();
+    await boot();
+    const sheet = await openPriceSheet(user);
+    expect(sheet.getByText('TZS 1,200')).toBeInTheDocument();
+
+    const input = sheet.getByLabelText('Bei mpya');
+    await user.clear(input);
+    await user.type(input, '1100');
+    expect(sheet.getByRole('status')).toHaveTextContent('Punguzo 8.3% · ndani ya kiwango cha 10%');
+    expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeDisabled();
+    await user.click(sheet.getByRole('button', { name: 'Mteja wa kudumu' }));
+    await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('bei imebadilishwa')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo · TZS 1,100/ }));
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    const [, payload] = salesPosts()[0];
+    expect(payload.lines).toEqual([
+      { productId: 'p-soda', quantity: 1, unitPrice: 1100, priceReason: 'REGULAR_CUSTOMER' },
+    ]);
+  });
+
+  it('will not save a drop past the terminal limit, and says so in percent only', async () => {
+    h.state.session = priceSession();
+    const user = userEvent.setup();
+    await boot();
+    const sheet = await openPriceSheet(user);
+    const input = sheet.getByLabelText('Bei mpya');
+    await user.clear(input);
+    await user.type(input, '1000');
+    expect(sheet.getByRole('status')).toHaveTextContent('Punguzo 16.7% · zaidi ya kiwango cha 10%');
+    expect(sheet.queryByRole('button', { name: 'Mteja wa kudumu' })).toBeNull();
+    expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeDisabled();
+  });
+
+  it('lets a price go up with a reason', async () => {
+    h.state.session = priceSession();
+    const user = userEvent.setup();
+    await boot();
+    const sheet = await openPriceSheet(user);
+    const input = sheet.getByLabelText('Bei mpya');
+    await user.clear(input);
+    await user.type(input, '1500');
+    expect(sheet.getByRole('status')).toHaveTextContent('Ongezeko 25%');
+    await user.click(sheet.getByRole('button', { name: 'Ofa ya jumla' }));
+    expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeEnabled();
+  });
+
+  it('restoring the list price sends the line exactly as before price editing', async () => {
+    h.state.session = priceSession();
+    const user = userEvent.setup();
+    await boot();
+    let sheet = await openPriceSheet(user);
+    await user.clear(sheet.getByLabelText('Bei mpya'));
+    await user.type(sheet.getByLabelText('Bei mpya'), '1100');
+    await user.click(sheet.getByRole('button', { name: 'Nyingine' }));
+    await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
+
+    await user.click(screen.getByRole('button', { name: 'Badilisha bei ya Soda Baridi' }));
+    sheet = within(screen.getByRole('dialog', { name: 'Badilisha bei' }));
+    await user.click(sheet.getByRole('button', { name: 'Rudisha bei' }));
+    expect(screen.queryByText('bei imebadilishwa')).toBeNull();
+
+    fireEvent.keyDown(window, { key: 'F12' });
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    const [, payload] = salesPosts()[0];
+    expect(Object.keys(payload.lines[0]).sort()).toEqual(['productId', 'quantity']);
+  });
+
+  it('shows the server refusal in Swahili, without any number', async () => {
+    h.state.session = priceSession();
+    h.backendPost.mockRejectedValue(
+      Object.assign(new Error('This price is below the allowed level for this product'), {
+        status: 400,
+      }),
+    );
+    const user = userEvent.setup();
+    await boot();
+    const sheet = await openPriceSheet(user);
+    await user.clear(sheet.getByLabelText('Bei mpya'));
+    await user.type(sheet.getByLabelText('Bei mpya'), '1100');
+    await user.click(sheet.getByRole('button', { name: 'Mteja wa kudumu' }));
+    await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Bei hii hairuhusiwi kwa bidhaa hii.');
+    expect(alert.textContent).not.toMatch(/\d/);
+  });
+
+  it('F4 opens the price of the last line, and F12 cannot pay while it is open', async () => {
+    h.state.session = priceSession();
+    const user = userEvent.setup();
+    await boot();
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    fireEvent.keyDown(window, { key: 'F4' });
+    expect(screen.getByRole('dialog', { name: 'Badilisha bei' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'F12' });
+    expect(salesPosts()).toHaveLength(0);
+  });
+
+  it('keeps an edited price in an offline-held sale', async () => {
+    h.state.session = priceSession();
+    const user = userEvent.setup();
+    await boot();
+    setOnLine(false);
+    fireEvent(window, new Event('offline'));
+    h.backendPost.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const sheet = await openPriceSheet(user);
+    await user.clear(sheet.getByLabelText('Bei mpya'));
+    await user.type(sheet.getByLabelText('Bei mpya'), '1150');
+    await user.click(sheet.getByRole('button', { name: 'Mteja wa kudumu' }));
+    await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+
+    await screen.findByRole('heading', { name: 'Imehifadhiwa kwenye simu' });
+    expect(h.state.outbox[0]).toMatchObject({
+      totalAmount: 1150,
+      payload: {
+        lines: [
+          { productId: 'p-soda', quantity: 1, unitPrice: 1150, priceReason: 'REGULAR_CUSTOMER' },
+        ],
+      },
+    });
   });
 });

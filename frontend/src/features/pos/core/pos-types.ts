@@ -23,6 +23,12 @@ export type Session = {
    * the Hesabu count flow it will gate ships in Phase 5.
    */
   stockCountsEnabled?: boolean;
+  /** mobile_pos_lite.edit_price: may change a price, with a reason. */
+  priceEditEnabled?: boolean;
+  /** mobile_pos_lite.edit_price_unlimited: no terminal cap on a price drop. */
+  priceEditUnlimited?: boolean;
+  /** The terminal's largest allowed drop, percent of list. 0 = none. */
+  maxPriceDropPct?: number;
 };
 
 export type Customer = {
@@ -37,7 +43,14 @@ export type Supplier = {
   supplierCode?: string | null;
   phone?: string | null;
 };
-export type CartLine = { product: MobilePosLiteProduct; quantity: number };
+export type PosPriceReason = 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
+/** A price the rep changed, with why. Absent = the product's list price. */
+export type CartLinePrice = { unitPrice: number; reason: PosPriceReason; note?: string };
+export type CartLine = {
+  product: MobilePosLiteProduct;
+  quantity: number;
+  price?: CartLinePrice;
+};
 export type PurchaseLine = { product: MobilePosLiteProduct; quantity: number; unitCost: string };
 export type DaySummary = {
   count: number;
