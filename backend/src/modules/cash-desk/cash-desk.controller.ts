@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CashDeskService } from './cash-desk.service';
 import {
   CashAccountDto,
@@ -10,8 +11,14 @@ import {
   CashReverseDto,
 } from './cash-desk.dto';
 
+/**
+ * `@AgentExcluded` — added by the ITEMBA OS redesign (4a155f19) and not yet
+ * reviewed for agent eligibility. Every route here stays out of Msaidizi's tool
+ * registry (fail closed) until it has reviewed positive evidence.
+ */
 @Controller('cash-desk')
 @RequirePermissions('cash_desk.view')
+@AgentExcluded()
 export class CashDeskController {
   constructor(private readonly service: CashDeskService) {}
   @Get('directory') directory(@CurrentUser() u: AuthUser) {

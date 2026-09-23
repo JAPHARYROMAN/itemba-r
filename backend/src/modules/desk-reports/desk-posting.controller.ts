@@ -11,6 +11,7 @@ import {
 import { IsIn, IsString, Length, Matches } from 'class-validator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { DeskReportQuery } from './desk-reports.dto';
 import { DeskPostingService } from './desk-posting.service';
 class SourceParams {
@@ -21,7 +22,13 @@ export class PostSourceDto {
   @IsString() @Length(1, 128) debitAccountId!: string;
   @IsString() @Length(1, 128) creditAccountId!: string;
 }
+/**
+ * `@AgentExcluded` — added by the ITEMBA OS redesign (4a155f19) and not yet
+ * reviewed for agent eligibility. Every route here stays out of Msaidizi's tool
+ * registry (fail closed) until it has reviewed positive evidence.
+ */
 @Controller('desk-posting')
+@AgentExcluded()
 export class DeskPostingController {
   constructor(private readonly service: DeskPostingService) {}
   @Get(':kind')

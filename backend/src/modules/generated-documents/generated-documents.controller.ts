@@ -58,7 +58,10 @@ export class GeneratedDocumentsController {
     return this.service.letterheadCompanies(user);
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Post('export')
+  @AgentExcluded()
   @RequireAnyPermissions(...BUSINESS_PDF_SOURCE_PERMISSIONS)
   async exportBusiness(
     @Body() dto: ExportBusinessDocumentDto,
@@ -80,7 +83,10 @@ export class GeneratedDocumentsController {
     this.sendExport(res, await this.service.exportTableDocument(dto, user, req.ip));
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Post('letter')
+  @AgentExcluded()
   @RequirePermissions('documents.manage')
   async exportLetter(
     @Body() dto: ExportLetterDto,

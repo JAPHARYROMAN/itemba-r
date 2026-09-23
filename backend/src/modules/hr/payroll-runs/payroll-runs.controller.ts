@@ -14,6 +14,7 @@ import { PayrollRunsQueryDto } from '../../../common/dto/resource-query.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { PayrollRunsService } from './payroll-runs.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
@@ -83,13 +84,20 @@ export class PayrollRunsController {
     return this.service.approveFinance(id, user);
   }
 
+  // The ITEMBA OS redesign (4a155f19) re-routed this money movement through a
+  // Cash Desk account with a new request contract; the prior agent evidence no
+  // longer applies, so it stays agent-excluded (fail closed) until re-reviewed.
   @Patch(':id/pay')
+  @AgentExcluded()
   @RequirePermissions('payroll.pay')
   pay(@Param('id') id: string, @Body() body: PayPayrollRunDto, @CurrentUser() user: AuthUser) {
     return this.service.pay(id, user, body);
   }
 
+  // Added by the ITEMBA OS redesign (4a155f19); not yet reviewed for agent
+  // eligibility, so it stays out of the agent tool registry (fail closed).
   @Patch(':id/reverse-payment')
+  @AgentExcluded()
   @RequirePermissions('payroll.pay')
   reversePayment(
     @Param('id') id: string,

@@ -176,6 +176,10 @@ const OPERATIONS_QUERY_PARAMETERS = Object.freeze([
   'paymentStatus',
   'dateFrom',
   'dateTo',
+  // Optional pagination added to OperationsReportQueryDto by the ITEMBA OS
+  // redesign (4a155f19). Fixtures never bind it, so they keep reading the
+  // legacy unpaginated response contract.
+  'page',
   'pageSize',
   'limit',
 ] as const);

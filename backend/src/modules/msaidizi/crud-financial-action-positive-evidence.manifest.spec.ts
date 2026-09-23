@@ -13,6 +13,7 @@ import {
   crudMutationRecoveryPlan,
   validateCrudMutationFixtureContract,
 } from './crud-mutation-evidence';
+import { CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS } from './crud-redesign-suspended-evidence';
 
 const EXPECTED_PERMISSIONS = {
   'AuditAdjustmentsController.post': 'audit_adjustments.post',
@@ -77,11 +78,18 @@ describe('standalone finance/operations positive mutation evidence tranche', () 
       expect(capability).toBeDefined();
       if (!capability) continue;
       expect(capability.verb).not.toBe('GET');
-      expect(capability.agentExcluded).toBe(false);
+      // LoanRepaymentSchedulesController.recordPayment and
+      // LoansController.recordRepayment: the ITEMBA OS redesign (4a155f19)
+      // changed their money-moving contracts, so both routes are agent-excluded
+      // and these retained envelopes are not bound to the live routes until
+      // they are re-reviewed.
+      const suspended = CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS.has(fixture.capabilityId);
+      expect(capability.agentExcluded).toBe(suspended);
       expect(capability.permissions).toEqual([
         EXPECTED_PERMISSIONS[fixture.capabilityId as ExpectedId],
       ]);
       expect(capability.anyPermissions).toEqual([]);
+      if (suspended) continue;
       expect(Object.keys(fixture.request.path ?? {}).sort()).toEqual(
         [...capability.params.path].sort(),
       );

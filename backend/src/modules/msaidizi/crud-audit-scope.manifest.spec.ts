@@ -5,9 +5,11 @@ import {
   CRUD_MUTATION_RESOLVED_AUDIT_CAPABILITY_IDS,
   crudMutationAuditAttributionStatus,
 } from './crud-mutation-audit-provenance';
+import { CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS } from './crud-redesign-suspended-evidence';
 
 describe('signed CRUD audit scope contracts', () => {
-  const fixtures = crudEvidenceFixturesForManifest(extractCapabilities(loadAllControllers()));
+  const manifest = extractCapabilities(loadAllControllers());
+  const fixtures = crudEvidenceFixturesForManifest(manifest);
   const governed = fixtures.filter((fixture) => 'governance' in fixture);
 
   it('gives every governance.audit:required route an exact immutable scope contract', () => {
@@ -70,9 +72,28 @@ describe('signed CRUD audit scope contracts', () => {
       .map((fixture) => fixture.capabilityId)
       .sort();
     const reviewedResolved = [...CRUD_MUTATION_RESOLVED_AUDIT_CAPABILITY_IDS].sort();
+    // Reviewed RESOLVED routes whose positives the ITEMBA OS redesign (4a155f19)
+    // suspended: each is agent-excluded, so the live registry has no fixture.
+    const suspendedResolved = reviewedResolved.filter((capabilityId) =>
+      CRUD_REDESIGN_SUSPENDED_POSITIVE_IDS.has(capabilityId),
+    );
 
     expect(new Set(reviewedResolved).size).toBe(reviewedResolved.length);
-    expect(declaredResolved).toEqual(reviewedResolved);
+    expect(suspendedResolved).toEqual([
+      'ApprovalDelegationsController.create',
+      'ApprovalDelegationsController.update',
+      'ApprovalWorkflowsController.create',
+      'ApprovalWorkflowsController.update',
+    ]);
+    for (const capabilityId of suspendedResolved) {
+      expect(manifest.find((capability) => capability.id === capabilityId)).toMatchObject({
+        agentExcluded: true,
+        agentExclusionReason: 'agent_excluded',
+      });
+    }
+    expect(declaredResolved).toEqual(
+      reviewedResolved.filter((capabilityId) => !suspendedResolved.includes(capabilityId)),
+    );
     expect(
       mutations.filter(
         (fixture) =>

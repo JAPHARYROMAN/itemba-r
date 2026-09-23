@@ -28,8 +28,12 @@ describe('unrepresented read authorization/query contracts', () => {
     ).map((blocker) => blocker.capabilityId),
   } as const;
 
-  it('keeps the exact 25 unsafe-scope and three free-form-query reads excluded', () => {
-    expect(expectedByReason.company_scope_not_enforced).toHaveLength(25);
+  it('keeps the exact 21 unsafe-scope and three free-form-query reads excluded', () => {
+    // 25 before the ITEMBA OS redesign (4a155f19). It moved four reads onto
+    // actor company scoping (CcmNoticesController.cmaReferral / .termination,
+    // LoanRepaymentSchedulesController.findOne / .getPayments); they are now
+    // plain @AgentExcluded() 'agent_excluded' path-read blockers instead.
+    expect(expectedByReason.company_scope_not_enforced).toHaveLength(21);
     expect(expectedByReason.query_schema_not_strict).toHaveLength(3);
 
     for (const [reason, expectedIds] of Object.entries(expectedByReason)) {

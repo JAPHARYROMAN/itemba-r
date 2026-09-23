@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestj
 import { IsOptional, IsUUID, IsString, Length, Matches } from 'class-validator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { DeskReportQuery } from './desk-reports.dto';
 import { CashConnectionsService } from './cash-connections.service';
 export class ConnectionDto {
@@ -13,8 +14,14 @@ export class CashPostDto {
   @Matches(/^[a-f0-9]{64}$/) fingerprint!: string;
   @IsOptional() @IsString() @Length(1, 128) offsetAccountId?: string;
 }
+/**
+ * `@AgentExcluded` — added by the ITEMBA OS redesign (4a155f19) and not yet
+ * reviewed for agent eligibility. Every route here stays out of Msaidizi's tool
+ * registry (fail closed) until it has reviewed positive evidence.
+ */
 @Controller('cash-connections')
 @RequirePermissions('cash_desk.view', 'journal_entries.view')
+@AgentExcluded()
 export class CashConnectionsController {
   constructor(private readonly service: CashConnectionsService) {}
   @Get('unlinked-payments')
