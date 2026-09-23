@@ -170,6 +170,14 @@ const CASES: Array<[raw: string, key: PosStringKey]> = [
   //     finished at 23:50 with no signal and closes on the bus at 00:10 is the
   //     normal case; anything outside it is a device clock, not a work day.
   ['Only today or yesterday can be closed from a Mobile POS terminal', 'errReportDateClosed'],
+  // mobile-pos-lite.service.ts price editing (POS remake phase 3):
+  //   · MOBILE_POS_PRICE_BELOW_ALLOWED, for both the terminal limit and the
+  //     below-cost guard (whose own cost-naming message never reaches here)
+  ['This price is below the allowed level for this product', 'errPriceNotAllowed'],
+  //   · resolveSaleLines
+  ['You cannot change prices on this terminal', 'errPriceEditNotAllowed'],
+  ['Choose a reason for the changed price', 'errPriceReasonRequired'],
+  ['Each product can have only one price in a sale', 'errOnePricePerProduct'],
 ];
 
 describe('posErrorKey — exact backend strings', () => {

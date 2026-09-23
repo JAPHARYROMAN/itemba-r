@@ -922,6 +922,51 @@ describe('SalesOrdersService POS / cash-sale output VAT', () => {
     );
   });
 
+  it('writes POS price overrides in the same insert as the order, and none when there are none', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service, 'confirm').mockResolvedValue({ id: 'so-1' } as any);
+    primeCashSale(prisma, { isTaxable: true, taxRate: null });
+    prisma.salesOrder.findFirst.mockResolvedValueOnce(null);
+    const override = {
+      companyId: 'company-1',
+      terminalId: 'terminal-1',
+      productId: 'product-1',
+      userId: 'user-1',
+      listUnitPrice: 1300,
+      chargedUnitPrice: 1180,
+      quantity: 1,
+      reasonCode: 'REGULAR_CUSTOMER',
+      note: null,
+    };
+
+    await service.mobilePosLiteQuickSale(
+      posDto({ idempotencyKey: 'kaunta-idem-2' }),
+      user,
+      'terminal-1',
+      'KAUNTA-01',
+      [override],
+    );
+    expect(prisma.salesOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mobilePosPriceOverrides: { create: [override] },
+        }),
+      }),
+    );
+
+    prisma.salesOrder.create.mockClear();
+    prisma.salesOrder.findFirst.mockResolvedValueOnce(null);
+    await service.mobilePosLiteQuickSale(
+      posDto({ idempotencyKey: 'kaunta-idem-3' }),
+      user,
+      'terminal-1',
+      'KAUNTA-01',
+    );
+    expect(prisma.salesOrder.create.mock.calls[0][0].data).not.toHaveProperty(
+      'mobilePosPriceOverrides',
+    );
+  });
+
   it('re-derives VAT when a DRAFT is updated with gross untaxed lines (edit cannot strip VAT)', async () => {
     const { service, prisma } = makeService();
     prisma.salesOrder.findFirst.mockResolvedValue(persistedOrder({ status: 'DRAFT' }));

@@ -1,0 +1,78 @@
+import type { MobilePosLiteProduct } from '@/lib/mobile-pos-lite-store';
+import type { PosStringKey } from './pos-i18n';
+
+export type Session = {
+  terminal: {
+    id: string;
+    code: string;
+    name: string;
+    configVersion: number;
+    offlineCashEnabled: boolean;
+    /** POS shell pilot flag: 1 = classic, 2 = Kaunta, 3 = new POS on ITEMBA OS. */
+    uiVersion?: number;
+  };
+  company: { id: string; name: string; code: string };
+  division: { id: string; name: string; code: string };
+  branch: { id: string; name: string; code: string };
+  rep: { id: string; name: string };
+  paymentMethods: Array<{ code: string; label: string; requiresReference: boolean }>;
+  purchasesEnabled?: boolean;
+  /**
+   * Permission-derived like purchasesEnabled (`mobile_pos_lite.stock_count`).
+   * Phase 4 consumes it only as the Stoo manager-view presentation gate;
+   * the Hesabu count flow it will gate ships in Phase 5.
+   */
+  stockCountsEnabled?: boolean;
+  /** mobile_pos_lite.edit_price: may change a price, with a reason. */
+  priceEditEnabled?: boolean;
+  /** mobile_pos_lite.edit_price_unlimited: no terminal cap on a price drop. */
+  priceEditUnlimited?: boolean;
+  /** The terminal's largest allowed drop, percent of list. 0 = none. */
+  maxPriceDropPct?: number;
+};
+
+export type Customer = {
+  id: string;
+  name: string;
+  customerCode?: string | null;
+  phone?: string | null;
+};
+export type Supplier = {
+  id: string;
+  name: string;
+  supplierCode?: string | null;
+  phone?: string | null;
+};
+export type PosPriceReason = 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
+/** A price the rep changed, with why. Absent = the product's list price. */
+export type CartLinePrice = { unitPrice: number; reason: PosPriceReason; note?: string };
+export type CartLine = {
+  product: MobilePosLiteProduct;
+  quantity: number;
+  price?: CartLinePrice;
+};
+export type PurchaseLine = { product: MobilePosLiteProduct; quantity: number; unitCost: string };
+export type DaySummary = {
+  count: number;
+  totalAmount: number;
+  sales: Array<{
+    id: string;
+    salesOrderNumber: string;
+    totalAmount: number;
+    paymentMethod: string;
+    createdAt: string;
+    customerName?: string | null;
+  }>;
+};
+export type SaleResult = {
+  id: string;
+  salesOrderNumber?: string;
+  totalAmount?: number;
+  receiptNumber?: string;
+};
+
+/** The screen-state union of the POS orchestrator. */
+export type PosScreen = 'home' | 'sale' | 'payment' | 'success' | 'queue' | 'purchase' | 'mySales';
+
+/** Signature of the `t` function returned by `usePosLang()`. */
+export type PosTranslate = (key: PosStringKey, vars?: Record<string, string | number>) => string;

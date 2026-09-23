@@ -41,6 +41,7 @@ import { applyPosThemeChrome, usePosTheme } from './pos-theme';
 import { useKauntaRouter, type KauntaRoute } from './pos-router';
 import type {
   CartLine,
+  CartLinePrice,
   Customer,
   DaySummary,
   PosScreen,
@@ -83,7 +84,7 @@ import { SuccessScreen } from './screens/SuccessScreen';
 /** Extra bottom padding so screen content clears the fixed 64px slab. */
 const SCREEN_PAD = ' pb-36';
 
-type KauntaShellProps = {
+export type KauntaShellProps = {
   session: Session;
   binding: MobilePosLiteBinding;
   online: boolean;
@@ -104,6 +105,18 @@ type KauntaShellProps = {
   matches: MobilePosLiteProduct[];
   addProduct: (product: MobilePosLiteProduct) => void;
   setQuantity: (productId: string, next: number) => void;
+  /** Price editing: drawn only by the new POS (uiVersion 3); Kaunta ignores it. */
+  setLinePrice?: (productId: string, price: CartLinePrice | null) => void;
+  /**
+   * 'os' draws the module screens in the ITEMBA OS look for the new POS
+   * (uiVersion 3): same screens, hooks and slab, OS colours instead of paper
+   * and brass, following the OS light/dark theme instead of Mchana/Usiku.
+   */
+  skin?: 'os';
+  /** In the OS skin, called when the rep goes back to selling (Mauzo). */
+  onReturnToSale?: () => void;
+  /** The terminal catalog, for exact barcode matches (new POS only). */
+  catalog?: MobilePosLiteProduct[];
   cartCount: number;
   total: number;
   beginSale: () => void;
@@ -261,6 +274,16 @@ export function KauntaShell(props: KauntaShellProps) {
   }, []);
 
   const { route, navigate } = useKauntaRouter({ purchasesEnabled, stockCountsEnabled, onExit });
+
+  // In the new POS the selling screens are its own: reaching Mauzo from a
+  // module hands the rep back to them.
+  const onReturnToSaleRef = useRef(props.onReturnToSale);
+  useEffect(() => {
+    onReturnToSaleRef.current = props.onReturnToSale;
+  });
+  useEffect(() => {
+    if (props.skin === 'os' && route === 'mauzo') onReturnToSaleRef.current?.();
+  }, [props.skin, route]);
 
   // Historia (spec-history-reports §3.1/§3.2). Neither list is cached, so both
   // hooks are pure fetch state; `active` is what lets each one's `online`
@@ -456,7 +479,11 @@ export function KauntaShell(props: KauntaShellProps) {
   // The address bar / status bar follows the POS's chosen theme, not the
   // phone's — see pos-theme.ts. Undone on unmount, so logout hands the chrome
   // back to the page's static Mchana `themeColor`.
-  useEffect(() => applyPosThemeChrome(theme), [theme]);
+  // The OS skin follows the OS theme, so it never repaints the browser
+  // chrome in the POS's own Mchana/Usiku colours.
+  useEffect(() => {
+    if (props.skin !== 'os') applyPosThemeChrome(theme);
+  }, [props.skin, theme]);
 
   // Keyboard rule (direction §3): a focused text input collapses the slab to a
   // 28px strip. Primary signal is the visualViewport shrinking under the soft
@@ -1052,7 +1079,8 @@ export function KauntaShell(props: KauntaShellProps) {
   return (
     <div
       className="pos-shell min-h-screen"
-      data-pos-theme={theme}
+      data-pos-theme={props.skin === 'os' ? undefined : theme}
+      data-pos-skin={props.skin}
       style={{ background: 'var(--aurora-bg)' }}
     >
       {showRail && (

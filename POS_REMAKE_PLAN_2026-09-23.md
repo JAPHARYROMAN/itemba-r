@@ -99,6 +99,17 @@ Today `POST /mobile-pos-lite/sales` lines are `{productId, quantity}`, and the s
 - **Visibility.** Price edits appear in the day close (count and total given away), in the office day-report register and in a new "price overrides" report. The owner sees who changed what, when and why.
 - **Receipt.** The receipt shows the charged price. Whether it also shows "was / now" is decision D3.
 
+### Phase 3 status (23 September 2026, branch `pos-remake-phase-3`)
+
+Built as designed above, with these specifics and one pre-existing leak closed:
+
+- **Schema** (migration `20260923150000_mobile_pos_price_overrides`, additive): `mobile_pos_terminals.maxPriceDropPct` (default 0, so no terminal allows a drop until an administrator sets one) and `mobile_pos_price_overrides` (list price, charged price, quantity, reason, note, user, terminal), written in the **same insert** as the sales order.
+- **Permissions**: `mobile_pos_lite.edit_price` (cashier, salesperson, branch and company managers) and `mobile_pos_lite.edit_price_unlimited` (managers). Both were added to the dashboard's POS-only set; without that, a rep holding `edit_price` would have been sent from the till into the ERP shell.
+- **Rules** (server, `resolveSaleLines`): a changed price needs `edit_price` and a reason; raising has no cap (D2); lowering is capped by the terminal unless `edit_price_unlimited`; the below-cost guard always applies; one price per product per sale; a missing or unreadable limit counts as 0.
+- **Cost leak closed**: the profit guard's refusal names the product's cost ("…must be greater than cost TZS X"). That reached reps **before** this work whenever a list price sat below cost. On the POS route it is now replaced by one fixed sentence, used for both the terminal limit and the cost guard, so a refusal says nothing about where the cost is.
+- **Phone**: tap a line's price (or F4 on the till) for the approved price sheet; changes are shown as a percentage of list, never against a cost. An unedited line is sent exactly as before (`{ productId, quantity }`); Kaunta and classic never set a price.
+- **Still to do**: the day close and the office day-report register do not yet show price changes (they come with the phase 5 port); an office "price overrides" report is not built yet. Until then the records exist but are read only through the database. Repeated refusals could still be used to probe roughly where the cost is; the terminal limit and the audit log are the mitigations.
+
 ## 6. Hardware
 
 | Device | Approach | Notes |
@@ -108,6 +119,21 @@ Today `POST /mobile-pos-lite/sales` lines are `{productId, quantity}`, and the s
 | Receipt printer, stage 2 | **ESC/POS direct**: Web Serial / WebUSB on desktop Chrome, Web Bluetooth on Android Chrome. Silent printing, no dialog. | Needs a model shortlist and a device matrix. D5. |
 | Cash drawer | Kicked open by an ESC/POS command through the printer (stage 2), only on a completed cash sale. | No drawer without a direct-print printer. |
 | Share receipt | Keep the existing letterhead PDF share (`GET sales/:id/receipt`) for phones without a printer. | Already shipped. |
+
+### Phase 4 status (23 September 2026, branch `pos-remake-phase-4`)
+
+- **Scanner (keyboard wedge), done:** a burst of 4+ keys less than 50 ms apart, ending in Enter, is a scan. Outside a text field it adds the exact barcode (or product code) match; an unknown code goes into search with a plain note. Inside the search box, Enter now prefers an exact barcode over the top fuzzy result. No camera (D4).
+- **Browser receipts, done:** one receipt model drawn for the browser print dialog at 80 mm (72 mm printable) or 58 mm (48 mm), chosen per device under Menu → Printa na droo. It holds charged prices only (D3) and never a cost; a held sale prints "not yet sent" and no order number. Measured in a browser at both widths: every amount sits on the right edge and nothing overflows.
+- **Direct ESC/POS and the cash drawer, built, not certified:** an encoder (init, bold, double height, partial cut, drawer pulse `ESC p 0 25 250`), a Web Serial connection (desktop Chrome/Edge) and a Web Bluetooth one (Chrome on Android), off by default. The drawer opens once per finished cash sale (sent or held), only with a directly connected printer and the setting on, and never for credit or mobile money. **Not tried on real hardware:** D5 (the printer and scanner models) is still open, so the panel says "not yet certified". Certification means a test print on each model, adding its Bluetooth service if it is not one of the three common ones, and confirming the drawer pulse.
+
+### Phase 5 status (23 September 2026, branch `pos-remake-phase-5`)
+
+**Approach changed from the table below, deliberately.** Rebuilding every module screen from scratch would re-derive behaviour that about 8,000 lines of Kaunta tests pin (count key saved with the draft, the 6-hour capture limit, the queued-sales gate, cost-blind history, the close's frozen key and business day). Kaunta's look is almost entirely CSS variables under `.pos-shell`, so the new POS instead opens Kaunta's own module screens, hooks and bottom action bar in an **ITEMBA OS skin** (`KauntaShell skin="os"`): OS colours, OS light/dark instead of Mchana/Usiku, brass replaced by plain ink (money) and OS amber (custody). No module logic changed.
+
+- **5a, done:** day reports carry the day's price changes (count, given below list, added above), computed by the server from its own records; shown on the day-report PDF and the office register.
+- **5b, done:** Menu lists the modules (Leo: day book, history and close; Stoo: stock and counts; Mizigo: deliveries, for users who may receive stock; Mipangilio: settings). Each opens in the OS skin at its deep link; tapping Mauzo returns to the new selling screens. The floating "back" button is gone.
+- **Trade-off:** module screens keep Kaunta's phone-first single column rather than the till/tablet layouts. A module can later get a native layout on its own, without touching behaviour.
+- **Not yet seen rendered:** the skin was checked by tests and by its tokens (the approved OS palette), not in a browser: the module screens are styled with Tailwind classes that need a real build. A signed-in look is needed before the pilot.
 
 ## 7. Visual direction
 

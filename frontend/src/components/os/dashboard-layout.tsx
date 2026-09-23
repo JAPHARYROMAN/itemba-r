@@ -51,13 +51,18 @@ function titleForPath(pathname: string): string | null {
 // phone-only branch manager who can also receive stock and count inventory
 // still lives entirely in the POS. (.stock_count ships with the Stoo phase;
 // listing it now is inert until the permission is seeded.)
+// Price editing (POS remake phase 3) is granted to reps, so both codes belong
+// here: without them a rep who can change a price would stop counting as
+// POS-only and be sent from the till into the ERP shell.
 const POS_ONLY_PERMISSIONS = new Set([
   'mobile_pos_lite.use',
   'mobile_pos_lite.purchase',
   'mobile_pos_lite.stock_count',
+  'mobile_pos_lite.edit_price',
+  'mobile_pos_lite.edit_price_unlimited',
 ]);
 
-function isPosOnlyUser(user: { permissions: string[] } | null | undefined): boolean {
+export function isPosOnlyUser(user: { permissions: string[] } | null | undefined): boolean {
   return (
     !!user &&
     user.permissions.includes('mobile_pos_lite.use') &&

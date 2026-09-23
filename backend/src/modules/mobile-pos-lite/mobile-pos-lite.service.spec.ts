@@ -195,6 +195,10 @@ function makeService() {
     productBatch: {
       update: jest.fn().mockResolvedValue({}),
     },
+    // Price changes in the day's sales (phase 5); none unless a test says so.
+    mobilePosPriceOverride: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     mobilePosDayReport: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
@@ -5231,5 +5235,261 @@ describe('MobilePosLiteController history and day-report routes', () => {
     expect(service.counterDeliveryBackfill).toHaveBeenCalledWith({ companyId: 'company-1' }, user);
     // Two arguments, so nothing a request body could carry can reach the run.
     expect(service.counterDeliveryBackfill.mock.calls[0]).toHaveLength(2);
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * Price editing (POS_REMAKE_PLAN_2026-09-23.md section 5). The list price of
+ * saleProduct() is 5000.
+ * ------------------------------------------------------------------------ */
+describe('MobilePosLiteService createSale price editing', () => {
+  function priceUser(...extra: string[]): AuthUser {
+    return { ...repUser(), permissions: ['mobile_pos_lite.use', ...extra] };
+  }
+  function edited(unitPrice: number, extra: Record<string, unknown> = {}) {
+    return saleDto({
+      lines: [
+        {
+          productId: 'product-1',
+          quantity: 2,
+          unitPrice,
+          priceReason: 'REGULAR_CUSTOMER',
+          ...extra,
+        },
+      ],
+    });
+  }
+  function setup(terminal: Record<string, unknown> = {}) {
+    const harness = makeService();
+    harness.prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow(terminal));
+    harness.prisma.product.findMany.mockResolvedValue([saleProduct()]);
+    return harness;
+  }
+  const refusal = /^This price is below the allowed level for this product$/;
+
+  it('sells at the list price and records nothing when the sent price equals the list', async () => {
+    const { service, salesOrders } = setup();
+    await service.createSale(TERMINAL_CODE, DEVICE_SECRET, edited(5000), priceUser());
+    const call = salesOrders.mobilePosLiteQuickSale.mock.calls[0];
+    expect(call[0].lines[0].unitPrice).toBe(5000);
+    expect(call).toHaveLength(4);
+  });
+
+  it('refuses a changed price from a rep without edit_price, before any sale', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(TERMINAL_CODE, DEVICE_SECRET, edited(4800), priceUser()),
+    ).rejects.toThrow('You cannot change prices on this terminal');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('requires a reason for a changed price', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4800, { priceReason: undefined }),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow('Choose a reason for the changed price');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('lets a rep raise a price with a reason, with no upper limit, and records it', async () => {
+    const { service, salesOrders } = setup();
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(6500, { priceNote: '  delivered to the door ' }),
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    const [dto, , , , overrides] = salesOrders.mobilePosLiteQuickSale.mock.calls[0];
+    expect(dto.lines[0].unitPrice).toBe(6500);
+    expect(overrides).toEqual([
+      {
+        companyId: 'company-1',
+        terminalId: 'terminal-1',
+        productId: 'product-1',
+        userId: 'rep-1',
+        listUnitPrice: 5000,
+        chargedUnitPrice: 6500,
+        quantity: 2,
+        reasonCode: 'REGULAR_CUSTOMER',
+        note: 'delivered to the door',
+      },
+    ]);
+  });
+
+  it('lets a rep lower a price within the terminal limit', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(4500),
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    expect(salesOrders.mobilePosLiteQuickSale.mock.calls[0][0].lines[0].unitPrice).toBe(4500);
+  });
+
+  it('refuses a drop past the terminal limit in the one cost-blind sentence', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4499),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow(refusal);
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('allows no drop at all on a terminal whose limit was never set', async () => {
+    const { service } = setup();
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4999),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow(refusal);
+  });
+
+  it('lets edit_price_unlimited go past the terminal limit', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(3000),
+      priceUser('mobile_pos_lite.edit_price', 'mobile_pos_lite.edit_price_unlimited'),
+    );
+    expect(salesOrders.mobilePosLiteQuickSale.mock.calls[0][0].lines[0].unitPrice).toBe(3000);
+  });
+
+  it('replaces the below-cost message, which names the cost, before it reaches the till', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    salesOrders.mobilePosLiteQuickSale.mockRejectedValue(
+      new BadRequestException(
+        'Maize Flour cannot be sold below cost. Net unit price TZS 3,814 must be greater than cost TZS 4,100.',
+      ),
+    );
+    const error = await service
+      .createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4500),
+        priceUser('mobile_pos_lite.edit_price'),
+      )
+      .catch((caught: Error) => caught);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toMatch(refusal);
+    expect((error as Error).message).not.toMatch(/\d/);
+  });
+
+  it('refuses two prices for one product in a sale', async () => {
+    const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
+    await expect(
+      service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        saleDto({
+          lines: [
+            { productId: 'product-1', quantity: 1, unitPrice: 4800, priceReason: 'OTHER' },
+            { productId: 'product-1', quantity: 1 },
+          ],
+        }),
+        priceUser('mobile_pos_lite.edit_price'),
+      ),
+    ).rejects.toThrow('Each product can have only one price in a sale');
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+
+  it('tells the phone what it may offer, from permissions and the terminal limit', async () => {
+    const { service } = setup({
+      maxPriceDropPct: '7.5',
+      paymentMethods: [
+        {
+          paymentMethod: 'CASH',
+          isEnabled: true,
+          cashAccountId: 'cash-1',
+          label: null,
+          cashAccount: { isActive: true },
+        },
+      ],
+    });
+    const session = await service.session(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    expect(session).toMatchObject({
+      priceEditEnabled: true,
+      priceEditUnlimited: false,
+      maxPriceDropPct: 7.5,
+    });
+  });
+});
+
+describe('MobilePosLiteService createDayReport price changes', () => {
+  it('sums the day price changes over exactly the report sales, both ways', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 3 },
+      _sum: { totalAmount: '42500' },
+    });
+    prisma.salesOrder.groupBy.mockResolvedValue([
+      { paymentMethod: 'CASH', _count: { _all: 3 }, _sum: { totalAmount: '42500' } },
+    ]);
+    prisma.salesOrderLine.groupBy.mockResolvedValue([]);
+    prisma.mobilePosPriceOverride.findMany.mockResolvedValue([
+      // 1 x (32000 -> 30500): 1500 given away
+      { listUnitPrice: '32000', chargedUnitPrice: '30500', quantity: '1' },
+      // 2 x (1200 -> 1500): 600 added
+      { listUnitPrice: '1200', chargedUnitPrice: '1500', quantity: '2' },
+      // 2 x (5000 -> 4500): 1000 given away
+      { listUnitPrice: '5000', chargedUnitPrice: '4500', quantity: '2' },
+    ]);
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+
+    // The same order filter as the day's totals, through the relation.
+    const salesWhere = prisma.salesOrder.aggregate.mock.calls[0][0].where;
+    expect(prisma.mobilePosPriceOverride.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { salesOrder: salesWhere } }),
+    );
+    const [{ data }] = prisma.mobilePosDayReport.create.mock.calls[0];
+    expect(data).toMatchObject({ priceChangeCount: 3, priceDropTotal: 2500, priceRaiseTotal: 600 });
+    expect(result).toMatchObject({
+      priceChangeCount: 3,
+      priceDropTotal: 2500,
+      priceRaiseTotal: 600,
+    });
+  });
+
+  it('reports none on a day without changed prices', async () => {
+    const { service, prisma } = makeService();
+    prisma.mobilePosTerminal.findFirst.mockResolvedValue(cashTerminalRow());
+    prisma.salesOrder.aggregate.mockResolvedValue({
+      _count: { _all: 0 },
+      _sum: { totalAmount: null },
+    });
+    prisma.salesOrder.groupBy.mockResolvedValue([]);
+    prisma.salesOrderLine.groupBy.mockResolvedValue([]);
+
+    const result = await service.createDayReport(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      dayReportDto(),
+      repUser(),
+    );
+    expect(result).toMatchObject({ priceChangeCount: 0, priceDropTotal: 0, priceRaiseTotal: 0 });
   });
 });

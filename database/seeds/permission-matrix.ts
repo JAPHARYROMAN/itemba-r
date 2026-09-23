@@ -202,6 +202,25 @@ export const ALL_PERMISSIONS: PermDef[] = [
     action: 'stock_count',
     isGroupControl: false,
   },
+  // Price editing on the till (POS_REMAKE_PLAN_2026-09-23.md section 5). A rep
+  // with edit_price may raise a price, or lower it within the terminal's
+  // maxPriceDropPct; edit_price_unlimited (managers) lifts that limit but never
+  // the below-cost guard. Every change needs a reason and is recorded.
+  {
+    code: 'mobile_pos_lite.edit_price',
+    description: 'Change a selling price on a Mobile POS Lite sale, within the terminal limit',
+    module: 'mobile_pos_lite',
+    action: 'edit_price',
+    isGroupControl: false,
+  },
+  {
+    code: 'mobile_pos_lite.edit_price_unlimited',
+    description:
+      'Lower a Mobile POS Lite selling price beyond the terminal limit (never below cost)',
+    module: 'mobile_pos_lite',
+    action: 'edit_price_unlimited',
+    isGroupControl: false,
+  },
   {
     code: 'mobile_pos_lite.manage',
     description: 'Provision and manage Mobile POS Lite terminals',
@@ -1480,7 +1499,11 @@ const BASE_ROLES: RoleDef[] = [
       notGroupCtrl,
       // Mobile POS Lite stock-in purchases + stock counts (manager-level; not
       // granted to cashiers/salespeople by default).
-      (p) => p.code === 'mobile_pos_lite.purchase' || p.code === 'mobile_pos_lite.stock_count',
+      (p) =>
+        p.code === 'mobile_pos_lite.purchase' ||
+        p.code === 'mobile_pos_lite.stock_count' ||
+        p.code === 'mobile_pos_lite.edit_price' ||
+        p.code === 'mobile_pos_lite.edit_price_unlimited',
     ),
   },
   {
@@ -1532,7 +1555,11 @@ const BASE_ROLES: RoleDef[] = [
         )(p) && readExport(p),
       // Mobile POS Lite stock-in purchases + stock counts (manager-level; not
       // granted to cashiers/salespeople by default).
-      (p) => p.code === 'mobile_pos_lite.purchase' || p.code === 'mobile_pos_lite.stock_count',
+      (p) =>
+        p.code === 'mobile_pos_lite.purchase' ||
+        p.code === 'mobile_pos_lite.stock_count' ||
+        p.code === 'mobile_pos_lite.edit_price' ||
+        p.code === 'mobile_pos_lite.edit_price_unlimited',
     ),
   },
   {
@@ -1612,7 +1639,8 @@ const BASE_ROLES: RoleDef[] = [
       (p.module === 'pos' && ['view', 'create', 'complete'].includes(p.action)) ||
       (p.module === 'retail_sales' && p.action === 'view') ||
       (p.module === 'westsides' && p.action === 'dashboard.view') ||
-      p.code === 'mobile_pos_lite.use',
+      p.code === 'mobile_pos_lite.use' ||
+      p.code === 'mobile_pos_lite.edit_price',
   },
   {
     name: 'INVENTORY_OFFICER',
@@ -1646,7 +1674,8 @@ const BASE_ROLES: RoleDef[] = [
       (p.module === 'retail_sales' && p.action === 'view') ||
       (p.module === 'price_lists' && p.action === 'view') ||
       (p.module === 'westsides' && p.action === 'dashboard.view') ||
-      p.code === 'mobile_pos_lite.use',
+      p.code === 'mobile_pos_lite.use' ||
+      p.code === 'mobile_pos_lite.edit_price',
   },
 
   // ── Itemba Enterprises Roles (Milestone 7) ──────────────────────────────────
@@ -2009,14 +2038,14 @@ export const ROLES: RoleDef[] = BASE_ROLES.map((role) => {
       ['sales_desk', 'cash_desk', 'invoice_desk'].includes(permission.module)
         ? role.name === 'GROUP_SUPER_ADMIN'
         : permission.module === 'fuel_reporting'
-        ? role.name === 'GROUP_SUPER_ADMIN' ||
-          (role.name === 'BRANCH_MANAGER' && permission.action !== 'admin') ||
-          (['COMPANY_MANAGER', 'GROUP_DIRECTOR', 'GROUP_AUDITOR', 'ACCOUNTANT'].includes(
-            role.name,
-          ) &&
-            permission.action === 'read')
-        : (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
-          (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
-          role.filter(permission),
+          ? role.name === 'GROUP_SUPER_ADMIN' ||
+            (role.name === 'BRANCH_MANAGER' && permission.action !== 'admin') ||
+            (['COMPANY_MANAGER', 'GROUP_DIRECTOR', 'GROUP_AUDITOR', 'ACCOUNTANT'].includes(
+              role.name,
+            ) &&
+              permission.action === 'read')
+          : (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
+            (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
+            role.filter(permission),
   };
 });

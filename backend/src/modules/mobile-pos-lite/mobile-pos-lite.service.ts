@@ -47,7 +47,10 @@ import {
   UpdateMobilePosTerminalDto,
 } from './dto/mobile-pos-terminal.dto';
 import { ActivateMobilePosTerminalDto } from './dto/mobile-pos-lite-session.dto';
-import { CreateMobilePosLiteSaleDto } from './dto/mobile-pos-lite-sale.dto';
+import {
+  CreateMobilePosLiteSaleDto,
+  type MobilePosPriceReason,
+} from './dto/mobile-pos-lite-sale.dto';
 import { CreateMobilePosLitePurchaseDto } from './dto/mobile-pos-lite-purchase.dto';
 import { CreateMobilePosLiteStockCountDto } from './dto/mobile-pos-lite-stock-count.dto';
 import {
@@ -657,6 +660,27 @@ function positivePrice(value: unknown) {
   return Number.isFinite(price) && price > 0 ? price : null;
 }
 
+/**
+ * The only words a rep ever sees when a price is refused, whether it broke
+ * the terminal's drop limit or the below-cost guard. It never carries a cost,
+ * a floor or a margin (POS_REMAKE_PLAN_2026-09-23.md section 2, invariant 7):
+ * one sentence for both causes, so a refusal cannot be used to find the cost.
+ */
+export const MOBILE_POS_PRICE_BELOW_ALLOWED =
+  'This price is below the allowed level for this product';
+
+export type MobilePosPriceOverrideInput = {
+  companyId: string;
+  terminalId: string;
+  productId: string;
+  userId: string;
+  listUnitPrice: number;
+  chargedUnitPrice: number;
+  quantity: number;
+  reasonCode: MobilePosPriceReason;
+  note: string | null;
+};
+
 function effectiveSellingPrice(product: {
   defaultSellingPrice?: unknown;
   retailPrice?: unknown;
@@ -909,6 +933,7 @@ export class MobilePosLiteService {
           creditEnabled: dto.creditEnabled ?? existing.creditEnabled,
           offlineCashEnabled: dto.offlineCashEnabled ?? existing.offlineCashEnabled,
           uiVersion: dto.uiVersion ?? existing.uiVersion,
+          maxPriceDropPct: dto.maxPriceDropPct ?? existing.maxPriceDropPct,
           configVersion: { increment: 1 },
           ...(dto.paymentMethods
             ? {
@@ -2052,30 +2077,44 @@ export class MobilePosLiteService {
       );
     }
 
-    const lines = await this.resolveSaleLines(terminal, dto.lines);
-    const sale = await this.salesOrders.mobilePosLiteQuickSale(
-      {
-        companyId: terminal.companyId,
-        divisionId: terminal.divisionId,
-        branchId: terminal.branchId,
-        // Credit always carries dto.customerId (validated above); cash/mobile
-        // money sales record an attached customer when one was chosen and fall
-        // back to the terminal's general customer otherwise.
-        customerId: dto.customerId ?? terminal.generalCustomerId,
-        salesType: isCredit ? SalesType.CREDIT_SALE : SalesType.CASH_SALE,
-        orderDate: new Date().toISOString(),
-        currency: CurrencyCode.TZS,
-        paymentMethod,
-        cashAccountId: payment?.cashAccountId,
-        paymentReference: dto.paymentReference?.trim() || undefined,
-        salespersonId: terminal.salespersonId,
-        idempotencyKey: dto.idempotencyKey,
-        lines,
-      },
-      user,
-      terminal.id,
-      terminal.terminalCode,
-    );
+    const { lines, overrides } = await this.resolveSaleLines(terminal, dto.lines, user);
+    let sale: Awaited<ReturnType<SalesOrdersService['mobilePosLiteQuickSale']>>;
+    try {
+      sale = await this.salesOrders.mobilePosLiteQuickSale(
+        {
+          companyId: terminal.companyId,
+          divisionId: terminal.divisionId,
+          branchId: terminal.branchId,
+          // Credit always carries dto.customerId (validated above); cash/mobile
+          // money sales record an attached customer when one was chosen and fall
+          // back to the terminal's general customer otherwise.
+          customerId: dto.customerId ?? terminal.generalCustomerId,
+          salesType: isCredit ? SalesType.CREDIT_SALE : SalesType.CASH_SALE,
+          orderDate: new Date().toISOString(),
+          currency: CurrencyCode.TZS,
+          paymentMethod,
+          cashAccountId: payment?.cashAccountId,
+          paymentReference: dto.paymentReference?.trim() || undefined,
+          salespersonId: terminal.salespersonId,
+          idempotencyKey: dto.idempotencyKey,
+          lines,
+        },
+        user,
+        terminal.id,
+        terminal.terminalCode,
+        // Passed only when a price was changed, so an ordinary sale takes
+        // exactly the path it took before price editing existed.
+        ...(overrides.length ? ([overrides] as const) : ([] as const)),
+      );
+    } catch (error) {
+      // The profit guard's own message names the cost. On the till it is
+      // replaced, whatever the price's origin (list or edited), by the one
+      // cost-blind sentence; the guard itself is unchanged.
+      if (error instanceof BadRequestException && /below cost/i.test(error.message)) {
+        throw new BadRequestException(MOBILE_POS_PRICE_BELOW_ALLOWED);
+      }
+      throw error;
+    }
 
     await this.prisma.mobilePosTerminal.update({
       where: { id: terminal.id },
@@ -2789,6 +2828,9 @@ export class MobilePosLiteService {
           salesCount: computed.salesCount,
           grossTotal: computed.grossTotal,
           itemsSoldQuantity: computed.itemsSoldQuantity,
+          priceChangeCount: computed.priceChangeCount,
+          priceDropTotal: computed.priceDropTotal,
+          priceRaiseTotal: computed.priceRaiseTotal,
           byMethod: computed.byMethod as unknown as Prisma.InputJsonValue,
           items: computed.items as unknown as Prisma.InputJsonValue,
           itemsTruncated: computed.itemsTruncated,
@@ -2961,6 +3003,24 @@ export class MobilePosLiteService {
       // phone declared something still in its outbox, saying both that it is
       // NOT in the total above and that the phone is where the figure came
       // from. A report that silently omitted unsent sales would be a lie.
+      // Price changes are part of the day's story for whoever reads the
+      // paper: how many lines left the list price, and which way. Printed only
+      // when there were any, like the held-sales section below.
+      ...(report.priceChangeCount > 0
+        ? [
+            {
+              title: 'Mabadiliko ya Bei / Price Changes',
+              items: [
+                { label: 'Mistari / Lines', value: String(report.priceChangeCount) },
+                { label: 'Punguzo / Discounts given', value: tzsWhole(report.priceDropTotal) },
+                { label: 'Ongezeko / Increases', value: tzsWhole(report.priceRaiseTotal) },
+              ],
+              paragraphs: [
+                'Kila badiliko limehifadhiwa na jina la muuzaji na sababu. / Each change is recorded with the rep and the reason.',
+              ],
+            },
+          ]
+        : []),
       ...(report.declaredHeldCount > 0
         ? [
             {
@@ -3075,7 +3135,7 @@ export class MobilePosLiteService {
     // predicate, so the two can never drift.
     const lineWhere: Prisma.SalesOrderLineWhereInput = { salesOrder: where };
 
-    const [totals, methods, lineTotals] = await Promise.all([
+    const [totals, methods, lineTotals, priceChanges] = await Promise.all([
       // Unbounded and exact.
       this.prisma.salesOrder.aggregate({
         where,
@@ -3099,7 +3159,22 @@ export class MobilePosLiteService {
         where: lineWhere,
         _sum: { quantity: true, lineTotal: true },
       }),
+      // Every changed price in the same sales, through the same relation
+      // filter so it can never cover different orders from the totals above.
+      this.prisma.mobilePosPriceOverride.findMany({
+        where: { salesOrder: where },
+        select: { listUnitPrice: true, chargedUnitPrice: true, quantity: true },
+      }),
     ]);
+
+    let priceDropTotal = 0;
+    let priceRaiseTotal = 0;
+    for (const change of priceChanges) {
+      const difference =
+        (Number(change.listUnitPrice) - Number(change.chargedUnitPrice)) * Number(change.quantity);
+      if (difference > 0) priceDropTotal += difference;
+      else priceRaiseTotal -= difference;
+    }
 
     const byMethod: DayReportMethodTotal[] = methods.map((method) => ({
       paymentMethod: method.paymentMethod,
@@ -3151,6 +3226,9 @@ export class MobilePosLiteService {
       // it can move no total on the record or on the paper. Disclosed anyway,
       // because a shortened list should say it is one.
       itemsTruncated: ranked.length > MOBILE_POS_DAY_REPORT_ITEM_CAP,
+      priceChangeCount: priceChanges.length,
+      priceDropTotal: round2(priceDropTotal),
+      priceRaiseTotal: round2(priceRaiseTotal),
     };
   }
 
@@ -3241,13 +3319,32 @@ export class MobilePosLiteService {
       // are: the phone's own statement about its outbox.
       declaredHeldCount: record.declaredHeldCount,
       declaredHeldAmount: Number(record.declaredHeldAmount),
+      priceChangeCount: record.priceChangeCount,
+      priceDropTotal: Number(record.priceDropTotal),
+      priceRaiseTotal: Number(record.priceRaiseTotal),
     };
   }
 
-  private async resolveSaleLines(terminal: Terminal, lines: CreateMobilePosLiteSaleDto['lines']) {
+  private async resolveSaleLines(
+    terminal: Terminal,
+    lines: CreateMobilePosLiteSaleDto['lines'],
+    user: AuthUser,
+  ) {
     const quantities = new Map<string, number>();
+    const requested = new Map<
+      string,
+      { unitPrice?: number; reason?: MobilePosPriceReason; note?: string }
+    >();
     for (const line of lines) {
       quantities.set(line.productId, (quantities.get(line.productId) ?? 0) + Number(line.quantity));
+      const edit = { unitPrice: line.unitPrice, reason: line.priceReason, note: line.priceNote };
+      const earlier = requested.get(line.productId);
+      // Split lines of one product merge into one sales line, so they must
+      // agree on its price: a merged line cannot carry two.
+      if (earlier && earlier.unitPrice !== edit.unitPrice) {
+        throw new BadRequestException('Each product can have only one price in a sale');
+      }
+      if (!earlier) requested.set(line.productId, edit);
     }
     const products = await this.prisma.product.findMany({
       where: {
@@ -3272,21 +3369,60 @@ export class MobilePosLiteService {
       throw new BadRequestException('One or more products are unavailable for this terminal');
     }
 
-    return products.map((product) => {
-      const unitPrice = effectiveSellingPrice(product);
-      if (unitPrice == null) {
+    const canEdit = user.permissions?.includes('mobile_pos_lite.edit_price') ?? false;
+    const unlimited = user.permissions?.includes('mobile_pos_lite.edit_price_unlimited') ?? false;
+    // Fail closed: a missing or unreadable limit is no allowance at all
+    // (NaN would make every comparison below false and let any drop through).
+    const configuredDrop = Number(terminal.maxPriceDropPct ?? 0);
+    const maxDropPct = Number.isFinite(configuredDrop) ? configuredDrop : 0;
+    const overrides: MobilePosPriceOverrideInput[] = [];
+
+    const resolved = products.map((product) => {
+      const listPrice = effectiveSellingPrice(product);
+      if (listPrice == null) {
         throw new BadRequestException(`${product.name} does not have a selling price`);
+      }
+      const quantity = quantities.get(product.id) ?? 0;
+      const edit = requested.get(product.id);
+      let unitPrice = listPrice;
+      if (edit?.unitPrice !== undefined && edit.unitPrice !== listPrice) {
+        if (!canEdit) {
+          throw new ForbiddenException('You cannot change prices on this terminal');
+        }
+        if (!edit.reason) {
+          throw new BadRequestException('Choose a reason for the changed price');
+        }
+        const dropPct = ((listPrice - edit.unitPrice) / listPrice) * 100;
+        // Raising a price needs only the permission and a reason (owner
+        // decision D2). Lowering it is capped by the terminal unless the user
+        // holds edit_price_unlimited; the below-cost guard applies either way.
+        if (dropPct > 0 && !unlimited && dropPct > maxDropPct + 1e-9) {
+          throw new BadRequestException(MOBILE_POS_PRICE_BELOW_ALLOWED);
+        }
+        unitPrice = edit.unitPrice;
+        overrides.push({
+          companyId: terminal.companyId,
+          terminalId: terminal.id,
+          productId: product.id,
+          userId: user.id,
+          listUnitPrice: listPrice,
+          chargedUnitPrice: edit.unitPrice,
+          quantity,
+          reasonCode: edit.reason,
+          note: edit.note?.trim() || null,
+        });
       }
       return {
         productId: product.id,
         description: product.name,
-        quantity: quantities.get(product.id) ?? 0,
+        quantity,
         unitId: product.baseUnitId,
         unitPrice,
         discountAmount: 0,
         taxAmount: 0,
       };
     });
+    return { lines: resolved, overrides };
   }
 
   private async resolvePurchaseLines(
@@ -4724,6 +4860,13 @@ export class MobilePosLiteService {
       // so no configVersion bump. Phase 4 uses it only as a presentation gate
       // (manager view on Stoo); the Hesabu flow itself ships in Phase 5.
       stockCountsEnabled: user.permissions?.includes('mobile_pos_lite.stock_count') ?? false,
+      // Price editing (POS remake phase 3): permission-derived like the two
+      // above; the limit is the terminal's. The phone uses these only to
+      // decide what to offer; the server re-checks every edited line.
+      priceEditEnabled: user.permissions?.includes('mobile_pos_lite.edit_price') ?? false,
+      priceEditUnlimited:
+        user.permissions?.includes('mobile_pos_lite.edit_price_unlimited') ?? false,
+      maxPriceDropPct: Number(terminal.maxPriceDropPct),
       company: terminal.company,
       division: terminal.division,
       branch: terminal.branch,
@@ -4754,6 +4897,7 @@ export class MobilePosLiteService {
       creditEnabled: terminal.creditEnabled,
       offlineCashEnabled: terminal.offlineCashEnabled,
       uiVersion: terminal.uiVersion,
+      maxPriceDropPct: Number(terminal.maxPriceDropPct),
       deviceName: terminal.deviceName,
       activatedAt: terminal.activatedAt,
       lastSeenAt: terminal.lastSeenAt,

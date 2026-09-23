@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -92,12 +93,22 @@ export class UpdateMobilePosTerminalDto {
   @IsBoolean()
   offlineCashEnabled?: boolean;
 
-  /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell. */
+  /** POS shell pilot flag: 1 = classic, 2 = Kaunta, 3 = new POS on ITEMBA OS. */
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(2)
+  @Max(3)
   uiVersion?: number;
+
+  /**
+   * Largest price drop, as a percent of list, a rep with
+   * mobile_pos_lite.edit_price may give on this terminal. 0 = none.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(90)
+  maxPriceDropPct?: number;
 
   @IsOptional()
   @IsArray()

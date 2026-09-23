@@ -438,6 +438,11 @@ export default function MobilePosDayReportsPage() {
           hint={`${totals.declaredHeldCount} sale(s) declared unsent`}
           variant={totals.declaredHeldCount > 0 ? 'amber' : 'default'}
         />
+        <StatCard
+          label="Discounts Given"
+          value={formatMoney(totals.priceDropTotal)}
+          hint={`${totals.priceChangeCount} line(s) sold at a changed price`}
+        />
       </div>
 
       <PageToolbar
@@ -889,6 +894,28 @@ function DayReportDrawer({ report, onClose, onExport, exporting }: DayReportDraw
               </p>
             )}
           </Section>
+
+          {report.priceChangeCount > 0 && (
+            <div className="rounded-lg border px-4 py-3" style={subtlePanelStyle}>
+              <div className="text-[13px] font-semibold">Price changes</div>
+              <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <span className="text-lg font-semibold tabular-nums">
+                  {formatMoney(report.priceDropTotal)}
+                </span>
+                <span className="text-[13px]" style={textSecondaryStyle}>
+                  given below list on {report.priceChangeCount} line
+                  {report.priceChangeCount === 1 ? '' : 's'}
+                  {report.priceRaiseTotal > 0
+                    ? ` · ${formatMoney(report.priceRaiseTotal)} added above list`
+                    : ''}
+                </span>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed" style={textMutedStyle}>
+                Computed by the server from its own records of each changed price, with the rep and
+                the reason. Already inside the gross total above.
+              </p>
+            </div>
+          )}
 
           {report.declaredHeldCount > 0 && (
             <div className="rounded-lg border px-4 py-3" style={subtlePanelStyle}>

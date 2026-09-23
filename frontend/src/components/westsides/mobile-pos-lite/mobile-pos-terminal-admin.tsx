@@ -41,6 +41,7 @@ type Terminal = {
   offlineCashEnabled: boolean;
   /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell. */
   uiVersion?: number;
+  maxPriceDropPct?: number;
   activatedAt?: string | null;
   lastSeenAt?: string | null;
   company: ScopeOption;
@@ -62,6 +63,18 @@ const PAYMENT_LABELS: Record<PaymentCode, string> = {
   CASH: 'Cash',
   MOBILE_MONEY: 'Mobile Money',
   BANK_TRANSFER: 'Bank',
+};
+
+// Largest price drop a rep with mobile_pos_lite.edit_price may give on a
+// terminal (percent of list). 0 = none; managers with edit_price_unlimited are
+// bounded only by the below-cost guard.
+const PRICE_DROP_LIMITS = [0, 5, 10, 15, 20];
+
+// Terminal pilot flag (uiVersion): which POS shell the phone runs.
+const POS_SHELL_LABELS: Record<number, string> = {
+  1: 'Classic',
+  2: 'Kaunta',
+  3: 'New POS (pilot)',
 };
 
 function label(item?: { name?: string | null; code?: string | null }) {
@@ -300,13 +313,33 @@ export function MobilePosTerminalAdmin() {
     }
   }
 
-  async function setPilotUi(id: string, enable: boolean) {
+  async function setPriceDropLimit(id: string, maxPriceDropPct: number) {
     try {
-      await backendPatch(`/mobile-pos-lite/terminals/${id}`, { uiVersion: enable ? 2 : 1 });
+      await backendPatch(`/mobile-pos-lite/terminals/${id}`, { maxPriceDropPct });
       await refreshTerminals();
       showToast(
         'success',
-        enable ? 'Kaunta pilot enabled' : 'Kaunta pilot disabled',
+        maxPriceDropPct > 0
+          ? `Reps may now lower prices by up to ${maxPriceDropPct}%`
+          : 'Reps may no longer lower prices on this terminal',
+        'The phone picks it up on its next session refresh.',
+      );
+    } catch (error) {
+      showToast(
+        'error',
+        'Could not update the price limit',
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+  }
+
+  async function setPilotUi(id: string, uiVersion: number) {
+    try {
+      await backendPatch(`/mobile-pos-lite/terminals/${id}`, { uiVersion });
+      await refreshTerminals();
+      showToast(
+        'success',
+        `POS shell set to ${POS_SHELL_LABELS[uiVersion] ?? uiVersion}`,
         'The phone picks it up on its next session refresh.',
       );
     } catch (error) {
@@ -663,15 +696,44 @@ export function MobilePosTerminalAdmin() {
                     </Btn>
                   )}
                   {terminal.status !== 'REVOKED' && (
-                    <Btn
-                      type="button"
-                      size="sm"
-                      variant={(terminal.uiVersion ?? 1) >= 2 ? 'warning' : 'secondary'}
-                      onClick={() => void setPilotUi(terminal.id, (terminal.uiVersion ?? 1) < 2)}
-                      title="Kaunta reform pilot: run the new POS shell on this terminal only"
-                    >
-                      {(terminal.uiVersion ?? 1) >= 2 ? 'Kaunta pilot: ON' : 'Kaunta pilot: OFF'}
-                    </Btn>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold">
+                      <span>Price drop limit</span>
+                      <select
+                        className="aurora-input h-8 rounded-md px-2 text-xs"
+                        value={terminal.maxPriceDropPct ?? 0}
+                        onChange={(event) =>
+                          void setPriceDropLimit(terminal.id, Number(event.target.value))
+                        }
+                        title="Largest price drop a rep may give on this terminal"
+                      >
+                        {Array.from(new Set([...PRICE_DROP_LIMITS, terminal.maxPriceDropPct ?? 0]))
+                          .sort((a, b) => a - b)
+                          .map((limit) => (
+                            <option key={limit} value={limit}>
+                              {limit === 0 ? 'None' : `${limit}%`}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
+                  {terminal.status !== 'REVOKED' && (
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold">
+                      <span>POS shell</span>
+                      <select
+                        className="aurora-input h-8 rounded-md px-2 text-xs"
+                        value={terminal.uiVersion ?? 1}
+                        onChange={(event) =>
+                          void setPilotUi(terminal.id, Number(event.target.value))
+                        }
+                        title="Pilot flag: which POS shell this terminal runs"
+                      >
+                        {[1, 2, 3].map((version) => (
+                          <option key={version} value={version}>
+                            {POS_SHELL_LABELS[version]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   )}
                   {terminal.status !== 'REVOKED' && (
                     <Btn
