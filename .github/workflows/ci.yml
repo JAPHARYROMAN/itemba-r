@@ -94,6 +94,14 @@ jobs:
       - name: Run tests, formatting, and fail-closed static verification
         run: |
           $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+          # `dotnet format` locates the CLI on its own rather than using the
+          # pinned path the runner passes, and on some runners it failed with
+          # "Unable to locate dotnet CLI" (main pushes of #58 and #59). Point
+          # every lookup it can make at the same pinned executable.
+          $dotnetRoot = Split-Path -Parent $dotnet
+          $env:DOTNET_HOST_PATH = $dotnet
+          $env:DOTNET_ROOT = $dotnetRoot
+          $env:PATH = "$dotnetRoot;$env:PATH"
           .\scripts\Invoke-ProtectedSourceVerification.ps1 -DotNetPath $dotnet
 
 
