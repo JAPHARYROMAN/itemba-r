@@ -92,11 +92,11 @@ export class UpdateMobilePosTerminalDto {
   @IsBoolean()
   offlineCashEnabled?: boolean;
 
-  /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell. */
+  /** POS shell pilot flag: 1 = classic, 2 = Kaunta, 3 = new POS on ITEMBA OS. */
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(2)
+  @Max(3)
   uiVersion?: number;
 
   @IsOptional()

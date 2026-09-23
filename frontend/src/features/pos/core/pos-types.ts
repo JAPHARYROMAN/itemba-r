@@ -8,7 +8,7 @@ export type Session = {
     name: string;
     configVersion: number;
     offlineCashEnabled: boolean;
-    /** Kaunta rollout pilot flag: 1 = classic shell, 2 = Kaunta shell (Phase 2+). */
+    /** POS shell pilot flag: 1 = classic, 2 = Kaunta, 3 = new POS on ITEMBA OS. */
     uiVersion?: number;
   };
   company: { id: string; name: string; code: string };

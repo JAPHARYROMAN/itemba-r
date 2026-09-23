@@ -64,6 +64,13 @@ const PAYMENT_LABELS: Record<PaymentCode, string> = {
   BANK_TRANSFER: 'Bank',
 };
 
+// Terminal pilot flag (uiVersion): which POS shell the phone runs.
+const POS_SHELL_LABELS: Record<number, string> = {
+  1: 'Classic',
+  2: 'Kaunta',
+  3: 'New POS (pilot)',
+};
+
 function label(item?: { name?: string | null; code?: string | null }) {
   if (!item) return '';
   return item.code ? `${item.code} - ${item.name}` : (item.name ?? '');
@@ -300,13 +307,13 @@ export function MobilePosTerminalAdmin() {
     }
   }
 
-  async function setPilotUi(id: string, enable: boolean) {
+  async function setPilotUi(id: string, uiVersion: number) {
     try {
-      await backendPatch(`/mobile-pos-lite/terminals/${id}`, { uiVersion: enable ? 2 : 1 });
+      await backendPatch(`/mobile-pos-lite/terminals/${id}`, { uiVersion });
       await refreshTerminals();
       showToast(
         'success',
-        enable ? 'Kaunta pilot enabled' : 'Kaunta pilot disabled',
+        `POS shell set to ${POS_SHELL_LABELS[uiVersion] ?? uiVersion}`,
         'The phone picks it up on its next session refresh.',
       );
     } catch (error) {
@@ -663,15 +670,23 @@ export function MobilePosTerminalAdmin() {
                     </Btn>
                   )}
                   {terminal.status !== 'REVOKED' && (
-                    <Btn
-                      type="button"
-                      size="sm"
-                      variant={(terminal.uiVersion ?? 1) >= 2 ? 'warning' : 'secondary'}
-                      onClick={() => void setPilotUi(terminal.id, (terminal.uiVersion ?? 1) < 2)}
-                      title="Kaunta reform pilot: run the new POS shell on this terminal only"
-                    >
-                      {(terminal.uiVersion ?? 1) >= 2 ? 'Kaunta pilot: ON' : 'Kaunta pilot: OFF'}
-                    </Btn>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold">
+                      <span>POS shell</span>
+                      <select
+                        className="aurora-input h-8 rounded-md px-2 text-xs"
+                        value={terminal.uiVersion ?? 1}
+                        onChange={(event) =>
+                          void setPilotUi(terminal.id, Number(event.target.value))
+                        }
+                        title="Pilot flag: which POS shell this terminal runs"
+                      >
+                        {[1, 2, 3].map((version) => (
+                          <option key={version} value={version}>
+                            {POS_SHELL_LABELS[version]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   )}
                   {terminal.status !== 'REVOKED' && (
                     <Btn

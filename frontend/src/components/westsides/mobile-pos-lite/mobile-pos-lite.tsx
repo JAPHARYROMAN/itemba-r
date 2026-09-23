@@ -19,6 +19,7 @@ import {
 } from '@/lib/mobile-pos-lite-store';
 import { useAuth } from '@/hooks/use-auth';
 import { KauntaShell } from './KauntaShell';
+import { PosShell } from '@/features/pos/ui/PosShell';
 import { usePosBootstrap } from './hooks/use-pos-bootstrap';
 import { usePosCart } from './hooks/use-pos-cart';
 import { usePosOutbox } from './hooks/use-pos-outbox';
@@ -622,13 +623,19 @@ export function MobilePosLite() {
     );
   }
 
+  // New POS on ITEMBA OS (POS remake): uiVersion >= 3 draws the same props in
+  // the OS design. It is a subset of kauntaEnabled, so every Kaunta-only money
+  // path above (mapped refusal wording, haptics, day-log tally) applies to it.
+  const posAppEnabled = (session.terminal.uiVersion ?? 1) >= 3;
+
   // Kaunta shell pilot: uiVersion >= 2 replaces the classic screen dispatch
   // entirely — hash router, top module rail, bottom slab, boot-into-Mauzo.
   // Both shells consume the same hooks/handlers above; the classic flow below
   // stays byte-identical for every other terminal.
   if (kauntaEnabled) {
+    const Shell = posAppEnabled ? PosShell : KauntaShell;
     return (
-      <KauntaShell
+      <Shell
         session={session}
         binding={binding}
         online={online}

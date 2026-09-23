@@ -83,7 +83,7 @@ import { SuccessScreen } from './screens/SuccessScreen';
 /** Extra bottom padding so screen content clears the fixed 64px slab. */
 const SCREEN_PAD = ' pb-36';
 
-type KauntaShellProps = {
+export type KauntaShellProps = {
   session: Session;
   binding: MobilePosLiteBinding;
   online: boolean;
