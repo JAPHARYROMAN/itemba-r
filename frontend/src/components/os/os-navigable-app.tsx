@@ -15,6 +15,7 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { isControlKind } from '@/features/reports/accounting-controls-types';
 import { AppGlyph } from './app-glyph';
+import './os-navigable-app.css';
 
 const loading = () => <PageSpinner label="Opening workspace" />;
 const Inventory = dynamic(() => import('@/features/inventory/inventory-workspace'), { loading });
