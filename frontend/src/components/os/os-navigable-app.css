@@ -1,0 +1,64 @@
+/*
+ * In-window navigation for navigable apps (Inventory, Payroll, Reports):
+ * back, forward, home and the app's name. Imported by os-navigable-app.tsx so
+ * it loads wherever the component renders. It used to live in
+ * os-split-workspace.css, which only the unused split view imports, so the
+ * live desktop showed this bar unstyled. --os-line is only defined under
+ * .itemba-os, hence the fallback.
+ */
+.os-navigable-app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.os-app-surface {
+  flex: 1;
+  min-width: 0;
+}
+.os-app-history {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--os-line, var(--aurora-border));
+  background: var(--aurora-card);
+}
+.os-app-history > :is(button, a) {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  color: var(--aurora-text-secondary);
+}
+.os-app-history > :is(button, a):hover:not(:disabled) {
+  background: var(--aurora-bg-subtle);
+  color: var(--aurora-text);
+}
+.os-app-history button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.os-app-history > span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  color: var(--aurora-text-secondary);
+  font-size: 11px;
+}
+.os-app-history .os-glyph {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+}
+.os-app-history .os-glyph svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media print {
+  .os-app-history {
+    display: none;
+  }
+}

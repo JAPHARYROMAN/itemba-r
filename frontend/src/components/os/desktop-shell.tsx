@@ -84,7 +84,7 @@ function HostedWindow({
   const changed = useCallback((href: string) => onNavigate(item.id, href), [item.id, onNavigate]);
   return <DesktopAppHost appId={item.appId} href={item.href} onHrefChange={changed} />;
 }
-function LegacyNavigation() {
+export function LegacyNavigation() {
   const { hasPermission } = useAuth();
   return (
     <nav className="desktop-erp-navigation" aria-label="ITEMBA-R modules">
@@ -100,12 +100,20 @@ function LegacyNavigation() {
                 permissionsAny: child.permissionsAny ?? entry.permissionsAny,
               }),
             )
-          : allowed(entry) && entry.href !== '/apps'
+          : // OS apps (Invoice Desk, Reports and the rest) carry sidebarHidden in
+            // OS mode: they live in the dock and library, not in the ERP's own
+            // navigation, exactly as the classic Sidebar already skips them.
+            allowed(entry) && entry.href !== '/apps' && !entry.sidebarHidden
             ? [entry]
             : [];
         if (!links.length) return null;
         return (
-          <details key={entry.label} open={entry.label === 'Dashboard'}>
+          // Labels repeat across groups and leaves ("Reports" is both), so the
+          // key says which kind of entry it is.
+          <details
+            key={isGroup(entry) ? `group:${entry.label}` : `leaf:${entry.href}`}
+            open={entry.label === 'Dashboard'}
+          >
             <summary>{entry.label}</summary>
             {links.map((link) => (
               <Link key={link.href} href={link.href}>
