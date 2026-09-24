@@ -60,9 +60,10 @@ Goal: prove, on a copy of real production data, that the backup restores, all 57
 2. **Run the rehearsal** on your machine: repo at the release commit, `npm ci` done in `backend/`, Docker running.
    ```bash
    git checkout main && git pull
-   bash scripts/upgrade-rehearsal/rehearse.sh ./<that-file>
+   PROD_SSH=<user>@<droplet> bash scripts/upgrade-rehearsal/rehearse.sh ./<that-file>
    ```
    The script:
+   - first checks that the release's backend would **accept production's settings**. The droplet resolves the release's `docker-compose.production.yml` against its `.env.production`, and the backend environment is streamed over SSH into the release's own startup validation (`env.validation.ts`). Nothing is written to disk here, and nothing is started. This is the check that would have stopped the 24 Sep outage: that release migrated production, then refused to start because Msaidizi chat was on without provider-contract evidence;
    - restores the backup into a throwaway Postgres 16 (the version production runs), which proves the backup is restorable;
    - records around 170 numbers per company: row counts, trial balance, a fingerprint of every account balance, stock quantity and value, customer, supplier and cash balances, sales and supplier invoice totals;
    - lists exactly which existing rows the four migrations will change (`preview.txt`);

@@ -2,23 +2,34 @@
 #
 # Rehearse the production upgrade on a COPY of the production database.
 #
-#   bash scripts/upgrade-rehearsal/rehearse.sh <backup.dump | backup.dump.gz>
+#   PROD_SSH=root@<droplet> bash scripts/upgrade-rehearsal/rehearse.sh <backup.dump[.gz]>
 #
 # Takes a production backup made by deploy/relaunch/backup-db.sh (pg_dump -Fc,
 # optionally gzipped), restores it into a throwaway Postgres 16 container (the
 # version production runs), and then, exactly as a real deploy would:
 #
+#   0. checks that the release's backend would accept production's settings:
+#      the release's own startup validation (env.validation.ts) run against
+#      the backend environment production would resolve for this release
+#      (the release's docker-compose.production.yml + production's
+#      .env.production, resolved on the droplet and streamed over SSH, never
+#      written to disk here). Nothing is started, so no production credential
+#      is used. On 2026-09-24 a release migrated production and then its
+#      backend refused production's settings; this step would have stopped it.
 #   1. records the numbers that must not change (reconcile.sql)
 #   2. previews which existing rows the pending migrations will change (preview.sql)
 #   3. runs `prisma migrate deploy`, the same command the production
 #      backend-migrate job runs, and times it
 #   4. records the numbers again and compares them
 #
-# It never connects to production: the only database it touches is the one it
-# creates. Run it from the repo root with the release commit checked out and
+# Apart from step 0's read-only settings query, it never connects to
+# production: the only database it touches is the one it creates. Run it from the repo root with the release commit checked out and
 # backend dependencies installed (npm ci in backend/). Needs Docker.
 #
 # Options (environment variables):
+#   PROD_SSH=user@host  production droplet for step 0 (required unless
+#                     SKIP_BACKEND_ENV_CHECK=1, e.g. when rehearsing a local dump)
+#   DEPLOY_DIR=/opt/itemba-r  checkout on the droplet holding .env.production
 #   KEEP=1            leave the rehearsal database running afterwards, so the
 #                     app can be pointed at it for spot checks
 #   PORT=55432        host port for the rehearsal database
@@ -66,6 +77,30 @@ psql_in() { docker exec -i "$CONTAINER" psql -U postgres -d "$DB" -v ON_ERROR_ST
 
 log "Release under test: $(git -C "$REPO_DIR" rev-parse --short HEAD) ($(git -C "$REPO_DIR" log -1 --format=%s))"
 log "Reports: $OUT_DIR"
+
+if [ "${SKIP_BACKEND_ENV_CHECK:-0}" = "1" ]; then
+  log "SKIPPED: backend settings check (SKIP_BACKEND_ENV_CHECK=1). Do not deploy on this rehearsal alone."
+else
+  [ -n "${PROD_SSH:-}" ] ||
+    fail "set PROD_SSH=user@droplet so the release's backend can be checked against production's settings (or SKIP_BACKEND_ENV_CHECK=1 for a local dump)"
+  log "Would this release's backend accept production's settings?"
+  # The droplet resolves THIS release's compose file (sent on stdin) against
+  # its own .env.production; only the backend's environment comes back, and it
+  # goes straight into the release's validator, never to a file.
+  set +e
+  ssh -o BatchMode=yes "$PROD_SSH"     "cd '${DEPLOY_DIR:-/opt/itemba-r}' && docker compose --env-file .env.production -f - config --format json"     <"$REPO_DIR/docker-compose.production.yml" 2>"$OUT_DIR/backend-env-resolve.log" |
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(!s){process.exit(3)}process.stdout.write(JSON.stringify(JSON.parse(s).services.backend.environment))})' |
+    (cd "$REPO_DIR/backend" && npx ts-node --transpile-only -P tsconfig.json       ../scripts/upgrade-rehearsal/check-backend-env.ts) >"$OUT_DIR/backend-env-check.txt" 2>&1
+  statuses=("${PIPESTATUS[@]}")
+  set -e
+  cat "$OUT_DIR/backend-env-check.txt"
+  if [ "${statuses[0]}" != "0" ] || [ "${statuses[1]}" != "0" ]; then
+    tail -5 "$OUT_DIR/backend-env-resolve.log" >&2
+    fail "could not resolve production's backend settings over SSH (see $OUT_DIR/backend-env-resolve.log)"
+  fi
+  [ "${statuses[2]}" = "0" ] ||
+    fail "this release's backend would refuse production's settings (above). Deploying it would migrate production and then leave the site down. Fix the settings or the release first."
+fi
 
 log "Starting a throwaway $PG_IMAGE on port $PORT"
 docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD="$PASSWORD" -e POSTGRES_DB="$DB" \
