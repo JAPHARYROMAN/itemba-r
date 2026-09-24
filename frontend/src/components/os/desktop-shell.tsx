@@ -43,6 +43,7 @@ import { backendBinaryGet } from '@/lib/api-client';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { MsaidiziTopbarButton } from '@/components/msaidizi/msaidizi-launcher';
 import { AppGlyph } from './app-glyph';
+import { DockIcon, DockMotionProvider, useDockMotion } from './desktop-dock-motion';
 import { OsNotifications } from './os-notifications';
 import { OsAccountMenu } from './os-account-menu';
 import { DesktopWindowFrame } from './desktop-window';
@@ -178,6 +179,14 @@ export function DesktopShell({
   const narrow = area.width < 1000;
   const prefersReduced = useReducedMotion();
   const reduced = appearance.motion === 'reduced' || !!prefersReduced;
+  // Narrow mode always lays the dock out along the bottom (desktop.css).
+  const dockMotion = useDockMotion({
+    edge: narrow ? 'bottom' : appearance.dock,
+    magnify: !narrow,
+    still: reduced,
+  });
+  // Launch bounces, one counter per app: each increase plays it once.
+  const [dockBounces, setDockBounces] = useState<Record<string, number>>({});
   const allowedApps = APP_REGISTRY.filter((app) => canOpenApp(app, hasPermission));
   const routeId = desktopAppForPath(pathname);
   const routeApp = routeId ? getApp(routeId) : undefined;
@@ -814,6 +823,7 @@ export function DesktopShell({
           <nav
             className="desktop-dock"
             aria-label="Desktop dock"
+            {...dockMotion.handlers}
             onKeyDown={(event) => {
               if (
                 !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(
@@ -841,59 +851,77 @@ export function DesktopShell({
               buttons[n]?.focus();
             }}
           >
-            <motion.button
-              ref={launcherTrigger}
-              className="desktop-apps-button"
-              aria-label="Apps"
-              aria-expanded={launcher}
-              whileTap={{ scale: 0.94 }}
-              onClick={() => setLauncher(!launcher)}
-            >
-              <span>
-                <LayoutGrid size={27} />
-              </span>
-              <strong>Apps</strong>
-            </motion.button>
-            <i className="desktop-dock-divider" />
-            {dockApps.map((app) => {
-              const windows = visibleWindows.filter((w) => w.appId === app.id);
-              return (
-                <div
-                  key={app.id}
-                  className="desktop-dock-item"
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setContextApp(app.id);
-                  }}
-                >
-                  <motion.button
-                    whileHover={reduced ? undefined : { y: -5, scale: 1.06 }}
-                    whileTap={{ scale: 0.94 }}
-                    aria-label={`Open ${app.label}${windows.length ? `, ${windows.length} open windows` : ''}`}
-                    aria-pressed={!showDesktop && active?.appId === app.id}
-                    onClick={() => (windows.length > 1 ? setContextApp(app.id) : openApp(app.id))}
+            <DockMotionProvider value={dockMotion.value}>
+              <motion.button
+                ref={launcherTrigger}
+                className="desktop-apps-button"
+                aria-label="Apps"
+                aria-expanded={launcher}
+                whileTap={{ scale: 0.94 }}
+                onClick={() => setLauncher(!launcher)}
+              >
+                <DockIcon>
+                  <span className="desktop-apps-tile">
+                    <LayoutGrid size={27} />
+                  </span>
+                </DockIcon>
+                <strong>Apps</strong>
+              </motion.button>
+              <i className="desktop-dock-divider" />
+              {dockApps.map((app) => {
+                const windows = visibleWindows.filter((w) => w.appId === app.id);
+                return (
+                  <div
+                    key={app.id}
+                    className="desktop-dock-item"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextApp(app.id);
+                    }}
                   >
-                    <AppGlyph app={app} />
-                    <span className="desktop-dock-tooltip">{app.label}</span>
-                    <span className="desktop-running" aria-hidden="true">
-                      {windows.slice(0, 3).map((w) => (
-                        <i key={w.id} data-active={w.id === session.activeId && !w.minimized} />
-                      ))}
-                    </span>
-                  </motion.button>
-                </div>
-              );
-            })}
-            <i className="desktop-dock-divider" />
-            <button
-              className="desktop-show-button"
-              aria-label={showDesktop ? 'Restore desktop windows' : 'Show desktop'}
-              aria-pressed={showDesktop}
-              onClick={() => setShowDesktop((v) => !v)}
-            >
-              <Monitor size={23} />
-              <span className="desktop-dock-tooltip">Show desktop</span>
-            </button>
+                    <motion.button
+                      // Magnification replaces the hover lift where it runs.
+                      whileHover={reduced || !narrow ? undefined : { y: -4 }}
+                      whileTap={{ scale: 0.94 }}
+                      aria-label={`Open ${app.label}${windows.length ? `, ${windows.length} open windows` : ''}`}
+                      aria-pressed={!showDesktop && active?.appId === app.id}
+                      onClick={() => {
+                        if (windows.length > 1) return setContextApp(app.id);
+                        // Only a real launch bounces, not a switch to an open window.
+                        if (windows.length === 0)
+                          setDockBounces((current) => ({
+                            ...current,
+                            [app.id]: (current[app.id] ?? 0) + 1,
+                          }));
+                        openApp(app.id);
+                      }}
+                    >
+                      <DockIcon bounce={dockBounces[app.id] ?? 0}>
+                        <AppGlyph app={app} />
+                      </DockIcon>
+                      <span className="desktop-dock-tooltip">{app.label}</span>
+                      <span className="desktop-running" aria-hidden="true">
+                        {windows.slice(0, 3).map((w) => (
+                          <i key={w.id} data-active={w.id === session.activeId && !w.minimized} />
+                        ))}
+                      </span>
+                    </motion.button>
+                  </div>
+                );
+              })}
+              <i className="desktop-dock-divider" />
+              <button
+                className="desktop-show-button"
+                aria-label={showDesktop ? 'Restore desktop windows' : 'Show desktop'}
+                aria-pressed={showDesktop}
+                onClick={() => setShowDesktop((v) => !v)}
+              >
+                <DockIcon>
+                  <Monitor size={23} />
+                </DockIcon>
+                <span className="desktop-dock-tooltip">Show desktop</span>
+              </button>
+            </DockMotionProvider>
           </nav>
           <Modal
             open={launcher}
