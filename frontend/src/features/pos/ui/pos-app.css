@@ -1061,6 +1061,52 @@ button.pos-chip {
 }
 
 /*
+ * Tablet and till: the sale screen fits the viewport and each panel scrolls on
+ * its own, so Lipa and Maliza Mauzo never sit below the fold. Without this the
+ * panels grew as tall as the product list and the whole page scrolled. The POS
+ * always runs as its own page (usesStandalonePosShell), so the viewport is its
+ * height; a container query cannot size the container itself, hence @media.
+ */
+@media (min-width: 640px) {
+  .pos-app:has(> .pos-body) {
+    height: 100dvh;
+  }
+}
+@container pos (min-width: 640px) {
+  .pos-body {
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .pos-find,
+  .pos-cart {
+    overflow: hidden;
+  }
+  .pos-products,
+  .pos-products[data-mode='results'] {
+    flex: 1 1 auto;
+    min-height: 0;
+    align-content: start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    /* room for the focus ring inside the scroll box */
+    padding: 3px;
+  }
+  .pos-lines {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .pos-pay {
+    overflow-y: auto;
+  }
+  .pos-pay > .pos-btn-primary {
+    position: sticky;
+    bottom: 0;
+    flex: none;
+  }
+}
+
+/*
  * ITEMBA OS skin for Kaunta's module screens (POS remake phase 5): the day
  * book, stock, counts, purchases, history, close and settings keep their
  * screens, hooks and slab, and take the OS colours instead of paper and brass.
