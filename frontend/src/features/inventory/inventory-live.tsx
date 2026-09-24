@@ -20,6 +20,7 @@ import { productQuantity } from '@/components/workspace/product-form';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { InventoryScope } from './inventory-scope';
+import { StockExportDialog } from './stock-export-dialog';
 import { useInventoryWorkspace } from './inventory-workspace-context';
 import { inventoryProductHref, inventoryViewHref } from './inventory-search';
 import './inventory-workspace.css';
@@ -37,6 +38,8 @@ export interface LiveStockItem {
     productCode?: string | null;
     sku?: string | null;
     barcode?: string | null;
+    category?: { id: string; name: string } | null;
+    baseUnit?: { id: string; name: string; symbol?: string | null } | null;
   };
   location?: { id: string; name: string; code?: string | null } | null;
   quantityOnHand: Amount;
@@ -191,6 +194,7 @@ function LiveStock() {
     enabled,
   );
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
     if (!autoRefresh || !enabled || result.loading) return;
     const timer = setInterval(result.reload, 30000);
@@ -339,9 +343,22 @@ function LiveStock() {
             <Btn variant="secondary" onClick={result.reload} disabled={!enabled || result.loading}>
               Refresh stock
             </Btn>
+            <Btn onClick={() => setExportOpen(true)} disabled={!data || allRows.length === 0}>
+              Export…
+            </Btn>
           </div>
         }
       />
+      {exportOpen && (
+        <StockExportDialog
+          open={exportOpen}
+          onClose={() => setExportOpen(false)}
+          rows={allRows}
+          companyId={scope.companyId}
+          search={debounced}
+          loadedAt={loadedAt}
+        />
+      )}
       {invalidThreshold && (
         <p role="alert" className="workspace-notice">
           Enter a finite, non-negative fallback threshold.

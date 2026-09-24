@@ -364,6 +364,10 @@ export class InventoryBalancesService {
             barcode: true,
             minimumStockLevel: true,
             reorderLevel: true,
+            // For filtering and exporting the live stock by category, and for
+            // labelling quantities with their unit.
+            category: { select: { id: true, name: true } },
+            baseUnit: { select: { id: true, name: true, symbol: true } },
           },
         },
         branch: { select: { id: true, name: true, code: true } },
