@@ -670,6 +670,10 @@ describe('Kaunta modules in the OS skin', () => {
   it('opens a module when its link is followed from the sale screen', async () => {
     const { container } = await boot();
     expect(container.querySelector('.pos-app')).not.toBeNull();
+    // Effects (the step hook's hash write, and the shell's hashchange
+    // listener) run after the header renders; follow the link only once they
+    // have, or a slow runner fires hashchange before anyone listens.
+    await waitFor(() => expect(window.location.hash).toBe('#pos/sale'));
 
     window.history.pushState(null, '', '/mobile-pos#leo');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
