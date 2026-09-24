@@ -310,6 +310,23 @@ if [ "$RUN_PRODUCTION_SEED" = 'true' ]; then
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile seed build backend-seed
 fi
 
+# Would the new backend accept this environment? Run the release's own startup
+# validation (dist/config/env.validation) inside the freshly built backend
+# image, with the environment Compose resolves for the backend service, BEFORE
+# anything is migrated or restarted. Nothing else starts (--no-deps, the
+# entrypoint is replaced), so the running site is untouched. On 2026-09-24 a
+# release migrated production and then its backend refused the settings
+# (Msaidizi chat on without provider-contract evidence), leaving the site down;
+# this stops that case here, with the old stack still serving.
+log "Checking the new backend accepts this environment (before migrating)"
+BACKEND_SETTINGS_CHECK="require('reflect-metadata'); require('./dist/config/env.validation').envValidate(process.env); console.log('Backend settings check: PASS')"
+if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps -T \
+  --entrypoint node backend -e "$BACKEND_SETTINGS_CHECK" </dev/null; then
+  echo 'ERROR: the new backend would refuse this environment (see above).' >&2
+  echo 'Nothing has been migrated or restarted; the current release is still serving.' >&2
+  exit 1
+fi
+
 log "Starting the stack"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d
 

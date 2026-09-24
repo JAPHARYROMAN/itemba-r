@@ -890,6 +890,49 @@ function assertProductionDeploymentWorkflow() {
     'relaunch posture preflight runs before migration',
   );
 
+  // The release's backend must accept the environment before anything is
+  // migrated or restarted (2026-09-24: a release migrated production and then
+  // its backend refused the settings, leaving the site down).
+  const buildLoop = relaunch.indexOf('for svc in backend-migrate backend frontend website; do');
+  const settingsValidation = relaunch.indexOf(
+    `BACKEND_SETTINGS_CHECK="require('reflect-metadata'); require('./dist/config/env.validation').envValidate(process.env);`,
+    buildLoop,
+  );
+  const settingsRun = relaunch.indexOf(
+    [
+      'run --rm --no-deps -T \\',
+      '  --entrypoint node backend -e "$BACKEND_SETTINGS_CHECK" </dev/null; then',
+    ].join('\n'),
+    settingsValidation,
+  );
+  const settingsExit = relaunch.indexOf('exit 1', settingsRun);
+  const stackStart = relaunch.indexOf('log "Starting the stack"');
+  const firstStackUp = relaunch.indexOf(
+    'docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up',
+    stackStart,
+  );
+  assert(target, buildLoop >= 0, 'relaunch builds the release images');
+  assert(
+    target,
+    settingsValidation > buildLoop,
+    "relaunch settings check uses the release's own envValidate, after building",
+  );
+  assert(
+    target,
+    settingsRun > settingsValidation,
+    'relaunch runs the settings check in the backend image, without dependencies, stdin closed',
+  );
+  assert(
+    target,
+    settingsExit > settingsRun && settingsExit < stackStart,
+    'relaunch settings check stops the deploy on failure',
+  );
+  assert(
+    target,
+    stackStart > settingsExit && firstStackUp > stackStart,
+    'relaunch settings check runs before the stack starts and before migration',
+  );
+
   const safe = Object.fromEntries(msaidiziEnableSwitches.map((key) => [key, 'false']));
   safe.MSAIDIZI_WRITE_MODE = 'read-only';
   assert(target, isSafeMsaidiziPosture(safe), 'negative-control baseline accepts exact dark posture');
