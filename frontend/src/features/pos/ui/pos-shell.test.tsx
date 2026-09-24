@@ -155,7 +155,9 @@ describe('uiVersion 3 mounts the new POS', () => {
   it('draws the OS shell for a v3 terminal and leaves a v2 terminal on Kaunta', async () => {
     const { container, unmount } = await boot();
     expect(container.querySelector('.pos-app')).not.toBeNull();
-    expect(window.location.hash).toBe('#pos/sale');
+    // The step hook writes the hash in an effect after the header renders, so
+    // wait for it rather than racing it (this failed intermittently in CI).
+    await waitFor(() => expect(window.location.hash).toBe('#pos/sale'));
     unmount();
 
     h.state.session = makeSession(2);
