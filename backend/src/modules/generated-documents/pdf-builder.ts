@@ -232,15 +232,15 @@ class SimplePdf {
     const rightX = this.pageWidth - MARGIN - rightWidth;
     const docTitle = cleanText(model.title).toUpperCase();
     this.text('DOCUMENT', rightX, headerTop + 7, 7.5, 'F2', rightWidth, 'right', TEXT_DARK);
-    const referenceEnd = this.wrappedText(
-      model.reference,
-      rightX,
-      headerTop + 23,
-      10,
-      rightWidth,
-      'F2',
-      TEXT_DARK,
-    );
+    // A reference is an identifier: keep it whole on one line, right-aligned
+    // under DOCUMENT. The word wrapper used to cut long ones mid-code
+    // ("GD-TABLE-EXPORT-...-TFJ" / "CM") and left-align them.
+    const reference = fitReference(model.reference, rightWidth, 10);
+    let referenceEnd = headerTop + 23;
+    for (const line of reference.lines) {
+      this.text(line, rightX, referenceEnd, reference.size, 'F2', rightWidth, 'right', TEXT_DARK);
+      referenceEnd += reference.size + 3;
+    }
     if (model.status)
       this.text(
         cleanText(model.status).toUpperCase(),
@@ -1333,6 +1333,37 @@ function measureText(value: string, size: number, font: FontName) {
     .font(font === 'F2' ? 'Helvetica-Bold' : 'Helvetica')
     .fontSize(size)
     .widthOfString(value) as number;
+}
+
+/**
+ * Lines and size for a document reference in `width`. One line whenever it
+ * fits at a readable size (down to 7.5pt); only a very long reference breaks,
+ * and then at its own hyphens, never mid-code.
+ */
+export function fitReference(
+  value: string,
+  width: number,
+  size: number,
+): { lines: string[]; size: number } {
+  const reference = cleanText(value || 'N/A');
+  const natural = measureText(reference, size, 'F2');
+  if (natural <= width) return { lines: [reference], size };
+  const shrunk = (size * width) / natural;
+  if (shrunk >= 7.5) return { lines: [reference], size: shrunk };
+  const lineSize = 8.5;
+  const parts = reference.split(/(?<=-)/);
+  const lines: string[] = [];
+  let line = '';
+  for (const part of parts) {
+    if (line && measureText(line + part, lineSize, 'F2') > width) {
+      lines.push(line);
+      line = part;
+    } else {
+      line += part;
+    }
+  }
+  if (line) lines.push(line);
+  return { lines, size: lineSize };
 }
 
 function wrapText(value: string, width: number, size: number): string[] {

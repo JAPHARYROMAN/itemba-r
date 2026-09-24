@@ -1,4 +1,4 @@
-import { BusinessPdfModel, buildBusinessPdf } from './pdf-builder';
+import { BusinessPdfModel, buildBusinessPdf, fitReference } from './pdf-builder';
 
 function sampleModel(overrides: Partial<BusinessPdfModel> = {}): BusinessPdfModel {
   return {
@@ -71,6 +71,16 @@ const TEXT_MUTED_FILL_OP = '0.39 0.46 0.55 rg';
 const PANEL_FILL_OP = '0.97 0.98 0.99 rg';
 
 describe('buildBusinessPdf rendering', () => {
+  it('keeps a long document reference whole on one line in the header', () => {
+    // Generated exports carry 30-character references that used to wrap
+    // mid-code ("GD-TABLE-EXPORT-MUFHA4FZ-TFJ" / "CM").
+    const reference = 'GD-TABLE-EXPORT-MUFHA4FZ-TFJCM';
+    const raw = buildBusinessPdf(sampleModel({ reference })).toString('latin1');
+    expect(occurrences(raw, `(${reference}) Tj`)).toBeGreaterThanOrEqual(2);
+    expect(raw).not.toContain('(GD-TABLE-EXPORT-MUFHA4FZ-TFJ) Tj');
+    expect(raw).not.toContain('(CM) Tj');
+  });
+
   it('renders the redesigned single-page document', () => {
     const buffer = buildBusinessPdf(sampleModel());
     const raw = buffer.toString('latin1');
@@ -351,5 +361,26 @@ describe('buildBusinessPdf firstPageComplete', () => {
     const breakAt = raw.indexOf('| CONTINUED');
     expect(breakAt).toBeGreaterThan(-1);
     expect(raw.indexOf('(Customer Acceptance) Tj')).toBeGreaterThan(breakAt);
+  });
+});
+
+describe('fitReference', () => {
+  it('keeps a reference that fits at full size', () => {
+    expect(fitReference('SO-2026-0001', 165, 10)).toEqual({ lines: ['SO-2026-0001'], size: 10 });
+  });
+
+  it('shrinks a slightly long reference instead of breaking it', () => {
+    const fit = fitReference('GD-TABLE-EXPORT-MUFHA4FZ-TFJCM', 165, 10);
+    expect(fit.lines).toEqual(['GD-TABLE-EXPORT-MUFHA4FZ-TFJCM']);
+    expect(fit.size).toBeLessThan(10);
+    expect(fit.size).toBeGreaterThanOrEqual(7.5);
+  });
+
+  it('breaks only a very long reference, and only at its own hyphens', () => {
+    const reference = 'LETTER-REF-2026-ACCOUNTS-PAYABLE-RECONCILIATION-CONFIRMATION-00042';
+    const fit = fitReference(reference, 165, 10);
+    expect(fit.lines.length).toBeGreaterThan(1);
+    expect(fit.lines.join('')).toBe(reference);
+    for (const line of fit.lines.slice(0, -1)) expect(line.endsWith('-')).toBe(true);
   });
 });
