@@ -136,6 +136,25 @@ describe('InventoryBalancesService.liveStock risk KPIs', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
+  it('returns each product category and base unit, for filtering and exporting', async () => {
+    const balance = makeBalance({ quantityOnHand: 5 });
+    balance.product = {
+      ...balance.product,
+      category: { id: 'cat-1', name: 'Beverages' },
+      baseUnit: { id: 'u-1', name: 'Bottle', symbol: 'btl' },
+    } as any;
+    const { service, findMany } = makeService([balance]);
+
+    const result: any = await service.liveStock({}, user);
+
+    const select = findMany.mock.calls[0][0].include.product.select;
+    expect(select.category).toEqual({ select: { id: true, name: true } });
+    expect(select.baseUnit).toEqual({ select: { id: true, name: true, symbol: true } });
+    const item = result.locations[0].items[0];
+    expect(item.product.category).toEqual({ id: 'cat-1', name: 'Beverages' });
+    expect(item.product.baseUnit.symbol).toBe('btl');
+  });
+
   it('applies division and branch filters without weakening company scope', async () => {
     const { service, findMany } = makeService([]);
 

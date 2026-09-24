@@ -986,3 +986,157 @@
     content: var(--report-second-label);
   }
 }
+
+/* ---------- Export stock available (stock-export-dialog.tsx) ---------- */
+.stock-export {
+  display: grid;
+  gap: 22px;
+}
+.stock-export section {
+  display: grid;
+  gap: 12px;
+}
+.stock-export h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--aurora-text);
+}
+.stock-export fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.stock-export legend {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--aurora-text-secondary);
+}
+.stock-export-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stock-export-heading h3 {
+  flex: 1;
+}
+.stock-export-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stock-export-chips label,
+.stock-export-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 999px;
+  background: var(--aurora-card);
+  color: var(--aurora-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.stock-export-chips label:has(input:checked) {
+  border-color: var(--aurora-primary);
+  background: var(--aurora-primary-subtle);
+  color: var(--aurora-primary-text, var(--aurora-text));
+}
+.stock-export-check {
+  border-radius: 10px;
+  align-self: end;
+}
+.stock-export-chips input,
+.stock-export-check input,
+.stock-export-formats input {
+  accent-color: var(--aurora-primary);
+}
+.stock-export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+}
+.stock-export-grid > h3 {
+  grid-column: 1 / -1;
+}
+/* sort beside a wider format picker, so each format card has room to read */
+.stock-export-output {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr);
+  gap: 12px 16px;
+  align-items: start;
+}
+.stock-export-output > h3 {
+  grid-column: 1 / -1;
+}
+.stock-export-formats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.stock-export-formats label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  background: var(--aurora-card);
+  cursor: pointer;
+}
+.stock-export-formats label:has(input:checked) {
+  border-color: var(--aurora-primary);
+  background: var(--aurora-primary-subtle);
+}
+.stock-export-formats strong {
+  font-size: 13px;
+  color: var(--aurora-text);
+}
+.stock-export-formats span {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--aurora-text-secondary);
+}
+.stock-export-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--aurora-text-muted, var(--aurora-text-secondary));
+}
+.stock-export-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--aurora-danger-text, #b42318);
+}
+.stock-export-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.stock-export-footer p {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .stock-export-output,
+  .stock-export-formats {
+    grid-template-columns: 1fr;
+  }
+  .stock-export-footer {
+    flex-wrap: wrap;
+  }
+  .stock-export-footer p {
+    flex-basis: 100%;
+  }
+}
