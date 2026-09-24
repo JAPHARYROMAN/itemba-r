@@ -72,7 +72,9 @@ describe('Payroll app', () => {
         }),
       ),
     );
-    expect(screen.getByRole('link', { name: /Active employees 7/ })).toHaveAttribute(
+    // The request above is made before its answer lands; until then the count
+    // reads "…", so wait for the link rather than racing the response.
+    expect(await screen.findByRole('link', { name: /Active employees 7/ })).toHaveAttribute(
       'href',
       '/hr/employees?companyId=company&employmentStatus=ACTIVE',
     );
