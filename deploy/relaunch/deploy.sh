@@ -174,6 +174,11 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
 # check is too late because an independently enabled worker could dispatch work
 # while the stack is coming up. Inspect Compose's resolved backend environment,
 # not the source .env, so defaults and interpolation are covered exactly.
+#
+# Human chat (MSAIDIZI_ENABLED) may be on, but only read-only: that is the
+# app's own rule (production-release-gate.service.ts: plain chat needs no
+# production ring). Every other switch starts autonomous or device work and
+# must stay exactly false here; turning those on is the ring-promotion path.
 MSAIDIZI_DARK_SWITCHES='MSAIDIZI_ENABLED MSAIDIZI_AUTONOMY_ENABLED MSAIDIZI_TASK_WORKER_ENABLED MSAIDIZI_AUTOPILOT_ENABLED MSAIDIZI_HOST_EXECUTION_ENABLED MSAIDIZI_ADAPTIVE_REASONING_ENABLED MSAIDIZI_DEVICE_PAIRING_ENABLED MSAIDIZI_DEVICE_CHANNEL_ENABLED MSAIDIZI_DIRECT_MTLS_ENABLED MSAIDIZI_SUPERVISOR_ENROLLMENT_ENABLED MSAIDIZI_UPDATE_SUPERVISOR_ENABLED MSAIDIZI_UPDATE_AUTOMATIC_ROLLOUT_ENABLED MSAIDIZI_UPDATE_EVALUATOR_ENABLED MSAIDIZI_EVALUATOR_MTLS_ENABLED MSAIDIZI_RECOVERY_SUPERVISOR_ENABLED MSAIDIZI_AUDIT_SIGNER_ENABLED'
 if ! command -v python3 >/dev/null 2>&1; then
   echo 'ERROR: python3 is required for the fail-closed Msaidizi deployment preflight.' >&2
@@ -194,14 +199,21 @@ except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
 
 switches = os.environ["MSAIDIZI_DARK_SWITCHES"].split()
 missing = "<unset>"
-unsafe = [f"{key}={environment.get(key, missing)}" for key in switches if environment.get(key) != "false"]
+# Chat may be exactly "true" or "false"; every other switch exactly "false".
+allowed = {"MSAIDIZI_ENABLED": ("true", "false")}
+unsafe = [
+    f"{key}={environment.get(key, missing)}"
+    for key in switches
+    if environment.get(key) not in allowed.get(key, ("false",))
+]
 mode = environment.get("MSAIDIZI_WRITE_MODE")
 if mode != "read-only":
     unsafe.append(f"MSAIDIZI_WRITE_MODE={mode if mode is not None else missing}")
 if unsafe:
     print("ERROR: unsafe Msaidizi production posture: " + ", ".join(unsafe), file=sys.stderr)
     raise SystemExit(1)
-print("Msaidizi preflight: PASS (all independent switches disabled, read-only)")
+chat = "on, read-only" if environment.get("MSAIDIZI_ENABLED") == "true" else "off"
+print(f"Msaidizi preflight: PASS (chat {chat}; all autonomous switches disabled; read-only)")
 '
 
 # Refuse to silently replace a missing production database with a new empty

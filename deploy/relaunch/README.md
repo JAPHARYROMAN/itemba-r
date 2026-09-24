@@ -41,8 +41,11 @@ is reserved for deliberate role-permission maintenance.
 
 ## Msaidizi protected ring promotion
 
-The ordinary deployment above intentionally keeps every Msaidizi switch false
-and `MSAIDIZI_WRITE_MODE=read-only`. It remains the recovery/default path and
+The ordinary deployment above keeps `MSAIDIZI_WRITE_MODE=read-only` and every
+autonomous or device Msaidizi switch false. Human chat (`MSAIDIZI_ENABLED`) may
+be `true` or `false`: it needs no production ring
+(`production-release-gate.service.ts`), and read-only is enforced both before
+the stack starts and after the deploy. It remains the recovery/default path and
 must be run for the exact signed source commit before a ring promotion.
 
 Use the manual `Msaidizi Protected Ring Promotion` GitHub workflow only after a

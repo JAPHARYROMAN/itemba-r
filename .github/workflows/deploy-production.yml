@@ -169,6 +169,10 @@ jobs:
           for KEY in $POSTURE_KEYS; do
             VALUE="$($COMPOSE exec -T backend printenv "$KEY" </dev/null || echo unset)"
             echo "${KEY}=${VALUE}"
+            # Human chat may be on; read-only is enforced below. Every other
+            # switch starts autonomous or device work and must be exactly false
+            # (production-release-gate.service.ts: chat needs no ring).
+            if [ "$KEY" = "MSAIDIZI_ENABLED" ] && [ "$VALUE" = "true" ]; then continue; fi
             if [ "$VALUE" != "false" ]; then
               echo "ERROR: production deployment requires ${KEY}=false; refusing unsafe Msaidizi posture." >&2
               exit 1
@@ -180,7 +184,7 @@ jobs:
             echo "ERROR: production deployment requires MSAIDIZI_WRITE_MODE=read-only; refusing unsafe Msaidizi posture." >&2
             exit 1
           fi
-          echo "Msaidizi posture: PASS (all independent switches disabled, read-only)"
+          echo "Msaidizi posture: PASS (chat at most read-only, all autonomous switches disabled)"
 
           # Prove the script reached its end. Without a sentinel, a future
           # stdin-eating command truncates these checks silently instead of

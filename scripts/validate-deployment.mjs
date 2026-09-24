@@ -810,6 +810,9 @@ function assertProductionDeploymentWorkflow() {
   );
   const postureDeclaration = `POSTURE_KEYS='${msaidiziEnableSwitches.join(' ')}'`;
   const postureStart = workflow.indexOf(postureDeclaration);
+  const chatException =
+    'if [ "$KEY" = "MSAIDIZI_ENABLED" ] && [ "$VALUE" = "true" ]; then continue; fi';
+  const chatExceptionAt = workflow.indexOf(chatException, postureStart);
   const switchRejection = workflow.indexOf('if [ "$VALUE" != "false" ]; then', postureStart);
   const switchExit = workflow.indexOf('exit 1', switchRejection);
   const modeRead = workflow.indexOf(
@@ -824,6 +827,16 @@ function assertProductionDeploymentWorkflow() {
     target,
     workflow.includes('VALUE="$($COMPOSE exec -T backend printenv "$KEY" </dev/null || echo unset)"'),
     'maps a missing or unreadable switch to an unsafe value',
+  );
+  assert(
+    target,
+    chatExceptionAt > postureStart && chatExceptionAt < switchRejection,
+    'allows only MSAIDIZI_ENABLED=true (human chat) before rejecting any other switch not exactly false',
+  );
+  assert(
+    target,
+    workflow.slice(postureStart, modeRead).split('then continue; fi').length === 2,
+    'the chat exception is the only switch exception',
   );
   assert(target, switchRejection > postureStart, 'rejects every switch not exactly false');
   assert(target, switchExit > switchRejection && switchExit < modeRead, 'switch rejection exits nonzero');
@@ -840,7 +853,14 @@ function assertProductionDeploymentWorkflow() {
   const preflightStart = relaunch.indexOf(preflightDeclaration);
   const pythonDependency = relaunch.indexOf('command -v python3', preflightStart);
   const preflightConfig = relaunch.indexOf('config --format json', pythonDependency);
-  const exactSwitchDecision = relaunch.indexOf('environment.get(key) != "false"', preflightConfig);
+  const chatAllowance = relaunch.indexOf(
+    'allowed = {"MSAIDIZI_ENABLED": ("true", "false")}',
+    preflightConfig,
+  );
+  const exactSwitchDecision = relaunch.indexOf(
+    'if environment.get(key) not in allowed.get(key, ("false",))',
+    chatAllowance,
+  );
   const exactModeDecision = relaunch.indexOf('mode != "read-only"', exactSwitchDecision);
   const firstComposeUp = relaunch.indexOf(
     'docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up',
@@ -852,7 +872,12 @@ function assertProductionDeploymentWorkflow() {
   assert(target, preflightStart > resolvedConfig, 'relaunch declares the exact dark switch set after config');
   assert(target, pythonDependency > preflightStart, 'relaunch fails closed when python3 is unavailable');
   assert(target, preflightConfig > pythonDependency, 'relaunch parses resolved Compose JSON');
-  assert(target, exactSwitchDecision > preflightConfig, 'relaunch rejects switches not exactly false');
+  assert(target, chatAllowance > preflightConfig, 'relaunch allows only human chat to be true');
+  assert(
+    target,
+    exactSwitchDecision > chatAllowance,
+    'relaunch rejects any other switch not exactly false, and chat not exactly true/false',
+  );
   assert(target, exactModeDecision > exactSwitchDecision, 'relaunch rejects mode not exactly read-only');
   assert(
     target,
@@ -868,12 +893,38 @@ function assertProductionDeploymentWorkflow() {
   const safe = Object.fromEntries(msaidiziEnableSwitches.map((key) => [key, 'false']));
   safe.MSAIDIZI_WRITE_MODE = 'read-only';
   assert(target, isSafeMsaidiziPosture(safe), 'negative-control baseline accepts exact dark posture');
-  for (const key of msaidiziEnableSwitches) {
+  assert(
+    target,
+    isSafeMsaidiziPosture({ ...safe, MSAIDIZI_ENABLED: 'true' }),
+    'accepts human chat on while read-only',
+  );
+  for (const mode of ['full', 'amber', 'unset']) {
     assert(
       target,
-      !isSafeMsaidiziPosture({ ...safe, [key]: 'true' }),
-      `negative control rejects ${key}=true`,
+      !isSafeMsaidiziPosture({ ...safe, MSAIDIZI_ENABLED: 'true', MSAIDIZI_WRITE_MODE: mode }),
+      `negative control rejects chat on with write mode ${mode}`,
     );
+  }
+  for (const value of ['TRUE', 'yes', '1', 'on']) {
+    assert(
+      target,
+      !isSafeMsaidiziPosture({ ...safe, MSAIDIZI_ENABLED: value }),
+      `negative control rejects MSAIDIZI_ENABLED=${value}`,
+    );
+  }
+  for (const key of msaidiziEnableSwitches) {
+    if (key !== 'MSAIDIZI_ENABLED') {
+      assert(
+        target,
+        !isSafeMsaidiziPosture({ ...safe, [key]: 'true' }),
+        `negative control rejects ${key}=true`,
+      );
+      assert(
+        target,
+        !isSafeMsaidiziPosture({ ...safe, MSAIDIZI_ENABLED: 'true', [key]: 'true' }),
+        `negative control rejects ${key}=true even with chat on`,
+      );
+    }
     const missing = { ...safe };
     delete missing[key];
     assert(
@@ -890,14 +941,20 @@ function assertProductionDeploymentWorkflow() {
     );
   }
   console.log(
-    'OK production workflow: pre/post-deploy dark posture and negative controls verified',
+    'OK production workflow: pre/post-deploy posture (chat at most read-only, autonomy dark) and negative controls verified',
   );
 }
 
+// Human chat (MSAIDIZI_ENABLED) may be exactly 'true' or 'false'; every other
+// switch exactly 'false'; write mode exactly 'read-only'. Mirrors deploy.sh
+// and the post-deploy verification.
 function isSafeMsaidiziPosture(values) {
   return (
-    msaidiziEnableSwitches.every((key) => values[key] === 'false') &&
-    values.MSAIDIZI_WRITE_MODE === 'read-only'
+    msaidiziEnableSwitches.every((key) =>
+      key === 'MSAIDIZI_ENABLED'
+        ? values[key] === 'true' || values[key] === 'false'
+        : values[key] === 'false',
+    ) && values.MSAIDIZI_WRITE_MODE === 'read-only'
   );
 }
 
