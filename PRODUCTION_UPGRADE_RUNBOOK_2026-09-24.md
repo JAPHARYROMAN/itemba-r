@@ -36,11 +36,11 @@ None drops a table or a column, and none hard-deletes business records. 53 creat
 
 ## 2. Blockers to clear first
 
-1. **Msaidizi posture (likely blocker; owner decision).** Since 28 Aug, `deploy.sh` refuses to deploy unless *every* Msaidizi switch, including plain chat (`MSAIDIZI_ENABLED`), resolves to `false` and `MSAIDIZI_WRITE_MODE=read-only`. The post-deploy verification checks the same. Production has not been deployed since that rule arrived. If chat was switched on in production's `.env.production` (it was reported live, read-only, on 2 Sep), the deploy **will stop before touching anything**. That is safe, but blocked. Choose one:
-   - (a) set `MSAIDIZI_ENABLED=false` in `.env.production` for the deploy, and accept that chat is off until the rule changes; or
-   - (b) change the deploy check to match the app's own release gate (`production-release-gate.service.ts`): plain chat is allowed while `MSAIDIZI_WRITE_MODE=read-only`, and the autonomous switches must stay `false`. This is a small reviewed PR before deploying.
+1. **Msaidizi posture: decided, option (b).** Since 28 Aug, `deploy.sh` refused to deploy unless *every* Msaidizi switch, including plain chat (`MSAIDIZI_ENABLED`), was `false`. Production has chat on, read-only, so the deploy would have stopped before touching anything. The owner chose to align the deploy check with the app's own release gate (`production-release-gate.service.ts`):
+   - chat may be on, but only with `MSAIDIZI_WRITE_MODE=read-only`;
+   - every autonomous and device switch must still be `false`.
 
-   Check first on the droplet: `grep '^MSAIDIZI_' /opt/itemba-r/.env.production`.
+   This is the PR `deploy-allow-readonly-chat`. **Merge it before deploying.** Then, on the droplet, confirm production's settings fit the new rule: `grep '^MSAIDIZI_' /opt/itemba-r/.env.production` must show `MSAIDIZI_WRITE_MODE=read-only` and no autonomous switch set to `true`.
 2. **Access.** Whoever runs this needs SSH to the droplet (for the backup copy and the checks), and "run workflow" rights on the repo. Consider adding required reviewers to the `production` environment in repo Settings → Environments.
 3. **Disk space.** Check the droplet has room for a fresh backup plus the new images: `df -h /opt /var/lib/docker`.
 
