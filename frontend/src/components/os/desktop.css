@@ -641,6 +641,52 @@
   padding-top: 8px;
   font-size: 11px;
 }
+/*
+ * Dock motion (desktop-dock-motion.tsx): each icon sits in a box that grows
+ * along the dock as the icon magnifies, so neighbours make room. The dock
+ * rises in once when the desktop opens; it uses the individual translate
+ * property so it never fights the transform that centres the dock.
+ */
+.desktop-dock-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.itemba-desktop[data-dock='bottom'] .desktop-dock-icon {
+  align-items: end;
+}
+.desktop-dock-icon-face {
+  display: grid;
+  place-items: center;
+  will-change: transform;
+}
+@keyframes desktop-dock-rise {
+  from {
+    opacity: 0;
+    translate: 0 28px;
+  }
+}
+@keyframes desktop-dock-slide-left {
+  from {
+    opacity: 0;
+    translate: -28px 0;
+  }
+}
+@keyframes desktop-dock-slide-right {
+  from {
+    opacity: 0;
+    translate: 28px 0;
+  }
+}
+.itemba-desktop .desktop-dock {
+  animation: desktop-dock-rise 520ms cubic-bezier(0.2, 0.9, 0.3, 1.05) backwards;
+}
+.itemba-desktop[data-dock='left'] .desktop-dock {
+  animation-name: desktop-dock-slide-left;
+}
+.itemba-desktop[data-dock='right'] .desktop-dock {
+  animation-name: desktop-dock-slide-right;
+}
 .desktop-dock {
   position: absolute;
   z-index: 100;
@@ -679,7 +725,7 @@
   gap: 1px;
   padding: 0 5px;
 }
-.desktop-apps-button > span {
+.desktop-apps-tile {
   display: grid;
   place-items: center;
   height: 34px;
@@ -713,16 +759,33 @@
   background: var(--desktop-ink);
   opacity: 0.35;
 }
+/* a new window's dot pops in under its app */
+.desktop-running i {
+  animation: desktop-dot-in 260ms cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+@keyframes desktop-dot-in {
+  from {
+    scale: 0;
+    opacity: 0;
+  }
+}
 .desktop-running i[data-active='true'] {
   background: var(--desktop-accent);
   opacity: 1;
 }
 .desktop-dock-tooltip {
-  display: none;
   position: absolute;
-  bottom: calc(100% + 20px);
+  bottom: calc(100% + 26px);
   left: 50%;
   transform: translateX(-50%);
+  opacity: 0;
+  visibility: hidden;
+  translate: 0 4px;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    translate 140ms ease,
+    visibility 0s linear 140ms;
   padding: 7px 11px;
   background: var(--desktop-glass);
   border: 1px solid var(--desktop-border);
@@ -734,7 +797,10 @@
 }
 .desktop-dock button:hover .desktop-dock-tooltip,
 .desktop-dock button:focus-visible .desktop-dock-tooltip {
-  display: block;
+  opacity: 1;
+  visibility: visible;
+  translate: 0 0;
+  transition-delay: 0s;
 }
 .itemba-desktop[data-dock='left'] .desktop-dock,
 .itemba-desktop[data-dock='right'] .desktop-dock {
@@ -754,13 +820,13 @@
   height: 1px;
 }
 .itemba-desktop:not([data-dock='bottom']) .desktop-dock-tooltip {
-  left: calc(100% + 15px);
+  left: calc(100% + 26px);
   bottom: auto;
   transform: none;
 }
 .itemba-desktop[data-dock='right'] .desktop-dock-tooltip {
   left: auto;
-  right: calc(100% + 15px);
+  right: calc(100% + 26px);
 }
 .itemba-desktop[data-auto-hide='true'] .desktop-dock {
   transition: opacity 0.2s;
@@ -1435,6 +1501,8 @@
     overflow-y: hidden;
     max-width: calc(100vw - 16px);
     border-radius: 20px;
+    /* always along the bottom here, so it always rises in */
+    animation-name: desktop-dock-rise;
   }
   .desktop-dock .os-glyph {
     height: 42px;
