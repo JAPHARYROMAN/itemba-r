@@ -875,7 +875,9 @@ describe('HESABU-4: the draft is custody', () => {
     // Cold boot on #hesabu normalizes to its parent #stoo (spec-sales §0.3):
     // re-entry has to pass the resume offer, so it is never a deep link.
     await screen.findByRole('heading', { name: 'Stoo' });
-    expect(window.location.hash).toBe('#stoo');
+    // The router normalises the hash in an effect after the render; wait for
+    // it rather than racing it (this failed intermittently in CI).
+    await waitFor(() => expect(window.location.hash).toBe('#stoo'));
     await screen.findByText('Unga wa Ngano');
     await tapSlab(user, 'ANZA KUHESABU');
     await screen.findByRole('heading', { name: 'Hesabu' });
