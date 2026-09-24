@@ -441,6 +441,8 @@ services:
         # ITEMBA OS shell switch; baked into the frontend build. Off unless exactly "true".
         NEXT_PUBLIC_ITEMBA_OS_ENABLED: ${NEXT_PUBLIC_ITEMBA_OS_ENABLED:-false}
         AUTH_COOKIE_MAX_AGE_SECONDS: ${AUTH_COOKIE_MAX_AGE_SECONDS:-315360000}
+        # Set by deploy.sh from the checked-out commit; shown as the app version.
+        APP_BUILD_SHA: ${APP_BUILD_SHA:-}
     container_name: itemba_r_frontend_prod
     restart: unless-stopped
     environment:
