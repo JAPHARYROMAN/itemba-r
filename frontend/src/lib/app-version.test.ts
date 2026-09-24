@@ -7,19 +7,23 @@ import { afterEach, describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const configPath = join(__dirname, '../../next.config.js');
 const { version } = require('../../package.json') as { version: string };
-const saved = { ...process.env };
+const KEYS = ['APP_BUILD_SHA', 'VERCEL_GIT_COMMIT_SHA', 'NEXT_PUBLIC_APP_VERSION'] as const;
+// Only these keys are touched and restored: process.env itself is shared with
+// the other test files in this worker, so it is never replaced.
+const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
 
 function loadVersion(env: Record<string, string | undefined>): string {
-  for (const key of ['APP_BUILD_SHA', 'VERCEL_GIT_COMMIT_SHA', 'NEXT_PUBLIC_APP_VERSION']) {
-    delete process.env[key];
-  }
+  for (const key of KEYS) delete process.env[key];
   Object.assign(process.env, env);
   delete require.cache[require.resolve(configPath)];
   return (require(configPath) as { env: Record<string, string> }).env.NEXT_PUBLIC_APP_VERSION;
 }
 
 afterEach(() => {
-  process.env = { ...saved };
+  for (const key of KEYS) {
+    if (saved[key] === undefined) delete process.env[key];
+    else process.env[key] = saved[key];
+  }
   delete require.cache[require.resolve(configPath)];
 });
 
