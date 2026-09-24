@@ -287,6 +287,9 @@ fi
 # 5. Build + start the stack (migrations run via the backend-migrate one-shot)
 # ----------------------------------------------------------------------------
 export DOCKER_BUILDKIT=1
+# The frontend shows this as its version (POS settings); its build has no .git.
+APP_BUILD_SHA="$(git -C "$REPO_DIR" rev-parse --short=8 HEAD 2>/dev/null || true)"
+export APP_BUILD_SHA
 log "Building images one at a time (limits peak memory)"
 for svc in backend-migrate backend frontend website; do
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build "$svc"
