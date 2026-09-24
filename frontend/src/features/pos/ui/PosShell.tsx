@@ -54,14 +54,38 @@ function stockLabel(product: MobilePosLiteProduct, t: PosTranslate): string {
 /** A Kaunta module the new POS opens in the OS skin, by its deep-link hash. */
 export type PosModule = 'leo' | 'stoo' | 'manunuzi' | 'mipangilio';
 
+/**
+ * Kaunta routes that belong to a module (not the sale flow Kaunta shares with
+ * the new POS). A link to one, on boot or typed into the address bar, opens
+ * the module; Kaunta's router then lands on the exact screen or normalises it
+ * to its parent (`#hesabu` → `#stoo`), as KAUNTA-7 already does.
+ */
+const MODULE_LINK = /^#(leo|stoo|hesabu|manunuzi|historia|funga|ripoti|mipangilio)(\/|$)/;
+
+function isModuleLink(hash: string): boolean {
+  return MODULE_LINK.test(hash);
+}
+
 export function PosShell(props: PosShellProps) {
-  const [module, setModule] = useState<PosModule | null>(null);
+  // Read before the sale screen mounts: its step hook rewrites the hash to
+  // #pos/sale on mount, which would swallow the link.
+  const [module, setModule] = useState<boolean>(
+    () => typeof window !== 'undefined' && isModuleLink(window.location.hash),
+  );
+
+  useEffect(() => {
+    const onHashChange = () => {
+      if (isModuleLink(window.location.hash)) setModule(true);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   if (module) {
     // The day book, stock, counts, deliveries, history, close and settings are
     // Kaunta's own screens, hooks and slab in the OS skin (phase 5), so every
     // behaviour their tests pin carries over. Reaching Mauzo returns here.
-    return <KauntaShell {...props} skin="os" onReturnToSale={() => setModule(null)} />;
+    return <KauntaShell {...props} skin="os" onReturnToSale={() => setModule(false)} />;
   }
 
   return (
@@ -70,7 +94,7 @@ export function PosShell(props: PosShellProps) {
       openModule={(next) => {
         // Kaunta's router honours a module deep link on boot (KAUNTA-7).
         window.history.replaceState(window.history.state, '', `#${next}`);
-        setModule(next);
+        setModule(true);
       }}
     />
   );
