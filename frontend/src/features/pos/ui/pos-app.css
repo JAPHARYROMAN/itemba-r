@@ -376,6 +376,11 @@ button.pos-chip {
   font-size: 13px;
   color: var(--pos-ink-2);
 }
+/* the line asks for more than the stock snapshot shows (a warning, not a block) */
+.pos-line-text .pos-line-stock {
+  color: var(--pos-warn-text);
+  font-weight: 500;
+}
 .pos-line-total {
   display: none;
   font-size: 15px;
