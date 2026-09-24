@@ -43,6 +43,17 @@ function stockState(product: MobilePosLiteProduct): 'out' | 'low' | 'ok' | 'none
   return 'ok';
 }
 
+/**
+ * What the stock snapshot says is left when a cart line asks for more, or null.
+ * A warning only, never a block: the snapshot can be stale (a delivery since),
+ * and the server has the final word ("Insufficient stock", errInsufficientStock).
+ */
+function stockShortfall(line: { product: MobilePosLiteProduct; quantity: number }): number | null {
+  const { availableStock } = line.product;
+  if (!line.product.trackInventory || availableStock === null) return null;
+  return line.quantity > availableStock ? Math.max(availableStock, 0) : null;
+}
+
 function stockLabel(product: MobilePosLiteProduct, t: PosTranslate): string {
   const state = stockState(product);
   if (state === 'out') return t('posOutOfStock');
@@ -628,6 +639,13 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                             {t('posEachPrice', { price: money(line.product.sellingPrice) })}
                           </span>
                         )}
+                        {stockShortfall(line) !== null && (
+                          <span className="pos-line-stock">
+                            {stockShortfall(line) === 0
+                              ? t('posLineOutOfStock')
+                              : t('posLineStockShort', { count: stockShortfall(line) ?? 0 })}
+                          </span>
+                        )}
                       </div>
                       <div className="pos-qty">
                         <button
@@ -837,6 +855,11 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
 
               {creditNeedsCustomer && cart.length > 0 && (
                 <p className="pos-hint">{t('selectCreditCustomer')}</p>
+              )}
+              {cart.some((line) => stockShortfall(line) !== null) && (
+                <p className="pos-note" data-tone="warn">
+                  {t('posStockWarning')}
+                </p>
               )}
               {notice && (
                 <p className="pos-note" data-tone="bad" role="alert">

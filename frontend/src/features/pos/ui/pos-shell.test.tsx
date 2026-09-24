@@ -203,6 +203,26 @@ describe('selling on the new POS', () => {
     expect(search).toHaveValue('');
   });
 
+  it('warns, without blocking, when a line asks for more than the stock shows', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.type(screen.getByLabelText('Tafuta au skani bidhaa'), 'maji{Enter}');
+    const cart = screen.getByRole('region', { name: 'Bidhaa za mauzo' });
+    for (let i = 0; i < 2; i += 1) {
+      await user.click(screen.getByRole('button', { name: 'Ongeza Maji ya Uhai' }));
+    }
+    // Three of three left is fine.
+    expect(within(cart).queryByText(/Stoo inaonyesha/)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Ongeza Maji ya Uhai' }));
+    expect(within(cart).getByText('Stoo inaonyesha 3 tu')).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    expect(screen.getByText(/Baadhi ya bidhaa zimezidi stoo/)).toBeInTheDocument();
+    // The snapshot can be stale, so the server decides.
+    expect(screen.getByRole('button', { name: /Maliza Mauzo · TZS 4,000/ })).toBeEnabled();
+  });
+
   it('keeps Complete disabled on credit until a customer is picked', async () => {
     const user = userEvent.setup();
     await boot();
