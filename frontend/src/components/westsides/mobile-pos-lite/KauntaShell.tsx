@@ -1052,6 +1052,7 @@ export function KauntaShell(props: KauntaShellProps) {
         leaveTerminal={props.leaveTerminal}
         syncCatalog={props.syncCatalog}
         t={t}
+        themeChoice={props.skin !== 'os'}
       />
     );
   } else {
@@ -1084,7 +1085,15 @@ export function KauntaShell(props: KauntaShellProps) {
       style={{ background: 'var(--aurora-bg)' }}
     >
       {showRail && (
-        <KauntaRail route={route} purchasesEnabled={purchasesEnabled} onNavigate={navigate} t={t} />
+        <KauntaRail
+          route={route}
+          purchasesEnabled={purchasesEnabled}
+          onNavigate={navigate}
+          t={t}
+          identity={
+            props.skin === 'os' ? `${props.session.branch.name} · ${props.session.rep.name}` : null
+          }
+        />
       )}
       <KauntaRibbon
         online={online}
@@ -1200,11 +1209,18 @@ function KauntaRail({
   purchasesEnabled,
   onNavigate,
   t,
+  identity,
 }: {
   route: KauntaRoute;
   purchasesEnabled: boolean;
   onNavigate: (to: KauntaRoute) => void;
   t: PosTranslate;
+  /**
+   * OS skin only: the till's own header line (branch · rep), so a module
+   * reads as part of the same POS it was opened from. Hidden on phones, where
+   * the tabs need the width.
+   */
+  identity?: string | null;
 }) {
   const tabs: Array<{ to: KauntaRoute; label: string; icon: typeof ShoppingCart }> = [
     { to: 'mauzo', label: t('railMauzo'), icon: ShoppingCart },
@@ -1230,6 +1246,22 @@ function KauntaRail({
       style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
     >
       <div className="mx-auto flex h-11 max-w-md items-stretch gap-1 px-2">
+        {identity && (
+          <div
+            className="mr-2 hidden min-w-0 flex-col justify-center border-r pr-3 sm:flex"
+            style={{ borderColor: 'var(--aurora-border)' }}
+          >
+            <strong className="text-sm leading-tight" style={{ color: 'var(--aurora-text)' }}>
+              Kaunta
+            </strong>
+            <span
+              className="truncate text-xs leading-tight"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
+              {identity}
+            </span>
+          </div>
+        )}
         {tabs.map((tab) => {
           const active = isActive(tab.to);
           const Icon = tab.icon;

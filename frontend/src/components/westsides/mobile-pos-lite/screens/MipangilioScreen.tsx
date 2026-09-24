@@ -32,6 +32,7 @@ export function MipangilioScreen({
   leaveTerminal,
   syncCatalog,
   t,
+  themeChoice = true,
 }: {
   shellClass: string;
   session: Session;
@@ -42,6 +43,12 @@ export function MipangilioScreen({
   leaveTerminal: () => Promise<void>;
   syncCatalog: (current: MobilePosLiteBinding) => Promise<void>;
   t: PosTranslate;
+  /**
+   * False in the OS skin, which follows the OS light/dark theme and never
+   * applies Mchana/Usiku; the row would be exactly the dead setting the
+   * comment above refuses.
+   */
+  themeChoice?: boolean;
 }) {
   const [haptics, setHaptics] = useState(isHapticsEnabled);
   const [resyncing, setResyncing] = useState(false);
@@ -223,54 +230,56 @@ export function MipangilioScreen({
             immediate effect — with both theme names flanking the track so the
             rep reads WHICH mode she is in, not just on/off. Swahili names in
             both catalogs: they are the modes' names, not a translation. */}
-        <section
-          className="mt-3 rounded-lg border px-4 py-3"
-          style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
-        >
-          <div className="flex min-h-11 items-center justify-between gap-3">
-            <span
-              className="text-sm font-semibold"
-              style={{ color: 'var(--aurora-text-secondary)' }}
-            >
-              {t('settingsTheme')}
-            </span>
-            <div className="flex items-center gap-2">
+        {themeChoice && (
+          <section
+            className="mt-3 rounded-lg border px-4 py-3"
+            style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}
+          >
+            <div className="flex min-h-11 items-center justify-between gap-3">
               <span
-                className="text-sm font-bold"
-                style={{ color: usiku ? 'var(--aurora-text-muted)' : 'var(--aurora-text)' }}
+                className="text-sm font-semibold"
+                style={{ color: 'var(--aurora-text-secondary)' }}
               >
-                {t('settingsThemeMchana')}
+                {t('settingsTheme')}
               </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={usiku}
-                aria-label={t('settingsTheme')}
-                onClick={toggleTheme}
-                className="relative h-7 w-12 flex-shrink-0 rounded-full transition-colors"
-                style={{
-                  background: usiku ? 'var(--aurora-primary)' : 'var(--aurora-bg-subtle)',
-                  boxShadow: usiku ? undefined : 'inset 0 0 0 1px var(--aurora-border)',
-                }}
-              >
+              <div className="flex items-center gap-2">
                 <span
-                  aria-hidden="true"
-                  className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${usiku ? 'left-6' : 'left-1'}`}
-                  style={{ boxShadow: 'var(--aurora-shadow)' }}
-                />
-              </button>
-              <span
-                className="text-sm font-bold"
-                style={{ color: usiku ? 'var(--aurora-text)' : 'var(--aurora-text-muted)' }}
-              >
-                {t('settingsThemeUsiku')}
-              </span>
+                  className="text-sm font-bold"
+                  style={{ color: usiku ? 'var(--aurora-text-muted)' : 'var(--aurora-text)' }}
+                >
+                  {t('settingsThemeMchana')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={usiku}
+                  aria-label={t('settingsTheme')}
+                  onClick={toggleTheme}
+                  className="relative h-7 w-12 flex-shrink-0 rounded-full transition-colors"
+                  style={{
+                    background: usiku ? 'var(--aurora-primary)' : 'var(--aurora-bg-subtle)',
+                    boxShadow: usiku ? undefined : 'inset 0 0 0 1px var(--aurora-border)',
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${usiku ? 'left-6' : 'left-1'}`}
+                    style={{ boxShadow: 'var(--aurora-shadow)' }}
+                  />
+                </button>
+                <span
+                  className="text-sm font-bold"
+                  style={{ color: usiku ? 'var(--aurora-text)' : 'var(--aurora-text-muted)' }}
+                >
+                  {t('settingsThemeUsiku')}
+                </span>
+              </div>
             </div>
-          </div>
-          <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-            {t('settingsThemeNote')}
-          </p>
-        </section>
+            <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+              {t('settingsThemeNote')}
+            </p>
+          </section>
+        )}
         <section
           className="mt-3 flex min-h-14 items-center justify-between gap-3 rounded-lg border px-4"
           style={{ background: 'var(--aurora-card)', borderColor: 'var(--aurora-border)' }}

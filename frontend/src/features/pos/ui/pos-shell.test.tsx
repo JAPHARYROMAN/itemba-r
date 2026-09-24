@@ -633,4 +633,51 @@ describe('Kaunta modules in the OS skin', () => {
     await user.click(screen.getByRole('button', { name: 'Menyu' }));
     expect(screen.getByRole('menuitem', { name: 'Mizigo' })).toBeInTheDocument();
   });
+
+  it('opens a module from its link on load, not the sale screen', async () => {
+    // A refresh inside a module (a stock count, settings) used to drop the
+    // rep on the sale screen while the address still named the module.
+    window.history.replaceState(null, '', '/mobile-pos#mipangilio');
+    const { container } = await boot();
+
+    await waitFor(() => expect(container.querySelector('.pos-shell')).not.toBeNull());
+    expect(container.querySelector('.pos-app')).toBeNull();
+    expect(window.location.hash).toBe('#mipangilio');
+  });
+
+  it('opens a module when its link is followed from the sale screen', async () => {
+    const { container } = await boot();
+    expect(container.querySelector('.pos-app')).not.toBeNull();
+
+    window.history.pushState(null, '', '/mobile-pos#leo');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+    await waitFor(() => expect(container.querySelector('.pos-shell')).not.toBeNull());
+    expect(container.querySelector('.pos-app')).toBeNull();
+  });
+
+  it('reads as the same till: the module rail carries the branch and rep', async () => {
+    const user = userEvent.setup();
+    const { container } = await boot();
+    await openMenuItem(user, /^Leo/);
+
+    const rail = await waitFor(() => {
+      const nav = container.querySelector('.pos-shell nav');
+      expect(nav).not.toBeNull();
+      return nav as HTMLElement;
+    });
+    expect(within(rail).getByText('Kaunta')).toBeInTheDocument();
+    expect(within(rail).getByText('Kisimani Main · Jofu K.')).toBeInTheDocument();
+  });
+
+  it('offers no Mchana/Usiku choice in the OS skin, which follows the OS theme', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await openMenuItem(user, /^Mipangilio/);
+
+    await screen.findByText('Mtetemo');
+    expect(screen.queryByText('Mandhari')).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Mandhari' })).toBeNull();
+    expect(screen.getByRole('switch', { name: 'Mtetemo' })).toBeInTheDocument();
+  });
 });

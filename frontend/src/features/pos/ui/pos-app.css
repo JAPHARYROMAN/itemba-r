@@ -1127,3 +1127,16 @@ html.dark .pos-shell[data-pos-skin='os'] {
   --aurora-warning-subtle: var(--aurora-warning-bg);
   --aurora-danger-subtle: var(--aurora-danger-bg);
 }
+
+/*
+ * The modules are Kaunta's phone screens, each a max-w-md (448px) column. On a
+ * tablet or till that left one narrow strip in the middle of the window. In the
+ * OS skin every column, the module rail and the bottom slab widen together to
+ * a comfortable reading width, so they still line up with each other. Phones
+ * keep the original width.
+ */
+@media (min-width: 900px) {
+  html .pos-shell[data-pos-skin='os'] .max-w-md {
+    max-width: 48rem;
+  }
+}
