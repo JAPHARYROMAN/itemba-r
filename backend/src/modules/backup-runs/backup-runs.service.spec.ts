@@ -16,6 +16,30 @@ function auditLogs() {
 }
 
 describe('BackupRunsService run creation', () => {
+  it('rejects unsupported coverage before creating a run or background job', async () => {
+    const prisma = makePrisma();
+    const service = new BackupRunsService(prisma, auditLogs());
+    await expect(service.create({ backupType: 'CONFIGURATION' }, 'user-A')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a job with an unimplemented remote destination before queueing it', async () => {
+    const prisma = makePrisma();
+    prisma.backupJob.findFirst.mockResolvedValue({
+      id: 'job-A',
+      status: 'ACTIVE',
+      backupType: 'FULL_SYSTEM',
+      storageTarget: 'S3_COMPATIBLE',
+    });
+    const service = new BackupRunsService(prisma, auditLogs());
+    await expect(service.create({ backupJobId: 'job-A' }, 'user-A')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('inherits backupType from an active backup job and enqueues worker execution', async () => {
     const tx = {
       backupRun: {

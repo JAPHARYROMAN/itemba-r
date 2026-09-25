@@ -13,9 +13,9 @@ const STATUS_COLORS: Record<string, string> = {
   PAUSED: 'bg-yellow-100 text-yellow-700',
 };
 
-const BACKUP_TYPES = ['DATABASE', 'FILE_STORAGE', 'DOCUMENTS', 'FULL_SYSTEM', 'CONFIGURATION', 'AUDIT_LOGS', 'CUSTOM'];
+const BACKUP_TYPES = ['DATABASE', 'FILE_STORAGE', 'DOCUMENTS', 'FULL_SYSTEM'];
 const SCHEDULES = ['MANUAL', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM'];
-const STORAGE_TARGETS = ['LOCAL', 'S3_COMPATIBLE', 'CLOUD_STORAGE', 'EXTERNAL_DRIVE', 'CUSTOM'];
+const STORAGE_TARGETS = ['LOCAL'];
 const STATUSES = ['ACTIVE', 'INACTIVE', 'PAUSED'];
 
 interface BackupJob {
@@ -40,7 +40,7 @@ interface JobForm {
   status: string;
 }
 
-const BLANK: JobForm = { name: '', backupType: 'DATABASE', schedule: 'MANUAL', storageTarget: '', retentionDays: '30', status: 'ACTIVE' };
+const BLANK: JobForm = { name: '', backupType: 'DATABASE', schedule: 'MANUAL', storageTarget: 'LOCAL', retentionDays: '30', status: 'ACTIVE' };
 
 function JobModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit'; initial?: BackupJob; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<JobForm>(() => initial ? {
@@ -84,19 +84,22 @@ function JobModal({ mode, initial, onClose, onSaved }: { mode: 'create' | 'edit'
     <Modal open onClose={onClose} title={mode === 'create' ? 'New Backup Job' : 'Edit Backup Job'} size="lg"
       footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit} loading={saving}>Save</Btn></>}>
       {error && <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">Full system backups include the database and local files. Keep an off-server copy and recover encryption keys separately. Archives support up to 3.75 GiB and 50,000 files; changing files cause the backup to fail so it can be retried.</p>
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2"><FormInput label="Name" required value={form.name} onChange={(e) => set('name', e.target.value)} /></div>
         <FormSelect label="Backup Type" required value={form.backupType} onChange={(e) => set('backupType', e.target.value)} disabled={mode === 'edit'}
           hint={mode === 'edit' ? 'Type cannot be changed after creation' : undefined}>
+          {!BACKUP_TYPES.includes(form.backupType) && <option value={form.backupType}>{form.backupType} (unavailable)</option>}
           {BACKUP_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </FormSelect>
         <FormSelect label="Schedule" value={form.schedule} onChange={(e) => set('schedule', e.target.value)} placeholder="Select…">
           {SCHEDULES.map((s) => <option key={s} value={s}>{s}</option>)}
         </FormSelect>
         <FormSelect label="Storage Target" value={form.storageTarget} onChange={(e) => set('storageTarget', e.target.value)} placeholder="Select…">
+          {form.storageTarget && !STORAGE_TARGETS.includes(form.storageTarget) && <option value={form.storageTarget}>{form.storageTarget} (unavailable)</option>}
           {STORAGE_TARGETS.map((t) => <option key={t} value={t}>{t}</option>)}
         </FormSelect>
-        <FormInput label="Retention (days)" type="number" min={1} value={form.retentionDays} onChange={(e) => set('retentionDays', e.target.value)} />
+        <FormInput label="Retention (days)" type="number" min={1} value={form.retentionDays} onChange={(e) => set('retentionDays', e.target.value)} hint="Requested policy. An operator must configure pruning and off-server copies." />
         <FormSelect label="Status" value={form.status} onChange={(e) => set('status', e.target.value)}>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </FormSelect>

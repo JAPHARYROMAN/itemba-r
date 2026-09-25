@@ -41,7 +41,9 @@ CMD ["npx", "prisma", "migrate", "deploy", "--schema=../database/prisma/schema.p
 FROM node:22-alpine AS production
 WORKDIR /app/backend
 ENV NODE_ENV=production
-RUN apk add --no-cache openssl postgresql-client
+# Match the PostgreSQL 16 services in production/CI. A newer pg_dump may emit
+# statements that cannot be restored on 16, even when dumping a 16 server.
+RUN apk add --no-cache openssl postgresql16-client
 RUN addgroup -S app && adduser -S app -G app
 
 COPY backend/package*.json ./

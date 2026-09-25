@@ -1,4 +1,5 @@
 import { BackupJobsService } from './backup-jobs.service';
+import { BadRequestException } from '@nestjs/common';
 
 function makePrisma(overrides: Record<string, unknown> = {}) {
   return {
@@ -16,6 +17,36 @@ function auditLogs() {
 }
 
 describe('BackupJobsService scheduling', () => {
+  it('does not offer successful configuration of an unimplemented destination', async () => {
+    const prisma = makePrisma();
+    const service = new BackupJobsService(prisma, auditLogs());
+    await expect(
+      service.create(
+        { name: 'Remote backup', backupType: 'FULL_SYSTEM', storageTarget: 'S3_COMPATIBLE' },
+        'user-A',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.backupJob.create).not.toHaveBeenCalled();
+  });
+
+  it('still allows pausing a legacy unsupported job', async () => {
+    const prisma = makePrisma();
+    prisma.backupJob.findFirst.mockResolvedValue({
+      id: 'job-A',
+      backupType: 'CONFIGURATION',
+      storageTarget: 'S3_COMPATIBLE',
+      status: 'ACTIVE',
+      schedule: 'MANUAL',
+      scheduleConfig: {},
+    });
+    prisma.backupJob.update.mockImplementation(async ({ data }: any) => ({ id: 'job-A', ...data }));
+    const service = new BackupJobsService(prisma, auditLogs());
+    await service.update('job-A', { status: 'PAUSED' }, 'user-A');
+    expect(prisma.backupJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'PAUSED' }) }),
+    );
+  });
+
   it('computes nextRunAt for scheduled jobs on create', async () => {
     const prisma = makePrisma();
     prisma.backupJob.create.mockImplementation(async ({ data }: any) => ({ id: 'job-A', ...data }));
