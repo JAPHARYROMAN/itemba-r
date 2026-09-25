@@ -222,14 +222,9 @@ public sealed class GovernedSystemToolRunnerTests : IDisposable
     string pidFile,
     CancellationToken cancellationToken)
   {
-    var command =
-      "$p = Start-Process -PassThru -FilePath $env:COMSPEC "
-      + "-ArgumentList @('/d','/s','/c','ping -n 30 127.0.0.1 >nul'); "
-      + $"[IO.File]::WriteAllText('{EscapePowerShell(pidFile)}', [string]$p.Id); "
-      + "$p.WaitForExit()";
     return runner.RunAsync(
       GovernedSystemTool.ScheduledTasks,
-      PowerShellArguments(command),
+      PowerShellArguments(DescendantProcessFixture.PowerShellCommand(pidFile)),
       4_096,
       cancellationToken).AsTask();
   }
