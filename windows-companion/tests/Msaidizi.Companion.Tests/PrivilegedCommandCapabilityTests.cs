@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace Itemba.Msaidizi.Companion.Tests;
 
+[Collection(NativeProcessTimingGroup.Name)]
 public sealed class PrivilegedCommandCapabilityTests : IDisposable
 {
   private readonly string _directory = Path.Combine(
