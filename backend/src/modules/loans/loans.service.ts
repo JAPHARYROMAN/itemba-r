@@ -106,6 +106,10 @@ export class LoansService {
         branch: { select: { id: true, name: true, code: true } },
         group: { select: { id: true, name: true, code: true } },
         repayments: { orderBy: { repaymentDate: 'desc' }, include: { financialEvent: true } },
+        financialEvents: {
+          where: { kind: 'REPAYMENT', scheduledPaymentId: { not: null } },
+          include: { scheduledPayment: { include: { paidBy: { select: { fullName: true } } } } },
+        },
         documents: { where: { deletedAt: null } },
       },
     });
@@ -122,7 +126,37 @@ export class LoansService {
         metadata: { lenderName: record.lenderName },
       });
     }
-    return record;
+    const { financialEvents, ...loan } = record;
+    const scheduledRepayments = financialEvents.flatMap((event) => {
+      const payment = event.scheduledPayment;
+      if (!payment || payment.deletedAt) return [];
+      return [
+        {
+          id: payment.id,
+          loanId: record.id,
+          repaymentDate: payment.paymentDate,
+          amount: payment.amount,
+          currency: payment.currency,
+          principal: event.principal,
+          interest: event.interest,
+          penalties: event.penalties,
+          paymentMethod: payment.paymentMethod,
+          referenceNumber: payment.reference,
+          recordedById: payment.paidById,
+          user: payment.paidBy,
+          createdAt: payment.createdAt,
+          financialEvent: { fees: event.fees, reversedAt: event.reversedAt },
+        },
+      ];
+    });
+    return {
+      ...loan,
+      repayments: [...loan.repayments, ...scheduledRepayments].sort(
+        (a, b) =>
+          b.repaymentDate.getTime() - a.repaymentDate.getTime() ||
+          b.createdAt.getTime() - a.createdAt.getTime(),
+      ),
+    };
   }
 
   // ─── Create ────────────────────────────────────────────────────────────────

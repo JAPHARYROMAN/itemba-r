@@ -22,8 +22,8 @@ function harness() {
     loanRepayment: { count: jest.fn().mockResolvedValue(0) },
     loanRepaymentSchedule: { count: jest.fn().mockResolvedValue(0) },
   };
-  const db: any = { $transaction: jest.fn((fn) => fn(tx)) };
-  const audit: any = { logStrictInTransaction: jest.fn() };
+  const db: any = { $transaction: jest.fn((fn) => fn(tx)), loan: tx.loan };
+  const audit: any = { logStrictInTransaction: jest.fn(), log: jest.fn() };
   const scope: any = { assertCanAccessCompany: jest.fn() };
   const lifecycle: any = { create: jest.fn().mockResolvedValue(loan), repay: jest.fn() };
   const ledger: any = { scope: jest.fn() };
@@ -40,6 +40,56 @@ function harness() {
   return { service, tx, loan, audit, lifecycle, ledger };
 }
 describe('Loan register financial protections', () => {
+  it('includes scheduled payments in the detail and print history without duplicating direct payments', async () => {
+    const { service, tx, loan } = harness();
+    const direct = {
+      id: 'direct',
+      repaymentDate: new Date('2026-01-02'),
+      createdAt: new Date('2026-01-02'),
+    };
+    const scheduled = {
+      id: 'scheduled',
+      paymentDate: new Date('2026-01-03'),
+      createdAt: new Date('2026-01-03'),
+      amount: new Prisma.Decimal(20),
+      currency: 'TZS',
+      paymentMethod: 'BANK_TRANSFER',
+      reference: 'partial',
+      paidById: 'user',
+      paidBy: { fullName: 'Test operator' },
+      deletedAt: null,
+    };
+    const event = {
+      principal: new Prisma.Decimal(17),
+      interest: new Prisma.Decimal(2),
+      fees: new Prisma.Decimal(1),
+      penalties: new Prisma.Decimal(0),
+      reversedAt: new Date('2026-01-04'),
+      scheduledPayment: scheduled,
+    };
+    tx.loan.findFirst.mockResolvedValue({
+      ...loan,
+      repayments: [direct],
+      financialEvents: [event],
+    });
+    const result = await service.findOne('loan', user);
+    expect(result.repayments.map((payment) => payment.id)).toEqual(['scheduled', 'direct']);
+    expect(result.repayments[0]).toMatchObject({
+      repaymentDate: scheduled.paymentDate,
+      referenceNumber: 'partial',
+      principal: event.principal,
+      interest: event.interest,
+      user: { fullName: 'Test operator' },
+      financialEvent: { fees: event.fees, reversedAt: event.reversedAt },
+    });
+    expect(result).not.toHaveProperty('financialEvents');
+  });
+  it('keeps repayment details inaccessible when the organisation check denies access', async () => {
+    const { service, ledger, audit } = harness();
+    ledger.scope.mockRejectedValue(new Error('Company access denied'));
+    await expect(service.findOne('loan', user)).rejects.toThrow('Company access denied');
+    expect(audit.log).not.toHaveBeenCalled();
+  });
   it('uses the shared atomic lifecycle for recognition and payments', async () => {
     const { service, lifecycle } = harness();
     const dto = {} as any;
