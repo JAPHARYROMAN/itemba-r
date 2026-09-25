@@ -1101,7 +1101,8 @@ describe('HIST-9: the key is persisted before the send and frozen across a remou
     // The address bar still reads `#funga`, and the cold boot normalises it to
     // its back-map parent — flow-interior screens are entered, never landed on.
     await screen.findByRole('heading', { name: 'Daftari la Leo' });
-    expect(window.location.hash).toBe('#leo');
+    // The route renders before its effect canonicalizes the browser history.
+    await waitFor(() => expect(window.location.hash).toBe('#leo'));
     await user.click(screen.getByRole('button', { name: 'FUNGA SIKU' }));
     await screen.findByRole('heading', { name: 'Funga Siku' });
     await user.click(slabVerb('FUNGA SIKU'));
