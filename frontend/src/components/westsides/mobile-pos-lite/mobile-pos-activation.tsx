@@ -1,7 +1,9 @@
 'use client';
+import { usePosHost } from '@/features/pos/core/pos-host-context';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
 import { CheckCircle2, LockKeyhole, Smartphone } from 'lucide-react';
 import { backendPost } from '@/lib/api-client';
 import {
@@ -25,7 +27,10 @@ function deviceSecret() {
 }
 
 export function MobilePosActivation() {
-  const router = useRouter();
+  const nativeRouter = useRouter();
+  const host = usePosHost();
+  const router = host?.router ?? nativeRouter;
+  const posBase = host?.basePath ?? '/mobile-pos';
   const searchParams = useSearchParams();
   const { hasPermission, loading: authLoading } = useAuth();
   const canUse = hasPermission('mobile_pos_lite.use');
@@ -65,7 +70,7 @@ export function MobilePosActivation() {
         deviceSecret: secret,
         activatedAt: new Date().toISOString(),
       });
-      router.replace('/mobile-pos');
+      router.replace(posBase);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t('notActivated'));
     } finally {
@@ -135,7 +140,7 @@ export function MobilePosActivation() {
           </p>
           <button
             type="button"
-            onClick={() => router.replace('/mobile-pos')}
+            onClick={() => router.replace(posBase)}
             className="mt-6 min-h-14 w-full rounded-lg bg-brand-600 px-4 text-base font-semibold text-white transition hover:bg-brand-700"
           >
             {t('openSales')}

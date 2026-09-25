@@ -4,6 +4,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
+  useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type Dispatch,
@@ -11,6 +14,11 @@ import {
   type SetStateAction,
 } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  isDesktopViewValue,
+  parseDesktopViewState,
+  type DesktopViewState,
+} from '@/lib/desktop-view-state';
 
 function createSession() {
   const values = new Map<string, unknown>();
@@ -37,10 +45,47 @@ function createSession() {
 }
 const Context = createContext<ReturnType<typeof createSession> | null>(null);
 const InstanceContext = createContext('');
+const ViewContext = createContext<{
+  initial: DesktopViewState;
+  save: (key: string, value: unknown) => void;
+} | null>(null);
 
 /** Each desktop window owns its view state; drafts remain account-scoped. */
-export function WorkspaceInstanceProvider({ id, children }: { id: string; children: ReactNode }) {
-  return <InstanceContext.Provider value={id}>{children}</InstanceContext.Provider>;
+export function WorkspaceInstanceProvider({
+  id,
+  appId = '',
+  viewState,
+  onViewChange,
+  children,
+}: {
+  id: string;
+  appId?: string;
+  viewState?: DesktopViewState;
+  onViewChange?: (id: string, viewState: DesktopViewState) => void;
+  children: ReactNode;
+}) {
+  const [initial] = useState(() => parseDesktopViewState(appId, viewState));
+  const snapshot = useRef(initial);
+  const notify = useRef(onViewChange);
+  useLayoutEffect(() => {
+    notify.current = onViewChange;
+  }, [onViewChange]);
+  const value = useMemo(
+    () => ({
+      initial,
+      save: (key: string, next: unknown) => {
+        if (!isDesktopViewValue(appId, key, next)) return;
+        snapshot.current = { version: 1, values: { ...snapshot.current.values, [key]: next } };
+        notify.current?.(id, snapshot.current);
+      },
+    }),
+    [appId, id, initial],
+  );
+  return (
+    <InstanceContext.Provider value={id}>
+      <ViewContext.Provider value={value}>{children}</ViewContext.Provider>
+    </InstanceContext.Provider>
+  );
 }
 export function useWorkspaceInstanceId() {
   return useContext(InstanceContext);
@@ -72,8 +117,15 @@ export function useWorkspaceState<T>(
 ): [T, Dispatch<SetStateAction<T>>] {
   const session = useContext(Context);
   const instanceId = useContext(InstanceContext);
+  const view = useContext(ViewContext);
   const key = stateKey && instanceId ? `${instanceId}:${stateKey}` : stateKey;
-  const [fallback, setFallback] = useState(initial);
+  const [fallback, setFallback] = useState<T>(() =>
+    stateKey && Object.hasOwn(view?.initial.values ?? {}, stateKey)
+      ? (view!.initial.values[stateKey] as T)
+      : typeof initial === 'function'
+        ? (initial as () => T)()
+        : initial,
+  );
   const subscribe = useCallback(
     (listener: () => void) => (session && key ? session.subscribe(key, listener) : () => {}),
     [session, key],
@@ -90,9 +142,11 @@ export function useWorkspaceState<T>(
         return;
       }
       const previous = session.read(key, fallback);
-      session.write(key, typeof next === 'function' ? (next as (value: T) => T)(previous) : next);
+      const updated = typeof next === 'function' ? (next as (value: T) => T)(previous) : next;
+      session.write(key, updated);
+      if (stateKey) view?.save(stateKey, updated);
     },
-    [session, key, fallback],
+    [session, key, fallback, stateKey, view],
   );
   return [value, set];
 }

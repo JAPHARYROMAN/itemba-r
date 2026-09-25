@@ -5,6 +5,7 @@ import { AppGlyph } from '@/components/os/app-glyph';
 import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { getApp } from '@/lib/apps';
 import { useDeskRecordSelection } from '@/components/workspace/desk-record-selection';
+import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
 import {
@@ -69,7 +70,10 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
     reverse = hasPermission('cash_desk.reverse');
   const invoiceAccess = hasPermission('invoice_desk.view'),
     pay = record && hasPermission('invoice_desk.payments');
-  const [section, setSection] = useWorkspaceState<Section>('cash-desk.section', 'overview'),
+  const [section, setSection] = useDeskSection(
+      'cash-desk',
+      sections.map((item) => item.id),
+    ),
     [scope, setScope] = useWorkspaceState<Scope>('cash-desk.scope', {
       companyId: '',
       divisionId: '',

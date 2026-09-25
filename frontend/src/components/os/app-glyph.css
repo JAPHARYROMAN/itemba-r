@@ -48,6 +48,10 @@
   --glyph-top: #e07e89;
   --glyph-bottom: #b44363;
 }
+.os-glyph[data-app='pos'] {
+  --glyph-top: #46a4b1;
+  --glyph-bottom: #206374;
+}
 .os-glyph[data-app='payroll'] {
   --glyph-top: #6b93d3;
   --glyph-bottom: #45659b;
@@ -63,4 +67,8 @@
 .os-glyph[data-app='settings'] {
   --glyph-top: #8b96a8;
   --glyph-bottom: #596578;
+}
+.os-glyph[data-app='records'] {
+  --glyph-top: #47a79c;
+  --glyph-bottom: #206961;
 }

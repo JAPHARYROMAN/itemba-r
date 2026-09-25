@@ -1,4 +1,5 @@
 'use client';
+import { usePosHost } from '@/features/pos/core/pos-host-context';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -56,7 +57,10 @@ export function usePosBootstrap({
   syncCatalog: (current: MobilePosLiteBinding) => Promise<void>;
   retryBoot: () => void;
 } {
-  const router = useRouter();
+  const nativeRouter = useRouter();
+  const host = usePosHost();
+  const router = host?.router ?? nativeRouter;
+  const posBase = host?.basePath ?? '/mobile-pos';
   const [binding, setBinding] = useState<MobilePosLiteBinding | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [catalog, setCatalog] = useState<MobilePosLiteProduct[]>([]);
@@ -136,7 +140,7 @@ export function usePosBootstrap({
       .then(async (stored) => {
         if (!isCurrent()) return;
         if (!stored) {
-          router.replace('/mobile-pos/activate');
+          router.replace(`${posBase}/activate`);
           return;
         }
         setBinding(stored);
@@ -175,7 +179,7 @@ export function usePosBootstrap({
         }
       })
       .catch(() => {
-        if (isCurrent()) router.replace('/mobile-pos/activate');
+        if (isCurrent()) router.replace(`${posBase}/activate`);
       });
     return () => {
       cancelled = true;
@@ -187,6 +191,7 @@ export function usePosBootstrap({
     loadSession,
     refreshPendingSales,
     router,
+    posBase,
     syncCatalog,
     syncPendingSales,
   ]);

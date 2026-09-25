@@ -39,6 +39,7 @@ export function perms(module: string, actions: string[], isGroupControl = false)
 
 export const ALL_PERMISSIONS: PermDef[] = [
   ...perms('sales_desk', ['view', 'manage', 'payments']),
+  ...perms('records', ['view', 'manage', 'export']),
   ...perms('cash_desk', ['view', 'manage', 'record', 'reverse']),
   ...perms('invoice_desk', ['view', 'manage', 'payments']),
   ...perms('fuel_reporting', ['read', 'manage']),
@@ -2035,7 +2036,7 @@ export const ROLES: RoleDef[] = BASE_ROLES.map((role) => {
   return {
     ...role,
     filter: (permission) =>
-      ['sales_desk', 'cash_desk', 'invoice_desk'].includes(permission.module)
+      ['sales_desk', 'cash_desk', 'invoice_desk', 'records'].includes(permission.module)
         ? role.name === 'GROUP_SUPER_ADMIN'
         : permission.module === 'fuel_reporting'
           ? role.name === 'GROUP_SUPER_ADMIN' ||

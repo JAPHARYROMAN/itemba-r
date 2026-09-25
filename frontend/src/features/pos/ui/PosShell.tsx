@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { usePosHost } from '../core/pos-host-context';
 import type { MobilePosLiteProduct, PendingMobilePosLiteSale } from '@/lib/mobile-pos-lite-store';
 import {
   KauntaShell,
@@ -78,19 +79,22 @@ function isModuleLink(hash: string): boolean {
 }
 
 export function PosShell(props: PosShellProps) {
+  const host = usePosHost();
   // Read before the sale screen mounts: its step hook rewrites the hash to
   // #pos/sale on mount, which would swallow the link.
   const [module, setModule] = useState<boolean>(
-    () => typeof window !== 'undefined' && isModuleLink(window.location.hash),
+    () =>
+      typeof window !== 'undefined' && isModuleLink(host?.history.hash() ?? window.location.hash),
   );
 
   useEffect(() => {
     const onHashChange = () => {
-      if (isModuleLink(window.location.hash)) setModule(true);
+      if (isModuleLink(host?.history.hash() ?? window.location.hash)) setModule(true);
     };
+    if (host) return host.history.listen(onHashChange);
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+  }, [host]);
 
   if (module) {
     // The day book, stock, counts, deliveries, history, close and settings are
@@ -104,7 +108,8 @@ export function PosShell(props: PosShellProps) {
       {...props}
       openModule={(next) => {
         // Kaunta's router honours a module deep link on boot (KAUNTA-7).
-        window.history.replaceState(window.history.state, '', `#${next}`);
+        if (host) host.history.replace(`#${next}`);
+        else window.history.replaceState(window.history.state, '', `#${next}`);
         setModule(true);
       }}
     />
@@ -112,6 +117,7 @@ export function PosShell(props: PosShellProps) {
 }
 
 function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void }) {
+  const host = usePosHost();
   const {
     session,
     online,
@@ -198,7 +204,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
         searchRef.current?.focus();
       }
     },
-    { enabled: step === 'sale' || step === 'pay' },
+    { enabled: step === 'sale' || step === 'pay', acceptEvent: host?.ownsInput },
   );
   const searchRef = useRef<HTMLInputElement>(null);
   const customerRef = useRef<HTMLInputElement>(null);
@@ -280,6 +286,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   // keyboard-wedge scanner sends). Nothing pays while the price sheet is open.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
+      if (host && !host.ownsInput(event.target)) return;
       if (priceFor) return;
       if (event.key === 'F4') {
         event.preventDefault();
@@ -698,7 +705,11 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
             </section>
 
             <section className="pos-panel pos-pay" aria-labelledby="pos-pay-title">
-              <button type="button" className="pos-back" onClick={() => window.history.back()}>
+              <button
+                type="button"
+                className="pos-back"
+                onClick={() => (host ? host.history.back() : window.history.back())}
+              >
                 ← {t('backToSale')}
               </button>
               <div className="pos-pay-total">

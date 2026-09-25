@@ -45,6 +45,8 @@ frontend/.env.*
 /backups
 backend/backups
 frontend/backups
+.release
+tmp
 
 # OS noise
 **/.DS_Store

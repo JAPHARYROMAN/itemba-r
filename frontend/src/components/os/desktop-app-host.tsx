@@ -9,6 +9,7 @@ import {
   useWorkspacePathname,
 } from '@/components/workspace/workspace-navigation';
 import { appForPath } from '@/lib/apps';
+import { AppNavigation } from './app-navigation';
 import {
   AppSurface,
   ownsInventoryPath,
@@ -16,6 +17,8 @@ import {
   ownsReportsPath,
 } from './os-navigable-app';
 const loading = () => <PageSpinner label="Opening your workspace" />;
+const preservesPosCounter = (from: string, to: string) =>
+  from.split(/[?#]/)[0] === '/pos' && to.split(/[?#]/)[0] === '/pos';
 const Invoice = dynamic(
   () => import('@/features/invoice-desk/invoice-desk').then((m) => m.InvoiceDesk),
   { loading },
@@ -27,6 +30,10 @@ const Sales = dynamic(() => import('@/features/sales-desk/sales-desk').then((m) 
   loading,
 });
 const Documents = dynamic(() => import('@/app/(dashboard)/documents/documents-app'), { loading });
+const Pos = dynamic(() => import('./desktop-pos').then((m) => m.DesktopPos), { loading });
+const Records = dynamic(() => import('@/features/records/records-app').then((m) => m.RecordsApp), {
+  loading,
+});
 const DocumentDetail = dynamic(
   () => import('@/app/(dashboard)/group-control/documents/[id]/page'),
   { loading },
@@ -61,19 +68,24 @@ function Surface({ appId }: { appId: string }) {
   const record = params.get('record') ?? undefined;
   const view = params.get('view');
   const path = useWorkspacePathname();
-  if (appId === 'documents' && /^\/group-control\/documents\/[^/]+$/.test(path))
-    return <DocumentDetail />;
+
   const content =
-    appId === 'invoice-desk' ? (
+    appId === 'documents' && /^\/group-control\/documents\/[^/]+$/.test(path) ? (
+      <DocumentDetail />
+    ) : appId === 'invoice-desk' ? (
       <Invoice targetRecordId={record} />
     ) : appId === 'cash-desk' ? (
       <Cash targetRecordId={record} />
     ) : appId === 'sales-desk' ? (
       <Sales targetRecordId={record} />
+    ) : appId === 'pos' ? (
+      <Pos />
+    ) : appId === 'records' ? (
+      <Records />
     ) : appId === 'documents' ? (
       <Documents initialView={view === 'library' || view === 'letter' ? view : 'home'} syncRoute />
     ) : (
-      <AppSurface appId={appId as 'inventory' | 'reports' | 'payroll'} />
+      <AppSurface appId={appId as 'inventory' | 'reports' | 'payroll'} navigation={false} />
     );
   return (
     <div
@@ -99,6 +111,7 @@ function Surface({ appId }: { appId: string }) {
         }
       }}
     >
+      <AppNavigation appId={appId} />
       {content}
     </div>
   );
@@ -119,6 +132,7 @@ export const DesktopAppHost = memo(function DesktopAppHost({
         initialHref={href}
         ownsPath={(path) => desktopAppForPath(path) === appId}
         onHrefChange={onHrefChange}
+        preservesContent={appId === 'pos' ? preservesPosCounter : undefined}
       >
         <Surface appId={appId} />
       </WorkspaceNavigationProvider>

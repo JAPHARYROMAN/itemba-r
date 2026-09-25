@@ -1,4 +1,6 @@
 'use client';
+import { usePosHost } from '@/features/pos/core/pos-host-context';
+import { usePosWindowGuard } from '@/features/pos/core/use-pos-window-guard';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -45,7 +47,10 @@ import { SaleScreen } from './screens/SaleScreen';
 import { SuccessScreen } from './screens/SuccessScreen';
 
 export function MobilePosLite() {
-  const router = useRouter();
+  const nativeRouter = useRouter();
+  const host = usePosHost();
+  const router = host?.router ?? nativeRouter;
+  const posBase = host?.basePath ?? '/mobile-pos';
   const { user, authOffline, logout, hasPermission, loading: authLoading } = useAuth();
   // Offline cold start (invariant 8): with the server unreachable there is no
   // user to ask, so the permission check would refuse a bound rep their till.
@@ -345,6 +350,7 @@ export function MobilePosLite() {
    */
   const purchaseNoticeRef = useRef('');
   const purchaseFormEmpty = purchaseCart.length === 0 && supplier === null;
+  usePosWindowGuard((cart.length > 0 && screen !== 'success') || !purchaseFormEmpty || busy);
   // Kaunta only: a purchase rejection describes THE SLIP that was refused, and
   // emptying the form is the discard ritual (§3.1 as amended by critique D3) —
   // the slip goes and its frozen key with it. The card that named the refused
@@ -562,7 +568,7 @@ export function MobilePosLite() {
 
   async function resetTerminal() {
     await clearMobilePosLiteBinding();
-    router.replace('/mobile-pos/activate');
+    router.replace(`${posBase}/activate`);
   }
 
   async function removePending(id: string) {

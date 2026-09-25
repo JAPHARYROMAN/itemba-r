@@ -352,6 +352,7 @@ export function UnsavedWorkProvider({ children }: { children: ReactNode }) {
 
 export const useUnsavedWork = () => useContext(Context);
 export const useUnsavedWorkScopeId = () => useContext(ScopeContext)?.id;
+export const useUnsavedWorkScope = () => useContext(ScopeContext);
 
 function snapshot(value: unknown) {
   return JSON.stringify(value, (_key, item) =>

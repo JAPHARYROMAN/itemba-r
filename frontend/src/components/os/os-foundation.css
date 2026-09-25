@@ -19,6 +19,7 @@ html[data-motion='reduced'] .os-system-layer *,
   transition: none !important;
 }
 .itemba-os,
+.itemba-desktop,
 .os-system-layer {
   --desk-bg: var(--aurora-bg);
   --desk-panel: var(--aurora-card);
@@ -35,13 +36,14 @@ html[data-motion='reduced'] .os-system-layer *,
   --aurora-border: #e4e8ee;
   --aurora-border-strong: #cbd3df;
   --aurora-text: #263143;
-  --aurora-text-secondary: #657185;
-  --aurora-text-muted: #69768a;
+  --aurora-text-secondary: #5d697d;
+  --aurora-text-muted: #626f83;
   --aurora-primary: #3268ca;
   --aurora-primary-subtle: #edf3ff;
   --aurora-primary-text: #2556a8;
 }
 .dark .itemba-os,
+.dark .itemba-desktop,
 .dark .os-system-layer {
   --os-panel: rgb(28 34 46 / 95%);
   --os-glass: rgb(35 43 57 / 85%);

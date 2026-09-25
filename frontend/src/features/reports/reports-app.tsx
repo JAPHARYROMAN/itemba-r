@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { FormDateField } from '@/components/ui';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
@@ -69,7 +70,7 @@ function ReportsWorkspace() {
     view = params.get('view') ?? '';
   const report = REPORTS.find((r) => r.id === view);
   const available = REPORTS.filter((r) => hasPermission(r.permission));
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useWorkspaceState('reports.search', '');
   const cards = available.filter((r) =>
     `${r.name} ${r.description} ${r.source}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -262,14 +263,19 @@ function ReportsWorkspace() {
 }
 
 function ReportView({ report }: { report: ReportDefinition }) {
-  const [scope, setScope] = useState<Scope>({ companyId: '', divisionId: '', branchId: '' });
-  const [from, setFrom] = useState(''),
-    [to, setTo] = useState(''),
-    [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all'),
-    [category, setCategory] = useState(''),
-    [kind, setKind] = useState('');
-  const [page, setPage] = useState(1),
+  const viewKey = `reports.list.${report.id}`;
+  const [scope, setScope] = useWorkspaceState<Scope>(`${viewKey}.scope`, {
+    companyId: '',
+    divisionId: '',
+    branchId: '',
+  });
+  const [from, setFrom] = useWorkspaceState(`${viewKey}.from`, ''),
+    [to, setTo] = useWorkspaceState(`${viewKey}.to`, ''),
+    [search, setSearch] = useWorkspaceState(`${viewKey}.search`, '');
+  const [status, setStatus] = useWorkspaceState(`${viewKey}.status`, 'all'),
+    [category, setCategory] = useWorkspaceState(`${viewKey}.category`, ''),
+    [kind, setKind] = useWorkspaceState(`${viewKey}.kind`, '');
+  const [page, setPage] = useWorkspaceState(`${viewKey}.page`, 1),
     [exporting, setExporting] = useState(false),
     [exportError, setExportError] = useState('');
   const exportController = useRef<AbortController | null>(null);

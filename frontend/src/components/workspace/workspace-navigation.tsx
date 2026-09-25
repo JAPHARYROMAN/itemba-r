@@ -35,12 +35,14 @@ export function WorkspaceNavigationProvider({
   ownsPath,
   children,
   onHrefChange,
+  preservesContent,
 }: {
   appId: string;
   initialHref: string;
   ownsPath: (pathname: string) => boolean;
   children: ReactNode;
   onHrefChange?: (href: string) => void;
+  preservesContent?: (from: string, to: string) => boolean;
 }) {
   const [history, setHistory] = useWorkspaceState<History>(`${appId}.navigation`, {
     entries: [initialHref],
@@ -89,34 +91,37 @@ export function WorkspaceNavigationProvider({
       const target = resolve(href);
       if (target === null) return false;
       if (target === current.current.entries[current.current.index]) return true;
-      request(
-        () => {
-          const previous = current.current;
-          const entries = replace
-            ? [...previous.entries]
-            : previous.entries.slice(0, previous.index + 1);
-          if (replace) entries[previous.index] = target;
-          else entries.push(target);
-          const bounded = entries.slice(-40);
-          commit({ entries: bounded, index: replace ? previous.index : bounded.length - 1 });
-        },
-        undefined,
-        'close',
-        { scope },
-      );
+      const action = () => {
+        const previous = current.current;
+        const entries = replace
+          ? [...previous.entries]
+          : previous.entries.slice(0, previous.index + 1);
+        if (replace) entries[previous.index] = target;
+        else entries.push(target);
+        const bounded = entries.slice(-40);
+        commit({ entries: bounded, index: replace ? previous.index : bounded.length - 1 });
+      };
+      if (preservesContent?.(current.current.entries[current.current.index], target)) action();
+      else request(action, undefined, 'close', { scope });
       return true;
     },
-    [resolve, request, scope, commit],
+    [resolve, request, scope, commit, preservesContent],
   );
   const traverse = useCallback(
     (step: number) => {
       const nextIndex = current.current.index + step;
       if (nextIndex < 0 || nextIndex >= current.current.entries.length) return;
-      request(() => commit({ ...current.current, index: nextIndex }), undefined, 'close', {
-        scope,
-      });
+      const action = () => commit({ ...current.current, index: nextIndex });
+      if (
+        preservesContent?.(
+          current.current.entries[current.current.index],
+          current.current.entries[nextIndex],
+        )
+      )
+        action();
+      else request(action, undefined, 'close', { scope });
     },
-    [request, scope, commit],
+    [request, scope, commit, preservesContent],
   );
   const readSearch = useCallback(
     () =>

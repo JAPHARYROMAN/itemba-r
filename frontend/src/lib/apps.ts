@@ -160,6 +160,41 @@ const APP_DEFINITIONS: readonly Omit<WorkspaceApp, 'hosting'>[] = [
     launch: { kind: 'route' },
   },
   {
+    id: 'pos',
+    href: '/pos',
+    label: 'Point of Sale',
+    description: 'Your terminal, counter sales and daily operations.',
+    category: 'Operations',
+    icon: 'sale',
+    iconKey: 'grid',
+    appearance: 'default',
+    permission: 'mobile_pos_lite.use',
+    keywords: ['pos', 'terminal', 'counter', 'kaunta', 'sales'],
+    launch: { kind: 'route' },
+  },
+  {
+    id: 'records',
+    href: '/records',
+    label: 'Records',
+    description: 'Your independent book of debts, sales, purchases, expenses and notes.',
+    category: 'Business',
+    icon: 'document',
+    iconKey: 'grid',
+    appearance: 'default',
+    permission: 'records.view',
+    keywords: [
+      'records',
+      'registers',
+      'debtors',
+      'creditors',
+      'sales',
+      'purchases',
+      'expenses',
+      'notes',
+    ],
+    launch: { kind: 'route' },
+  },
+  {
     id: 'payroll',
     href: '/payroll',
     label: 'Payroll',
@@ -216,7 +251,7 @@ export const APP_REGISTRY: readonly WorkspaceApp[] = APP_DEFINITIONS.map((app) =
     kind:
       app.launch.kind === 'external'
         ? 'external'
-        : ['itemba-r', 'settings'].includes(app.id)
+        : ['itemba-r', 'settings', 'pos'].includes(app.id)
           ? 'singleton'
           : 'independent',
     minWidth: 480,

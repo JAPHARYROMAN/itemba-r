@@ -2082,6 +2082,7 @@ model InvoiceDeskEvent {
 }
 
 model Company {
+  records           RecordEntry[]
   deskCustomers      SalesDeskCustomer[]
   deskSales          SalesDeskSale[]
   deskCashAccounts   CashDeskAccount[]
@@ -2397,6 +2398,7 @@ model CompanyProfile {
 
 /// Business unit / product line within a Company.
 model Division {
+  records          RecordEntry[]
   deskSales        SalesDeskSale[]
   deskCashAccounts CashDeskAccount[]
   deskInvoices     InvoiceDeskInvoice[]
@@ -2514,6 +2516,7 @@ model Division {
 /// Operational unit within a Division.
 /// Can be a physical branch, project site, farm, warehouse, fuel station, etc.
 model Branch {
+  records          RecordEntry[]
   deskSales        SalesDeskSale[]
   deskCashAccounts CashDeskAccount[]
   deskInvoices     InvoiceDeskInvoice[]
@@ -2627,6 +2630,7 @@ model Branch {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model User {
+  records                 RecordEntry[]
   fuelReportRevisions FuelReportRevision[]
   id                  String               @id @default(uuid())
   email               String               @unique
@@ -17287,6 +17291,97 @@ model CashDeskLoan {
   @@index([lenderAccountId])
   @@index([borrowerAccountId])
   @@map("cash_desk_loans")
+}
+
+// Independent registers: no accounting, cash, stock or party links.
+model RecordEntry {
+  id            String   @id @default(uuid())
+  requestId     String   @unique
+  payloadKey    String
+  ownerId       String
+  companyId     String?
+  divisionId    String?
+  branchId      String?
+  kind          String   @db.VarChar(12)
+  title         String   @db.VarChar(180)
+  counterparty  String?  @db.VarChar(180)
+  contact       String?  @db.VarChar(160)
+  reference     String?  @db.VarChar(100)
+  category      String?  @db.VarChar(80)
+  notes         String?  @db.VarChar(10000)
+  currency      String   @db.VarChar(3)
+  amount        Decimal  @db.Decimal(18, 2)
+  settledAmount Decimal  @default(0) @db.Decimal(18, 2)
+  recordDate    DateTime @db.Date
+  dueDate       DateTime? @db.Date
+  version       Int      @default(1)
+  voidedAt      DateTime?
+  voidReason    String?  @db.VarChar(500)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  owner         User     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  company       Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division      Division? @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  settlements   RecordSettlement[]
+  events        RecordEvent[]
+  statementStartsOn DateTime? @db.Date
+  postings      RecordPosting[]
+
+  @@index([ownerId, recordDate])
+  @@index([companyId, divisionId, branchId, kind, recordDate])
+  @@map("record_entries")
+}
+
+model RecordSettlement {
+  id             String   @id @default(uuid())
+  recordId       String
+  requestId      String   @unique
+  payloadKey     String
+  amount         Decimal  @db.Decimal(18, 2)
+  date           DateTime @db.Date
+  reference      String?  @db.VarChar(160)
+  notes          String?  @db.VarChar(500)
+  createdBy      String
+  createdAt      DateTime @default(now())
+  reversedAt     DateTime?
+  reversalReason String?  @db.VarChar(500)
+  record         RecordEntry @relation(fields: [recordId], references: [id], onDelete: Restrict)
+
+  @@index([recordId, date])
+  @@map("record_settlements")
+}
+
+// Append-only movements for a Records party statement, independent of the ERP ledger.
+model RecordPosting {
+  id          String @id @default(uuid())
+  recordId    String
+  sequence    Int
+  kind        String @db.VarChar(20)
+  date        DateTime @db.Date
+  delta       Decimal @db.Decimal(18, 2)
+  description String @db.VarChar(1000)
+  reference   String? @db.VarChar(160)
+  createdAt   DateTime @default(now())
+  record      RecordEntry @relation(fields: [recordId], references: [id], onDelete: Restrict)
+
+  @@unique([recordId, sequence])
+  @@index([recordId, date, sequence])
+  @@map("record_postings")
+}
+
+model RecordEvent {
+  id        String @id @default(uuid())
+  recordId  String
+  actorId   String
+  actorName String
+  action    String
+  detail    String
+  createdAt DateTime @default(now())
+  record    RecordEntry @relation(fields: [recordId], references: [id], onDelete: Restrict)
+
+  @@index([recordId, createdAt])
+  @@map("record_events")
 }
 
 model SalesDeskCustomer {

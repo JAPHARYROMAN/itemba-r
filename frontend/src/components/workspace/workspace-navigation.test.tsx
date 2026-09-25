@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PageHeader } from '@/components/ui/page-header';
-import { WorkspaceSessionProvider } from './workspace-session';
+import { WorkspaceInstanceProvider, WorkspaceSessionProvider } from './workspace-session';
+import { AppNavigation } from '@/components/os/app-navigation';
+import { WindowNavigationProvider } from '@/components/os/window-navigation-context';
 import { UnsavedWorkProvider, UnsavedWorkScope, useFormGuard } from './unsaved-work-provider';
 import {
   WorkspaceNavigationProvider,
@@ -111,6 +113,24 @@ function Harness() {
     </WorkspaceSessionProvider>
   );
 }
+function ToolbarWindow({ id }: { id: string }) {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+  return (
+    <section aria-label={id}>
+      <header ref={setTarget} aria-label={`${id} toolbar`} />
+      <WorkspaceInstanceProvider id={id} appId="inventory">
+        <UnsavedWorkScope id={id}>
+          <WorkspaceNavigationProvider appId="inventory" initialHref="/inventory" ownsPath={owns}>
+            <WindowNavigationProvider target={target}>
+              <AppNavigation appId="inventory" />
+              <LocalApp />
+            </WindowNavigationProvider>
+          </WorkspaceNavigationProvider>
+        </UnsavedWorkScope>
+      </WorkspaceInstanceProvider>
+    </section>
+  );
+}
 beforeEach(() => {
   vi.clearAllMocks();
   native.account = 'one';
@@ -124,6 +144,33 @@ beforeEach(() => {
 });
 
 describe('Independent app navigation', () => {
+  it('keeps keyboard history controls in each window toolbar independent', async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceSessionProvider>
+        <UnsavedWorkProvider>
+          <ToolbarWindow id="first" />
+          <ToolbarWindow id="second" />
+        </UnsavedWorkProvider>
+      </WorkspaceSessionProvider>,
+    );
+    const first = within(screen.getByRole('region', { name: 'first' }));
+    const second = within(screen.getByRole('region', { name: 'second' }));
+    const toolbar = within(screen.getByLabelText('first toolbar'));
+    await user.click(first.getByRole('link', { name: 'Catalog' }));
+    await user.click(second.getByRole('link', { name: 'Product' }));
+    toolbar.getByRole('button', { name: 'Back in Inventory' }).focus();
+    await user.keyboard('{Enter}');
+    expect(first.getByLabelText('Local address')).toHaveTextContent('/inventory?');
+    expect(first.getByLabelText('Local address')).not.toHaveTextContent('tab=catalog');
+    expect(second.getByLabelText('Local address')).toHaveTextContent('/inventory/products/product');
+    await user.click(toolbar.getByRole('button', { name: 'Forward in Inventory' }));
+    expect(first.getByLabelText('Local address')).toHaveTextContent('tab=catalog');
+    await user.click(toolbar.getByRole('link', { name: 'Inventory home' }));
+    expect(first.getByLabelText('Local address')).not.toHaveTextContent('tab=catalog');
+    expect(second.getByLabelText('Local address')).toHaveTextContent('/inventory/products/product');
+    expect(native.push).not.toHaveBeenCalled();
+  });
   it('keeps query, breadcrumbs and local history separate from the browser route', async () => {
     const user = userEvent.setup();
     render(<Harness />);

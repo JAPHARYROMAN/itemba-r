@@ -5,6 +5,7 @@ import {
   getApp,
   appForPath,
   validateAppRegistry,
+  usesStandalonePosShell,
   type WorkspaceApp,
 } from './apps';
 import { getAppConnection } from './app-connections';
@@ -29,6 +30,15 @@ const future: WorkspaceApp = {
 };
 
 describe('App registration contract', () => {
+  it('hosts one POS terminal with its existing permission and preserves standalone routes', () => {
+    const pos = getApp('pos')!;
+    expect(appForPath('/pos/activate')).toBe(pos);
+    expect(pos.hosting.kind).toBe('singleton');
+    expect(canOpenApp(pos, (permission) => permission === 'mobile_pos_lite.use')).toBe(true);
+    expect(canOpenApp(pos, (permission) => permission === 'sales_desk.view')).toBe(false);
+    expect(usesStandalonePosShell('/pos')).toBe(false);
+    expect(usesStandalonePosShell('/mobile-pos')).toBe(true);
+  });
   it('keeps the employee-to-pay lifecycle inside Payroll', () => {
     const payroll = getApp('payroll')!;
     for (const path of [

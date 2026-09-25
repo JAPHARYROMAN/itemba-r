@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useRef } from 'react';
-import { ArrowLeft, ArrowRight, House } from 'lucide-react';
+import { AppNavigation } from './app-navigation';
 import { PageSpinner } from '@/components/ui/loading-state';
 import { getApp } from '@/lib/apps';
 import { payrollCompanionRoute } from '@/features/payroll/payroll-companion-routes';
@@ -14,7 +14,6 @@ import {
   WorkspaceLink,
 } from '@/components/workspace/workspace-navigation';
 import { isControlKind } from '@/features/reports/accounting-controls-types';
-import { AppGlyph } from './app-glyph';
 import './os-navigable-app.css';
 
 const loading = () => <PageSpinner label="Opening workspace" />;
@@ -66,7 +65,13 @@ export const ownsReportsPath = (path: string) =>
     '/accounting-engine/bank-reconciliations',
   ].includes(path);
 
-export function AppSurface({ appId }: { appId: NavigableAppId }) {
+export function AppSurface({
+  appId,
+  navigation = true,
+}: {
+  appId: NavigableAppId;
+  navigation?: boolean;
+}) {
   const pathname = useWorkspacePathname();
   const params = useWorkspaceSearchParams();
   const history = useWorkspaceHistory()!;
@@ -116,33 +121,7 @@ export function AppSurface({ appId }: { appId: NavigableAppId }) {
     );
   return (
     <div className="os-navigable-app">
-      <nav className="os-app-history" aria-label={`${app.label} navigation`}>
-        <button
-          type="button"
-          aria-label={`Back in ${app.label}`}
-          title="Back"
-          disabled={!history.canBack}
-          onClick={history.back}
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label={`Forward in ${app.label}`}
-          title="Forward"
-          disabled={!history.canForward}
-          onClick={history.forward}
-        >
-          <ArrowRight size={16} />
-        </button>
-        <WorkspaceLink href={app.href} aria-label={`${app.label} home`} title={`${app.label} home`}>
-          <House size={16} />
-        </WorkspaceLink>
-        <span>
-          <AppGlyph app={app} size="small" />
-          {app.label}
-        </span>
-      </nav>
+      {navigation && <AppNavigation appId={appId} />}
       <div
         ref={content}
         className="os-app-surface"

@@ -16,6 +16,7 @@
     "format:check": "node scripts/check-format-baseline.mjs",
     "test": "node --max-old-space-size=8192 node_modules/jest/bin/jest.js --runInBand",
     "test:watch": "jest --watch",
+    "test:records": "node scripts/test-records.cjs",
     "test:msaidizi-benchmark-score": "node --test test/benchmarks/tool-search-score.test.mjs test/benchmarks/tool-search-client.test.mjs",
     "test:msaidizi-task-persistence": "cross-env MSAIDIZI_CHAT_DISPOSABLE_DB=1 NODE_ENV=test NODE_OPTIONS=--max-old-space-size=8192 node ./node_modules/jest/bin/jest.js --config test/jest-e2e.json --runInBand test/msaidizi-task-persistence.e2e-spec.ts",
     "test:msaidizi-worker-restart": "cross-env MSAIDIZI_CHAT_DISPOSABLE_DB=1 NODE_ENV=test NODE_OPTIONS=--max-old-space-size=8192 node ./node_modules/jest/bin/jest.js --config test/jest-e2e.json --runInBand test/msaidizi-worker-restart.e2e-spec.ts",

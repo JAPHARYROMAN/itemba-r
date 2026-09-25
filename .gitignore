@@ -62,3 +62,6 @@ website/data/
 
 # Local release rehearsal secrets, database dumps and detailed audit output
 .release/
+
+# Local screenshots, exports, logs and disposable deployment rehearsals
+/tmp/

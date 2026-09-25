@@ -69,6 +69,9 @@ export function useDockMotion({
     () => ({ pointer, edge, magnify: magnify && !still, still }),
     [pointer, edge, magnify, still],
   );
+  useEffect(() => {
+    if (!value.magnify) pointer.set(Number.POSITIVE_INFINITY);
+  }, [pointer, value.magnify]);
   const handlers = {
     onPointerMove(event: PointerEvent) {
       if (event.pointerType !== 'mouse' || !value.magnify) return;
@@ -131,7 +134,10 @@ export function DockIcon({ children, bounce = 0 }: { children: ReactNode; bounce
     played.current = bounce;
     if (still) return;
     const run = animate(lift, dockBounceFrames(edge), { duration: 0.8, ease: 'easeOut' });
-    return () => run.stop();
+    return () => {
+      run.stop();
+      lift.set(0);
+    };
   }, [bounce, edge, lift, still]);
 
   const origin = edge === 'bottom' ? '50% 100%' : edge === 'left' ? '0% 50%' : '100% 50%';
@@ -139,15 +145,17 @@ export function DockIcon({ children, bounce = 0 }: { children: ReactNode; bounce
     <motion.span
       ref={box}
       className="desktop-dock-icon"
-      style={edge === 'bottom' ? { width: along } : { height: along }}
+      style={
+        edge === 'bottom' ? { width: still ? 'auto' : along } : { height: still ? 'auto' : along }
+      }
     >
       <motion.span
         ref={icon}
         className="desktop-dock-icon-face"
         style={{
-          scale,
+          scale: still ? 1 : scale,
           transformOrigin: origin,
-          ...(edge === 'bottom' ? { y: lift } : { x: lift }),
+          ...(edge === 'bottom' ? { y: still ? 0 : lift } : { x: still ? 0 : lift }),
         }}
       >
         {children}

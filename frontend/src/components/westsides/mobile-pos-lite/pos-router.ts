@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePosHost } from '@/features/pos/core/pos-host-context';
 
 /**
  * Kaunta hash pseudo-router — spec-sales §0.3 (hash-only mandate, amended
@@ -161,10 +162,24 @@ export function useKauntaRouter({
    */
   onExit?: (from: KauntaRoute, to: KauntaRoute) => void;
 }): { route: KauntaRoute; navigate: (to: KauntaRoute) => void } {
+  const host = usePosHost();
+  const readHash = useCallback(() => host?.history.hash() ?? window.location.hash, [host]);
+  const replaceHash = useCallback(
+    (next: KauntaRoute) => {
+      if (host) host.history.replace(`#${next}`);
+      else window.history.replaceState(window.history.state, '', hashUrl(next));
+    },
+    [host],
+  );
+  const pushHash = useCallback(
+    (next: KauntaRoute) => {
+      if (host) host.history.push(`#${next}`);
+      else window.history.pushState(window.history.state, '', hashUrl(next));
+    },
+    [host],
+  );
   const [route, setRoute] = useState<KauntaRoute>(() =>
-    typeof window === 'undefined'
-      ? 'mauzo'
-      : bootRouteFromHash(window.location.hash, { purchasesEnabled }),
+    typeof window === 'undefined' ? 'mauzo' : bootRouteFromHash(readHash(), { purchasesEnabled }),
   );
   // Mirrors kept fresh outside render (event handlers read them); the route
   // mirror is additionally written inside navigate/popstate so back-to-back
@@ -184,9 +199,9 @@ export function useKauntaRouter({
   // the [#mauzo, deep-link] stack so hardware back lands on the counter.
   useEffect(() => {
     const boot = routeRef.current;
-    window.history.replaceState(null, '', hashUrl('mauzo'));
-    if (boot !== 'mauzo') window.history.pushState(null, '', hashUrl(boot));
-  }, []);
+    replaceHash('mauzo');
+    if (boot !== 'mauzo') pushHash(boot);
+  }, [host, readHash, replaceHash, pushHash]);
 
   useEffect(() => {
     const onPop = () => {
@@ -195,13 +210,13 @@ export function useKauntaRouter({
       const programmatic = backPendingRef.current;
       backPendingRef.current = false;
       const from = routeRef.current;
-      const raw = routeFromHash(window.location.hash);
+      const raw = routeFromHash(readHash());
       // Re-apply the boot rules on traversal: forward-button trips into
       // flow-interior or gated territory normalize back to their parent.
-      let next = bootRouteFromHash(window.location.hash, {
+      let next = bootRouteFromHash(readHash(), {
         purchasesEnabled: purchasesRef.current,
       });
-      if (raw !== next) window.history.replaceState(null, '', hashUrl(next));
+      if (raw !== next) replaceHash(next);
       // Back-map for a screen whose parent is not the root (Hesabu → Stoo):
       // the back already unwound to #mauzo, so push the parent to restore the
       // canonical two-entry stack. Hardware back only — the count receipt's
@@ -209,34 +224,39 @@ export function useKauntaRouter({
       const parent = programmatic ? undefined : FLOW_PARENT[from];
       if (parent && parent !== 'mauzo' && next === 'mauzo') {
         next = parent;
-        window.history.pushState(null, '', hashUrl(next));
+        pushHash(next);
       }
       if (from === next) return;
       onExitRef.current?.(from, next);
       routeRef.current = next;
       setRoute(next);
     };
+    if (host) return host.history.listen(onPop);
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [host, readHash, replaceHash, pushHash]);
 
-  const navigate = useCallback((to: KauntaRoute) => {
-    const from = routeRef.current;
-    if (to === from || backPendingRef.current) return;
-    if (to === 'mauzo') {
-      // The root is reached by unwinding, never by pushing: the stack
-      // discipline guarantees the entry below any non-root screen is #mauzo,
-      // and the popstate handler applies the route change + exit hooks.
-      backPendingRef.current = true;
-      window.history.back();
-      return;
-    }
-    if (from === 'mauzo') window.history.pushState(null, '', hashUrl(to));
-    else window.history.replaceState(null, '', hashUrl(to));
-    onExitRef.current?.(from, to);
-    routeRef.current = to;
-    setRoute(to);
-  }, []);
+  const navigate = useCallback(
+    (to: KauntaRoute) => {
+      const from = routeRef.current;
+      if (to === from || backPendingRef.current) return;
+      if (to === 'mauzo') {
+        // The root is reached by unwinding, never by pushing: the stack
+        // discipline guarantees the entry below any non-root screen is #mauzo,
+        // and the popstate handler applies the route change + exit hooks.
+        backPendingRef.current = true;
+        if (host) host.history.back();
+        else window.history.back();
+        return;
+      }
+      if (from === 'mauzo') pushHash(to);
+      else replaceHash(to);
+      onExitRef.current?.(from, to);
+      routeRef.current = to;
+      setRoute(to);
+    },
+    [host, replaceHash, pushHash],
+  );
 
   // A gate revoked mid-session (a session refresh drops `stock_count` under a
   // manager standing in Hesabu) leaves the route naming a screen the shell

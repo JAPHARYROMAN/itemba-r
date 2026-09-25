@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { isDesktopViewValue } from './workspace-view-state';
 
 export function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -63,6 +64,8 @@ const hosts: Record<string, RegExp> = {
   payroll: /^\/(payroll|hr|payroll-config)(?:\/|$)/,
   reports: /^\/(reports|accounting-engine|finance\/bank-reconciliations)(?:\/|$)/,
   documents: /^\/(documents|group-control\/documents)(?:\/|$)/,
+  pos: /^\/pos(?:\/activate)?$/,
+  records: /^\/records$/,
   settings: /^\/(settings|apps)(?:\/|$)/,
   'itemba-r': /^\//,
 };
@@ -88,9 +91,20 @@ export function validateLayout(value: unknown): Prisma.InputJsonObject {
       !host.test(w.href.split(/[?#]/)[0])
     )
       throw new BadRequestException('Invalid app location');
-    if (['settings', 'itemba-r'].includes(w.appId)) {
+    if (['settings', 'itemba-r', 'pos'].includes(w.appId)) {
       if (singletons.has(w.appId)) throw new BadRequestException('This app supports one window');
       singletons.add(w.appId);
+    }
+    if (w.viewState !== undefined) {
+      const state = object(w.viewState);
+      const values = object(state.values);
+      if (
+        state.version !== 1 ||
+        Object.keys(state).some((key) => !['version', 'values'].includes(key)) ||
+        Object.keys(values).length > 100 ||
+        !Object.entries(values).every(([key, value]) => isDesktopViewValue(w.appId, key, value))
+      )
+        throw new BadRequestException('Unsupported window view settings');
     }
     if (
       ![

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { emptyScanBuffer, feedScanKey, productForCode } from './scanner';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, renderHook } from '@testing-library/react';
+import { emptyScanBuffer, feedScanKey, productForCode, useScanner } from './scanner';
 
 function feed(keys: Array<[string, number]>) {
   let buffer = emptyScanBuffer();
@@ -62,4 +63,20 @@ describe('productForCode', () => {
     expect(productForCode(catalog, '62000')).toBeUndefined();
     expect(productForCode(catalog, '')).toBeUndefined();
   });
+});
+
+it('does not add scanner input belonging to another desktop window', () => {
+  const scan = vi.fn();
+  let time = 0;
+  const now = () => (time += 8);
+  const { rerender } = renderHook(
+    ({ active }) => useScanner(scan, { now, acceptEvent: () => active }),
+    { initialProps: { active: false } },
+  );
+  const send = () => [...'6200001', 'Enter'].forEach((key) => fireEvent.keyDown(window, { key }));
+  send();
+  expect(scan).not.toHaveBeenCalled();
+  rerender({ active: true });
+  send();
+  expect(scan).toHaveBeenCalledExactlyOnceWith('6200001');
 });

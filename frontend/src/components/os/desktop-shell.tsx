@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { motion, MotionConfig, useReducedMotion } from 'motion/react';
 import {
   LayoutGrid,
@@ -19,6 +20,7 @@ import {
   MoreHorizontal,
   Palette,
   RotateCcw,
+  CloudOff,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useCommandPalette } from '@/components/aurora/command';
@@ -30,6 +32,7 @@ import { UnsavedWorkScope, useUnsavedWork } from '@/components/workspace/unsaved
 import { APP_REGISTRY, appForPath, canOpenApp, getApp, usesStandalonePosShell } from '@/lib/apps';
 import {
   accentForeground,
+  accentFocus,
   isWindowApp,
   parseDesktopSession,
   type DesktopWindow,
@@ -41,20 +44,26 @@ import { AppLauncher } from '@/components/apps/app-launcher';
 import { SettingsWorkspace } from '@/components/settings/settings-workspace';
 import { backendBinaryGet } from '@/lib/api-client';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
 import { MsaidiziTopbarButton } from '@/components/msaidizi/msaidizi-launcher';
 import { AppGlyph } from './app-glyph';
 import { DockIcon, DockMotionProvider, useDockMotion } from './desktop-dock-motion';
 import { OsNotifications } from './os-notifications';
 import { OsAccountMenu } from './os-account-menu';
 import { DesktopWindowFrame } from './desktop-window';
+import { DesktopShortcut } from './desktop-shortcut';
 import { DesktopAppHost, desktopAppForPath } from './desktop-app-host';
+import { desktopWindowLabel } from '@/lib/desktop-window-label';
+import type { DesktopViewState } from '@/lib/desktop-view-state';
 import { AppearanceStudio } from './appearance-studio';
 import { useDesktopProfile } from './use-desktop-profile';
 import { useDesktopSession } from './use-desktop-session';
+import { getBuiltInWallpaper } from '@/lib/wallpapers';
 import './os-shell.css';
 import './legacy-workspace.css';
 import './os-foundation.css';
 import './desktop.css';
+const DesktopRuntimeReview = dynamic(() => import('./desktop-runtime-review'), { ssr: false });
 
 const staysMounted = (href: string) => {
   const url = new URL(href, window.location.origin);
@@ -72,7 +81,7 @@ function routeForWindow(item: DesktopWindow) {
 function cleanHref(pathname: string, params: URLSearchParams) {
   const clean = new URLSearchParams(params);
   clean.delete('_osw');
-  return `${pathname}${clean.size ? `?${clean}` : ''}`;
+  return `${pathname}${clean.size ? `?${clean}` : ''}${typeof window !== 'undefined' ? window.location.hash : ''}`;
 }
 
 function HostedWindow({
@@ -145,6 +154,9 @@ export function DesktopShell({
     update: updateAppearance,
     ready: profileReady,
     status: profileStatus,
+    recovery: profileRecovery,
+    recovering: profileRecovering,
+    recover: recoverProfile,
   } = useDesktopProfile(user!.id);
   const {
     session,
@@ -152,11 +164,36 @@ export function DesktopShell({
     ready,
     savedSessions,
     status: sessionStatus,
+    recovery: sessionRecovery,
+    recovering: sessionRecovering,
+    recover: recoverSession,
+    sessionId,
   } = useDesktopSession(user!.id);
   const workspace = appearance,
     updateWorkspace = updateAppearance;
   const { drafts } = useWorkspaceDrafts();
+  const companies = useWorkspaceChoices<{ id: string; name: string }>(
+    '/companies',
+    {},
+    hasPermission('companies.read'),
+  );
+  const windowLabel = (item: DesktopWindow) => desktopWindowLabel(item, companies.rows);
+  const [focusRequest, setFocusRequest] = useState({ id: '', revision: 0 });
+  const pendingFocus = useRef<string | null>(null);
+  const completeWindowFocus = useCallback(() => {
+    const id = pendingFocus.current;
+    if (!id) return;
+    pendingFocus.current = null;
+    setFocusRequest((current) => ({ id, revision: current.revision + 1 }));
+  }, []);
   const sessionRef = useRef(session);
+  const closedWindowIds = useRef(new Set<string>());
+  useEffect(() => {
+    // An explicit browser-history visit may reopen a closed canonical link.
+    const traversed = () => closedWindowIds.current.clear();
+    window.addEventListener('popstate', traversed);
+    return () => window.removeEventListener('popstate', traversed);
+  }, []);
   useLayoutEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -167,11 +204,14 @@ export function DesktopShell({
   const [query, setQuery] = useState(''),
     [category, setCategory] = useState('All'),
     [contextApp, setContextApp] = useState<string | null>(null);
+  const [launcherAll, setLauncherAll] = useState(false);
+  const [runtimeReview] = useState(() => params.get('uiReview') === 'performance');
   const [desktopMenu, setDesktopMenu] = useState(false),
     [systemSettings, setSystemSettings] = useState(false),
     [notice, setNotice] = useState('');
   const [clock, setClock] = useState<Date | null>(null),
     [wallpaper, setWallpaper] = useState<string | null>(null);
+  const [pageVisible, setPageVisible] = useState(true);
   const [area, setArea] = useState({ width: 1280, height: 760 });
   const areaRef = useRef<HTMLDivElement>(null),
     launcherTrigger = useRef<HTMLButtonElement>(null),
@@ -183,11 +223,13 @@ export function DesktopShell({
   const dockMotion = useDockMotion({
     edge: narrow ? 'bottom' : appearance.dock,
     magnify: !narrow,
-    still: reduced,
+    still: reduced || !pageVisible,
   });
   // Launch bounces, one counter per app: each increase plays it once.
   const [dockBounces, setDockBounces] = useState<Record<string, number>>({});
   const allowedApps = APP_REGISTRY.filter((app) => canOpenApp(app, hasPermission));
+  const pinnedApps = allowedApps.filter((app) => workspace.pinnedApps.includes(app.id));
+  const browsingApps = launcherAll || !!query.trim() || !pinnedApps.length;
   const routeId = desktopAppForPath(pathname);
   const routeApp = routeId ? getApp(routeId) : undefined;
   const legacyRoute =
@@ -213,13 +255,24 @@ export function DesktopShell({
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    const tick = () => setClock(new Date());
+    const tick = () => {
+      if (document.visibilityState !== 'hidden') setClock(new Date());
+    };
+    const visibility = () => {
+      setPageVisible(document.visibilityState !== 'hidden');
+      tick();
+    };
     tick();
+    visibility();
     const timer = setInterval(tick, 30000);
-    return () => clearInterval(timer);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', visibility);
+    };
   }, []);
   useEffect(() => {
-    if (!appearance.wallpaperId) {
+    if (!appearance.wallpaperId || getBuiltInWallpaper(appearance.wallpaperId)) {
       setWallpaper(null);
       return;
     }
@@ -240,11 +293,15 @@ export function DesktopShell({
       if (url) URL.revokeObjectURL(url);
     };
   }, [appearance.wallpaperId]);
+  const builtInWallpaper = getBuiltInWallpaper(appearance.wallpaperId);
+  const wallpaperImage = builtInWallpaper?.src ?? wallpaper;
   useEffect(() => {
     const root = document.documentElement;
     const properties: Record<string, string> = {
       '--desktop-accent': appearance.accent,
       '--desktop-accent-ink': accentForeground(appearance.accent),
+      '--desktop-focus-light': accentFocus(appearance.accent, '#f1f3f7'),
+      '--desktop-focus-dark': accentFocus(appearance.accent, '#242d3c'),
       '--desktop-blur': `${appearance.transparency === 'reduced' ? 0 : appearance.blur}px`,
       '--desktop-icon-size': `${appearance.iconSize}px`,
     };
@@ -261,6 +318,12 @@ export function DesktopShell({
         windows: current.windows.map((item) => (item.id === id ? { ...item, ...changes } : item)),
       })),
     [setSession],
+  );
+  const saveWindowView = useCallback(
+    (id: string, viewState: DesktopViewState) => {
+      changeWindow(id, { viewState });
+    },
+    [changeWindow],
   );
   const navigate = useCallback(
     (href: string, replace = false) =>
@@ -289,9 +352,29 @@ export function DesktopShell({
       recentApps: [appId, ...current.recentApps.filter((id) => id !== appId)].slice(0, 8),
     }));
   }
-  function focusWindow(id: string, syncUrl = true) {
+  function arrangeWindow(id: string, changes: Partial<DesktopWindow>) {
+    if (!changes.minimized || sessionRef.current.activeId !== id) {
+      changeWindow(id, changes);
+      return;
+    }
+    const current = sessionRef.current;
+    const next = current.windows.filter((item) => item.id !== id && !item.minimized).at(-1);
+    setSession({
+      ...current,
+      activeId: next?.id ?? null,
+      windows: current.windows.map((item) => (item.id === id ? { ...item, ...changes } : item)),
+    });
+    pendingFocus.current = next?.id ?? null;
+    completeWindowFocus();
+    navigate(next && next.appId !== 'settings' ? routeForWindow(next) : '/desktop', true);
+  }
+  function focusWindow(id: string, syncUrl = true, transferFocus = false) {
     const item = sessionRef.current.windows.find((row) => row.id === id);
     if (!item) return;
+    if (transferFocus) {
+      pendingFocus.current = id;
+      if (!launcher && !overview && !contextApp && !control && !desktopMenu) completeWindowFocus();
+    }
     setShowDesktop(false);
     setOverview(false);
     setSession((current) =>
@@ -322,8 +405,8 @@ export function DesktopShell({
       return;
     }
     const previous = [...sessionRef.current.windows].reverse().find((item) => item.appId === appId);
-    if (previous && (!newWindow || !isWindowApp(appId))) {
-      focusWindow(previous.id);
+    if (previous && (!newWindow || app.hosting.kind !== 'independent')) {
+      focusWindow(previous.id, true, true);
       return;
     }
     if (sessionRef.current.windows.length >= 24) {
@@ -344,6 +427,8 @@ export function DesktopShell({
         height: 740,
       },
     };
+    pendingFocus.current = item.id;
+    if (!launcher && !contextApp && !control && !desktopMenu) completeWindowFocus();
     setSession((current) => ({
       ...current,
       windows: [...current.windows, item],
@@ -354,6 +439,7 @@ export function DesktopShell({
   function closeWindow(id: string) {
     request(
       () => {
+        closedWindowIds.current.add(id);
         const current = sessionRef.current;
         const windows = current.windows.filter((item) => item.id !== id);
         const next =
@@ -374,6 +460,19 @@ export function DesktopShell({
     const routeKey = `${pathname}?${params}`;
     if (initializedRoute.current === routeKey) return;
     initializedRoute.current = routeKey;
+    if (closedWindowIds.current.has(params.get('_osw') ?? '')) {
+      // A late route commit from focusing a just-closed window must not recreate it.
+      const activeWindow = sessionRef.current.windows.find(
+        (item) => item.id === sessionRef.current.activeId,
+      );
+      navigate(
+        activeWindow && activeWindow.appId !== 'settings'
+          ? routeForWindow(activeWindow)
+          : '/desktop',
+        true,
+      );
+      return;
+    }
     if (pathname === '/apps') {
       setLauncher(true);
       return;
@@ -403,7 +502,7 @@ export function DesktopShell({
       };
     });
     setShowDesktop(false);
-  }, [ready, pathname, params, routeApp, hasPermission, setSession]);
+  }, [ready, pathname, params, routeApp, hasPermission, setSession, navigate]);
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
       if (
@@ -437,6 +536,9 @@ export function DesktopShell({
     const app = getApp(item.appId);
     return app && canOpenApp(app, hasPermission);
   });
+  const desktopCovered =
+    !showDesktop &&
+    visibleWindows.some((item) => !item.minimized && (narrow || item.mode === 'maximized'));
   const dockApps = allowedApps.filter(
     (app) =>
       workspace.pinnedApps.includes(app.id) ||
@@ -484,13 +586,15 @@ export function DesktopShell({
           data-dock={appearance.dock}
           data-auto-hide={appearance.autoHide}
           data-reduced-motion={reduced}
+          data-wallpaper-tone={builtInWallpaper?.tone}
         >
           <div
             className="desktop-wallpaper"
+            data-builtin={!!builtInWallpaper}
             style={
-              wallpaper
+              wallpaperImage
                 ? {
-                    backgroundImage: `url("${wallpaper}")`,
+                    backgroundImage: `url("${wallpaperImage}")`,
                     backgroundPosition: appearance.wallpaperPosition,
                   }
                 : { backgroundPosition: appearance.wallpaperPosition }
@@ -543,10 +647,19 @@ export function DesktopShell({
                 <button
                   className="desktop-bar-icon"
                   aria-label="Control centre"
-                  title="Control centre"
+                  title={
+                    sessionRecovery || profileRecovery
+                      ? 'Desktop settings need attention'
+                      : 'Control centre'
+                  }
+                  data-attention={!!sessionRecovery || !!profileRecovery}
                   onClick={() => setControl(true)}
                 >
-                  <SlidersHorizontal size={17} />
+                  {sessionRecovery || profileRecovery ? (
+                    <CloudOff size={17} />
+                  ) : (
+                    <SlidersHorizontal size={17} />
+                  )}
                 </button>
               </div>
               <span className="desktop-bar-divider" aria-hidden="true" />
@@ -596,51 +709,32 @@ export function DesktopShell({
               setDesktopMenu(true);
             }}
           >
-            <div className="desktop-home" aria-label="Desktop">
+            <div
+              className="desktop-home"
+              aria-label="Desktop"
+              inert={desktopCovered}
+              aria-hidden={desktopCovered}
+            >
               <div className="desktop-greeting">
-                <span className="desktop-eyebrow">A LITTLE SPACE FOR EVERYTHING</span>
-                <h1>
-                  Make room for
-                  <br />
-                  <em>your best work.</em>
-                </h1>
-                <p>Your apps. Your ideas. All here.</p>
-                <button onClick={() => setLauncher(true)}>
-                  <LayoutGrid size={16} /> Explore your apps <ChevronRight size={16} />
-                </button>
+                <span className="desktop-eyebrow">ITEMBA OS</span>
+                <h1>Your workspace.</h1>
+                <p>Everything you need, in one place.</p>
               </div>
               <div className="desktop-shortcuts" aria-label="Desktop shortcuts">
                 {appearance.shortcuts.map((shortcut) => {
                   const app = allowedApps.find((a) => a.id === shortcut.appId);
                   if (!app) return null;
                   return (
-                    <motion.div
+                    <DesktopShortcut
                       key={app.id}
-                      className="desktop-shortcut"
-                      drag={!narrow}
-                      dragMomentum={false}
-                      dragConstraints={areaRef}
-                      style={{
-                        x: narrow ? 0 : Math.min(shortcut.x, area.width - 116),
-                        y: narrow ? 0 : Math.min(shortcut.y, area.height - 112),
-                      }}
-                      onDragEnd={(_, info) =>
+                      position={shortcut}
+                      area={area}
+                      narrow={narrow}
+                      onMove={(x, y) =>
                         updateAppearance((current) => ({
                           ...current,
-                          shortcuts: current.shortcuts.map((s) =>
-                            s.appId === app.id
-                              ? {
-                                  ...s,
-                                  x: Math.max(
-                                    0,
-                                    Math.min(area.width - 116, shortcut.x + info.offset.x),
-                                  ),
-                                  y: Math.max(
-                                    0,
-                                    Math.min(area.height - 112, shortcut.y + info.offset.y),
-                                  ),
-                                }
-                              : s,
+                          shortcuts: current.shortcuts.map((item) =>
+                            item.appId === app.id ? { ...item, x, y } : item,
                           ),
                         }))
                       }
@@ -660,19 +754,19 @@ export function DesktopShell({
                       >
                         <MoreHorizontal size={16} />
                       </button>
-                    </motion.div>
+                    </DesktopShortcut>
                   );
                 })}
               </div>
               <aside className="desktop-widgets" aria-label="Desktop widgets">
                 {appearance.widgets.recent && (
-                  <section className="desktop-widget">
+                  <section className="desktop-widget" data-widget="recent">
                     <header>
                       <Clock3 size={17} />
-                      <h2>Pick up where you left off</h2>
+                      <h2>Recent apps</h2>
                     </header>
                     {recent.length ? (
-                      recent.map((app) => (
+                      recent.slice(0, 3).map((app) => (
                         <button key={app.id} onClick={() => openApp(app.id)}>
                           <AppGlyph app={app} size="small" />
                           <span>{app.label}</span>
@@ -685,18 +779,18 @@ export function DesktopShell({
                   </section>
                 )}
                 {appearance.widgets.drafts && (
-                  <section className="desktop-widget">
+                  <section className="desktop-widget desktop-widget-compact">
                     <header>
                       <FilePenLine size={17} />
                       <h2>Unfinished work</h2>
+                      <strong className="desktop-widget-count">{drafts.length}</strong>
                     </header>
-                    <strong className="desktop-widget-number">{drafts.length}</strong>
                     <p>
                       {drafts.length
                         ? 'Drafts ready when you are.'
                         : 'A clear desk. A fresh start.'}
                     </p>
-                    {drafts.slice(0, 3).map((draft) => (
+                    {drafts.slice(0, 2).map((draft) => (
                       <button key={draft.id} onClick={() => openApp(draft.appId)}>
                         <span>{draft.title}</span>
                         <ChevronRight size={15} />
@@ -705,14 +799,14 @@ export function DesktopShell({
                   </section>
                 )}
                 {appearance.widgets.approvals && hasPermission('approval_requests.view') && (
-                  <section className="desktop-widget">
+                  <section className="desktop-widget desktop-widget-compact">
                     <header>
                       <CheckCheck size={17} />
                       <h2>Needs your attention</h2>
+                      <strong className="desktop-widget-count">
+                        {approvals.loading || approvals.error ? '—' : (approvals.data?.total ?? 0)}
+                      </strong>
                     </header>
-                    <strong className="desktop-widget-number">
-                      {approvals.loading || approvals.error ? '—' : (approvals.data?.total ?? 0)}
-                    </strong>
                     <p>
                       {approvals.error
                         ? 'Approvals are temporarily unavailable.'
@@ -748,11 +842,20 @@ export function DesktopShell({
                     onFocus={() => {
                       if (sessionRef.current.activeId !== item.id) focusWindow(item.id);
                     }}
-                    onChange={(change) => changeWindow(item.id, change)}
+                    onChange={(change) => arrangeWindow(item.id, change)}
                     onClose={() => closeWindow(item.id)}
-                    onNew={isWindowApp(app.id) ? () => openApp(app.id, true) : undefined}
+                    onNew={
+                      app.hosting.kind === 'independent' ? () => openApp(app.id, true) : undefined
+                    }
+                    contextLabel={windowLabel(item)}
+                    focusRequest={focusRequest.id === item.id ? focusRequest.revision : 0}
                   >
-                    <WorkspaceInstanceProvider id={item.id}>
+                    <WorkspaceInstanceProvider
+                      id={item.id}
+                      appId={item.appId}
+                      viewState={item.viewState}
+                      onViewChange={saveWindowView}
+                    >
                       <UnsavedWorkScope
                         id={`window:${item.id}`}
                         survivesNavigation={
@@ -784,6 +887,9 @@ export function DesktopShell({
                                 value={appearance}
                                 onChange={updateAppearance}
                                 status={profileStatus}
+                                recovery={profileRecovery}
+                                recovering={profileRecovering}
+                                onRecover={(choice) => void recoverProfile(choice)}
                               />
                             )}
                           </>
@@ -883,10 +989,10 @@ export function DesktopShell({
                       // Magnification replaces the hover lift where it runs.
                       whileHover={reduced || !narrow ? undefined : { y: -4 }}
                       whileTap={{ scale: 0.94 }}
-                      aria-label={`Open ${app.label}${windows.length ? `, ${windows.length} open windows` : ''}`}
+                      aria-label={`Open ${app.label}${windows.length ? `, ${windows.length} open ${windows.length === 1 ? 'window' : 'windows'}` : ''}`}
+                      data-dock-app={app.id}
                       aria-pressed={!showDesktop && active?.appId === app.id}
                       onClick={() => {
-                        if (windows.length > 1) return setContextApp(app.id);
                         // Only a real launch bounces, not a switch to an open window.
                         if (windows.length === 0)
                           setDockBounces((current) => ({
@@ -906,6 +1012,15 @@ export function DesktopShell({
                         ))}
                       </span>
                     </motion.button>
+                    {windows.length > 0 && (
+                      <button
+                        className="desktop-dock-windows"
+                        aria-label={`${app.label} windows and options`}
+                        onClick={() => setContextApp(app.id)}
+                      >
+                        {windows.length}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -927,9 +1042,10 @@ export function DesktopShell({
             open={launcher}
             onClose={() => setLauncher(false)}
             title="Your apps"
-            subtitle="Find your next workspace."
+            subtitle="Open an app or pick up where you left off."
             size="2xl"
             returnFocusRef={launcherTrigger}
+            onAfterClose={completeWindowFocus}
           >
             <div className="desktop-launcher">
               <label className="desktop-launcher-search">
@@ -943,67 +1059,92 @@ export function DesktopShell({
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </label>
-              <div className="desktop-launcher-categories">
-                {['All', ...new Set(allowedApps.map((app) => app.category))].map((name) => (
-                  <button
-                    key={name}
-                    aria-pressed={category === name}
-                    onClick={() => setCategory(name)}
-                  >
-                    {name}
-                  </button>
-                ))}
+              <div className="desktop-launcher-views" aria-label="App library views">
+                <button
+                  aria-pressed={!browsingApps}
+                  onClick={() => {
+                    setLauncherAll(false);
+                    setQuery('');
+                    setCategory('All');
+                  }}
+                >
+                  Pinned & recent
+                </button>
+                <button
+                  aria-pressed={browsingApps}
+                  onClick={() => {
+                    setLauncherAll(true);
+                    setCategory('All');
+                  }}
+                >
+                  All apps <span>{allowedApps.length}</span>
+                </button>
               </div>
-              {!query && category === 'All' && (
+              {browsingApps && (
+                <div className="desktop-launcher-categories">
+                  {['All', ...new Set(allowedApps.map((app) => app.category))].map((name) => (
+                    <button
+                      key={name}
+                      aria-pressed={category === name}
+                      onClick={() => setCategory(name)}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!browsingApps && (
                 <>
                   <h3>Pinned</h3>
                   <div className="desktop-launcher-grid">
-                    {allowedApps
-                      .filter((app) => workspace.pinnedApps.includes(app.id))
-                      .map((app) => (
+                    {pinnedApps.map((app) => (
+                      <button
+                        key={app.id}
+                        onClick={() => openApp(app.id)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setLauncher(false);
+                          setContextApp(app.id);
+                        }}
+                      >
+                        <AppGlyph app={app} />
+                        <span>{app.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              {browsingApps && (
+                <>
+                  <h3>
+                    {query ? 'Search results' : 'All apps'} <span>{filtered.length}</span>
+                  </h3>
+                  <div className="desktop-all-apps">
+                    {filtered.map((app) => (
+                      <div key={app.id}>
+                        <button onClick={() => openApp(app.id)}>
+                          <AppGlyph app={app} size="small" />
+                          <span>
+                            <strong>{app.label}</strong>
+                            <small>{app.category}</small>
+                          </span>
+                        </button>
                         <button
-                          key={app.id}
-                          onClick={() => openApp(app.id)}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
+                          aria-label={`${app.label} options`}
+                          onClick={() => {
                             setLauncher(false);
                             setContextApp(app.id);
                           }}
                         >
-                          <AppGlyph app={app} />
-                          <span>{app.label}</span>
+                          <MoreHorizontal size={18} />
                         </button>
-                      ))}
+                      </div>
+                    ))}
                   </div>
+                  {!filtered.length && <p>No apps match your search.</p>}
                 </>
               )}
-              <h3>
-                All apps <span>{filtered.length}</span>
-              </h3>
-              <div className="desktop-all-apps">
-                {filtered.map((app) => (
-                  <div key={app.id}>
-                    <button onClick={() => openApp(app.id)}>
-                      <AppGlyph app={app} size="small" />
-                      <span>
-                        <strong>{app.label}</strong>
-                        <small>{app.category}</small>
-                      </span>
-                    </button>
-                    <button
-                      aria-label={`${app.label} options`}
-                      onClick={() => {
-                        setLauncher(false);
-                        setContextApp(app.id);
-                      }}
-                    >
-                      <MoreHorizontal size={18} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              {!filtered.length && <p>No apps match your search.</p>}
-              {!!recent.length && !query && (
+              {!!recent.length && !browsingApps && (
                 <>
                   <h3>Recently used</h3>
                   <div className="desktop-launcher-recent">
@@ -1031,22 +1172,17 @@ export function DesktopShell({
             subtitle="Everything in its place. Pick a window to continue."
             size="3xl"
             returnFocusRef={overviewTrigger}
+            onAfterClose={completeWindowFocus}
           >
             <div className="desktop-overview">
               {visibleWindows.map((item) => {
                 const app = getApp(item.appId)!;
                 return (
                   <div key={item.id} className="desktop-overview-card">
-                    <button onClick={() => focusWindow(item.id)}>
+                    <button onClick={() => focusWindow(item.id, true, true)}>
                       <div className="desktop-window-preview">
                         <AppGlyph app={app} size="large" />
-                        <span>
-                          {new URL(item.href, 'http://desktop.local').pathname
-                            .split('/')
-                            .filter(Boolean)
-                            .slice(1)
-                            .join(' / ') || 'Workspace'}
-                        </span>
+                        <span>{windowLabel(item)}</span>
                       </div>
                       <strong>{app.label}</strong>
                       <small>
@@ -1071,10 +1207,11 @@ export function DesktopShell({
             onClose={() => setContextApp(null)}
             title={getApp(contextApp ?? '')?.label ?? 'App options'}
             size="sm"
+            onAfterClose={completeWindowFocus}
           >
             <div className="desktop-context-actions">
               <button onClick={() => contextApp && openApp(contextApp)}>Open app</button>
-              {contextApp && isWindowApp(contextApp) && (
+              {contextApp && getApp(contextApp)?.hosting.kind === 'independent' && (
                 <button onClick={() => openApp(contextApp, true)}>
                   <Plus size={16} />
                   New window
@@ -1103,20 +1240,26 @@ export function DesktopShell({
               </button>
               {visibleWindows
                 .filter((w) => w.appId === contextApp)
-                .map((w, i) => (
+                .map((w) => (
                   <button
                     key={w.id}
                     onClick={() => {
                       setContextApp(null);
-                      focusWindow(w.id);
+                      focusWindow(w.id, true, true);
                     }}
                   >
-                    Window {i + 1} {w.minimized ? '· minimised' : ''}
+                    {windowLabel(w)} {w.minimized ? '· minimised' : ''}
                   </button>
                 ))}
             </div>
           </Modal>
-          <Modal open={desktopMenu} onClose={() => setDesktopMenu(false)} title="Desktop" size="sm">
+          <Modal
+            open={desktopMenu}
+            onClose={() => setDesktopMenu(false)}
+            title="Desktop"
+            size="sm"
+            onAfterClose={completeWindowFocus}
+          >
             <div className="desktop-context-actions">
               <button
                 onClick={() => {
@@ -1148,7 +1291,13 @@ export function DesktopShell({
               </button>
             </div>
           </Modal>
-          <Modal open={control} onClose={() => setControl(false)} title="Control centre" size="sm">
+          <Modal
+            open={control}
+            onClose={() => setControl(false)}
+            title="Control centre"
+            size="sm"
+            onAfterClose={completeWindowFocus}
+          >
             <div className="desktop-control-centre">
               <label>
                 Appearance
@@ -1196,9 +1345,88 @@ export function DesktopShell({
                 <Palette size={17} />
                 Open Appearance Studio
               </button>
-              <p role="status">{sessionStatus}</p>
+              {profileRecovery && (
+                <p role="status">
+                  Appearance needs attention. Open Appearance Studio to choose which settings to
+                  keep.
+                </p>
+              )}
+              <section
+                className="desktop-session-status"
+                data-attention={!!sessionRecovery}
+                aria-label="Workspace sync"
+              >
+                <p role="status">{sessionStatus}</p>
+                {sessionRecovery && (
+                  <div className="desktop-recovery-actions">
+                    {sessionRecovery === 'conflict' ? (
+                      <>
+                        <button
+                          disabled={sessionRecovering}
+                          onClick={() =>
+                            request(() => void recoverSession('saved'), undefined, 'exit')
+                          }
+                        >
+                          Use saved layout
+                        </button>
+                        <button
+                          disabled={sessionRecovering}
+                          onClick={() => void recoverSession('keep')}
+                        >
+                          Keep current layout
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        disabled={sessionRecovering}
+                        onClick={() => void recoverSession('retry')}
+                      >
+                        Try syncing again
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+              <details className="desktop-keyboard-help">
+                <summary>Keyboard shortcuts</summary>
+                <dl>
+                  <div>
+                    <dt>Apps</dt>
+                    <dd>
+                      <kbd>Ctrl / ⌘</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Window overview</dt>
+                    <dd>
+                      <kbd>Ctrl / ⌘</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Show desktop</dt>
+                    <dd>
+                      <kbd>Ctrl / ⌘</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Move through dock</dt>
+                    <dd>
+                      <kbd>←</kbd> <kbd>→</kbd>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Close a panel</dt>
+                    <dd>
+                      <kbd>Esc</kbd>
+                    </dd>
+                  </div>
+                </dl>
+              </details>
+              {savedSessions.some((s) => s.id !== sessionId && s.layout.windows.length > 0) && (
+                <h3>Continue another session</h3>
+              )}
               {savedSessions
-                .filter((s) => s.layout.windows.length)
+                .filter((s) => s.id !== sessionId && s.layout.windows.length)
                 .slice(0, 5)
                 .map((saved) => (
                   <button
@@ -1218,12 +1446,26 @@ export function DesktopShell({
                     <RotateCcw size={16} />
                     <span>
                       Continue {saved.name}
-                      <small>{new Date(saved.updatedAt).toLocaleString()}</small>
+                      <small>
+                        {[
+                          ...new Set(
+                            saved.layout.windows.map((w) => getApp(w.appId)?.label).filter(Boolean),
+                          ),
+                        ]
+                          .slice(0, 3)
+                          .join(' · ')}
+                      </small>
+                      <small>
+                        {saved.layout.windows.length}{' '}
+                        {saved.layout.windows.length === 1 ? 'window' : 'windows'} ·{' '}
+                        {new Date(saved.updatedAt).toLocaleString()}
+                      </small>
                     </span>
                   </button>
                 ))}
             </div>
           </Modal>
+          {runtimeReview && <DesktopRuntimeReview />}
         </div>
       </ModalPortalProvider>
     </MotionConfig>
