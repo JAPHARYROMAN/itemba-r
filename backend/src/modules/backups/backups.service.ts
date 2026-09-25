@@ -57,8 +57,14 @@ export class BackupsService {
 
     return {
       activeJobs,
-      recentRuns,
-      lastSuccessfulByType: lastSuccessful,
+      recentRuns: recentRuns.map((run) => ({
+        ...run,
+        fileSizeBytes: run.fileSizeBytes?.toString() ?? null,
+      })),
+      lastSuccessfulByType: lastSuccessful.map((run) => ({
+        ...run,
+        fileSizeBytes: run.fileSizeBytes?.toString() ?? null,
+      })),
       failedRunsLast7Days: failedCount,
     };
   }
