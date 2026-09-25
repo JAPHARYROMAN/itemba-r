@@ -61,7 +61,7 @@ jobs:
     # workflow inputs and never derived by this job.
     environment: msaidizi-production-ring-promotion
     env:
-      NODE_VERSION: '20'
+      NODE_VERSION: '22'
       MSAIDIZI_PROMOTION_BACKEND_IMAGE: ${{ inputs.backend_image }}
       MSAIDIZI_PROMOTION_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
       MSAIDIZI_PROMOTION_RELEASE_RUN_ATTEMPT: ${{ inputs.release_run_attempt }}

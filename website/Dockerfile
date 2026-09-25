@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
 # ── Dependencies ──────────────────────────────────────────────────────────
-FROM node:20-bookworm-slim AS deps
+FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
 # ── Builder ───────────────────────────────────────────────────────────────
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # Public env vars are inlined into the client bundle AT BUILD TIME — they must
@@ -26,7 +26,7 @@ RUN npm run build
 # ── Runner ────────────────────────────────────────────────────────────────
 # Uses Next's standalone output: a minimal server with only the traced
 # dependencies, plus the static assets and public files copied alongside.
-FROM node:20-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
