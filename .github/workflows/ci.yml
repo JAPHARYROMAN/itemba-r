@@ -11,6 +11,24 @@ env:
   DATABASE_URL: postgresql://itemba:1618@localhost:5432/itemba_r_ci_placeholder?schema=public
 
 jobs:
+  dependency-security:
+    name: Dependencies — ${{ matrix.package }} production audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [backend, frontend, website]
+    defaults:
+      run:
+        working-directory: ./${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Reject high or critical production dependency advisories
+        run: npm audit --omit=dev --audit-level=high
+
   prisma-validate:
     name: Prisma — Schema Validate
     runs-on: ubuntu-latest
@@ -103,7 +121,6 @@ jobs:
           $env:DOTNET_ROOT = $dotnetRoot
           $env:PATH = "$dotnetRoot;$env:PATH"
           .\scripts\Invoke-ProtectedSourceVerification.ps1 -DotNetPath $dotnet
-
 
   windows-companion-timing:
     name: Windows Companion — Process Timing (advisory)
@@ -436,6 +453,7 @@ jobs:
       - unsafe-patterns
       - deployment-validate
       - migration-rehearsal
+      - dependency-security
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4

@@ -154,10 +154,7 @@ const msaidiziInputMounts = [
 ];
 
 const configuredMsaidiziHostInputs = Object.fromEntries(
-  msaidiziInputMounts.map(({ hostEnv, target }) => [
-    hostEnv,
-    `/operator/itemba-msaidizi${target}`,
-  ]),
+  msaidiziInputMounts.map(({ hostEnv, target }) => [hostEnv, `/operator/itemba-msaidizi${target}`]),
 );
 
 const substitutedMsaidiziContainerPaths = Object.fromEntries(
@@ -192,9 +189,14 @@ try {
     validateMissingSecretsFail(target);
     const config = validateConfigPasses(target);
     assertDeploymentShape(target, config);
+    assertDesktopBuildSwitch(target, config);
     if (target.name === 'production') {
       const configuredInputs = validateConfigPasses(target, configuredMsaidiziHostInputs);
-      assertMsaidiziInputMounts(target, configuredInputs.services?.backend, configuredMsaidiziHostInputs);
+      assertMsaidiziInputMounts(
+        target,
+        configuredInputs.services?.backend,
+        configuredMsaidiziHostInputs,
+      );
       const substitutedPaths = validateConfigPasses(target, substitutedMsaidiziContainerPaths);
       assertMsaidiziInputMounts(
         target,
@@ -229,7 +231,7 @@ function composeConfig(target, extraEnv = {}) {
 
   for (const key of Object.keys(env)) {
     if (
-      key.startsWith('MSAIDIZI_') &&
+      (key.startsWith('MSAIDIZI_') || key === 'NEXT_PUBLIC_ITEMBA_OS_ENABLED') &&
       !Object.prototype.hasOwnProperty.call(extraEnv, key)
     ) {
       delete env[key];
@@ -278,6 +280,33 @@ function validateMissingSecretsFail(target) {
   }
 }
 
+function assertDesktopBuildSwitch(target, baseline) {
+  assertEqual(
+    target,
+    baseline.services.frontend.build?.args?.NEXT_PUBLIC_ITEMBA_OS_ENABLED,
+    'false',
+    'desktop remains an explicit deployment choice',
+  );
+  for (const enabled of ['true', 'false']) {
+    const configured = validateConfigPasses(target, {
+      NEXT_PUBLIC_ITEMBA_OS_ENABLED: enabled,
+    });
+    assertEqual(
+      target,
+      configured.services.frontend.build?.args?.NEXT_PUBLIC_ITEMBA_OS_ENABLED,
+      enabled,
+      `desktop ${enabled} reaches the frontend build`,
+    );
+    // A desktop choice must not alter backend permissions or enable autonomous work.
+    assertEqual(
+      target,
+      JSON.stringify(configured.services.backend),
+      JSON.stringify(baseline.services.backend),
+      'desktop choice preserves backend configuration',
+    );
+  }
+}
+
 function assertStagingChatOverlay(baseTarget, baseline) {
   const target = {
     ...baseTarget,
@@ -316,16 +345,36 @@ function assertStagingChatOverlay(baseTarget, baseline) {
   assertEqual(target, config.name, baseline.name, 'staging project is preserved');
   for (const [name, service] of Object.entries(baseline.services)) {
     if (name !== 'backend') {
-      assertEqual(target, JSON.stringify(config.services[name]), JSON.stringify(service), `${name} is unchanged`);
+      assertEqual(
+        target,
+        JSON.stringify(config.services[name]),
+        JSON.stringify(service),
+        `${name} is unchanged`,
+      );
     }
   }
   const backend = config.services.backend;
   for (const key of msaidiziEnableSwitches) {
-    assertEqual(target, backend.environment[key], key === 'MSAIDIZI_ENABLED' ? 'true' : 'false', `${key} is fixed`);
+    assertEqual(
+      target,
+      backend.environment[key],
+      key === 'MSAIDIZI_ENABLED' ? 'true' : 'false',
+      `${key} is fixed`,
+    );
   }
   assertEqual(target, backend.environment.MSAIDIZI_TOOL_SEARCH, 'true', 'tool search enabled');
-  assertEqual(target, backend.environment.MSAIDIZI_WRITE_MODE, 'read-only', 'writes remain disabled');
-  assertEqual(target, backend.environment.MSAIDIZI_GLOBAL_KILL_SWITCH, 'true', 'operator kill switch remains effective');
+  assertEqual(
+    target,
+    backend.environment.MSAIDIZI_WRITE_MODE,
+    'read-only',
+    'writes remain disabled',
+  );
+  assertEqual(
+    target,
+    backend.environment.MSAIDIZI_GLOBAL_KILL_SWITCH,
+    'true',
+    'operator kill switch remains effective',
+  );
   for (const [key, value] of Object.entries(inputs)) {
     if (!key.endsWith('_HOST_PATH')) {
       assertEqual(target, backend.environment[key], value, `${key} is forwarded`);
@@ -341,15 +390,42 @@ function assertStagingChatOverlay(baseTarget, baseline) {
     assertEqual(target, mounts.length, 1, `exactly one ${input.target} mount`);
     const mount = mounts[0];
     assertEqual(target, mount.type, 'bind', `${input.target} uses bind`);
-    assertEqual(target, mount.source, expectedSources[index], `${input.target} uses staging source`);
+    assertEqual(
+      target,
+      mount.source,
+      expectedSources[index],
+      `${input.target} uses staging source`,
+    );
     assertEqual(target, mount.read_only, true, `${input.target} is read-only`);
-    assert(target, declaresNoImplicitHostPath({ file: target.overlay }, input.target), `${input.target} refuses implicit host-path creation`);
-    assert(target, mount.bind?.create_host_path !== true, `${input.target} does not create host paths`);
-    assertEqual(target, backend.environment[input.pathEnv], input.target, `${input.pathEnv} cannot be substituted`);
+    assert(
+      target,
+      declaresNoImplicitHostPath({ file: target.overlay }, input.target),
+      `${input.target} refuses implicit host-path creation`,
+    );
+    assert(
+      target,
+      mount.bind?.create_host_path !== true,
+      `${input.target} does not create host paths`,
+    );
+    assertEqual(
+      target,
+      backend.environment[input.pathEnv],
+      input.target,
+      `${input.pathEnv} cannot be substituted`,
+    );
   }
-  const remainingVolumes = backend.volumes.filter((mount) => !providerMounts.some((input) => input.target === mount.target));
-  assertEqual(target, JSON.stringify(remainingVolumes), JSON.stringify(baseline.services.backend.volumes), 'only two provider mounts are added');
-  console.log('OK staging read-only chat overlay: required inputs, fixed ceiling and isolated mounts verified');
+  const remainingVolumes = backend.volumes.filter(
+    (mount) => !providerMounts.some((input) => input.target === mount.target),
+  );
+  assertEqual(
+    target,
+    JSON.stringify(remainingVolumes),
+    JSON.stringify(baseline.services.backend.volumes),
+    'only two provider mounts are added',
+  );
+  console.log(
+    'OK staging read-only chat overlay: required inputs, fixed ceiling and isolated mounts verified',
+  );
 }
 
 function validateConfigPasses(target, extraEnv = {}) {
@@ -642,14 +718,8 @@ function assertDeploymentShape(target, config) {
     ['device', devicePort],
     ['evaluator', evaluatorPort],
   ]) {
-    const binding =
-      backendPorts.find((entry) => String(entry.target ?? '') === expectedPort) ?? {};
-    assertEqual(
-      target,
-      String(binding.target ?? ''),
-      expectedPort,
-      `${label} mTLS target port`,
-    );
+    const binding = backendPorts.find((entry) => String(entry.target ?? '') === expectedPort) ?? {};
+    assertEqual(target, String(binding.target ?? ''), expectedPort, `${label} mTLS target port`);
     assertEqual(
       target,
       String(binding.published ?? ''),
@@ -740,7 +810,6 @@ function assertDeploymentShape(target, config) {
   );
 }
 
-
 /**
  * Whether the compose file itself declares `create_host_path: false` on the
  * bind whose container target is `inputTarget`. Reads the block that follows
@@ -797,7 +866,12 @@ function assertMsaidiziInputMounts(target, backend, expectedSources, unsetReason
         `${pathEnv} resolves to its fixed container mount`,
       );
     } else {
-      assertEqual(target, backend?.environment?.[pathEnv], '', `${pathEnv} stays unset ${unsetReason}`);
+      assertEqual(
+        target,
+        backend?.environment?.[pathEnv],
+        '',
+        `${pathEnv} stays unset ${unsetReason}`,
+      );
     }
   }
 }
@@ -825,7 +899,9 @@ function assertProductionDeploymentWorkflow() {
   assert(target, postureStart >= 0, 'declares the exact independent-switch allowlist');
   assert(
     target,
-    workflow.includes('VALUE="$($COMPOSE exec -T backend printenv "$KEY" </dev/null || echo unset)"'),
+    workflow.includes(
+      'VALUE="$($COMPOSE exec -T backend printenv "$KEY" </dev/null || echo unset)"',
+    ),
     'maps a missing or unreadable switch to an unsafe value',
   );
   assert(
@@ -839,10 +915,18 @@ function assertProductionDeploymentWorkflow() {
     'the chat exception is the only switch exception',
   );
   assert(target, switchRejection > postureStart, 'rejects every switch not exactly false');
-  assert(target, switchExit > switchRejection && switchExit < modeRead, 'switch rejection exits nonzero');
+  assert(
+    target,
+    switchExit > switchRejection && switchExit < modeRead,
+    'switch rejection exits nonzero',
+  );
   assert(target, modeRead > switchExit, 'reads write mode after all independent switches');
   assert(target, modeRejection > modeRead, 'rejects write mode unless exactly read-only');
-  assert(target, modeExit > modeRejection && modeExit < sentinel, 'write-mode rejection exits nonzero');
+  assert(
+    target,
+    modeExit > modeRejection && modeExit < sentinel,
+    'write-mode rejection exits nonzero',
+  );
   assert(target, sentinel > modeExit, 'posture rejection runs before the completion sentinel');
 
   const relaunch = readFileSync(resolve(rootDir, 'deploy', 'relaunch', 'deploy.sh'), 'utf8');
@@ -867,10 +951,22 @@ function assertProductionDeploymentWorkflow() {
     exactModeDecision,
   );
   const firstMigration = relaunch.indexOf('prisma migrate', exactModeDecision);
-  assert(target, relaunch.indexOf('set -euo pipefail') >= 0, 'relaunch uses pipeline failure propagation');
+  assert(
+    target,
+    relaunch.indexOf('set -euo pipefail') >= 0,
+    'relaunch uses pipeline failure propagation',
+  );
   assert(target, resolvedConfig >= 0, 'relaunch validates Compose before posture preflight');
-  assert(target, preflightStart > resolvedConfig, 'relaunch declares the exact dark switch set after config');
-  assert(target, pythonDependency > preflightStart, 'relaunch fails closed when python3 is unavailable');
+  assert(
+    target,
+    preflightStart > resolvedConfig,
+    'relaunch declares the exact dark switch set after config',
+  );
+  assert(
+    target,
+    pythonDependency > preflightStart,
+    'relaunch fails closed when python3 is unavailable',
+  );
   assert(target, preflightConfig > pythonDependency, 'relaunch parses resolved Compose JSON');
   assert(target, chatAllowance > preflightConfig, 'relaunch allows only human chat to be true');
   assert(
@@ -878,7 +974,11 @@ function assertProductionDeploymentWorkflow() {
     exactSwitchDecision > chatAllowance,
     'relaunch rejects any other switch not exactly false, and chat not exactly true/false',
   );
-  assert(target, exactModeDecision > exactSwitchDecision, 'relaunch rejects mode not exactly read-only');
+  assert(
+    target,
+    exactModeDecision > exactSwitchDecision,
+    'relaunch rejects mode not exactly read-only',
+  );
   assert(
     target,
     firstComposeUp > exactModeDecision,
@@ -935,7 +1035,11 @@ function assertProductionDeploymentWorkflow() {
 
   const safe = Object.fromEntries(msaidiziEnableSwitches.map((key) => [key, 'false']));
   safe.MSAIDIZI_WRITE_MODE = 'read-only';
-  assert(target, isSafeMsaidiziPosture(safe), 'negative-control baseline accepts exact dark posture');
+  assert(
+    target,
+    isSafeMsaidiziPosture(safe),
+    'negative-control baseline accepts exact dark posture',
+  );
   assert(
     target,
     isSafeMsaidiziPosture({ ...safe, MSAIDIZI_ENABLED: 'true' }),
@@ -970,11 +1074,7 @@ function assertProductionDeploymentWorkflow() {
     }
     const missing = { ...safe };
     delete missing[key];
-    assert(
-      target,
-      !isSafeMsaidiziPosture(missing),
-      `negative control rejects missing ${key}`,
-    );
+    assert(target, !isSafeMsaidiziPosture(missing), `negative control rejects missing ${key}`);
   }
   for (const mode of ['amber', 'red', 'unset', 'READ-ONLY']) {
     assert(
