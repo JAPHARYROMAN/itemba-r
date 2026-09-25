@@ -1,5 +1,8 @@
 # ITEMBA OS — release verification, 20 September 2026
 
+> Historical evidence. See the [25 September release candidate assessment](itemba-os-2026-09-25.md)
+> for current packaging, CI, workflow, dependency and recovery status.
+
 **Release decision: hold.** This is evidence from an isolated local rehearsal, not staging acceptance or approval to deploy. No working business records were changed by the rehearsal. The opening-data audit used a PostgreSQL read-only transaction.
 
 ## Current phase 4 acceptance pass — 20 September

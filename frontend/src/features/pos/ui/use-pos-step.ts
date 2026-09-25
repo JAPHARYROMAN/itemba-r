@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePosHost } from '@/features/pos/core/pos-host-context';
 
 /**
  * Where the new POS is in a sale, kept in the URL hash so the phone's hardware
@@ -25,29 +26,38 @@ function stepFromHash(hash: string): PosStep | null {
 }
 
 export function usePosStep() {
+  const host = usePosHost();
   const [step, setStep] = useState<PosStep>('sale');
 
   useEffect(() => {
-    const initial = stepFromHash(window.location.hash);
+    const initial = stepFromHash(host?.history.hash() ?? window.location.hash);
     const boot: PosStep = initial === 'queue' ? 'queue' : 'sale';
-    window.history.replaceState(window.history.state, '', `${PREFIX}${boot}`);
+    if (host) host.history.replace(`${PREFIX}${boot}`);
+    else window.history.replaceState(window.history.state, '', `${PREFIX}${boot}`);
     setStep(boot);
     const onPop = () => {
-      const next = stepFromHash(window.location.hash);
+      const next = stepFromHash(host?.history.hash() ?? window.location.hash);
       if (next) setStep(next);
     };
+    if (host) return host.history.listen(onPop);
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [host]);
 
-  const go = useCallback((next: PosStep, options: { replace?: boolean } = {}) => {
-    const url = `${PREFIX}${next}`;
-    if (window.location.hash !== url) {
-      if (options.replace) window.history.replaceState(window.history.state, '', url);
-      else window.history.pushState(window.history.state, '', url);
-    }
-    setStep(next);
-  }, []);
+  const go = useCallback(
+    (next: PosStep, options: { replace?: boolean } = {}) => {
+      const url = `${PREFIX}${next}`;
+      if (host) {
+        if (options.replace) host.history.replace(url);
+        else host.history.push(url);
+      } else if (window.location.hash !== url) {
+        if (options.replace) window.history.replaceState(window.history.state, '', url);
+        else window.history.pushState(window.history.state, '', url);
+      }
+      setStep(next);
+    },
+    [host],
+  );
 
   return { step, go };
 }

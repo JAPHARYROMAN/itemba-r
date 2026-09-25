@@ -272,6 +272,7 @@ function LoanPrintDocument({ loan, audit }: { loan: LoanDetail; audit: AuditEntr
                   <DocumentTh align="right">Amount</DocumentTh>
                   <DocumentTh align="right">Principal</DocumentTh>
                   <DocumentTh align="right">Interest</DocumentTh>
+                  <DocumentTh align="right">Fees</DocumentTh>
                   <DocumentTh align="right">Penalty</DocumentTh>
                   <DocumentTh>Method</DocumentTh>
                   <DocumentTh>Reference</DocumentTh>
@@ -281,7 +282,10 @@ function LoanPrintDocument({ loan, audit }: { loan: LoanDetail; audit: AuditEntr
               <tbody>
                 {repayments.map((repayment) => (
                   <tr key={repayment.id}>
-                    <DocumentTd>{fmtDate(repayment.repaymentDate)}</DocumentTd>
+                    <DocumentTd>
+                      {fmtDate(repayment.repaymentDate)}
+                      {repayment.financialEvent?.reversedAt ? ' · Reversed' : ''}
+                    </DocumentTd>
                     <DocumentTd align="right" mono>
                       {loanMoney(loan, repayment.amount)}
                     </DocumentTd>
@@ -290,6 +294,9 @@ function LoanPrintDocument({ loan, audit }: { loan: LoanDetail; audit: AuditEntr
                     </DocumentTd>
                     <DocumentTd align="right" mono>
                       {repayment.interest ? loanMoney(loan, repayment.interest) : 'N/A'}
+                    </DocumentTd>
+                    <DocumentTd align="right" mono>
+                      {loanMoney(loan, repayment.financialEvent?.fees ?? '0')}
                     </DocumentTd>
                     <DocumentTd align="right" mono>
                       {repayment.penalties ? loanMoney(loan, repayment.penalties) : 'N/A'}

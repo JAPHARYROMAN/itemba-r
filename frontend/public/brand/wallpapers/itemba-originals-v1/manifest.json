@@ -1,0 +1,63 @@
+{
+  "id": "itemba-originals-v1",
+  "name": "ITEMBA Originals",
+  "version": 1,
+  "generatedWith": "Built-in image generation",
+  "wallpapers": [
+    {
+      "id": "itemba-v1-dune-light",
+      "name": "Dune Light",
+      "image": "dune-light.webp",
+      "thumbnail": "thumbnails/dune-light.webp",
+      "original": "originals/dune-light.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 222442,
+      "sha256": "a36383977d9f177ff27ab51b091e01c06f65ce3a79b08468144463a070a173fa"
+    },
+    {
+      "id": "itemba-v1-tidal-glass",
+      "name": "Tidal Glass",
+      "image": "tidal-glass.webp",
+      "thumbnail": "thumbnails/tidal-glass.webp",
+      "original": "originals/tidal-glass.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 226034,
+      "sha256": "6a3410866b7d500075cd3c7e4948c68ebf80df2225139f4c633b80500451125b"
+    },
+    {
+      "id": "itemba-v1-aurora-veil",
+      "name": "Aurora Veil",
+      "image": "aurora-veil.webp",
+      "thumbnail": "thumbnails/aurora-veil.webp",
+      "original": "originals/aurora-veil.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 103722,
+      "sha256": "9e31dbc84278218aaa24a37b563acf3c9ae9f835061eb5aa3e71faa1942ac6e2"
+    },
+    {
+      "id": "itemba-v1-pearl-fold",
+      "name": "Pearl Fold",
+      "image": "pearl-fold.webp",
+      "thumbnail": "thumbnails/pearl-fold.webp",
+      "original": "originals/pearl-fold.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 158886,
+      "sha256": "040505c8c1654db4fc222d2145952a085749a4763200588d14b4f647533e6dd2"
+    },
+    {
+      "id": "itemba-v1-midnight-rift",
+      "name": "Midnight Rift",
+      "image": "midnight-rift.webp",
+      "thumbnail": "thumbnails/midnight-rift.webp",
+      "original": "originals/midnight-rift.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 238106,
+      "sha256": "61930e42bb9033732de139bc2dc7b9d2bbc9bb2022ade00f27513b95af23d50b"
+    }
+  ]
+}

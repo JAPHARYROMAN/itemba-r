@@ -1,4 +1,5 @@
 import { APP_REGISTRY, getApp } from './apps';
+import { parseDesktopViewState, type DesktopViewState } from './desktop-view-state';
 
 export const WINDOW_APP_IDS = [
   'invoice-desk',
@@ -8,6 +9,8 @@ export const WINDOW_APP_IDS = [
   'payroll',
   'reports',
   'documents',
+  'pos',
+  'records',
 ] as const;
 export const isWindowApp = (id: string) => WINDOW_APP_IDS.some((value) => value === id);
 export type WindowMode =
@@ -27,6 +30,7 @@ export interface DesktopWindow {
   bounds: Bounds;
   mode: WindowMode;
   minimized: boolean;
+  viewState?: DesktopViewState;
 }
 export interface DesktopSession {
   version: 1;
@@ -193,6 +197,7 @@ export function parseDesktopSession(input: unknown): DesktopSession {
       href: w.href,
       mode: modes.includes(w.mode) ? w.mode : ('floating' as WindowMode),
       minimized: w.minimized === true,
+      ...(w.viewState ? { viewState: parseDesktopViewState(w.appId, w.viewState) } : {}),
       bounds: {
         x: clamp(w.bounds?.x, 0, 4000, 72),
         y: clamp(w.bounds?.y, 0, 2000, 32),
@@ -226,10 +231,37 @@ export function windowBounds(window: DesktopWindow, width: number, height: numbe
   return { x: right ? width / 2 + 4 : 8, y: bottom ? height / 2 + 4 : 8, width: w, height: h };
 }
 /** WCAG relative luminance, used for user-selected accent foregrounds. */
-export function accentForeground(hex: string) {
+function luminance(hex: string) {
+  if (hex.length === 4) hex = '#' + [...hex.slice(1)].map((value) => value + value).join('');
   const c = [1, 3, 5]
     .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
     .map((n) => (n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4));
-  const luminance = c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
-  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? '#000000' : '#ffffff';
+  return c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+}
+export function contrastRatio(foreground: string, background: string) {
+  const a = luminance(foreground),
+    b = luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+export function accentForeground(hex: string) {
+  return contrastRatio(hex, '#000000') >= contrastRatio(hex, '#ffffff') ? '#000000' : '#ffffff';
+}
+/** Preserve the chosen hue while keeping focus/selection visible on an opaque surface. */
+export function accentFocus(hex: string, background: string) {
+  if (contrastRatio(hex, background) >= 3) return hex;
+  const target = accentForeground(background) === '#000000' ? 0 : 255;
+  const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+  for (let step = 1; step <= 20; step++) {
+    const mixed =
+      '#' +
+      channels
+        .map((value) =>
+          Math.round(value + ((target - value) * step) / 20)
+            .toString(16)
+            .padStart(2, '0'),
+        )
+        .join('');
+    if (contrastRatio(mixed, background) >= 3) return mixed;
+  }
+  return target ? '#ffffff' : '#000000';
 }

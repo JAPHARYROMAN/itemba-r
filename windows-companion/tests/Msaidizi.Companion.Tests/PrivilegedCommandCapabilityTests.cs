@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace Itemba.Msaidizi.Companion.Tests;
 
+[Collection(NativeProcessTimingGroup.Name)]
 public sealed class PrivilegedCommandCapabilityTests : IDisposable
 {
   private readonly string _directory = Path.Combine(
@@ -189,14 +190,9 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
   {
     var fixture = CreateFixture();
     var pidFile = Path.Combine(_directory, "timeout-descendant.pid");
-    var escapedPidFile = pidFile.Replace("'", "''", StringComparison.Ordinal);
-    var command =
-      "$p = Start-Process -PassThru -FilePath $env:COMSPEC "
-      + "-ArgumentList @('/d','/s','/c','ping -n 30 127.0.0.1 >nul'); "
-      + $"[IO.File]::WriteAllText('{escapedPidFile}', [string]$p.Id); $p.WaitForExit()";
     var specification = fixture.Policy.Resolve(
       "windows-powershell",
-      PowerShellArguments(command),
+      PowerShellArguments(DescendantProcessFixture.PowerShellCommand(pidFile)),
       5,
       4_096);
     var elapsed = Stopwatch.StartNew();
@@ -218,14 +214,9 @@ public sealed class PrivilegedCommandCapabilityTests : IDisposable
   {
     var fixture = CreateFixture();
     var pidFile = Path.Combine(_directory, "descendant.pid");
-    var escapedPidFile = pidFile.Replace("'", "''", StringComparison.Ordinal);
-    var command =
-      "$p = Start-Process -PassThru -FilePath $env:COMSPEC "
-      + "-ArgumentList @('/d','/s','/c','ping -n 30 127.0.0.1 >nul'); "
-      + $"[IO.File]::WriteAllText('{escapedPidFile}', [string]$p.Id); $p.WaitForExit()";
     var specification = fixture.Policy.Resolve(
       "windows-powershell",
-      PowerShellArguments(command),
+      PowerShellArguments(DescendantProcessFixture.PowerShellCommand(pidFile)),
       30,
       4_096);
     using var cancellation = new CancellationTokenSource();

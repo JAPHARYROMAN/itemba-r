@@ -6,12 +6,18 @@ import { promisify } from 'util';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JobContext, JobHandlerRegistry, JobResult } from '../job-handler.registry';
+import {
+  SUPPORTED_BACKUP_TYPES,
+  snapshotLocalStorage,
+  validateBackupSupport,
+  writeBackupArchive,
+} from '../backup-archive';
 
 const execFileAsync = promisify(execFile);
 
 /**
- * BACKUP_RUN handler. Drives `pg_dump` against the database referenced by
- * `DATABASE_URL`, writes the artifact to `BACKUPS_DIR`, computes a SHA-256
+ * BACKUP_RUN handler. Database jobs produce SQL; file jobs produce an archive;
+ * full jobs capture both with a per-file manifest. Writes to BACKUPS_DIR, computes a SHA-256
  * checksum, and updates the BackupRun row to COMPLETED with file size +
  * checksum + duration. On failure, marks FAILED with the error message.
  *
@@ -51,9 +57,6 @@ export class BackupRunJobHandler implements OnModuleInit {
       );
     await fs.mkdir(backupsDir, { recursive: true });
 
-    const databaseUrl = this.databaseUrlForPgTools(process.env.DATABASE_URL);
-    if (!databaseUrl) throw new Error('DATABASE_URL is not set');
-
     const startedAt = new Date();
     const backupRun = await this.prisma.backupRun.findUnique({
       where: { id: backupRunId },
@@ -67,10 +70,26 @@ export class BackupRunJobHandler implements OnModuleInit {
         fileSizeBytes: true,
         checksum: true,
         metadata: true,
+        backupJob: { select: { storageTarget: true } },
       },
     });
     if (!backupRun) throw new Error(`BackupRun ${backupRunId} not found`);
-    if (backupRun.status === 'COMPLETED' && backupRun.filePath && backupRun.checksum) {
+    const artifactFormat =
+      backupRun.backupType === 'DATABASE' ? 'pg_dump/plain-sql' : 'itemba-backup/zip-v1';
+    const previousMetadata =
+      backupRun.metadata &&
+      typeof backupRun.metadata === 'object' &&
+      !Array.isArray(backupRun.metadata)
+        ? (backupRun.metadata as Record<string, unknown>)
+        : {};
+    if (
+      SUPPORTED_BACKUP_TYPES.includes(backupRun.backupType) &&
+      (backupRun.backupJob?.storageTarget ?? 'LOCAL') === 'LOCAL' &&
+      backupRun.status === 'COMPLETED' &&
+      backupRun.filePath &&
+      backupRun.checksum &&
+      previousMetadata.artifactFormat === artifactFormat
+    ) {
       return {
         data: {
           fileName: path.basename(backupRun.filePath),
@@ -88,27 +107,67 @@ export class BackupRunJobHandler implements OnModuleInit {
       data: { status: 'RUNNING', startedAt },
     });
 
-    const fileName = this.safeBackupFileName(backupRun.backupRunNumber);
+    const fileName = this.safeBackupFileName(backupRun.backupRunNumber).replace(
+      /\.sql$/,
+      `-${randomUUID()}${backupRun.backupType === 'DATABASE' ? '.sql' : '.zip'}`,
+    );
     const filePath = this.resolveBackupPath(backupsDir, fileName);
     const tempFilePath = this.resolveBackupPath(backupsDir, `${fileName}.tmp-${randomUUID()}`);
+    const databaseTempPath = this.resolveBackupPath(
+      backupsDir,
+      `${fileName}.database-${randomUUID()}.sql`,
+    );
+    let published = false;
 
     try {
-      // pg_dump is invoked via execFile (no shell) so DATABASE_URL is not
-      // interpreted by a shell. The connection string is passed as one argv
-      // value through --dbname so pg_dump can resolve the target database.
-      await execFileAsync(
-        'pg_dump',
-        [
-          '--no-owner',
-          '--no-privileges',
-          '--format=plain',
-          `--file=${tempFilePath}`,
-          `--dbname=${databaseUrl}`,
-        ],
-        { env: process.env, timeout: 30 * 60_000 },
-      );
+      ctx.signal?.throwIfAborted();
+      await ctx.checkpoint?.();
+      validateBackupSupport(backupRun.backupType, backupRun.backupJob?.storageTarget);
+      const includeFiles = backupRun.backupType !== 'DATABASE';
+      const includeDatabase =
+        backupRun.backupType === 'DATABASE' || backupRun.backupType === 'FULL_SYSTEM';
+      // Inventory precedes the database snapshot. Added, changed or deleted files
+      // during capture make the whole backup fail, rather than omit referenced data.
+      const snapshot = includeFiles ? await snapshotLocalStorage(backupsDir, ctx.signal) : null;
+      if (includeDatabase) {
+        const databaseUrl = this.databaseUrlForPgTools(process.env.DATABASE_URL);
+        if (!databaseUrl) throw new Error('DATABASE_URL is not set');
+        const connection = new URL(databaseUrl);
+        const password = decodeURIComponent(connection.password);
+        connection.password = '';
+        const dumpPath = includeFiles ? databaseTempPath : tempFilePath;
+        // Reserve a private file. Keep the password out of argv and stored errors.
+        await (await fs.open(dumpPath, 'wx', 0o600)).close();
+        await execFileAsync(
+          'pg_dump',
+          [
+            '--no-owner',
+            '--no-privileges',
+            '--format=plain',
+            `--file=${dumpPath}`,
+            `--dbname=${connection.toString()}`,
+          ],
+          {
+            env: { ...process.env, PGPASSWORD: password },
+            timeout: 30 * 60_000,
+            signal: ctx.signal,
+          },
+        );
+      }
+      const archive = snapshot
+        ? await writeBackupArchive({
+            destination: tempFilePath,
+            backupType: backupRun.backupType,
+            snapshot,
+            signal: ctx.signal,
+            ...(includeDatabase ? { databaseFile: databaseTempPath } : {}),
+          })
+        : null;
 
+      ctx.signal?.throwIfAborted();
+      await ctx.checkpoint?.();
       await fs.rename(tempFilePath, filePath);
+      published = true;
       const stat = await fs.stat(filePath);
       const checksum = await this.fileSha256(filePath);
 
@@ -116,7 +175,7 @@ export class BackupRunJobHandler implements OnModuleInit {
       const completedAt = new Date();
       await this.prisma.$transaction(async (tx) => {
         await tx.backupRun.update({
-          where: { id: backupRunId },
+          where: { id: backupRunId, status: 'RUNNING', startedAt },
           data: {
             status: 'COMPLETED',
             completedAt,
@@ -132,7 +191,13 @@ export class BackupRunJobHandler implements OnModuleInit {
                 : {}),
               backupType: backupRun.backupType,
               checksumAlgorithm: 'sha256',
-              artifactFormat: 'pg_dump/plain-sql',
+              artifactFormat,
+              databaseIncluded: includeDatabase,
+              filesIncluded: includeFiles,
+              storageTarget: 'LOCAL',
+              ...(archive
+                ? { fileCount: archive.fileCount, sourceBytes: archive.sourceBytes }
+                : {}),
             },
           },
         });
@@ -148,9 +213,9 @@ export class BackupRunJobHandler implements OnModuleInit {
       const message = err instanceof Error ? err.message : String(err);
       await this.prisma.backupRun
         .update({
-          where: { id: backupRunId },
+          where: { id: backupRunId, status: 'RUNNING', startedAt },
           data: {
-            status: 'FAILED',
+            status: ctx.signal?.aborted ? 'CANCELLED' : 'FAILED',
             completedAt: new Date(),
             errorMessage: message.slice(0, 4000),
           },
@@ -158,8 +223,10 @@ export class BackupRunJobHandler implements OnModuleInit {
         .catch(() => undefined);
       // Best-effort cleanup of partial file
       await fs.unlink(tempFilePath).catch(() => undefined);
-      await fs.unlink(filePath).catch(() => undefined);
+      if (published) await fs.unlink(filePath).catch(() => undefined);
       throw err;
+    } finally {
+      await fs.unlink(databaseTempPath).catch(() => undefined);
     }
   }
 

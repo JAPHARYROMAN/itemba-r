@@ -50,12 +50,14 @@ function hrefsFromSource(file: string) {
 function routePatternToRegex(route: string) {
   const escaped = route
     .split('/')
+    .filter(Boolean)
     .map((segment) => {
-      if (segment.startsWith('[...') && segment.endsWith(']')) return '.+';
-      if (segment.startsWith('[') && segment.endsWith(']')) return '[^/]+';
-      return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (segment.startsWith('[[...') && segment.endsWith(']]')) return '(?:/.*)?';
+      if (segment.startsWith('[...') && segment.endsWith(']')) return '/.+';
+      if (segment.startsWith('[') && segment.endsWith(']')) return '/[^/]+';
+      return '/' + segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     })
-    .join('/');
+    .join('');
   return new RegExp(`^${escaped}$`);
 }
 

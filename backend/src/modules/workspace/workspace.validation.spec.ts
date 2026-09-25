@@ -32,4 +32,32 @@ describe('workspace storage validation', () => {
       }),
     ).toThrow();
   });
+  it('accepts view recovery but refuses form contents or another app in the layout', () => {
+    const layout = (values: Record<string, unknown>) => ({
+      version: 1,
+      activeId: 'one',
+      windows: [{ ...window, viewState: { version: 1, values } }],
+    });
+    expect(
+      validateLayout(
+        layout({
+          'invoice-desk.search': 'fuel',
+          'invoice-desk.scope': { companyId: 'a', divisionId: '', branchId: '' },
+        }),
+      ),
+    ).toBeTruthy();
+    for (const values of [
+      { 'invoice-desk.new.amount': 500 },
+      { 'cash-desk.search': 'cash' },
+      { 'invoice-desk.scope': { bankAccount: 'secret' } },
+    ])
+      expect(() => validateLayout(layout(values))).toThrow('Unsupported window view settings');
+  });
+  it('allows one activated or unactivated POS host and rejects a second terminal editor', () => {
+    const pos = { ...window, appId: 'pos', href: '/pos/activate' };
+    expect(validateLayout({ version: 1, activeId: 'one', windows: [pos] })).toBeTruthy();
+    expect(() =>
+      validateLayout({ version: 1, activeId: 'one', windows: [pos, { ...pos, id: 'two' }] }),
+    ).toThrow('This app supports one window');
+  });
 });

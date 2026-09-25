@@ -1,4 +1,5 @@
 {
+  "/pos/[[...path]]": "/pos",
   "/apps/[appId]": "/apps/fuel-grid",
   "/companies/[id]": "/companies/e2e-company",
   "/group-control/contracts/[id]": "/group-control/contracts/e2e-contract",

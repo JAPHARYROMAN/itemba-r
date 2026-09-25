@@ -113,7 +113,7 @@ export default function LoanRepaymentsPage() {
     interestAccountId: '',
     feeAccountId: '',
   });
-  const paymentRequest = useRef<string | null>(null),
+  const paymentRequests = useRef(new Map<string, string>()),
     paymentPending = useRef(false);
   const [paymentAck, setPaymentAck] = useState(false);
   const [companyId, setCompanyId] = useState('');
@@ -249,7 +249,6 @@ export default function LoanRepaymentsPage() {
 
   const loadPayments = async (schedule: LoanSchedule) => {
     setSelected(schedule);
-    paymentRequest.current = null;
     setPaymentAck(false);
     setPaymentAccounts({ cashDeskAccountId: '', interestAccountId: '', feeAccountId: '' });
     setPaymentForm((current) => ({
@@ -309,7 +308,8 @@ export default function LoanRepaymentsPage() {
     }
 
     paymentPending.current = true;
-    paymentRequest.current ??= crypto.randomUUID();
+    const requestId = paymentRequests.current.get(selected.id) ?? crypto.randomUUID();
+    paymentRequests.current.set(selected.id, requestId);
     setSaving(true);
     setError('');
     try {
@@ -323,7 +323,7 @@ export default function LoanRepaymentsPage() {
             amount: paymentForm.amount,
             currency: preview.data.currency,
             paymentMethod: paymentForm.paymentMethod,
-            requestId: paymentRequest.current,
+            requestId,
             allocationFingerprint: preview.data.allocationFingerprint,
             ...paymentAccounts,
             interestAccountId: paymentAccounts.interestAccountId || undefined,
@@ -334,6 +334,10 @@ export default function LoanRepaymentsPage() {
       );
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorMessage(json, 'Payment failed'));
+      // This transaction is acknowledged. A later partial payment is a new
+      // transaction; failed/uncertain submissions keep their existing identity.
+      paymentRequests.current.delete(selected.id);
+      setPaymentAck(false);
       setPaymentOpen(false);
       await load();
       paymentHistory.reload();
@@ -591,6 +595,14 @@ export default function LoanRepaymentsPage() {
                   disabled={selected.status === 'PAID' || selected.status === 'CANCELLED'}
                   onClick={() => {
                     setError('');
+                    setPaymentAck(false);
+                    if (!paymentRequests.current.has(selected.id)) {
+                      setPaymentForm((current) => ({
+                        ...current,
+                        amount: String(selected.outstandingAmount),
+                        reference: '',
+                      }));
+                    }
                     setPaymentOpen(true);
                   }}
                 >

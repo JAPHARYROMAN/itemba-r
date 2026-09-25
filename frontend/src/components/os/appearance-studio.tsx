@@ -1,16 +1,25 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Upload, Trash2, Check, Sparkles } from 'lucide-react';
+import Image from 'next/image';
+import { Upload, Trash2, Check, Sparkles, Download, CloudCheck, CloudOff } from 'lucide-react';
+import type { AppearanceRecovery } from './use-desktop-profile';
+import { WALLPAPER_COLLECTIONS } from '@/lib/wallpapers';
 import { backendDelete, backendGet, backendUpload } from '@/lib/api-client';
 import { DEFAULT_APPEARANCE, THEMES, type DesktopAppearance } from '@/lib/desktop';
 export function AppearanceStudio({
   value,
   onChange,
   status,
+  recovery = null,
+  recovering = false,
+  onRecover,
 }: {
   value: DesktopAppearance;
   onChange: (change: (current: DesktopAppearance) => DesktopAppearance) => void;
   status: string;
+  recovery?: AppearanceRecovery;
+  recovering?: boolean;
+  onRecover?: (choice: 'saved' | 'keep' | 'retry') => void;
 }) {
   const [wallpapers, setWallpapers] = useState<{ id: string; name: string }[]>([]);
   const [busy, setBusy] = useState(false),
@@ -36,12 +45,87 @@ export function AppearanceStudio({
         <span className="desktop-eyebrow">MAKE YOURSELF AT HOME</span>
         <h1>Your desktop. Your atmosphere.</h1>
         <p>Choose a starting point, then make it yours.</p>
-        <span className="desktop-sync" role="status">
-          {status}
-        </span>
       </header>
+      <div className="appearance-sync" data-attention={!!recovery}>
+        {recovery ? (
+          <CloudOff size={18} aria-hidden="true" />
+        ) : (
+          <CloudCheck size={18} aria-hidden="true" />
+        )}
+        <div>
+          <p role="status" aria-live="polite">
+            {status}
+          </p>
+          {recovery && <small>Your open apps and unfinished work stay in place.</small>}
+          {recovery && onRecover && (
+            <div className="appearance-sync-actions">
+              {recovery === 'conflict' ? (
+                <>
+                  <button disabled={recovering} onClick={() => onRecover('saved')}>
+                    Use account settings
+                  </button>
+                  <button disabled={recovering} onClick={() => onRecover('keep')}>
+                    Keep this appearance
+                  </button>
+                </>
+              ) : (
+                <button disabled={recovering} onClick={() => onRecover('retry')}>
+                  Try syncing again
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {WALLPAPER_COLLECTIONS.map((collection) => (
+        <section
+          key={collection.id}
+          className="appearance-originals"
+          aria-label={`${collection.name} wallpaper collection`}
+        >
+          <div className="appearance-originals-heading">
+            <div>
+              <span className="desktop-eyebrow">
+                {collection.edition} · INCLUDED WITH ITEMBA OS
+              </span>
+              <h2>{collection.name}</h2>
+              <p>{collection.description}</p>
+            </div>
+            <a
+              href={collection.download}
+              download
+              aria-label={`Download ${collection.name} collection`}
+              className="appearance-pack-download"
+            >
+              <Download size={15} /> Download collection
+            </a>
+          </div>
+          <div className="appearance-wallpaper-grid">
+            {collection.wallpapers.map((wallpaper) => (
+              <button
+                key={wallpaper.id}
+                type="button"
+                aria-label={`Use ${wallpaper.name} wallpaper`}
+                aria-pressed={value.wallpaperId === wallpaper.id}
+                onClick={() => change('wallpaperId', wallpaper.id)}
+              >
+                <span className="appearance-wallpaper-image">
+                  <Image src={wallpaper.thumbnail} alt="" width={480} height={270} unoptimized />
+                  {value.wallpaperId === wallpaper.id && (
+                    <span className="appearance-wallpaper-check">
+                      <Check size={15} /> Selected
+                    </span>
+                  )}
+                </span>
+                <strong>{wallpaper.name}</strong>
+                <small>{wallpaper.description}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
       <section>
-        <h2>Collections</h2>
+        <h2>Colour themes</h2>
         <div className="appearance-themes">
           {THEMES.map((theme) => (
             <button
@@ -52,7 +136,6 @@ export function AppearanceStudio({
                   ...current,
                   theme: theme.id,
                   accent: theme.accent,
-                  wallpaperId: null,
                 }))
               }
             >
@@ -127,11 +210,11 @@ export function AppearanceStudio({
         </div>
       </section>
       <section className="appearance-section">
-        <h2>Wallpaper</h2>
+        <h2>Your images & positioning</h2>
         <p>Your uploads stay private to your account.</p>
         <div className="appearance-wallpapers">
           <button aria-pressed={!value.wallpaperId} onClick={() => change('wallpaperId', null)}>
-            Collection wallpaper
+            Original theme wallpaper
           </button>
           {wallpapers.map((wallpaper) => (
             <div key={wallpaper.id}>

@@ -68,7 +68,15 @@ const performanceNow = () => performance.now();
 
 export function useScanner(
   onScan: (code: string) => void,
-  { enabled = true, now = performanceNow }: { enabled?: boolean; now?: () => number } = {},
+  {
+    enabled = true,
+    now = performanceNow,
+    acceptEvent,
+  }: {
+    enabled?: boolean;
+    now?: () => number;
+    acceptEvent?: (target: EventTarget | null) => boolean;
+  } = {},
 ) {
   const buffer = useRef<ScanBuffer>(emptyScanBuffer());
   const handler = useRef(onScan);
@@ -79,7 +87,13 @@ export function useScanner(
   useEffect(() => {
     if (!enabled) return;
     function onKey(event: KeyboardEvent) {
-      if (isEditable(event.target) || event.ctrlKey || event.metaKey || event.altKey) {
+      if (
+        (acceptEvent && !acceptEvent(event.target)) ||
+        isEditable(event.target) ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      ) {
         buffer.current = emptyScanBuffer();
         return;
       }
@@ -92,5 +106,5 @@ export function useScanner(
     }
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [enabled, now]);
+  }, [enabled, now, acceptEvent]);
 }

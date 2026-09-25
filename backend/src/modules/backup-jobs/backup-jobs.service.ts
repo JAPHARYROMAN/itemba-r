@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditScopeKind, AuditSeverity, BackupSchedule, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { computeNextBackupRunAt } from '../job-worker/backup-schedule';
+import { validateBackupSupport } from '../job-worker/backup-archive';
 import { CreateBackupJobDto, QueryBackupJobDto, UpdateBackupJobDto } from './dto/backup-job.dto';
 
 const SAFE_SELECT = {
@@ -61,6 +62,7 @@ export class BackupJobsService {
   }
 
   async create(dto: CreateBackupJobDto, userId: string) {
+    this.validateSupport(dto.backupType, dto.storageTarget);
     const schedule = dto.schedule ?? BackupSchedule.MANUAL;
     const scheduleConfig = (dto.scheduleConfig ?? {}) as Prisma.InputJsonObject;
     const nextRunAt =
@@ -99,6 +101,9 @@ export class BackupJobsService {
 
   async update(id: string, dto: UpdateBackupJobDto, userId: string) {
     const existing = await this.findOne(id);
+    if ((dto.status ?? existing.status) === 'ACTIVE') {
+      this.validateSupport(existing.backupType, dto.storageTarget ?? existing.storageTarget);
+    }
     const schedule = dto.schedule ?? existing.schedule;
     const scheduleConfig =
       dto.scheduleConfig !== undefined
@@ -159,5 +164,13 @@ export class BackupJobsService {
       severity: AuditSeverity.HIGH,
     });
     return { success: true };
+  }
+
+  private validateSupport(type: string, target?: string) {
+    try {
+      validateBackupSupport(type, target);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
   }
 }

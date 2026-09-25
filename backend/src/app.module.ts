@@ -12,6 +12,7 @@ import { redisConfig } from './common/config/redis.config';
 import { AuthModule } from './modules/auth/auth.module';
 import { FuelReportingModule } from './modules/fuel-reporting/fuel-reporting.module';
 import { SalesDeskModule } from './modules/sales-desk/sales-desk.module';
+import { RecordsModule } from './modules/records/records.module';
 import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
 import { CashDeskModule } from './modules/cash-desk/cash-desk.module';
 import { InvoiceDeskModule } from './modules/invoice-desk/invoice-desk.module';
@@ -253,6 +254,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     InvoiceDeskModule,
     CashDeskModule,
     SalesDeskModule,
+    RecordsModule,
     DeskReportsModule,
     UsersModule,
     RolesModule,

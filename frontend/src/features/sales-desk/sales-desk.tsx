@@ -5,6 +5,7 @@ import { AppGlyph } from '@/components/os/app-glyph';
 import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { getApp } from '@/lib/apps';
 import { useDeskRecordSelection } from '@/components/workspace/desk-record-selection';
+import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
 import {
@@ -39,10 +40,11 @@ export function SalesDesk({ targetRecordId }: { targetRecordId?: string } = {}) 
     manage = hasPermission('sales_desk.manage'),
     cashAccess = hasPermission('cash_desk.view'),
     pay = hasPermission('sales_desk.payments') && cashAccess && hasPermission('cash_desk.record');
-  const [section, setSection] = useWorkspaceState<'overview' | 'sales' | 'customers'>(
-      'sales-desk.section',
+  const [section, setSection] = useDeskSection('sales-desk', [
       'overview',
-    ),
+      'sales',
+      'customers',
+    ] as const),
     [scope, setScope] = useWorkspaceState<Scope>('sales-desk.scope', {
       companyId: '',
       divisionId: '',

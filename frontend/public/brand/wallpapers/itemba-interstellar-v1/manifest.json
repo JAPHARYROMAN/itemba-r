@@ -1,0 +1,63 @@
+{
+  "id": "itemba-interstellar-v1",
+  "name": "Interstellar",
+  "version": 1,
+  "generatedWith": "Built-in image generation",
+  "wallpapers": [
+    {
+      "id": "itemba-interstellar-v1-event-horizon",
+      "name": "Event Horizon",
+      "image": "event-horizon.webp",
+      "thumbnail": "thumbnails/event-horizon.webp",
+      "original": "originals/event-horizon.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 231322,
+      "sha256": "4ce97629549e37dc64dd4becb93933275a4e0db18b9aa38a2c5df1243180c275"
+    },
+    {
+      "id": "itemba-interstellar-v1-saturn-drift",
+      "name": "Saturn Drift",
+      "image": "saturn-drift.webp",
+      "thumbnail": "thumbnails/saturn-drift.webp",
+      "original": "originals/saturn-drift.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 210468,
+      "sha256": "a83b8f66bbc86efab2e5dcdc91189fa9e352364ddd93d29abd15635bf002e739"
+    },
+    {
+      "id": "itemba-interstellar-v1-nebula-bloom",
+      "name": "Nebula Bloom",
+      "image": "nebula-bloom.webp",
+      "thumbnail": "thumbnails/nebula-bloom.webp",
+      "original": "originals/nebula-bloom.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 237838,
+      "sha256": "edb01bb0dff132498f695f6445d78864c31c0bddc16a0bbec0e040562107ce01"
+    },
+    {
+      "id": "itemba-interstellar-v1-frozen-orbit",
+      "name": "Frozen Orbit",
+      "image": "frozen-orbit.webp",
+      "thumbnail": "thumbnails/frozen-orbit.webp",
+      "original": "originals/frozen-orbit.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 350174,
+      "sha256": "73dc1da5979f7138eb0681227e3add4acff94174b8b8abbcdcd9efba2aa0085b"
+    },
+    {
+      "id": "itemba-interstellar-v1-stellar-passage",
+      "name": "Stellar Passage",
+      "image": "stellar-passage.webp",
+      "thumbnail": "thumbnails/stellar-passage.webp",
+      "original": "originals/stellar-passage.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 293272,
+      "sha256": "adc328a0a9523f4e9f03dcc5f649fb0001712fc4ee9fbd4cdebf7c25525a60da"
+    }
+  ]
+}

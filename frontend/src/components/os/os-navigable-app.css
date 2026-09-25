@@ -16,12 +16,22 @@
   min-width: 0;
 }
 .os-app-history {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 6px 14px;
   border-bottom: 1px solid var(--os-line, var(--aurora-border));
   background: var(--aurora-card);
+}
+.os-app-location {
+  text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .os-app-history > :is(button, a) {
   display: grid;

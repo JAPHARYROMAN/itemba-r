@@ -15,11 +15,24 @@ const STATUS_COLORS: Record<string, string> = {
   CANCELLED: 'bg-gray-100 text-gray-500',
 };
 
+interface BackupRun {
+  id: string;
+  backupRunNumber: string;
+  backupJobId?: string | null;
+  backupType: string;
+  status: string;
+  startedAt?: string | null;
+  durationMs?: number | null;
+  fileSizeBytes?: string | null;
+  errorMessage?: string | null;
+  coverageWarning?: string | null;
+}
+
 export default function BackupRunsPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('backup_runs.view');
   const beginRequest = useRequestGuard();
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<BackupRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -29,7 +42,7 @@ export default function BackupRunsPage() {
     setLoading(true);
     setLoadError('');
     try {
-      const rows = await backendList<any>('/backup-runs', { signal: request.signal });
+      const rows = await backendList<BackupRun>('/backup-runs', { signal: request.signal });
       if (!request.current()) return;
       setData(rows);
     } catch (err) {
@@ -82,18 +95,19 @@ export default function BackupRunsPage() {
             <tbody>
               {data.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No backup runs found</td></tr>
-              ) : data.map((row: any) => (
+              ) : data.map((row) => (
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs">{row.backupRunNumber}</td>
                   <td className="px-4 py-3">{row.backupJobId ?? '—'}</td>
                   <td className="px-4 py-3">{row.backupType ?? '—'}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}>{row.status}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.coverageWarning ? 'bg-amber-100 text-amber-900' : STATUS_COLORS[row.status] ?? 'bg-gray-100 text-gray-600'}`}>{row.coverageWarning ? 'REVIEW REQUIRED' : row.status}</span>
+                    {row.coverageWarning ? <p className="mt-2 max-w-sm text-xs text-amber-800 dark:text-amber-300">{row.coverageWarning}</p> : null}
                   </td>
                   <td className="px-4 py-3 text-gray-400">{row.startedAt ? new Date(row.startedAt).toLocaleString() : '—'}</td>
                   <td className="px-4 py-3">{row.durationMs != null ? `${(row.durationMs / 1000).toFixed(1)}s` : '—'}</td>
-                  <td className="px-4 py-3">{row.fileSizeBytes != null ? `${(row.fileSizeBytes / 1024 / 1024).toFixed(1)} MB` : '—'}</td>
-                  <td className="px-4 py-3 text-red-600 text-xs max-w-[200px] truncate">{row.errorMessage ?? '—'}</td>
+                  <td className="px-4 py-3">{row.fileSizeBytes != null ? `${(Number(row.fileSizeBytes) / 1024 / 1024).toFixed(1)} MB` : '—'}</td>
+                  <td className="px-4 py-3 text-red-600 text-xs max-w-[280px] break-words">{row.errorMessage ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

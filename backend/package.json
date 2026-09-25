@@ -16,6 +16,7 @@
     "format:check": "node scripts/check-format-baseline.mjs",
     "test": "node --max-old-space-size=8192 node_modules/jest/bin/jest.js --runInBand",
     "test:watch": "jest --watch",
+    "test:records": "node scripts/test-records.cjs",
     "test:msaidizi-benchmark-score": "node --test test/benchmarks/tool-search-score.test.mjs test/benchmarks/tool-search-client.test.mjs",
     "test:msaidizi-task-persistence": "cross-env MSAIDIZI_CHAT_DISPOSABLE_DB=1 NODE_ENV=test NODE_OPTIONS=--max-old-space-size=8192 node ./node_modules/jest/bin/jest.js --config test/jest-e2e.json --runInBand test/msaidizi-task-persistence.e2e-spec.ts",
     "test:msaidizi-worker-restart": "cross-env MSAIDIZI_CHAT_DISPOSABLE_DB=1 NODE_ENV=test NODE_OPTIONS=--max-old-space-size=8192 node ./node_modules/jest/bin/jest.js --config test/jest-e2e.json --runInBand test/msaidizi-worker-restart.e2e-spec.ts",
@@ -85,7 +86,7 @@
     "helmet": "^7.1.0",
     "ioredis": "^5.10.1",
     "mammoth": "^1.12.3",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.1.1",
     "otplib": "^13.4.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -124,6 +125,11 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.5.4"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   },
   "jest": {
     "moduleFileExtensions": [

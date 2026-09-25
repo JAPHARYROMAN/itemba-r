@@ -1,10 +1,19 @@
 'use client';
-import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), summary, textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 let scrollLocks = 0;
 let originalOverflow = '';
@@ -22,12 +31,8 @@ export function WindowModalProvider({
   active: boolean;
   children: React.ReactNode;
 }) {
-  const value = useMemo(() => ({target,active}),[target,active]);
-  return (
-    <WindowPortalContext.Provider value={value}>
-      {children}
-    </WindowPortalContext.Provider>
-  );
+  const value = useMemo(() => ({ target, active }), [target, active]);
+  return <WindowPortalContext.Provider value={value}>{children}</WindowPortalContext.Provider>;
 }
 /** Workspace windows must not clip dialogs when their content uses container queries. */
 export function ModalPortalProvider({ children }: { children: React.ReactNode }) {
@@ -49,6 +54,10 @@ function availableControls(panel: HTMLElement) {
   return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((control) => {
     let current: HTMLElement | null = control;
     while (current && current !== panel) {
+      if (current instanceof HTMLDetailsElement && !current.open) {
+        const summary = current.querySelector(':scope > summary');
+        if (!summary?.contains(control)) return false;
+      }
       if (
         current.hidden ||
         current.inert ||
@@ -79,6 +88,8 @@ interface ModalProps {
   placement?: 'center' | 'right';
   /** Stable trigger when this dialog opens from a menu or another temporary surface. */
   returnFocusRef?: React.RefObject<HTMLElement | null>;
+  /** Hand off focus after the exit animation, when selecting another workspace. */
+  onAfterClose?: () => void;
 }
 
 const SIZE_MAP: Record<string, string> = {
@@ -102,6 +113,7 @@ export function Modal({
   onChangeCapture,
   placement = 'center',
   returnFocusRef,
+  onAfterClose,
 }: ModalProps) {
   const portal = useContext(PortalContext);
   const windowPortal = useContext(WindowPortalContext);
@@ -110,6 +122,13 @@ export function Modal({
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const unmountFocus = useRef<{ panel: HTMLElement | null; target: HTMLElement | null } | null>(
+    null,
+  );
+  const afterClose = useRef(onAfterClose);
+  useEffect(() => {
+    afterClose.current = onAfterClose;
+  }, [onAfterClose]);
 
   useEffect(() => {
     if (open) {
@@ -121,7 +140,10 @@ export function Modal({
     }
     if (!rendered) return;
 
-    const timer = window.setTimeout(() => setRendered(false), 160);
+    const timer = window.setTimeout(() => {
+      setRendered(false);
+      afterClose.current?.();
+    }, 160);
     return () => window.clearTimeout(timer);
   }, [open, rendered]);
 
@@ -134,12 +156,24 @@ export function Modal({
     const panel = panelRef.current;
     const focusable = panel ? availableControls(panel)[0] : null;
     const returnTarget = returnFocusRef?.current ?? restoreFocusRef.current;
+    unmountFocus.current = { panel, target: returnTarget };
     if (!panel?.contains(document.activeElement)) (focusable ?? panel)?.focus();
     return () => {
       if (!windowPortal || panel?.contains(document.activeElement)) returnTarget?.focus?.();
       restoreFocusRef.current = null;
+      unmountFocus.current = null;
     };
   }, [open, rendered, returnFocusRef, windowPortal]);
+
+  // An immediately unmounted form loses its active element before passive cleanup.
+  // Restore it while the panel still exists; animated closes use the effect above.
+  useLayoutEffect(
+    () => () => {
+      const remembered = unmountFocus.current;
+      if (remembered?.panel?.contains(document.activeElement)) remembered.target?.focus();
+    },
+    [],
+  );
 
   // ESC to close + trap Tab focus within the dialog
   useEffect(() => {

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AuditSeverity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { backupCoverageWarning, validateBackupSupport } from '../job-worker/backup-archive';
 
 function buildSelect(canDownload: boolean) {
   return {
@@ -26,6 +27,7 @@ function buildSelect(canDownload: boolean) {
 function serializeBackupRun(record: Record<string, any>) {
   return {
     ...record,
+    coverageWarning: backupCoverageWarning(record),
     fileSizeBytes:
       record.fileSizeBytes === null || record.fileSizeBytes === undefined
         ? record.fileSizeBytes
@@ -78,10 +80,11 @@ export class BackupRunsService {
 
   async create(dto: any, userId: string) {
     let backupType = dto.backupType;
+    let storageTarget: string | undefined;
     if (dto.backupJobId) {
       const job = await this.prisma.backupJob.findFirst({
         where: { id: dto.backupJobId, deletedAt: null },
-        select: { id: true, backupType: true, status: true },
+        select: { id: true, backupType: true, status: true, storageTarget: true },
       });
       if (!job) throw new NotFoundException('Backup job not found');
       if (job.status !== 'ACTIVE') {
@@ -91,10 +94,16 @@ export class BackupRunsService {
         throw new BadRequestException('backupType must match the selected backup job');
       }
       backupType = job.backupType;
+      storageTarget = job.storageTarget;
     }
 
     if (!backupType) {
       throw new BadRequestException('backupType is required when backupJobId is not supplied');
+    }
+    try {
+      validateBackupSupport(backupType, storageTarget);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {

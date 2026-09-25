@@ -6,6 +6,7 @@ using Itemba.Msaidizi.Companion.Service.Security;
 
 namespace Itemba.Msaidizi.Companion.Tests;
 
+[Collection(NativeProcessTimingGroup.Name)]
 public sealed class GovernedSystemToolRunnerTests : IDisposable
 {
   private readonly string _directory = Path.Combine(
@@ -222,14 +223,9 @@ public sealed class GovernedSystemToolRunnerTests : IDisposable
     string pidFile,
     CancellationToken cancellationToken)
   {
-    var command =
-      "$p = Start-Process -PassThru -FilePath $env:COMSPEC "
-      + "-ArgumentList @('/d','/s','/c','ping -n 30 127.0.0.1 >nul'); "
-      + $"[IO.File]::WriteAllText('{EscapePowerShell(pidFile)}', [string]$p.Id); "
-      + "$p.WaitForExit()";
     return runner.RunAsync(
       GovernedSystemTool.ScheduledTasks,
-      PowerShellArguments(command),
+      PowerShellArguments(DescendantProcessFixture.PowerShellCommand(pidFile)),
       4_096,
       cancellationToken).AsTask();
   }
@@ -310,4 +306,69 @@ public sealed class GovernedSystemToolRunnerTests : IDisposable
       last = index;
     }
   }
+}
+
+internal static class DescendantProcessFixture
+{
+  public static string PowerShellCommand(string pidFile)
+  {
+    var escapedPath = pidFile.Replace("'", "''", StringComparison.Ordinal);
+    // Keep native process fixtures in this existing reviewed test boundary.
+    // These tests measure Job Object ownership, cancellation and timeout. Start
+    // the child directly, without importing Start-Process or asking ShellExecute
+    // to create a console in a non-interactive test session.
+    return "$ErrorActionPreference = 'Stop'; "
+      + "$info = [Diagnostics.ProcessStartInfo]::new(); "
+      + "$info.FileName = $env:COMSPEC; "
+      + "$info.Arguments = '/d /s /c ping -n 30 127.0.0.1 >nul'; "
+      + "$info.UseShellExecute = $false; $info.CreateNoWindow = $true; "
+      + "$p = [Diagnostics.Process]::Start($info); "
+      + $"[IO.File]::WriteAllText('{escapedPath}', [string]$p.Id); "
+      + "$p.WaitForExit()";
+  }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class NativeProcessTimingGroup : ICollectionFixture<NativeProcessTimingFixture>
+{
+  public const string Name = "Native process timing";
+}
+
+public sealed class NativeProcessTimingFixture : IAsyncLifetime
+{
+  public async Task InitializeAsync()
+  {
+    // Cold Windows PowerShell initialization on a shared runner can consume the
+    // entire command budget before a descendant exists. Warm this fixed image
+    // during bounded fixture setup, then preserve all measured timeout and
+    // termination assertions. The collection prevents competing timing probes.
+    var startInfo = new ProcessStartInfo(Path.Combine(
+      Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+    {
+      UseShellExecute = false,
+      CreateNoWindow = true,
+    };
+    foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "exit 0" })
+    {
+      startInfo.ArgumentList.Add(argument);
+    }
+    using var process = Process.Start(startInfo)
+      ?? throw new InvalidOperationException("PowerShell timing fixture did not start.");
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    try
+    {
+      await process.WaitForExitAsync(deadline.Token);
+      Assert.Equal(0, process.ExitCode);
+    }
+    finally
+    {
+      if (!process.HasExited)
+      {
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit(3_000);
+      }
+    }
+  }
+
+  public Task DisposeAsync() => Task.CompletedTask;
 }
