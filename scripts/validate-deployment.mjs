@@ -74,6 +74,9 @@ const sampleEnv = {
   WEBSITE_HOST: 'validation.local',
   WEBSITE_WWW_HOST: 'www.validation.local',
   ACME_EMAIL: 'ops@validation.local',
+  SHARED_EDGE_NETWORK: 'itemba-shared-edge-validation',
+  FUELGRID_APP_HOST: 'fuelgrid.validation.local',
+  FUELGRID_API_HOST: 'api.fuelgrid.validation.local',
   JOB_WORKER_ENABLED: 'true',
   SEED_ADMIN_EMAIL: 'admin@validation.local',
   SEED_ADMIN_PASSWORD: 'seed-admin-deploy-validation-secret-40',
@@ -683,6 +686,36 @@ function assertDeploymentShape(target, config) {
   assert(target, caddy.environment?.WEBSITE_HOST, 'caddy has website hostname');
   assert(target, caddy.environment?.WEBSITE_WWW_HOST, 'caddy has website www hostname');
   assert(target, caddy.environment?.ACME_EMAIL, 'caddy has ACME email');
+  if (target.name === 'production') {
+    assert(
+      target,
+      Object.hasOwn(caddy.networks ?? {}, 'shared_edge'),
+      'caddy joins Fuel Grid shared edge',
+    );
+    assertEqual(
+      target,
+      config.networks?.shared_edge?.external,
+      true,
+      'shared edge is externally managed',
+    );
+    assertEqual(
+      target,
+      config.networks?.shared_edge?.name,
+      sampleEnv.SHARED_EDGE_NETWORK,
+      'shared edge honours configured name',
+    );
+    for (const key of ['FUELGRID_APP_HOST', 'FUELGRID_API_HOST']) {
+      assertEqual(target, caddy.environment?.[key], sampleEnv[key], `caddy forwards ${key}`);
+    }
+    for (const [name, service] of Object.entries(config.services)) {
+      if (name !== 'caddy')
+        assert(
+          target,
+          !Object.hasOwn(service.networks ?? {}, 'shared_edge'),
+          `${name} stays off the shared edge`,
+        );
+    }
+  }
 
   const caddyPorts = (caddy.ports ?? []).map((port) =>
     String(port.published ?? port.target ?? port),

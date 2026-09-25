@@ -37,6 +37,7 @@ const target = useStaging
     };
 
 const sharedEdgeNetwork = `itemba-shared-edge-smoke-${process.pid}`;
+const fuelGridProbe = `itemba-fuelgrid-probe-${process.pid}`;
 
 const sampleEnv = {
   POSTGRES_DB: target.postgresDb,
@@ -87,6 +88,7 @@ try {
   exitCode = 1;
 } finally {
   compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
+  runDocker(['rm', '-f', fuelGridProbe], { allowFailure: true });
   runDocker(['network', 'rm', sharedEdgeNetwork], { allowFailure: true });
   rmSync(tempDir, { recursive: true, force: true });
 }
@@ -100,6 +102,34 @@ async function runSmoke() {
   compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
   runDocker(['network', 'create', sharedEdgeNetwork]);
   compose(['up', '--build', '-d']);
+
+  if (target.name === 'production') {
+    // Check real container DNS/connectivity, without a Fuel Grid installation or public port.
+    runDocker([
+      'run',
+      '--detach',
+      '--name',
+      fuelGridProbe,
+      '--network',
+      sharedEdgeNetwork,
+      '--network-alias',
+      'fuelgrid-api',
+      'node:22-alpine',
+      'node',
+      '-e',
+      "require('http').createServer((req,res)=>res.end('fuelgrid-shared-edge-smoke')).listen(8080,'0.0.0.0')",
+    ]);
+    await waitForContainerCommand(
+      'Caddy reaches Fuel Grid on shared edge',
+      'caddy',
+      [
+        'sh',
+        '-ec',
+        'test "$(wget -qO- http://fuelgrid-api:8080/readyz)" = "fuelgrid-shared-edge-smoke"',
+      ],
+      30_000,
+    );
+  }
 
   await waitForContainerCommand(
     'backend readiness',
