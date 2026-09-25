@@ -38,6 +38,7 @@ function makeService() {
   );
   return {
     service,
+    backupRunFindMany,
     queryMocks: [backupJobFindMany, backupRunFindMany, backupRunCount],
   };
 }
@@ -59,5 +60,33 @@ describe('BackupsService dashboard group scope', () => {
 
     await expect(service.getDashboard(COMPANY_USER)).rejects.toBeInstanceOf(ForbiddenException);
     for (const query of queryMocks) expect(query).not.toHaveBeenCalled();
+  });
+
+  it('returns JSON-safe exact file sizes for recent and successful backups', async () => {
+    const { service, backupRunFindMany } = makeService();
+    const largeSize = 9007199254740993n;
+    backupRunFindMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        { id: 'large-run', fileSizeBytes: largeSize },
+        { id: 'empty-run', fileSizeBytes: 0n },
+        { id: 'pending-run', fileSizeBytes: null },
+      ])
+      .mockResolvedValueOnce([
+        { backupType: 'FULL', fileSizeBytes: largeSize },
+        { backupType: 'FILES', fileSizeBytes: null },
+      ]);
+
+    const response = JSON.parse(JSON.stringify(await service.getDashboard(GROUP_USER)));
+
+    expect(response.recentRuns).toEqual([
+      { id: 'large-run', fileSizeBytes: '9007199254740993' },
+      { id: 'empty-run', fileSizeBytes: '0' },
+      { id: 'pending-run', fileSizeBytes: null },
+    ]);
+    expect(response.lastSuccessfulByType).toEqual([
+      { backupType: 'FULL', fileSizeBytes: '9007199254740993' },
+      { backupType: 'FILES', fileSizeBytes: null },
+    ]);
   });
 });
