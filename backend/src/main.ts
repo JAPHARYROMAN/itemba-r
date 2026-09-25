@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, ShutdownSignal } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -31,6 +31,10 @@ async function bootstrap() {
     bufferLogs: true,
     logger: isProd ? ['error', 'warn', 'log'] : ['error', 'warn', 'log', 'debug'],
   });
+
+  // Docker sends SIGTERM before its stop timeout. Run the registered database,
+  // worker and cache cleanup hooks instead of leaving PID 1 to be force-killed.
+  app.enableShutdownHooks([ShutdownSignal.SIGTERM, ShutdownSignal.SIGINT]);
 
   // Table-PDF exports post the full row matrix (worst case ~3MB); the express
   // default 100kb JSON limit would reject them.
