@@ -14,6 +14,8 @@ import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { pagination } from '../../common/utils/pagination';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
+import { assertCashAccountForScope } from '../../common/services/cash-account-scope.helper';
 
 type ReceivableSalesOrderSnapshot = {
   id: string;
@@ -33,6 +35,7 @@ export class ReceivablesService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly org: OrganizationScopeService,
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
@@ -392,14 +395,33 @@ export class ReceivablesService {
             outstandingAmount: Prisma.Decimal;
             paidAmount: Prisma.Decimal;
             status: string;
+            currency: string;
           }>
-        >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName", "receivableNumber", "outstandingAmount", "paidAmount", "status"
+        >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName", "receivableNumber", "outstandingAmount", "paidAmount", "status", "currency"
           FROM "receivables"
           WHERE "id" = ${id} AND "deletedAt" IS NULL
           FOR UPDATE`;
 
         if (!locked) throw new NotFoundException('Receivable not found');
         await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+        await this.org.assertCanAccessScope(
+          user,
+          locked.divisionId,
+          locked.branchId,
+          AccessLevel.WRITE,
+        );
+        if (dto.cashAccountId) {
+          const account = await assertCashAccountForScope(tx, {
+            cashAccountId: dto.cashAccountId,
+            companyId: locked.companyId,
+            divisionId: locked.divisionId,
+            branchId: locked.branchId,
+          });
+          if (account.currency !== locked.currency)
+            throw new BadRequestException(
+              'Receipt account currency must match the receivable currency.',
+            );
+        }
 
         // A settled receivable (WRITTEN_OFF / PAID / CANCELLED) must not accept a
         // payment. writeOff leaves outstandingAmount non-zero, so the amount check
@@ -677,7 +699,17 @@ export class ReceivablesService {
     }
 
     const search = query.search?.trim();
-    if (search) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ receivableNumber: { contains: search, mode: 'insensitive' } }, { customerName: { contains: search, mode: 'insensitive' } }, { customer: { name: { contains: search, mode: 'insensitive' } } }] }];
+    if (search)
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { receivableNumber: { contains: search, mode: 'insensitive' } },
+            { customerName: { contains: search, mode: 'insensitive' } },
+            { customer: { name: { contains: search, mode: 'insensitive' } } },
+          ],
+        },
+      ];
     return where;
   }
 

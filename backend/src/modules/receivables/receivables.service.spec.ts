@@ -15,6 +15,7 @@ function lockedReceivable(overrides: Record<string, unknown> = {}) {
     outstandingAmount: '500',
     paidAmount: '0',
     status: 'OPEN',
+    currency: 'TZS',
     ...overrides,
   };
 }
@@ -39,7 +40,11 @@ function makeService(
     cashAccount: {
       findFirst: jest
         .fn()
-        .mockResolvedValue(opts.cashAccount ?? { companyId: 'company-1', accountType: 'CASH' }),
+        .mockResolvedValue(
+          opts.cashAccount === undefined
+            ? { companyId: 'company-1', accountType: 'CASH', currency: 'TZS' }
+            : opts.cashAccount && { currency: 'TZS', ...opts.cashAccount },
+        ),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     chartOfAccount: {
@@ -85,6 +90,7 @@ function makeService(
     accountResolver,
     postingEngine,
     { next: jest.fn() } as any,
+    { assertCanAccessScope: jest.fn().mockResolvedValue(undefined) } as any,
   );
 
   // Stub findOne (used by writeOff to load the receivable before the tx).
@@ -101,6 +107,26 @@ function makeService(
 }
 
 describe('ReceivablesService.recordPayment GL settlement', () => {
+  it('rejects a receiving account in another currency before changing the balance', async () => {
+    const { service, tx, postingEngine } = makeService(lockedReceivable(), {
+      cashAccount: { companyId: 'company-1', accountType: 'BANK', currency: 'USD' },
+    });
+    await expect(
+      service.recordPayment('rec-1', { amount: 10, cashAccountId: 'usd-bank' }, user),
+    ).rejects.toThrow('currency');
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+  it('rejects a receiving drawer belonging to a different branch', async () => {
+    const { service, tx } = makeService(lockedReceivable({ branchId: 'branch-a' }), {
+      cashAccount: { companyId: 'company-1', accountType: 'CASH_ON_HAND', branchId: 'branch-b' },
+    });
+    await expect(
+      service.recordPayment('rec-1', { amount: 10, cashAccountId: 'other-till' }, user),
+    ).rejects.toThrow('branch');
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+  });
   it('posts a balanced DR Cash / CR AR_CONTROL settlement journal', async () => {
     const { service, postingEngine } = makeService(lockedReceivable());
 

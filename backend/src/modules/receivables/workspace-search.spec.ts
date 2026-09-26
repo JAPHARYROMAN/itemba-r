@@ -21,7 +21,7 @@ describe('Financial workspace search', () => {
       const unused = {} as any;
       const service =
         kind === 'receivable'
-          ? new ReceivablesService(prisma, unused, scope, unused, unused, unused)
+          ? new ReceivablesService(prisma, unused, scope, unused, unused, unused, unused)
           : kind === 'payable'
             ? new PayablesService(prisma, unused, scope, unused, unused, unused)
             : new ExpensesService(prisma, unused, unused, unused, scope, unused, unused, unused);

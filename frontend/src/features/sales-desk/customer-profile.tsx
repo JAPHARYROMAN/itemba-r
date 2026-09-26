@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { Btn, Card, PageHeader, SkeletonCardGrid, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { useUnsavedWork } from '@/components/workspace/unsaved-work-provider';
 import { useWorkspaceRouter as useGuardedRouter } from '@/components/workspace/workspace-navigation';
 import {
@@ -407,6 +408,10 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
     canView && canViewFinanceReports && !!data?.customer.companyId,
   );
   const agingDetail = agingResult.data;
+  useLinkedDeskChanges('sales-desk', editing || confirmBlock, () => {
+    load();
+    agingResult.reload();
+  });
   const creditColor = useMemo(() => {
     const utilization = data?.summary.creditUtilizationPct ?? 0;
     if (utilization >= 90) return 'partner-tone-danger';
