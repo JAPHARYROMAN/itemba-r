@@ -29,6 +29,7 @@ import {
 } from './trading-partner-types';
 import './workspace.css';
 import './trading-partner.css';
+import { useWorkspaceState } from './workspace-session';
 interface PartnerSummary {
   total: number;
   active: number;
@@ -41,7 +42,14 @@ interface PartnerSummary {
   openPayableBalance?: number;
   overduePayableBalance?: number;
 }
-export function TradingPartnerWorkspace({ kind }: { kind: PartnerKind }) {
+export function TradingPartnerWorkspace({
+  kind,
+  workspace,
+}: {
+  kind: PartnerKind;
+  workspace?: 'sales-desk';
+}) {
+  const stateKey = (field: string) => (workspace ? `sales-desk.customers.${field}` : undefined);
   const { hasPermission, loading: authLoading } = useAuth();
   const canRead = !authLoading && hasPermission(`${kind}.view`),
     canCreate = hasPermission(`${kind}.create`),
@@ -54,10 +62,10 @@ export function TradingPartnerWorkspace({ kind }: { kind: PartnerKind }) {
   const supplier = kind === 'suppliers',
     label = partnerLabel(kind),
     title = `${label}s`;
-  const [search, setSearch] = useState(''),
-    [query, setQuery] = useState(''),
-    [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({
+  const [search, setSearch] = useWorkspaceState(stateKey('search'), ''),
+    [query, setQuery] = useState(search.trim()),
+    [page, setPage] = useWorkspaceState(stateKey('page'), 1);
+  const [filters, setFilters] = useWorkspaceState(stateKey('filters'), {
     companyId: '',
     divisionId: '',
     branchId: '',
@@ -72,12 +80,13 @@ export function TradingPartnerWorkspace({ kind }: { kind: PartnerKind }) {
     } | null>(null),
     [notice, setNotice] = useState('');
   useEffect(() => {
+    if (query === search.trim()) return;
     const timer = setTimeout(() => {
       setQuery(search.trim());
       setPage(1);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, query, setPage]);
   const scope = {
     search: query,
     companyId: filters.companyId,
@@ -116,7 +125,7 @@ export function TradingPartnerWorkspace({ kind }: { kind: PartnerKind }) {
   );
   useEffect(() => {
     if (result.data && !result.data.data.length && page > 1) setPage((p) => p - 1);
-  }, [result.data, page]);
+  }, [result.data, page, setPage]);
   const change = (key: keyof typeof filters, value: string) => {
     setFilters((p) => ({
       ...p,
@@ -163,7 +172,13 @@ export function TradingPartnerWorkspace({ kind }: { kind: PartnerKind }) {
             ? 'Supplier relationships, procurement scope and payment exposure.'
             : 'Customer relationships, sales scope and credit exposure.'
         }
-        breadcrumbs={[{ label: 'Operations', href: '/operations' }, { label: title }]}
+        breadcrumbs={[
+          {
+            label: workspace ? 'Sales Desk' : 'Operations',
+            href: workspace ? '/sales-desk' : '/operations',
+          },
+          { label: title },
+        ]}
         actions={canCreate && <Btn onClick={() => setEditor({})}>New {label.toLowerCase()}</Btn>}
       />
       <div className="workspace-summary">
@@ -374,7 +389,11 @@ export function TradingPartnerWorkspace({ kind }: { kind: PartnerKind }) {
         ]}
         actions={(r) => (
           <>
-            <Link href={`/operations/${kind}/${r.id}`}>Open profile</Link>
+            <Link
+              href={workspace ? `/sales-desk/customers/${r.id}` : `/operations/${kind}/${r.id}`}
+            >
+              Open profile
+            </Link>
             {canUpdate && (
               <>
                 <Btn variant="secondary" onClick={() => setEditor({ record: r })}>

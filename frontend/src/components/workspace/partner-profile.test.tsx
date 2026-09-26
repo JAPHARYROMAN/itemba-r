@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import CustomerProfile from '@/app/(dashboard)/operations/customers/[id]/page';
+import { CustomerProfile as CustomerProfileView } from '@/features/sales-desk/customer-profile';
 import SupplierProfile from '@/app/(dashboard)/operations/suppliers/[id]/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
@@ -17,6 +17,9 @@ const state = vi.hoisted(() => ({
   page: vi.fn(),
   push: vi.fn(),
 }));
+function CustomerProfile() {
+  return <CustomerProfileView customerId={state.id} />;
+}
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: state.id }),
   useRouter: () => ({ push: state.push }),
@@ -426,7 +429,9 @@ describe.each(['customer', 'supplier'] as const)('%s profile', (kind) => {
     );
     expect(state.push).not.toHaveBeenCalled();
     await userEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
-    expect(state.push).toHaveBeenCalledWith(`/operations/${kind}s`);
+    expect(state.push).toHaveBeenCalledWith(
+      kind === 'customer' ? '/sales-desk/customers' : `/operations/${kind}s`,
+    );
   });
 });
 describe('Customer aging and profile mutations', () => {

@@ -5,8 +5,11 @@ import Dashboard from '@/app/(dashboard)/operations/page';
 import PurchaseDetail from '@/app/(dashboard)/operations/purchase-orders/[id]/page';
 import DraftDetail from '@/app/(dashboard)/operations/purchase-orders/order-drafts/[id]/page';
 import DraftPrint from '@/app/(dashboard)/operations/purchase-orders/order-drafts/[id]/print/page';
-import SalesDetail from '@/app/(dashboard)/operations/sales-orders/[id]/page';
+import { BusinessSaleDetail } from '@/features/sales-desk/business-sale-detail';
 import SalesPrint from '@/app/(dashboard)/operations/sales-orders/[id]/print/page';
+function SalesDetail() {
+  return <BusinessSaleDetail saleId="record-1" />;
+}
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),

@@ -21,6 +21,53 @@ describe('workspace storage validation', () => {
       validateLayout({ version: 1, activeId: 'one', windows: [window, window] }),
     ).toThrow();
   });
+  it('recovers migrated customer and sales windows with safe filters only', () => {
+    for (const href of [
+      '/operations/customers/customer',
+      '/operations/sales-orders/sale',
+      '/sales-desk/sales/sale',
+    ]) {
+      const input = {
+        ...window,
+        appId: 'sales-desk',
+        href,
+        viewState: {
+          version: 1,
+          values: {
+            'sales-desk.business-sales.search': 'reference',
+            'sales-desk.customers.filters': {
+              companyId: 'company',
+              branchId: 'branch',
+              status: 'ACTIVE',
+            },
+          },
+        },
+      };
+      expect(validateLayout({ version: 1, activeId: 'one', windows: [input] })).toBeTruthy();
+    }
+    for (const href of ['/operations/suppliers', '/operations/customers-elsewhere'])
+      expect(() =>
+        validateLayout({ version: 1, windows: [{ ...window, appId: 'sales-desk', href }] }),
+      ).toThrow();
+    expect(() =>
+      validateLayout({
+        version: 1,
+        windows: [
+          {
+            ...window,
+            appId: 'sales-desk',
+            href: '/sales-desk',
+            viewState: {
+              version: 1,
+              values: {
+                'sales-desk.customers.filters': { bankAccount: 'not-a-view-setting' },
+              },
+            },
+          },
+        ],
+      }),
+    ).toThrow('Unsupported window view settings');
+  });
   it('rejects unsupported appearance schema and unsafe accents', () => {
     expect(() => validateAppearance({ version: 2 })).toThrow();
     expect(() =>

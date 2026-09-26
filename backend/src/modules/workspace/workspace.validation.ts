@@ -59,7 +59,7 @@ export function validateAppearance(value: unknown): Prisma.InputJsonObject {
 const hosts: Record<string, RegExp> = {
   'invoice-desk': /^\/invoice-desk(?:\/|$)/,
   'cash-desk': /^\/cash-desk(?:\/|$)/,
-  'sales-desk': /^\/sales-desk(?:\/|$)/,
+  'sales-desk': /^\/(sales-desk|operations\/customers|operations\/sales-orders)(?:\/|$)/,
   inventory: /^\/(inventory|master-data\/products)(?:\/|$)/,
   payroll: /^\/(payroll|hr|payroll-config)(?:\/|$)/,
   reports: /^\/(reports|accounting-engine|finance\/bank-reconciliations)(?:\/|$)/,

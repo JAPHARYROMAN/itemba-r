@@ -67,6 +67,14 @@ describe('App registration contract', () => {
     const sales = getApp('sales-desk')!;
     expect(sales.launch.kind).toBe('route');
     expect(appForPath('/sales-desk')).toBe(sales);
+    expect(appForPath('/operations/customers')).toBe(sales);
+    expect(appForPath('/operations/customers/customer-id')).toBe(sales);
+    expect(appForPath('/operations/sales-orders/sale-id')).toBe(sales);
+    expect(appForPath('/sales-desk/sales/sale-id')).toBe(sales);
+    expect(appForPath('/operations/suppliers')).not.toBe(sales);
+    expect(appForPath('/operations/customers-extra')).not.toBe(sales);
+    expect(canOpenApp(sales, (p) => p === 'customers.view')).toBe(true);
+    expect(canOpenApp(sales, (p) => p === 'sales.view')).toBe(true);
     expect(canOpenApp(sales, (p) => p === 'sales_desk.view')).toBe(true);
     expect(canOpenApp(sales, (p) => p === 'cash_desk.view')).toBe(false);
   });
