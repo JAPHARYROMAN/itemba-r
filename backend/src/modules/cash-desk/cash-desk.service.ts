@@ -50,8 +50,21 @@ export class CashDeskService {
     private readonly intercompany?: IntercompanyLoanLedgerService,
   ) {}
 
-  directory(user: AuthUser) {
-    return this.invoices.directory(user);
+  async directory(user: AuthUser, companyId?: string) {
+    const directory = await this.invoices.directory(user, companyId);
+    if (!this.companies.isGroupScoped(user)) return directory;
+    // Group users may read a named company even without an explicit grant.
+    // Offer that selection without broadening unbounded financial queries.
+    return {
+      ...directory,
+      companies: await this.db.company.findMany({
+        where: { status: 'ACTIVE', deletedAt: null },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      requiresCompanySelection:
+        !companyId && (await this.companies.accessibleCompanyIds(user)).length === 0,
+    };
   }
   private async scope(
     user: AuthUser,

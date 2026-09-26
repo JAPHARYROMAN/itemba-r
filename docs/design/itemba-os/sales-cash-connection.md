@@ -21,6 +21,9 @@ remain separately labelled; their balances are not added to business account bal
   complete receipt history additionally require the existing cash-account and customer-payment
   viewing permissions. Collection requires `receivables.manage`; company and branch write scope,
   account custody and matching currency are checked on the backend.
+- Group users without company grants choose an explicit company in Cash Desk. The directory
+  offers active company names and reloads the selected company's divisions and branches;
+  unfiltered financial queries remain closed and no write access is granted.
 - The projection uses a repeatable-read snapshot. More than 10,000 source records requires a
   narrower organisation selection rather than silently truncating totals.
 - Open Cash Desk and Sales Desk windows refetch through their authorised endpoints after

@@ -63,6 +63,29 @@ beforeEach(() => {
   api.post.mockResolvedValue({ id: 'saved' });
 });
 describe('Cash Desk', () => {
+  it('loads the selected company directory when an explicit financial scope is required', async () => {
+    const fallback = api.get.getMockImplementation()!;
+    api.get.mockImplementation((path, ...args) =>
+      path === '/cash-desk/directory'
+        ? Promise.resolve({ ...directory, requiresCompanySelection: true })
+        : fallback(path, ...args),
+    );
+    render(<CashDesk />);
+    expect(
+      await screen.findByText(
+        'Choose a company to view its sales, collections and account balances.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Company', { exact: true }), {
+      target: { value: 'company' },
+    });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/cash-desk/directory',
+        expect.objectContaining({ query: { companyId: 'company' } }),
+      ),
+    );
+  });
   it('opens a searched movement from a fresh scoped read and preserves linked-loan controls', async () => {
     const fallback = api.get.getMockImplementation()!;
     const movement = {

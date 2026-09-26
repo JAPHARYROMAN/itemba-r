@@ -30,8 +30,8 @@ export class CashDeskController {
   salesConnection(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
     return this.sales.read(u, q);
   }
-  @Get('directory') directory(@CurrentUser() u: AuthUser) {
-    return this.service.directory(u);
+  @Get('directory') directory(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
+    return this.service.directory(u, q.companyId);
   }
   @Get('accounts') accounts(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
     return this.service.accounts(u, q);

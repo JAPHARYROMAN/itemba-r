@@ -100,7 +100,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
   const [expenseRevision, setExpenseRevision] = useState(0);
   const deferred = useDeferredValue(search),
     query = Object.fromEntries(Object.entries(scope).filter(([, v]) => v));
-  const directory = useWorkspaceResource<Directory>('/cash-desk/directory', {}, allowed);
+  const directory = useWorkspaceResource<Directory & { requiresCompanySelection?: boolean }>(
+    '/cash-desk/directory',
+    scope.companyId ? { companyId: scope.companyId } : {},
+    allowed,
+  );
   const allAccounts = useWorkspaceResource<Account[]>('/cash-desk/accounts', {}, allowed);
   const accounts = useWorkspaceResource<Account[]>('/cash-desk/accounts', query, allowed);
   const overview = useWorkspaceResource<CashOverview>(
@@ -357,7 +361,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
               <label key={key}>
                 <span>{['Company', 'Division', 'Branch'][i]}</span>
                 <select value={scope[key]} onChange={(e) => changeScope(key, e.target.value)}>
-                  <option value="">All {['companies', 'divisions', 'branches'][i]}</option>
+                  <option value="">
+                    {i === 0 && directory.data?.requiresCompanySelection
+                      ? 'Choose a company'
+                      : `All ${['companies', 'divisions', 'branches'][i]}`}
+                  </option>
                   {list.map((x) => (
                     <option key={x.id} value={x.id}>
                       {x.name}
@@ -368,6 +376,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
             );
           })}
         </div>
+        {directory.data?.requiresCompanySelection && (
+          <p role="status" className="cash-connection-note">
+            Choose a company to view its sales, collections and account balances.
+          </p>
+        )}
         {notice && (
           <p role="status" className="desk-success">
             {notice}
