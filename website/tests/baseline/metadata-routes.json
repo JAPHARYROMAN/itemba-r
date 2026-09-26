@@ -1,0 +1,221 @@
+{
+  "sitemap": {
+    "status": 200,
+    "headers": {
+      "cache-control": "public, max-age=0, must-revalidate",
+      "content-type": "application/xml",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+    },
+    "matchesExpectedOrder": true,
+    "entries": [
+      {
+        "loc": "https://www.itembagrouptz.com/",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "1"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/about",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.85"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.88"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/locations",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.82"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/companies",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.9"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/capabilities",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/insights",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.76"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/company-profile",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.86"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/partnerships",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.82"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/faq",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.78"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/contact",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.8"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services/fuel-and-lubricants",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services/trade-and-distribution",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services/logistics-and-cross-border-transit",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services/construction-supplies-and-hardware",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services/hospitality-and-lodging",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/services/real-estate-and-property",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.84"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/locations/songwe-tunduma",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.83"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/companies/mwanjalisi-oil",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.82"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/companies/westsides-company",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.82"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/companies/itemba-enterprises",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.82"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/insights/route-business-enquiry-itemba-group",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.74"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/insights/tunduma-corridor-fuel-trade-logistics",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.74"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/insights/choose-right-itemba-company",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.74"
+      },
+      {
+        "loc": "https://www.itembagrouptz.com/insights/supplier-bulk-purchase-enquiries",
+        "lastmod": "2026-05-14T00:00:00.000Z",
+        "changefreq": "monthly",
+        "priority": "0.74"
+      }
+    ],
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n<url>\n<loc>https://www.itembagrouptz.com/</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>1</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/about</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.85</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.88</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/locations</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.82</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/companies</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.9</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/capabilities</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/insights</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.76</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/company-profile</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.86</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/partnerships</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.82</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/faq</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.78</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/contact</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.8</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services/fuel-and-lubricants</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services/trade-and-distribution</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services/logistics-and-cross-border-transit</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services/construction-supplies-and-hardware</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services/hospitality-and-lodging</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/services/real-estate-and-property</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.84</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/locations/songwe-tunduma</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.83</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/companies/mwanjalisi-oil</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.82</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/companies/westsides-company</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.82</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/companies/itemba-enterprises</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.82</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/insights/route-business-enquiry-itemba-group</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.74</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/insights/tunduma-corridor-fuel-trade-logistics</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.74</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/insights/choose-right-itemba-company</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.74</priority>\n</url>\n<url>\n<loc>https://www.itembagrouptz.com/insights/supplier-bulk-purchase-enquiries</loc>\n<lastmod>2026-05-14T00:00:00.000Z</lastmod>\n<changefreq>monthly</changefreq>\n<priority>0.74</priority>\n</url>\n</urlset>\n"
+  },
+  "robots": {
+    "status": 200,
+    "headers": {
+      "cache-control": "public, max-age=0, must-revalidate",
+      "content-type": "text/plain",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+    },
+    "body": "User-Agent: *\nAllow: /\n\nSitemap: https://www.itembagrouptz.com/sitemap.xml\n"
+  },
+  "manifest": {
+    "status": 200,
+    "headers": {
+      "cache-control": "public, max-age=0, must-revalidate",
+      "content-type": "application/manifest+json",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+    },
+    "json": {
+      "name": "Itemba Group | Tanzania's Diversified Business Group",
+      "short_name": "Itemba Group",
+      "description": "Itemba Group is a Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating across energy, trade, logistics, construction, hospitality, real estate, and manufacturing.",
+      "start_url": "/",
+      "scope": "/",
+      "display": "standalone",
+      "background_color": "#080f1e",
+      "theme_color": "#080f1e",
+      "lang": "en-TZ",
+      "categories": [
+        "business"
+      ],
+      "icons": [
+        {
+          "src": "/favicon-48x48.png",
+          "sizes": "48x48",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/site-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/site-icon-512.png",
+          "sizes": "512x512",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/logo.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ]
+    },
+    "body": "{\"name\":\"Itemba Group | Tanzania's Diversified Business Group\",\"short_name\":\"Itemba Group\",\"description\":\"Itemba Group is a Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating across energy, trade, logistics, construction, hospitality, real estate, and manufacturing.\",\"start_url\":\"/\",\"scope\":\"/\",\"display\":\"standalone\",\"background_color\":\"#080f1e\",\"theme_color\":\"#080f1e\",\"lang\":\"en-TZ\",\"categories\":[\"business\"],\"icons\":[{\"src\":\"/favicon-48x48.png\",\"sizes\":\"48x48\",\"type\":\"image/png\",\"purpose\":\"any\"},{\"src\":\"/site-icon-192.png\",\"sizes\":\"192x192\",\"type\":\"image/png\",\"purpose\":\"any\"},{\"src\":\"/site-icon-512.png\",\"sizes\":\"512x512\",\"type\":\"image/png\",\"purpose\":\"any\"},{\"src\":\"/logo.png\",\"sizes\":\"512x512\",\"type\":\"image/png\"}]}"
+  }
+}

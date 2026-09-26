@@ -1,0 +1,116 @@
+{
+  "hostRedirects": [
+    {
+      "host": "itembagrouptz.com",
+      "path": "/",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com"
+    },
+    {
+      "host": "itembagrouptz.com",
+      "path": "/about",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/about"
+    },
+    {
+      "host": "itembagrouptz.com",
+      "path": "/services/fuel-and-lubricants",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/services/fuel-and-lubricants"
+    },
+    {
+      "host": "itembagrouptz.com",
+      "path": "/faq?utm_source=test",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/faq?utm_source=test"
+    },
+    {
+      "host": "itembagroup.com",
+      "path": "/",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com"
+    },
+    {
+      "host": "itembagroup.com",
+      "path": "/about",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/about"
+    },
+    {
+      "host": "itembagroup.com",
+      "path": "/services/fuel-and-lubricants",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/services/fuel-and-lubricants"
+    },
+    {
+      "host": "itembagroup.com",
+      "path": "/faq?utm_source=test",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/faq?utm_source=test"
+    },
+    {
+      "host": "www.itembagroup.com",
+      "path": "/",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com"
+    },
+    {
+      "host": "www.itembagroup.com",
+      "path": "/about",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/about"
+    },
+    {
+      "host": "www.itembagroup.com",
+      "path": "/services/fuel-and-lubricants",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/services/fuel-and-lubricants"
+    },
+    {
+      "host": "www.itembagroup.com",
+      "path": "/faq?utm_source=test",
+      "status": 308,
+      "location": "https://www.itembagrouptz.com/faq?utm_source=test"
+    }
+  ],
+  "controlHosts": [
+    {
+      "host": "www.itembagrouptz.com",
+      "path": "/about",
+      "status": 200,
+      "location": null,
+      "xRobotsTag": null
+    },
+    {
+      "host": "staging-www.itembagrouptz.com",
+      "path": "/about",
+      "status": 200,
+      "location": null,
+      "xRobotsTag": null
+    },
+    {
+      "host": "www-staging.itembagrouptz.com",
+      "path": "/about",
+      "status": 200,
+      "location": null,
+      "xRobotsTag": null
+    }
+  ],
+  "trailingSlash": [
+    {
+      "path": "/about/",
+      "status": 308,
+      "location": "/about"
+    },
+    {
+      "path": "/services/fuel-and-lubricants/",
+      "status": 308,
+      "location": "/services/fuel-and-lubricants"
+    },
+    {
+      "path": "/company-profile/",
+      "status": 308,
+      "location": "/company-profile"
+    }
+  ]
+}

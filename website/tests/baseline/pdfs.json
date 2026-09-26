@@ -1,0 +1,295 @@
+{
+  "source": "public/downloads",
+  "files": {
+    "itemba-group-profile.pdf": {
+      "profile": "group",
+      "path": "/downloads/itemba-group-profile.pdf",
+      "bytes": 4836670,
+      "sha256": "3f4233cd6300d245ce925c2737321e92a67a4342a6e2e6afef5b0786b0f5737a",
+      "pageCount": 9,
+      "pageSizes": [
+        "595.92x842.88"
+      ],
+      "info": {
+        "title": "Company Profile | Itemba Group",
+        "author": null,
+        "subject": null,
+        "creator": "Chromium",
+        "producer": "Skia/PDF m149",
+        "creationDate": "2026-06-27T11:54:59.000Z",
+        "modificationDate": "2026-06-27T11:54:59.000Z"
+      },
+      "footerPageTotals": [
+        9
+      ],
+      "charsPerPage": [
+        1256,
+        1244,
+        705,
+        1960,
+        1275,
+        3635,
+        912,
+        2504,
+        83
+      ],
+      "totalChars": 13582,
+      "keyStrings": {
+        "Itemba Group": true,
+        "Company Profile and Capability Statement": true,
+        "PREPARED FOR INSTITUTIONAL REVIEW": true,
+        "KEY PROFILE FACTS": true,
+        "Itemba Filling Station, Along Tunduma-Ileje Highway": true,
+        "P.O. Box 132, Tunduma-Songwe, Tanzania": true,
+        "+255 758 793 511": true,
+        "+255 745 215 047": true,
+        "info@itembagrouptz.com": true,
+        "www.itembagrouptz.com": true,
+        "EST. 2012": true,
+        "INDEPENDENT LEGAL COMPANIES": true,
+        "Westsides Company Ltd": true,
+        "Mwanjalisi Oil Company Ltd": true,
+        "Itemba Enterprises Co Ltd": true,
+        "TARGET MARKET": true
+      },
+      "headings": [
+        "ITEMBA",
+        "PREPARED FOR INSTITUTIONAL REVIEW",
+        "KEY PROFILE FACTS",
+        "PROFILE TYPE",
+        "HEAD OFFICE",
+        "OPERATING COMPANIES",
+        "WEBSITE",
+        "PUBLIC CONTACT",
+        "INDEPENDENT LEGAL COMPANIES",
+        "EST. 2012",
+        "RELATED OPERATING IMAGES",
+        "COMPANY OVERVIEW",
+        "VISION AND MISSION",
+        "BUSINESS ACTIVITIES",
+        "TARGET MARKET",
+        "OPERATIONS AND BRANCHES",
+        "COMPANY HISTORY",
+        "ASSETS AND CAPACITY",
+        "FINANCIAL OVERVIEW",
+        "COMPLIANCE INFORMATION",
+        "COMPETITIVE STRENGTHS",
+        "FUTURE PLANS",
+        "PURPOSE OF BANKING RELATIONSHIP",
+        "ATTACHMENTS AVAILABLE ON REQUEST"
+      ]
+    },
+    "itemba-westsides-profile.pdf": {
+      "profile": "westsides",
+      "path": "/downloads/itemba-westsides-profile.pdf",
+      "bytes": 6596668,
+      "sha256": "5e7735fec26c20c6ed471f4cc7516ba196232a97c53c697cba0171753428fb19",
+      "pageCount": 4,
+      "pageSizes": [
+        "595.92x842.88"
+      ],
+      "info": {
+        "title": "Company Profile | Itemba Group",
+        "author": null,
+        "subject": null,
+        "creator": "Chromium",
+        "producer": "Skia/PDF m149",
+        "creationDate": "2026-06-27T11:55:00.000Z",
+        "modificationDate": "2026-06-27T11:55:00.000Z"
+      },
+      "footerPageTotals": [
+        4
+      ],
+      "charsPerPage": [
+        1011,
+        1142,
+        2211,
+        528
+      ],
+      "totalChars": 4895,
+      "keyStrings": {
+        "135764": true,
+        "Itemba Group": true,
+        "Company Profile and Capability Statement": true,
+        "PREPARED FOR INSTITUTIONAL REVIEW": true,
+        "KEY PROFILE FACTS": true,
+        "Itemba Filling Station, Along Tunduma-Ileje Highway": true,
+        "P.O. Box 132, Tunduma-Songwe, Tanzania": true,
+        "+255 758 793 511": true,
+        "+255 745 215 047": true,
+        "info@itembagrouptz.com": true,
+        "www.itembagrouptz.com": true,
+        "EST. 2012": true,
+        "Westsides Company Ltd": true,
+        "ITEMBA-HARDWARE": true,
+        "UZUNGUNI INN": true,
+        "136-065-580": true,
+        "9 June 2017": true
+      },
+      "headings": [
+        "ITEMBA",
+        "PREPARED FOR INSTITUTIONAL REVIEW",
+        "KEY PROFILE FACTS",
+        "LEGAL NAME",
+        "INCORPORATED",
+        "INCORPORATION NO.",
+        "LEGAL STATUS",
+        "WEBSITE",
+        "HEAD OFFICE CONTACT",
+        "DIRECTORS",
+        "EST. 2012",
+        "RELATED OPERATING IMAGES",
+        "COMPANY OVERVIEW",
+        "BUSINESS ACTIVITIES",
+        "PRODUCTS AND SERVICES",
+        "TARGET MARKET",
+        "OPERATIONS AND BRANCHES",
+        "COMPETITIVE STRENGTHS",
+        "FINANCIAL OVERVIEW",
+        "COMPLIANCE INFORMATION",
+        "PURPOSE OF BANKING RELATIONSHIP",
+        "ATTACHMENTS AVAILABLE ON REQUEST"
+      ]
+    },
+    "itemba-mwanjalisi-profile.pdf": {
+      "profile": "mwanjalisi",
+      "path": "/downloads/itemba-mwanjalisi-profile.pdf",
+      "bytes": 3736520,
+      "sha256": "142201927771d367592a37e4c7d707f9b2a26c07fa0f612b9afb6099842d19f2",
+      "pageCount": 4,
+      "pageSizes": [
+        "595.92x842.88"
+      ],
+      "info": {
+        "title": "Company Profile | Itemba Group",
+        "author": null,
+        "subject": null,
+        "creator": "Chromium",
+        "producer": "Skia/PDF m149",
+        "creationDate": "2026-06-27T11:55:01.000Z",
+        "modificationDate": "2026-06-27T11:55:01.000Z"
+      },
+      "footerPageTotals": [
+        4
+      ],
+      "charsPerPage": [
+        1014,
+        1138,
+        1963,
+        357
+      ],
+      "totalChars": 4475,
+      "keyStrings": {
+        "134897": true,
+        "Itemba Group": true,
+        "Company Profile and Capability Statement": true,
+        "PREPARED FOR INSTITUTIONAL REVIEW": true,
+        "KEY PROFILE FACTS": true,
+        "Itemba Filling Station, Along Tunduma-Ileje Highway": true,
+        "P.O. Box 132, Tunduma-Songwe, Tanzania": true,
+        "+255 758 793 511": true,
+        "+255 745 215 047": true,
+        "info@itembagrouptz.com": true,
+        "www.itembagrouptz.com": true,
+        "EST. 2012": true,
+        "Mwanjalisi Oil Company Ltd": true,
+        "UZUNGUNI PARKING YARD": true,
+        "134-036-206": true,
+        "2 May 2017": true
+      },
+      "headings": [
+        "ITEMBA",
+        "PREPARED FOR INSTITUTIONAL REVIEW",
+        "KEY PROFILE FACTS",
+        "LEGAL NAME",
+        "INCORPORATED",
+        "INCORPORATION NO.",
+        "LEGAL STATUS",
+        "WEBSITE",
+        "HEAD OFFICE CONTACT",
+        "DIRECTORS",
+        "EST. 2012",
+        "RELATED OPERATING IMAGES",
+        "COMPANY OVERVIEW",
+        "BUSINESS ACTIVITIES",
+        "TARGET MARKET",
+        "OPERATIONS AND BRANCHES",
+        "COMPETITIVE STRENGTHS",
+        "FINANCIAL OVERVIEW",
+        "COMPLIANCE INFORMATION",
+        "PURPOSE OF BANKING RELATIONSHIP",
+        "ATTACHMENTS AVAILABLE ON REQUEST"
+      ]
+    },
+    "itemba-enterprises-profile.pdf": {
+      "profile": "enterprises",
+      "path": "/downloads/itemba-enterprises-profile.pdf",
+      "bytes": 4112219,
+      "sha256": "3d5398cb701c8d83c02d7300faad1ef258598f0d60a981ac3b589d9695476ae8",
+      "pageCount": 4,
+      "pageSizes": [
+        "595.92x842.88"
+      ],
+      "info": {
+        "title": "Company Profile | Itemba Group",
+        "author": null,
+        "subject": null,
+        "creator": "Chromium",
+        "producer": "Skia/PDF m149",
+        "creationDate": "2026-06-27T11:55:02.000Z",
+        "modificationDate": "2026-06-27T11:55:02.000Z"
+      },
+      "footerPageTotals": [
+        4
+      ],
+      "charsPerPage": [
+        924,
+        978,
+        2068,
+        402
+      ],
+      "totalChars": 4375,
+      "keyStrings": {
+        "88774": true,
+        "Itemba Group": true,
+        "Company Profile and Capability Statement": true,
+        "PREPARED FOR INSTITUTIONAL REVIEW": true,
+        "KEY PROFILE FACTS": true,
+        "Itemba Filling Station, Along Tunduma-Ileje Highway": true,
+        "P.O. Box 132, Tunduma-Songwe, Tanzania": true,
+        "+255 758 793 511": true,
+        "+255 745 215 047": true,
+        "info@itembagrouptz.com": true,
+        "www.itembagrouptz.com": true,
+        "EST. 2012": true,
+        "Itemba Enterprises Co Ltd": true,
+        "Cross-Border Transit": true,
+        "116-321-378": true,
+        "20 January 2012": true
+      },
+      "headings": [
+        "ITEMBA",
+        "PREPARED FOR INSTITUTIONAL REVIEW",
+        "KEY PROFILE FACTS",
+        "LEGAL NAME",
+        "INCORPORATED",
+        "INCORPORATION NO.",
+        "LEGAL STATUS",
+        "WEBSITE",
+        "HEAD OFFICE CONTACT",
+        "EST. 2012",
+        "DIRECTORS",
+        "RELATED OPERATING IMAGES",
+        "COMPANY OVERVIEW",
+        "BUSINESS ACTIVITIES",
+        "TARGET MARKET",
+        "COMPANY HISTORY",
+        "COMPETITIVE STRENGTHS",
+        "FINANCIAL OVERVIEW",
+        "COMPLIANCE INFORMATION",
+        "PURPOSE OF BANKING RELATIONSHIP",
+        "ATTACHMENTS AVAILABLE ON REQUEST"
+      ]
+    }
+  }
+}
