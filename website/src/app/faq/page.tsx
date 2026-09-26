@@ -4,92 +4,25 @@ import AnimatedSection from '@/components/AnimatedSection';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import FaqList from '@/components/FaqList';
 import JsonLd from '@/components/JsonLd';
-import {
-  absoluteUrl,
-  breadcrumbJsonLd,
-  companyProfiles,
-  companyUrl,
-  faqJsonLd,
-  groupFaqs,
-  locationProfiles,
-  locationUrl,
-  partnershipFaqs,
-  serviceAreas,
-  serviceUrl,
-  site,
-  type Faq,
-} from '@/lib/site';
+import { enquiryPrompts } from '@/content/enquiry';
+import { faqPage, faqSections as buildFaqSections, type FaqSection } from '@/content/faqs';
+import { absoluteUrl, breadcrumbJsonLd, faqJsonLd, groupFaqs, site } from '@/lib/site';
 
-type FaqSection = {
-  id: string;
-  eyebrow: string;
-  title: string;
-  description: string;
-  href: string;
-  linkLabel: string;
-  faqs: readonly Faq[];
-};
+const { meta, hero } = faqPage;
 
 export const metadata: Metadata = {
-  title: 'Frequently Asked Questions',
-  description:
-    'Answers to common questions about Itemba Group, its companies, services, location, and business enquiry channels in Tanzania.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/faq') },
   openGraph: {
-    title: 'Itemba Group Frequently Asked Questions',
-    description:
-      'Answers about Itemba Group companies, fuel, trade, logistics, construction supplies, hospitality, real estate, and Songwe-Tunduma operations.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/faq'),
   },
 };
 
-const faqSections: FaqSection[] = [
-  {
-    id: 'partnerships',
-    eyebrow: 'Partnerships',
-    title: 'Partnerships and Supplier Enquiries',
-    description: 'Questions for suppliers, bulk buyers, logistics customers, contractors, and regional business partners.',
-    href: '/partnerships',
-    linkLabel: 'View partnerships',
-    faqs: partnershipFaqs,
-  },
-  {
-    id: 'group',
-    eyebrow: 'Group',
-    title: 'Itemba Group',
-    description: 'Core questions about the group structure, sectors, and enquiry channels.',
-    href: '/company-profile',
-    linkLabel: 'View company profile',
-    faqs: groupFaqs,
-  },
-  ...companyProfiles.map((company) => ({
-    id: `company-${company.slug}`,
-    eyebrow: 'Company',
-    title: company.name,
-    description: company.summary,
-    href: companyUrl(company.slug),
-    linkLabel: 'View company',
-    faqs: company.faqs,
-  })),
-  ...serviceAreas.map((service) => ({
-    id: `service-${service.slug}`,
-    eyebrow: 'Service',
-    title: service.title,
-    description: service.summary,
-    href: serviceUrl(service.slug),
-    linkLabel: 'View service',
-    faqs: service.faqs,
-  })),
-  ...locationProfiles.map((location) => ({
-    id: `location-${location.slug}`,
-    eyebrow: 'Location',
-    title: location.title,
-    description: location.summary,
-    href: locationUrl(location.slug),
-    linkLabel: 'View location',
-    faqs: location.faqs,
-  })),
-];
+// Legacy page: the group set keeps its origin/main wording (src/content/legacy.ts via @/lib/site).
+const faqSections: FaqSection[] = buildFaqSections({ groupFaqs });
 
 const allFaqs = faqSections.flatMap((section) => section.faqs);
 
@@ -97,7 +30,7 @@ const faqCollectionJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'CollectionPage',
   '@id': `${absoluteUrl('/faq')}#faq`,
-  name: 'Itemba Group Frequently Asked Questions',
+  name: meta.ogTitle,
   url: absoluteUrl('/faq'),
   about: {
     '@id': `${site.url}/#organization`,
@@ -139,15 +72,14 @@ export default function FaqPage() {
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
               <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Frequently asked questions
+                {hero.eyebrow}
               </span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Answers for <span className="gradient-text">customers and partners.</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
-              Quick answers about Itemba Group companies, services, location, and how to route
-              business enquiries to the right operating team.
+              {hero.lede}
             </p>
           </AnimatedSection>
         </div>
@@ -160,7 +92,7 @@ export default function FaqPage() {
             <AnimatedSection>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                  Browse topics
+                  {faqPage.topicsHeading}
                 </p>
                 <div className="space-y-2">
                   {faqSections.map((section) => (
@@ -178,8 +110,8 @@ export default function FaqPage() {
             <AnimatedSection delay={0.08} className="mt-5">
               <EnquiryRouter
                 compact
-                title="Still need help?"
-                description="Choose the relevant enquiry type and send a prepared message to the group office."
+                title={enquiryPrompts.faq.title}
+                description={enquiryPrompts.faq.description}
               />
             </AnimatedSection>
           </aside>

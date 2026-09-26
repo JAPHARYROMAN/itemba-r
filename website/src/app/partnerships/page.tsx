@@ -16,16 +16,18 @@ import {
   serviceUrl,
   site,
 } from '@/lib/site';
+import { enquiryPrompts } from '@/content/enquiry';
+import { partnershipsPage } from '@/content/partnerships';
+
+const { meta, hero, routes, process, faq } = partnershipsPage;
 
 export const metadata: Metadata = {
-  title: 'Partnerships',
-  description:
-    'Partnership and business enquiry routes for suppliers, bulk buyers, contractors, logistics customers, fuel customers, property, hospitality, and regional partners working with Itemba Group.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/partnerships') },
   openGraph: {
-    title: 'Partner with Itemba Group',
-    description:
-      'Supplier introductions, bulk purchase enquiries, fuel, logistics, construction supply, hospitality, and property opportunities with Itemba Group.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/partnerships'),
   },
 };
@@ -34,7 +36,7 @@ const partnershipsJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'WebPage',
   '@id': `${absoluteUrl('/partnerships')}#partnerships`,
-  name: 'Partner with Itemba Group',
+  name: meta.ogTitle,
   url: absoluteUrl('/partnerships'),
   description: metadata.description,
   about: {
@@ -85,15 +87,14 @@ export default function PartnershipsPage() {
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
               <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Business development
+                {hero.eyebrow}
               </span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Partner with <span className="gradient-text">Itemba Group.</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
-              A clear route for suppliers, commercial buyers, contractors, transport operators,
-              hospitality customers, property stakeholders and regional business partners.
+              {hero.lede}
             </p>
           </AnimatedSection>
         </div>
@@ -106,10 +107,10 @@ export default function PartnershipsPage() {
             <AnimatedSection className="mb-10">
               <div className="gold-line mb-6" />
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-                Partnership routes
+                {routes.eyebrow}
               </p>
               <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-                Start with the right operating team
+                {routes.title}
               </h2>
             </AnimatedSection>
 
@@ -118,7 +119,7 @@ export default function PartnershipsPage() {
                 <AnimatedSection key={area.id} delay={index * 0.05}>
                   <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-gold-400/50 hover:bg-white/[0.06]">
                     <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                      Routed to {area.routeTo}
+                      {routes.routedToPrefix} {area.routeTo}
                     </p>
                     <h3 className="mb-3 font-tight text-2xl font-black leading-tight tracking-tight text-white">
                       {area.title}
@@ -127,7 +128,7 @@ export default function PartnershipsPage() {
 
                     <div className="mb-5">
                       <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                        Good fit for
+                        {routes.goodFitLabel}
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {area.goodFit.map((fit) => (
@@ -140,7 +141,7 @@ export default function PartnershipsPage() {
 
                     <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
                       <div>
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Companies</p>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">{routes.companiesLabel}</p>
                         <div className="space-y-1.5">
                           {area.companySlugs.map((slug) => (
                             <Link key={slug} href={companyUrl(slug)} className="block text-gold-300 hover:text-gold-200">
@@ -150,7 +151,7 @@ export default function PartnershipsPage() {
                         </div>
                       </div>
                       <div>
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Services</p>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">{routes.servicesLabel}</p>
                         <div className="space-y-1.5">
                           {area.serviceSlugs.map((slug) => (
                             <Link key={slug} href={serviceUrl(slug)} className="block text-gold-300 hover:text-gold-200">
@@ -169,23 +170,18 @@ export default function PartnershipsPage() {
           <aside className="space-y-6 lg:sticky lg:top-24 lg:self-start">
             <AnimatedSection direction="left">
               <EnquiryRouter
-                title="Route a partnership enquiry"
-                description="Choose the closest enquiry type and send a prepared message to the group office."
+                title={enquiryPrompts.partnerships.title}
+                description={enquiryPrompts.partnerships.description}
               />
             </AnimatedSection>
 
             <AnimatedSection direction="left" delay={0.08}>
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                  How enquiries move
+                  {process.eyebrow}
                 </p>
                 <div className="space-y-4">
-                  {[
-                    ['1', 'Select the closest route'],
-                    ['2', 'Send details by WhatsApp, email, or phone'],
-                    ['3', 'The group office routes the enquiry internally'],
-                    ['4', 'The relevant company or division follows up'],
-                  ].map(([step, label]) => (
+                  {process.steps.map((label, index) => [String(index + 1), label]).map(([step, label]) => (
                     <div key={step} className="flex gap-3 text-sm text-slate-300">
                       <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gold-500 text-xs font-bold text-white">
                         {step}
@@ -206,11 +202,10 @@ export default function PartnershipsPage() {
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <h2 className="mb-4 font-tight text-3xl font-black leading-tight tracking-tight text-white">
-              Partnership questions
+              {faq.title}
             </h2>
             <p className="text-sm leading-relaxed text-slate-400">
-              Practical answers for suppliers, buyers, logistics customers and partners preparing to
-              contact Itemba Group.
+              {faq.body}
             </p>
           </AnimatedSection>
           <AnimatedSection direction="left">

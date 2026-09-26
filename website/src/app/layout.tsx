@@ -32,8 +32,7 @@ export const metadata: Metadata = {
     template: `%s | ${site.name}`,
   },
   description: site.description,
-  keywords:
-    'Itemba Group, Tanzania, Songwe, Tunduma, energy, fuel distribution, logistics, cross-border transit, trade distribution, construction supplies, hospitality, real estate, Mwanjalisi Oil, Westsides, Itemba Enterprises',
+  keywords: site.keywords,
   alternates: {
     canonical: '/',
   },
@@ -95,9 +94,9 @@ const organizationJsonLd = {
   address: {
     '@type': 'PostalAddress',
     streetAddress: contact.headOffice,
-    addressLocality: 'Tunduma',
-    addressRegion: 'Songwe',
-    addressCountry: 'TZ',
+    addressLocality: contact.address.locality,
+    addressRegion: contact.address.region,
+    addressCountry: contact.address.countryCode,
     postOfficeBoxNumber: contact.postal,
   },
   contactPoint: [
@@ -105,8 +104,8 @@ const organizationJsonLd = {
       '@type': 'ContactPoint',
       telephone: contact.primaryPhoneDisplay,
       contactType: 'business enquiries',
-      areaServed: ['TZ', 'ZM'],
-      availableLanguage: ['English', 'Swahili'],
+      areaServed: contact.areaServed,
+      availableLanguage: contact.availableLanguages,
     },
   ],
   subOrganization: companyProfiles.map((company) => ({
@@ -130,7 +129,7 @@ const websiteJsonLd = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${interTight.variable}`}>
+    <html lang={site.language} className={`${inter.variable} ${interTight.variable}`}>
       <body className="font-sans antialiased bg-white text-slate-900 overflow-x-hidden">
         <a href="#main-content" className="skip-link">
           Skip to content

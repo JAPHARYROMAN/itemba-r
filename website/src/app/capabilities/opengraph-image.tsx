@@ -1,11 +1,10 @@
+import { ogCards } from '@/content/og';
 import { OG_CONTENT_TYPE, OG_SIZE, ogImageFor } from '@/lib/og-card';
+
+const { alt: cardAlt, ...card } = ogCards.capabilities;
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = OG_CONTENT_TYPE;
-export const alt = 'Itemba Group capabilities';
+export const alt = cardAlt;
 
-export default ogImageFor({
-  eyebrow: 'Capabilities',
-  title: 'Built to move the southern corridor.',
-  subtitle: 'Energy, trade, logistics, hospitality, construction and property — under one group.',
-});
+export default ogImageFor(card);

@@ -1,5 +1,5 @@
 import { ImageResponse } from 'next/og';
-import { site } from '@/lib/site';
+import { site } from '@/content/site';
 
 /**
  * Shared renderer for per-page Open Graph cards (1200×630). Each route's
@@ -88,7 +88,7 @@ export function renderOgCard({ eyebrow, title, subtitle, accent = GOLD }: OgCard
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: '30px', fontWeight: 800 }}>{site.name}</div>
           <div style={{ color: '#f0cc6a', fontSize: '17px', marginTop: '4px' }}>
-            Mpemba-Tunduma · Songwe Region · Tanzania
+            {site.placeLine}
           </div>
         </div>
       </div>

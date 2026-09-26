@@ -16,6 +16,7 @@
     "test:e2e:quality": "node scripts/run-e2e.mjs --grep @quality",
     "budget": "node scripts/check-budgets.mjs --report-only && node scripts/check-html.mjs --report-only && node scripts/check-client-allowlist.mjs --report-only",
     "images": "node scripts/images/build-images.mjs",
+    "media:manifest": "node scripts/images/media-manifest.mjs",
     "snapshot:baseline": "node scripts/snapshot-routes.mjs --out tests/baseline --baseline",
     "snapshot": "node scripts/snapshot-routes.mjs --out test-results/snapshot",
     "pdf:facts": "node scripts/pdf-facts.mjs --out test-results/pdf-facts",

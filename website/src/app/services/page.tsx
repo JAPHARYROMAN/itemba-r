@@ -5,7 +5,9 @@ import BrandVisual from '@/components/BrandVisual';
 import CinematicImage from '@/components/cine/CinematicImage';
 import SectorIcon from '@/components/SectorIcon';
 import JsonLd from '@/components/JsonLd';
-import { getCompanyAccent, getServiceIcon } from '@/lib/company-accent';
+import { getCompanyAccent } from '@/lib/company-accent';
+import { companies } from '@/content/companies';
+import { serviceIcons, servicesPage } from '@/content/services';
 import {
   absoluteUrl,
   breadcrumbJsonLd,
@@ -15,15 +17,15 @@ import {
   site,
 } from '@/lib/site';
 
+const { meta, hero, directory, delivery } = servicesPage;
+
 export const metadata: Metadata = {
-  title: 'Services',
-  description:
-    'Explore Itemba Group services across fuel, trade distribution, logistics, construction supplies, hospitality, and real estate in Tanzania.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/services') },
   openGraph: {
-    title: 'Itemba Group Services',
-    description:
-      'Fuel, trade distribution, logistics, construction supplies, hospitality, and property services from Itemba Group companies.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/services'),
   },
 };
@@ -32,7 +34,7 @@ const servicesJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'CollectionPage',
   '@id': `${absoluteUrl('/services')}#services`,
-  name: 'Itemba Group Services',
+  name: meta.ogTitle,
   url: absoluteUrl('/services'),
   about: {
     '@id': `${site.url}/#organization`,
@@ -73,22 +75,26 @@ export default function ServicesPage() {
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
               <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Services &amp; capabilities
+                {hero.eyebrow}
               </span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Find the service. <span className="gradient-text">Meet the team behind it.</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
-              Fuel and energy, trade and distribution, logistics, hospitality, real estate and
-              construction supply — each handled by the operating company that runs it.
+              {hero.lede}
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
-              <span>6 service areas</span>
-              <span aria-hidden="true" className="text-gold-400">·</span>
-              <span>3 operating companies</span>
-              <span aria-hidden="true" className="text-gold-400">·</span>
-              <span>Songwe · Tunduma corridor</span>
+              {hero.facts.flatMap((fact, index) => [
+                ...(index > 0
+                  ? [
+                      <span key={`dot-${fact}`} aria-hidden="true" className="text-gold-400">
+                        ·
+                      </span>,
+                    ]
+                  : []),
+                <span key={fact}>{fact}</span>,
+              ])}
             </div>
           </AnimatedSection>
         </div>
@@ -100,19 +106,18 @@ export default function ServicesPage() {
           <AnimatedSection className="mb-12">
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Capability directory
+              {directory.eyebrow}
             </p>
             <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-              Services people search for
+              {directory.title}
             </h2>
           </AnimatedSection>
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             {serviceAreas.map((service, index) => {
               const accent = getCompanyAccent(service.companySlug);
-              const shortCompany = service.companyName
-                .replace(/\s+(Co|Company)\s+Ltd$/i, '')
-                .replace(/\s+Ltd$/i, '');
+              const shortCompany =
+                companies.find((company) => company.slug === service.companySlug)?.shortName ?? service.companyName;
               return (
                 <AnimatedSection key={service.slug} delay={index * 0.05}>
                   <Link
@@ -137,7 +142,7 @@ export default function ServicesPage() {
                     <div className="relative p-7 sm:p-8">
                       <div className="mb-5 flex items-center justify-between gap-3">
                         <span className={`inline-flex h-11 w-11 items-center justify-center rounded-xl border ${accent.chip}`}>
-                          <SectorIcon name={getServiceIcon(service.visual)} className="h-6 w-6" />
+                          <SectorIcon name={serviceIcons[service.visual]} className="h-6 w-6" />
                         </span>
                         <span className={`rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-widest ${accent.chip}`}>
                           {shortCompany}
@@ -160,7 +165,7 @@ export default function ServicesPage() {
                         ))}
                       </div>
                       <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-white">
-                        View service
+                        {directory.cardAction}
                         <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                         </svg>
@@ -180,15 +185,14 @@ export default function ServicesPage() {
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <h2 className="mb-4 font-tight text-3xl font-black leading-tight tracking-tight text-white">
-              Company-led delivery
+              {delivery.title}
             </h2>
             <p className="text-sm leading-relaxed text-slate-400">
-              Every service area maps back to one of the group operating companies, keeping
-              enquiries clear and accountable from the first contact.
+              {delivery.body}
             </p>
           </AnimatedSection>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {['mwanjalisi-oil', 'westsides-company', 'itemba-enterprises'].map((slug) => {
+            {companies.map(({ slug }) => {
               const relatedServices = serviceAreas.filter((service) => service.companySlug === slug);
               const companyName = relatedServices[0]?.companyName;
               const accent = getCompanyAccent(slug);

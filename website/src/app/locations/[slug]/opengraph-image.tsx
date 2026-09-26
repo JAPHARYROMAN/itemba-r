@@ -1,10 +1,11 @@
 import { ImageResponse } from 'next/og';
-import { locationProfiles } from '@/lib/site';
+import { locationProfiles } from '@/content/locations';
+import { ogFallbacks } from '@/content/og';
 import { OG_CONTENT_TYPE, OG_SIZE, clamp, renderOgCard } from '@/lib/og-card';
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = OG_CONTENT_TYPE;
-export const alt = 'Itemba Group location';
+export const alt = ogFallbacks.location.alt;
 
 export function generateStaticParams() {
   return locationProfiles.map((location) => ({ slug: location.slug }));
@@ -16,8 +17,8 @@ export default async function Image({ params }: { params: Promise<{ slug: string
 
   return new ImageResponse(
     renderOgCard({
-      eyebrow: location?.eyebrow ?? 'Locations',
-      title: location?.title ?? 'Itemba Group Location',
+      eyebrow: location?.eyebrow ?? ogFallbacks.location.eyebrow,
+      title: location?.title ?? ogFallbacks.location.title,
       subtitle: location ? clamp(location.summary) : undefined,
     }),
     size,

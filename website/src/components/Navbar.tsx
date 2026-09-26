@@ -5,17 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-
-const links = [
-  { href: '/',          label: 'Home' },
-  { href: '/about',     label: 'About' },
-  { href: '/services',   label: 'Services' },
-  { href: '/companies', label: 'Companies' },
-  { href: '/locations', label: 'Location' },
-  { href: '/partnerships', label: 'Partnerships' },
-  { href: '/company-profile', label: 'Profile' },
-  { href: '/contact',   label: 'Contact' },
-];
+import { brandLabel, legacyHeaderLinks as links } from '@/content/nav';
 
 export default function Navbar() {
   const [scrolled, setScrolled]   = useState(false);
@@ -44,7 +34,7 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto px-5 sm:px-8 h-20 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 flex-shrink-0" aria-label="Itemba Group home">
+        <Link href="/" className="flex items-center gap-3 flex-shrink-0" aria-label={brandLabel}>
           <div className="rounded-sm">
             {/* Save logo to website/public/logo.png */}
             <Image

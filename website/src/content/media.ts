@@ -1,0 +1,293 @@
+/**
+ * Media registry: every photograph the site uses, by stable id.
+ *
+ * Content refers to images by id (`mediaImage('mpemba-station-wide')`), never
+ * by path, so the image pipeline can re-point an id without touching copy.
+ * Each entry records who the image belongs to (`entity`), where it came from
+ * (`provenance`) and, for third-party images, the credit and licence that
+ * must be rendered next to it. Intrinsic size and the blur placeholder come
+ * from ./media.generated.ts (npm run media:manifest).
+ *
+ * Paths stay under /images/ because the PDF script rewrites exactly that
+ * prefix and JSON-LD publishes these URLs.
+ */
+import 'server-only';
+import type { BooleanFlagName } from './flags';
+import { mediaGenerated, type GeneratedMediaSrc } from './media.generated';
+
+/** Who the photograph shows / belongs to. */
+export type MediaEntity = 'group' | 'mwanjalisi' | 'westsides' | 'enterprises' | 'location';
+
+/**
+ * - own: Itemba's own photograph (phone originals in website/images/).
+ * - stock: a third-party image used under the recorded licence (credit + licence required).
+ * - unknown: provenance or licence not recorded; needs owner confirmation before prominent use.
+ */
+export type MediaProvenance = 'own' | 'stock' | 'unknown';
+
+export type MediaEntry = {
+  src: GeneratedMediaSrc;
+  /** Canonical alt text (ownership-carrying). A usage may override it in context. */
+  alt: string;
+  entity: MediaEntity;
+  provenance: MediaProvenance;
+  /** Rendered credit line, e.g. "Richard grivas / Wikimedia Commons". */
+  credit?: string;
+  licence?: string;
+  licenceUrl?: string;
+  /** Only render when this flag is on. */
+  requires?: BooleanFlagName;
+  note?: string;
+};
+
+export const media = {
+  // ── Mwanjalisi Oil: ITEMBA stations ──────────────────────────────────────
+  'mpemba-station-wide': {
+    src: '/images/fuel-stations/itemba-filling-station-wide.webp',
+    alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    note: 'Raw: images/itemba filling station 002.jpg (4000x3000). Plan lead for the home hero.',
+  },
+  'mpemba-station-roadside': {
+    src: '/images/fuel-stations/itemba-station-wide-yard.webp',
+    alt: 'ITEMBA filling station forecourt seen from the highway on the Songwe Region corridor',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    note: 'Raw: images/itemba.jpg (4000x3000).',
+  },
+  'mpemba-truck-canopy': {
+    src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
+    alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy managed by Mwanjalisi Oil',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+  'mpemba-forecourt': {
+    src: '/images/fuel-stations/itemba-mpemba-forecourt.webp',
+    alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+  'mpemba-service-yard': {
+    src: '/images/fuel-stations/itemba-mpemba-service-yard.webp',
+    alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+  'uzunguni-pump-island': {
+    src: '/images/fuel-stations/itemba-uzunguni-pump-island.webp',
+    alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Company Ltd',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+  'uzunguni-forecourt-wide': {
+    src: '/images/fuel-stations/itemba-uzunguni-forecourt-wide.webp',
+    alt: 'ITEMBA-UZUNGUNI filling station forecourt on the TANZAM Highway',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+
+  // ── Mwanjalisi Oil: UZUNGUNI PARKING YARD ────────────────────────────────
+  'parking-container-trucks': {
+    src: '/images/parking/uzunguni-parking-container-trucks.webp',
+    alt: 'Container trucks parked at UZUNGUNI PARKING YARD',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+  'parking-yard-trucks': {
+    src: '/images/parking/uzunguni-parking-yard-trucks.webp',
+    alt: 'Truck parking at UZUNGUNI PARKING YARD',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+  },
+  'parking-truck-line': {
+    src: '/images/parking/uzunguni-parking-truck-line.webp',
+    alt: 'A line of trucks and containers at UZUNGUNI PARKING YARD, Mpemba-Tunduma',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    note: 'Not used by the legacy pages; plan lead for the logistics / corridor imagery.',
+  },
+
+  // ── Itemba Enterprises: Itemba Logistics ─────────────────────────────────
+  'logistics-tanker': {
+    src: '/images/logistics/itemba-logistics-tanker-under-canopy.webp',
+    alt: 'Itemba Logistics tanker supporting goods movement and transit operations',
+    entity: 'enterprises',
+    provenance: 'own',
+    note: 'Portrait 720x1280; the striped canopy is not ITEMBA signage. Small cells only.',
+  },
+  'logistics-truck-front': {
+    src: '/images/logistics/itemba-logistics-truck-front.webp',
+    alt: 'Itemba Logistics truck front view',
+    entity: 'enterprises',
+    provenance: 'own',
+  },
+  'logistics-truck-yard': {
+    src: '/images/logistics/itemba-logistics-truck-yard.webp',
+    alt: 'Itemba Logistics truck in a yard',
+    entity: 'enterprises',
+    provenance: 'own',
+  },
+
+  // ── Westsides: wholesale beverages ───────────────────────────────────────
+  'westsides-warehouse-stock': {
+    src: '/images/beverages/westsides-warehouse-stock-wide.webp',
+    alt: 'Westsides Company Ltd wholesale beverage warehouse stock for distribution customers',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+  'westsides-order-truck': {
+    src: '/images/beverages/westsides-customer-order-truck.webp',
+    alt: 'Customer beverage order loaded on a truck for Westsides distribution',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+  'westsides-softdrinks': {
+    src: '/images/beverages/westsides-softdrinks-warehouse.webp',
+    alt: 'Soft drink stock inside a Westsides beverage warehouse',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+  'westsides-crates': {
+    src: '/images/beverages/westsides-cocacola-crates.webp',
+    alt: 'Coca-Cola crates stored for Westsides distribution',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+
+  // ── Westsides: ITEMBA-HARDWARE ───────────────────────────────────────────
+  'hardware-storefront': {
+    src: '/images/hardware/itemba-hardware-storefront.webp',
+    alt: 'ITEMBA-HARDWARE storefront and construction supply stock managed by Westsides Company Ltd',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+  'hardware-paint-stock': {
+    src: '/images/hardware/itemba-hardware-paint-stock.webp',
+    alt: 'ITEMBA-HARDWARE paint and construction supply stock',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+
+  // ── Westsides: UZUNGUNI INN ──────────────────────────────────────────────
+  'inn-lodge-room': {
+    src: '/images/hospitality/uzunguni-lodge-room.webp',
+    alt: 'UZUNGUNI INN lodging room managed by Westsides Company Ltd',
+    entity: 'westsides',
+    provenance: 'unknown',
+    requires: 'useUnverifiedHospitalityPhotos',
+    note: '600x449 and stock-looking; unconfirmed as an UZUNGUNI INN room. Never full-bleed.',
+  },
+  'inn-bar-restaurant': {
+    src: '/images/hospitality/uzunguni-bar-restaurant.webp',
+    alt: 'UZUNGUNI INN restaurant and bar seating',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+  'inn-bar-night': {
+    src: '/images/hospitality/uzunguni-bar-night.webp',
+    alt: 'UZUNGUNI INN bar area at night',
+    entity: 'westsides',
+    provenance: 'own',
+  },
+
+  // ── Itemba Enterprises: Itemba Estate (not Itemba projects) ──────────────
+  'estate-construction-wide': {
+    src: '/images/real-estate/modern-african-estate-construction-wide.webp',
+    alt: 'Modern low-rise residential estate construction site with multiple homes',
+    entity: 'enterprises',
+    provenance: 'unknown',
+    note: 'External image, no licence recorded; does not show an Itemba project (flags.estateImagery).',
+  },
+  'estate-construction': {
+    src: '/images/real-estate/modern-african-estate-construction.webp',
+    alt: 'Aerial view of multiple low-rise homes under construction in a residential estate',
+    entity: 'enterprises',
+    provenance: 'unknown',
+    note: 'External image, no licence recorded (flags.estateImagery).',
+  },
+  'estate-housing-development': {
+    src: '/images/real-estate/modern-african-housing-development-wide.webp',
+    alt: 'Modern low-rise housing development with repeated residential units',
+    entity: 'enterprises',
+    provenance: 'unknown',
+    note: 'External image, no licence recorded (flags.estateImagery).',
+  },
+  'estate-white-villa': {
+    src: '/images/real-estate/modern-tanzania-white-villa-wide.webp',
+    alt: 'Finished modern residential home in Tanzania',
+    entity: 'enterprises',
+    provenance: 'unknown',
+    note: 'External image, no licence recorded (flags.estateImagery).',
+  },
+  'estate-coastal-aerial': {
+    src: '/images/real-estate/zanzibar-residential-houses-aerial-wide.webp',
+    alt: 'Aerial view of residential houses and roads in a Tanzanian coastal town',
+    entity: 'enterprises',
+    provenance: 'unknown',
+    note: 'External image, no licence recorded (flags.estateImagery).',
+  },
+
+  // ── Location and group ───────────────────────────────────────────────────
+  'songwe-landscape': {
+    src: '/images/locations/songwe-region-landscape.webp',
+    alt: 'Fields and mountains in Songwe Region, Tanzania',
+    entity: 'location',
+    provenance: 'stock',
+    credit: 'Richard grivas / Wikimedia Commons',
+    licence: 'CC BY-SA 4.0',
+    licenceUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+    note: 'The credit must be rendered wherever the image appears.',
+  },
+  'profile-cover': {
+    src: '/images/company-profile/itemba-group-profile-cover.webp',
+    alt: 'ITEMBA-UZUNGUNI filling station canopy, the Itemba Group company profile cover',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    note: 'A crop of the ITEMBA-UZUNGUNI front scene; group print cover.',
+  },
+} as const satisfies Record<string, MediaEntry>;
+
+export type MediaId = keyof typeof media;
+
+/** An image as content carries it: registry id plus the (possibly contextual) alt and caption. */
+export type MediaImage = {
+  media: MediaId;
+  src: string;
+  alt: string;
+  caption?: string;
+};
+
+/**
+ * Content-side image reference. `alt` overrides the registry alt where the
+ * context needs different words (kept verbatim from the legacy pages).
+ */
+export function mediaImage(id: MediaId, options: { alt?: string; caption?: string } = {}): MediaImage {
+  const entry: MediaEntry = media[id];
+  const image: MediaImage = { media: id, src: entry.src, alt: options.alt ?? entry.alt };
+  if (options.caption !== undefined) image.caption = options.caption;
+  return image;
+}
+
+/** An image shown with a visible caption (galleries, print grids). */
+export type MediaFigure = MediaImage & { caption: string };
+
+export function mediaFigure(id: MediaId, options: { alt?: string; caption: string }): MediaFigure {
+  return { ...mediaImage(id, { alt: options.alt }), caption: options.caption };
+}
+
+export type ResolvedMedia = MediaEntry & {
+  id: MediaId;
+  width: number;
+  height: number;
+  blurDataURL: string;
+};
+
+/** Registry entry plus generated intrinsic size and blur placeholder. */
+export function getMedia(id: MediaId): ResolvedMedia {
+  const entry: MediaEntry = media[id];
+  const generated = mediaGenerated[entry.src];
+  return { ...entry, id, width: generated.width, height: generated.height, blurDataURL: generated.blurDataURL };
+}
+
+export const mediaIds = Object.keys(media) as MediaId[];

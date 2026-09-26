@@ -1,11 +1,10 @@
+import { ogCards } from '@/content/og';
 import { OG_CONTENT_TYPE, OG_SIZE, ogImageFor } from '@/lib/og-card';
+
+const { alt: cardAlt, ...card } = ogCards.services;
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = OG_CONTENT_TYPE;
-export const alt = 'Itemba Group services';
+export const alt = cardAlt;
 
-export default ogImageFor({
-  eyebrow: 'Services',
-  title: 'Energy, trade, logistics & more.',
-  subtitle: 'Six service areas across the three Itemba Group companies.',
-});
+export default ogImageFor(card);

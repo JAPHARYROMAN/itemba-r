@@ -15,6 +15,8 @@ import {
   faqJsonLd,
   site,
 } from '@/lib/site';
+import { companyAreaServed, companyPageCopy as copy } from '@/content/companies';
+import { enquiryPrompts } from '@/content/enquiry';
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -85,13 +87,13 @@ export default async function CompanyProfilePage({ params }: PageProps) {
     address: {
       '@type': 'PostalAddress',
       streetAddress: contact.headOffice,
-      addressLocality: 'Tunduma',
-      addressRegion: 'Songwe',
-      addressCountry: 'TZ',
+      addressLocality: contact.address.locality,
+      addressRegion: contact.address.region,
+      addressCountry: contact.address.countryCode,
     },
     telephone: contact.primaryPhoneDisplay,
     email: contact.email,
-    areaServed: ['Songwe Region', 'Tunduma', 'Tanzania-Zambia corridor'],
+    areaServed: companyAreaServed,
     makesOffer: company.services.map((service) => ({
       '@type': 'Offer',
       itemOffered: {
@@ -137,7 +139,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
               href="/companies"
               className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
             >
-              <span aria-hidden="true">←</span> All companies
+              <span aria-hidden="true">←</span> {copy.backLink}
             </Link>
             <p
               className={`mt-8 text-xs font-semibold uppercase tracking-[0.25em] ${company.accentClass}`}
@@ -164,7 +166,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
             <AnimatedSection>
               <div className="gold-line mb-6" />
               <h2 className="font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-                Services &amp; market focus
+                {copy.servicesHeading}
               </h2>
               <p className="mt-5 text-lg leading-relaxed text-slate-300">{company.detail}</p>
               <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -204,7 +206,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
             <AnimatedSection delay={0.08}>
               <div className="gold-line mb-6" />
               <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-                Frequently asked questions
+                {copy.faqHeading}
               </h2>
               <FaqList faqs={company.faqs} />
             </AnimatedSection>
@@ -214,26 +216,24 @@ export default async function CompanyProfilePage({ params }: PageProps) {
             <AnimatedSection direction="fade" delay={0.08}>
               <div className={`space-y-5 border-l-2 ${company.accentBorder} pl-5`}>
                 <div>
-                  <div className="mb-1 text-xs text-slate-400">Sector</div>
+                  <div className="mb-1 text-xs text-slate-400">{copy.sectorLabel}</div>
                   <div className={`text-sm font-semibold ${company.accentClass}`}>
                     {company.sector}
                   </div>
                 </div>
-                <div>
-                  <div className="mb-1 text-xs text-slate-400">Structure</div>
-                  <div className="text-sm font-semibold text-white">Subsidiary of Itemba Group</div>
-                </div>
-                <div>
-                  <div className="mb-1 text-xs text-slate-400">Location</div>
-                  <div className="text-sm font-semibold text-white">Songwe Region, Tanzania</div>
-                </div>
+                {copy.facts.map((fact) => (
+                  <div key={fact.label}>
+                    <div className="mb-1 text-xs text-slate-400">{fact.label}</div>
+                    <div className="text-sm font-semibold text-white">{fact.value}</div>
+                  </div>
+                ))}
               </div>
             </AnimatedSection>
 
             <AnimatedSection direction="fade" delay={0.12}>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                  Key strengths
+                  {copy.strengthsHeading}
                 </p>
                 <div className="space-y-3">
                   {company.highlights.map((highlight) => (
@@ -253,7 +253,7 @@ export default async function CompanyProfilePage({ params }: PageProps) {
                 compact
                 defaultIntentId={company.id}
                 title={company.enquiryLabel}
-                description="Contact the group office with a prepared message that can be routed to the relevant operating team."
+                description={enquiryPrompts.company.description}
               />
             </AnimatedSection>
           </aside>

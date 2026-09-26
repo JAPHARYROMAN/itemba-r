@@ -1,11 +1,10 @@
-import type { IconName } from '@/components/SectorIcon';
-
 /**
  * Single source of truth for the per-company accent used across the site
  * (Mwanjalisi Oil = amber, Westsides = blue, Itemba Enterprises = emerald),
  * keyed by companySlug. Class strings are full literals so Tailwind's JIT keeps
  * them. `wash` is an rgba for hero gradient overlays (matches the hex in
- * og-card.tsx). Reused by the services index + service detail pages.
+ * og-card.tsx). Reused by the services index + service detail pages. Service icons
+ * come from src/content/services (serviceIcons).
  */
 export interface CompanyAccent {
   /** Accent text colour, e.g. eyebrow. */
@@ -61,19 +60,4 @@ const ACCENTS: Record<string, CompanyAccent> = {
 /** Accent for a company slug, falling back to brand gold. */
 export function getCompanyAccent(companySlug: string): CompanyAccent {
   return ACCENTS[companySlug] ?? GOLD;
-}
-
-/** Map a service's `visual` to a SectorIcon name. */
-const VISUAL_ICON: Record<string, IconName> = {
-  fuel: 'energy',
-  trade: 'trade',
-  logistics: 'logistics',
-  hardware: 'construction',
-  estate: 'realestate',
-  hospitality: 'hospitality',
-  parking: 'logistics',
-};
-
-export function getServiceIcon(visual: string): IconName {
-  return VISUAL_ICON[visual] ?? 'trade';
 }

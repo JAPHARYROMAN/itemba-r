@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { corridorCopy, corridorSites, corridorWaypoints, type CorridorSite, type SiteManager } from '@/content/corridor';
 
 /**
  * Interactive schematic of the Tunduma trade corridor and the Itemba sites
@@ -10,19 +11,19 @@ import { useState } from 'react';
  * under the global prefers-reduced-motion rule.
  */
 
-type Manager = 'mwanjalisi' | 'westsides' | 'group';
+type Manager = SiteManager;
 
-interface Site {
-  id: string;
-  name: string;
-  manager: Manager;
-  managerName: string;
-  kind: string;
-  detail: string;
-  x: number;
-  y: number;
-  side: 'left' | 'right';
-}
+/** Diagram placement per site (layout lives here; the site data is in src/content/corridor). */
+const PLACEMENT: Record<CorridorSite['id'], { x: number; y: number; side: 'left' | 'right' }> = {
+  mpemba: { x: 170, y: 232, side: 'left' },
+  yard: { x: 132, y: 322, side: 'left' },
+  hardware: { x: 170, y: 412, side: 'left' },
+  uzunguni: { x: 560, y: 232, side: 'right' },
+  inn: { x: 598, y: 322, side: 'right' },
+  hq: { x: 560, y: 412, side: 'right' },
+};
+
+type Site = CorridorSite & { x: number; y: number; side: 'left' | 'right' };
 
 const ACCENT: Record<Manager, { dot: string; ring: string; chip: string }> = {
   mwanjalisi: {
@@ -42,82 +43,18 @@ const ACCENT: Record<Manager, { dot: string; ring: string; chip: string }> = {
   },
 };
 
+const LEGEND_CHIP: Record<Manager, string> = {
+  mwanjalisi: 'rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-amber-300',
+  westsides: 'rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-blue-300',
+  group: 'rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-emerald-300',
+};
+
 const HUB = { x: 365, y: 322 };
 
-const SITES: Site[] = [
-  {
-    id: 'mpemba',
-    name: 'ITEMBA-MPEMBA',
-    manager: 'mwanjalisi',
-    managerName: 'Mwanjalisi Oil',
-    kind: 'Filling station',
-    detail: 'Diesel, petrol, kerosene and lubricants near the Tunduma Bus Station.',
-    x: 170,
-    y: 232,
-    side: 'left',
-  },
-  {
-    id: 'yard',
-    name: 'UZUNGUNI PARKING YARD',
-    manager: 'mwanjalisi',
-    managerName: 'Mwanjalisi Oil',
-    kind: 'Parking & staging',
-    detail: 'Corridor vehicle staging and overnight parking in Uzunguni Area.',
-    x: 132,
-    y: 322,
-    side: 'left',
-  },
-  {
-    id: 'hardware',
-    name: 'ITEMBA-HARDWARE',
-    manager: 'westsides',
-    managerName: 'Westsides',
-    kind: 'Trade & supply',
-    detail: 'Building materials, tools and construction equipment for contractors.',
-    x: 170,
-    y: 412,
-    side: 'left',
-  },
-  {
-    id: 'uzunguni',
-    name: 'ITEMBA-UZUNGUNI',
-    manager: 'mwanjalisi',
-    managerName: 'Mwanjalisi Oil',
-    kind: 'Filling station',
-    detail: 'Fuel and lubricants along the TANZAM Highway in Uzunguni Area.',
-    x: 560,
-    y: 232,
-    side: 'right',
-  },
-  {
-    id: 'inn',
-    name: 'UZUNGUNI INN',
-    manager: 'westsides',
-    managerName: 'Westsides',
-    kind: 'Hospitality',
-    detail: 'Lodging, restaurant and bar for travellers and corridor traders.',
-    x: 598,
-    y: 322,
-    side: 'right',
-  },
-  {
-    id: 'hq',
-    name: 'Group head office',
-    manager: 'group',
-    managerName: 'Itemba Group',
-    kind: 'Headquarters',
-    detail: 'Itemba Filling Station, along the Tunduma-Ileje Highway, Mpemba.',
-    x: 560,
-    y: 412,
-    side: 'right',
-  },
-];
+const SITES: Site[] = corridorSites.map((site) => ({ ...site, ...PLACEMENT[site.id] }));
 
-const WAYPOINTS = [
-  { label: 'Dar es Salaam', sub: 'Origin of supply', x: 365, y: 54 },
-  { label: 'Southern Highlands', sub: 'Mbeya · Iringa', x: 365, y: 150 },
-  { label: 'Zambia border', sub: 'DRC · Zimbabwe · Malawi', x: 365, y: 506 },
-];
+const WAYPOINT_Y: Record<(typeof corridorWaypoints)[number]['id'], number> = { dar: 54, highlands: 150, border: 506 };
+const WAYPOINTS = corridorWaypoints.map((w) => ({ label: w.label, sub: w.sub, x: 365, y: WAYPOINT_Y[w.id] }));
 
 function connector(site: Site) {
   const cx = (HUB.x + site.x) / 2;
@@ -138,7 +75,7 @@ export default function CorridorMap() {
           viewBox="0 0 730 560"
           className="relative z-10 w-full"
           role="img"
-          aria-label="Schematic map of the Tunduma trade corridor showing Itemba Group sites at the Mpemba-Tunduma hub"
+          aria-label={corridorCopy.mapLabel}
         >
           <defs>
             <linearGradient id="corridorRibbon" x1="0" y1="0" x2="0" y2="1">
@@ -188,7 +125,7 @@ export default function CorridorMap() {
           <circle cx={HUB.x} cy={HUB.y} r="58" fill="url(#hubGlow)" />
           <circle cx={HUB.x} cy={HUB.y} r="7" fill="#e8b52e" />
           <text x={HUB.x} y={HUB.y - 64} textAnchor="middle" className="fill-gold-300" fontSize="11" fontWeight="700" letterSpacing="2">
-            TUNDUMA · MPEMBA
+            {corridorCopy.hubLabel}
           </text>
 
           {/* connectors */}
@@ -217,7 +154,7 @@ export default function CorridorMap() {
                 key={s.id}
                 tabIndex={0}
                 role="button"
-                aria-label={`${s.name} — ${s.kind}, managed by ${s.managerName}`}
+                aria-label={`${s.name} — ${s.kind}, ${corridorCopy.managedBy} ${s.managerName}`}
                 className="cine-pin"
                 onMouseEnter={() => setActiveId(s.id)}
                 onMouseLeave={() => setActiveId(null)}
@@ -273,24 +210,19 @@ export default function CorridorMap() {
           </div>
         ) : (
           <div className="rounded-3xl border border-dashed border-white/12 bg-white/[0.02] p-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">One hub, six sites</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">{corridorCopy.intro.eyebrow}</p>
             <h3 className="mt-4 font-tight text-2xl font-black leading-tight tracking-tight text-white">
-              Every Itemba site sits on the same corridor.
+              {corridorCopy.intro.title}
             </h3>
             <p className="mt-4 text-base leading-relaxed text-slate-400">
-              Fuel, parking, hardware, hospitality and logistics — all anchored where the Dar es Salaam supply line
-              meets the Tanzania-Zambia border at Tunduma. Hover or tap a pin to explore.
+              {corridorCopy.intro.body}
             </p>
             <div className="mt-6 flex flex-wrap gap-2 text-xs">
-              <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-amber-300">
-                Mwanjalisi Oil
-              </span>
-              <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-blue-300">
-                Westsides
-              </span>
-              <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
-                Itemba Group
-              </span>
+              {corridorCopy.legend.map((item) => (
+                <span key={item.manager} className={LEGEND_CHIP[item.manager]}>
+                  {item.label}
+                </span>
+              ))}
             </div>
           </div>
         )}

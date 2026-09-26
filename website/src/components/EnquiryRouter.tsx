@@ -2,13 +2,18 @@
 
 import { type FormEvent, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import {
-  contact,
-  enquiryIntents,
-  mailtoWithSubject,
-  whatsappWithMessage,
-} from '@/lib/site';
+import { contact, mailtoWithSubject, telHref, whatsappWithMessage } from '@/content/contact';
+import { enquiryFormCopy as copy, enquiryIntents } from '@/content/enquiry';
+import type { IntentId } from '@/content/types';
 import { trackConversion } from '@/lib/analytics';
+
+/** Legacy intent accent classes (presentation stays out of content). */
+const intentAccent: Record<IntentId, { accentClass: string; ringClass: string }> = {
+  general: { accentClass: 'bg-gold-500', ringClass: 'border-gold-400 bg-gold-50 text-gold-700' },
+  mwanjalisi: { accentClass: 'bg-amber-500', ringClass: 'border-amber-400 bg-amber-50 text-amber-700' },
+  westsides: { accentClass: 'bg-blue-500', ringClass: 'border-blue-400 bg-blue-50 text-blue-700' },
+  enterprises: { accentClass: 'bg-emerald-500', ringClass: 'border-emerald-400 bg-emerald-50 text-emerald-700' },
+};
 
 type EnquiryRouterProps = {
   defaultIntentId?: string;
@@ -67,28 +72,24 @@ function buildMessage({
   contactMethod: string;
   message: string;
 }) {
-  const lines = [
-    'Hello Itemba Group,',
-    '',
-    `Enquiry type: ${intentLabel}`,
-    `Please route to: ${routeTo}`,
-  ];
+  const m = copy.preparedMessage;
+  const lines: string[] = [m.greeting, '', `${m.intent}: ${intentLabel}`, `${m.routeTo}: ${routeTo}`];
 
-  if (name.trim()) lines.push(`Name: ${name.trim()}`);
-  if (organization.trim()) lines.push(`Organisation: ${organization.trim()}`);
-  if (contactMethod.trim()) lines.push(`Preferred contact: ${contactMethod.trim()}`);
+  if (name.trim()) lines.push(`${m.name}: ${name.trim()}`);
+  if (organization.trim()) lines.push(`${m.organization}: ${organization.trim()}`);
+  if (contactMethod.trim()) lines.push(`${m.contactMethod}: ${contactMethod.trim()}`);
   if (message.trim()) {
-    lines.push('', 'Message:', message.trim());
+    lines.push('', m.message, message.trim());
   }
 
-  lines.push('', 'Thank you.');
+  lines.push('', m.closing);
   return lines.join('\n');
 }
 
 export default function EnquiryRouter({
   defaultIntentId = 'general',
-  title = 'Route an enquiry',
-  description = 'Choose the area that best matches your enquiry and contact the right team with a prepared message.',
+  title = copy.title,
+  description = copy.description,
   compact = false,
   className = '',
 }: EnquiryRouterProps) {
@@ -124,7 +125,7 @@ export default function EnquiryRouter({
 
     if (!contactMethod.trim() || !message.trim()) {
       setSubmitState('error');
-      setSubmitMessage('Preferred contact and message are required.');
+      setSubmitMessage(copy.messages.required);
       return;
     }
 
@@ -154,16 +155,16 @@ export default function EnquiryRouter({
       };
 
       if (!response.ok || !result.ok) {
-        throw new Error(result.error || 'The enquiry could not be submitted.');
+        throw new Error(result.error || copy.messages.failed);
       }
 
       setSubmitState('success');
       setSubmitMessage(
         result.emailStatus === 'sent'
-          ? 'Enquiry submitted and emailed to the team.'
+          ? copy.messages.sentAndEmailed
           : result.storageStatus === 'stored'
-            ? 'Enquiry submitted and saved. Use WhatsApp for urgent follow-up.'
-            : 'Enquiry submitted. Use WhatsApp for urgent follow-up.',
+            ? copy.messages.sentAndStored
+            : copy.messages.sent,
       );
       trackConversion('enquiry_submit', {
         enquiry_id: result.id,
@@ -176,14 +177,14 @@ export default function EnquiryRouter({
       setMessage('');
     } catch (error) {
       setSubmitState('error');
-      setSubmitMessage(error instanceof Error ? error.message : 'The enquiry could not be submitted.');
+      setSubmitMessage(error instanceof Error ? error.message : copy.messages.failed);
     }
   }
 
   return (
     <form onSubmit={handleSubmit} className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
       <div className="mb-6">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold-600">Business Enquiry</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold-600">{copy.eyebrow}</p>
         <h2 className="font-tight text-2xl font-black leading-tight tracking-tighter text-ink-900">{title}</h2>
         <p className="mt-3 text-sm leading-relaxed text-slate-600">{description}</p>
       </div>
@@ -199,10 +200,10 @@ export default function EnquiryRouter({
               onClick={() => setIntentId(intent.id)}
               aria-pressed={selected}
               className={`rounded-xl border p-3 text-left transition ${
-                selected ? intent.ringClass : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                selected ? intentAccent[intent.id].ringClass : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
               }`}
             >
-              <span className={`mb-3 block h-1.5 w-8 rounded-full ${intent.accentClass}`} />
+              <span className={`mb-3 block h-1.5 w-8 rounded-full ${intentAccent[intent.id].accentClass}`} />
               <span className="block text-sm font-semibold">{intent.shortLabel}</span>
             </button>
           );
@@ -213,7 +214,7 @@ export default function EnquiryRouter({
         <div className="text-sm font-semibold text-ink-900">{selectedIntent.label}</div>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">{selectedIntent.summary}</p>
         <p className="mt-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-          Routed to {selectedIntent.routeTo}
+          {copy.routedToPrefix} {selectedIntent.routeTo}
         </p>
       </div>
 
@@ -230,42 +231,42 @@ export default function EnquiryRouter({
       <div className={`mt-5 grid grid-cols-1 gap-3 ${compact ? '' : 'sm:grid-cols-2'}`}>
         {!compact && (
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-500">Name</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-500">{copy.fields.name.label}</span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink-900 transition focus:border-gold-400"
-              placeholder="Your name"
+              placeholder={copy.fields.name.placeholder}
             />
           </label>
         )}
         {!compact && (
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-500">Organisation</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-500">{copy.fields.organization.label}</span>
             <input
               value={organization}
               onChange={(event) => setOrganization(event.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink-900 transition focus:border-gold-400"
-              placeholder="Company or organisation"
+              placeholder={copy.fields.organization.placeholder}
             />
           </label>
         )}
         <label className={`block ${compact ? '' : 'sm:col-span-2'}`}>
-          <span className="mb-1.5 block text-xs font-semibold text-slate-500">Preferred contact</span>
+          <span className="mb-1.5 block text-xs font-semibold text-slate-500">{copy.fields.contactMethod.label}</span>
           <input
             value={contactMethod}
             onChange={(event) => setContactMethod(event.target.value)}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink-900 transition focus:border-gold-400"
-            placeholder="Phone, email, or WhatsApp number"
+            placeholder={copy.fields.contactMethod.placeholder}
           />
         </label>
         <label className={`block ${compact ? '' : 'sm:col-span-2'}`}>
-          <span className="mb-1.5 block text-xs font-semibold text-slate-500">Message</span>
+          <span className="mb-1.5 block text-xs font-semibold text-slate-500">{copy.fields.message.label}</span>
           <textarea
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink-900 transition focus:border-gold-400"
-            placeholder="Briefly describe what you need"
+            placeholder={copy.fields.message.placeholder}
           />
         </label>
       </div>
@@ -275,7 +276,7 @@ export default function EnquiryRouter({
         disabled={submitState === 'submitting'}
         className="btn-primary mt-5 inline-flex w-full items-center justify-center rounded-full bg-ink-900 px-5 py-3 text-sm font-semibold text-white hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {submitState === 'submitting' ? 'Submitting enquiry...' : 'Submit enquiry'}
+        {submitState === 'submitting' ? copy.submitting : copy.submit}
       </button>
 
       {submitMessage && (
@@ -297,21 +298,21 @@ export default function EnquiryRouter({
           className="btn-primary inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
         >
           <WhatsAppIcon />
-          WhatsApp
+          {copy.actions.whatsapp}
         </a>
         <a
           href={mailtoWithSubject(selectedIntent.subject, preparedMessage)}
           className="btn-primary inline-flex items-center justify-center gap-2 rounded-full bg-gold-500 px-5 py-3 text-sm font-semibold text-white hover:bg-gold-400"
         >
           <MailIcon />
-          Email
+          {copy.actions.email}
         </a>
         <a
-          href={`tel:${contact.primaryPhone}`}
+          href={telHref(contact.primaryPhone)}
           className="btn-primary inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-ink-900 hover:border-ink-900"
         >
           <PhoneIcon />
-          Call
+          {copy.actions.call}
         </a>
       </div>
     </form>

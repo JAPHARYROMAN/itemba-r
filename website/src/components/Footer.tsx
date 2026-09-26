@@ -11,24 +11,18 @@ import {
   serviceUrl,
   site,
 } from '@/lib/site';
+import { contactActionLabels, mapsDirectionsUrl, telHref } from '@/content/contact';
+import { businessEnquirySubject } from '@/content/enquiry';
+import { footerCopy, footerGroupLinks, footerLegalLinks } from '@/content/nav';
 import { getCompanyAccent } from '@/lib/company-accent';
 
 const linkGroups: Record<string, { label: string; href: string }[]> = {
-  Group: [
-    { label: 'Home', href: '/' },
-    { label: 'About', href: '/about' },
-    { label: 'Capabilities', href: '/capabilities' },
-    { label: 'Partnerships', href: '/partnerships' },
-    { label: 'Insights', href: '/insights' },
-    { label: 'Company Profile', href: '/company-profile' },
-    { label: 'FAQ', href: '/faq' },
-    { label: 'Contact', href: '/contact' },
-  ],
+  Group: footerGroupLinks,
   Services: serviceAreas.map((service) => ({ label: service.shortTitle, href: serviceUrl(service.slug) })),
   Locations: locationProfiles.map((location) => ({ label: location.shortTitle, href: locationUrl(location.slug) })),
 };
 
-const mapsHref = `https://www.google.com/maps?q=${encodeURIComponent(contact.mapQuery)}`;
+const mapsHref = mapsDirectionsUrl();
 
 function PhoneIcon() {
   return (
@@ -68,34 +62,33 @@ export default function Footer() {
         <div className="flex flex-col gap-6 border-b border-white/10 py-12 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="font-tight text-2xl font-black tracking-tight text-white sm:text-3xl">
-              Ready to talk to Itemba Group?
+              {footerCopy.cta.title}
             </h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-400">
-              Fuel, trade, logistics, hospitality and more across the Tanzania–Zambia corridor —
-              reach the group office directly.
+              {footerCopy.cta.body}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
             <a
-              href={`tel:${contact.primaryPhone}`}
-              aria-label="Call Itemba Group"
+              href={telHref(contact.primaryPhone)}
+              aria-label={contactActionLabels.call}
               className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:border-white/40 hover:bg-white/10 focus-visible:ring-gold-400"
             >
-              <PhoneIcon /> Call
+              <PhoneIcon /> {footerCopy.cta.call}
             </a>
             <a
               href={contact.whatsapp}
-              aria-label="Message Itemba Group on WhatsApp"
+              aria-label={contactActionLabels.whatsappFooter}
               className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 focus-visible:ring-gold-400"
             >
-              <WhatsAppIcon /> WhatsApp
+              <WhatsAppIcon /> {footerCopy.cta.whatsapp}
             </a>
             <a
-              href={mailtoWithSubject('Business enquiry')}
-              aria-label="Email Itemba Group"
+              href={mailtoWithSubject(businessEnquirySubject)}
+              aria-label={contactActionLabels.email}
               className="inline-flex items-center gap-2 rounded-full bg-gold-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-gold-400 hover:shadow-lg hover:shadow-gold-500/25 focus-visible:ring-gold-400"
             >
-              <MailIcon /> Email us
+              <MailIcon /> {footerCopy.cta.email}
             </a>
           </div>
         </div>
@@ -106,14 +99,13 @@ export default function Footer() {
           <div className="col-span-2">
             <Image
               src="/logo.png"
-              alt="Itemba Group"
+              alt={site.name}
               width={260}
               height={100}
               className="h-14 w-auto object-contain"
             />
             <p className="mt-5 max-w-xs text-sm leading-relaxed text-slate-400">
-              Tanzania&apos;s diversified business group — three independent companies, six sectors,
-              one unified vision on the southern corridor.
+              {footerCopy.tagline}
             </p>
 
             <address
@@ -122,15 +114,15 @@ export default function Footer() {
               className="mt-6 max-w-xs space-y-3 text-xs not-italic text-slate-400"
             >
               <div>
-                <div className="mb-0.5 font-semibold uppercase tracking-widest text-gold-400">Head office</div>
-                <p itemProp="streetAddress">Itemba Filling Station, Along Tunduma-Ileje Highway, Mpemba</p>
+                <div className="mb-0.5 font-semibold uppercase tracking-widest text-gold-400">{footerCopy.headOfficeLabel}</div>
+                <p itemProp="streetAddress">{contact.address.street}</p>
                 <p>
-                  <span itemProp="addressLocality">Tunduma</span>,{' '}
-                  <span itemProp="addressRegion">Songwe</span>,{' '}
-                  <span itemProp="addressCountry">Tanzania</span>
+                  <span itemProp="addressLocality">{contact.address.locality}</span>,{' '}
+                  <span itemProp="addressRegion">{contact.address.region}</span>,{' '}
+                  <span itemProp="addressCountry">{contact.address.country}</span>
                 </p>
               </div>
-              <p itemProp="postOfficeBoxNumber">P.O. Box 132, Tunduma-Songwe</p>
+              <p itemProp="postOfficeBoxNumber">{contact.postalShort}</p>
             </address>
 
             <a
@@ -143,13 +135,13 @@ export default function Footer() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 21s7-5.2 7-11a7 7 0 10-14 0c0 5.8 7 11 7 11z" />
                 <circle cx="12" cy="10" r="2.5" strokeWidth={1.8} />
               </svg>
-              Get directions
+              {footerCopy.directions}
             </a>
           </div>
 
           {/* Group */}
           <nav aria-label="Group footer links">
-            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">Group</h3>
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">{footerCopy.columns.group}</h3>
             <ul className="space-y-2.5">
               {linkGroups.Group.map((item) => (
                 <li key={item.href}>
@@ -163,7 +155,7 @@ export default function Footer() {
 
           {/* Companies (colour-coded) */}
           <nav aria-label="Companies footer links">
-            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">Companies</h3>
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">{footerCopy.columns.companies}</h3>
             <ul className="space-y-2.5">
               {companyProfiles.map((company) => {
                 const accent = getCompanyAccent(company.slug);
@@ -184,7 +176,7 @@ export default function Footer() {
 
           {/* Services */}
           <nav aria-label="Services footer links">
-            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">Services</h3>
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">{footerCopy.columns.services}</h3>
             <ul className="space-y-2.5">
               {linkGroups.Services.map((item) => (
                 <li key={item.href}>
@@ -198,7 +190,7 @@ export default function Footer() {
 
           {/* Locations */}
           <nav aria-label="Locations footer links">
-            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">Locations</h3>
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-white">{footerCopy.columns.locations}</h3>
             <ul className="space-y-2.5">
               {linkGroups.Locations.map((item) => (
                 <li key={item.href}>
@@ -213,11 +205,13 @@ export default function Footer() {
 
         {/* ── Bottom bar ───────────────────────────────────────────────── */}
         <div className="flex flex-col items-center justify-between gap-4 border-t border-white/10 py-7 text-xs text-slate-500 sm:flex-row">
-          <p>© {year} Itemba Group. All rights reserved.</p>
+          <p>© {year} {site.name}. {footerCopy.rightsReserved}</p>
           <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-            <Link href="/company-profile" className="transition-colors hover:text-white">Company Profile</Link>
-            <Link href="/faq" className="transition-colors hover:text-white">FAQ</Link>
-            <Link href="/contact" className="transition-colors hover:text-white">Contact</Link>
+            {footerLegalLinks.map((item) => (
+              <Link key={item.href} href={item.href} className="transition-colors hover:text-white">
+                {item.label}
+              </Link>
+            ))}
             <span className="text-slate-600">{site.domain}</span>
           </div>
         </div>

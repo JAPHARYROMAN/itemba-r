@@ -13,15 +13,17 @@ import {
   serviceUrl,
   site,
 } from '@/lib/site';
+import { locationsPage } from '@/content/locations';
+
+const { meta, hero, headquarters } = locationsPage;
 
 export const metadata: Metadata = {
-  title: 'Locations',
-  description:
-    'Find Itemba Group in Mpemba-Tunduma, Songwe Region, Tanzania, and explore services connected to the Tunduma trade corridor.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/locations') },
   openGraph: {
-    title: 'Itemba Group Locations',
-    description: 'Itemba Group headquarters and operating presence in Mpemba-Tunduma, Songwe Region, Tanzania.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/locations'),
   },
 };
@@ -30,7 +32,7 @@ const locationsJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'CollectionPage',
   '@id': `${absoluteUrl('/locations')}#locations`,
-  name: 'Itemba Group Locations',
+  name: meta.ogTitle,
   url: absoluteUrl('/locations'),
   about: {
     '@id': `${site.url}/#organization`,
@@ -69,7 +71,7 @@ export default function LocationsPage() {
         {primaryLocation.image ? (
           <CinematicImage src={primaryLocation.image.src} alt="" priority className="animate-kenburns" />
         ) : (
-          <BrandVisual variant="corridor" label="Songwe and Tunduma corridor" className="absolute inset-0" />
+          <BrandVisual variant="corridor" label={hero.fallbackVisualLabel} className="absolute inset-0" />
         )}
         <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/70 to-ink-950/30" />
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
@@ -79,11 +81,11 @@ export default function LocationsPage() {
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
               <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Local presence
+                {hero.eyebrow}
               </span>
             </div>
             <h1 className="cine-shadow font-tight text-5xl font-black leading-[0.92] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Based in Songwe. <span className="gradient-text">Connected through Tunduma.</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-200/90">
               {primaryLocation.summary}
@@ -98,7 +100,7 @@ export default function LocationsPage() {
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Headquarters
+              {headquarters.eyebrow}
             </p>
             <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white">
               {primaryLocation.title}
@@ -108,7 +110,7 @@ export default function LocationsPage() {
               href={locationUrl(primaryLocation.slug)}
               className="btn-primary inline-flex rounded-full bg-gold-500 px-6 py-3 text-sm font-semibold text-white hover:bg-gold-400"
             >
-              View location profile
+              {headquarters.action}
             </Link>
           </AnimatedSection>
 
@@ -131,7 +133,7 @@ export default function LocationsPage() {
           <AnimatedSection className="mb-10">
             <div className="gold-line mb-6" />
             <h2 className="font-tight text-3xl font-black leading-tight tracking-tight text-white">
-              Services connected to this location
+              {locationsPage.servicesHeading}
             </h2>
           </AnimatedSection>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

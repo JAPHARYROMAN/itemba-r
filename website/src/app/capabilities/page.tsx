@@ -8,60 +8,31 @@ import {
   breadcrumbJsonLd,
   companyProfiles,
   companyUrl,
-  locationUrl,
   serviceAreas,
   serviceUrl,
   site,
 } from '@/lib/site';
+import { capabilitiesPage, partnerChecklist, verificationSignals } from '@/content/capabilities';
+import { enquiryPrompts } from '@/content/enquiry';
+
+const { meta, hero, signals, map, diligence, route } = capabilitiesPage;
 
 export const metadata: Metadata = {
-  title: 'Capabilities and Operating Proof',
-  description:
-    'A practical view of Itemba Group operating capabilities, company responsibilities, service routes, and enquiry paths across Songwe Region and the Tunduma corridor.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/capabilities') },
   openGraph: {
-    title: 'Itemba Group Capabilities and Operating Proof',
-    description:
-      'See how Itemba Group maps services, companies, location presence, and enquiry routing for customers, suppliers, and partners.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/capabilities'),
   },
 };
-
-const verificationSignals = [
-  {
-    title: 'Group structure',
-    summary:
-      'Three named operating companies are presented with separate profiles, sectors, services, and contact routes.',
-  },
-  {
-    title: 'Service ownership',
-    summary:
-      'Each service area maps back to the company most closely responsible for handling that enquiry.',
-  },
-  {
-    title: 'Local operating base',
-    summary:
-      'The Mpemba-Tunduma head office and Songwe Region location profile are consistent across the site.',
-  },
-  {
-    title: 'Contact accountability',
-    summary:
-      'Partnership, service, company, and contact pages route enquiries through the same group channels.',
-  },
-];
-
-const partnerChecklist = [
-  'The product, service, or operating area you need',
-  'The closest Itemba Group company or division',
-  'Delivery location, expected volume, or business context',
-  'Preferred response method and urgency',
-];
 
 const capabilityJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'CollectionPage',
   '@id': `${absoluteUrl('/capabilities')}#capabilities`,
-  name: 'Itemba Group Capabilities and Operating Proof',
+  name: meta.ogTitle,
   url: absoluteUrl('/capabilities'),
   description: metadata.description,
   about: {
@@ -108,16 +79,14 @@ export default function CapabilitiesPage() {
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
               <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Capability proof
+                {hero.eyebrow}
               </span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Verify the fit. <span className="gradient-text">Contact the right team.</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
-              A practical guide for customers, suppliers, contractors, transport operators and
-              partners who need to understand Itemba Group&apos;s operating coverage before sending a
-              business enquiry.
+              {hero.lede}
             </p>
           </AnimatedSection>
         </div>
@@ -129,10 +98,10 @@ export default function CapabilitiesPage() {
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Verification signals
+              {signals.eyebrow}
             </p>
             <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-              What a visitor can confirm quickly
+              {signals.title}
             </h2>
           </AnimatedSection>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -159,10 +128,10 @@ export default function CapabilitiesPage() {
           <AnimatedSection className="mb-12">
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Capability map
+              {map.eyebrow}
             </p>
             <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-              Services, owners, and best-fit enquiries
+              {map.title}
             </h2>
           </AnimatedSection>
 
@@ -185,7 +154,7 @@ export default function CapabilitiesPage() {
 
                     <div>
                       <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                        Operating company
+                        {map.companyLabel}
                       </p>
                       <Link
                         href={companyUrl(service.companySlug)}
@@ -200,7 +169,7 @@ export default function CapabilitiesPage() {
 
                     <div>
                       <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                        Common enquiries
+                        {map.enquiriesLabel}
                       </p>
                       <div className="mb-5 flex flex-wrap gap-2">
                         {service.audience.slice(0, 3).map((audience) => (
@@ -216,7 +185,7 @@ export default function CapabilitiesPage() {
                         href={serviceUrl(service.slug)}
                         className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
                       >
-                        Open service page
+                        {map.action}
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                         </svg>
@@ -236,14 +205,13 @@ export default function CapabilitiesPage() {
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Due-diligence path
+              {diligence.eyebrow}
             </p>
             <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-              Prepare a stronger business enquiry
+              {diligence.title}
             </h2>
             <p className="text-sm leading-relaxed text-slate-400">
-              Before contacting Itemba Group, a partner can use this site to confirm the correct
-              operating area, location context, company profile and contact route.
+              {diligence.body}
             </p>
           </AnimatedSection>
 
@@ -261,16 +229,16 @@ export default function CapabilitiesPage() {
               </div>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
-                  href="/company-profile"
+                  href={diligence.actions.profile.href}
                   className="btn-primary rounded-full bg-gold-500 px-5 py-3 text-sm font-semibold text-white hover:bg-gold-400"
                 >
-                  View company profile
+                  {diligence.actions.profile.label}
                 </Link>
                 <Link
-                  href={locationUrl('songwe-tunduma')}
+                  href={diligence.actions.location.href}
                   className="btn-primary rounded-full border border-white/25 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-gold-400 hover:text-gold-300"
                 >
-                  View location profile
+                  {diligence.actions.location.label}
                 </Link>
               </div>
             </div>
@@ -284,26 +252,25 @@ export default function CapabilitiesPage() {
           <AnimatedSection>
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Route an enquiry
+              {route.eyebrow}
             </p>
             <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-              Ready to contact the group?
+              {route.title}
             </h2>
             <p className="text-sm leading-relaxed text-slate-400">
-              Use the enquiry router to send the request to the closest business area, or continue
-              through the partnerships page for supplier and commercial routes.
+              {route.body}
             </p>
             <Link
-              href="/partnerships"
+              href={route.link.href}
               className="mt-7 inline-flex text-sm font-semibold text-gold-300 transition hover:text-gold-200"
             >
-              View partnership routes
+              {route.link.label}
             </Link>
           </AnimatedSection>
           <AnimatedSection direction="left">
             <EnquiryRouter
-              title="Route a capability enquiry"
-              description="Choose the area that best matches the capability, service, or operating company you need."
+              title={enquiryPrompts.capabilities.title}
+              description={enquiryPrompts.capabilities.description}
             />
           </AnimatedSection>
         </div>

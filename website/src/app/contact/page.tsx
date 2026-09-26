@@ -1,78 +1,70 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Fragment } from 'react';
 import AnimatedSection from '@/components/AnimatedSection';
 import EnquiryRouter from '@/components/EnquiryRouter';
 import JsonLd from '@/components/JsonLd';
+import { companies } from '@/content/companies';
+import { mailtoHref, mapsEmbedUrl, telHref } from '@/content/contact';
+import { contactPage } from '@/content/contactPage';
+import { businessEnquirySubject } from '@/content/enquiry';
+import type { CompanyId } from '@/content/types';
 import { absoluteUrl, breadcrumbJsonLd, contact, mailtoWithSubject, site } from '@/lib/site';
 
+const { meta, hero, findUs, businessNote, quickActions } = contactPage;
+
 export const metadata: Metadata = {
-  title: 'Contact',
-  description:
-    'Contact Itemba Group for business enquiries, partnerships, fuel, trade, logistics, hospitality, real estate, and group information.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/contact') },
   openGraph: {
-    title: 'Contact Itemba Group',
-    description: 'Reach Itemba Group headquarters in Mpemba-Tunduma, Songwe Region, Tanzania.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/contact'),
   },
 };
 
-const subsidiaries = [
-  { name: 'Mwanjalisi Oil Co Ltd', sector: 'Energy, Fuel & Parking', dot: 'bg-amber-400' },
-  { name: 'Westsides Company Ltd', sector: 'Trade & Distribution', dot: 'bg-blue-400' },
-  { name: 'Itemba Enterprises Co Ltd', sector: 'Logistics & Transit', dot: 'bg-emerald-400' },
-];
+const companyDot: Record<CompanyId, string> = {
+  mwanjalisi: 'bg-amber-400',
+  westsides: 'bg-blue-400',
+  enterprises: 'bg-emerald-400',
+};
 
-const contextCards = [
-  {
-    icon: '🗺️',
-    title: 'Strategic location',
-    desc: "Mpemba-Tunduma sits on the Tanzania-Zambia border — one of East Africa's most active trade corridors.",
-  },
-  {
-    icon: '🤝',
-    title: 'Regional connections',
-    desc: 'Direct access to cross-border trade flows and a wide network of regional business partners.',
-  },
-  {
-    icon: '📈',
-    title: 'Growing economy',
-    desc: "Songwe Region is one of Tanzania's fastest-growing regions, driven by trade and infrastructure investment.",
-  },
-];
+const subsidiaries = companies.map((company) => ({
+  name: company.name,
+  sector: company.band.sector,
+  dot: companyDot[company.id],
+}));
+
+const contextIcons: Record<(typeof contactPage.contextCards)[number]['id'], string> = {
+  location: '🗺️',
+  connections: '🤝',
+  growth: '📈',
+};
+
+function AddressLines({ lines }: { lines: readonly string[] }) {
+  return (
+    <address className="text-sm not-italic leading-relaxed text-slate-400">
+      {lines.map((line, index) => (
+        <Fragment key={line}>
+          {index > 0 ? <br /> : null}
+          {line}
+        </Fragment>
+      ))}
+    </address>
+  );
+}
 
 const contactRows = [
-  {
-    title: 'Head office',
-    body: (
-      <address className="text-sm not-italic leading-relaxed text-slate-400">
-        Itemba Filling Station
-        <br />
-        Along Tunduma–Ileje Highway
-        <br />
-        Mpemba, Tunduma
-      </address>
-    ),
-  },
-  {
-    title: 'Postal address',
-    body: (
-      <address className="text-sm not-italic leading-relaxed text-slate-400">
-        P.O. Box 132
-        <br />
-        Tunduma–Songwe
-        <br />
-        Tanzania
-      </address>
-    ),
-  },
+  { title: findUs.headOfficeLabel, body: <AddressLines lines={contact.headOfficeLines} /> },
+  { title: findUs.postalLabel, body: <AddressLines lines={contact.postalLines} /> },
 ];
 
 const contactPageJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'ContactPage',
   '@id': `${absoluteUrl('/contact')}#contact`,
-  name: 'Contact Itemba Group',
+  name: meta.ogTitle,
   url: absoluteUrl('/contact'),
   about: {
     '@id': `${site.url}/#organization`,
@@ -83,8 +75,8 @@ const contactPageJsonLd = {
       telephone: contact.primaryPhoneDisplay,
       email: contact.email,
       contactType: 'business enquiries',
-      areaServed: ['TZ', 'ZM'],
-      availableLanguage: ['English', 'Swahili'],
+      areaServed: contact.areaServed,
+      availableLanguage: contact.availableLanguages,
     },
   ],
 };
@@ -112,17 +104,12 @@ export default function ContactPage() {
           <AnimatedSection>
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
-              <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Get in touch
-              </span>
+              <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">{hero.eyebrow}</span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Contact <span className="gradient-text">Itemba Group</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
-            <p className="mt-7 max-w-xl text-lg leading-relaxed text-slate-300">
-              Reach out for business enquiries, partnerships, or general information about our
-              companies and operations.
-            </p>
+            <p className="mt-7 max-w-xl text-lg leading-relaxed text-slate-300">{hero.lede}</p>
           </AnimatedSection>
         </div>
       </section>
@@ -134,11 +121,9 @@ export default function ContactPage() {
           <div>
             <AnimatedSection>
               <div className="gold-line mb-6" />
-              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-                Find us
-              </p>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">{findUs.eyebrow}</p>
               <h2 className="mb-10 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-                Group headquarters
+                {findUs.title}
               </h2>
             </AnimatedSection>
 
@@ -166,13 +151,13 @@ export default function ContactPage() {
                     </svg>
                   </div>
                   <div>
-                    <div className="mb-1 font-tight font-bold text-white">Phone</div>
+                    <div className="mb-1 font-tight font-bold text-white">{findUs.phoneLabel}</div>
                     <div className="space-y-0.5 text-sm leading-relaxed">
-                      <a href="tel:+255758793511" className="block text-gold-300 transition-colors hover:text-gold-200">
-                        +255 758 793 511
+                      <a href={telHref(contact.primaryPhone)} className="block text-gold-300 transition-colors hover:text-gold-200">
+                        {contact.primaryPhoneDisplay}
                       </a>
-                      <a href="tel:+255745215047" className="block text-gold-300 transition-colors hover:text-gold-200">
-                        +255 745 215 047
+                      <a href={telHref(contact.secondaryPhone)} className="block text-gold-300 transition-colors hover:text-gold-200">
+                        {contact.secondaryPhoneDisplay}
                       </a>
                     </div>
                   </div>
@@ -185,9 +170,9 @@ export default function ContactPage() {
                     </svg>
                   </div>
                   <div>
-                    <div className="mb-1 font-tight font-bold text-white">Email</div>
-                    <a href="mailto:info@itembagrouptz.com" className="break-all text-sm text-gold-300 transition-colors hover:text-gold-200">
-                      info@itembagrouptz.com
+                    <div className="mb-1 font-tight font-bold text-white">{findUs.emailLabel}</div>
+                    <a href={mailtoHref()} className="break-all text-sm text-gold-300 transition-colors hover:text-gold-200">
+                      {contact.email}
                     </a>
                   </div>
                 </div>
@@ -196,32 +181,28 @@ export default function ContactPage() {
 
             <AnimatedSection delay={0.18}>
               <div className="mt-10 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-sm leading-relaxed text-slate-400">
-                <strong className="mb-1 block font-tight font-bold text-white">
-                  Business enquiries
-                </strong>
-                For sector-specific enquiries, we recommend contacting the relevant subsidiary
-                company directly. Each company operates with its own team and management structure.
+                <strong className="mb-1 block font-tight font-bold text-white">{businessNote.title}</strong>
+                {businessNote.body}
                 <div className="mt-3 flex flex-wrap gap-4">
-                  <Link href="/partnerships" className="font-semibold text-gold-300 hover:text-gold-200">
-                    Partnership enquiry routes
-                  </Link>
-                  <Link href="/faq" className="font-semibold text-gold-300 hover:text-gold-200">
-                    Browse frequently asked questions
-                  </Link>
+                  {businessNote.links.map((link) => (
+                    <Link key={link.href} href={link.href} className="font-semibold text-gold-300 hover:text-gold-200">
+                      {link.label}
+                    </Link>
+                  ))}
                 </div>
               </div>
             </AnimatedSection>
 
             <AnimatedSection delay={0.22}>
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <a href={`tel:${contact.primaryPhone}`} className="btn-primary rounded-2xl border border-white/20 bg-white/5 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-white/10">
-                  Call
+                <a href={telHref(contact.primaryPhone)} className="btn-primary rounded-2xl border border-white/20 bg-white/5 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-white/10">
+                  {quickActions.call}
                 </a>
                 <a href={contact.whatsapp} className="btn-primary rounded-2xl bg-emerald-600 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-emerald-500">
-                  WhatsApp
+                  {quickActions.whatsapp}
                 </a>
-                <a href={mailtoWithSubject('Business enquiry')} className="btn-primary rounded-2xl bg-gold-500 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-gold-400">
-                  Email
+                <a href={mailtoWithSubject(businessEnquirySubject)} className="btn-primary rounded-2xl bg-gold-500 px-5 py-4 text-center text-sm font-semibold text-white hover:bg-gold-400">
+                  {quickActions.email}
                 </a>
               </div>
             </AnimatedSection>
@@ -236,8 +217,8 @@ export default function ContactPage() {
             <AnimatedSection direction="left" delay={0.1}>
               <div className="relative h-72 overflow-hidden rounded-3xl border border-white/10 shadow-xl">
                 <iframe
-                  title="Itemba Group headquarters map"
-                  src={`https://www.google.com/maps?q=${encodeURIComponent(contact.mapQuery)}&output=embed`}
+                  title={contactPage.mapTitle}
+                  src={mapsEmbedUrl()}
                   className="h-full w-full"
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"
@@ -247,7 +228,7 @@ export default function ContactPage() {
 
             <AnimatedSection direction="left" delay={0.18}>
               <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                Our companies
+                {contactPage.companiesHeading}
               </p>
               <div className="space-y-3">
                 {subsidiaries.map((co) => (
@@ -272,12 +253,13 @@ export default function ContactPage() {
       <section className="border-t border-white/5 bg-ink-950 px-5 py-20 sm:px-8">
         <div className="mx-auto max-w-7xl">
           <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-            {contextCards.map((card, i) => (
+            {/* Legacy page renders all three cards (origin/main); the rebuilt page applies `requires`. */}
+            {contactPage.contextCards.map((card, i) => (
               <AnimatedSection key={card.title} delay={i * 0.1}>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-7 transition hover:bg-white/[0.06]">
-                  <div className="mb-4 text-3xl">{card.icon}</div>
+                  <div className="mb-4 text-3xl">{contextIcons[card.id]}</div>
                   <h3 className="mb-2 font-tight font-bold text-white">{card.title}</h3>
-                  <p className="text-sm leading-relaxed text-slate-400">{card.desc}</p>
+                  <p className="text-sm leading-relaxed text-slate-400">{card.summary}</p>
                 </div>
               </AnimatedSection>
             ))}

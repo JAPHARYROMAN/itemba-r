@@ -20,6 +20,9 @@ import {
   serviceUrl,
   site,
 } from '@/lib/site';
+import { mapsEmbedUrl } from '@/content/contact';
+import { enquiryPrompts } from '@/content/enquiry';
+import { locationAreaServed, locationPageCopy as copy } from '@/content/locations';
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -84,14 +87,14 @@ export default async function LocationPage({ params }: PageProps) {
     address: {
       '@type': 'PostalAddress',
       streetAddress: contact.headOffice,
-      addressLocality: 'Tunduma',
-      addressRegion: 'Songwe',
-      addressCountry: 'TZ',
+      addressLocality: contact.address.locality,
+      addressRegion: contact.address.region,
+      addressCountry: contact.address.countryCode,
       postOfficeBoxNumber: contact.postal,
     },
     containedInPlace: {
       '@type': 'AdministrativeArea',
-      name: 'Songwe Region',
+      name: contact.address.regionName,
     },
   };
   const localBusinessJsonLd = {
@@ -107,7 +110,7 @@ export default async function LocationPage({ params }: PageProps) {
     parentOrganization: {
       '@id': `${site.url}/#organization`,
     },
-    areaServed: ['Songwe Region', 'Tunduma', 'Mpemba', 'Tanzania-Zambia corridor'],
+    areaServed: locationAreaServed,
     makesOffer: relatedServices.map((service) => ({
       '@type': 'Offer',
       itemOffered: {
@@ -149,7 +152,7 @@ export default async function LocationPage({ params }: PageProps) {
               href="/locations"
               className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
             >
-              <span aria-hidden="true">←</span> All locations
+              <span aria-hidden="true">←</span> {copy.backLink}
             </Link>
             <p className="mt-8 text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
               {location.eyebrow}
@@ -175,7 +178,7 @@ export default async function LocationPage({ params }: PageProps) {
               <AnimatedSection>
                 <div className="gold-line mb-6" />
                 <h2 className="mb-5 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-                  Why this location matters
+                  {copy.whyHeading}
                 </h2>
                 <p className="mb-8 text-lg leading-relaxed text-slate-300">{location.detail}</p>
               </AnimatedSection>
@@ -194,7 +197,7 @@ export default async function LocationPage({ params }: PageProps) {
             <AnimatedSection>
               <div className="gold-line mb-6" />
               <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-                Services available through this location
+                {copy.servicesHeading}
               </h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {relatedServices.map((service) => (
@@ -216,7 +219,7 @@ export default async function LocationPage({ params }: PageProps) {
             <AnimatedSection>
               <div className="gold-line mb-6" />
               <h2 className="mb-6 font-tight text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-                Location questions
+                {copy.faqHeading}
               </h2>
               <FaqList faqs={location.faqs} />
             </AnimatedSection>
@@ -226,15 +229,15 @@ export default async function LocationPage({ params }: PageProps) {
             <AnimatedSection direction="left" delay={0.08}>
               <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
                 <iframe
-                  title="Itemba Group Songwe-Tunduma location map"
-                  src={`https://www.google.com/maps?q=${encodeURIComponent(contact.mapQuery)}&output=embed`}
+                  title={copy.mapTitle}
+                  src={mapsEmbedUrl()}
                   className="h-72 w-full"
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"
                 />
                 <div className="p-6">
                   <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                    Address
+                    {copy.addressHeading}
                   </p>
                   <address className="text-sm not-italic leading-relaxed text-slate-400">
                     {location.addressLines.map((line) => (
@@ -250,7 +253,7 @@ export default async function LocationPage({ params }: PageProps) {
             <AnimatedSection direction="left" delay={0.14}>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                  Operating companies
+                  {copy.companiesHeading}
                 </p>
                 <div className="space-y-3">
                   {relatedCompanies.map((company) => (
@@ -270,8 +273,8 @@ export default async function LocationPage({ params }: PageProps) {
             <AnimatedSection direction="left" delay={0.2}>
               <EnquiryRouter
                 compact
-                title="Ask about this location"
-                description="Contact the group office for enquiries connected to the Songwe-Tunduma operating base."
+                title={enquiryPrompts.location.title}
+                description={enquiryPrompts.location.description}
               />
             </AnimatedSection>
           </aside>

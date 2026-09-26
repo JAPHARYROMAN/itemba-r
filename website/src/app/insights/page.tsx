@@ -9,19 +9,19 @@ import {
   insightArticles,
   insightUrl,
   serviceAreas,
-  serviceUrl,
   site,
 } from '@/lib/site';
+import { insightsPage } from '@/content/insights';
+
+const { meta, hero, featured: featuredCopy, more, directRoute } = insightsPage;
 
 export const metadata: Metadata = {
-  title: 'Insights',
-  description:
-    'Practical Itemba Group articles for business enquiries, supplier introductions, location context, service routing, and company selection in Songwe Region, Tanzania.',
+  title: meta.title,
+  description: meta.description,
   alternates: { canonical: absoluteUrl('/insights') },
   openGraph: {
-    title: 'Itemba Group Insights',
-    description:
-      'Guides for customers, suppliers, contractors, transport operators, and partners working with Itemba Group companies.',
+    title: meta.ogTitle,
+    description: meta.ogDescription,
     url: absoluteUrl('/insights'),
   },
 };
@@ -30,7 +30,7 @@ const insightsJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'Blog',
   '@id': `${absoluteUrl('/insights')}#insights`,
-  name: 'Itemba Group Insights',
+  name: meta.ogTitle,
   url: absoluteUrl('/insights'),
   publisher: {
     '@id': `${site.url}/#organization`,
@@ -76,15 +76,14 @@ export default function InsightsPage() {
             <div className="mb-5 flex items-center gap-3">
               <span className="h-px w-10 bg-gold-400" />
               <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                Insights
+                {hero.eyebrow}
               </span>
             </div>
             <h1 className="font-tight text-5xl font-black leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              Practical guides for <span className="gradient-text">business enquiries.</span>
+              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-300">
-              Focused articles for customers, suppliers, contractors, transport operators and
-              partners who need to choose the right Itemba Group service route.
+              {hero.lede}
             </p>
           </AnimatedSection>
         </div>
@@ -96,7 +95,7 @@ export default function InsightsPage() {
           <AnimatedSection className="mb-10">
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              Featured guide
+              {featuredCopy.eyebrow}
             </p>
           </AnimatedSection>
 
@@ -129,7 +128,7 @@ export default function InsightsPage() {
                   ))}
                 </div>
                 <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition group-hover:text-gold-200">
-                  Read guide
+                  {featuredCopy.action}
                   <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                   </svg>
@@ -146,10 +145,10 @@ export default function InsightsPage() {
           <AnimatedSection className="mb-12">
             <div className="gold-line mb-6" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              More articles
+              {more.eyebrow}
             </p>
             <h2 className="font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-              Guides by need
+              {more.title}
             </h2>
           </AnimatedSection>
 
@@ -179,7 +178,7 @@ export default function InsightsPage() {
                       ))}
                   </div>
                   <span className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition group-hover:text-gold-200">
-                    Read article
+                    {more.action}
                     <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
@@ -196,22 +195,25 @@ export default function InsightsPage() {
         <AnimatedSection className="mx-auto max-w-3xl text-center">
           <div className="gold-line mx-auto mb-8" />
           <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-            Need a direct route?
+            {directRoute.title}
           </h2>
           <p className="mb-8 text-sm leading-relaxed text-slate-400">
-            Use the capability map or partnerships page when your enquiry spans more than one
-            company, service or operating division.
+            {directRoute.body}
           </p>
           <div className="flex flex-wrap justify-center gap-3">
-            <Link href="/capabilities" className="btn-primary rounded-full bg-gold-500 px-6 py-3 text-sm font-semibold text-white hover:bg-gold-400">
-              Capability map
-            </Link>
-            <Link href="/partnerships" className="btn-primary rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-white hover:border-gold-400 hover:text-gold-300">
-              Partnerships
-            </Link>
-            <Link href={serviceUrl('logistics-and-cross-border-transit')} className="btn-primary rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-white hover:border-gold-400 hover:text-gold-300">
-              Logistics guide
-            </Link>
+            {directRoute.links.map((link, index) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={
+                  index === 0
+                    ? 'btn-primary rounded-full bg-gold-500 px-6 py-3 text-sm font-semibold text-white hover:bg-gold-400'
+                    : 'btn-primary rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-white hover:border-gold-400 hover:text-gold-300'
+                }
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
         </AnimatedSection>
       </section>

@@ -1,11 +1,10 @@
+import { ogCards } from '@/content/og';
 import { OG_CONTENT_TYPE, OG_SIZE, ogImageFor } from '@/lib/og-card';
+
+const { alt: cardAlt, ...card } = ogCards.contact;
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = OG_CONTENT_TYPE;
-export const alt = 'Contact Itemba Group';
+export const alt = cardAlt;
 
-export default ogImageFor({
-  eyebrow: 'Contact',
-  title: 'Talk to the group office.',
-  subtitle: 'Route any enquiry to the right Itemba Group company or division.',
-});
+export default ogImageFor(card);

@@ -1,8 +1,9 @@
 import { ImageResponse } from 'next/og';
-import { site } from '@/lib/site';
+import { ogCards } from '@/content/og';
+import { site } from '@/content/site';
 
 export const runtime = 'edge';
-export const alt = "Itemba Group - Tanzania's Diversified Business Group";
+export const alt = ogCards.root.alt;
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -92,13 +93,13 @@ export default function Image() {
               marginBottom: '24px',
             }}
           >
-            Diversified Business Group
+            {ogCards.root.eyebrow}
           </div>
           <div style={{ fontSize: '74px', lineHeight: 0.94, fontWeight: 900, letterSpacing: '-0.03em' }}>
-            Energy. Trade. Logistics. Hospitality.
+            {ogCards.root.title}
           </div>
           <div style={{ color: '#cbd5e1', fontSize: '26px', lineHeight: 1.35, marginTop: '30px' }}>
-            Three independent companies, six business sectors, one unified vision.
+            {ogCards.root.subtitle}
           </div>
         </div>
         <div style={{ color: '#94a3b8', fontSize: '20px' }}>{site.domain}</div>

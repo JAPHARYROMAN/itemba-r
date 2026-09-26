@@ -18,6 +18,8 @@ import {
   serviceUrl,
   site,
 } from '@/lib/site';
+import { enquiryPrompts } from '@/content/enquiry';
+import { insightPageCopy as copy } from '@/content/insights';
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -129,7 +131,7 @@ export default async function InsightArticlePage({ params }: PageProps) {
               href="/insights"
               className="inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition hover:text-gold-200"
             >
-              <span aria-hidden="true">←</span> All insights
+              <span aria-hidden="true">←</span> {copy.backLink}
             </Link>
             <p className="mt-8 text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
               {article.eyebrow} · {article.readingTime}
@@ -189,7 +191,7 @@ export default async function InsightArticlePage({ params }: PageProps) {
               <AnimatedSection direction="left">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
                   <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                    Related services
+                    {copy.relatedServices}
                   </p>
                   <div className="space-y-3">
                     {relatedServices.map((service) => (
@@ -210,7 +212,7 @@ export default async function InsightArticlePage({ params }: PageProps) {
               <AnimatedSection direction="left" delay={0.08}>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
                   <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                    Related companies
+                    {copy.relatedCompanies}
                   </p>
                   <div className="space-y-3">
                     {relatedCompanies.map((company) => (
@@ -232,7 +234,7 @@ export default async function InsightArticlePage({ params }: PageProps) {
               <AnimatedSection direction="left" delay={0.12}>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
                   <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                    Related location
+                    {copy.relatedLocation}
                   </p>
                   <div className="space-y-3">
                     {relatedLocations.map((location) => (
@@ -253,8 +255,8 @@ export default async function InsightArticlePage({ params }: PageProps) {
             <AnimatedSection direction="left" delay={0.16}>
               <EnquiryRouter
                 compact
-                title="Ask about this topic"
-                description="Route a focused enquiry to the closest Itemba Group operating area."
+                title={enquiryPrompts.insightArticle.title}
+                description={enquiryPrompts.insightArticle.description}
               />
             </AnimatedSection>
           </aside>
@@ -266,18 +268,17 @@ export default async function InsightArticlePage({ params }: PageProps) {
         <AnimatedSection className="mx-auto max-w-3xl text-center">
           <div className="gold-line mx-auto mb-8" />
           <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white sm:text-5xl">
-            Continue from this guide
+            {copy.continueCta.title}
           </h2>
           <p className="mb-8 text-sm leading-relaxed text-slate-400">
-            Use the next route that best matches the business need, or open the full insights hub for
-            more practical guidance.
+            {copy.continueCta.body}
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <Link href={article.cta.href} className="btn-primary rounded-full bg-gold-500 px-6 py-3 text-sm font-semibold text-white hover:bg-gold-400">
               {article.cta.label}
             </Link>
             <Link href="/insights" className="btn-primary rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-slate-200 hover:border-gold-400 hover:text-gold-300">
-              More insights
+              {copy.continueCta.moreLabel}
             </Link>
           </div>
         </AnimatedSection>
