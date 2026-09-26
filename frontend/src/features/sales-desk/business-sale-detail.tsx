@@ -15,6 +15,7 @@ import {
   showToast,
 } from '@/components/ui';
 import { backendGet, backendPatch } from '@/lib/api-client';
+import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { RecordSalesOrderPaymentModal } from '@/app/(dashboard)/operations/_components/record-sales-order-payment-modal';
@@ -269,6 +270,7 @@ export function BusinessSaleDetail({ saleId }: { saleId: string }) {
   useEffect(() => {
     load();
   }, [load]);
+  useLinkedDeskChanges('sales-desk', recordingPayment || !!actionLoading, load);
 
   const order = data?.order;
   const currency = order?.currency ?? 'TZS';
@@ -291,6 +293,7 @@ export function BusinessSaleDetail({ saleId }: { saleId: string }) {
     setError('');
     try {
       await backendPatch(`/sales-orders/${id}/${action}`);
+      notifyDeskSaved('sales-desk');
       showToast(
         action === 'confirm' ? 'success' : 'info',
         action === 'confirm' ? 'Order confirmed' : 'Order cancelled',

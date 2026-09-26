@@ -700,3 +700,81 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.cash-sales-connection {
+  margin-block: 20px;
+  padding: 20px;
+  border: 1px solid var(--desk-line);
+  border-radius: 20px;
+  background: var(--desk-panel);
+}
+.cash-sales-connection p,
+.cash-sales-connection dt {
+  color: var(--desk-muted);
+}
+.cash-connected-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+  margin-block: 16px;
+}
+.cash-connected-totals > div {
+  border: 1px solid var(--desk-line);
+  padding: 16px;
+  border-radius: 14px;
+}
+.cash-connected-totals dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.cash-connected-totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.cash-connection-note {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.cash-collection-list article {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-block: 18px;
+  border-bottom: 1px solid var(--desk-line);
+}
+.cash-collection-list article > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cash-collection-list article p {
+  margin-top: 5px;
+  font-size: 13px;
+}
+.cash-collection-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cash-sales-connection .cash-toolbar {
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .cash-sales-connection {
+    padding: 14px;
+  }
+  .cash-sales-connection .cash-section-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .cash-collection-list article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

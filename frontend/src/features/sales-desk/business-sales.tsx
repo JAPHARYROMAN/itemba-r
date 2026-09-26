@@ -7,6 +7,7 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { useRequestGuard } from '@/hooks/use-request-guard';
+import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
 
 import { RecordBrowser } from '@/components/workspace/record-browser';
@@ -1491,6 +1492,11 @@ export function BusinessSales() {
   useEffect(() => {
     load();
   }, [load]);
+  useLinkedDeskChanges(
+    'sales-desk',
+    creating || !!editing || !!recordingPayment || !!actionLoading,
+    load,
+  );
 
   // Export the FULL filtered register (not just the visible page) to CSV/PDF.
   const exportRegister = useCallback(
@@ -1717,6 +1723,7 @@ export function BusinessSales() {
     setActionError('');
     try {
       await backendPatch(`/sales-orders/${id}/${action}`);
+      notifyDeskSaved('sales-desk');
       showToast(
         action === 'confirm' ? 'success' : 'info',
         action === 'confirm' ? 'Order confirmed' : 'Order cancelled',

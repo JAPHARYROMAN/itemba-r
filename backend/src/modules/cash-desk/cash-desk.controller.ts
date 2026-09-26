@@ -3,6 +3,7 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CashDeskService } from './cash-desk.service';
+import { CashSalesConnectionService } from './cash-sales-connection.service';
 import {
   CashAccountDto,
   CashExpenseQuery,
@@ -20,9 +21,17 @@ import {
 @RequirePermissions('cash_desk.view')
 @AgentExcluded()
 export class CashDeskController {
-  constructor(private readonly service: CashDeskService) {}
-  @Get('directory') directory(@CurrentUser() u: AuthUser) {
-    return this.service.directory(u);
+  constructor(
+    private readonly service: CashDeskService,
+    private readonly sales: CashSalesConnectionService,
+  ) {}
+  @Get('sales-connection')
+  @RequirePermissions('cash_desk.view', 'sales.view', 'receivables.view')
+  salesConnection(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
+    return this.sales.read(u, q);
+  }
+  @Get('directory') directory(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
+    return this.service.directory(u, q.companyId);
   }
   @Get('accounts') accounts(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
     return this.service.accounts(u, q);

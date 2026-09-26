@@ -97,8 +97,8 @@ export class InvoiceDeskService {
     };
   }
 
-  async directory(user: AuthUser) {
-    const companyScope = await this.companies.companyWhereFor(user);
+  async directory(user: AuthUser, companyId?: string) {
+    const companyScope = await this.companies.companyWhereFor(user, companyId);
     const accessible = await this.org.accessibleIds(user);
     const branchScope = accessible.unrestricted
       ? {}

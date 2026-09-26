@@ -1,9 +1,73 @@
 import { Prisma } from '@prisma/client';
 import { cashDate, checkDailyBalances, payloadKey } from './cash-desk.domain';
 import { CashDeskController } from './cash-desk.controller';
+import { CashDeskService } from './cash-desk.service';
+import { InvoiceDeskService } from '../invoice-desk/invoice-desk.service';
+import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { PERMISSIONS_KEY } from '../../common/decorators/require-permissions.decorator';
 const d = (x: string) => new Prisma.Decimal(x);
 describe('Cash Desk ledger', () => {
+  it('lets a group reader select an explicit company without opening unbounded financial scope', async () => {
+    const db = {
+      company: { findMany: jest.fn().mockResolvedValue([{ id: 'company', name: 'Company' }]) },
+      branch: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const companies = new CompanyScopeService(db as any);
+    const org = { accessibleIds: jest.fn().mockResolvedValue({ unrestricted: true }) };
+    const invoices = new InvoiceDeskService(db as any, companies, org as any, {} as any);
+    const service = new CashDeskService(db as any, companies, org as any, {} as any, invoices);
+    const reader = {
+      id: 'group-reader',
+      email: 'reader@example.test',
+      permissions: [],
+      roles: [],
+      roleScopes: ['GROUP'],
+      companyAccess: [],
+    };
+    const directory = await service.directory(reader);
+    expect(directory).toMatchObject({
+      companies: [{ id: 'company', name: 'Company' }],
+      requiresCompanySelection: true,
+    });
+    expect(await companies.companyWhereFor(reader)).toEqual({ id: { in: [] } });
+    const selected = await service.directory(reader, 'company');
+    expect(selected).toMatchObject({ requiresCompanySelection: false });
+    expect(db.branch.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              division: expect.objectContaining({ companyId: 'company' }),
+            }),
+          ]),
+        }),
+      }),
+    );
+    await expect(companies.assertCanAccessCompany(reader, 'company', 'WRITE')).rejects.toThrow();
+  });
+  it('keeps company readers restricted to their grants when selecting the directory', async () => {
+    const db = { company: { findMany: jest.fn() }, branch: { findMany: jest.fn() } };
+    const companies = new CompanyScopeService(db as any);
+    const org = {};
+    const invoices = new InvoiceDeskService(db as any, companies, org as any, {} as any);
+    const service = new CashDeskService(db as any, companies, org as any, {} as any, invoices);
+    await expect(
+      service.directory(
+        {
+          id: 'company-reader',
+          email: 'reader@example.test',
+          permissions: [],
+          roles: [],
+          roleScopes: ['COMPANY'],
+          companyId: 'allowed',
+          companyAccess: [],
+        },
+        'other-company',
+      ),
+    ).rejects.toThrow();
+    expect(db.branch.findMany).not.toHaveBeenCalled();
+    expect(db.company.findMany).not.toHaveBeenCalled();
+  });
   it('preserves exact cents across large amounts', () => {
     expect(
       checkDailyBalances(

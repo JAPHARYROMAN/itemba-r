@@ -29,6 +29,7 @@ import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet } from '@/lib/api-client';
 import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
+import { CashSalesConnection } from './cash-sales-connection';
 import {
   Account,
   CashOverview,
@@ -52,6 +53,7 @@ import './cash-desk.css';
 const deskApp = getApp('cash-desk')!;
 const sections = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'collections', label: 'Sales collections', icon: Banknote },
   { id: 'sales', label: 'Daily sales', icon: Banknote },
   { id: 'expenses', label: 'Expenses', icon: ArrowUpRight },
   { id: 'movements', label: 'Movements', icon: ArrowLeftRight },
@@ -98,7 +100,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
   const [expenseRevision, setExpenseRevision] = useState(0);
   const deferred = useDeferredValue(search),
     query = Object.fromEntries(Object.entries(scope).filter(([, v]) => v));
-  const directory = useWorkspaceResource<Directory>('/cash-desk/directory', {}, allowed);
+  const directory = useWorkspaceResource<Directory & { requiresCompanySelection?: boolean }>(
+    '/cash-desk/directory',
+    scope.companyId ? { companyId: scope.companyId } : {},
+    allowed,
+  );
   const allAccounts = useWorkspaceResource<Account[]>('/cash-desk/accounts', {}, allowed);
   const accounts = useWorkspaceResource<Account[]>('/cash-desk/accounts', query, allowed);
   const overview = useWorkspaceResource<CashOverview>(
@@ -239,17 +245,23 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
           </div>
         </div>
         <nav aria-label="Cash Desk">
-          {sections.map((s) => (
-            <button
-              key={s.id}
-              aria-current={section === s.id ? 'page' : undefined}
-              onClick={() => go(s.id)}
-            >
-              <s.icon size={17} />
-              {s.label}
-              <ChevronRight size={13} />
-            </button>
-          ))}
+          {sections
+            .filter(
+              (s) =>
+                s.id !== 'collections' ||
+                ['sales.view', 'receivables.view'].every((p) => hasPermission(p)),
+            )
+            .map((s) => (
+              <button
+                key={s.id}
+                aria-current={section === s.id ? 'page' : undefined}
+                onClick={() => go(s.id)}
+              >
+                <s.icon size={17} />
+                {s.label}
+                <ChevronRight size={13} />
+              </button>
+            ))}
         </nav>
         <div className="desk-rail-note">
           <span className="desk-note-icon">
@@ -271,17 +283,19 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
             <p>
               {section === 'overview'
                 ? 'A clear picture of the money you hold and the money you owe.'
-                : section === 'expenses'
-                  ? 'Manage everyday spending and see where your money goes.'
-                  : section === 'sales'
-                    ? 'Keep a daily record of money received from sales.'
-                    : section === 'accounts'
-                      ? 'Cash tills, bank accounts and mobile wallets.'
-                      : section === 'loans'
-                        ? 'Track lending and repayments within your group.'
-                        : section === 'suppliers'
-                          ? 'The same invoices and balances as Invoice Desk.'
-                          : 'A permanent record of every receipt, payment and transfer.'}
+                : section === 'collections'
+                  ? 'Collect outstanding sales and see their business receipt accounts.'
+                  : section === 'expenses'
+                    ? 'Manage everyday spending and see where your money goes.'
+                    : section === 'sales'
+                      ? 'Keep a daily record of money received from sales.'
+                      : section === 'accounts'
+                        ? 'Cash tills, bank accounts and mobile wallets.'
+                        : section === 'loans'
+                          ? 'Track lending and repayments within your group.'
+                          : section === 'suppliers'
+                            ? 'The same invoices and balances as Invoice Desk.'
+                            : 'A permanent record of every receipt, payment and transfer.'}
             </p>
           </div>
           <div className="desk-header-actions">
@@ -300,7 +314,8 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                   </Btn>
                 )
               : record &&
-                section !== 'suppliers' && (
+                section !== 'suppliers' &&
+                section !== 'collections' && (
                   <Btn
                     icon={<Plus size={15} />}
                     disabled={!allAccounts.data?.length}
@@ -346,7 +361,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
               <label key={key}>
                 <span>{['Company', 'Division', 'Branch'][i]}</span>
                 <select value={scope[key]} onChange={(e) => changeScope(key, e.target.value)}>
-                  <option value="">All {['companies', 'divisions', 'branches'][i]}</option>
+                  <option value="">
+                    {i === 0 && directory.data?.requiresCompanySelection
+                      ? 'Choose a company'
+                      : `All ${['companies', 'divisions', 'branches'][i]}`}
+                  </option>
                   {list.map((x) => (
                     <option key={x.id} value={x.id}>
                       {x.name}
@@ -357,6 +376,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
             );
           })}
         </div>
+        {directory.data?.requiresCompanySelection && (
+          <p role="status" className="cash-connection-note">
+            Choose a company to view its sales, collections and account balances.
+          </p>
+        )}
         {notice && (
           <p role="status" className="desk-success">
             {notice}
@@ -370,7 +394,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
             {[...new Set(failures)].join(' ')} <button onClick={reload}>Retry</button>
           </p>
         )}
-        {(section === 'overview' || section === 'sales') && (
+        {(section === 'overview' || section === 'sales' || section === 'collections') && (
           <div className="cash-toolbar">
             <div className="ui-date-caption">
               Sales date{' '}
@@ -385,21 +409,39 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 className="ui-date-field-inline"
               />
             </div>
-            <label>
-              Currency{' '}
-              <select value={current?.currency ?? ''} onChange={(e) => setCurrency(e.target.value)}>
-                {currencies.length ? (
-                  currencies.map((c) => <option key={c.currency}>{c.currency}</option>)
-                ) : (
-                  <option value="">No accounts yet</option>
-                )}
-              </select>
-            </label>
+            {section !== 'collections' && (
+              <label>
+                Desk account currency{' '}
+                <select
+                  value={current?.currency ?? ''}
+                  onChange={(e) => setCurrency(e.target.value)}
+                >
+                  {currencies.length ? (
+                    currencies.map((c) => <option key={c.currency}>{c.currency}</option>)
+                  ) : (
+                    <option value="">No accounts yet</option>
+                  )}
+                </select>
+              </label>
+            )}
             <span>Dates use East Africa Time</span>
           </div>
         )}
+        {['overview', 'collections', 'sales', 'accounts'].includes(section) && (
+          <CashSalesConnection
+            key={JSON.stringify(scope)}
+            scope={scope}
+            date={date}
+            revision={expenseRevision}
+            compact={section !== 'collections'}
+            onOpen={() => go('collections')}
+          />
+        )}
         {section === 'overview' && (
           <>
+            <div className="cash-section-title">
+              <h2>Desk accounts & direct entries</h2>
+            </div>
             <div className="cash-stats">
               <div className="cash-balance">
                 <span>
@@ -450,7 +492,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
             {!accounts.loading && !accounts.error && !accounts.data?.length ? (
               <Empty
                 title="Give your money a home"
-                description="Add a cash till, bank account or mobile wallet, then start recording your daily sales and payments."
+                description="Add a desk account for direct entries, expenses and transfers. Sales Desk business receipt accounts appear above."
               >
                 {manage && (
                   <Btn icon={<Plus size={15} />} onClick={() => setEditor({ kind: 'account' })}>
@@ -545,7 +587,8 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 Sales received{' '}
                 <strong>{current ? money(current.sales, current.currency) : '—'}</strong>
                 <span>
-                  Includes manual totals and Sales Desk receipts. Reversed records are excluded.
+                  Includes manual totals and Direct entries receipts. Business sales collections
+                  appear above. Reversed records are excluded.
                 </span>
               </p>
             )}

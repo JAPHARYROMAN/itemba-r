@@ -1,5 +1,6 @@
 'use client';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -111,6 +112,7 @@ export function RecordSalesOrderPaymentModal({
     })
       .then((rows) => {
         if (cancelled) return;
+        rows = rows.filter((account) => !account.currency || account.currency === currency);
         setAccounts(rows);
         setCashAccountId((current) =>
           current && rows.some((account) => account.id === current) ? current : (rows[0]?.id ?? ''),
@@ -128,7 +130,7 @@ export function RecordSalesOrderPaymentModal({
     return () => {
       cancelled = true;
     };
-  }, [branchId, companyId, divisionId]);
+  }, [branchId, companyId, divisionId, currency]);
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => account.id === cashAccountId) ?? null,
@@ -168,6 +170,7 @@ export function RecordSalesOrderPaymentModal({
         }. Balance: ${money(newOutstanding, currency)}`,
       );
       draft.markSaved();
+      notifyDeskSaved('sales-desk');
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record payment');
@@ -242,8 +245,9 @@ export function RecordSalesOrderPaymentModal({
         </FormSelect>
         {!accountsLoading && accounts.length === 0 && (
           <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-            No active receipt account is available for this branch. Create or activate one under
-            Finance &gt; Cash Accounts.
+            No active {currency} receipt account is available for this branch. Create or activate
+            one under Finance &gt; Cash Accounts. Business receipt account balances are shared with
+            Cash Desk collections.
           </p>
         )}
         <FormDateField

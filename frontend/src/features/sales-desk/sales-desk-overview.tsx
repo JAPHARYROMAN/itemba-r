@@ -3,6 +3,7 @@ import { ArrowRight, Receipt, Users } from 'lucide-react';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 
 export function SalesDeskOverview() {
   const { hasPermission } = useAuth();
@@ -21,6 +22,10 @@ export function SalesDeskOverview() {
   );
   const count = (value: number | undefined, loading: boolean) =>
     loading ? '…' : value === undefined ? '—' : value.toLocaleString();
+  useLinkedDeskChanges('sales-desk', false, () => {
+    sales.reload();
+    customers.reload();
+  });
   return (
     <div className="sales-business-overview">
       <header className="desk-header">
@@ -76,6 +81,20 @@ export function SalesDeskOverview() {
         Your existing Operations records are here, including new POS sales. Customer profiles retain
         their balances, statements and sales history.
       </p>
+      {hasPermission('cash_desk.view') && hasPermission('receivables.view') && canSales && (
+        <div className="sales-business-direct-card">
+          <div>
+            <h2>Cash Desk collections</h2>
+            <p>
+              Collect outstanding sales, review received payments and see the same business receipt
+              accounts in Cash Desk.
+            </p>
+          </div>
+          <Link href="/cash-desk?view=collections">
+            Open collections <ArrowRight size={16} />
+          </Link>
+        </div>
+      )}
       {hasPermission('sales_desk.view') && (
         <div className="sales-business-direct-card">
           <div>

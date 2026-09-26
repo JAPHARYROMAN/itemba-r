@@ -63,6 +63,29 @@ beforeEach(() => {
   api.post.mockResolvedValue({ id: 'saved' });
 });
 describe('Cash Desk', () => {
+  it('loads the selected company directory when an explicit financial scope is required', async () => {
+    const fallback = api.get.getMockImplementation()!;
+    api.get.mockImplementation((path, ...args) =>
+      path === '/cash-desk/directory'
+        ? Promise.resolve({ ...directory, requiresCompanySelection: true })
+        : fallback(path, ...args),
+    );
+    render(<CashDesk />);
+    expect(
+      await screen.findByText(
+        'Choose a company to view its sales, collections and account balances.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Company', { exact: true }), {
+      target: { value: 'company' },
+    });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/cash-desk/directory',
+        expect.objectContaining({ query: { companyId: 'company' } }),
+      ),
+    );
+  });
   it('opens a searched movement from a fresh scoped read and preserves linked-loan controls', async () => {
     const fallback = api.get.getMockImplementation()!;
     const movement = {
@@ -245,7 +268,7 @@ describe('Cash Desk', () => {
   it('keeps currency balances separate and formats exact decimal strings', async () => {
     render(<CashDesk />);
     await screen.findByText('TZS 9,999,999,999,999,999.99');
-    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'USD' } });
+    fireEvent.change(screen.getByLabelText('Desk account currency'), { target: { value: 'USD' } });
     expect(screen.getByText('USD 20.00')).toBeInTheDocument();
     expect(screen.queryByText('TZS 9,999,999,999,999,999.99')).not.toBeInTheDocument();
   });
