@@ -1,0 +1,104 @@
+/*
+ * Element defaults, built on the token variables from tokens.css. Plain CSS
+ * with no @layer: this file is processed on its own, and it loads after
+ * preflight and before the utilities, so any utility class overrides it.
+ */
+
+html {
+  background-color: rgb(var(--surface));
+  color: rgb(var(--fg));
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Anchored sections clear the sticky global nav. */
+  scroll-padding-top: calc(var(--nav-height) + 8px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Body copy: 17px / 1.47, weight 400. */
+body {
+  background-color: rgb(var(--surface));
+  color: rgb(var(--fg));
+  font-size: 1.0625rem;
+  line-height: 1.47;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+}
+
+/* Every tone element paints its own surface and text colour, so the
+   re-mapped variables always match what is under them. */
+[data-tone] {
+  background-color: rgb(var(--surface));
+  color: rgb(var(--fg));
+}
+
+:where(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+:where(p, li, dd, figcaption, blockquote) {
+  text-wrap: pretty;
+}
+
+::selection {
+  background-color: rgb(var(--focus) / 0.24);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgb(var(--fg-muted));
+  opacity: 1;
+}
+
+/* Focus: a visible ring for keyboard users only (3:1 against every surface,
+   checked by the contrast test). */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--focus));
+  outline-offset: 3px;
+}
+
+#main-content:focus {
+  outline: none;
+}
+
+.skip-link {
+  position: fixed;
+  left: var(--gutter);
+  top: 0.75rem;
+  z-index: var(--z-skip);
+  transform: translateY(-200%);
+  border-radius: var(--radius-pill);
+  background-color: rgb(var(--btn));
+  color: rgb(var(--btn-fg));
+  padding: 0.75rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.43;
+  transition: transform var(--duration-fast) var(--ease);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* Safety net: whatever a component animates, reduced motion stills it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

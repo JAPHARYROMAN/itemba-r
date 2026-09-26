@@ -1,6 +1,9 @@
 import type { Metadata } from 'next';
-import { Inter, Inter_Tight } from 'next/font/google';
-import './globals.css';
+import '@/styles/tokens.css';
+import '@/styles/base.css';
+import '@/styles/utilities.css';
+import '@/styles/print.css';
+import { inter } from '@/design/fonts';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ScrollProgress from '@/components/ScrollProgress';
@@ -10,19 +13,6 @@ import QuickContact from '@/components/QuickContact';
 import Analytics from '@/components/Analytics';
 import ConversionTracker from '@/components/ConversionTracker';
 import { absoluteUrl, companyProfiles, contact, site } from '@/lib/site';
-
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-});
-
-const interTight = Inter_Tight({
-  subsets: ['latin'],
-  variable: '--font-inter-tight',
-  weight: ['600', '700', '800', '900'],
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(site.url),
@@ -129,8 +119,8 @@ const websiteJsonLd = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang={site.language} className={`${inter.variable} ${interTight.variable}`}>
-      <body className="font-sans antialiased bg-white text-slate-900 overflow-x-hidden">
+    <html lang={site.language} className={inter.variable}>
+      <body className="overflow-x-hidden font-sans">
         <a href="#main-content" className="skip-link">
           Skip to content
         </a>
