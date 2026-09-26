@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -6,6 +6,13 @@ import { join } from 'node:path';
 import { HrReportWorkspace } from './hr-report-workspace';
 import type { HrReportResult } from './hr-report-types';
 import { queryDateField, setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({ permissions: new Set<string>(), get: vi.fn(), page: vi.fn() }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: (p: string) => state.permissions.has(p) }),
@@ -147,20 +154,22 @@ describe('People reports', () => {
     state.permissions.add('hr.reports.view');
     render(<HrReportWorkspace />);
     await run();
-    expect(screen.queryByLabelText('Company')).not.toBeInTheDocument();
+    expect(querySelectField('Company')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Inspect Alex Example' }));
     expect(screen.queryByRole('link', { name: 'Open employee' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Statutory returns' })).not.toBeInTheDocument();
     await run('Payroll');
-    expect(screen.queryByLabelText('Pay period')).not.toBeInTheDocument();
+    expect(querySelectField('Pay period')).not.toBeInTheDocument();
   });
   it('renders real employee relation fields and status, keeps filters and exposes later pages', async () => {
     render(<HrReportWorkspace />);
     expect(state.get).not.toHaveBeenCalled();
-    await screen.findByRole('option', { name: 'Example Company' });
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'company');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Example Company'),
+    );
+    await chooseSelectOption('Company', 'company');
     await userEvent.type(screen.getByLabelText('Employee name or code'), 'Alex');
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'INACTIVE');
+    await chooseSelectOption('Status', 'INACTIVE');
     await userEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     await screen.findByRole('button', { name: 'Inspect Alex Example' });
     expect(state.get).toHaveBeenLastCalledWith(
@@ -223,8 +232,12 @@ describe('People reports', () => {
   it('uses supported payroll period filters, run numbers, entry counts and totals across all pages', async () => {
     render(<HrReportWorkspace />);
     await userEvent.click(screen.getByRole('button', { name: 'Payroll', exact: true }));
-    await screen.findByRole('option', { name: 'September 2026 · Example Company' });
-    await userEvent.selectOptions(screen.getByLabelText('Pay period'), 'period');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Pay period'))).toContain(
+        'September 2026 · Example Company',
+      ),
+    );
+    await chooseSelectOption('Pay period', 'period');
     expect(queryDateField('From date')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     expect(
@@ -244,8 +257,8 @@ describe('People reports', () => {
       '/hr/payroll-entries?payrollRunId=run',
     );
     capture('hr-report-payroll');
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'other');
-    expect(screen.getByLabelText('Pay period')).toHaveValue('');
+    await chooseSelectOption('Company', 'other');
+    expect(selectFieldValue(getSelectField('Pay period'))).toBe('');
     expect(
       screen.queryByRole('region', { name: 'Totals for all matching records' }),
     ).not.toBeInTheDocument();
@@ -301,7 +314,9 @@ describe('People reports', () => {
       total: 2,
     }));
     await userEvent.click(screen.getByRole('button', { name: 'Retry companies' }));
-    await screen.findByRole('option', { name: 'Company 2' });
-    expect(within(screen.getByLabelText('Company')).getAllByRole('option')).toHaveLength(3);
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Company 2'),
+    );
+    expect(selectFieldOptions(getSelectField('Company'))).toHaveLength(3);
   });
 });

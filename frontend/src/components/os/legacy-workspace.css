@@ -138,7 +138,7 @@
   }
   :is(.itemba-os, .os-system-layer)
     [data-dialog-body]
-    :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+    :is(input:not([type='checkbox']):not([type='radio']), select, textarea, .ui-select-trigger) {
     font-size: 16px;
   }
   :is(.itemba-os, .os-system-layer) [data-dialog-footer] > button {

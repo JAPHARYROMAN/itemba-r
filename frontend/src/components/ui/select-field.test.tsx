@@ -5,7 +5,14 @@ import { axe } from 'jest-axe';
 import { describe, expect, it, vi } from 'vitest';
 import { Modal, ModalPortalProvider } from './modal';
 import { SelectField, type SelectFieldOption } from './select-field';
-import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
+import {
+  changeSelectField,
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldText,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const companies: SelectFieldOption[] = [
   { value: '', label: 'All companies' },
@@ -41,7 +48,7 @@ function Harness({
 describe('SelectField', () => {
   it('shows the current choice, the empty "All" row included', () => {
     render(<Harness initial="" />);
-    expect(selectFieldValue(getSelectField('Company'))).toBe('All companies');
+    expect(selectFieldText(getSelectField('Company'))).toBe('All companies');
   });
 
   it('reports the chosen option as its plain string value', async () => {
@@ -50,7 +57,7 @@ describe('SelectField', () => {
     render(<Harness onChange={onChange} />);
     await chooseSelectOption('Company', 'Mwanjalisi Oil', user);
     expect(onChange).toHaveBeenLastCalledWith('mwanjalisi');
-    expect(selectFieldValue(getSelectField('Company'))).toBe('Mwanjalisi Oil');
+    expect(selectFieldText(getSelectField('Company'))).toBe('Mwanjalisi Oil');
     await chooseSelectOption('Company', 'All companies', user);
     expect(onChange).toHaveBeenLastCalledWith('');
   });
@@ -69,9 +76,42 @@ describe('SelectField', () => {
     );
   });
 
-  it('shows the placeholder while the value matches no option', () => {
-    render(<Harness initial="not-loaded-yet" placeholder="Choose a company" />);
-    expect(selectFieldValue(getSelectField('Company'))).toBe('Choose a company');
+  it('shows the placeholder while its list has nothing loaded', () => {
+    render(
+      <Harness
+        initial="company-id"
+        options={[{ value: '', label: 'All companies' }]}
+        placeholder="Choose a company"
+      />,
+    );
+    expect(selectFieldText(getSelectField('Company'))).toBe('Choose a company');
+  });
+
+  it('keeps a saved value the loaded list no longer offers, so the record still saves', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <form>
+        <Harness
+          label="Type"
+          required
+          initial="COMPANY"
+          options={[
+            { value: 'GENERAL_SUPPLIER', label: 'General supplier' },
+            { value: 'MANUFACTURER', label: 'Manufacturer' },
+          ]}
+        />
+      </form>,
+    );
+    const field = getSelectField('Type');
+    expect(selectFieldText(field)).toBe('COMPANY');
+    expect(selectFieldValue(field)).toBe('COMPANY');
+    expect(container.querySelector('form')!.checkValidity()).toBe(true);
+    expect(selectFieldOptions(field)).toEqual(['COMPANY', 'General supplier', 'Manufacturer']);
+    await chooseSelectOption(field, 'Manufacturer', user);
+    expect(selectFieldOptions(getSelectField('Type'))).toEqual([
+      'General supplier',
+      'Manufacturer',
+    ]);
   });
 
   it('keeps short lists free of a search box', async () => {
@@ -148,6 +188,14 @@ describe('SelectField', () => {
     expect(new FormData(form).get('companyId')).toBe('mwanjalisi');
   });
 
+  it('speaks "required" in the name instead of reading out the asterisk', () => {
+    render(<Harness required />);
+    expect(
+      screen.getByRole('button', { name: 'All companies Company (required)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('*')).toBeVisible();
+  });
+
   it('says why a required field stopped the form, then clears once chosen', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
@@ -185,7 +233,43 @@ describe('SelectField', () => {
     await user.click(getSelectField('Company'));
     await user.click(await screen.findByRole('option', { name: 'Mwanjalisi Oil' }));
     expect(onClose).not.toHaveBeenCalled();
-    expect(selectFieldValue(getSelectField('Company'))).toBe('Mwanjalisi Oil');
+    expect(selectFieldText(getSelectField('Company'))).toBe('Mwanjalisi Oil');
+  });
+
+  it('calls the latest change handler, even for renders it skipped', () => {
+    // Handlers often close over the whole form (`setForm({ ...form, x })`). The
+    // field skips renders whose props are unchanged by content, so it must not
+    // keep calling the handler from an earlier render and drop other edits.
+    function Form() {
+      const [form, setForm] = useState({ company: '', type: '' });
+      return (
+        <>
+          <SelectField
+            label="Company"
+            value={form.company}
+            onChange={(company) => setForm({ ...form, company })}
+            options={companies}
+          />
+          <SelectField
+            label="Type"
+            value={form.type}
+            onChange={(type) => setForm({ ...form, type })}
+            options={[
+              { value: '', label: 'Any type' },
+              { value: 'retail', label: 'Retail' },
+            ]}
+          />
+          <output>{JSON.stringify(form)}</output>
+        </>
+      );
+    }
+    render(<Form />);
+    changeSelectField('Company', 'westsides');
+    changeSelectField('Type', 'retail');
+    changeSelectField('Company', 'mwanjalisi');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      JSON.stringify({ company: 'mwanjalisi', type: 'retail' }),
+    );
   });
 
   it('names itself from aria-label when the caption lives outside', () => {

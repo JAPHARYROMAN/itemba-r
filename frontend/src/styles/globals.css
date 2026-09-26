@@ -817,8 +817,8 @@ select optgroup {
    Select field — components/ui/select-field.tsx
 
    React Aria's Select in place of a native `<select>`, whose open list the
-   browser paints on its own terms. The `field` trigger repeats `.aurora-input`
-   so it sits flush in a form grid; `bare` is the borderless caption a desk's
+   browser paints on its own terms. The `field` trigger repeats FormInput's box
+   (field-chrome's INPUT_BASE) so it sits flush in a form grid; `bare` is the borderless caption a desk's
    scope bar uses. Variant defaults sit behind `:where()` so a bar's own
    `.some-toolbar .ui-select-trigger` restyle wins whatever order the sheets load.
    ───────────────────────────────────────────────────────────────────────── */
@@ -858,8 +858,8 @@ select optgroup {
   padding: 0.5rem 0.75rem;
   background-color: var(--aurora-card);
   border: 1px solid var(--aurora-border);
-  border-radius: var(--aurora-radius-sm);
-  font-size: 0.875rem;
+  border-radius: 0.5rem;
+  font-size: 13px;
   line-height: 1.5;
   transition:
     border-color var(--aurora-duration-fast) var(--aurora-ease),
@@ -1002,6 +1002,13 @@ select optgroup {
 
 .ui-select-search input::placeholder {
   color: var(--aurora-text-muted);
+}
+
+/* Phones zoom the page into any focused input under 16px. */
+@media (pointer: coarse) {
+  .ui-select-search input {
+    font-size: 16px;
+  }
 }
 
 /* React Aria also draws the native clear button; the list already filters live. */

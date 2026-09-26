@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { changeSelectField } from '@/test/select-field';
 import LoanRepaymentsPage from './page';
 
 const fixture = vi.hoisted(() => ({
@@ -87,9 +88,7 @@ async function openFirstPayment() {
 }
 
 function reviewAndPay(dialog: HTMLElement) {
-  fireEvent.change(within(dialog).getByLabelText(/Pay from Cash Desk account/), {
-    target: { value: 'cash' },
-  });
+  changeSelectField('Pay from Cash Desk account', 'cash', dialog);
   fireEvent.click(within(dialog).getByRole('checkbox', { name: /I have reviewed/ }));
   fireEvent.click(within(dialog).getByRole('button', { name: 'Record Payment' }));
 }

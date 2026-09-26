@@ -6,6 +6,12 @@ import { join } from 'node:path';
 import { EmployeeAllocationWorkspace } from './employee-allocation-workspace';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   page: vi.fn(),
@@ -137,8 +143,10 @@ describe.each(['allowance', 'deduction'] as const)('Employee %s workspace', (kin
         expect.objectContaining({ query: expect.objectContaining({ page: 2 }) }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Type filter'), 'type');
-    await userEvent.selectOptions(screen.getByLabelText('Status filter'), 'INACTIVE');
+    // The filters sit in a collapsed panel; the choice lists open only once it is shown.
+    await userEvent.click(screen.getByRole('button', { name: /^Filters/ }));
+    await chooseSelectOption('Type filter', 'type');
+    await chooseSelectOption('Status filter', 'INACTIVE');
     await userEvent.type(screen.getByPlaceholderText('Search employee or type…'), ' Alex ');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
@@ -155,8 +163,8 @@ describe.each(['allowance', 'deduction'] as const)('Employee %s workspace', (kin
         }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'other');
-    expect(screen.getByLabelText('Type filter')).toHaveValue('');
+    await chooseSelectOption('Company filter', 'other');
+    expect(selectFieldValue(getSelectField('Type filter'))).toBe('');
   });
   it('retains failed edits, guards drafts and clears the end date without changing the start timestamp', async () => {
     mount(kind);
@@ -188,26 +196,20 @@ describe.each(['allowance', 'deduction'] as const)('Employee %s workspace', (kin
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save allocation' }));
     expect(within(dialog).getByRole('alert')).toHaveTextContent('end date on or after');
     expect(state.put).not.toHaveBeenCalled();
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Company', { exact: false }),
-      'other',
-    );
-    expect(within(dialog).getByLabelText('Employee', { exact: false })).toHaveValue('');
+    await chooseSelectOption('Company', 'other', userEvent, dialog);
+    expect(selectFieldValue(getSelectField('Employee', dialog))).toBe('');
     expect(
-      within(dialog).getByLabelText(kind === 'allowance' ? 'Allowance type' : 'Deduction type', {
-        exact: false,
-      }),
-    ).toHaveValue('');
+      selectFieldValue(
+        getSelectField(kind === 'allowance' ? 'Allowance type' : 'Deduction type', dialog),
+      ),
+    ).toBe('');
   });
   it('allows unchanged employee identity without employee-view permission but blocks creation', async () => {
     state.permissions.delete('employees.view');
     mount(kind);
     const dialog = await openEditor(kind);
-    expect(within(dialog).getByLabelText('Employee', { exact: false })).toBeDisabled();
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Status', { exact: true }),
-      'INACTIVE',
-    );
+    expect(getSelectField('Employee', dialog)).toBeDisabled();
+    await chooseSelectOption('Status', 'INACTIVE', userEvent, dialog);
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save allocation' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(state.put).toHaveBeenLastCalledWith('/hr/employee-' + kind + 's/allocation', {
@@ -222,26 +224,28 @@ describe.each(['allowance', 'deduction'] as const)('Employee %s workspace', (kin
     await inspect();
     await userEvent.click(screen.getByRole('button', { name: 'New ' + kind }));
     const dialog = await screen.findByRole('dialog', { name: 'New ' + kind });
-    await within(dialog).findByRole('option', { name: 'Example Company' });
-    state.failTypes = true;
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Company', { exact: false }),
-      'company',
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
     );
+    state.failTypes = true;
+    await chooseSelectOption('Company', 'company', userEvent, dialog);
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Types unavailable');
     expect(within(dialog).getByRole('button', { name: 'Save allocation' })).toBeDisabled();
     state.failTypes = false;
     await userEvent.click(within(dialog).getByRole('button', { name: 'Retry types' }));
-    await within(dialog).findByRole('option', { name: 'Example type · EXAMPLE' });
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Employee', { exact: false }),
-      'employee',
+    await waitFor(() =>
+      expect(
+        selectFieldOptions(
+          getSelectField(kind === 'allowance' ? 'Allowance type' : 'Deduction type', dialog),
+        ),
+      ).toContain('Example type · EXAMPLE'),
     );
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText(kind === 'allowance' ? 'Allowance type' : 'Deduction type', {
-        exact: false,
-      }),
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
+    await chooseSelectOption(
+      kind === 'allowance' ? 'Allowance type' : 'Deduction type',
       'type',
+      userEvent,
+      dialog,
     );
     await userEvent.type(within(dialog).getByLabelText('Amount (TZS)', { exact: false }), '25000');
     if (kind === 'deduction')

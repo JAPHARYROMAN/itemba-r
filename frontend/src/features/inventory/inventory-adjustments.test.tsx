@@ -10,6 +10,12 @@ import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { WorkspaceSessionProvider } from '@/components/workspace/workspace-session';
 import { setDateField } from '@/test/date-field';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -95,6 +101,11 @@ const embed = () => (
     </InventoryWorkspaceProvider>
   </UnsavedWorkProvider>
 );
+// The register's filters sit in a collapsed (hidden) panel until "Filters" is
+// opened, so the status field is found among hidden elements, as the replaced
+// `getByLabelText` found the hidden select.
+const collapsedStatusField = () =>
+  screen.getByRole('button', { name: /(^|\s)Adjustment status$/, hidden: true });
 function capture(name: string) {
   const dir = process.env.ITEMBA_PAYROLL_VISUAL_DIR;
   if (!dir) return;
@@ -180,7 +191,7 @@ describe('Adjustment register', () => {
     );
     const view = render(tree(true));
     await screen.findByRole('button', { name: 'Inspect SA-2026-0042' });
-    fireEvent.change(screen.getByLabelText('Adjustment status'), { target: { value: 'APPROVED' } });
+    changeSelectField(collapsedStatusField(), 'APPROVED');
     await screen.findByRole('button', { name: 'Inspect SA-2026-0042' });
     fireEvent.click(screen.getByRole('button', { name: 'Next', exact: true }));
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect SA-2026-0042' }));
@@ -195,7 +206,7 @@ describe('Adjustment register', () => {
         'Freshly updated after app switch',
       ),
     );
-    expect(screen.getByLabelText('Adjustment status')).toHaveValue('APPROVED');
+    expect(selectFieldValue(collapsedStatusField())).toBe('APPROVED');
     expect(api.get).toHaveBeenLastCalledWith(
       '/stock-adjustments',
       expect.objectContaining({
@@ -206,7 +217,7 @@ describe('Adjustment register', () => {
     view.rerender(tree(true));
     await screen.findByRole('button', { name: 'Inspect SA-2026-0042' });
     expect(screen.queryByRole('button', { name: 'Close details' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Adjustment status')).toHaveValue('DRAFT');
+    expect(selectFieldValue(collapsedStatusField())).toBe('DRAFT');
   });
   it('cancels an obsolete export and applies same-view URL changes', async () => {
     const view = render(<InventoryAdjustments />);
@@ -272,7 +283,7 @@ describe('Adjustment register', () => {
       ),
     );
     fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    fireEvent.change(screen.getByLabelText('Adjustment status'), { target: { value: 'APPROVED' } });
+    changeSelectField('Adjustment status', 'APPROVED');
     await setDateField('Created from (UTC)', '2026-09-01');
     await setDateField('Created through (UTC)', '2026-09-18');
     await waitFor(() =>
@@ -466,7 +477,9 @@ function editor() {
   return { saved, close };
 }
 async function selectProduct(line = 1) {
-  await screen.findByRole('option', { name: 'Litre (L)' });
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField(`Unit, line ${line}`))).toContain('Litre (L)'),
+  );
   fireEvent.focus(screen.getByRole('combobox', { name: `Product, line ${line}` }));
   fireEvent.click(
     within(await screen.findByRole('option', { name: /Fresh milk/ })).getByRole('button'),
@@ -479,7 +492,9 @@ describe('Adjustment entry', () => {
   it('supports verified manual counts for create-only users without requesting balances', async () => {
     api.permissions.delete('inventory.view');
     editor();
-    await screen.findByRole('option', { name: 'Litre (L)' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Unit, line 1'))).toContain('Litre (L)'),
+    );
     fireEvent.focus(screen.getByRole('combobox', { name: 'Product, line 1' }));
     fireEvent.click(
       within(await screen.findByRole('option', { name: /Fresh milk/ })).getByRole('button'),
@@ -551,10 +566,10 @@ describe('Adjustment entry', () => {
     fireEvent.change(screen.getByLabelText(/Counted quantity, line 1/), {
       target: { value: '12' },
     });
-    fireEvent.change(screen.getByLabelText(/Adjustment branch/), { target: { value: 'other' } });
+    changeSelectField('Adjustment branch', 'other');
     expect(screen.getByLabelText(/Counted quantity, line 1/)).toHaveValue(null);
     await waitFor(() => expect(resolve).toBeDefined());
-    fireEvent.change(screen.getByLabelText(/Adjustment company/), { target: { value: 'otherco' } });
+    changeSelectField('Adjustment company', 'otherco');
     await act(async () => resolve({ data: [{ quantityOnHand: 900 }], total: 1 }));
     expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(null);
   });
@@ -569,7 +584,9 @@ describe('Adjustment entry', () => {
       return base(path, options);
     });
     editor();
-    await screen.findByRole('option', { name: 'Litre (L)' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Unit, line 1'))).toContain('Litre (L)'),
+    );
     fireEvent.focus(screen.getByRole('combobox', { name: 'Product, line 1' }));
     fireEvent.click(
       within(await screen.findByRole('option', { name: /Fresh milk/ })).getByRole('button'),

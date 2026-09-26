@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 import { WcfExposureWorkspace } from './wcf-exposure-workspace';
 import type { WcfExposure } from './wcf-exposure-types';
 const state = vi.hoisted(() => ({
@@ -69,11 +70,13 @@ beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
 });
 async function choose() {
-  await screen.findByRole('option', { name: 'Example Company' });
-  await userEvent.selectOptions(screen.getByLabelText('Company'), 'company');
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Company'))).toContain('Example Company'),
+  );
+  await chooseSelectOption('Company', 'company');
   fireEvent.change(screen.getByRole('spinbutton', { name: /Year/ }), { target: { value: '2026' } });
-  await userEvent.selectOptions(screen.getByLabelText('From month'), '1');
-  await userEvent.selectOptions(screen.getByLabelText('To month'), '3');
+  await chooseSelectOption('From month', '1');
+  await chooseSelectOption('To month', '3');
 }
 async function generate() {
   await userEvent.click(screen.getByRole('button', { name: 'Generate report' }));
@@ -150,11 +153,11 @@ describe('WCF exposure workspace', () => {
   it('validates month order and integer year before reads', async () => {
     render(<WcfExposureWorkspace />);
     await choose();
-    await userEvent.selectOptions(screen.getByLabelText('From month'), '4');
+    await chooseSelectOption('From month', '4');
     await userEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     expect(screen.getByRole('alert')).toHaveTextContent('From month must be on or before To month');
     expect(state.get).not.toHaveBeenCalled();
-    await userEvent.selectOptions(screen.getByLabelText('From month'), '1');
+    await chooseSelectOption('From month', '1');
     fireEvent.change(screen.getByRole('spinbutton', { name: /Year/ }), {
       target: { value: '2026.5' },
     });
@@ -178,7 +181,7 @@ describe('WCF exposure workspace', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('button', { name: 'Inspect Branch 21' })).toBeInTheDocument();
     expect(state.get).toHaveBeenCalledTimes(1);
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'other');
+    await chooseSelectOption('Company', 'other');
     expect(
       screen.queryByRole('region', { name: 'Complete exposure totals' }),
     ).not.toBeInTheDocument();
@@ -212,7 +215,7 @@ describe('WCF exposure workspace', () => {
     await choose();
     await userEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     const signal = state.get.mock.calls[0][1].signal as AbortSignal;
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'other');
+    await chooseSelectOption('Company', 'other');
     expect(signal.aborted).toBe(true);
     await act(async () => finish(fixture));
     expect(
@@ -226,7 +229,9 @@ describe('WCF exposure workspace', () => {
       .mockResolvedValueOnce({ data: [{ id: 'other', name: 'Other Company' }], total: 2 });
     render(<WcfExposureWorkspace />);
     await userEvent.click(await screen.findByRole('button', { name: 'Retry companies' }));
-    await screen.findByRole('option', { name: 'Other Company' });
-    expect(within(screen.getByLabelText('Company')).getAllByRole('option')).toHaveLength(3);
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Other Company'),
+    );
+    expect(selectFieldOptions(getSelectField('Company'))).toHaveLength(3);
   });
 });

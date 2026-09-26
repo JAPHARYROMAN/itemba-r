@@ -7,6 +7,7 @@ import { TradingPartnerWorkspace } from './trading-partner-workspace';
 import { TradingPartnerEditor } from './trading-partner-editor';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { type PartnerKind, type TradingPartner } from './trading-partner-types';
+import { chooseSelectOption, findSelectField, getSelectField } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -193,17 +194,13 @@ describe.each(['customers', 'suppliers'] as const)('%s workspace', (kind) => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters', exact: true }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Division filter' }),
-      'division',
-    );
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'BLOCKED');
-    await user.selectOptions(
-      screen.getByRole('combobox', {
-        name: kind === 'customers' ? 'Branch filter' : 'Category filter',
-      }),
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption(await findSelectField('Division filter'), 'division', user);
+    await chooseSelectOption('Status filter', 'BLOCKED', user);
+    await chooseSelectOption(
+      kind === 'customers' ? 'Branch filter' : 'Category filter',
       kind === 'customers' ? 'branch' : 'category',
+      user,
     );
     await waitFor(() =>
       expect(state.get).toHaveBeenCalledWith(
@@ -220,7 +217,7 @@ describe.each(['customers', 'suppliers'] as const)('%s workspace', (kind) => {
         }),
       ),
     );
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'other');
+    await chooseSelectOption('Company filter', 'other', user);
     await waitFor(() =>
       expect(state.get).toHaveBeenCalledWith(
         `/${kind}`,
@@ -264,15 +261,8 @@ describe.each(['customers', 'suppliers'] as const)('%s workspace', (kind) => {
     mount(kind);
     await ready();
     await user.click(screen.getByRole('button', { name: `New ${label}` }));
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: /^Division/ }),
-      'division',
-    );
-    if (kind === 'customers')
-      await user.selectOptions(
-        screen.getByRole('combobox', { name: /^Branch \/ location/ }),
-        'branch',
-      );
+    await chooseSelectOption(await findSelectField('Division'), 'division', user);
+    if (kind === 'customers') await chooseSelectOption('Branch / location', 'branch', user);
     else await user.click(await screen.findByRole('checkbox', { name: /Building materials/ }));
     await user.type(screen.getByRole('textbox', { name: /^Name/ }), 'New partner');
     await user.click(screen.getByRole('button', { name: `Create ${label}`, exact: true }));
@@ -401,12 +391,10 @@ describe('Partner recovery and actions', () => {
     mount();
     await screen.findByText(/Later page failed/);
     await userEvent.click(screen.getByRole('button', { name: 'Filters', exact: true }));
-    expect(screen.getByRole('combobox', { name: 'Company filter' })).toBeDisabled();
+    expect(getSelectField('Company filter')).toBeDisabled();
     state.page.mockResolvedValue({ data: [{ id: 'company', name: 'Example Company' }], total: 1 });
     await userEvent.click(screen.getByRole('button', { name: 'Retry company choices' }));
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Company filter' })).not.toBeDisabled(),
-    );
+    await waitFor(() => expect(getSelectField('Company filter')).not.toBeDisabled());
   });
   it('allows unchanged scope edits without directory access and never changes immutable codes', async () => {
     state.permissions = new Set(['suppliers.update']);

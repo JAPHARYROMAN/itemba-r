@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CategoryModal, Company, ExpenseCategory } from './page';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldText,
+  selectFieldValue,
+} from '@/test/select-field';
 
 /**
  * Expense-category GL linkage regression.
@@ -67,13 +74,12 @@ const COA_CO1 = {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
-// Locate a <select> through one of its options; more robust than label lookup
-// when the label text carries the required-asterisk marker.
-function selectByOptionText(optionName: string | RegExp): HTMLSelectElement {
-  const option = screen.getByRole('option', { name: optionName });
-  const select = option.closest('select');
-  if (!select) throw new Error(`No <select> ancestor for option ${String(optionName)}`);
-  return select as HTMLSelectElement;
+const companyField = () => getSelectField('Company');
+const glField = () => getSelectField('Linked GL Account');
+
+// Wait until the GL selector offers the given account.
+async function findGlOption(name: string) {
+  await waitFor(() => expect(selectFieldOptions(glField())).toContain(name));
 }
 
 function mockFetch(handler: (url: string, init?: RequestInit) => any) {
@@ -109,7 +115,7 @@ describe('CategoryModal — GL account linkage', () => {
     );
 
     // Choose a company — this triggers the COA fetch.
-    fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
+    changeSelectField(companyField(), 'co-1');
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/chart-of-accounts'));
@@ -118,12 +124,10 @@ describe('CategoryModal — GL account linkage', () => {
     });
 
     // Expense + COGS accounts appear; asset/liability filtered out.
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    expect(screen.getByRole('option', { name: '5000 — Cost of Goods' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: '1000 — Cash' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('option', { name: '2000 — Accounts Payable' }),
-    ).not.toBeInTheDocument();
+    await findGlOption('6000 — Office Supplies');
+    expect(selectFieldOptions(glField())).toContain('5000 — Cost of Goods');
+    expect(selectFieldOptions(glField())).not.toContain('1000 — Cash');
+    expect(selectFieldOptions(glField())).not.toContain('2000 — Accounts Payable');
   });
 
   it('POSTs create with the chosen linkedAccountId and companyId', async () => {
@@ -137,15 +141,13 @@ describe('CategoryModal — GL account linkage', () => {
       <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />,
     );
 
-    fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
+    changeSelectField(companyField(), 'co-1');
+    await findGlOption('6000 — Office Supplies');
 
     fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), {
       target: { value: 'Office Supplies' },
     });
-    fireEvent.change(selectByOptionText('6000 — Office Supplies'), {
-      target: { value: 'acc-exp-1' },
-    });
+    changeSelectField(glField(), 'acc-exp-1');
     fireEvent.click(screen.getByText('Create'));
 
     await waitFor(() => {
@@ -191,10 +193,8 @@ describe('CategoryModal — GL account linkage', () => {
       />,
     );
 
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    fireEvent.change(selectByOptionText('5000 — Cost of Goods'), {
-      target: { value: 'acc-cogs-1' },
-    });
+    await findGlOption('6000 — Office Supplies');
+    changeSelectField(glField(), 'acc-cogs-1');
     fireEvent.click(screen.getByText('Save Changes'));
 
     await waitFor(() => {
@@ -236,11 +236,11 @@ describe('CategoryModal — GL account linkage', () => {
     );
 
     // Once accounts load, the pre-linked account is still selected.
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    expect(selectByOptionText('6000 — Office Supplies').value).toBe('acc-exp-1');
+    await findGlOption('6000 — Office Supplies');
+    expect(selectFieldValue(glField())).toBe('acc-exp-1');
 
     // Clear the linkage and save: PATCH body carries linkedAccountId: null.
-    fireEvent.change(selectByOptionText('6000 — Office Supplies'), { target: { value: '' } });
+    changeSelectField(glField(), '');
     fireEvent.click(screen.getByText('Save Changes'));
 
     await waitFor(() => {
@@ -285,12 +285,10 @@ describe('CategoryModal — GL account linkage', () => {
     );
 
     // Accounts load; the missing link is kept selectable via a synthetic option.
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    const syntheticOption = screen.getByRole('option', {
-      name: 'Current account (inactive or unavailable)',
-    }) as HTMLOptionElement;
-    expect(syntheticOption.value).toBe('acc-deactivated-1');
-    expect(selectByOptionText('6000 — Office Supplies').value).toBe('acc-deactivated-1');
+    await findGlOption('6000 — Office Supplies');
+    expect(selectFieldOptions(glField())).toContain('Current account (inactive or unavailable)');
+    expect(selectFieldText(glField())).toBe('Current account (inactive or unavailable)');
+    expect(selectFieldValue(glField())).toBe('acc-deactivated-1');
 
     // Unrelated edit: rename only, then save.
     fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), {
@@ -322,22 +320,17 @@ describe('CategoryModal — GL account linkage', () => {
       <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />,
     );
 
-    fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
-    fireEvent.change(selectByOptionText('6000 — Office Supplies'), {
-      target: { value: 'acc-exp-1' },
-    });
-    expect(selectByOptionText('6000 — Office Supplies').value).toBe('acc-exp-1');
+    changeSelectField(companyField(), 'co-1');
+    await findGlOption('6000 — Office Supplies');
+    changeSelectField(glField(), 'acc-exp-1');
+    expect(selectFieldValue(glField())).toBe('acc-exp-1');
 
     // Switching company invalidates the account choice — it belongs to co-1.
-    fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-2' } });
+    changeSelectField(companyField(), 'co-2');
     await waitFor(() => {
-      expect(selectByOptionText('Acme TZ (ACME)').value).toBe('co-2');
+      expect(selectFieldValue(companyField())).toBe('co-2');
     });
-    const glSelect = screen
-      .getAllByRole('combobox')
-      .find((el) => el !== selectByOptionText('Acme TZ (ACME)')) as HTMLSelectElement;
-    expect(glSelect.value).toBe('');
+    expect(selectFieldValue(glField())).toBe('');
   });
 
   it('surfaces backend errors and keeps the modal open', async () => {
@@ -355,8 +348,8 @@ describe('CategoryModal — GL account linkage', () => {
       <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={onSaved} />,
     );
 
-    fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
-    await screen.findByRole('option', { name: '6000 — Office Supplies' });
+    changeSelectField(companyField(), 'co-1');
+    await findGlOption('6000 — Office Supplies');
     fireEvent.change(screen.getByPlaceholderText('e.g. Office Supplies'), {
       target: { value: 'Office Supplies' },
     });
@@ -376,7 +369,7 @@ describe('CategoryModal — GL account linkage', () => {
       <CategoryModal mode="create" companies={COMPANIES} onClose={() => {}} onSaved={() => {}} />,
     );
 
-    fireEvent.change(selectByOptionText('Acme TZ (ACME)'), { target: { value: 'co-1' } });
+    changeSelectField(companyField(), 'co-1');
     fireEvent.click(screen.getByText('Create'));
 
     expect(await screen.findByText(/Name is required/)).toBeInTheDocument();

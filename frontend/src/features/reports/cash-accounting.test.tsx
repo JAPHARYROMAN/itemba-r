@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { changeSelectField, getSelectField, querySelectField } from '@/test/select-field';
 import { CashAccounting } from './cash-accounting';
 const mocks = vi.hoisted(() => ({
   post: vi.fn(),
@@ -119,9 +120,7 @@ describe('Cash accounting review', () => {
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Review Main Cash' }));
     await screen.findByRole('dialog');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Dedicated asset ledger account' }), {
-      target: { value: 'legacy-ledger' },
-    });
+    changeSelectField('Dedicated asset ledger account', 'legacy-ledger');
     expect(
       screen.getByText('Reload account connections to compare the recorded balance.'),
     ).toBeInTheDocument();
@@ -133,9 +132,7 @@ describe('Cash accounting review', () => {
     expect(screen.queryByRole('button', { name: 'Map Main Cash' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Review Main Cash' }));
     await screen.findByRole('dialog');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Dedicated asset ledger account' }), {
-      target: { value: 'legacy-ledger' },
-    });
+    changeSelectField('Dedicated asset ledger account', 'legacy-ledger');
     expect(screen.getByText(/The balances differ/)).toBeInTheDocument();
     expect(screen.getByText(/Review only. Saving requires/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save connection' })).not.toBeInTheDocument();
@@ -146,9 +143,7 @@ describe('Cash accounting review', () => {
     render(<CashAccounting connections />);
     fireEvent.click(screen.getByRole('button', { name: 'Map Main Cash' }));
     await screen.findByRole('dialog');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Dedicated asset ledger account' }), {
-      target: { value: 'legacy-ledger' },
-    });
+    changeSelectField('Dedicated asset ledger account', 'legacy-ledger');
     expect(screen.getByText(/The balances differ/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save connection' })).toBeDisabled();
     fireEvent.click(screen.getByRole('checkbox'));
@@ -166,7 +161,7 @@ describe('Cash accounting review', () => {
     render(<CashAccounting connections={false} />);
     fireEvent.click(screen.getByRole('button', { name: 'Review' }));
     await screen.findByRole('dialog');
-    expect(screen.getByLabelText('Invoice control account')).toBeDisabled();
+    expect(getSelectField('Invoice control account')).toBeDisabled();
     const submit = screen.getByRole('button', { name: 'Post cash movement' });
     expect(submit).toBeDisabled();
     fireEvent.click(screen.getByRole('checkbox'));
@@ -185,7 +180,7 @@ describe('Cash accounting review', () => {
     render(<CashAccounting connections={false} />);
     fireEvent.click(screen.getByRole('button', { name: 'Review' }));
     await screen.findByRole('dialog');
-    expect(screen.queryByLabelText('Offset account')).not.toBeInTheDocument();
+    expect(querySelectField('Offset account')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Post cash movement' }));
     await waitFor(() =>

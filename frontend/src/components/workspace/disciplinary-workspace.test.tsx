@@ -6,6 +6,12 @@ import { join } from 'node:path';
 import { DisciplinaryWorkspace } from './disciplinary-workspace';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   user: { id: 'reviewer' },
@@ -150,9 +156,11 @@ describe('Disciplinary workspace', () => {
         expect.objectContaining({ query: expect.objectContaining({ page: 2 }) }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await userEvent.selectOptions(screen.getByLabelText('Status filter'), 'PENDING_GM_APPROVAL');
-    await userEvent.selectOptions(screen.getByLabelText('Type filter'), 'WRITTEN_WARNING');
+    // The filters sit in a collapsed panel; open it to reach the shared select fields.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    await chooseSelectOption('Company filter', 'company');
+    await chooseSelectOption('Status filter', 'PENDING_GM_APPROVAL');
+    await chooseSelectOption('Type filter', 'WRITTEN_WARNING');
     await userEvent.type(screen.getByPlaceholderText('Search action or employee…'), ' Alex ');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
@@ -186,7 +194,7 @@ describe('Disciplinary workspace', () => {
       await userEvent.clear(within(dialog).getByLabelText(label));
     await setDateField('Effective from', '', userEvent, dialog);
     await setDateField('Effective to', '', userEvent, dialog);
-    await userEvent.selectOptions(within(dialog).getByLabelText('Linked dispute'), '');
+    await chooseSelectOption('Linked dispute', '', userEvent, dialog);
     state.patch.mockRejectedValueOnce(new Error('Save unavailable'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save action' }));
     expect(await screen.findByText('Save unavailable')).toBeInTheDocument();
@@ -219,29 +227,25 @@ describe('Disciplinary workspace', () => {
     await userEvent.click(screen.getByRole('button', { name: 'New action' }));
     const dialog = screen.getByRole('dialog', { name: 'New disciplinary action' });
     await waitFor(() =>
-      expect(
-        within(dialog)
-          .getByLabelText(/Company/)
-          .querySelector('option[value="company"]'),
-      ).toBeTruthy(),
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
     );
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Company/), 'company');
-    await waitFor(() => expect(within(dialog).getByLabelText(/Employee\*/)).toBeEnabled());
+    await chooseSelectOption('Company', 'company', userEvent, dialog);
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
     state.failDisputes = true;
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee\*/), 'employee');
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
     expect(await screen.findByText('Disputes unavailable')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Save action' })).toBeDisabled();
     state.failDisputes = false;
     await userEvent.click(screen.getByRole('button', { name: 'Retry disputes' }));
-    await waitFor(() => expect(within(dialog).getByLabelText('Linked dispute')).toBeEnabled());
-    await userEvent.selectOptions(within(dialog).getByLabelText('Linked dispute'), 'dispute');
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee\*/), 'second');
-    expect(within(dialog).getByLabelText('Linked dispute')).toHaveValue('');
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Company/), 'other');
-    expect(within(dialog).getByLabelText(/Employee\*/)).toHaveValue('');
-    await waitFor(() => expect(within(dialog).getByLabelText(/Employee\*/)).toBeEnabled());
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee\*/), 'employee');
-    await userEvent.selectOptions(within(dialog).getByLabelText('Action type'), 'WRITTEN_WARNING');
+    await waitFor(() => expect(getSelectField('Linked dispute', dialog)).toBeEnabled());
+    await chooseSelectOption('Linked dispute', 'dispute', userEvent, dialog);
+    await chooseSelectOption('Employee', 'second', userEvent, dialog);
+    expect(selectFieldValue(getSelectField('Linked dispute', dialog))).toBe('');
+    await chooseSelectOption('Company', 'other', userEvent, dialog);
+    expect(selectFieldValue(getSelectField('Employee', dialog))).toBe('');
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
+    await chooseSelectOption('Action type', 'WRITTEN_WARNING', userEvent, dialog);
     await userEvent.type(within(dialog).getByLabelText('Reason *'), 'Synthetic reason');
     await setDateField(/Issued on/, '2026-09-01', userEvent, dialog);
     capture('disciplinary-form');

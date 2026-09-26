@@ -15,6 +15,18 @@ import {
   useWorkspacePathname,
 } from '@/components/workspace/workspace-navigation';
 import { PayrollWorkspace } from './payroll-workspace';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
+
+// A register's filters sit in a collapsed (hidden) panel until "Filters" is opened,
+// so its fields are found among hidden elements, as the replaced `getByLabelText`
+// found the hidden selects.
+const filterField = (label: string) =>
+  screen.getByRole('button', { name: new RegExp(`(^|\\s)${label}$`), hidden: true });
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -194,14 +206,16 @@ async function newEmployee() {
   await user.click(screen.getByRole('button', { name: 'New employee' }));
   const dialog = await screen.findByRole('dialog', { name: 'New employee' });
   const form = within(dialog);
-  await form.findByRole('option', { name: 'Company A (A)' });
-  await user.selectOptions(form.getByLabelText(/^Company/), 'company');
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Company A (A)'),
+  );
+  await chooseSelectOption(getSelectField('Company', dialog), 'company', user);
   await waitFor(() =>
     expect(form.getByRole('button', { name: 'Save', exact: true })).toBeEnabled(),
   );
   fireEvent.change(form.getByLabelText(/^First name/), { target: { value: 'Jamie' } });
   fireEvent.change(form.getByLabelText(/^Last name/), { target: { value: 'Example' } });
-  return { user, form };
+  return { user, form, dialog };
 }
 async function editAllocation(kind: 'allowance' | 'deduction') {
   const user = userEvent.setup();
@@ -217,10 +231,10 @@ async function editAllocation(kind: 'allowance' | 'deduction') {
 describe('Payroll draft continuity', () => {
   it('keeps complete employee onboarding while navigating, resumes from home, and retains a failed save', async () => {
     render(<App />);
-    const { user, form } = await newEmployee();
-    await user.selectOptions(form.getByLabelText('Branch'), 'branch');
-    await user.selectOptions(form.getByLabelText('Department'), 'department');
-    await user.selectOptions(form.getByLabelText('Position'), 'position');
+    const { user, form, dialog } = await newEmployee();
+    await chooseSelectOption(getSelectField('Branch', dialog), 'branch', user);
+    await chooseSelectOption(getSelectField('Department', dialog), 'department', user);
+    await chooseSelectOption(getSelectField('Position', dialog), 'position', user);
     fireEvent.change(form.getByLabelText('Bank account number'), {
       target: { value: 'TEST-ACCOUNT' },
     });
@@ -230,12 +244,13 @@ describe('Payroll draft continuity', () => {
     expect(await screen.findByRole('heading', { name: 'Payroll overview' })).toBeVisible();
     expect(screen.queryByRole('dialog', { name: 'New employee' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume New employee' }));
-    const resumed = within(await screen.findByRole('dialog', { name: 'New employee' }));
+    const resumedDialog = await screen.findByRole('dialog', { name: 'New employee' });
+    const resumed = within(resumedDialog);
     await waitFor(() =>
       expect(resumed.getByRole('button', { name: 'Save', exact: true })).toBeEnabled(),
     );
-    expect(resumed.getByLabelText('Branch')).toHaveValue('branch');
-    expect(resumed.getByLabelText('Position')).toHaveValue('position');
+    expect(selectFieldValue(getSelectField('Branch', resumedDialog))).toBe('branch');
+    expect(selectFieldValue(getSelectField('Position', resumedDialog))).toBe('position');
     expect(resumed.getByLabelText('Bank account number')).toHaveValue('TEST-ACCOUNT');
     expect(state.post).not.toHaveBeenCalled();
     state.post.mockRejectedValueOnce(new Error('Employee save unavailable'));
@@ -265,9 +280,9 @@ describe('Payroll draft continuity', () => {
       return previousRead(path, options);
     });
     render(<App />);
-    const { user, form } = await newEmployee();
+    const { user, form, dialog } = await newEmployee();
     expect(form.getByRole('alert')).toHaveTextContent('Could not load branches');
-    expect(form.getByLabelText('Branch')).toBeDisabled();
+    expect(getSelectField('Branch', dialog)).toBeDisabled();
     await user.click(form.getByRole('button', { name: 'Save', exact: true }));
     await waitFor(() =>
       expect(state.post).toHaveBeenCalledWith(
@@ -279,8 +294,8 @@ describe('Payroll draft continuity', () => {
   });
   it('rejects a retained organisation choice that is no longer available', async () => {
     render(<App />);
-    const { user, form } = await newEmployee();
-    await user.selectOptions(form.getByLabelText('Branch'), 'branch');
+    const { user, form, dialog: created } = await newEmployee();
+    await chooseSelectOption(getSelectField('Branch', created), 'branch', user);
     await user.click(form.getByRole('button', { name: 'Keep draft', exact: true }));
     state.branch = false;
     await user.click(screen.getByRole('button', { name: 'Resume New employee' }));
@@ -393,8 +408,8 @@ describe('Payroll draft continuity', () => {
     render(<App />);
     const user = userEvent.setup();
     await screen.findByRole('button', { name: 'Inspect Alex Example' });
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await user.selectOptions(screen.getByLabelText('Status filter'), 'ACTIVE');
+    await chooseSelectOption(filterField('Company filter'), 'company', user);
+    await chooseSelectOption(filterField('Status filter'), 'ACTIVE', user);
     await user.click(screen.getByRole('button', { name: 'Next', exact: true }));
     await user.click(await screen.findByRole('button', { name: 'Inspect Alex Example' }));
     await user.click(screen.getByRole('link', { name: 'Open home' }));
@@ -402,8 +417,8 @@ describe('Payroll draft continuity', () => {
     state.page.mockClear();
     await user.click(screen.getByRole('link', { name: 'Open employees' }));
     expect(await screen.findByRole('heading', { name: 'Alex Updated' })).toBeVisible();
-    expect(screen.getByLabelText('Company filter')).toHaveValue('company');
-    expect(screen.getByLabelText('Status filter')).toHaveValue('ACTIVE');
+    expect(selectFieldValue(filterField('Company filter'))).toBe('company');
+    expect(selectFieldValue(filterField('Status filter'))).toBe('ACTIVE');
     expect(state.page).toHaveBeenCalledWith(
       '/hr/employees',
       expect.objectContaining({
@@ -446,7 +461,7 @@ describe('Payroll draft continuity', () => {
     render(<App initialHref="/hr/employee-allowances" />);
     const user = userEvent.setup();
     await screen.findByRole('button', { name: 'Inspect Alex Example' });
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+    await chooseSelectOption(filterField('Company filter'), 'company', user);
     await user.type(screen.getByPlaceholderText('Search employee or type…'), 'Alex');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
@@ -465,7 +480,7 @@ describe('Payroll draft continuity', () => {
     state.page.mockClear();
     await user.click(screen.getByRole('link', { name: 'Open allowances' }));
     expect(screen.getByPlaceholderText('Search employee or type…')).toHaveValue('Alex');
-    await waitFor(() => expect(screen.getByLabelText('Company filter')).toHaveValue('company'));
+    await waitFor(() => expect(selectFieldValue(filterField('Company filter'))).toBe('company'));
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
         '/hr/employee-allowances',

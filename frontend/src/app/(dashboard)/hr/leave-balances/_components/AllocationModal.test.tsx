@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import {
+  changeSelectField,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+} from '@/test/select-field';
 import { AllocationModal, LeaveBalanceRecord } from './AllocationModal';
 
 /**
@@ -85,15 +91,13 @@ afterEach(() => {
 });
 
 async function fillCreateForm() {
-  await waitFor(() => expect(screen.getByLabelText('Company')).toBeEnabled());
-  fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'c-1' } });
+  await waitFor(() => expect(getSelectField('Company')).toBeEnabled());
+  changeSelectField('Company', 'c-1');
   await waitFor(() =>
-    expect((screen.getByLabelText('Employee') as HTMLSelectElement).options.length).toBeGreaterThan(
-      1,
-    ),
+    expect(selectFieldOptions(getSelectField('Employee')).length).toBeGreaterThan(1),
   );
-  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'e-1' } });
-  fireEvent.change(screen.getByLabelText('Leave Type'), { target: { value: 'lt-1' } });
+  changeSelectField('Employee', 'e-1');
+  changeSelectField('Leave type', 'lt-1');
   fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2026' } });
 }
 
@@ -159,8 +163,8 @@ describe('AllocationModal', () => {
     render(<AllocationModal initial={ADJUST_RECORD} onClose={() => {}} onSaved={onSaved} />);
 
     // Identity selectors are replaced by a read-only summary.
-    expect(screen.queryByLabelText('Company')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Employee')).not.toBeInTheDocument();
+    expect(querySelectField('Company')).not.toBeInTheDocument();
+    expect(querySelectField('Employee')).not.toBeInTheDocument();
     expect(screen.getByText('Alice Mkapa')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Allocated Days'), { target: { value: '25' } });

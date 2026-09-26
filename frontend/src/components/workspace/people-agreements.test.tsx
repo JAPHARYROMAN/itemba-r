@@ -5,6 +5,7 @@ import EmploymentContractsPage from '@/app/(dashboard)/hr/employment-contracts/p
 import EmployeeAssignmentsPage from '@/app/(dashboard)/hr/employee-assignments/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -132,7 +133,7 @@ describe('Contract and assignment workspaces', () => {
     const user = mount(EmploymentContractsPage);
     await screen.findByRole('button', { name: 'Inspect CON-1' });
     await user.click(screen.getByRole('button', { name: 'Filters' }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'source');
+    await chooseSelectOption('Company filter', 'source', user);
     await user.click(screen.getByRole('button', { name: 'Next', exact: true }));
     await user.type(screen.getByRole('searchbox'), 'Alex');
     await waitFor(() =>
@@ -162,9 +163,10 @@ describe('Contract and assignment workspaces', () => {
   it('retains contract drafts after failed saves and sends typed pay terms with automatic numbering', async () => {
     const user = mount(EmploymentContractsPage);
     await user.click(screen.getByRole('button', { name: 'New contract' }));
-    const editor = within(await screen.findByRole('dialog', { name: 'New employment contract' }));
-    await user.selectOptions(editor.getByLabelText(/^Company/), 'source');
-    await user.selectOptions(editor.getByLabelText(/^Employee/), 'employee');
+    const dialog = await screen.findByRole('dialog', { name: 'New employment contract' });
+    const editor = within(dialog);
+    await chooseSelectOption('Company', 'source', user, dialog);
+    await chooseSelectOption('Employee', 'employee', user, dialog);
     await setDateField(/^Start date/, '2026-01-01', user, editor);
     await user.type(editor.getByLabelText(/^Salary amount/), '123.50');
     await user.clear(editor.getByLabelText(/^Currency/));
@@ -221,11 +223,12 @@ describe('Contract and assignment workspaces', () => {
   it('allows an accessible employee from another company in a transfer draft and omits unsupported audit fields', async () => {
     const user = mount(EmployeeAssignmentsPage);
     await user.click(screen.getByRole('button', { name: 'New assignment' }));
-    const editor = within(await screen.findByRole('dialog', { name: 'New assignment' }));
-    await waitFor(() => expect(editor.getByLabelText(/^Employee/)).toBeEnabled());
-    await user.selectOptions(editor.getByLabelText(/^Employee/), 'employee');
-    await user.selectOptions(editor.getByLabelText(/^Destination company/), 'destination');
-    expect(editor.getByLabelText(/^Employee/)).toHaveValue('employee');
+    const dialog = await screen.findByRole('dialog', { name: 'New assignment' });
+    const editor = within(dialog);
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
+    await chooseSelectOption('Employee', 'employee', user, dialog);
+    await chooseSelectOption('Destination company', 'destination', user, dialog);
+    expect(selectFieldValue(getSelectField('Employee', dialog))).toBe('employee');
     await setDateField(/^Start date/, '2026-01-01', user, editor);
     state.post.mockRejectedValueOnce(new Error('Assignment save unavailable'));
     await user.click(editor.getByRole('button', { name: 'Save assignment' }));
@@ -246,15 +249,16 @@ describe('Contract and assignment workspaces', () => {
     const user = mount(EmployeeAssignmentsPage);
     await user.click(await screen.findByRole('button', { name: 'Inspect Alex Example' }));
     await user.click(screen.getByRole('button', { name: 'Edit assignment' }));
-    const editor = within(await screen.findByRole('dialog', { name: 'Edit assignment' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit assignment' });
+    const editor = within(dialog);
     await waitFor(() =>
       expect(editor.getByRole('button', { name: 'Save assignment' })).toBeEnabled(),
     );
-    expect(editor.getByLabelText(/^Employee/)).toBeDisabled();
-    expect(editor.getByLabelText(/^Destination company/)).toBeDisabled();
-    expect(editor.getByLabelText('Division')).toBeDisabled();
-    expect(editor.getByLabelText('Status')).toBeDisabled();
-    await user.selectOptions(editor.getByLabelText('Branch'), '');
+    expect(getSelectField('Employee', dialog)).toBeDisabled();
+    expect(getSelectField('Destination company', dialog)).toBeDisabled();
+    expect(getSelectField('Division', dialog)).toBeDisabled();
+    expect(getSelectField('Status', dialog)).toBeDisabled();
+    await chooseSelectOption('Branch', '', user, dialog);
     await setDateField('End date', '', user, editor);
     await user.click(editor.getByRole('button', { name: 'Cancel' }));
     await user.click(screen.getByRole('button', { name: 'Stay here' }));

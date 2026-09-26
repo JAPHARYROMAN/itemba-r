@@ -9,6 +9,13 @@ import type { StockDamage } from './inventory-damage-types';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { WorkspaceSessionProvider } from '@/components/workspace/workspace-session';
+import {
+  changeSelectField,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -195,12 +202,15 @@ describe('Damage register', () => {
     );
     const view = render(tree(true));
     await screen.findByRole('button', { name: 'Inspect DMG-2026-00024' });
-    fireEvent.change(screen.getByLabelText('Damage status'), { target: { value: 'APPROVED' } });
+    // The filters sit in the collapsed Filters panel; role queries only reach them once shown.
+    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
+    changeSelectField('Damage status', 'APPROVED');
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect DMG-2026-00024' }));
     view.rerender(tree(false));
     view.rerender(tree(true));
     await screen.findByRole('button', { name: 'Close details' });
-    expect(screen.getByLabelText('Damage status')).toHaveValue('APPROVED');
+    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
+    expect(selectFieldValue(getSelectField('Damage status'))).toBe('APPROVED');
     expect(api.get).toHaveBeenLastCalledWith(
       '/westsides/stock-damage',
       expect.objectContaining({ query: expect.objectContaining({ ...scope, status: 'APPROVED' }) }),
@@ -242,10 +252,8 @@ describe('Damage register', () => {
       ),
     );
     fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    fireEvent.change(screen.getByLabelText('Damage status'), { target: { value: 'APPROVED' } });
-    fireEvent.change(screen.getByLabelText('Damage type filter'), {
-      target: { value: 'BREAKAGE' },
-    });
+    changeSelectField('Damage status', 'APPROVED');
+    changeSelectField('Damage type filter', 'BREAKAGE');
     fireEvent.focus(screen.getByRole('combobox', { name: 'Filter damage by product' }));
     await screen.findByRole('option', { name: /Bottled water/ });
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter damage by product' }), {
@@ -437,16 +445,22 @@ function editor(productId = 'water') {
   return { saved, close };
 }
 async function fill() {
-  await screen.findByRole('option', { name: 'Bottle (btl)' });
-  fireEvent.change(screen.getByLabelText(/Damage unit/), { target: { value: 'unit' } });
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Damage unit'))).toContain('Bottle (btl)'),
+  );
+  changeSelectField('Damage unit', 'unit');
   fireEvent.change(screen.getByLabelText(/Damaged quantity/), { target: { value: '2.0001' } });
 }
 describe('Damage reporting', () => {
   it('protects drafts and preserves a failed save with the exact batch, quantity and zero estimate', async () => {
     const { saved, close } = editor();
     await fill();
-    await screen.findByRole('option', { name: /BATCH-2026-00031/ });
-    fireEvent.change(screen.getByLabelText('Linked batch'), { target: { value: 'batch' } });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Linked batch'))).toEqual(
+        expect.arrayContaining([expect.stringMatching(/BATCH-2026-00031/)]),
+      ),
+    );
+    changeSelectField('Linked batch', 'batch');
     fireEvent.change(screen.getByLabelText('Estimated total value (TZS)'), {
       target: { value: '0' },
     });
@@ -505,23 +519,29 @@ describe('Damage reporting', () => {
     });
     editor();
     expect(await screen.findByRole('alert')).toHaveTextContent('Later unit page unavailable');
-    expect(screen.queryByRole('option', { name: 'Unit 0' })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Damage unit'))).not.toContain('Unit 0');
     expect(screen.getByRole('button', { name: 'Save damage draft' })).toBeDisabled();
     fail = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry unit choices' }));
-    await screen.findByRole('option', { name: 'Bottle (btl)' });
-    expect(screen.getByRole('option', { name: 'Unit 99' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Damage unit'))).toContain('Bottle (btl)'),
+    );
+    expect(selectFieldOptions(getSelectField('Damage unit'))).toContain('Unit 99');
   });
   it('clears dependent references after scope changes and obeys optional directory permissions', async () => {
     editor();
     await fill();
-    await screen.findByRole('option', { name: /BATCH-2026-00031/ });
-    fireEvent.change(screen.getByLabelText('Linked batch'), { target: { value: 'batch' } });
-    fireEvent.change(screen.getByLabelText(/Damage branch/), { target: { value: 'otherbranch' } });
-    expect(screen.getByLabelText('Linked batch')).toHaveValue('');
-    fireEvent.change(screen.getByLabelText(/Damage company/), { target: { value: 'other' } });
-    expect(screen.getByLabelText(/Damage branch/)).toHaveValue('');
-    expect(screen.getByLabelText(/Damage unit/)).toHaveValue('');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Linked batch'))).toEqual(
+        expect.arrayContaining([expect.stringMatching(/BATCH-2026-00031/)]),
+      ),
+    );
+    changeSelectField('Linked batch', 'batch');
+    changeSelectField('Damage branch', 'otherbranch');
+    expect(selectFieldValue(getSelectField('Linked batch'))).toBe('');
+    changeSelectField('Damage company', 'other');
+    expect(selectFieldValue(getSelectField('Damage branch'))).toBe('');
+    expect(selectFieldValue(getSelectField('Damage unit'))).toBe('');
     expect(screen.getByRole('combobox', { name: 'Damaged product' })).toHaveValue('');
     await waitFor(() =>
       expect(api.page).toHaveBeenCalledWith(
@@ -536,6 +556,6 @@ describe('Damage reporting', () => {
     expect(api.page).not.toHaveBeenCalled();
     expect(api.get).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Save damage draft' })).toBeDisabled();
-    expect(screen.queryByLabelText('Linked batch')).not.toBeInTheDocument();
+    expect(querySelectField('Linked batch')).not.toBeInTheDocument();
   });
 });

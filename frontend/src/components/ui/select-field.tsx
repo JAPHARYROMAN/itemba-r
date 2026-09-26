@@ -1,5 +1,13 @@
 'use client';
-import React, { useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Check, ChevronDown, CircleAlert, Search } from 'lucide-react';
 import {
   Autocomplete,
@@ -102,7 +110,38 @@ function themeOf(element: Element | null): React.CSSProperties | undefined {
   return theme as React.CSSProperties;
 }
 
-export function SelectField({
+function optionsSignature(options: SelectFieldOption[]) {
+  return options
+    .map((option) => `${option.value}\u0001${option.label}\u0001${option.disabled ? 1 : 0}`)
+    .join('\u0002');
+}
+
+/** Equal when every prop is — `options` by what they say, not by identity. */
+function sameField(a: SelectFieldProps, b: SelectFieldProps) {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof SelectFieldProps>;
+  for (const key of keys) {
+    if (key !== 'options' && a[key] !== b[key]) return false;
+  }
+  return optionsSignature(a.options) === optionsSignature(b.options);
+}
+
+/**
+ * A React Aria Select is several times the work of a native select to render,
+ * and forms re-render every field on each keystroke with fresh `options` arrays
+ * and `onChange` closures. The field therefore skips renders its props do not
+ * change by content, and calls whichever `onChange` the caller rendered last —
+ * never a stale one that closed over earlier form state.
+ */
+export function SelectField({ onChange, ...props }: SelectFieldProps) {
+  const latest = useRef(onChange);
+  useLayoutEffect(() => {
+    latest.current = onChange;
+  });
+  const stableOnChange = useCallback((next: string) => latest.current(next), []);
+  return <SelectFieldView {...props} onChange={stableOnChange} />;
+}
+
+const SelectFieldView = memo(function SelectFieldView({
   label,
   'aria-label': ariaLabel,
   hint,
@@ -124,9 +163,42 @@ export function SelectField({
   const { fieldId, errorId, hintId, aria } = useFieldA11y(id, error, hint);
   const { contains } = useFilter({ sensitivity: 'base' });
   const root = useRef<HTMLDivElement>(null);
+  const chosen = useRef<string | null>(null);
   const [theme, setTheme] = useState<React.CSSProperties>();
-  const items = options.map((option) => ({ ...option, id: option.value }));
-  const selected = options.some((option) => option.value === value) ? value : null;
+  // A saved value the loaded list no longer offers — a retired type, a record on
+  // a page not fetched — keeps a row of its own. Read as "nothing chosen", it
+  // would fail a `required` check the saved record already passed and block an
+  // unrelated edit; the native select hid it behind its first option instead.
+  // While the list is still empty or loading, the placeholder stands in.
+  const stale =
+    value !== '' &&
+    !options.some((option) => option.value === value) &&
+    options.some((option) => option.value !== '');
+  const rows = stale ? [{ value, label: value }, ...options] : options;
+  // React Aria rebuilds its whole collection when `items` changes identity, so a
+  // change of value alone must not hand it a new array.
+  const signature = optionsSignature(rows);
+  const items = useMemo(() => {
+    // The first row per value wins, as in a native select; React Aria needs one
+    // item per key.
+    const seen = new Set<string>();
+    return rows
+      .filter((option) => !seen.has(option.value) && !!seen.add(option.value))
+      .map((option) => ({ ...option, id: option.value }));
+    // `signature` is `rows` by content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+  const selected = rows.some((option) => option.value === value) ? value : null;
+
+  // A form's `onChange`/`onChangeCapture` heard every native select change. Send
+  // the same bubbling `change` from React Aria's hidden select once the operator's
+  // choice has rendered: by then the hidden select holds the new value, so its own
+  // handler sees no change and cannot report the choice a second time.
+  useEffect(() => {
+    if (chosen.current === null || chosen.current !== value) return;
+    chosen.current = null;
+    root.current?.querySelector('select')?.dispatchEvent(new Event('change', { bubbles: true }));
+  }, [value]);
 
   const list = (
     <ListBox
@@ -160,6 +232,7 @@ export function SelectField({
       className={`ui-select ui-select-${variant}${labelPlacement === 'side' ? ' ui-select-side' : ''} ${className}`.trim()}
       value={selected}
       onChange={(key) => {
+        chosen.current = fromKey(key);
         onChange(fromKey(key));
         // Workspace drafts listen for bubbling `input` on a wrapping form, the
         // same signal the shared date field sends.
@@ -178,11 +251,20 @@ export function SelectField({
     >
       {label && (
         <AriaLabel
-          className={plainLabel ? LABEL_CLASS : 'ui-select-label'}
+          className={plainLabel ? `ui-select-label ${LABEL_CLASS}` : 'ui-select-label'}
           style={plainLabel ? LABEL_STYLE : undefined}
         >
           {label}
-          {required && <RequiredMark />}
+          {/* The trigger is a button, which cannot carry `aria-required`, so the
+              state lives in its name: "Company (required)", not "Company star". */}
+          {required && (
+            <>
+              <span aria-hidden="true">
+                <RequiredMark />
+              </span>
+              <span className="sr-only"> (required)</span>
+            </>
+          )}
         </AriaLabel>
       )}
       <Button className={`ui-select-trigger${error ? ' ui-select-trigger-invalid' : ''}${shake}`}>
@@ -228,4 +310,4 @@ export function SelectField({
       )}
     </Select>
   );
-}
+}, sameField);

@@ -21,6 +21,13 @@ import {
   useWorkspacePathname,
 } from '@/components/workspace/workspace-navigation';
 import { setDateField } from '@/test/date-field';
+import {
+  changeSelectField,
+  findSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   get: vi.fn(),
@@ -223,11 +230,9 @@ async function fillCreate() {
   fireEvent.change(await screen.findByRole('textbox', { name: 'Reconciliation number' }), {
     target: { value: 'BR-NEW' },
   });
-  const field = screen.getByRole('combobox', { name: 'Cash account' });
-  await waitFor(() =>
-    expect(within(field).getByRole('option', { name: 'Main Bank · USD' })).toBeInTheDocument(),
-  );
-  fireEvent.change(field, { target: { value: 'bank' } });
+  const field = getSelectField('Cash account');
+  await waitFor(() => expect(selectFieldOptions(field)).toContain('Main Bank · USD'));
+  changeSelectField(field, 'bank');
   await setDateField('Statement start', '2026-09-01');
   await setDateField('Statement end', '2026-09-30');
 }
@@ -248,9 +253,7 @@ describe('Reconciliation register and drafts', () => {
     expect(await screen.findByRole('textbox', { name: 'Reconciliation number' })).toHaveValue(
       'BR-NEW',
     );
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Cash account' })).toHaveTextContent('Main Bank'),
-    );
+    await waitFor(() => expect(getSelectField('Cash account')).toHaveTextContent('Main Bank'));
     state.post.mockRejectedValueOnce(new Error('Save unavailable'));
     fireEvent.click(screen.getByRole('button', { name: 'Create reconciliation' }));
     await screen.findByText('Save unavailable');
@@ -289,14 +292,12 @@ describe('Reconciliation register and drafts', () => {
       target: { value: 'KEEP-CODE' },
     });
     await screen.findByRole('button', { name: 'Retry cash accounts' });
-    expect(
-      within(screen.getByRole('combobox', { name: 'Cash account' })).queryByRole('option', {
-        name: 'First account · USD',
-      }),
-    ).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Cash account'))).not.toContain('First account · USD');
     state.page.mockImplementation(baseline);
     fireEvent.click(screen.getByRole('button', { name: 'Retry cash accounts' }));
-    await screen.findByRole('option', { name: 'Main Bank · USD' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash account'))).toContain('Main Bank · USD'),
+    );
     expect(screen.getByRole('textbox', { name: 'Reconciliation number' })).toHaveValue('KEEP-CODE');
   });
   it('validates periods and rejects numeric precision loss instead of rounding opening balances', async () => {
@@ -317,9 +318,7 @@ describe('Reconciliation register and drafts', () => {
     state.permissions.delete('companies.view');
     render(<App />);
     await fillCreate();
-    expect(
-      within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Company' }),
-    ).toBeDisabled();
+    expect(getSelectField('Company', screen.getByRole('dialog'))).toBeDisabled();
     expect(state.page.mock.calls.some(([url]) => url === '/companies')).toBe(false);
   });
   it('reports failed register reads and supports retry instead of showing an empty list', async () => {
@@ -348,13 +347,12 @@ describe('Reconciliation register and drafts', () => {
         <Pane id="right" />
       </Providers>,
     );
-    const left = within(screen.getByRole('region', { name: 'left window' })),
-      right = within(screen.getByRole('region', { name: 'right window' }));
+    const leftWindow = screen.getByRole('region', { name: 'left window' }),
+      rightWindow = screen.getByRole('region', { name: 'right window' });
+    const left = within(leftWindow);
     await left.findByRole('button', { name: 'Review BR-01' });
-    fireEvent.change(left.getByRole('combobox', { name: 'Status' }), {
-      target: { value: 'DRAFT' },
-    });
-    expect(right.getByRole('combobox', { name: 'Status' })).toHaveValue('');
+    changeSelectField('Status', 'DRAFT', leftWindow);
+    expect(selectFieldValue(getSelectField('Status', rightWindow))).toBe('');
     fireEvent.click(await left.findByRole('button', { name: 'Next page' }));
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
@@ -605,8 +603,8 @@ describe('Statement lines, matching and final review', () => {
     fireEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Run matching' }),
     );
-    const select = await screen.findByRole('combobox', { name: 'Journal match for Existing line' });
-    fireEvent.change(select, { target: { value: 'journal-line' } });
+    const select = await findSelectField('Journal match for Existing line');
+    changeSelectField(select, 'journal-line');
     fireEvent.click(screen.getByRole('button', { name: 'Review selected match' }));
     await screen.findByRole('dialog', { name: 'Review selected match' });
     fireEvent.click(screen.getByRole('button', { name: 'Keep draft' }));

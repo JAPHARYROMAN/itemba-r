@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PayrollPeriodsPage from '@/app/(dashboard)/hr/payroll-periods/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import { chooseSelectOption } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -74,7 +75,7 @@ const mount = () =>
 async function fillPeriod(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'New period' }));
   await screen.findByRole('dialog', { name: 'New payroll period' });
-  await user.selectOptions(screen.getByRole('combobox', { name: /^Company/ }), 'company');
+  await chooseSelectOption('Company', 'company', user);
   await user.type(screen.getByRole('textbox', { name: /^Name/ }), 'October cycle');
   await setDateField(/Start date/, '2026-10-01', user);
   await setDateField(/End date/, '2026-10-31', user);
@@ -101,8 +102,8 @@ describe('Payroll period workspace', () => {
     mount();
     await screen.findByRole('button', { name: 'Inspect September 2026' });
     await user.click(screen.getByRole('button', { name: 'Filters' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'APPROVED');
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption('Status filter', 'APPROVED', user);
     await user.click(screen.getByRole('button', { name: 'Next', exact: true }));
     await waitFor(() =>
       expect(state.page).toHaveBeenLastCalledWith(

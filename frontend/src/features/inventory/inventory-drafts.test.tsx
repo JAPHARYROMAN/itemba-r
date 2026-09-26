@@ -10,6 +10,12 @@ import {
   useUnsavedWork,
 } from '@/components/workspace/unsaved-work-provider';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const api = vi.hoisted(() => ({
   get: vi.fn(),
@@ -130,7 +136,9 @@ beforeEach(() => {
 });
 async function beginCount() {
   fireEvent.click(screen.getByRole('button', { name: 'Start adjustment' }));
-  await screen.findByRole('option', { name: 'Litre (L)' });
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Unit, line 1'))).toContain('Litre (L)'),
+  );
   fireEvent.focus(screen.getByRole('combobox', { name: 'Product, line 1' }));
   fireEvent.click(
     within(await screen.findByRole('option', { name: /Fresh milk/ })).getByRole('button'),
@@ -174,7 +182,9 @@ describe('Inventory session drafts', () => {
     const inventory = within(screen.getByLabelText('Inventory app'));
     const erp = within(screen.getByLabelText('ERP register'));
     fireEvent.click(inventory.getByRole('button', { name: 'Start adjustment' }));
-    await screen.findByRole('option', { name: 'Litre (L)' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Unit, line 1'))).toContain('Litre (L)'),
+    );
     fireEvent.change(screen.getByLabelText(/Adjustment reason/), {
       target: { value: 'Shared stock count' },
     });
@@ -246,15 +256,19 @@ describe('Inventory session drafts', () => {
   it('resumes batch quantities, supplier and dates after app unmount without creating a batch', async () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: 'Start batch' }));
-    await screen.findByRole('option', { name: 'Litre (L)' });
-    fireEvent.change(screen.getByLabelText(/Batch unit/), { target: { value: 'unit' } });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Batch unit'))).toContain('Litre (L)'),
+    );
+    changeSelectField('Batch unit', 'unit');
     fireEvent.change(screen.getByLabelText(/Initial quantity/), { target: { value: '12.3456' } });
-    fireEvent.change(screen.getByLabelText('Supplier'), { target: { value: 'supplier' } });
+    changeSelectField('Supplier', 'supplier');
     await setDateField('Expiry date', '2026-12-01');
     await returnToDraft('Stock batch');
-    await screen.findByRole('option', { name: 'Litre (L)' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Batch unit'))).toContain('Litre (L)'),
+    );
     expect(screen.getByLabelText(/Initial quantity/)).toHaveValue(12.3456);
-    expect(screen.getByLabelText('Supplier')).toHaveValue('supplier');
+    expect(selectFieldValue(getSelectField('Supplier'))).toBe('supplier');
     expect(dateFieldValue(getDateField('Expiry date'))).toBe('2026-12-01');
     expect(api.post).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Create batch', exact: true }));
@@ -274,10 +288,14 @@ describe('Inventory session drafts', () => {
   it('retains a damage report on legacy routes and requires a currently available batch to save', async () => {
     render(<App legacy />);
     fireEvent.click(screen.getByRole('button', { name: 'Start damage' }));
-    await screen.findByRole('option', { name: /BATCH-2026-31/ });
-    fireEvent.change(screen.getByLabelText(/Damage unit/), { target: { value: 'unit' } });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Linked batch'))).toContainEqual(
+        expect.stringMatching(/BATCH-2026-31/),
+      ),
+    );
+    changeSelectField('Damage unit', 'unit');
     fireEvent.change(screen.getByLabelText(/Damaged quantity/), { target: { value: '2.0001' } });
-    fireEvent.change(screen.getByLabelText('Linked batch'), { target: { value: 'batch' } });
+    changeSelectField('Linked batch', 'batch');
     fireEvent.change(screen.getByLabelText('Estimated total value (TZS)'), {
       target: { value: '0' },
     });
@@ -292,13 +310,15 @@ describe('Inventory session drafts', () => {
         : base(path, options),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Resume Stock damage' }));
-    await screen.findByRole('option', { name: 'Litre (L)' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Damage unit'))).toContain('Litre (L)'),
+    );
     expect(screen.getByLabelText('Damage notes')).toHaveValue('Broken in transit');
     expect(screen.getByLabelText('Estimated total value (TZS)')).toHaveValue(0);
     fireEvent.click(screen.getByRole('button', { name: 'Save damage draft' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Load and select a batch');
     expect(api.post).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Linked batch'), { target: { value: '' } });
+    changeSelectField('Linked batch', '');
     fireEvent.click(screen.getByRole('button', { name: 'Save damage draft' }));
     await waitFor(() => expect(api.saved).toHaveBeenCalledOnce());
     expect(api.post).toHaveBeenLastCalledWith(

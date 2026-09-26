@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { ApprovalInbox } from './approval-inbox';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { type ApprovalRequest, requestPath } from './approval-request-types';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -184,8 +185,8 @@ describe('Request register and assigned inbox', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters', exact: true }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'DRAFT');
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption('Status filter', 'DRAFT', user);
     await user.type(screen.getByRole('textbox', { name: 'Entity type filter' }), 'SupplierInvoice');
     await waitFor(() =>
       expect(api.get).toHaveBeenLastCalledWith(
@@ -202,7 +203,7 @@ describe('Request register and assigned inbox', () => {
         }),
       ),
     );
-    expect(screen.getByRole('option', { name: 'Expired' })).toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Status filter'))).toContain('Expired');
   });
   it('cancels obsolete list/detail reads, removes stale actions and retries list errors', async () => {
     const user = userEvent.setup();

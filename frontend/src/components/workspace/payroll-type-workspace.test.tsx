@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PayrollTypeWorkspace } from './payroll-type-workspace';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   page: vi.fn(),
@@ -98,7 +99,9 @@ describe.each(['allowance', 'deduction'] as const)('%s type workspace', (kind) =
         expect.objectContaining({ query: expect.objectContaining({ page: 2 }) }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'company');
+    // The filter sits in the collapsed Filters panel; role queries only reach it once shown.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    await chooseSelectOption('Company filter', 'company');
     await userEvent.type(
       screen.getByPlaceholderText('Search ' + kind + ' types by name…'),
       ' Example ',
@@ -117,7 +120,9 @@ describe.each(['allowance', 'deduction'] as const)('%s type workspace', (kind) =
     await inspect();
     await userEvent.click(screen.getByRole('button', { name: 'Edit type' }));
     const dialog = await screen.findByRole('dialog', { name: 'Edit ' + kind + ' type' });
-    await within(dialog).findByRole('option', { name: 'Example Company' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
+    );
     await userEvent.clear(within(dialog).getByLabelText('Default amount (TZS)'));
     if (kind === 'deduction')
       await userEvent.clear(within(dialog).getByLabelText('Default percentage (%)'));
@@ -145,19 +150,20 @@ describe.each(['allowance', 'deduction'] as const)('%s type workspace', (kind) =
     expect(within(dialog).getByRole('button', { name: 'Save type' })).toBeDisabled();
     state.failChoices = false;
     await userEvent.click(within(dialog).getByRole('button', { name: 'Retry companies' }));
-    await within(dialog).findByRole('option', { name: 'Example Company' });
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Company', { exact: false }),
-      'company',
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
     );
+    await chooseSelectOption('Company', 'company', userEvent, dialog);
     await userEvent.type(within(dialog).getByLabelText('Name', { exact: false }), ' Sample ');
     await userEvent.type(within(dialog).getByLabelText('Code', { exact: false }), ' SAMPLE ');
     await userEvent.type(within(dialog).getByLabelText('Default amount (TZS)'), '0');
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText(kind === 'allowance' ? 'Taxable' : 'Statutory'),
+    await chooseSelectOption(
+      kind === 'allowance' ? 'Taxable' : 'Statutory',
       'true',
+      userEvent,
+      dialog,
     );
-    await userEvent.selectOptions(within(dialog).getByLabelText('Recurring'), 'true');
+    await chooseSelectOption('Recurring', 'true', userEvent, dialog);
     if (kind === 'deduction')
       await userEvent.type(within(dialog).getByLabelText('Default percentage (%)'), '2.5');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save type' }));

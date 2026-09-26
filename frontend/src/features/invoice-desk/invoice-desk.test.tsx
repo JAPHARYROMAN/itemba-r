@@ -11,7 +11,7 @@ import {
   chooseSelectOption,
   findSelectField,
   getSelectField,
-  selectFieldValue,
+  selectFieldText,
 } from '@/test/select-field';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { WorkspaceDraftsProvider } from '@/components/workspace/workspace-drafts';
@@ -212,8 +212,8 @@ describe('Invoice Desk experience', () => {
     await chooseSelectOption('Division', 'Retail', user);
     await chooseSelectOption('Branch', 'Central', user);
     await chooseSelectOption('Company', 'Other company', user);
-    expect(selectFieldValue(getSelectField('Division'))).toBe('All divisions');
-    expect(selectFieldValue(getSelectField('Branch'))).toBe('All branches');
+    expect(selectFieldText(getSelectField('Division'))).toBe('All divisions');
+    expect(selectFieldText(getSelectField('Branch'))).toBe('All branches');
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(
         '/invoice-desk/overview',

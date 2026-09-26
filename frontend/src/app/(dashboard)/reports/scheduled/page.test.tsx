@@ -14,6 +14,12 @@ import {
 import ScheduledReportsPage from './page';
 import { WorkspaceSessionProvider } from '@/components/workspace/workspace-session';
 import { WorkspaceDraftsProvider } from '@/components/workspace/workspace-drafts';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -108,24 +114,34 @@ describe('Scheduled reports in a companion app', () => {
     render(<Harness />);
     await screen.findByText('No scheduled reports yet');
     await user.click(screen.getByRole('button', { name: 'New schedule' }));
-    await screen.findByRole('option', { name: 'Supplier aging' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Report'))).toContain('Supplier aging'),
+    );
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Weekly supplier balances');
     await user.type(screen.getByRole('textbox', { name: 'Schedule code' }), 'SUPPLIERS-WEEKLY');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Report' }), 'report');
+    await chooseSelectOption('Report', 'report', user);
     await user.type(screen.getByRole('textbox', { name: 'Recipients' }), 'finance@example.com');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Frequency' }), 'WEEKLY');
+    await chooseSelectOption('Frequency', 'WEEKLY', user);
+    // A disabled row is marked only in the open list, so open it, check, and close it.
+    await user.click(getSelectField('Report'));
     expect(
-      screen.getByRole('option', { name: 'Custom analysis · manual export only' }),
-    ).toBeDisabled();
+      within(await screen.findByRole('listbox')).getByRole('option', {
+        name: 'Custom analysis · manual export only',
+      }),
+    ).toHaveAttribute('aria-disabled', 'true');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
     expect(screen.queryByLabelText('Report definition ID')).not.toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: 'Reports home' }));
     await user.click(screen.getByRole('button', { name: 'Keep draft and continue' }));
     await user.click(screen.getByRole('link', { name: 'Open schedules' }));
     await user.click(await screen.findByRole('button', { name: 'Resume New report schedule' }));
-    await screen.findByRole('option', { name: 'Supplier aging' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Report'))).toContain('Supplier aging'),
+    );
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Weekly supplier balances');
-    expect(screen.getByRole('combobox', { name: 'Company' })).toHaveValue('company');
-    expect(screen.getByRole('combobox', { name: 'Frequency' })).toHaveValue('WEEKLY');
+    expect(selectFieldValue(getSelectField('Company'))).toBe('company');
+    expect(selectFieldValue(getSelectField('Frequency'))).toBe('WEEKLY');
     expect(state.post).not.toHaveBeenCalled();
     state.post.mockRejectedValueOnce(new Error('Schedule service unavailable'));
     await user.click(screen.getByRole('button', { name: 'Create schedule' }));
@@ -144,7 +160,7 @@ describe('Scheduled reports in a companion app', () => {
       }),
     );
     expect(screen.queryByLabelText('Unfinished drafts')).not.toBeInTheDocument();
-  });
+  }, 10_000);
   it('reloads an edited schedule on resume and requires review when it changed', async () => {
     const record = {
       id: 'schedule',
@@ -186,15 +202,19 @@ describe('Scheduled reports in a companion app', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(await screen.findByRole('button', { name: 'Edit', exact: true }));
-    await screen.findByRole('option', { name: 'Supplier view' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Linked saved view'))).toContain('Supplier view'),
+    );
     fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
       target: { value: '' },
     });
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Linked saved view' }), '');
+    await chooseSelectOption('Linked saved view', '', user);
     await user.click(screen.getByRole('button', { name: 'Keep draft', exact: true }));
     await user.click(screen.getByRole('button', { name: 'Resume Edit report schedule' }));
     await screen.findByRole('checkbox');
-    await screen.findByRole('option', { name: 'Supplier aging' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Report'))).toContain('Supplier aging'),
+    );
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(state.patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole('checkbox'));
@@ -219,12 +239,14 @@ describe('Scheduled reports in a companion app', () => {
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Retain my schedule');
     state.get.mockImplementation(options);
     await user.click(screen.getByRole('button', { name: 'Retry schedule choices' }));
-    await screen.findByRole('option', { name: 'Supplier aging' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Report'))).toContain('Supplier aging'),
+    );
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Retain my schedule');
     await user.type(screen.getByRole('textbox', { name: 'Schedule code' }), 'TEST');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Report' }), 'report');
+    await chooseSelectOption('Report', 'report', user);
     await user.type(screen.getByRole('textbox', { name: 'Recipients' }), 'not-an-email');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company' }), '');
+    await chooseSelectOption('Company', '', user);
     await user.click(screen.getByRole('button', { name: 'Create schedule' }));
     expect(screen.getByText('Choose an available company.')).toBeVisible();
     expect(screen.getByText(/Enter valid email addresses/)).toBeVisible();

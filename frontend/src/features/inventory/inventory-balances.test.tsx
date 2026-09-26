@@ -4,6 +4,12 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import InventoryBalances, { balanceAvailable, type InventoryBalance } from './inventory-balances';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -197,12 +203,12 @@ describe('Inventory balances workspace', () => {
       ),
     );
     filters();
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'cement' } });
-    await waitFor(() => expect(screen.getByLabelText('Product family')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Product family'), { target: { value: 'family' } });
-    fireEvent.change(screen.getByLabelText('Cost status'), { target: { value: 'MISSING_COST' } });
-    fireEvent.change(screen.getByLabelText('Stock status'), { target: { value: 'OVERSOLD' } });
-    fireEvent.change(screen.getByLabelText('Movement age'), { target: { value: '60' } });
+    changeSelectField('Category', 'cement');
+    await waitFor(() => expect(getSelectField('Product family')).toBeEnabled());
+    changeSelectField('Product family', 'family');
+    changeSelectField('Cost status', 'MISSING_COST');
+    changeSelectField('Stock status', 'OVERSOLD');
+    changeSelectField('Movement age', '60');
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'cement' } });
     await waitFor(() =>
       expect(state.get).toHaveBeenCalledWith(
@@ -358,14 +364,16 @@ describe('Inventory balances workspace', () => {
     render(embed());
     await loaded();
     filters();
-    await screen.findByRole('option', { name: 'Paint' });
+    await waitFor(() => expect(selectFieldOptions(getSelectField('Category'))).toContain('Paint'));
     await screen.findByText(/Families unavailable/);
     state.page.mockResolvedValue({ data: [{ id: 'family', name: '50 kg' }], total: 1 });
     fireEvent.click(screen.getByRole('button', { name: /Retry Family choices/i }));
-    await screen.findByRole('option', { name: '50 kg' });
-    fireEvent.change(screen.getByLabelText('Product family'), { target: { value: 'family' } });
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'paint' } });
-    expect(screen.getByLabelText('Product family')).toHaveValue('');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Product family'))).toContain('50 kg'),
+    );
+    changeSelectField('Product family', 'family');
+    changeSelectField('Category', 'paint');
+    expect(selectFieldValue(getSelectField('Product family'))).toBe('');
   });
   it('honours standalone legacy scope and low-stock links on the first read', async () => {
     state.params =
@@ -379,7 +387,7 @@ describe('Inventory balances workspace', () => {
       productId: 'product',
       stockStatus: 'LOW_STOCK',
     });
-    expect(screen.getByLabelText('Branch')).toHaveValue('branch');
+    expect(selectFieldValue(getSelectField('Branch'))).toBe('branch');
   });
   it('keeps register failures separate from empty results and retries the failed read', async () => {
     state.get.mockImplementation(async (path: string) => {

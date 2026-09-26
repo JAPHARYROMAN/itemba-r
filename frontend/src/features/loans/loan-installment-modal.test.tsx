@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LoanInstallmentModal } from './loan-installment-modal';
 import { setDateField } from '@/test/date-field';
+import { changeSelectField } from '@/test/select-field';
 const api = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('@/lib/api-client', () => ({ backendPost: api.post }));
 it('records contractual fees and lets the server derive installment totals', async () => {
@@ -14,7 +15,7 @@ it('records contractual fees and lets the server derive installment totals', asy
       onSaved={saved}
     />,
   );
-  fireEvent.change(screen.getByLabelText(/^Loan/), { target: { value: 'loan' } });
+  changeSelectField('Loan', 'loan');
   await setDateField(/Due date/, '2026-12-01');
   fireEvent.change(screen.getByLabelText(/Principal/), { target: { value: '100.01' } });
   fireEvent.change(screen.getByLabelText(/Interest/), { target: { value: '8' } });

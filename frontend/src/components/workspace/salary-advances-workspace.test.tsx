@@ -6,6 +6,12 @@ import { join } from 'node:path';
 import SalaryAdvancesPage from '@/app/(dashboard)/hr/salary-advances/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   page: vi.fn(),
@@ -103,11 +109,10 @@ async function inspect() {
 async function openForm() {
   await userEvent.click(screen.getByRole('button', { name: 'Request advance', exact: true }));
   const dialog = await screen.findByRole('dialog', { name: 'Request salary advance' });
-  await within(dialog).findByRole('option', { name: 'Example Company' });
-  await userEvent.selectOptions(
-    within(dialog).getByLabelText('Company', { exact: false }),
-    'company',
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
   );
+  await chooseSelectOption('Company', 'company', userEvent, dialog);
   return dialog;
 }
 describe('Salary advances workspace', () => {
@@ -133,8 +138,10 @@ describe('Salary advances workspace', () => {
         expect.objectContaining({ query: expect.objectContaining({ page: 2, limit: 20 }) }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await userEvent.selectOptions(screen.getByLabelText('Status filter'), 'SETTLED');
+    // The filters sit in a collapsed panel; open it as an operator would.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters', exact: true }));
+    await chooseSelectOption('Company filter', 'company');
+    await chooseSelectOption('Status filter', 'SETTLED');
     await userEvent.type(screen.getByPlaceholderText('Search advance or employee…'), ' Alex ');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
@@ -148,11 +155,12 @@ describe('Salary advances workspace', () => {
   it('retains a failed request and guarded draft, then sends the exact creation payload', async () => {
     mount();
     const dialog = await openForm();
-    await within(dialog).findByRole('option', { name: 'Alex Example · EXAMPLE-01' });
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Employee', { exact: false }),
-      'employee',
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Employee', dialog))).toContain(
+        'Alex Example · EXAMPLE-01',
+      ),
     );
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
     await userEvent.type(within(dialog).getByLabelText('Amount (TZS)', { exact: false }), '20000');
     await setDateField('Request date', '2026-09-17', userEvent, dialog);
     await userEvent.type(within(dialog).getByLabelText('Reason (optional)'), '  Example request  ');
@@ -184,16 +192,14 @@ describe('Salary advances workspace', () => {
     expect(within(dialog).getByRole('button', { name: 'Request advance' })).toBeDisabled();
     state.lookupFailure = false;
     await userEvent.click(within(dialog).getByRole('button', { name: 'Retry employees' }));
-    await within(dialog).findByRole('option', { name: 'Alex Example · EXAMPLE-01' });
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Employee', { exact: false }),
-      'employee',
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Employee', dialog))).toContain(
+        'Alex Example · EXAMPLE-01',
+      ),
     );
-    await userEvent.selectOptions(
-      within(dialog).getByLabelText('Company', { exact: false }),
-      'other',
-    );
-    expect(within(dialog).getByLabelText('Employee', { exact: false })).toHaveValue('');
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
+    await chooseSelectOption('Company', 'other', userEvent, dialog);
+    expect(selectFieldValue(getSelectField('Employee', dialog))).toBe('');
     expect(state.post).not.toHaveBeenCalled();
   });
   it('blocks employee lookup and creation without employee viewing permission', async () => {

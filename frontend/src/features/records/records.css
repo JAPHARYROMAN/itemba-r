@@ -1020,14 +1020,15 @@
   }
   .records-register-switcher {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 12px;
   }
-  .records-register-switcher > label {
+  .records-register-switcher > .ui-select-label {
     margin: 0;
     font-size: 12px;
   }
-  .records-register-switcher > select {
+  .records-register-switcher .ui-select-trigger {
     max-width: 260px;
     min-height: 38px;
   }
@@ -1038,14 +1039,15 @@
   }
   .records-register-switcher {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 12px;
   }
-  .records-register-switcher > label {
+  .records-register-switcher > .ui-select-label {
     margin: 0;
     font-size: 12px;
   }
-  .records-register-switcher > select {
+  .records-register-switcher .ui-select-trigger {
     max-width: 260px;
     min-height: 38px;
   }

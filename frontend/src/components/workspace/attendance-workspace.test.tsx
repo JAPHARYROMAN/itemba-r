@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AttendancePage from '@/app/(dashboard)/hr/attendance/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import { chooseSelectOption } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -100,7 +101,7 @@ describe('Attendance workspace', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters' }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+    await chooseSelectOption('Company filter', 'company', user);
     await setDateField('From date', '2026-09-01', user);
     await user.type(screen.getByRole('searchbox'), 'Alex');
     await waitFor(() =>
@@ -142,7 +143,7 @@ describe('Attendance workspace', () => {
   it('clears saved times with null when changing to absence', async () => {
     const user = mount();
     await edit(user);
-    await user.selectOptions(screen.getByLabelText('Attendance status'), 'ABSENT');
+    await chooseSelectOption('Attendance status', 'ABSENT', user);
     await setDateField('Clock-in', '');
     await setDateField('Clock-out', '');
     await user.click(screen.getByRole('button', { name: 'Save attendance' }));
@@ -158,8 +159,8 @@ describe('Attendance workspace', () => {
     const user = mount();
     await user.click(screen.getByRole('button', { name: 'Log attendance' }));
     await screen.findByRole('dialog', { name: 'Log attendance' });
-    await user.selectOptions(screen.getByLabelText(/Company\*/), 'company');
-    await user.selectOptions(screen.getByLabelText(/Employee\*/), 'employee');
+    await chooseSelectOption('Company', 'company', user);
+    await chooseSelectOption('Employee', 'employee', user);
     await setDateField(/Attendance date/, '2026-09-17', user);
     await setDateField('Clock-in', '2026-09-17T22:00', user);
     await setDateField('Clock-out', '2026-09-18T06:00', user);

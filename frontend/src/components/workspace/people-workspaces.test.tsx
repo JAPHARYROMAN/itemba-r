@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PositionsPage from '@/app/(dashboard)/hr/positions/page';
 import EmployeesPage from '@/app/(dashboard)/hr/employees/page';
+import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 
 const state = vi.hoisted(() => ({
@@ -116,20 +117,21 @@ describe('People workspaces', () => {
     const user = userEvent.setup();
     mount(EmployeesPage);
     await user.click(screen.getByRole('button', { name: 'New employee' }));
-    const editor = within(await screen.findByRole('dialog', { name: 'New employee' }));
-    await user.selectOptions(editor.getByLabelText(/^Company/), 'company');
+    const dialog = await screen.findByRole('dialog', { name: 'New employee' });
+    const editor = within(dialog);
+    await chooseSelectOption(getSelectField('Company', dialog), 'company', user);
     expect(await editor.findByText(/User accounts: Insufficient access/)).toBeInTheDocument();
-    expect(editor.getByLabelText('User account')).toBeDisabled();
-    await user.selectOptions(editor.getByLabelText('Department'), 'department');
-    await user.selectOptions(editor.getByLabelText('Position'), 'position');
+    expect(getSelectField('User account', dialog)).toBeDisabled();
+    await chooseSelectOption(getSelectField('Department', dialog), 'department', user);
+    await chooseSelectOption(getSelectField('Position', dialog), 'position', user);
     await user.type(editor.getByLabelText(/^First name/), 'Preview');
     state.get.mockImplementation(async (path) =>
       path.endsWith('linkable-users') ? [] : { employeeCode: 'EMP-2' },
     );
     await user.click(editor.getByRole('button', { name: 'Retry choices' }));
-    await waitFor(() => expect(editor.getByLabelText('User account')).toBeEnabled());
-    expect(editor.getByLabelText('Department')).toHaveValue('department');
-    expect(editor.getByLabelText('Position')).toHaveValue('position');
+    await waitFor(() => expect(getSelectField('User account', dialog)).toBeEnabled());
+    expect(selectFieldValue(getSelectField('Department', dialog))).toBe('department');
+    expect(selectFieldValue(getSelectField('Position', dialog))).toBe('position');
     expect(editor.getByLabelText(/^First name/)).toHaveValue('Preview');
   });
   it.each([
@@ -184,8 +186,9 @@ describe('People workspaces', () => {
     const user = userEvent.setup();
     mount(EmployeesPage);
     await user.click(screen.getByRole('button', { name: 'New employee' }));
-    const editor = within(await screen.findByRole('dialog', { name: 'New employee' }));
-    await user.selectOptions(editor.getByLabelText(/^Company/), 'company');
+    const dialog = await screen.findByRole('dialog', { name: 'New employee' });
+    const editor = within(dialog);
+    await chooseSelectOption(getSelectField('Company', dialog), 'company', user);
     await waitFor(() =>
       expect(editor.getByRole('button', { name: 'Save', exact: true })).toBeEnabled(),
     );
@@ -228,7 +231,7 @@ describe('People workspaces', () => {
     mount(EmployeesPage);
     await screen.findByRole('button', { name: 'Inspect Alex Example' });
     await user.click(screen.getByRole('button', { name: /Filters/ }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+    await chooseSelectOption('Company filter', 'company', user);
     await user.type(screen.getByRole('searchbox'), 'Alex');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(

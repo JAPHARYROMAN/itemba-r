@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountingReadiness } from './accounting-readiness';
+import { changeSelectField } from '@/test/select-field';
 const mocks = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), canPost: true }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
@@ -70,12 +71,8 @@ describe('Accounting review workflow', () => {
     await screen.findByRole('dialog');
     const submit = screen.getByRole('button', { name: 'Post balanced journal' });
     expect(submit).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Debit · Customer receivables'), {
-      target: { value: 'ar' },
-    });
-    fireEvent.change(screen.getByLabelText('Credit · Sales income'), {
-      target: { value: 'income' },
-    });
+    changeSelectField('Debit · Customer receivables', 'ar');
+    changeSelectField('Credit · Sales income', 'income');
     expect(submit).toBeDisabled();
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(submit);

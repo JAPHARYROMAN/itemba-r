@@ -6,6 +6,7 @@ import InventoryReports from './inventory-reports';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { INVENTORY_REPORTS, normalizeInventoryReport, reportValue } from './inventory-report-data';
 import { loadInventoryReport } from './inventory-report-loader';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 
 const api = vi.hoisted(() => ({
   get: vi.fn(),
@@ -82,7 +83,7 @@ describe('Inventory reports workspace', () => {
   it('offers all seven reports, keeps precise values and complete details in the OS inspector', async () => {
     render(tree());
     const inspect = await screen.findByRole('button', { name: 'Inspect Bottled water' });
-    expect(screen.getAllByRole('option')).toHaveLength(7);
+    expect(selectFieldOptions(getSelectField('Inventory report'))).toHaveLength(7);
     expect(screen.getByText('12.0001 btl')).toBeInTheDocument();
     capture('inventory-reports');
     fireEvent.click(inspect);
@@ -95,9 +96,7 @@ describe('Inventory reports workspace', () => {
           ? { rows: [stock], total: 1 }
           : [stock],
       );
-      fireEvent.change(screen.getByLabelText('Inventory report'), {
-        target: { value: report.key },
-      });
+      changeSelectField('Inventory report', report.key);
       await waitFor(() =>
         expect(api.get).toHaveBeenCalledWith(
           report.endpoint,
@@ -119,7 +118,7 @@ describe('Inventory reports workspace', () => {
     expect(api.get).not.toHaveBeenCalled();
     view.rerender(tree());
     await screen.findByRole('button', { name: 'Inspect Bottled water' });
-    expect(screen.getAllByRole('option')).toHaveLength(2);
+    expect(selectFieldOptions(getSelectField('Inventory report'))).toHaveLength(2);
     expect(api.page).not.toHaveBeenCalled();
     expect(api.get).toHaveBeenCalledWith('/westsides/reports/batch-status', expect.anything());
     api.permissions.clear();
@@ -166,9 +165,7 @@ describe('Inventory reports workspace', () => {
     await screen.findByRole('button', { name: 'Inspect Product 20' });
     expect(api.get).toHaveBeenCalledTimes(1);
     api.get.mockResolvedValue({ rows: [stock], total: 41 });
-    fireEvent.change(screen.getByLabelText('Inventory report'), {
-      target: { value: 'inventory-movements' },
-    });
+    changeSelectField('Inventory report', 'inventory-movements');
     await screen.findByRole('button', { name: 'Inspect Bottled water' });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() =>
@@ -212,7 +209,7 @@ describe('Inventory reports workspace', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     await screen.findByRole('status');
-    fireEvent.change(screen.getByLabelText('Inventory report'), { target: { value: 'low-stock' } });
+    changeSelectField('Inventory report', 'low-stock');
     await act(async () => resolve([stock]));
     expect(api.csv).not.toHaveBeenCalled();
   });
