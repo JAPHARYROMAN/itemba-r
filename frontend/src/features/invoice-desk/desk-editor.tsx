@@ -1,6 +1,6 @@
 'use client';
 import { useId, useRef, useState } from 'react';
-import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal } from '@/components/ui';
+import { Btn, FormDateField, FormInput, FormTextarea, Modal, SelectField } from '@/components/ui';
 import { DraftFormNotice, useWorkspaceDraftForm } from '@/components/workspace/workspace-drafts';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendPost, backendPatch } from '@/lib/api-client';
@@ -250,11 +250,11 @@ export function DeskEditor({
           </p>
         )}
         {(kind === 'invoice' || kind === 'supplier') && (
-          <FormSelect
+          <SelectField
             label="Company"
             required
             value={form.companyId}
-            onChange={(e) => set('companyId', e.target.value)}
+            onChange={(value) => set('companyId', value)}
             options={choices(directory.companies, 'Select company')}
           />
         )}
@@ -287,35 +287,35 @@ export function DeskEditor({
             {kind === 'invoice' && (
               <>
                 <div className="desk-form-pair">
-                  <FormSelect
+                  <SelectField
                     label="Division"
                     required
                     disabled={!form.companyId}
                     value={form.divisionId}
-                    onChange={(e) => set('divisionId', e.target.value)}
+                    onChange={(value) => set('divisionId', value)}
                     options={choices(
                       directory.divisions.filter((d) => d.companyId === form.companyId),
                       'Select division',
                     )}
                   />
-                  <FormSelect
+                  <SelectField
                     label="Branch"
                     required
                     disabled={!form.divisionId}
                     value={form.branchId}
-                    onChange={(e) => set('branchId', e.target.value)}
+                    onChange={(value) => set('branchId', value)}
                     options={choices(
                       directory.branches.filter((b) => b.divisionId === form.divisionId),
                       'Select branch',
                     )}
                   />
                 </div>
-                <FormSelect
+                <SelectField
                   label="Supplier"
                   required
                   disabled={!form.companyId || suppliers.loading}
                   value={form.supplierId}
-                  onChange={(e) => set('supplierId', e.target.value)}
+                  onChange={(value) => set('supplierId', value)}
                   options={choices(
                     suppliers.data ?? [],
                     suppliers.loading ? 'Loading suppliers…' : 'Select supplier',
@@ -371,10 +371,10 @@ export function DeskEditor({
               />
             </div>
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Currency"
                 value={form.currency}
-                onChange={(e) => set('currency', e.target.value)}
+                onChange={(value) => set('currency', value)}
                 options={['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP'].map((c) => ({
                   value: c,
                   label: c,
@@ -424,10 +424,10 @@ export function DeskEditor({
               value={form.paymentDate}
               onChange={(value) => set('paymentDate', value)}
             />
-            <FormSelect
+            <SelectField
               label="Payment method"
               value={form.method}
-              onChange={(e) => set('method', e.target.value)}
+              onChange={(value) => set('method', value)}
               options={['Bank transfer', 'Cash', 'Mobile money', 'Cheque', 'Other'].map((m) => ({
                 value: m,
                 label: m,

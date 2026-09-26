@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDateField } from '@/test/date-field';
-import { chooseSelectOption } from '@/test/select-field';
+import userEvent from '@testing-library/user-event';
+import { chooseSelectOption, getSelectField } from '@/test/select-field';
 import { CashDesk } from './cash-desk';
 import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
@@ -161,9 +162,9 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/Paying account/), { target: { value: 'till' } });
+    await chooseSelectOption('Paying account', /Main till/);
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '150.25' } });
-    fireEvent.change(screen.getByLabelText(/Expense category/), { target: { value: 'TRANSPORT' } });
+    await chooseSelectOption('Expense category', 'Travel & transport');
     fireEvent.change(screen.getByLabelText(/Paid to/), { target: { value: 'Courier service' } });
     fireEvent.change(screen.getByLabelText(/Description/), {
       target: { value: 'Document delivery' },
@@ -296,7 +297,7 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/Receiving account/), { target: { value: 'till' } });
+    await chooseSelectOption('Receiving account', /Main till/);
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '20.10' } });
     fireEvent.change(screen.getByLabelText(/Description/), {
       target: { value: 'Tuesday cash sales' },
@@ -337,8 +338,10 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
+    await userEvent.click(getSelectField('Paying account'));
+    await screen.findByRole('option', { name: /Main till/ });
     expect(screen.queryByRole('option', { name: /Other till/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Paying account/), { target: { value: 'till' } });
+    await userEvent.click(screen.getByRole('option', { name: /Main till/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save movement' }));
     await waitFor(() => expect(saved).toHaveBeenCalled());
     expect(api.post.mock.calls[0][1]).toMatchObject({

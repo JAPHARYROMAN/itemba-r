@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { axe } from 'jest-axe';
 import { describe, expect, it, vi } from 'vitest';
+import { Modal, ModalPortalProvider } from './modal';
 import { SelectField, type SelectFieldOption } from './select-field';
 import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
 
@@ -109,6 +110,82 @@ describe('SelectField', () => {
     render(<Harness disabled />);
     await user.click(getSelectField('Company'));
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('moves through the empty "All" row with the keyboard', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    getSelectField('Company').focus();
+    await user.keyboard('{Enter}');
+    await screen.findByRole('listbox');
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(onChange).toHaveBeenLastCalledWith('westsides');
+    // Focus returns to the trigger once the list has closed, not synchronously.
+    await waitFor(() => expect(getSelectField('Company')).toHaveFocus());
+    await user.keyboard('{Enter}');
+    await screen.findByRole('listbox');
+    await user.keyboard('{ArrowUp}{Enter}');
+    expect(onChange).toHaveBeenLastCalledWith('');
+  });
+
+  it('blocks a form while a required field sits on its "Choose …" row', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <form>
+        <Harness
+          required
+          name="companyId"
+          options={[{ value: '', label: 'Choose company' }, ...companies.slice(1)]}
+        />
+      </form>,
+    );
+    const form = container.querySelector('form')!;
+    expect(form.checkValidity()).toBe(false);
+    expect(new FormData(form).get('companyId')).toBe('');
+    await chooseSelectOption('Company', 'Mwanjalisi Oil', user);
+    expect(form.checkValidity()).toBe(true);
+    expect(new FormData(form).get('companyId')).toBe('mwanjalisi');
+  });
+
+  it('says why a required field stopped the form, then clears once chosen', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    const { container } = render(
+      <form onSubmit={onSubmit}>
+        <Harness
+          required
+          options={[{ value: '', label: 'Choose company' }, ...companies.slice(1)]}
+        />
+      </form>,
+    );
+    act(() => container.querySelector('form')!.requestSubmit());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(await screen.findByText('Company is required.')).toBeInTheDocument();
+    expect(getSelectField('Company')).toHaveAccessibleDescription('Company is required.');
+    await chooseSelectOption('Company', 'Mwanjalisi Oil', user);
+    expect(screen.queryByText('Company is required.')).not.toBeInTheDocument();
+  });
+
+  it('closes only its own list on Escape inside a modal form', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <ModalPortalProvider>
+        <Modal open onClose={onClose} title="Record movement">
+          <Harness />
+        </Modal>
+      </ModalPortalProvider>,
+    );
+    await user.click(getSelectField('Company'));
+    await screen.findByRole('listbox');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(getSelectField('Company'));
+    await user.click(await screen.findByRole('option', { name: 'Mwanjalisi Oil' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(selectFieldValue(getSelectField('Company'))).toBe('Mwanjalisi Oil');
   });
 
   it('names itself from aria-label when the caption lives outside', () => {

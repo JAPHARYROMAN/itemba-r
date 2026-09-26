@@ -1,6 +1,6 @@
 'use client';
 import { useId, useRef, useState } from 'react';
-import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal } from '@/components/ui';
+import { Btn, FormDateField, FormInput, FormTextarea, Modal, SelectField } from '@/components/ui';
 import { DraftFormNotice, useWorkspaceDraftForm } from '@/components/workspace/workspace-drafts';
 import { useLoanOptions, LoanLedgerChoice } from '@/features/loans/loan-finance';
 import { backendPost } from '@/lib/api-client';
@@ -304,31 +304,31 @@ export function CashEditor({
         )}
         {editor.kind === 'account' ? (
           <>
-            <FormSelect
+            <SelectField
               label="Company"
               required
               value={form.companyId}
-              onChange={(e) => set('companyId', e.target.value)}
+              onChange={(value) => set('companyId', value)}
               options={choices(directory.companies, 'Choose company')}
             />
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Division"
                 required
                 disabled={!form.companyId}
                 value={form.divisionId}
-                onChange={(e) => set('divisionId', e.target.value)}
+                onChange={(value) => set('divisionId', value)}
                 options={choices(
                   directory.divisions.filter((d) => d.companyId === form.companyId),
                   'Choose division',
                 )}
               />
-              <FormSelect
+              <SelectField
                 label="Branch"
                 required
                 disabled={!form.divisionId}
                 value={form.branchId}
-                onChange={(e) => set('branchId', e.target.value)}
+                onChange={(value) => set('branchId', value)}
                 options={choices(
                   directory.branches.filter((b) => b.divisionId === form.divisionId),
                   'Choose branch',
@@ -344,20 +344,20 @@ export function CashEditor({
               onChange={(e) => set('name', e.target.value)}
             />
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Account type"
                 value={form.accountKind}
-                onChange={(e) => set('accountKind', e.target.value)}
+                onChange={(value) => set('accountKind', value)}
                 options={[
                   { value: 'CASH', label: 'Cash' },
                   { value: 'BANK', label: 'Bank' },
                   { value: 'MOBILE_MONEY', label: 'Mobile money' },
                 ]}
               />
-              <FormSelect
+              <SelectField
                 label="Currency"
                 value={form.currency}
-                onChange={(e) => set('currency', e.target.value)}
+                onChange={(value) => set('currency', value)}
                 options={['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP'].map((value) => ({
                   value,
                   label: value,
@@ -405,13 +405,13 @@ export function CashEditor({
               </p>
             )}
             {!editor.loan && !editor.invoice && (
-              <FormSelect
+              <SelectField
                 label="Movement type"
                 value={form.kind}
-                onChange={(e) => {
+                onChange={(value) => {
                   setForm((f) => ({
                     ...f,
-                    kind: e.target.value,
+                    kind: value,
                     targetAccountId: '',
                     dueDate: '',
                   }));
@@ -421,7 +421,7 @@ export function CashEditor({
                 )}
               />
             )}
-            <FormSelect
+            <SelectField
               label={
                 ['DAILY_SALES', 'OTHER_IN'].includes(form.kind)
                   ? 'Receiving account'
@@ -430,16 +430,16 @@ export function CashEditor({
               required
               disabled={!!editor.loan}
               value={form.accountId}
-              onChange={(e) => set('accountId', e.target.value)}
+              onChange={(value) => set('accountId', value)}
               options={accountChoices(eligible)}
             />
             {two && (
-              <FormSelect
+              <SelectField
                 label={form.kind === 'LOAN' ? 'Borrower account' : 'Receiving account'}
                 required
                 disabled={!!editor.loan || !account}
                 value={form.targetAccountId}
-                onChange={(e) => set('targetAccountId', e.target.value)}
+                onChange={(value) => set('targetAccountId', value)}
                 options={accountChoices(targets)}
               />
             )}
@@ -545,11 +545,11 @@ export function CashEditor({
             )}
             {form.kind === 'EXPENSE' && (
               <>
-                <FormSelect
+                <SelectField
                   label="Expense category"
                   required
                   value={form.expenseCategory}
-                  onChange={(e) => set('expenseCategory', e.target.value)}
+                  onChange={(value) => set('expenseCategory', value)}
                   options={[
                     { value: '', label: 'Choose category' },
                     ...Object.entries(expenseCategories).map(([value, label]) => ({

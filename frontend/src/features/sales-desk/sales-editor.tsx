@@ -1,7 +1,7 @@
 'use client';
 import { useId, useRef, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal } from '@/components/ui';
+import { Btn, FormDateField, FormInput, FormTextarea, Modal, SelectField } from '@/components/ui';
 import { DraftFormNotice, useWorkspaceDraftForm } from '@/components/workspace/workspace-drafts';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendPost } from '@/lib/api-client';
@@ -226,11 +226,11 @@ export function SalesEditor({
           </p>
         )}
         {(editor.kind === 'sale' || editor.kind === 'customer') && (
-          <FormSelect
+          <SelectField
             label="Company"
             required
             value={form.companyId}
-            onChange={(e) => set('companyId', e.target.value)}
+            onChange={(value) => set('companyId', value)}
             options={choices(directory.companies, 'Choose company')}
           />
         )}
@@ -263,23 +263,23 @@ export function SalesEditor({
         {editor.kind === 'sale' && (
           <>
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Division"
                 required
                 disabled={!form.companyId}
                 value={form.divisionId}
-                onChange={(e) => set('divisionId', e.target.value)}
+                onChange={(value) => set('divisionId', value)}
                 options={choices(
                   directory.divisions.filter((d) => d.companyId === form.companyId),
                   'Choose division',
                 )}
               />
-              <FormSelect
+              <SelectField
                 label="Branch"
                 required
                 disabled={!form.divisionId}
                 value={form.branchId}
-                onChange={(e) => set('branchId', e.target.value)}
+                onChange={(value) => set('branchId', value)}
                 options={choices(
                   directory.branches.filter((b) => b.divisionId === form.divisionId),
                   'Choose branch',
@@ -287,18 +287,18 @@ export function SalesEditor({
               />
             </div>
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Customer"
                 required
                 disabled={!form.companyId || customers.loading}
                 value={form.customerId}
-                onChange={(e) => set('customerId', e.target.value)}
+                onChange={(value) => set('customerId', value)}
                 options={choices(customers.data ?? [], 'Choose customer')}
               />
-              <FormSelect
+              <SelectField
                 label="Currency"
                 value={form.currency}
-                onChange={(e) => set('currency', e.target.value)}
+                onChange={(value) => set('currency', value)}
                 options={['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP'].map((value) => ({
                   value,
                   label: value,
@@ -442,11 +442,11 @@ export function SalesEditor({
               {editor.sale.customer.name} · {editor.sale.saleNumber}
               <strong>Outstanding {money(editor.sale.outstanding, editor.sale.currency)}</strong>
             </p>
-            <FormSelect
+            <SelectField
               label="Receiving account"
               required
               value={form.accountId}
-              onChange={(e) => set('accountId', e.target.value)}
+              onChange={(value) => set('accountId', value)}
               options={choices(
                 eligible.map((a) => ({
                   id: a.id,

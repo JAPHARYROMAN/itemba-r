@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { chooseSelectOption } from '@/test/select-field';
+import userEvent from '@testing-library/user-event';
+import { chooseSelectOption, getSelectField } from '@/test/select-field';
 import { DirectSalesDesk as SalesDesk } from './direct-sales-desk';
 import { SalesEditor } from './sales-editor';
 import { lineTotal, saleTotal, type Sale } from './types';
@@ -158,8 +159,8 @@ describe('Sales Desk', () => {
         onSaved={saved}
       />,
     );
-    await screen.findByRole('option', { name: 'Acme' });
-    fireEvent.change(screen.getByLabelText(/^Customer/), { target: { value: 'customer' } });
+    await waitFor(() => expect(getSelectField('Customer')).toBeEnabled());
+    await chooseSelectOption('Customer', 'Acme');
     fireEvent.change(screen.getByLabelText(/Item 1 description/), { target: { value: 'Feed' } });
     fireEvent.change(screen.getByLabelText(/Item 1 quantity/), { target: { value: '0.5' } });
     fireEvent.change(screen.getByLabelText(/Item 1 unit price/), { target: { value: '100.01' } });
@@ -202,9 +203,10 @@ describe('Sales Desk', () => {
         onSaved={saved}
       />,
     );
+    await userEvent.click(getSelectField('Receiving account'));
     await screen.findByRole('option', { name: /Till/ });
     expect(screen.queryByRole('option', { name: /Dollar account/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Receiving account/), { target: { value: 'till' } });
+    await userEvent.click(screen.getByRole('option', { name: /Till/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
     await waitFor(() => expect(saved).toHaveBeenCalledWith('sale'));
     expect(api.post).toHaveBeenCalledWith(

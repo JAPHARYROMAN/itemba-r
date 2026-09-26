@@ -872,8 +872,24 @@ select optgroup {
   box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
 }
 
-:where(.ui-select-field) .ui-select-trigger-invalid {
+:where(.ui-select-field) .ui-select-trigger-invalid,
+:where(.ui-select-field[data-invalid]) .ui-select-trigger {
   border-color: var(--aurora-danger);
+}
+
+/* Same line as the shared FieldError in field-chrome.tsx. */
+.ui-select-error {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  color: var(--aurora-danger);
+  font-size: 11px;
+}
+
+.ui-select-error svg {
+  flex: none;
 }
 
 :where(.ui-select-bare) .ui-select-trigger {

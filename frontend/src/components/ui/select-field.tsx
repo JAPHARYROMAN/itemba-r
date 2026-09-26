@@ -1,9 +1,10 @@
 'use client';
 import React, { useRef, useState } from 'react';
-import { Check, ChevronDown, Search } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, Search } from 'lucide-react';
 import {
   Autocomplete,
   Button,
+  FieldError as AriaFieldError,
   Input,
   Label as AriaLabel,
   ListBox,
@@ -69,11 +70,10 @@ export interface SelectFieldProps {
 
 const SEARCH_THRESHOLD = 8;
 
-// React Aria treats keys as identities, and an empty-string id is too easy for a
-// falsy check to swallow. The "All …" rows every scope bar leads with are `''`.
-const EMPTY_KEY = '\u0000empty';
-const toKey = (value: string) => (value === '' ? EMPTY_KEY : value);
-const fromKey = (key: Key | null) => (key == null || key === EMPTY_KEY ? '' : String(key));
+// Option values are the keys, `''` included. React Aria's hidden native select
+// then carries `''` for a "Choose …" row, so a required field left there still
+// blocks the form exactly as the `<select>` it replaces did.
+const fromKey = (key: Key | null) => (key == null ? '' : String(key));
 
 // The list is portaled to <body>, outside the window whose theme the field sits
 // in — ITEMBA OS windows, the fuel portal and the auth pages each redefine these.
@@ -125,8 +125,8 @@ export function SelectField({
   const { contains } = useFilter({ sensitivity: 'base' });
   const root = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useState<React.CSSProperties>();
-  const items = options.map((option) => ({ ...option, id: toKey(option.value) }));
-  const selected = options.some((option) => option.value === value) ? toKey(value) : null;
+  const items = options.map((option) => ({ ...option, id: option.value }));
+  const selected = options.some((option) => option.value === value) ? value : null;
 
   const list = (
     <ListBox
@@ -169,7 +169,8 @@ export function SelectField({
       placeholder={placeholder}
       isRequired={required}
       isDisabled={disabled}
-      isInvalid={!!error}
+      // `false` would pin the field valid and silence the native `required` check.
+      isInvalid={error ? true : undefined}
       name={name}
       id={fieldId}
       aria-label={label ? undefined : ariaLabel}
@@ -207,9 +208,24 @@ export function SelectField({
       </Popover>
       {error ? (
         <FieldError id={errorId}>{error}</FieldError>
-      ) : hint ? (
-        <Hint id={hintId}>{hint}</Hint>
-      ) : null}
+      ) : (
+        <>
+          {hint && <Hint id={hintId}>{hint}</Hint>}
+          {/* A native `required` check ends here, not in a browser bubble: React
+              Aria cancels the bubble and moves focus to the trigger, so the
+              reason has to be written out beside it. */}
+          <AriaFieldError className="ui-select-error">
+            {({ validationDetails, validationErrors }) => (
+              <>
+                <CircleAlert size={12} aria-hidden="true" />
+                {validationDetails.valueMissing
+                  ? `${label ?? ariaLabel ?? 'This field'} is required.`
+                  : validationErrors.join(' ')}
+              </>
+            )}
+          </AriaFieldError>
+        </>
+      )}
     </Select>
   );
 }
