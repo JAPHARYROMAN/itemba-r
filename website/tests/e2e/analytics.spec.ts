@@ -90,10 +90,16 @@ test.describe('contract › analytics', { tag: '@contract' }, () => {
     });
   }
 
-  test('QuickContact call link on home pushes phone_click', async ({ page }) => {
+  test('QuickContact call link on home pushes phone_click', async ({ page }, testInfo) => {
     await settle(page, '/');
     expect(await page.evaluate(markQuickContact), 'home shows QuickContact').toBe(true);
-    const link = page.locator('[data-e2e-quick-contact] a[href^="tel:"]').filter({ visible: true }).first();
+    // The rebuild's quick-contact bar is phone-only (plan: "mobile quick
+    // contact"); from `md` the footer carries the same tel: action, so the
+    // desktop project clicks that one.
+    const link =
+      testInfo.project.name === 'phone'
+        ? page.locator('[data-e2e-quick-contact] a[href^="tel:"]').filter({ visible: true }).first()
+        : page.locator('footer a[href^="tel:"]').filter({ visible: true }).first();
     await expect(async () => {
       await link.click({ timeout: 5_000 });
       const events = (await dataLayer(page)).filter((e) => e.event === 'website_conversion' && e.conversion_action === 'phone_click');

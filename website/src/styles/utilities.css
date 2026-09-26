@@ -65,6 +65,81 @@
 }
 
 /*
+ * The mobile menu sheet (src/islands/SiteNav.tsx): a native popover opened
+ * by the menu button's popovertarget, so it opens, closes on Escape and
+ * returns focus without JS. It shows only while :popover-open matches, so a
+ * browser that does not know the selector never shows it at all.
+ */
+.site-menu {
+  display: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.site-menu:popover-open {
+  display: block;
+}
+
+@media (max-width: 1023.98px) {
+  /* The page behind an open sheet does not scroll. */
+  html:has(#site-menu:popover-open) {
+    overflow: hidden;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* The bar shows every link from lg; a sheet left open on a narrower
+     window gets out of the way. */
+  .site-menu {
+    display: none !important;
+  }
+}
+
+/* Entrance: the links settle into place, staggered. Transform only: the
+   sheet and its links are fully opaque from the first frame, so the menu is
+   readable (and reachable) the instant it opens. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  .site-menu:popover-open .site-menu-item {
+    animation: site-menu-item-in var(--duration-slow) var(--ease-emphasized) both;
+    animation-delay: calc(var(--i, 0) * 24ms);
+  }
+}
+
+@keyframes site-menu-item-in {
+  from {
+    transform: translateY(-10px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Without popover support the sheet cannot open, so the bar keeps its links
+   instead, as a row that scrolls sideways on narrow screens. */
+@supports not selector(:popover-open) {
+  .site-menu,
+  .site-menu-toggle {
+    display: none !important;
+  }
+
+  .site-nav-links {
+    display: flex;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+}
+
+/*
  * Pages with a local sub-nav (src/ui/SubNav.tsx) have two sticky bars, so
  * in-page anchors must clear both.
  */

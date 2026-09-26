@@ -1,8 +1,23 @@
 /*
- * Print: the company-profile print documents and the PDF pipeline contract
- * (scripts/generate-profile-pdfs.mjs). Moved verbatim from the old
- * src/app/globals.css; WP1.2b rewrites it with shape-independent selectors
- * in the same commit that removes PageTransition.
+ * Print: the company-profile print documents and the PDF pipeline contract.
+ *
+ * scripts/generate-profile-pdfs.mjs (frozen) and the page's print islands
+ * drive these hooks, which must not change:
+ *   - body[data-print-scope='company-profile']: set while /company-profile
+ *     is mounted (CompanyProfilePrintScope), so any print of the page shows
+ *     the print documents, defaulting to the group profile;
+ *   - body[data-print-profile=<id>] and body.printing-company-profile: set
+ *     by PrintProfileButton and by the PDF script to pick one profile;
+ *   - .print-document-root > article.print-profile-document[data-profile=<id>],
+ *     hidden on screen, plus every print-* layout class below.
+ *
+ * The rules are shape-independent: they no longer assume the page content
+ * sits inside one wrapper <div> in <main> (the old PageTransition shape).
+ * In print mode, everything in #main-content that is not the print root, not
+ * inside it and not one of its ancestors is hidden, wherever the root sits.
+ * Site chrome is hidden by class or marker, never by element name, so a
+ * <header> or <footer> inside printable content (the letterhead, the
+ * document footer) prints.
  */
 
 /* ─── Print profile support ───────────────────────────────────────────── */
@@ -32,8 +47,13 @@
     color: #080f1e !important;
   }
 
-  header,
-  footer,
+  /* Site chrome: the global nav (and its menu sheet), the footer, local
+     sub-navs, the skip link, the quick-contact bar and anything fixed, plus
+     whatever a page marks [data-print='hide'] or .print-hidden. */
+  .site-header,
+  .site-footer,
+  [data-subnav],
+  [data-print='hide'],
   .print-hidden,
   .skip-link,
   .fixed {
@@ -60,22 +80,35 @@
     line-height: 1.5 !important;
   }
 
-  body.printing-company-profile #main-content > div > :not(.print-document-root),
-  body.printing-company-profile #main-content > :not(div):not(.print-document-root),
-  body[data-print-profile] #main-content > div > :not(.print-document-root),
-  body[data-print-profile] #main-content > :not(div):not(.print-document-root) {
+  /* Print mode (the scope, the picker or the PDF script): only the print
+     documents remain in #main-content, however deep the root sits. */
+  :is(body[data-print-scope='company-profile'], body.printing-company-profile, body[data-print-profile])
+    #main-content
+    :not(.print-document-root, .print-document-root *, :has(.print-document-root)) {
     display: none !important;
   }
 
+  /* Browsers without :has() cannot see ancestors, so they rely on the page
+     placing the root directly in <main> (as /company-profile does). */
+  @supports not selector(:has(*)) {
+    :is(body[data-print-scope='company-profile'], body.printing-company-profile, body[data-print-profile])
+      #main-content
+      > :not(.print-document-root) {
+      display: none !important;
+    }
+  }
+
   body.printing-company-profile .print-document-root,
-  body[data-print-profile] .print-document-root {
+  body[data-print-profile] .print-document-root,
+  body[data-print-scope='company-profile'] .print-document-root {
     display: block !important;
     max-width: none !important;
     width: 100% !important;
   }
 
   body.printing-company-profile .print-profile-document,
-  body[data-print-profile] .print-profile-document {
+  body[data-print-profile] .print-profile-document,
+  body[data-print-scope='company-profile'] .print-profile-document {
     display: none !important;
   }
 
@@ -90,32 +123,17 @@
     display: block !important;
   }
 
-  /* Print-scope fallback: while the company-profile page is mounted, ANY print
-     (the picker OR a direct Ctrl+P) hides the dark cinematic web view and shows
-     the light print layouts, defaulting to the full group profile when the
-     picker hasn't set a specific profile. */
-  body[data-print-scope='company-profile'] #main-content > div > :not(.print-document-root),
-  body[data-print-scope='company-profile'] #main-content > :not(div):not(.print-document-root) {
-    display: none !important;
-  }
-
-  body[data-print-scope='company-profile'] .print-document-root {
-    display: block !important;
-    max-width: none !important;
-    width: 100% !important;
-  }
-
-  body[data-print-scope='company-profile'] .print-profile-document {
-    display: none !important;
-  }
-
+  /* Print-scope fallback: while the company-profile page is mounted, a
+     direct Ctrl+P with no profile picked prints the full group profile. */
   body[data-print-scope='company-profile']:not([data-print-profile]) .print-profile-document[data-profile='group'] {
     display: block !important;
   }
 
+  /* The light A4 document system, set in Inter (the site face, from
+     next/font) with Arial as the fallback. */
   .print-profile-document {
     color: #111827 !important;
-    font-family: Arial, Helvetica, sans-serif !important;
+    font-family: var(--font-sans), Arial, Helvetica, sans-serif !important;
   }
 
   .print-letterhead {
@@ -235,7 +253,8 @@
     letter-spacing: 0;
   }
 
-  .print-cover-panel h1 {
+  /* The document title: .print-cover-title (h1 kept for older markup). */
+  .print-cover-panel :is(h1, .print-cover-title) {
     color: #ffffff !important;
     font-size: 24pt;
     font-weight: 900;

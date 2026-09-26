@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { surfaces } from '@/design/tokens';
 import { site } from '@/lib/site';
 
 export default function manifest(): MetadataRoute.Manifest {
@@ -9,9 +10,12 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    background_color: '#080f1e',
-    theme_color: '#080f1e',
-    lang: 'en-TZ',
+    // The canvas, as on html/body and the theme-color meta: the launch splash
+    // and the browser chrome match the light shell.
+    background_color: surfaces.canvas,
+    theme_color: surfaces.canvas,
+    // The same language as <html lang>.
+    lang: site.language,
     categories: ['business'],
     icons: [
       {

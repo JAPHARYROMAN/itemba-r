@@ -1,18 +1,34 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import '@/styles/tokens.css';
 import '@/styles/base.css';
 import '@/styles/utilities.css';
 import '@/styles/print.css';
+import { shellCopy } from '@/content/nav';
 import { inter } from '@/design/fonts';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
-import ScrollProgress from '@/components/ScrollProgress';
-import PageTransition from '@/components/PageTransition';
+import { surfaces } from '@/design/tokens';
 import JsonLd from '@/components/JsonLd';
-import QuickContact from '@/components/QuickContact';
 import Analytics from '@/components/Analytics';
 import ConversionTracker from '@/components/ConversionTracker';
+import QuickContact from '@/islands/QuickContact';
 import { absoluteUrl, companyProfiles, contact, site } from '@/lib/site';
+import { pageMetadata } from '@/lib/seo';
+import { SiteFooter } from '@/shell/SiteFooter';
+import { SiteHeader } from '@/shell/SiteHeader';
+import { SkipLink } from '@/ui/a11y';
+
+/**
+ * Home's metadata, built by seo.ts. The home page is still the legacy client
+ * page, which cannot export metadata until WP2.1, so the layout carries it:
+ * this canonical and openGraph are what `/` renders. Every other page sets
+ * its own canonical and a complete openGraph (a page's openGraph replaces the
+ * layout's; it does not merge).
+ */
+const home = pageMetadata({
+  title: { absolute: site.title },
+  description: site.description,
+  path: '/',
+  ogDescription: site.shortDescription,
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(site.url),
@@ -23,9 +39,7 @@ export const metadata: Metadata = {
   },
   description: site.description,
   keywords: site.keywords,
-  alternates: {
-    canonical: '/',
-  },
+  alternates: home.alternates,
   robots: {
     index: true,
     follow: true,
@@ -41,35 +55,23 @@ export const metadata: Metadata = {
     shortcut: '/favicon.ico',
     apple: [{ url: '/apple-touch-icon.png', type: 'image/png', sizes: '180x180' }],
   },
-  openGraph: {
-    title: site.title,
-    description: site.shortDescription,
-    url: site.url,
-    siteName: site.name,
-    locale: site.locale,
-    type: 'website',
-    images: [
-      {
-        url: '/opengraph-image',
-        width: 1200,
-        height: 630,
-        alt: site.title,
-      },
-    ],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: site.title,
-    description: site.shortDescription,
-    // images intentionally omitted: Next falls twitter:image back to the
-    // resolved openGraph image, so per-route opengraph-image.tsx cards apply
-    // to X/Twitter too (and static pages keep the generic root card).
-  },
+  // No `images`: the root opengraph-image.tsx supplies the card.
+  openGraph: home.openGraph,
+  // The card type only. Next fills twitter:title, description and image from
+  // each page's own openGraph, so layout copy never leaks onto every page
+  // (architecture §6).
+  twitter: { card: 'summary_large_image' },
   verification: process.env.GOOGLE_SITE_VERIFICATION
     ? {
         google: process.env.GOOGLE_SITE_VERIFICATION,
       }
     : undefined,
+};
+
+/** The browser chrome matches the canvas, so nothing flashes another colour. */
+export const viewport: Viewport = {
+  themeColor: surfaces.canvas,
+  colorScheme: 'light',
 };
 
 const organizationJsonLd = {
@@ -117,22 +119,25 @@ const websiteJsonLd = {
   },
 };
 
+/**
+ * The shell: skip link, global nav, <main> with no wrapper (the print rules
+ * and the PDF script see the page content directly), footer, and the mobile
+ * quick-contact bar. html and body take their colours from the tokens
+ * (src/styles/base.css), so the first paint is already the canvas.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang={site.language} className={inter.variable}>
-      <body className="overflow-x-hidden font-sans">
-        <a href="#main-content" className="skip-link">
-          Skip to content
-        </a>
+      <body className="overflow-x-hidden bg-surface font-sans text-fg">
+        <SkipLink>{shellCopy.skipLink}</SkipLink>
         <Analytics />
         <ConversionTracker />
         <JsonLd data={[organizationJsonLd, websiteJsonLd]} />
-        <ScrollProgress />
-        <Navbar />
+        <SiteHeader />
         <main id="main-content" tabIndex={-1}>
-          <PageTransition>{children}</PageTransition>
+          {children}
         </main>
-        <Footer />
+        <SiteFooter />
         <QuickContact />
       </body>
     </html>

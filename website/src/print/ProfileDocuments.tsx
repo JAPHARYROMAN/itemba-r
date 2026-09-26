@@ -11,7 +11,9 @@ import { site } from '@/content/site';
  *
  * Contract with the frozen PDF script and print.css: the class names, the
  * `article.print-profile-document[data-profile=<id>]` elements and plain
- * <img src="/images/..."> photos are load-bearing. Keep them.
+ * <img src="/images/..."> photos are load-bearing. Keep them. The cover
+ * title is a styled <p> (.print-cover-title), so the hidden documents add no
+ * h1 to the page.
  */
 export default function ProfileDocuments() {
   return (
@@ -47,7 +49,7 @@ export default function ProfileDocuments() {
                 <span>{site.domain}</span>
               </div>
               <p className="print-kicker">{printCopy.kicker}</p>
-              <h1>{profile.title}</h1>
+              <p className="print-cover-title">{profile.title}</p>
               <p className="print-subtitle">{profile.subtitle}</p>
             </div>
             <img src={profile.coverImage.src} alt={profile.coverImage.alt} />

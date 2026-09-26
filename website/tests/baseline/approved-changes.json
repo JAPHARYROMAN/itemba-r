@@ -1,4 +1,245 @@
 {
   "$comment": "Reviewed, intentional differences from the golden baseline, read by tests/e2e/route-inventory.spec.ts. Only soft fields can be approved: description, keywords, og:title, og:description, og:image:alt, og:site_name, og:locale, og:type, twitter:title, twitter:description, twitter:image:alt. Shape: routes[\"/path\"][\"field\"] = { \"value\": \"exact new text\" | null (removed), \"reason\": \"why\" }. Hard fields (title, canonical, og:url, robots, OG image, anchors, JSON-LD coverage, EnquiryRouter intent, print hooks, headers, sitemap order, redirects) cannot be approved here. An approval that matches the baseline again fails as stale.",
-  "routes": {}
+  "routes": {
+    "/about": {
+      "twitter:title": {
+        "value": "About Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "A Tanzanian holding group built on diversification, resilience, and long-term growth across multiple sectors.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services": {
+      "twitter:title": {
+        "value": "Itemba Group Services",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Fuel, trade distribution, logistics, construction supplies, hospitality, and property services from Itemba Group companies.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/locations": {
+      "twitter:title": {
+        "value": "Itemba Group Locations",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Itemba Group headquarters and operating presence in Mpemba-Tunduma, Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/companies": {
+      "twitter:title": {
+        "value": "Itemba Group Companies",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Three independent companies operating across energy, trade, logistics, hospitality, real estate, and construction.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/capabilities": {
+      "twitter:title": {
+        "value": "Itemba Group Capabilities and Operating Proof",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "See how Itemba Group maps services, companies, location presence, and enquiry routing for customers, suppliers, and partners.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/insights": {
+      "twitter:title": {
+        "value": "Itemba Group Insights",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Guides for customers, suppliers, contractors, transport operators, and partners working with Itemba Group companies.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/company-profile": {
+      "twitter:title": {
+        "value": "Itemba Group Company Profile",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "A full company profile and capability statement for Itemba Group in Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/partnerships": {
+      "twitter:title": {
+        "value": "Partner with Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Supplier introductions, bulk purchase enquiries, fuel, logistics, construction supply, hospitality, and property opportunities with Itemba Group.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/faq": {
+      "twitter:title": {
+        "value": "Itemba Group Frequently Asked Questions",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Answers about Itemba Group companies, fuel, trade, logistics, construction supplies, hospitality, real estate, and Songwe-Tunduma operations.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/contact": {
+      "twitter:title": {
+        "value": "Contact Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Reach Itemba Group headquarters in Mpemba-Tunduma, Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services/fuel-and-lubricants": {
+      "twitter:title": {
+        "value": "Fuel and Lubricants | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Fuel, lubricant, and UZUNGUNI PARKING YARD services from ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, managed by Mwanjalisi Oil Co Ltd under Itemba Group in Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services/trade-and-distribution": {
+      "twitter:title": {
+        "value": "Trade and Distribution | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Trade and distribution services from Westsides Company Ltd for Songwe stockists, bars, night clubs, cross-border bulk buyers, and construction customers in Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services/logistics-and-cross-border-transit": {
+      "twitter:title": {
+        "value": "Logistics and Cross-Border Transit | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Logistics from Dar es Salaam to Songwe, Mbeya, Rukwa, Ruvuma, and Iringa plus cross-border transit from Itemba Enterprises Co Ltd through Tunduma.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services/construction-supplies-and-hardware": {
+      "twitter:title": {
+        "value": "Construction Supplies and Hardware | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "ITEMBA-HARDWARE under Westsides Company Ltd supplies construction materials, hardware, tools, and construction equipment in Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services/hospitality-and-lodging": {
+      "twitter:title": {
+        "value": "Hospitality and Lodging | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Hospitality, lodging, restaurant, and bar services through UZUNGUNI INN under Westsides Company Ltd in Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/services/real-estate-and-property": {
+      "twitter:title": {
+        "value": "Real Estate and Property | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Real estate, property development, and property-related services through Itemba Estate under Itemba Enterprises Co Ltd in Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/locations/songwe-tunduma": {
+      "twitter:title": {
+        "value": "Songwe Region and Tunduma Corridor | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Itemba Group location in Mpemba-Tunduma, Songwe Region, Tanzania, serving fuel, trade, logistics, construction supply, hospitality, and real estate enquiries.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/companies/mwanjalisi-oil": {
+      "twitter:title": {
+        "value": "Mwanjalisi Oil Co Ltd | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Mwanjalisi Oil Co Ltd manages ITEMBA-branded filling stations including ITEMBA-MPEMBA and ITEMBA-UZUNGUNI plus UZUNGUNI PARKING YARD, serving fuel, lubricants, and parking customers in Songwe Region, Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/companies/westsides-company": {
+      "twitter:title": {
+        "value": "Westsides Company Ltd | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Westsides Company Ltd manages wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN for Songwe stockists, bars, cross-border buyers, and construction customers in Tanzania.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/companies/itemba-enterprises": {
+      "twitter:title": {
+        "value": "Itemba Enterprises Co Ltd | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Itemba Enterprises Co Ltd operates logistics from Dar es Salaam to the Southern Highlands and cross-border transit services through Tunduma to Zambia, DRC, Zimbabwe, and Malawi.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/insights/route-business-enquiry-itemba-group": {
+      "twitter:title": {
+        "value": "How to Route a Business Enquiry to Itemba Group | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Learn how to route a business enquiry to Itemba Group companies and divisions across fuel, trade, logistics, construction supply, hospitality, and property services.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/insights/tunduma-corridor-fuel-trade-logistics": {
+      "twitter:title": {
+        "value": "Why the Tunduma Corridor Matters for Fuel, Trade, and Logistics | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Understand why Itemba Group location in Mpemba-Tunduma, Songwe Region, matters for fuel, trade distribution, logistics, and cross-border transit enquiries.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/insights/choose-right-itemba-company": {
+      "twitter:title": {
+        "value": "Choosing the Right Itemba Group Company for Your Enquiry | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Compare Itemba Group companies and learn which operating company fits fuel, trade distribution, logistics, hardware, hospitality, real estate, and parking enquiries.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    },
+    "/insights/supplier-bulk-purchase-enquiries": {
+      "twitter:title": {
+        "value": "What Suppliers and Bulk Buyers Should Prepare Before Contacting Itemba Group | Itemba Group",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:title from this page's og:title instead of repeating the site title on every page."
+      },
+      "twitter:description": {
+        "value": "Prepare supplier introductions and bulk purchase enquiries for Itemba Group with the right product, volume, delivery, company, and contact details.",
+        "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
+      }
+    }
+  }
 }
