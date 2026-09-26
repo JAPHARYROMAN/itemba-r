@@ -1,0 +1,194 @@
+.stock-valuation-view {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.valuation-controls {
+  padding: 20px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 16px;
+  background: var(--aurora-card);
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.valuation-controls header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.valuation-controls h3 {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--aurora-text);
+}
+.valuation-controls p,
+.valuation-note {
+  font-size: 12px;
+  color: var(--aurora-text-secondary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.valuation-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+}
+.valuation-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.valuation-column-picker {
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+}
+.valuation-column-picker summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 44px;
+}
+.valuation-column-picker > p,
+.valuation-column-picker > button {
+  margin: 0 16px 12px;
+}
+.valuation-column-picker fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  padding: 0 16px 12px;
+  gap: 4px 16px;
+}
+.valuation-column-picker label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.valuation-column-picker input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--aurora-primary);
+}
+.valuation-column-picker :focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+.valuation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 40px;
+  padding: 18px 20px;
+  background: var(--aurora-card);
+  border: 1px solid var(--aurora-border);
+  border-radius: 14px;
+}
+.valuation-summary div {
+  display: grid;
+  gap: 5px;
+}
+.valuation-summary span {
+  font-size: 12px;
+  color: var(--aurora-text-secondary);
+}
+.valuation-summary strong {
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+  color: var(--aurora-text);
+}
+.valuation-summary small {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--aurora-text-secondary);
+}
+.stock-valuation-view .valuation-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.valuation-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+.valuation-print-table {
+  display: none;
+}
+@container os-workspace (max-width: 600px) {
+  .valuation-layout {
+    grid-template-columns: 1fr;
+  }
+  .valuation-controls {
+    padding: 14px;
+  }
+}
+@media (max-width: 600px) {
+  .valuation-layout {
+    grid-template-columns: 1fr;
+  }
+  .valuation-controls {
+    padding: 14px;
+  }
+}
+@media print {
+  .inventory-reports:has(.stock-valuation-view) > :not(.stock-valuation-view),
+  .report-viewer:has(.stock-valuation-view) > :not(.stock-valuation-view),
+  .stock-valuation-view > :not(.valuation-print-table) {
+    display: none !important;
+  }
+  .valuation-print-table .document-page {
+    max-width: none;
+    min-height: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+  .valuation-print-table .document-print-root {
+    padding: 0;
+    background: white;
+  }
+  .stock-valuation-view .report-no-print,
+  .valuation-screen-table {
+    display: none !important;
+  }
+  .valuation-print-table {
+    display: block !important;
+  }
+  .valuation-print-table .os-table-scroll {
+    overflow: visible !important;
+  }
+  .valuation-print-table table {
+    width: 100%;
+    min-width: 0 !important;
+    table-layout: fixed;
+    font-size: 9px;
+  }
+  .valuation-print-table :is(th, td) {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    padding: 5px !important;
+    color: #111 !important;
+  }
+  .valuation-print-table thead {
+    display: table-header-group;
+  }
+  .valuation-print-table tr {
+    break-inside: avoid;
+  }
+  .valuation-summary {
+    background: white;
+    color: #111;
+    border-color: #ddd;
+  }
+  .valuation-summary :is(span, strong, small),
+  .valuation-note {
+    color: #111;
+  }
+}

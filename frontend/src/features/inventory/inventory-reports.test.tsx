@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,8 +12,12 @@ const api = vi.hoisted(() => ({
   page: vi.fn(),
   csv: vi.fn(),
   pdf: vi.fn(),
+  binary: vi.fn(),
   permissions: new Set<string>(),
   loading: false,
+}));
+vi.mock('@/hooks/use-document-letterhead', () => ({
+  useDocumentLetterhead: () => ({ groupName: 'ITEMBA GROUP' }),
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: (p: string) => api.permissions.has(p), loading: api.loading }),
@@ -23,7 +27,11 @@ vi.mock('@/lib/report-export', async (original) => ({
   ...(await original<typeof import('@/lib/report-export')>()),
   downloadTextFile: api.csv,
 }));
-vi.mock('@/lib/export-download', () => ({ downloadTablePdf: api.pdf, TABLE_PDF_MAX_ROWS: 5000 }));
+vi.mock('@/lib/export-download', () => ({
+  downloadTablePdf: api.pdf,
+  downloadBinaryExport: api.binary,
+  TABLE_PDF_MAX_ROWS: 5000,
+}));
 const stock = {
   productCode: 'WATER_01',
   product: 'Bottled water',
@@ -79,15 +87,63 @@ beforeEach(() => {
   api.pdf.mockResolvedValue(undefined);
 });
 describe('Inventory reports workspace', () => {
-  it('offers all seven reports, keeps precise values and complete details in the OS inspector', async () => {
+  it('applies selected columns and filters consistently to CSV, PDF and Excel across all pages', async () => {
+    const rows = [
+      ...Array.from({ length: 23 }, (_, index) => ({ ...stock, product: `Water ${index}` })),
+      { ...stock, product: 'Rice', category: 'Food' },
+    ];
+    api.get.mockResolvedValue(rows);
     render(tree());
-    const inspect = await screen.findByRole('button', { name: 'Inspect Bottled water' });
-    expect(screen.getAllByRole('option')).toHaveLength(7);
-    expect(screen.getByText('12.0001 btl')).toBeInTheDocument();
+    await screen.findByRole('cell', { name: 'Water 0', exact: true });
+    fireEvent.change(screen.getByLabelText('Category filter'), { target: { value: 'Beverages' } });
+    fireEvent.change(screen.getByLabelText('Column layout'), { target: { value: 'compact' } });
+    expect(screen.queryByRole('columnheader', { name: 'Category' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await waitFor(() => expect(api.csv).toHaveBeenCalled());
+    expect(api.csv.mock.calls[0][2].split('\r\n')[0]).not.toContain('Category');
+    expect(api.csv.mock.calls[0][2]).toContain('Water 22');
+    expect(api.csv.mock.calls[0][2]).not.toContain('Rice');
+    fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    await waitFor(() => expect(api.pdf).toHaveBeenCalled());
+    expect(api.pdf.mock.calls[0][0].columns).not.toContain('Category');
+    expect(api.pdf.mock.calls[0][0].rows).toHaveLength(23);
+    expect(api.pdf.mock.calls[0][0].companyId).toBe('company');
+    expect(api.pdf.mock.calls[0][0].summary[0].value).toBe('414,005.75');
+    fireEvent.click(screen.getByRole('button', { name: 'Export Excel' }));
+    await waitFor(() => expect(api.binary).toHaveBeenCalled());
+    expect(api.binary.mock.calls[0][1]).toMatchObject({
+      columns: api.pdf.mock.calls[0][0].columns,
+      rows: api.pdf.mock.calls[0][0].rows,
+      format: 'xlsx',
+    });
+  });
+  it('cancels an in-flight export when its column layout changes', async () => {
+    render(tree());
+    await screen.findByRole('cell', { name: 'Bottled water', exact: true });
+    let resolve!: (value: unknown) => void;
+    api.get.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    fireEvent.change(screen.getByLabelText('Column layout'), { target: { value: 'compact' } });
+    await act(async () => resolve([stock]));
+    expect(api.csv).not.toHaveBeenCalled();
+  });
+  it('offers all seven reports with a valuation preview and inspectors for other reports', async () => {
+    render(tree());
+    await screen.findByRole('cell', { name: 'Bottled water', exact: true });
+    expect(within(screen.getByLabelText('Inventory report')).getAllByRole('option')).toHaveLength(
+      7,
+    );
+    expect(screen.getByRole('cell', { name: '12.0001', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '18,000.25', exact: true })).toBeInTheDocument();
     capture('inventory-reports');
-    fireEvent.click(inspect);
+    fireEvent.change(screen.getByLabelText('Inventory report'), { target: { value: 'low-stock' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect Bottled water' }));
     expect(screen.getByLabelText('Record details')).toHaveTextContent('WATER_01');
-    expect(screen.getByLabelText('Record details')).toHaveTextContent('18,000.25');
     capture('inventory-reports-details');
     for (const report of INVENTORY_REPORTS) {
       api.get.mockResolvedValue(
@@ -140,30 +196,34 @@ describe('Inventory reports workspace', () => {
     api.get.mockResolvedValue([{ ...stock, product: 'New scope stock' }]);
     view.rerender(tree('other'));
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
-    await screen.findByRole('button', { name: 'Inspect New scope stock' });
+    await screen.findByRole('cell', { name: 'New scope stock', exact: true });
     await act(async () => resolve([stock]));
     expect(oldSignal.aborted).toBe(true);
-    expect(screen.queryByRole('button', { name: 'Inspect Bottled water' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('cell', { name: 'Bottled water', exact: true }),
+    ).not.toBeInTheDocument();
   });
   it('clears stale rows on refresh errors and recovers through retry', async () => {
     render(tree());
-    await screen.findByRole('button', { name: 'Inspect Bottled water' });
+    await screen.findByRole('cell', { name: 'Bottled water', exact: true });
     api.get.mockRejectedValueOnce(new Error('Report temporarily unavailable'));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh report' }));
     await screen.findByText('Report temporarily unavailable');
     expect(screen.getByRole('button', { name: 'Export PDF' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Inspect Bottled water' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('cell', { name: 'Bottled water', exact: true }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    await screen.findByRole('button', { name: 'Inspect Bottled water' });
+    await screen.findByRole('cell', { name: 'Bottled water', exact: true });
   });
   it('paginates complete snapshot arrays and requests the next movement page', async () => {
     api.get.mockResolvedValue(
       Array.from({ length: 21 }, (_, i) => ({ ...stock, product: 'Product ' + i })),
     );
     render(tree());
-    await screen.findByRole('button', { name: 'Inspect Product 0' });
+    await screen.findByRole('cell', { name: 'Product 0', exact: true });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByRole('button', { name: 'Inspect Product 20' });
+    await screen.findByRole('cell', { name: 'Product 20', exact: true });
     expect(api.get).toHaveBeenCalledTimes(1);
     api.get.mockResolvedValue({ rows: [stock], total: 41 });
     fireEvent.change(screen.getByLabelText('Inventory report'), {
@@ -186,7 +246,7 @@ describe('Inventory reports workspace', () => {
     }));
     api.get.mockResolvedValue(rows);
     render(tree());
-    await screen.findByRole('button', { name: 'Inspect Product 0' });
+    await screen.findByRole('cell', { name: 'Product 0', exact: true });
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => expect(api.csv).toHaveBeenCalled());
     const csv = api.csv.mock.calls[0][2];
@@ -198,7 +258,7 @@ describe('Inventory reports workspace', () => {
   });
   it('shows failed exports and suppresses files when scope changes during collection', async () => {
     render(tree());
-    await screen.findByRole('button', { name: 'Inspect Bottled water' });
+    await screen.findByRole('cell', { name: 'Bottled water', exact: true });
     api.get.mockRejectedValueOnce(new Error('Export read failed'));
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     await screen.findByText('Export read failed');
@@ -219,7 +279,7 @@ describe('Inventory reports workspace', () => {
   it('passes a cancellation signal to PDF and keeps zero distinct from unknown', async () => {
     api.get.mockResolvedValue([{ ...stock, quantityOnHand: 0, totalValue: null }]);
     render(tree());
-    await screen.findByText('0 btl');
+    await screen.findByRole('cell', { name: '0', exact: true });
     expect(screen.getByText('—')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
     await waitFor(() => expect(api.pdf).toHaveBeenCalled());

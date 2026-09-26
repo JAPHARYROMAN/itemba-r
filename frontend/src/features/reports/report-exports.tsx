@@ -5,7 +5,15 @@ import { FormSelect } from '@/components/aurora';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendPost } from '@/lib/api-client';
-import { downloadTextFile, reportToTable, toCsv } from '@/lib/report-export';
+import { downloadTextFile, pickPrimaryTable, reportToTable, toCsv } from '@/lib/report-export';
+import {
+  VALUATION_NOTE,
+  valuationRows,
+  valuationTable,
+  valuationSummary,
+  valuationFilterLabel,
+  type ValuationOptions,
+} from '@/features/inventory/stock-valuation-format';
 import { downloadBinaryExport, downloadTablePdf } from '@/lib/export-download';
 import { printWorkspace } from '@/components/workspace/print-workspace';
 import { reportError, summarizeResult } from './report-viewer-utils';
@@ -17,11 +25,13 @@ export function ReportExports({
   result,
   source,
   scopeLabel,
+  stockValuation,
 }: {
   entry: CatalogEntry;
   result: ReportExecution;
   source: RefObject<HTMLDivElement | null>;
   scopeLabel: string;
+  stockValuation?: ValuationOptions;
 }) {
   const { hasPermission } = useAuth();
   const allowed = hasPermission(entry.permission);
@@ -54,7 +64,19 @@ export function ReportExports({
     setError('');
     try {
       const filename = `${entry.id}-${result.generatedAt.slice(0, 10)}`;
-      const table = reportToTable(result.data);
+      const stockRows = stockValuation
+        ? valuationRows(pickPrimaryTable(result.data).rows, stockValuation)
+        : [];
+      const stockTable = stockValuation ? valuationTable(stockRows, stockValuation) : null;
+      const table = stockTable || reportToTable(result.data);
+      const exportData =
+        stockValuation && table
+          ? table.rows.map((row) =>
+              Object.fromEntries(table.columns.map((column, index) => [column, row[index]])),
+            )
+          : result.data;
+      if (stockValuation && !stockRows.length)
+        throw new Error('No stock matches these filters. Adjust the filters before exporting.');
       if (['csv', 'pdf', 'docx', 'xlsx', 'txt'].includes(selected) && !table)
         throw new Error('This result has no table to export. Use JSON or print the current view.');
       if (
@@ -75,12 +97,12 @@ export function ReportExports({
         downloadTextFile(
           `${filename}.json`,
           'application/json',
-          JSON.stringify(result.data, null, 2),
+          JSON.stringify(exportData, null, 2),
         );
       else if (selected === 'copy') {
         if (!navigator.clipboard)
           throw new Error('Clipboard access is unavailable. Download JSON instead.');
-        await navigator.clipboard.writeText(JSON.stringify(result.data, null, 2));
+        await navigator.clipboard.writeText(JSON.stringify(exportData, null, 2));
       } else if (selected === 'print') printWorkspace(source.current);
       else {
         const body = {
@@ -90,6 +112,21 @@ export function ReportExports({
           columns: table!.columns,
           rows: table!.rows,
           baseName: entry.id,
+          ...(stockValuation
+            ? {
+                orientation: 'landscape' as const,
+                numericColumns: stockTable!.numericColumns,
+                columnWeights: stockTable!.columnWeights,
+                stripedRows: true,
+                summary: valuationSummary(stockRows, stockValuation),
+                meta: [
+                  { label: 'Filters', value: valuationFilterLabel(stockValuation) },
+                  { label: 'Retrieved at', value: result.generatedAt },
+                  { label: 'Stock positions', value: String(stockRows.length) },
+                ],
+                note: VALUATION_NOTE,
+              }
+            : {}),
         };
         if (selected === 'pdf') await downloadTablePdf(body, controller.signal);
         else
@@ -109,12 +146,14 @@ export function ReportExports({
       if (controller.signal.aborted || !live.current) return;
       const completed =
         selected === 'print'
-          ? 'Print dialog requested for the current visible page.'
+          ? stockValuation
+            ? 'Print dialog requested for all matching stock positions.'
+            : 'Print dialog requested for the current visible page.'
           : selected === 'copy'
             ? 'Report JSON copied.'
             : 'Report export prepared.';
       setMessage(completed);
-      const metrics = summarizeResult(result.data);
+      const metrics = summarizeResult(exportData);
       try {
         await backendPost<ExportAuditResponse>(
           '/reports/export-audit',
@@ -126,7 +165,9 @@ export function ReportExports({
             runId: result.manifest?.runId,
             sourceUrl: result.sourceUrl,
             ...metrics,
-            dataHash: result.manifest?.manifestHash || metrics.dataHash,
+            dataHash: stockValuation
+              ? metrics.dataHash
+              : result.manifest?.manifestHash || metrics.dataHash,
             sectionCount:
               metrics.objectSectionCount +
               (metrics.rowCount ? 1 : 0) +
@@ -135,10 +176,15 @@ export function ReportExports({
               ...result.filters,
               action:
                 selected === 'print'
-                  ? 'PRINT_VISIBLE_PAGE'
+                  ? stockValuation
+                    ? 'PRINT_FILTERED_STOCK'
+                    : 'PRINT_VISIBLE_PAGE'
                   : selected === 'copy'
                     ? 'COPY_JSON'
                     : 'DOWNLOAD',
+              ...(stockValuation
+                ? { stockValuation, sourceManifestHash: result.manifest?.manifestHash }
+                : {}),
             },
           },
           { signal: controller.signal },
@@ -184,7 +230,7 @@ export function ReportExports({
           disabled={!allowed || busy}
           onClick={() => void exportResult('print')}
         >
-          Print visible page
+          {stockValuation ? 'Print stock valuation' : 'Print visible page'}
         </Btn>
         <Btn
           variant="secondary"
@@ -195,9 +241,15 @@ export function ReportExports({
         </Btn>
       </div>
       <p>
-        Table exports include all rows in the main result table, regardless of row search or
-        pagination. JSON includes every section. Document exports use the selected company’s
-        letterhead, with the configured group fallback.
+        {stockValuation ? (
+          'Every format includes all matching stock positions and only the chosen columns. Printing includes all matching pages. '
+        ) : (
+          <>
+            Table exports include all rows in the main result table, regardless of row search or
+            pagination. JSON includes every section.{' '}
+          </>
+        )}
+        Document exports use the selected company’s letterhead, with the configured group fallback.
       </p>
       {message && <p role="status">{message}</p>}
       {error && (
