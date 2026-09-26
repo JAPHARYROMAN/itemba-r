@@ -256,6 +256,33 @@ async function newView() {
 }
 
 describe('Report library and viewer workspace', () => {
+  it('retains the chosen export format without refetching history on each stock filter change and cancels old exports', async () => {
+    state.entries = [makeEntry('ops.stock-valuation')];
+    state.data = [{ product: 'Water', category: 'Drinks', quantityOnHand: 12, totalValue: 100 }];
+    render(<App initial="/reports/run?reportId=ops.stock-valuation" />);
+    await run();
+    let resolve!: () => void;
+    state.binary.mockImplementationOnce(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    fireEvent.change(screen.getByLabelText('Export format'), { target: { value: 'xlsx' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
+    await waitFor(() => expect(state.binary).toHaveBeenCalled());
+    const signal = state.binary.mock.calls[0][3] as AbortSignal;
+    const reads = state.get.mock.calls.filter(([path]) => path.includes('/export-audit/')).length;
+    fireEvent.change(screen.getByLabelText('Column layout'), { target: { value: 'compact' } });
+    fireEvent.change(screen.getByLabelText('Find product'), { target: { value: 'Water' } });
+    expect(signal.aborted).toBe(true);
+    expect(screen.getByLabelText('Export format')).toHaveValue('xlsx');
+    await act(async () => resolve());
+    expect(state.get.mock.calls.filter(([path]) => path.includes('/export-audit/'))).toHaveLength(
+      reads,
+    );
+    expect(state.post.mock.calls.some(([path]) => path === '/reports/export-audit')).toBe(false);
+  });
   it('uses a saved stock format for the preview, every export and the audit without altering the source run', async () => {
     state.entries = [{ ...makeEntry('ops.stock-valuation'), category: 'Inventory' }];
     state.data = Array.from({ length: 24 }, (_, index) => ({

@@ -50,6 +50,15 @@ export function ReportExports({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
+  const projectionKey = JSON.stringify(stockValuation);
+  useEffect(() => {
+    pending.current?.abort();
+    pending.current = null;
+    setBusy(false);
+    setMessage('');
+    setError('');
+    return () => pending.current?.abort();
+  }, [projectionKey]);
   const history = useWorkspaceResource<ExportAuditHistory>(
     `/reports/export-audit/${encodeURIComponent(entry.id)}`,
     { companyId: result.filters.companyId, limit: 8 },

@@ -350,10 +350,7 @@ function ReportViewerContent({
                 />
               )}
               <ReportExports
-                key={
-                  execution.result.generatedAt +
-                  (isValuation ? JSON.stringify(presentation.stockValuation) : '')
-                }
+                key={execution.result.generatedAt}
                 entry={entry}
                 result={execution.result}
                 source={root}
