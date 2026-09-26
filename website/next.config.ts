@@ -3,6 +3,12 @@ import type { NextConfig } from 'next';
 const config: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: __dirname,
+  // The OG cards (src/lib/og-card.tsx) read their fonts and the crest from
+  // disk at request time, e.g. for a slug that was not prerendered. The file
+  // tracer cannot see those reads, so list the files for every card route.
+  outputFileTracingIncludes: {
+    '/**/opengraph-image*': ['./src/assets/fonts/og/*.ttf', './public/logo-print.png'],
+  },
   images: {
     formats: ['image/avif', 'image/webp'],
   },

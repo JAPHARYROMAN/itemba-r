@@ -64,6 +64,14 @@
   }
 }
 
+/*
+ * Pages with a local sub-nav (src/ui/SubNav.tsx) have two sticky bars, so
+ * in-page anchors must clear both.
+ */
+html:has([data-subnav]) {
+  scroll-padding-top: calc(var(--sticky-top, var(--nav-height)) + var(--subnav-height) + 8px);
+}
+
 /* ── LEGACY: pre-rebuild page classes. Delete in WP3.1 with the old pages. ── */
 
 @layer utilities {

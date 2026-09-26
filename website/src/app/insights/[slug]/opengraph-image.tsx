@@ -1,7 +1,6 @@
-import { ImageResponse } from 'next/og';
 import { insightArticles } from '@/content/insights';
 import { ogFallbacks } from '@/content/og';
-import { OG_CONTENT_TYPE, OG_SIZE, clamp, renderOgCard } from '@/lib/og-card';
+import { OG_CONTENT_TYPE, OG_SIZE, clamp, ogImageResponse } from '@/lib/og-card';
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = OG_CONTENT_TYPE;
@@ -15,12 +14,9 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const { slug } = await params;
   const article = insightArticles.find((item) => item.slug === slug);
 
-  return new ImageResponse(
-    renderOgCard({
-      eyebrow: article?.eyebrow ?? ogFallbacks.insight.eyebrow,
-      title: article?.title ?? ogFallbacks.insight.title,
-      subtitle: article ? clamp(article.summary) : undefined,
-    }),
-    size,
-  );
+  return ogImageResponse({
+    eyebrow: article?.eyebrow ?? ogFallbacks.insight.eyebrow,
+    title: article?.title ?? ogFallbacks.insight.title,
+    subtitle: article ? clamp(article.summary) : undefined,
+  });
 }

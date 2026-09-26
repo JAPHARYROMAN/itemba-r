@@ -5,6 +5,9 @@ import { defineConfig } from 'vitest/config';
 const root = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  // tsconfig keeps `jsx: preserve` for Next; unit tests that import .tsx
+  // modules (the UI kit, the OG card) need JSX compiled here.
+  oxc: { jsx: { runtime: 'automatic', importSource: 'react' } },
   resolve: {
     alias: {
       '@': path.resolve(root, 'src'),
