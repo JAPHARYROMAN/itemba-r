@@ -9,319 +9,325 @@ export const mediaGenerated = {
     width: 1059,
     height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRm4AAABXRUJQVlA4IGIAAAAwAgCdASoNABAAA4BaJbACdAEVk8ylzWMAAAD+jXHGCGzAyazUh2gclj3oKdJmezchIoeAhTeeuZObeAqybiOTNMy3VAjO3tVxBozSskayXs97irttdO4A3mYqOHBxBTVAAA==",
+      "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAADwAQCdASoNABAAA4BaJagCdAD6wFB+JgAA/dLe/qzW7tmLGyO2n6pEG3fyxF6En2OvpWWtccN64DXP0vJwNOFR46PrauqtI0LgAA==",
   },
   "/images/beverages/beverage-stock-pallets.webp": {
     width: 930,
-    height: 1280,
+    height: 1242,
     blurDataURL:
-      "data:image/webp;base64,UklGRm4AAABXRUJQVlA4IGIAAAAQAgCdASoMABAAA4BaJbACdAEQXMVcTCAAAOA1tn5hnq5Xjr6DjYs51gbTnNmAojJiIeZBnWmg5YOCKieWunNP93SQZzcepY2zwsjYxkF7T+QJ0Vc9+EB3OmcBbu+SigAAAA==",
+      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAADQAQCdASoMABAAA4BaJbACdACec4ZgAAD8Z9FOZpDwlVRNneDgSsikz1kiNpUbOdBDY2Gn4ebbHV+vzS0o8clx+Jn79DtY081RgS1iPFlpcd1lUAAAAA==",
   },
   "/images/beverages/liquor-cases.webp": {
     width: 900,
-    height: 1280,
+    height: 1204,
     blurDataURL:
-      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAAAQAgCdASoLABAAA4BaJbACdAEOdu5EoHcAAM3z4fOM/A+oYtBhXVhbcx+/kRxx79qA2M4KbTWJBSlPJf8gTy5zatIuMAH0/x/veRGylTD3E1SWgAA=",
+      "data:image/webp;base64,UklGRlgAAABXRUJQVlA4IEwAAAAQAgCdASoMABAAA4BaJbACdADc+K26lZuwAP6Z7j3yR99oZqQJLIn8BT0GcedX4dX+QSajQwYdBF4tRyKmv6+5X4Hv3QePfl6i6QAA",
   },
   "/images/beverages/spirits-warehouse-cases.webp": {
     width: 938,
-    height: 1280,
+    height: 1252,
     blurDataURL:
-      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAADQAQCdASoMABAAA4BaJQBYdh6GRC+tSAD+tCCL/6iBQgMg4djf6oiMrfpV6/rcqb44aLkDAPc2CmluUMfnOumKfFQLRFSGQLWYdzbZCSt0m9uzdY0cQAAA",
+      "data:image/webp;base64,UklGRl4AAABXRUJQVlA4IFIAAADwAQCdASoMABAAA4BaJYwC7ADcAG9apQAA/rOsJ+SlUweMD//pPD4GX9Z8w3MOx7oStSEg5AM53AVK3xbl4yubQOFtZSm43q6x8ACg8iHgAAAA",
   },
   "/images/beverages/westsides-beer-delivery-truck.webp": {
     width: 780,
     height: 1040,
     blurDataURL:
-      "data:image/webp;base64,UklGRmwAAABXRUJQVlA4IGAAAABQAgCdASoMABAAA4BaJYwC7AYuHbZXBqL1eoAA/vi6aSi/uqoW5C/9iv8X4ezIF+HIP5OE+7pCr36WbE11mX0Wrbp2sIOCuFBYt14i275qyh4yVb1jhX+0i0K8zmWOgAA=",
+      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAACwAQCdASoMABAAA4BaJZwAAjl8cxwAAP74umkoiyrrYysdkgvGVdV7BCmv8aTFzipWzeGIjQtbCQqO0fWc/EmN9Ftpfel9tgpnb9LwKFud4JMuAAA=",
   },
   "/images/beverages/westsides-cocacola-crates.webp": {
     width: 780,
     height: 1040,
     blurDataURL:
-      "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAADwAQCdASoMABAAA4BaJZgCdADcebfjFEAA/uoJNLwm9Fnhh3U01MV4Q4XovIfg3g6iGyu50cfvgjK3GL8GeHHHK2+nESpPn0hOAA==",
+      "data:image/webp;base64,UklGRkgAAABXRUJQVlA4IDwAAADwAQCdASoMABAAA4BaJQBdgBuVmHcjg+QA/uoFfT5AiO7qkD9iZnSoosJKe1Tae6petecqI5CUEiWjFAA=",
   },
   "/images/beverages/westsides-customer-order-truck.webp": {
     width: 780,
     height: 1040,
     blurDataURL:
-      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAADwAQCdASoMABAAA4BaJQBWACKfAthO+eAA/mozW0n36iUhUHrQChby/VxdaVSolK5mpl8NWpsveRB+Ssuy2cQ9l98WhZDbSQu76UP/1AJ9ZMR+gAA=",
+      "data:image/webp;base64,UklGRlgAAABXRUJQVlA4IEwAAADwAQCdASoMABAAA4BaJZQCsAEQzG7PrQAA/OzDvOZ3DnVGb7kftCeGtOzVusPEgHcbf9YrQwOFNYc2RZcgDylyHO7CKZkYAS6nzAAA",
   },
   "/images/beverages/westsides-softdrinks-stacks.webp": {
     width: 780,
     height: 1040,
     blurDataURL:
-      "data:image/webp;base64,UklGRk4AAABXRUJQVlA4IEIAAADwAQCdASoMABAAA4BaJZwAAl3DkrF0aYAA/DQBC3Ww4RK5+s04//pKIZWbwhOFkT7OI5FrCwkNGNYWI9wRj06AAAA=",
+      "data:image/webp;base64,UklGRkoAAABXRUJQVlA4ID4AAAAQAgCdASoMABAAA4BaJZwAAt0LC8PCLgoAAPa+Z+XE2JRhH2ogVLEIIuUhvuGTzOhFQtpA2A4jkyrIa+nQAA==",
   },
   "/images/beverages/westsides-softdrinks-warehouse.webp": {
     width: 780,
     height: 1040,
     blurDataURL:
-      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAAAQAgCdASoMABAAA4BaJYwC7AD1dCpjY5MQAP7Q0P6aatYyaB4SnDEkuU/aZwZkr16CODsBOWuTii1npzVGQGS0NkF6qNH1Tgu5bBySGzgQFsgWQAA=",
+      "data:image/webp;base64,UklGRlIAAABXRUJQVlA4IEYAAADwAQCdASoMABAAA4BaJZQC7AERAw/scgAA/sBDFsZGK+qq+Vr6rTlurD8Aaht/H/lEM2mJFuiyBrl7ivXW8iD6FIANIAAA",
   },
   "/images/beverages/westsides-stock-overview.webp": {
     width: 1040,
     height: 780,
     blurDataURL:
-      "data:image/webp;base64,UklGRl4AAABXRUJQVlA4IFIAAADQAQCdASoQAAwAA4BaJZACdAC8mmCQAAD+0msMHT3SJOt+YnYhsKfXGDbkwRAO3qNaA4Ygl4XZPUd5w7aVXlmzjMNar8+uDjCv+lpWt0l5gAAA",
+      "data:image/webp;base64,UklGRk4AAABXRUJQVlA4IEIAAADQAQCdASoQAAwAA4BaJQBYdheVOwMw4AD+wcf8tFjsCqnKDKZu5EOxTB5+Va+Eno9d0cNHJZePYcOPFxnlSVitAAA=",
   },
   "/images/beverages/westsides-warehouse-stock-wide.webp": {
     width: 1040,
     height: 780,
     blurDataURL:
-      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAADwAQCdASoQAAwAA4BaJYgAAgU3rIzsr4AA/sRZiopYjS+3jGm96JE5jj5wRW2C73OBpGsn+zl6DMxKrXyAJODbmzejafPF2txgAFXTwAA=",
+      "data:image/webp;base64,UklGRkwAAABXRUJQVlA4IEAAAADQAQCdASoQAAwAA4BaJYwAAjPDPgLEeAD+jgXQN5iRSpjwTUNLIIJVp4eEgssMvyAzCqxPejS/zjCDtOMsoAAA",
   },
   "/images/company-profile/itemba-group-profile-cover.webp": {
-    width: 1600,
-    height: 880,
+    width: 1280,
+    height: 704,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAADQAQCdASoQAAkAA4BaJbACdAEXFjrgAAD+a/ED1rD1jfPPLvncw/EvLCapW/OrAr8F49z7ZYiiXhYpjI/kW/OZkRzrSGcQgUzh09ZBQf05xdL+jtVRtStaAAA=",
+      "data:image/webp;base64,UklGRlIAAABXRUJQVlA4IEYAAADQAQCdASoQAAkAA4BaJYgCdADwJ89kgAD+BL1akBrlqHnw3wefFPxcOkaz7ayE18GhVOVuMIfUjbipVQw8e7vDZomEAAAA",
   },
   "/images/fuel-stations/itemba-filling-station-night.webp": {
-    width: 1125,
-    height: 1500,
+    width: 1200,
+    height: 1600,
     blurDataURL:
-      "data:image/webp;base64,UklGRkwAAABXRUJQVlA4IEAAAADwAQCdASoMABAAA4BaJZwCdAELT06NlkAA/uodorPVOBYpHFLFGD/xUB6MbuCon/C61I3Tn3nIgY4X09pB6IAA",
+      "data:image/webp;base64,UklGRkYAAABXRUJQVlA4IDoAAAAQAgCdASoMABAAA4BaJZwAAt0GXPOFV4UAAP7mU7PvLmcAmvFtSaf5L7aPxAwbhunAel4ouZ1xAAAA",
   },
   "/images/fuel-stations/itemba-filling-station-wide.webp": {
-    width: 1800,
-    height: 1350,
+    width: 2400,
+    height: 1800,
     blurDataURL:
-      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoQAAwAA4BaJagCdAD7CGtpUfEAAP7D/cfatmbaOoozW0oCr5dZLfwDVtxyHPwzwqdQuPpp0TAAhdFdO20sIl9HLexMXz+UAAA=",
+      "data:image/webp;base64,UklGRkgAAABXRUJQVlA4IDwAAADQAQCdASoQAAwAA4BaJQBOgCIcE1HZIAD+r3BwCmUgoO/QAutJUS39drjwPIgck3yVauYCZlrs+5h40AA=",
+  },
+  "/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp": {
+    width: 2400,
+    height: 1800,
+    blurDataURL:
+      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAACQAQCdASoQAAwAA4BaJZQC06DyBgAA+p3PwzmHeardiTf3/x6RgHdz01l4e1q2IDxemdlLgGK8yaq8YftpU8YJeldnORFzfHptQeErAAA=",
   },
   "/images/fuel-stations/itemba-mpemba-canopy.webp": {
-    width: 900,
-    height: 1200,
+    width: 960,
+    height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAAAQAgCdASoMABAAA4BaJbACdAEO9LgeRgFAAN1OvTyZXCWG/2LlBFsBfuSyrd/aBlGr2xb3G9mfq/xEtgKn+XiH8gEWXwqm7sV6b2W6JPW5io/EAAA=",
+      "data:image/webp;base64,UklGRk4AAABXRUJQVlA4IEIAAADwAQCdASoMABAAA4BaJagCdAC9xM+UBYAA3WfUoN2zEBOQsBPN75GoPG5YEzqtDf5op+zj8PXXeN51BrVOW1VheAA=",
   },
   "/images/fuel-stations/itemba-mpemba-forecourt.webp": {
     width: 1152,
     height: 864,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAADwAQCdASoQAAwAA4BaJbACdADcSCJADcAA9ACRoUH6zxKcgoqklOagVraOFWNj5isjw9eMq57igOKGtbGGNx9ASQGs1NetSkuD7Rjr3L9w020T+4N5vYiwQAA=",
+      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoQAAwAA4BaJZACdGuAAkbGZTIwAPQAkZ7Ux0CG8/pHt4Xp4VX/JirVnGqzXupHistzoRZE6SCGVbvp4Mk3rnN4ZPNZn8AAAAA=",
   },
   "/images/fuel-stations/itemba-mpemba-front.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAABQAgCdASoQAAwAA4BaJbACdGuAAsrL4SFrEgAA9lTscD2QXIkDMHxyS4MWThWMg57t0q/Sl7oYvh40mqKckIDl9fDe5yDtNGD8gfGphbWI/dakr7o7nuwAAAA=",
+      "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAAAQAgCdASoQAAwAA4BaJZACdGuAAr6C42wAAMwDHvjdtiwYeZk6p6f7Q6t2ro3PSmgZcdvvvuwjfx+7wyO3S3VjQoTHjNYsUuYAAA==",
   },
   "/images/fuel-stations/itemba-mpemba-service-yard.webp": {
     width: 1152,
     height: 864,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAABQAgCdASoQAAwAA4BaJbACdGuAAuHLRArq+gAAzJeWSM/phKYORmYnn2XoGb9hUFL1GwSymtH4kRrPBqFTwrd23McojvCaBYdzYU6+J9o0q7D4vU08G55XAAA=",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAAAQAgCdASoQAAwAA4BaJZACdGuAApOdMYeAAPRLKFV7Ujeb8LaO+UAihQsKOprSPU2brgFDHULmcjxxedxpowAF3gYAAA==",
   },
   "/images/fuel-stations/itemba-mpemba-station.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAABQAgCdASoQAAwAA4BaJbACdH8IwABZWmPvsAAA9md59aX29Kt8QAI6bMbaVR5zIPmzVmT+MeyBTd7xG1WCAPmoJFZlcT2TRUaPdVUXAOJaWa7fBmAAAA==",
+      "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAAAQAgCdASoQAAwAA4BaJZACdGuAAr6C42wAAMwDHvjdtiwYeZk6p6f7Q6t2ro3PSmgZcdvvvuwjfx+7wyO3S3VjQoTHjNYsUuYAAA==",
   },
   "/images/fuel-stations/itemba-mpemba-truck-canopy.webp": {
     width: 1080,
     height: 808,
     blurDataURL:
-      "data:image/webp;base64,UklGRnIAAABXRUJQVlA4IGYAAAAQAgCdASoQAAwAA4BaJQBOgCHciV5UYmPAAPyO68rHObLrnLPqrsbmb80rG6xGGS52xauX3BLNjyhlQfPzvoc1QXnp1GMyyTHKnu1mlzvsX12494NnPaDcoyCc2mxQ05ZImSFAAAA=",
+      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAAAwAgCdASoQAAwAA4BaJYwCdIExGBh8aiC/8AD8js+DDXB8Wex6QpTzFdCIcHMyPsmjUCwuHOJmR/d6oU8aSULuqVT4iSY6vaCeJGiNXbWXCY2YbL4WiiAA",
   },
   "/images/fuel-stations/itemba-mpemba-wide.webp": {
     width: 1152,
     height: 864,
     blurDataURL:
-      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAADwAQCdASoQAAwAA4BaJbACdAEemZzVsgAA+7XKDZ2BFLr+zkIwXMP4h95A2FMcC3m2TEBbvMWaRLw5Qg+eKe8e2zo+m/xzSH2W8+AOF8HbTqjXogAAAA==",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAABQAgCdASoQAAwAA4BaJZgCdGuAAvgH8LYSXAAA88s95L1IdOyBi452eWOWoJGuDAhw++bl0zXOp8rr2XlHaEGSQAAAAA==",
   },
   "/images/fuel-stations/itemba-station-wide-yard.webp": {
-    width: 1800,
-    height: 1350,
+    width: 2400,
+    height: 1800,
     blurDataURL:
-      "data:image/webp;base64,UklGRlwAAABXRUJQVlA4IFAAAADwAQCdASoQAAwAA4BaJagCdAEJS0MdqAAA/tXfdKeeDPWzpTSwUFBxWevWSKUG1tQpXpUaHu2VWJezu8znQcO3M74xivat11jVOMWnoOQAAA==",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAADQAQCdASoQAAwAA4BaJYgCdAEDEHDmgAD+xxcfEJJEm9j4vqd7oIpIebRgPNADMWX/B0it145H3TettKvhqdgmVTEAAA==",
   },
   "/images/fuel-stations/itemba-uzunguni-close.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmgAAABXRUJQVlA4IFwAAABQAgCdASoQAAwAA4BaJagCdGuAAvrVZkzA+AAA/OY1caqBr3qHzD3V23MV1Ejr0s3j975GCnzJJ3vLd3VmCC8iOxVW2nA+6La/o4/7WmSG68/Mm7K9j3dEHNKAAA==",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAADwAQCdASoQAAwAA4BaJQBOgCPwnPcO2UAA/mFkKmI4TnhXQE2zj/oV8wQXBGzr9tLPf253yeG+CvThp3wXP87gQ4AAAA==",
   },
   "/images/fuel-stations/itemba-uzunguni-forecourt-wide.webp": {
     width: 1152,
     height: 864,
     blurDataURL:
-      "data:image/webp;base64,UklGRnIAAABXRUJQVlA4IGYAAABQAgCdASoQAAwAA4BaJbACdEf/ggYwwI7kFAAA/BJ2Q0NNJhJ8BpZgVBkQkxdyCq5p78ySfTc8qOejgTiGaswmfvVKklsRWmAGtGHP7mFpqW73uU3ISr7hiQtM2AUXnmzfkTBAAAA=",
+      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoQAAwAA4BaJZACdGuAAvfnaHsAAPZwbY0IsnzxFKoLe+ePqasxS+Q96praAxF9KZzejjTiwpaERt7kAqKCtJ9NxpbKX3OwAAA=",
   },
   "/images/fuel-stations/itemba-uzunguni-forecourt.webp": {
     width: 1152,
     height: 864,
     blurDataURL:
-      "data:image/webp;base64,UklGRnAAAABXRUJQVlA4IGQAAAAQAgCdASoQAAwAA4BaJbACdEf/ggXoE/igAP27WkGJwsLJLjulxMcQ5TFAkD8nEsVD6BtjTKySZVh2W9Pry7+xvW4sqqbOwuY+wd8O9LHU+lM4xuwWj2Id7pmwCi882b8iYIAA",
+      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoQAAwAA4BaJZACdGuAAvfnaHsAAPZwbY0IsnzxFKoLe+ePqasxS+Q96praAxF9KZzejjTiwpaERt7kAqKCtJ9NxpbKX3OwAAA=",
   },
   "/images/fuel-stations/itemba-uzunguni-front.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmgAAABXRUJQVlA4IFwAAADwAQCdASoQAAwAA4BaJbACdAEWB1vfxgAA/mpoWLgX3ngXZWJ2xaNlvFnCR0wYfPIN0fbQ2L7ZBXttNSw6V2vX3o8m/UtooKE7OKnwzzId195pf0dqqNqVQAAAAA==",
+      "data:image/webp;base64,UklGRlQAAABXRUJQVlA4IEgAAADwAQCdASoQAAwAA4BaJYgCdAEXy9oJ/AAA/gS9Wo73MGwt2R+yOTr1FQGAoWuvNSjcFdYsOREi6nHSE39lRoFvvPmDTOnNoAA=",
   },
   "/images/fuel-stations/itemba-uzunguni-pump-island.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmoAAABXRUJQVlA4IF4AAAAQAgCdASoQAAwAA4BaJbACdADhG1z7qk8AAPz3sQRt3Ik1dZlDW8p0SPRGT/48uiPb+Q9VBoNf7HDTmhDMSlOhqnGqeBUW8wBXM+xBgszfBXGLE04tyinkrKLtUAAA",
+      "data:image/webp;base64,UklGRlIAAABXRUJQVlA4IEYAAADwAQCdASoQAAwAA4BaJQBOgBwsz/rEPAAA/mi46BfoUaf7oYtKHeSZQMe8OAwboItSuFck9qOl8Gnl0WwoX2zpBcoHuUAA",
   },
   "/images/fuel-stations/itemba-uzunguni-roadside.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRm4AAABXRUJQVlA4IGIAAABQAgCdASoQAAwAA4BaJbACdGuAAs5vve6FWAAA4DfYtjJ83i4oWhjn5LxbP2o1FjteXzjRTLQDHcYJrG4vzL6S2nRn2TLH5LXCGAWmBMqc1KgcrfNXLe3DIGwfePHdImAAAA==",
+      "data:image/webp;base64,UklGRl4AAABXRUJQVlA4IFIAAACwAQCdASoQAAwAA4BaJYgCdAEHFYegAPhjw1MYYlQ/OcKG+Y3CcBZ/7UPKdqGyf/wJ8Sg5m6k6fbOexAthNTVVO79auNb7fJjgK1V/kzRyAAAA",
   },
   "/images/fuel-stations/itemba-uzunguni-station.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAADwAQCdASoQAAwAA4BaJaACdADbjeXs4AAA/OYaTQ0EQ/uU4DjG0x4yVaBOZ1aP3TxN/1Pm4kWYR9O1ikEm0owRtXX3UqdXMyZCa191wyMHkdYFnReXHpFQAAA=",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAADwAQCdASoQAAwAA4BaJQBOgCPwnPcO2UAA/mFkKmI4TnhXQE2zj/oV8wQXBGzr9tLPf253yeG+CvThp3wXP87gQ4AAAA==",
   },
   "/images/fuel-stations/itemba-uzunguni-yard-view.webp": {
     width: 1152,
     height: 864,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAAAQAgCdASoQAAwAA4BaJbACdAEe/YB6jp5AAP5fbPkTKH0+8ZUmH5XEZCybObUZNnsl9KADcHBca87r0LLOms6wc3d3USUcAEhLelCyBZ2W68BkMWZIukwAAAA=",
+      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAADQAQCdASoQAAwAA4BaJZACdADcHsH0AAD+VepPYXBiBi0F9uHaFS8en+kbIW2/szm0fUr6uOgrUjJ8YA7RXI3aUlPwchIhY2EPmABAAAA=",
   },
   "/images/hardware/itemba-hardware-paint-stock.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmgAAABXRUJQVlA4IFwAAAAQAgCdASoQAAwAA4BaJQBOgCPPPZ3HVvgAAP7Maz1sx3HGvYly7T2+Ln3KZb6E3I9m42AYD8VXr4DbUdQAslKQvcFWJ+7lneG3XyyU6pmWm7nAMQKQnMwRTQAAAA==",
+      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAADwAQCdASoQAAwAA4BaJZQCdAEeg9SutvgA/nNFLdY2sdFqy1PzKmjyViHyAGltU5g4MDJ3CXBQ+xUAKuK4KWFhllPFvAklydsVkzhSwAxwnhwKAAA=",
   },
   "/images/hardware/itemba-hardware-storefront.webp": {
     width: 960,
     height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAADwAQCdASoMABAAA4BaJZQAAuWtI2TQ/IAA/mz1xtMQ8lz9oDPDRb4TkyEG/TLmjeiOZJ0XYIXvOUI39uwHGv866+klyonZklWa0nlLv1XhGqigFwAAAA==",
+      "data:image/webp;base64,UklGRlwAAABXRUJQVlA4IFAAAAAQAgCdASoMABAAA4BaJZwAAueBS8Bkc7AAAP6b82qzuw9L/QdmS+ofEdffyVbTerGzLRpyDzZSEbp7qViC79wH+mV/LjoKDN629OigIAAAAA==",
   },
   "/images/hospitality/uzunguni-bar-night.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAAAQAgCdASoQAAwAA4BaJbACdAEVuk1ejk7QAP7s0KGCuGwF4rC6y4gWE3BfLVcLiNN+x/GBqGaMfLf/8mmZKGNfX/zQM4gBAPa/Lafof+7FxY4UGRD4AA==",
+      "data:image/webp;base64,UklGRlQAAABXRUJQVlA4IEgAAADQAQCdASoQAAwAA4BaJbACdAD0bg3FgAD+2fV4vsVpeNwXyfVUPJ+4Ej6GRmAHljPjP/iMa9r/djRT7xIpgQHi4seTfi3GAAA=",
   },
   "/images/hospitality/uzunguni-bar-restaurant.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmoAAABXRUJQVlA4IF4AAAAwAgCdASoQAAwAA4BaJbACdIExELx4yImbxAD+49e45NprbGpD0/dyKMgRIWLHVMhjJf2IRMG3NFjmvvsHXjmDi/jFe9+3uF8AMTlFIvV+79vtvBL8vIIxO8uQ8AAA",
+      "data:image/webp;base64,UklGRlwAAABXRUJQVlA4IFAAAADQAQCdASoQAAwAA4BaJZACdACRVfuR4AD+uxleUGe0zLx8rKmCcnncwox5lhg5fv+huotSRouq3V1y0uFCJ8My7F7DYSAFO0G+EPjpgAAAAA==",
   },
   "/images/hospitality/uzunguni-inn-room.webp": {
     width: 1024,
     height: 768,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAAAQAgCdASoQAAwAA4BaJZgC7H8ADnd9GiKgAP7UymLE/KYTFHjtoG7227j42cujZ/guGuMYQ/6X7zmpXi73vikLUjjYANOOUBsie0aW9bKLiBq5sUIeH7OHwAA=",
+      "data:image/webp;base64,UklGRlwAAABXRUJQVlA4IFAAAADwAQCdASoQAAwAA4BaJYgAAf5tqcpdSAAA/udLbpFjOWu7CRcADDiefwBwQsm8nRujqJ0PotSMD2PkJq0MhaEkV0qbQ8X+hBiUjRJnvgAAAA==",
   },
   "/images/hospitality/uzunguni-lodge-room.webp": {
     width: 600,
     height: 449,
     blurDataURL:
-      "data:image/webp;base64,UklGRmgAAABXRUJQVlA4IFwAAAAwAgCdASoQAAwAA4BaJbACdAEPhyGQJFekAAD+uD2L4UUXfyD1yxlpvxYqLEgS0kEO0LiRfuO9Xq+zgbPxrXiie2rMzHW/jQqBWgDnid/H56xhS55UtvsifXYAAA==",
+      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAAAwAgCdASoQAAwAA4BaJagCdAEPh4utigwowAD+uDwW+l89DsmT7uFYYZS/HS1TQ7xl1LnB93islp6HHrPikC8kurtSVo3tT7mdzKc3vtrDCfJy2oqRFQAA",
   },
   "/images/locations/songwe-region-landscape.webp": {
     width: 2000,
     height: 1125,
     blurDataURL:
-      "data:image/webp;base64,UklGRlQAAABXRUJQVlA4IEgAAADwAQCdASoQAAkAA4BaJbACdADp02/VqIAA/tRtnIrQ7YPkXL7YUVMXKgUqDAa8uBbmOifVGoGZ2M/+Rmjp4UwcauY80+UAAAA=",
+      "data:image/webp;base64,UklGRkwAAABXRUJQVlA4IEAAAADQAQCdASoQAAkAA4BaJbACdADp02ZrWAD+1GvOrWvC9aM043wrt2jbvnKjRNmLDGN693uAvg8wB76Nx54cgAAA",
   },
   "/images/logistics/itemba-logistics-tanker-under-canopy.webp": {
     width: 720,
     height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAADQAQCdASoJABAAA4BaJbACdEf/gbZUWAD+cWiYVN3DcCa8SA5zP7NzI6WtFPl5ILtkG04Xozi0fi+gB4L7ug8vNvETxf8ZoE0vdva+A2a9/3n7cr8kAAAA",
+      "data:image/webp;base64,UklGRl4AAABXRUJQVlA4IFIAAACwAQCdASoJABAAA4BaJbACdADyZrkAAP0dFAaQ/E6A/Vmpe/1nuY9A/xp0I9Kabg+jypbL0B0Vpk2c+0xSTfBFHwqm8IE6gHpcuw96AOptAAAA",
   },
   "/images/logistics/itemba-logistics-truck-front.webp": {
     width: 720,
     height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAADQAQCdASoJABAAA4BaJbACdADb5CFfiAD+qnrhTX39hg8n9kW4a6m5Jrpnog9j0bfbU2x5PgXVObqHCww8QbDGbPfdxPHk6mF59Hm6x9lYJiA0gAA=",
+      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoJABAAA4BaJbACdADdsj9h1xEAAP5Cnh4Pc5aQcpJEWlZHTz6naDuPKiJIL1zq3qxQCWcdODr+ZRKdKuPqI/GD2fISIA4gAAA=",
   },
   "/images/logistics/itemba-logistics-truck-yard.webp": {
     width: 567,
     height: 1008,
     blurDataURL:
-      "data:image/webp;base64,UklGRlwAAABXRUJQVlA4IFAAAAAQAgCdASoJABAAA4BaJagCdGuAAkbyGFAAAPsOjaGGcgn2cIWQIB+V1fokZLYysGM8wXy5y+n07lbBaoIkW8QiLDPKeirzgyOwlHaDroAAAA==",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAADwAQCdASoJABAAA4BaJZACdADdLk7Gt4AA9B/6fhxlbMXMJVsVJOvV84e5MzscvYDPvRQZyLCEKWmTpeseqHgyRuYAAA==",
   },
   "/images/parking/uzunguni-parking-container-trucks.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAABwAgCdASoQAAwAA4BaJbACdGuAAviAc8uv+A2AAP7c+eI/shv4FkNnSKjXadr5DPxtgvE5t6aFzg/+AH8GPbidMQkm+rPdb+qsZBu7AAA=",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAADwAQCdASoQAAwAA4BaJYgCdAEesRtaDAAA/qMoUSxnDgGht7qZ4YqZOqbD7RotXm6ylYPuZu/P1eq2hSn2Jq+OfgAAAA==",
   },
   "/images/parking/uzunguni-parking-truck-line.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAAAwAgCdASoQAAwAA4BaJbACdGuAAvhJqh3TAAD7F6xBwE/Tok9zJzKmdNGBcZhA+iJ6a551BuPYItRPXPTGNNQYrbW4Cq+XAK/p2o77EZ3erWgAAAA=",
+      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAAAQAgCdASoQAAwAA4BaJZACdGuAAvhMgTQAAPPNTjLeQJkcWaBNFgK16BaGf/LGHVG2oNcWAmvtBx4xLOzSrS+iieAAAA==",
   },
   "/images/parking/uzunguni-parking-yard-overview.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAADwAQCdASoQAAwAA4BaJbACdAEKTEZ2Q9AA/NMGz0LnB6BqSu8aonNeigN+HXa1FcKpCvjuOKZoPEzbzzce9NKox3413NiS7962LLpj6Dooz4wBJlo1okgAAAA=",
+      "data:image/webp;base64,UklGRlQAAABXRUJQVlA4IEgAAAAQAgCdASoQAAwAA4BaJYgCdAEKS/1LeBYAAP36wB0AAhh+7PYcavtnVhg5ewZs3YjsV84VNKYQRkIQ5X/Dg2EcS/HK9iIAAAA=",
   },
   "/images/parking/uzunguni-parking-yard-trucks.webp": {
     width: 1280,
     height: 960,
     blurDataURL:
-      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAAAQAgCdASoQAAwAA4BaJbACdAD0u2TG01oMAOA1jlXRbzPQbKNCasI2h8GW8RwWFTZT7p/EO7Q8KfrLAqm5jwV/bUzbJtVtlvzs7rQzuFyw3WzTRIwfeAAA",
+      "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAADQAQCdASoQAAwAA4BaJZACdADwJ8P9VAD4Yhx9T9mTtF09FVicBZT7w/7LE/+N8lOLn3zgHBOW57YWhy0ArNWV13tAFmaQIfrgAA==",
   },
   "/images/real-estate/modern-african-estate-construction-card.webp": {
     width: 1400,
     height: 1050,
     blurDataURL:
-      "data:image/webp;base64,UklGRnoAAABXRUJQVlA4IG4AAACQAgCdASoQAAwAA4BaJQBOkBvk/xa/+cAxFPn4AAD+qeoYn7OVggV6H1pH0kEImCcBdnoRmdJMMOF9zhwXDh4m63qnZRRipfyfbGvlEoCIhsoJNwdY967pKKzfRL7Fe1Rd8wu4QgeS3TrfHmOAAA==",
+      "data:image/webp;base64,UklGRnoAAABXRUJQVlA4IG4AAADQAgCdASoQAAwAA4BaJYwCdIIpJ/i1+s4Bieu2c6AAAP6DxwlfdREBw+h9aR841qcQKoA5jbTZ4J2rcfKwse4NIBG720+dniKBKrE09ZqbIMJTBlZDawczukongo7lw4Th4bE6/j1s1vZWQAAAAA==",
   },
   "/images/real-estate/modern-african-estate-construction-wide.webp": {
-    width: 1800,
-    height: 1012,
+    width: 1600,
+    height: 900,
     blurDataURL:
-      "data:image/webp;base64,UklGRmoAAABXRUJQVlA4IF4AAAAwAgCdASoQAAkAA4BaJQBOj+AQThh6wK2OAAD+oynsFMRahTaFP3i9f30z4WnVHXhX3ijPQNcX7Obtj2sebpFtFYhKpMP8xJKG/eXTic+wzny4knZHe83bScSBgAAA",
+      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAAAQAgCdASoQAAkAA4BaJYwCdH8AGJwjdQ9QAP54rrLaFrX9iRky9E4EfroYLYidEfqKZ6VzCIr9hksRS0U/wR8YBMWsB9YYvsIRk1NxHHrfT+jzDyQhHdYwYAA=",
   },
   "/images/real-estate/modern-african-estate-construction.webp": {
-    width: 1440,
-    height: 1800,
+    width: 1280,
+    height: 1600,
     blurDataURL:
-      "data:image/webp;base64,UklGRngAAABXRUJQVlA4IGwAAAAwAgCdASoNABAAA4BaJYgCdEf/i19ZLS4vAAD+M7Gu7965JaYzR3gDaFaqdgnzEILrRcT7K1vLCpqdOfPovuF0p8ia21r0ckZ98sASSE4Y0cjmsUyljQPyHSZfgKh9BXCR/H/kHLgKnIQAAAA=",
+      "data:image/webp;base64,UklGRnAAAABXRUJQVlA4IGQAAADQAQCdASoNABAAA4BaJQBOgCBraN45AAD9dqiD9ePWqLOsP/y6AtzOwHHrLS6/3J/j1j+folaxYtSOP/tM6USvoRBmP9I4ZlBATWFGs4UKKHIz1K1JEMjYBlyAJ+9t8Ac5NEAA",
   },
   "/images/real-estate/modern-african-housing-development-wide.webp": {
-    width: 1800,
-    height: 1012,
+    width: 1600,
+    height: 900,
     blurDataURL:
-      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAACwAQCdASoQAAkAA4BaJbAC7ABqMluAAP4xgEPtY3mAWWWNAv9NoVdKgUzopI/ifEKIVDt46TRTf0kUJunjnGm+3+QoZ9vScNvGt1h5U1QzYwJfagAAAA==",
+      "data:image/webp;base64,UklGRl4AAABXRUJQVlA4IFIAAACQAQCdASoQAAkAA4BaJZAAASLIngAA/XBvK4gX4+qdRsA1x3lFna0mx+Dk6659EM+y2OalhGEIKKPPy11IfQAXPMJaQOe/9B2dxpnwgEcOEAAA",
   },
   "/images/real-estate/modern-african-housing-development.webp": {
-    width: 1800,
-    height: 1350,
+    width: 1600,
+    height: 1200,
     blurDataURL:
-      "data:image/webp;base64,UklGRm4AAABXRUJQVlA4IGIAAADwAQCdASoQAAwAA4BaJbAC7AYqXUW6DrAA/nhQxzNOPY/xk9G2hmjQTJTe4xUh6mMhnCI0VWHCJhvGV2I01OW8eckN3olRc7V7NuUxS+mvrDBmE36f1W58fsB6DuHY+eAAAA==",
+      "data:image/webp;base64,UklGRmgAAABXRUJQVlA4IFwAAAAwAgCdASoQAAwAA4BaJZgC7AYqNUfjQMQGYAD+JZlErrQ5de0kaBNRvuAM47zjXCg1r+pwK/oZ8+KMo/Q05c0K68T+KWwBvprrwEZpdocuav2DJxBZM7SRH4AAAA==",
   },
   "/images/real-estate/modern-tanzania-white-villa-wide.webp": {
-    width: 1800,
-    height: 1012,
+    width: 1600,
+    height: 900,
     blurDataURL:
-      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAADwAQCdASoQAAkAA4BaJQBOgCKsN0PhywAA/uI2k7ctH/PNve/1ZyJiiLNHAFqg9b8o15VXQMWjaRmZHh9/kCd8FdkBiiJSNvk/Suywy68qF3fFetr1QAAA",
+      "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAADQAQCdASoQAAkAA4BaJQBOgCDplRUOAAD+4jaTty0jNGXJ1HV3K09FetAfGEHO/Zopc8cjEwjIev43DBkc/yt7oBOw6occbXbAlDg/y7RTPFimrx7AAA==",
   },
   "/images/real-estate/modern-tanzania-white-villa.webp": {
-    width: 1200,
-    height: 1800,
+    width: 1067,
+    height: 1600,
     blurDataURL:
-      "data:image/webp;base64,UklGRm4AAABXRUJQVlA4IGIAAABwAgCdASoLABAAA4BaJZACdAYv1qy5cR1YDtcAAP7F+/nXhVJDnzFoYqqLf92p3k1fbDunpkP1aRbo94dgx1YibZKJ9XX5naL2cYYM1ZD89IH+enHbauRk/x+1FSAVUHsAAA==",
+      "data:image/webp;base64,UklGRmoAAABXRUJQVlA4IF4AAAAwAgCdASoLABAAA4BaJQBOgCBv094sL4AOIAD+xfv7sZ1qPgxLr7Mwu8adi31RD1yihhWTfXzgKnplJWRPf5jW0k8eVVK7kjNZ+g26/ZJcPXzBEgfBBbQMhjql0cAA",
   },
   "/images/real-estate/zanzibar-residential-houses-aerial-wide.webp": {
-    width: 1800,
-    height: 1012,
+    width: 1600,
+    height: 900,
     blurDataURL:
-      "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAADwAQCdASoQAAkAA4BaJQBOgCB/SQK2CkAA/uwPYnnXX7eNTpfEanbVHxfiubAKWmjYyHIie9VR0S6ZH2VvhZMzib0MOgHpvS8hOkPa+ojbwSJwkAm/iBCWgAA=",
+      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAADwAQCdASoQAAkAA4BaJYwCsAED+kNcS0AA/ukEOphSTnttjb0hBeTgGQqCyyhkro4yVvU3rUnb7WaP9DzTHB5Z/+5oYYi4LfHUS1X+ZNTbPlb0MI6C0gAA",
   },
   "/images/real-estate/zanzibar-residential-houses-aerial.webp": {
-    width: 1200,
-    height: 1800,
+    width: 1067,
+    height: 1600,
     blurDataURL:
-      "data:image/webp;base64,UklGRmwAAABXRUJQVlA4IGAAAABQAgCdASoLABAAA4BaJZQC7AYu5vrizWiDgAAA/uwRTQNsTK/OBB+0ZbwkfoOhrH3Q0FeqGv69CLUbNMXNz0MRY5d9mHeqrjqhM/exRfPcWk/qU6pwyL4YI9egScqAAAA=",
+      "data:image/webp;base64,UklGRmgAAABXRUJQVlA4IFwAAADwAQCdASoLABAAA4BaJZQAD5COtMAZL/oA/ukGfF8c5QHjiMTBz1P5NDl1hanTO/UircAMeR2kX1q23qWFSl7N7Vg3LAm5fFVEpSEmfRm/5cUxV+8o3Wt694uAAA==",
   },
 } as const satisfies Record<string, GeneratedMedia>;
 
