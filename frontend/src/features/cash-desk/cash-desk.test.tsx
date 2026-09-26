@@ -245,7 +245,7 @@ describe('Cash Desk', () => {
   it('keeps currency balances separate and formats exact decimal strings', async () => {
     render(<CashDesk />);
     await screen.findByText('TZS 9,999,999,999,999,999.99');
-    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'USD' } });
+    fireEvent.change(screen.getByLabelText('Desk account currency'), { target: { value: 'USD' } });
     expect(screen.getByText('USD 20.00')).toBeInTheDocument();
     expect(screen.queryByText('TZS 9,999,999,999,999,999.99')).not.toBeInTheDocument();
   });

@@ -99,11 +99,11 @@ export function CashSalesConnection({
   const { reload } = data;
   const previousRevision = useRef(revision);
   useEffect(() => {
-    if (previousRevision.current !== revision) {
+    if (!paying && previousRevision.current !== revision) {
       previousRevision.current = revision;
       reload();
     }
-  }, [revision, reload]);
+  }, [revision, reload, paying]);
   useLinkedDeskChanges('cash-desk', !!paying, data.reload);
   if (!allowed) return null;
   const info = data.data;

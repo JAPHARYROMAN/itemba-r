@@ -396,16 +396,21 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 className="ui-date-field-inline"
               />
             </div>
-            <label>
-              Currency{' '}
-              <select value={current?.currency ?? ''} onChange={(e) => setCurrency(e.target.value)}>
-                {currencies.length ? (
-                  currencies.map((c) => <option key={c.currency}>{c.currency}</option>)
-                ) : (
-                  <option value="">No accounts yet</option>
-                )}
-              </select>
-            </label>
+            {section !== 'collections' && (
+              <label>
+                Desk account currency{' '}
+                <select
+                  value={current?.currency ?? ''}
+                  onChange={(e) => setCurrency(e.target.value)}
+                >
+                  {currencies.length ? (
+                    currencies.map((c) => <option key={c.currency}>{c.currency}</option>)
+                  ) : (
+                    <option value="">No accounts yet</option>
+                  )}
+                </select>
+              </label>
+            )}
             <span>Dates use East Africa Time</span>
           </div>
         )}

@@ -88,6 +88,17 @@ beforeEach(() => {
   api.get.mockResolvedValue(response);
 });
 describe('Business sales in Cash Desk', () => {
+  it('defers a parent refresh until the collection form closes', async () => {
+    const view = render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
+    await screen.findByText('Test customer');
+    fireEvent.click(screen.getByRole('button', { name: 'Collect payment for SO1' }));
+    const before = api.get.mock.calls.length;
+    view.rerender(<CashSalesConnection scope={scope} date="2026-09-26" revision={1} />);
+    expect(api.get).toHaveBeenCalledTimes(before);
+    expect(screen.getByRole('dialog', { name: 'Collect' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel payment' }));
+    await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(before));
+  });
   it('opens the same sale and collects against its existing receivable', async () => {
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     await screen.findByText('Test customer');
