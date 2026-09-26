@@ -32,6 +32,26 @@ export function isDesktopViewValue(appId: string, key: string, value: unknown): 
   if (key.length > 256) return false;
   let field = key.slice(appId.length + 1);
   let allowed = key.startsWith(`${appId}.`) && fields[appId]?.includes(field);
+  if (appId === 'sales-desk') {
+    const match =
+      /^sales-desk\.(business-sales|customers)\.(search|page|view|companyId|type|status|payment|from|to|filters)$/.exec(
+        key,
+      );
+    if (match) {
+      field = match[2];
+      allowed = true;
+      if (field === 'filters') {
+        if (match[1] !== 'customers' || !value || typeof value !== 'object' || Array.isArray(value))
+          return false;
+        return Object.entries(value).every(
+          ([name, item]) =>
+            ['companyId', 'divisionId', 'branchId', 'productCategoryId', 'type', 'status'].includes(
+              name,
+            ) && text(item),
+        );
+      }
+    }
+  }
   if (appId === 'payroll') {
     const match =
       /^payroll\.(?:window:[\w-]+|main)\.(employees|departments|positions|assignments|employment-contracts|attendance|leave-types|leave-requests|leave-balances|payroll-periods|payroll-runs|salary-advances|salary-payments)\.(search|page|status|company|companyFilter|companyId|employee|type|year|period|dateFrom|dateTo)$/.exec(

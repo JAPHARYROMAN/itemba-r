@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Sales from '@/app/(dashboard)/operations/sales-orders/page';
+import { BusinessSales as Sales } from '@/features/sales-desk/business-sales';
 import Purchases from '@/app/(dashboard)/operations/purchase-orders/page';
 
 const state = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ vi.mock('@/hooks/use-auth', () => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: state.push }),
   usePathname: () => '/operations/purchase-orders',
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/lib/api-client', () => ({
   backendPage: state.page,

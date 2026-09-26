@@ -9,6 +9,7 @@ const navigationSourceFiles = [
   path.join(process.cwd(), 'src', 'lib', 'apps.ts'),
   path.join(process.cwd(), 'src', 'lib', 'payroll-app.ts'),
   path.join(process.cwd(), 'src', 'features', 'reports', 'reports-app.tsx'),
+  path.join(process.cwd(), 'src', 'features', 'sales-desk', 'sales-desk.tsx'),
 ];
 const minPageRoutes = 190;
 

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SalesDesk } from './sales-desk';
+import { DirectSalesDesk as SalesDesk } from './direct-sales-desk';
 import { SalesEditor } from './sales-editor';
 import { lineTotal, saleTotal, type Sale } from './types';
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));

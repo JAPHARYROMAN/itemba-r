@@ -1,0 +1,2490 @@
+'use client';
+import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import {
+  useWorkspaceRouter as useGuardedRouter,
+  useWorkspaceSearchParams,
+} from '@/components/workspace/workspace-navigation';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useRequestGuard } from '@/hooks/use-request-guard';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
+
+import { RecordBrowser } from '@/components/workspace/record-browser';
+import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
+
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+
+import { DocumentPreviewLink } from '@/components/documents';
+import {
+  Btn,
+  Card,
+  ConfirmDialog,
+  CustomerPicker,
+  EmptyState,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageToolbar,
+  showToast,
+  SkeletonTable,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
+import type { BusinessPartyPickerOption } from '@/components/ui';
+import {
+  backendDelete,
+  backendGet,
+  backendList,
+  backendPage,
+  backendPatch,
+  backendPost,
+} from '@/lib/api-client';
+import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
+import { downloadTablePdf } from '@/lib/export-download';
+import { useAuth } from '@/hooks/use-auth';
+import { RecordSalesOrderPaymentModal } from '@/app/(dashboard)/operations/_components/record-sales-order-payment-modal';
+import {
+  SALES_TYPES,
+  CURRENCIES,
+  PAYMENT_METHODS,
+  ACCOUNT_TYPE_LABELS,
+  defaultPaymentMethodForSalesType,
+} from '@/lib/sales-order-constants';
+import {
+  OrderLineEditor,
+  mergeOrderProductOptions,
+  type OrderLineValidationState,
+} from '@/app/(dashboard)/operations/_components/order-line-editor';
+
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+}
+interface Product {
+  id: string;
+  name: string;
+  productCode?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  baseUnitId?: string | null;
+  baseUnit?: { name?: string | null; symbol?: string | null } | null;
+  category?: { id?: string | null; name?: string | null } | null;
+  defaultPurchasePrice?: number | string | null;
+  defaultSellingPrice?: number | string | null;
+  wholesalePrice?: number | string | null;
+  retailPrice?: number | string | null;
+  productType?: string | null;
+  trackInventory?: boolean | null;
+  isTaxable?: boolean | null;
+  taxRate?: number | string | null;
+  sellingPrice?: number | string | null;
+  availableStock?: number | string | null;
+  availableQuantity?: number | string | null;
+  quantityAvailable?: number | string | null;
+  inventoryBalance?: {
+    quantityOnHand?: number | string | null;
+    quantityReserved?: number | string | null;
+    availableQuantity?: number | string | null;
+    quantityAvailable?: number | string | null;
+  } | null;
+}
+interface ProductCategory {
+  id: string;
+  name: string;
+  categoryType?: string | null;
+  parentCategory?: { name?: string | null } | null;
+}
+interface Unit {
+  id: string;
+  name: string;
+  symbol: string;
+}
+interface Employee {
+  id: string;
+  fullName?: string | null;
+  employeeCode?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  defaultCommissionRate?: number | string | null;
+}
+interface CashAccount {
+  id: string;
+  accountName: string;
+  accountType: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  currency?: string | null;
+  isActive?: boolean;
+  linkedBank?: {
+    id?: string;
+    bankName?: string | null;
+    accountName?: string | null;
+    accountNumber?: string | null;
+  } | null;
+}
+
+interface SalesOrderLine {
+  id?: string;
+  productId: string;
+  description: string;
+  qty: number;
+  unitId: string;
+  unitPrice: number;
+  discount: number;
+  tax: number;
+  // True once the user manually overrides the auto-computed VAT for this line.
+  taxManual?: boolean;
+  batchId: string;
+}
+
+interface SalesOrder {
+  id: string;
+  salesOrderNumber?: string;
+  orderNumber?: string;
+  orderDate: string;
+  dueDate?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  receivableId?: string | null;
+  salesType: string;
+  totalAmount: number;
+  documentDiscount?: number | string | null;
+  outstandingAmount: number;
+  status: string;
+  paymentStatus: string;
+  currency: string;
+  notes?: string | null;
+  salespersonId?: string | null;
+  paymentMethod?: string | null;
+  cashAccountId?: string | null;
+  paymentReference?: string | null;
+  companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  company?: { name: string } | null;
+  division?: { id: string; name: string; code?: string | null } | null;
+  branch?: { id: string; name: string; code?: string | null } | null;
+  customer?: {
+    id?: string;
+    name: string;
+    customerCode?: string | null;
+    creditLimit?: number | string | null;
+    currentBalance?: number | string | null;
+    status?: string | null;
+  } | null;
+  salesperson?: {
+    id: string;
+    employeeCode?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+  } | null;
+  cashAccount?: {
+    id: string;
+    accountName: string;
+    accountType: string;
+    currency?: string | null;
+  } | null;
+  receivable?: {
+    id: string;
+    receivableNumber?: string | null;
+    status?: string | null;
+    paidAmount?: number | string | null;
+    outstandingAmount?: number | string | null;
+  } | null;
+  deliveryNotes?: { id: string; deliveryNoteNumber?: string | null; status: string }[];
+  paidAmount?: number | string | null;
+  lines?: SalesOrderLine[];
+}
+
+interface WorkbenchSummary {
+  totalOrders: number;
+  draft: number;
+  confirmed: number;
+  cancelled: number;
+  revenue: number;
+  outstanding: number;
+  paidAmount: number;
+  unpaidCount: number;
+  overdueCreditOrders: number;
+  blockedFailedActionCount: number;
+}
+
+interface CustomerDaySummaryOrder {
+  id: string;
+  salesOrderNumber?: string | null;
+  orderNumber?: string | null;
+  orderDate: string;
+  customerName: string;
+  receivableId?: string | null;
+  companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  company?: { id: string; name: string; code?: string | null } | null;
+  division?: { id: string; name: string; code?: string | null } | null;
+  branch?: { id: string; name: string; code?: string | null } | null;
+  salesperson?: SalesOrder['salesperson'];
+  salesType: string;
+  status: string;
+  paymentStatus: string;
+  paymentMethod?: string | null;
+  currency: string;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+}
+
+interface CustomerDaySummary {
+  id: string;
+  date: string;
+  currency: string;
+  customer: {
+    id?: string | null;
+    name: string;
+    customerCode?: string | null;
+    isWalkIn: boolean;
+  };
+  orderCount: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  statusCounts: Record<string, number>;
+  paymentStatusCounts: Record<string, number>;
+  orders: CustomerDaySummaryOrder[];
+}
+
+interface SalesOrderForm {
+  companyId: string;
+  divisionId: string;
+  branchId: string;
+  customerId: string;
+  customerName: string;
+  salesType: string;
+  orderDate: string;
+  dueDate: string;
+  currency: string;
+  notes: string;
+  salespersonId: string;
+  paymentMethod: string;
+  cashAccountId: string;
+  paymentReference: string;
+  documentDiscount: number;
+  lines: SalesOrderLine[];
+}
+
+interface SalesOrderPaymentTarget {
+  id: string;
+  salesOrderNumber?: string | null;
+  orderNumber?: string | null;
+  receivableId?: string | null;
+  companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  currency: string;
+  outstandingAmount: number | string;
+}
+
+interface Division {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Branch {
+  id: string;
+  name: string;
+  code?: string | null;
+  divisionId: string;
+}
+
+interface Paginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+const emptyPaginated = <T,>(): Paginated<T> => ({ data: [], total: 0, page: 1, totalPages: 1 });
+
+const SALES_STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'CANCELLED', 'VOIDED'];
+const PAYMENT_STATUSES = ['UNPAID', 'PARTIALLY_PAID', 'PAID'];
+
+const blankSummary = (): WorkbenchSummary => ({
+  totalOrders: 0,
+  draft: 0,
+  confirmed: 0,
+  cancelled: 0,
+  revenue: 0,
+  outstanding: 0,
+  paidAmount: 0,
+  unpaidCount: 0,
+  overdueCreditOrders: 0,
+  blockedFailedActionCount: 0,
+});
+
+function accountSelectLabel(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'Cash Account';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'Bank Account';
+    case 'MOBILE_MONEY':
+      return 'Mobile Money Account';
+    default:
+      return 'Receipt Account';
+  }
+}
+
+function emptyAccountHint(method: string) {
+  switch (method) {
+    case 'CASH':
+      return 'No active cash-on-hand or petty-cash account is available for this company.';
+    case 'BANK_CARD':
+    case 'BANK_TRANSFER':
+      return 'No active bank receipt account is available for this company.';
+    case 'MOBILE_MONEY':
+      return 'No active mobile-money account is available for this company.';
+    default:
+      return 'No active receipt account is available for this company.';
+  }
+}
+
+function accountOptionLabel(account: CashAccount) {
+  const typeLabel = ACCOUNT_TYPE_LABELS[account.accountType] ?? account.accountType;
+  const bankName =
+    account.accountType === 'BANK' &&
+    account.linkedBank?.bankName &&
+    !account.accountName.toLowerCase().includes(account.linkedBank.bankName.toLowerCase())
+      ? ` - ${account.linkedBank.bankName}`
+      : '';
+  const currency = account.currency ? ` - ${account.currency}` : '';
+  return `${account.accountName}${bankName} (${typeLabel}${currency})`;
+}
+
+function normalizeMatchText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function receiptAccountScore(account: CashAccount, branch?: Branch | null) {
+  let score = 0;
+  const accountText = normalizeMatchText(account.accountName);
+  const branchName = normalizeMatchText(branch?.name);
+  const branchCode = normalizeMatchText(branch?.code);
+
+  if (account.accountType === 'CASH_ON_HAND') score -= 30;
+  if (account.accountType === 'PETTY_CASH') score -= 20;
+  if (accountText.includes('cash')) score -= 10;
+  if (branchName && accountText.includes(branchName)) score -= 40;
+  if (branchCode && accountText.includes(branchCode)) score -= 25;
+  if (branchName.includes('kisimani') && accountText.includes('kisimani')) score -= 60;
+  if (accountText.includes('default')) score -= 5;
+
+  return score;
+}
+
+function sortReceiptAccounts(accounts: CashAccount[], branch?: Branch | null) {
+  return [...accounts].sort((left, right) => {
+    const scoreDiff = receiptAccountScore(left, branch) - receiptAccountScore(right, branch);
+    if (scoreDiff !== 0) return scoreDiff;
+    return accountOptionLabel(left).localeCompare(accountOptionLabel(right));
+  });
+}
+
+const BLANK_LINE = (): SalesOrderLine => ({
+  productId: '',
+  description: '',
+  qty: 1,
+  unitId: '',
+  unitPrice: 0,
+  discount: 0,
+  tax: 0,
+  batchId: '',
+});
+const blankForm = (): SalesOrderForm => ({
+  companyId: '',
+  divisionId: '',
+  branchId: '',
+  customerId: '',
+  customerName: '',
+  salesType: 'CASH_SALE',
+  orderDate: new Date().toISOString().slice(0, 10),
+  dueDate: '',
+  currency: 'TZS',
+  notes: '',
+  salespersonId: '',
+  paymentMethod: defaultPaymentMethodForSalesType('CASH_SALE'),
+  cashAccountId: '',
+  paymentReference: '',
+  documentDiscount: 0,
+  lines: [BLANK_LINE()],
+});
+
+// Parse a net-days value out of a free-text customer payment-terms string, e.g.
+// "Net 30", "NET30", "30 days", "n/30", or a bare "45". Returns null when the
+// terms are immediate/COD/unparseable so the due-date is left as-is.
+function netDaysFromPaymentTerms(terms: string | null | undefined): number | null {
+  if (!terms) return null;
+  const text = String(terms).toLowerCase();
+  if (/\b(cod|due on receipt|on receipt|immediate|cash|prepaid|advance)\b/.test(text)) {
+    return 0;
+  }
+  const match = text.match(/(\d{1,3})/);
+  if (!match) return null;
+  const days = Number(match[1]);
+  return Number.isFinite(days) && days >= 0 ? days : null;
+}
+
+// Add `days` calendar days to an ISO date-only string (yyyy-mm-dd) and return
+// the resulting ISO date-only string. Returns '' for an invalid base date.
+// Works in UTC end-to-end so the round-trip through toISOString() cannot shift
+// the calendar day in non-UTC zones (e.g. UTC+3 was previously one day early).
+function addDaysToDate(isoDate: string, days: number): string {
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-').map(Number);
+  if (![y, m, d].every((part) => Number.isFinite(part))) return '';
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (Number.isNaN(dt.getTime())) return '';
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function fmtMoney(n: number | string | null | undefined, ccy = 'TZS') {
+  const value = Number(n ?? 0);
+  return `${ccy} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0)}`;
+}
+
+function localDateString(date = new Date()) {
+  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+function dateDaysFromToday(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return localDateString(date);
+}
+
+function monthStartString() {
+  const date = new Date();
+  date.setDate(1);
+  return localDateString(date);
+}
+
+function compactCounts(counts: Record<string, number>) {
+  return Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => `${key.replace(/_/g, ' ')}: ${count}`)
+    .join(' · ');
+}
+
+function employeeLabel(employee?: Employee | SalesOrder['salesperson'] | null) {
+  if (!employee) return 'None';
+  const name = [employee.firstName, employee.lastName].filter(Boolean).join(' ').trim();
+  return name || employee.employeeCode || employee.id;
+}
+
+function SalesOrderModal({
+  mode,
+  initial,
+  companies,
+  onClose: closeWithoutGuard,
+  onSaved,
+}: {
+  mode: 'create' | 'edit';
+  initial?: SalesOrder;
+  companies: Company[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<SalesOrderForm>(() =>
+    initial
+      ? {
+          companyId: initial.companyId,
+          divisionId: initial.divisionId ?? '',
+          branchId: initial.branchId ?? '',
+          customerId: initial.customerId ?? '',
+          customerName: initial.customerName ?? '',
+          salesType: initial.salesType,
+          orderDate: initial.orderDate.slice(0, 10),
+          dueDate: initial.dueDate?.slice(0, 10) ?? '',
+          currency: initial.currency,
+          notes: initial.notes ?? '',
+          salespersonId: initial.salespersonId ?? '',
+          paymentMethod:
+            initial.paymentMethod ?? defaultPaymentMethodForSalesType(initial.salesType),
+          cashAccountId: initial.cashAccountId ?? '',
+          paymentReference: initial.paymentReference ?? '',
+          // Restore the persisted order-level (document) discount so the editor
+          // shows the same total the backend stores and an edit-save round-trips
+          // it instead of silently dropping it. Defaults to 0 for older orders
+          // that never carried one.
+          documentDiscount: Number(initial.documentDiscount ?? 0) || 0,
+          lines: initial.lines?.length
+            ? initial.lines.map((line: any) => ({
+                id: line.id,
+                productId: line.productId ?? '',
+                description: line.description ?? '',
+                qty: Number(line.qty ?? line.quantity ?? 1),
+                unitId: line.unitId ?? '',
+                unitPrice: Number(line.unitPrice ?? 0),
+                discount:
+                  line.discount != null
+                    ? Number(line.discount)
+                    : Number(line.discountAmount ?? 0) /
+                      Math.max(1, Number(line.qty ?? line.quantity ?? 1)),
+                tax: Number(line.tax ?? line.taxAmount ?? 0),
+                // Preserve the persisted tax as a manual value so auto-VAT does
+                // not overwrite an already-saved order's line tax on open.
+                taxManual: true,
+                batchId: line.batchId ?? '',
+              }))
+            : [BLANK_LINE()],
+        }
+      : blankForm(),
+  );
+  const [selectedCustomer, setSelectedCustomer] = useState<BusinessPartyPickerOption | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productSearchCategoryId, setProductSearchCategoryId] = useState('');
+  const [productSearchLoading, setProductSearchLoading] = useState(false);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const draft = useFormGuard(form, setForm);
+  const onClose = () => draft.requestClose(closeWithoutGuard);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  // Once the user hand-edits the due date, auto due-date stops overwriting it.
+  // Pre-populated orders (edit mode) count as already-set so we don't clobber.
+  const [dueDateTouched, setDueDateTouched] = useState<boolean>(() => Boolean(initial?.dueDate));
+  const [autoDueDateInfo, setAutoDueDateInfo] = useState<{ netDays: number; terms: string } | null>(
+    null,
+  );
+  const [lineValidation, setLineValidation] = useState<OrderLineValidationState>({
+    hasBlockingErrors: false,
+    stockWarnings: [],
+  });
+  const selectedProductIdKey = form.lines
+    .map((line) => line.productId)
+    .filter(Boolean)
+    .join('|');
+  const handleProductSearch = useCallback((query: string, filters?: { categoryId?: string }) => {
+    setProductSearchQuery(query);
+    setProductSearchCategoryId(filters?.categoryId ?? '');
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    backendList<Unit>('/units', { query: { limit: 200 } })
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setSelectedCustomer(null);
+      setEmployees([]);
+      setCashAccounts([]);
+      setDivisions([]);
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      backendList<Division>('/divisions', { query: { companyId: form.companyId, limit: 200 } }),
+      backendList<Branch>('/branches', {
+        query: { companyId: form.companyId, activeOnly: true, limit: 500 },
+      }),
+    ]).then(([divisionResult, branchResult]) => {
+      if (cancelled) return;
+      setDivisions(divisionResult.status === 'fulfilled' ? divisionResult.value : []);
+      setBranches(branchResult.status === 'fulfilled' ? branchResult.value : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  useEffect(() => {
+    if (!form.companyId || !form.divisionId || !form.branchId || form.paymentMethod === 'CREDIT') {
+      setCashAccounts([]);
+      return;
+    }
+
+    let cancelled = false;
+    setCashAccounts([]);
+    backendList<CashAccount>('/sales-orders/receipt-accounts', {
+      query: {
+        companyId: form.companyId,
+        divisionId: form.divisionId,
+        branchId: form.branchId,
+        paymentMethod: form.paymentMethod,
+        limit: 500,
+      },
+    })
+      .then((rows) => {
+        if (!cancelled) setCashAccounts(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCashAccounts([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId, form.divisionId, form.branchId, form.paymentMethod]);
+
+  useEffect(() => {
+    if (!form.companyId || !form.branchId) {
+      setEmployees([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<Employee>('/hr/employees', {
+      query: { companyId: form.companyId, branchId: form.branchId, limit: 500 },
+    })
+      .then((rows) => {
+        if (!cancelled) setEmployees(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setEmployees([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId, form.divisionId, form.branchId]);
+
+  useEffect(() => {
+    if (!form.customerId) setSelectedCustomer(null);
+  }, [form.customerId]);
+
+  useEffect(() => {
+    if (!form.companyId) {
+      setCategories([]);
+      return;
+    }
+    let cancelled = false;
+    backendList<ProductCategory>('/product-categories', {
+      query: {
+        companyId: form.companyId,
+        limit: 5000,
+      },
+    })
+      .then((rows) => {
+        if (!cancelled) setCategories(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.companyId]);
+
+  // Reload products when company, division, or branch changes; the backend
+  // filters to the chosen division and adds stock for the sale branch.
+  useEffect(() => {
+    if (!form.companyId || !form.divisionId || !form.branchId) {
+      setProducts([]);
+      setProductSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const search = productSearchQuery.trim();
+    const selectedProductIds = selectedProductIdKey ? selectedProductIdKey.split('|') : [];
+    setProductSearchLoading(true);
+
+    const timer = setTimeout(
+      () => {
+        backendList<Product>('/products', {
+          query: {
+            companyId: form.companyId,
+            divisionId: form.divisionId || undefined,
+            branchId: form.branchId,
+            categoryId: productSearchCategoryId || undefined,
+            limit: search ? 50 : 200,
+            ...(search && { search }),
+          },
+        })
+          .then((rows) => {
+            if (!cancelled) {
+              setProducts((current) => mergeOrderProductOptions(rows, current, selectedProductIds));
+            }
+          })
+          .catch(() => {
+            if (!cancelled) setProducts([]);
+          })
+          .finally(() => {
+            if (!cancelled) setProductSearchLoading(false);
+          });
+      },
+      search ? 250 : 0,
+    );
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    form.branchId,
+    form.companyId,
+    form.divisionId,
+    productSearchCategoryId,
+    productSearchQuery,
+    selectedProductIdKey,
+  ]);
+
+  const setField = <K extends keyof SalesOrderForm>(k: K, v: SalesOrderForm[K]) => {
+    draft.touch();
+    setForm((f) => ({ ...f, [k]: v }));
+  };
+  const setLine = (i: number, patch: Partial<SalesOrderLine>) =>
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    }));
+  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, BLANK_LINE()] }));
+  const removeLine = (i: number) =>
+    setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+  const branchOptions = form.divisionId
+    ? branches.filter((branch) => branch.divisionId === form.divisionId)
+    : [];
+  const selectedBranch = useMemo(
+    () => branches.find((branch) => branch.id === form.branchId) ?? null,
+    [branches, form.branchId],
+  );
+  const receiptAccounts = useMemo(
+    () =>
+      form.paymentMethod === 'CREDIT'
+        ? []
+        : sortReceiptAccounts(
+            cashAccounts.filter((account) => account.isActive !== false),
+            selectedBranch,
+          ),
+    [cashAccounts, form.paymentMethod, selectedBranch],
+  );
+
+  useEffect(() => {
+    setForm((current) => {
+      if (current.paymentMethod === 'CREDIT') {
+        return current.cashAccountId ? { ...current, cashAccountId: '' } : current;
+      }
+      if (!current.cashAccountId) {
+        return receiptAccounts[0] ? { ...current, cashAccountId: receiptAccounts[0].id } : current;
+      }
+
+      const selected = cashAccounts.find((account) => account.id === current.cashAccountId);
+      if (!selected) {
+        return { ...current, cashAccountId: '' };
+      }
+      return current;
+    });
+  }, [cashAccounts, form.paymentMethod, receiptAccounts]);
+
+  // AUTO DUE-DATE: when a customer with parseable payment terms is selected,
+  // auto-compute dueDate = orderDate + netDays. Stays editable — once the user
+  // hand-edits the due date (dueDateTouched) we stop overwriting it.
+  const customerNetDays = useMemo(
+    () => netDaysFromPaymentTerms(selectedCustomer?.paymentTerms),
+    [selectedCustomer?.paymentTerms],
+  );
+  useEffect(() => {
+    if (customerNetDays == null || !selectedCustomer?.paymentTerms) {
+      setAutoDueDateInfo(null);
+      return;
+    }
+    setAutoDueDateInfo({ netDays: customerNetDays, terms: selectedCustomer.paymentTerms });
+    if (dueDateTouched) return;
+    const computed = addDaysToDate(form.orderDate, customerNetDays);
+    if (computed) {
+      setForm((current) =>
+        current.dueDate === computed ? current : { ...current, dueDate: computed },
+      );
+    }
+  }, [customerNetDays, selectedCustomer?.paymentTerms, form.orderDate, dueDateTouched]);
+
+  const handleSubmit = async () => {
+    if (!form.companyId) {
+      setError('Company is required');
+      return;
+    }
+    if (!form.divisionId) {
+      setError('Division is required');
+      return;
+    }
+    if (!form.branchId) {
+      setError('Branch/location is required');
+      return;
+    }
+    if (!form.customerId && !form.customerName.trim()) {
+      setError('Customer or walk-in name required');
+      return;
+    }
+    if (!form.lines.length) {
+      setError('Add at least one line');
+      return;
+    }
+    if (form.lines.some((l) => !l.productId || !l.unitId)) {
+      setError('Each line needs product and unit');
+      return;
+    }
+    if (lineValidation.hasBlockingErrors) {
+      setError(
+        lineValidation.stockWarnings[0] ??
+          lineValidation.profitWarnings?.[0] ??
+          'Resolve stock/profit validation before saving',
+      );
+      return;
+    }
+    if (form.paymentMethod !== 'CREDIT' && !form.cashAccountId) {
+      setError(`Pick a ${accountSelectLabel(form.paymentMethod).toLowerCase()}`);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const body: Record<string, unknown> = {
+        divisionId: form.divisionId,
+        branchId: form.branchId,
+        salesType: form.salesType,
+        orderDate: form.orderDate,
+        currency: form.currency,
+        paymentMethod: form.paymentMethod,
+        lines: form.lines.map((l) => ({
+          productId: l.productId,
+          description: l.description,
+          quantity: Number(l.qty) || 0,
+          unitId: l.unitId,
+          unitPrice: Number(l.unitPrice) || 0,
+          discountAmount: Number(l.discount) || 0,
+          taxAmount: Number(l.tax) || 0,
+          // Tell the server this tax figure is an explicit operator value
+          // (including a deliberate zero for a VAT-relieved sale), so the
+          // inclusive-VAT derivation never rewrites the entered price. POS
+          // payloads never send this flag and keep being derived.
+          taxManual: !!l.taxManual,
+          ...(l.batchId ? { batchId: l.batchId } : {}),
+        })),
+      };
+      if (form.customerId) body.customerId = form.customerId;
+      if (form.customerName) body.customerName = form.customerName;
+      if (form.dueDate) body.dueDate = form.dueDate;
+      // Order-level (document) discount: a flat currency amount deducted from the
+      // whole order on top of line discounts. The backend honours this field
+      // (SalesOrder.documentDiscount) and applies the same clamp/total math, so
+      // the displayed total matches what is persisted. On create, only send when
+      // > 0 to keep the payload minimal (the DTO defaults to 0). On edit, always
+      // send it — the update preserves the stored value when omitted, so we must
+      // send an explicit 0 to let the user clear a previously-applied discount.
+      if (mode === 'edit' || form.documentDiscount > 0) {
+        body.documentDiscount = form.documentDiscount;
+      }
+      if (form.notes) body.notes = form.notes;
+      if (form.salespersonId) body.salespersonId = form.salespersonId;
+      if (form.cashAccountId) body.cashAccountId = form.cashAccountId;
+      if (form.paymentReference) body.paymentReference = form.paymentReference;
+      if (mode === 'create') {
+        await backendPost('/sales-orders', { ...body, companyId: form.companyId });
+        showToast('success', 'Sales order created', 'Saved as draft — confirm it to post.');
+      } else {
+        await backendPatch(`/sales-orders/${initial!.id}`, body);
+        showToast('success', 'Sales order updated');
+      }
+      draft.markSaved();
+      onSaved();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      onChangeCapture={draft.touch}
+      open
+      onClose={onClose}
+      title={mode === 'create' ? 'Create Sales Order' : 'Edit Sales Order'}
+      size="3xl"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="primary"
+            onClick={handleSubmit}
+            loading={saving}
+            disabled={lineValidation.hasBlockingErrors}
+          >
+            {mode === 'create' ? 'Create Draft' : 'Save Changes'}
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          {error}
+        </div>
+      )}
+      <div className="workspace-form space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <h3 className="workspace-form-heading">Order context</h3>
+          <FormSelect
+            label="Company"
+            required
+            value={form.companyId}
+            onChange={(e) => {
+              setProductSearchQuery('');
+              setProductSearchCategoryId('');
+              setForm((f) => ({
+                ...f,
+                companyId: e.target.value,
+                divisionId: '',
+                branchId: '',
+                customerId: '',
+                salespersonId: '',
+                cashAccountId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                })),
+              }));
+            }}
+            placeholder="Select company"
+            disabled={mode === 'edit'}
+          >
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Sales Type"
+            required
+            value={form.salesType}
+            onChange={(e) => {
+              const salesType = e.target.value;
+              setForm((current) => {
+                const paymentMethod = defaultPaymentMethodForSalesType(
+                  salesType,
+                  current.paymentMethod,
+                );
+                return {
+                  ...current,
+                  salesType,
+                  paymentMethod,
+                  cashAccountId:
+                    paymentMethod === current.paymentMethod ? current.cashAccountId : '',
+                };
+              });
+            }}
+          >
+            {SALES_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Division"
+            required
+            value={form.divisionId}
+            onChange={(e) => {
+              const divisionId = e.target.value;
+              setProductSearchQuery('');
+              setProductSearchCategoryId('');
+              setForm((f) => ({
+                ...f,
+                divisionId,
+                branchId: '',
+                customerId: '',
+                salespersonId: '',
+                cashAccountId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                })),
+              }));
+            }}
+            placeholder={form.companyId ? 'Select division' : 'Select company first'}
+          >
+            {divisions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.code ? `${d.code} — ${d.name}` : d.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Branch / Location"
+            required
+            value={form.branchId}
+            onChange={(e) => {
+              const branchId = e.target.value;
+              setProductSearchQuery('');
+              setProductSearchCategoryId('');
+              setForm((f) => ({
+                ...f,
+                branchId,
+                customerId: '',
+                salespersonId: '',
+                cashAccountId: '',
+                lines: f.lines.map((line) => ({
+                  ...line,
+                  productId: '',
+                })),
+              }));
+            }}
+            placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
+            disabled={!form.divisionId}
+          >
+            {branchOptions.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.code ? `${branch.code} — ${branch.name}` : branch.name}
+              </option>
+            ))}
+          </FormSelect>
+          <FormSelect
+            label="Currency"
+            required
+            value={form.currency}
+            onChange={(e) => setField('currency', e.target.value)}
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </FormSelect>
+          <h3 className="workspace-form-heading">Customer and dates</h3>
+          <CustomerPicker
+            label="Customer"
+            value={form.customerId}
+            onChange={(customerId, customer) => {
+              // A fresh customer selection re-enables auto due-date so the newly
+              // selected customer's payment terms drive the due date.
+              setDueDateTouched(false);
+              setSelectedCustomer(customer ?? null);
+              setField('customerId', customerId);
+            }}
+            onResolved={setSelectedCustomer}
+            companyId={form.companyId || undefined}
+            divisionId={form.divisionId || undefined}
+            branchId={form.branchId || undefined}
+            placeholder={
+              form.branchId
+                ? 'Search customers by name, code, phone, email or TIN'
+                : 'Select branch first'
+            }
+            disabled={!form.branchId}
+          />
+          <FormInput
+            label="Walk-in Name"
+            value={form.customerName}
+            onChange={(e) => setField('customerName', e.target.value)}
+            placeholder="If no customer selected"
+          />
+          <FormDateField
+            label="Order Date"
+            required
+            value={form.orderDate}
+            onChange={(value) => setField('orderDate', value)}
+          />
+          <FormDateField
+            label="Due Date"
+            value={form.dueDate}
+            onChange={(value) => {
+              setDueDateTouched(true);
+              setField('dueDate', value);
+            }}
+            hint={
+              autoDueDateInfo
+                ? autoDueDateInfo.netDays === 0
+                  ? `Due on receipt (${autoDueDateInfo.terms})`
+                  : `Auto: ${autoDueDateInfo.netDays} days from order date (${autoDueDateInfo.terms})`
+                : undefined
+            }
+          />
+          <FormSelect
+            label="Salesperson"
+            value={form.salespersonId}
+            onChange={(e) => setField('salespersonId', e.target.value)}
+            placeholder={form.branchId ? 'None (no commission)' : 'Select branch first'}
+            disabled={!form.branchId}
+          >
+            {employees.map((e) => {
+              const ratePct =
+                e.defaultCommissionRate != null
+                  ? ` — ${(Number(e.defaultCommissionRate) * 100).toFixed(2)}%`
+                  : '';
+              const label = `${e.fullName ?? employeeLabel(e)}${ratePct}`;
+              return (
+                <option key={e.id} value={e.id}>
+                  {label}
+                </option>
+              );
+            })}
+          </FormSelect>
+          <h3 className="workspace-form-heading">Payment details</h3>
+          <FormSelect
+            label="Payment Method"
+            required
+            value={form.paymentMethod}
+            onChange={(e) => {
+              const paymentMethod = e.target.value;
+              setForm((current) => ({
+                ...current,
+                paymentMethod,
+                cashAccountId: '',
+              }));
+            }}
+            options={PAYMENT_METHODS}
+          />
+          {form.paymentMethod !== 'CREDIT' && (
+            <>
+              <FormSelect
+                label={accountSelectLabel(form.paymentMethod)}
+                required
+                value={form.cashAccountId}
+                onChange={(e) => setField('cashAccountId', e.target.value)}
+                placeholder={
+                  !form.companyId
+                    ? 'Pick company first'
+                    : !form.branchId
+                      ? 'Pick branch/location first'
+                      : `Select ${accountSelectLabel(form.paymentMethod).toLowerCase()}`
+                }
+                disabled={!form.companyId || !form.branchId || receiptAccounts.length === 0}
+                hint={
+                  form.companyId && !form.branchId
+                    ? 'Select the sale branch/location first so the form can load the correct receipt accounts.'
+                    : form.companyId && receiptAccounts.length === 0
+                      ? `${emptyAccountHint(form.paymentMethod)} Create it under ${
+                          ['BANK_CARD', 'BANK_TRANSFER'].includes(form.paymentMethod)
+                            ? 'Group Control > Bank Accounts.'
+                            : 'Finance > Cash Accounts for this branch/location.'
+                        }`
+                      : undefined
+                }
+              >
+                {receiptAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {accountOptionLabel(a)}
+                  </option>
+                ))}
+              </FormSelect>
+              <FormInput
+                label="Payment Reference"
+                value={form.paymentReference}
+                onChange={(e) => setField('paymentReference', e.target.value)}
+                placeholder="M-Pesa code, slip #, etc."
+              />
+            </>
+          )}
+          {selectedCustomer && (
+            <div
+              className="col-span-3 grid grid-cols-2 gap-3 rounded-lg border p-3 text-sm sm:grid-cols-4"
+              style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+            >
+              <div>
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Customer status
+                </p>
+                <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  {selectedCustomer.status ?? 'ACTIVE'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Credit limit
+                </p>
+                <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  {fmtMoney(selectedCustomer.creditLimit, form.currency)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Current balance
+                </p>
+                <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  {fmtMoney(selectedCustomer.currentBalance, form.currency)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                  Available credit
+                </p>
+                <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                  {fmtMoney(
+                    Math.max(
+                      0,
+                      Number(selectedCustomer.creditLimit ?? 0) -
+                        Number(selectedCustomer.currentBalance ?? 0),
+                    ),
+                    form.currency,
+                  )}
+                </p>
+              </div>
+              {selectedCustomer.paymentTerms ? (
+                <div className="col-span-2 sm:col-span-4">
+                  <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
+                    Payment terms
+                  </p>
+                  <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
+                    {selectedCustomer.paymentTerms}
+                    {customerNetDays != null
+                      ? customerNetDays === 0
+                        ? ' (due on receipt)'
+                        : ` (net ${customerNetDays} days)`
+                      : ''}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          )}
+          <div className="col-span-2">
+            <FormTextarea
+              label="Notes"
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setField('notes', e.target.value)}
+            />
+          </div>
+        </div>
+
+        <OrderLineEditor
+          variant="sales"
+          lines={form.lines}
+          products={products}
+          categories={categories}
+          units={units}
+          currency={form.currency}
+          productSearchLoading={productSearchLoading}
+          enforceStockAvailability
+          autoTax
+          documentDiscount={form.documentDiscount}
+          onDocumentDiscountChange={(value) => setField('documentDiscount', value)}
+          onAddLine={() => draft.change(addLine)}
+          onRemoveLine={(index) => draft.change(() => removeLine(index))}
+          onLineChange={(index, patch) => draft.change(() => setLine(index, patch))}
+          onProductSearch={handleProductSearch}
+          onValidationChange={setLineValidation}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteConfirm({
+  order,
+  onClose,
+  onConfirmed,
+}: {
+  order: SalesOrder;
+  onClose: () => void;
+  onConfirmed: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const handleDelete = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await backendDelete(`/sales-orders/${order.id}`);
+      onConfirmed();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Delete Order"
+      size="md"
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="danger" onClick={handleDelete} loading={saving}>
+            Delete
+          </Btn>
+        </>
+      }
+    >
+      {error && (
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          {error}
+        </div>
+      )}
+      <p className="text-sm" style={{ color: 'var(--aurora-text)' }}>
+        Delete order <strong>{order.orderNumber ?? order.id}</strong>?
+      </p>
+    </Modal>
+  );
+}
+
+export function BusinessSales() {
+  const router = useGuardedRouter();
+  const searchParams = useWorkspaceSearchParams();
+  const { hasPermission } = useAuth();
+  const beginRequest = useRequestGuard();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [summary, setSummary] = useState<WorkbenchSummary>(blankSummary);
+  const [data, setData] = useState<Paginated<SalesOrder> | null>(null);
+  const [customerDayData, setCustomerDayData] = useState<Paginated<CustomerDaySummary> | null>(
+    null,
+  );
+  const [viewMode, setViewMode] = useWorkspaceState<'summary' | 'orders'>(
+    'sales-desk.business-sales.view',
+    'orders',
+  );
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [layout, setLayout] = useWorkspaceLayout('/sales-desk/sales');
+  const [searchInput, setSearchInput] = useWorkspaceState('sales-desk.business-sales.search', '');
+  const [filterSearch, setFilterSearch] = useState(searchInput);
+  const [filterCompany, setFilterCompany] = useWorkspaceState(
+    'sales-desk.business-sales.companyId',
+    '',
+  );
+  const [filterType, setFilterType] = useWorkspaceState('sales-desk.business-sales.type', '');
+  const [filterStatus, setFilterStatus] = useWorkspaceState('sales-desk.business-sales.status', '');
+  const [filterPayment, setFilterPayment] = useWorkspaceState(
+    'sales-desk.business-sales.payment',
+    '',
+  );
+  const [filterDateFrom, setFilterDateFrom] = useWorkspaceState(
+    'sales-desk.business-sales.from',
+    '',
+  );
+  const [filterDateTo, setFilterDateTo] = useWorkspaceState('sales-desk.business-sales.to', '');
+  const [page, setPage] = useWorkspaceState('sales-desk.business-sales.page', 1);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<SalesOrder | null>(null);
+  const [deleting, setDeleting] = useState<SalesOrder | null>(null);
+  const [recordingPayment, setRecordingPayment] = useState<SalesOrderPaymentTarget | null>(null);
+  const [requestedEditId, setRequestedEditId] = useState('');
+  const [handledEditId, setHandledEditId] = useState('');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [exporting, setExporting] = useState<false | 'csv' | 'pdf'>(false);
+
+  const canView = hasPermission('sales.view');
+  const canCreate = hasPermission('sales.create');
+  const canConfirm = hasPermission('sales.confirm');
+  const canCancel = hasPermission('sales.cancel');
+  const canRecordPayment = hasPermission('receivables.manage');
+
+  useEffect(() => {
+    let cancelled = false;
+    backendList<Company>('/companies', { query: { limit: 200 } })
+      .then((rows) => {
+        if (!cancelled) setCompanies(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Debounce the search box (~300ms) so each keystroke does not fire the load chain.
+  useEffect(() => {
+    if (filterSearch === searchInput) return;
+    const timer = setTimeout(() => {
+      setFilterSearch(searchInput);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, filterSearch, setPage]);
+
+  const load = useCallback(async () => {
+    if (!canView) return;
+    const request = beginRequest();
+    setLoading(true);
+    setLoadError('');
+    try {
+      const query: Record<string, string | number> = {};
+      if (filterSearch.trim()) query.search = filterSearch.trim();
+      if (filterCompany) query.companyId = filterCompany;
+      if (filterType) query.salesType = filterType;
+      if (filterStatus) query.status = filterStatus;
+      if (filterPayment) query.paymentStatus = filterPayment;
+      if (filterDateFrom) query.dateFrom = filterDateFrom;
+      if (filterDateTo) query.dateTo = filterDateTo;
+      const [pageResult, summaryResult] = await Promise.all([
+        viewMode === 'summary'
+          ? backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
+              query: { ...query, page, limit: 20 },
+              signal: request.signal,
+            })
+          : backendPage<SalesOrder>('/sales-orders', {
+              query: { ...query, page, limit: 20 },
+              signal: request.signal,
+            }),
+        backendGet<WorkbenchSummary>('/sales-orders/workbench-summary', {
+          query,
+          signal: request.signal,
+        }),
+      ]);
+      if (!request.current()) return;
+      if (viewMode === 'summary') {
+        setCustomerDayData(pageResult as Paginated<CustomerDaySummary>);
+      } else {
+        setData(pageResult as Paginated<SalesOrder>);
+      }
+      setSummary(summaryResult);
+    } catch (err: unknown) {
+      if (!request.current()) return;
+      setData(emptyPaginated<SalesOrder>());
+      setCustomerDayData(emptyPaginated<CustomerDaySummary>());
+      setSummary(blankSummary());
+      setLoadError(err instanceof Error ? err.message : 'Failed to load sales orders');
+    } finally {
+      if (request.current()) setLoading(false);
+    }
+  }, [
+    beginRequest,
+    canView,
+    page,
+    filterSearch,
+    filterCompany,
+    filterType,
+    filterStatus,
+    filterPayment,
+    filterDateFrom,
+    filterDateTo,
+    viewMode,
+  ]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Export the FULL filtered register (not just the visible page) to CSV/PDF.
+  const exportRegister = useCallback(
+    async (format: 'csv' | 'pdf') => {
+      if (!canView) return;
+      setExporting(format);
+      try {
+        const query: Record<string, string | number> = {};
+        if (filterSearch.trim()) query.search = filterSearch.trim();
+        if (filterCompany) query.companyId = filterCompany;
+        if (filterType) query.salesType = filterType;
+        if (filterStatus) query.status = filterStatus;
+        if (filterPayment) query.paymentStatus = filterPayment;
+        if (filterDateFrom) query.dateFrom = filterDateFrom;
+        if (filterDateTo) query.dateTo = filterDateTo;
+
+        const CAP = 5000;
+        if (viewMode === 'summary') {
+          const result = await backendPage<CustomerDaySummary>(
+            '/sales-orders/customer-day-summary',
+            {
+              query: { ...query, page: 1, limit: CAP },
+            },
+          );
+          const groups = (result.data ?? []).slice(0, CAP);
+          if (!groups.length) {
+            showToast(
+              'info',
+              'Nothing to export',
+              'No customer summaries match the current filters.',
+            );
+            return;
+          }
+          const rows = groups.map((group) => ({
+            Date: group.date,
+            Customer: group.customer.name,
+            Currency: group.currency,
+            Orders: group.orderCount,
+            Total: group.totalAmount,
+            Paid: group.paidAmount,
+            Outstanding: group.outstandingAmount,
+            Statuses: compactCounts(group.statusCounts),
+            Payments: compactCounts(group.paymentStatusCounts),
+            'Order Numbers': group.orders
+              .map((order) => order.salesOrderNumber ?? order.orderNumber ?? order.id)
+              .join(', '),
+          }));
+          const columns = [
+            'Date',
+            'Customer',
+            'Currency',
+            'Orders',
+            'Total',
+            'Paid',
+            'Outstanding',
+            'Statuses',
+            'Payments',
+            'Order Numbers',
+          ];
+          if (format === 'pdf') {
+            await downloadTablePdf({
+              title: 'Sales by Customer and Day',
+              subtitle: `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`,
+              companyId: filterCompany || undefined,
+              columns,
+              rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
+              numericColumns: [3, 4, 5, 6],
+              baseName: 'sales-customer-day-summary',
+            });
+          } else {
+            downloadTextFile(
+              `sales-customer-day-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+              'text/csv;charset=utf-8',
+              rowsToCsv(rows, columns),
+            );
+          }
+          if (result.total > groups.length) {
+            showToast(
+              'warning',
+              'Export truncated',
+              `Exported the first ${groups.length} of ${result.total} matching customer-day rows.`,
+            );
+          }
+          return;
+        }
+
+        const result = await backendPage<SalesOrder>('/sales-orders', {
+          query: { ...query, page: 1, limit: CAP },
+        });
+        const orders = (result.data ?? []).slice(0, CAP);
+        if (!orders.length) {
+          showToast('info', 'Nothing to export', 'No sales orders match the current filters.');
+          return;
+        }
+
+        const rows = orders.map((o) => ({
+          'Order #': o.salesOrderNumber ?? o.orderNumber ?? o.id,
+          Date: formatDateOnly(o.orderDate),
+          Customer: o.customer?.name ?? o.customerName ?? 'Walk-in customer',
+          Branch: o.branch?.name ?? '',
+          'Sales Type': o.salesType,
+          Status: o.status,
+          Payment: o.paymentStatus,
+          'Payment Method': o.paymentMethod ?? '',
+          Currency: o.currency,
+          Total: o.totalAmount,
+          Outstanding: o.outstandingAmount,
+        }));
+        const columns = [
+          'Order #',
+          'Date',
+          'Customer',
+          'Branch',
+          'Sales Type',
+          'Status',
+          'Payment',
+          'Payment Method',
+          'Currency',
+          'Total',
+          'Outstanding',
+        ];
+        if (format === 'pdf') {
+          const filterParts = [
+            filterCompany ? companies.find((c) => c.id === filterCompany)?.name : '',
+            filterType.replace(/_/g, ' '),
+            filterStatus.replace(/_/g, ' '),
+            filterPayment.replace(/_/g, ' '),
+            filterDateFrom || filterDateTo
+              ? `${filterDateFrom || 'start'} to ${filterDateTo || 'today'}`
+              : '',
+          ].filter(Boolean);
+          await downloadTablePdf({
+            title: 'Sales Orders',
+            subtitle: filterParts.length ? filterParts.join(' · ') : undefined,
+            companyId: filterCompany || undefined,
+            columns,
+            rows: rows.map((r) => columns.map((c) => cellToString(r[c as keyof typeof r]))),
+            numericColumns: [9, 10],
+            baseName: 'sales-orders',
+          });
+        } else {
+          downloadTextFile(
+            `sales-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+            'text/csv;charset=utf-8',
+            rowsToCsv(rows, columns),
+          );
+        }
+        if (result.total > orders.length) {
+          showToast(
+            'warning',
+            'Export truncated',
+            `Exported the first ${orders.length} of ${result.total} matching orders.`,
+          );
+        }
+      } catch (err) {
+        showToast(
+          'error',
+          'Export failed',
+          err instanceof Error ? err.message : 'Could not export sales orders.',
+        );
+      } finally {
+        setExporting(false);
+      }
+    },
+    [
+      canView,
+      companies,
+      filterSearch,
+      filterCompany,
+      filterType,
+      filterStatus,
+      filterPayment,
+      filterDateFrom,
+      filterDateTo,
+      viewMode,
+    ],
+  );
+
+  useEffect(() => {
+    // Seed the workbench from drill-through URLs (e.g. the operations dashboard
+    // links to ?status=CONFIRMED or ?paymentStatus=UNPAID) plus the edit deep-link.
+    const params = searchParams;
+    setRequestedEditId(params.get('editId') ?? '');
+    const status = params.get('status');
+    if (status && SALES_STATUSES.includes(status)) setFilterStatus(status);
+    const paymentStatus = params.get('paymentStatus');
+    if (paymentStatus && PAYMENT_STATUSES.includes(paymentStatus)) setFilterPayment(paymentStatus);
+    const salesType = params.get('salesType');
+    if (salesType) setFilterType(salesType);
+    const dateFrom = params.get('dateFrom');
+    const dateTo = params.get('dateTo');
+    if (dateFrom) setFilterDateFrom(dateFrom);
+    if (dateTo) setFilterDateTo(dateTo);
+  }, [
+    searchParams,
+    setFilterStatus,
+    setFilterPayment,
+    setFilterType,
+    setFilterDateFrom,
+    setFilterDateTo,
+  ]);
+
+  useEffect(() => {
+    if (!requestedEditId || requestedEditId === handledEditId || !canView) return;
+    let cancelled = false;
+    setHandledEditId(requestedEditId);
+    backendGet<SalesOrder>(`/sales-orders/${requestedEditId}`)
+      .then((order) => {
+        if (!cancelled && order.status === 'DRAFT' && canCreate) setEditing(order);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [canCreate, canView, handledEditId, requestedEditId]);
+
+  const [pendingAction, setPendingAction] = useState<{
+    id: string;
+    action: 'confirm' | 'cancel';
+  } | null>(null);
+
+  const doAction = async (id: string, action: 'confirm' | 'cancel') => {
+    setActionLoading(`${id}:${action}`);
+    setActionError('');
+    try {
+      await backendPatch(`/sales-orders/${id}/${action}`);
+      showToast(
+        action === 'confirm' ? 'success' : 'info',
+        action === 'confirm' ? 'Order confirmed' : 'Order cancelled',
+        action === 'confirm' ? 'Inventory issued and posted to the ledger.' : undefined,
+      );
+      await load();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      setActionError(message);
+      showToast('error', `Could not ${action} order`, message);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const runPendingAction = async () => {
+    if (!pendingAction) return;
+    await doAction(pendingAction.id, pendingAction.action);
+    setPendingAction(null);
+  };
+
+  const applyDatePreset = (preset: 'today' | 'yesterday' | 'month' | 'all') => {
+    if (preset === 'today') {
+      const today = localDateString();
+      setFilterDateFrom(today);
+      setFilterDateTo(today);
+    } else if (preset === 'yesterday') {
+      const yesterday = dateDaysFromToday(-1);
+      setFilterDateFrom(yesterday);
+      setFilterDateTo(yesterday);
+    } else if (preset === 'month') {
+      setFilterDateFrom(monthStartString());
+      setFilterDateTo(localDateString());
+    } else {
+      setFilterDateFrom('');
+      setFilterDateTo('');
+    }
+    setPage(1);
+  };
+
+  const activePage = viewMode === 'summary' ? customerDayData : data;
+  const recordingPaymentReceivableId = recordingPayment?.receivableId ?? null;
+  const recordingPaymentOutstanding = Number(recordingPayment?.outstandingAmount ?? 0);
+
+  if (!canView) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Sales" subtitle="Customer orders and counter sales" />
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500">Access Restricted</p>
+        </div>
+      </div>
+    );
+  }
+
+  const renderOrderActions = (o: SalesOrder) => {
+    const orderRef = o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
+    return (
+      <>
+        <Btn
+          variant="secondary"
+          size="xs"
+          aria-label={`View order ${orderRef}`}
+          onClick={() => router.push(`/sales-desk/sales/${o.id}`)}
+        >
+          View
+        </Btn>
+        <DocumentPreviewLink
+          href={`/sales-desk/sales/${o.id}/print`}
+          label={`View / Print / PDF order ${orderRef}`}
+        />
+        {canRecordPayment &&
+          (o.receivableId ?? o.receivable?.id) &&
+          Number(o.outstandingAmount ?? 0) > 0 &&
+          ['CONFIRMED', 'PARTIALLY_PAID'].includes(o.status) && (
+            <Btn
+              variant="primary"
+              size="xs"
+              aria-label={`Record payment for order ${orderRef}`}
+              onClick={() =>
+                setRecordingPayment({
+                  id: o.id,
+                  salesOrderNumber: o.salesOrderNumber,
+                  orderNumber: o.orderNumber,
+                  receivableId: o.receivableId ?? o.receivable?.id ?? null,
+                  companyId: o.companyId,
+                  divisionId: o.divisionId,
+                  branchId: o.branchId,
+                  currency: o.currency,
+                  outstandingAmount: o.outstandingAmount,
+                })
+              }
+            >
+              Pay
+            </Btn>
+          )}
+        {o.status === 'DRAFT' && canCreate && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`Edit order ${orderRef}`}
+            onClick={() => setEditing(o)}
+          >
+            Edit
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canConfirm && (
+          <Btn
+            variant="primary"
+            size="xs"
+            aria-label={`Confirm order ${orderRef}`}
+            loading={actionLoading === `${o.id}:confirm`}
+            onClick={() => setPendingAction({ id: o.id, action: 'confirm' })}
+          >
+            Confirm
+          </Btn>
+        )}
+        {o.status === 'CONFIRMED' && canCancel && (
+          <Btn
+            variant="danger"
+            size="xs"
+            aria-label={`Cancel order ${orderRef}`}
+            loading={actionLoading === `${o.id}:cancel`}
+            onClick={() => setPendingAction({ id: o.id, action: 'cancel' })}
+          >
+            Cancel
+          </Btn>
+        )}
+        {o.status === 'DRAFT' && canCreate && (
+          <Btn
+            variant="ghost"
+            size="xs"
+            aria-label={`Delete order ${orderRef}`}
+            onClick={() => setDeleting(o)}
+          >
+            Delete
+          </Btn>
+        )}
+      </>
+    );
+  };
+
+  const filterSelectCls =
+    'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
+  const filterStyle = {
+    borderColor: 'var(--aurora-border)',
+    background: 'var(--aurora-card)',
+    color: 'var(--aurora-text)',
+  } as const;
+
+  return (
+    <div className="business-workspace space-y-6">
+      {creating && (
+        <SalesOrderModal
+          mode="create"
+          companies={companies}
+          onClose={() => setCreating(false)}
+          onSaved={() => {
+            setCreating(false);
+            load();
+          }}
+        />
+      )}
+      {editing && (
+        <SalesOrderModal
+          mode="edit"
+          initial={editing}
+          companies={companies}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteConfirm
+          order={deleting}
+          onClose={() => setDeleting(null)}
+          onConfirmed={() => {
+            setDeleting(null);
+            load();
+          }}
+        />
+      )}
+      {recordingPayment && recordingPaymentReceivableId && recordingPaymentOutstanding > 0 && (
+        <RecordSalesOrderPaymentModal
+          receivableId={recordingPaymentReceivableId}
+          companyId={recordingPayment.companyId}
+          divisionId={recordingPayment.divisionId}
+          branchId={recordingPayment.branchId}
+          currency={recordingPayment.currency}
+          outstanding={recordingPaymentOutstanding}
+          orderLabel={
+            recordingPayment.salesOrderNumber ?? recordingPayment.orderNumber ?? recordingPayment.id
+          }
+          onClose={() => setRecordingPayment(null)}
+          onSaved={() => {
+            setRecordingPayment(null);
+            load();
+          }}
+        />
+      )}
+      {pendingAction && (
+        <ConfirmDialog
+          open
+          variant={pendingAction.action === 'cancel' ? 'danger' : 'default'}
+          title={pendingAction.action === 'confirm' ? 'Confirm sales order' : 'Cancel sales order'}
+          message={
+            pendingAction.action === 'confirm'
+              ? 'This issues inventory and posts the sale to the ledger.'
+              : 'This reverses any issued stock and cancels the linked receivable. This cannot be undone.'
+          }
+          confirmLabel={pendingAction.action === 'confirm' ? 'Confirm order' : 'Cancel order'}
+          cancelLabel="Back"
+          loading={actionLoading === `${pendingAction.id}:${pendingAction.action}`}
+          onConfirm={runPendingAction}
+          onClose={() => setPendingAction(null)}
+        />
+      )}
+
+      <PageHeader title="Sales" subtitle="Customer orders, POS sales, payments and revenue" />
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 aurora-stagger">
+        <StatCard label="Total Orders" value={summary.totalOrders} />
+        <StatCard label="Confirmed" value={summary.confirmed} />
+        <StatCard label="Unpaid" value={summary.unpaidCount} />
+        <StatCard label="Revenue" value={fmtMoney(summary.revenue)} />
+      </div>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
+          <span>{loadError}</span>
+          <Btn size="sm" variant="secondary" onClick={() => void load()}>
+            Try again
+          </Btn>
+        </div>
+      )}
+      {actionError && (
+        <div
+          role="alert"
+          className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+          {actionError}
+        </div>
+      )}
+
+      <PageToolbar
+        collapsibleFilters
+        activeFilterCount={
+          [
+            filterCompany,
+            filterType,
+            filterStatus,
+            filterPayment,
+            filterDateFrom,
+            filterDateTo,
+          ].filter(Boolean).length
+        }
+        search={searchInput}
+        onSearch={(v) => setSearchInput(v)}
+        searchPlaceholder="Order # or customer…"
+        filters={
+          <>
+            <select
+              aria-label="Filter by company"
+              value={filterCompany}
+              onChange={(e) => {
+                setFilterCompany(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Companies</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by sales type"
+              value={filterType}
+              onChange={(e) => {
+                setFilterType(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Types</option>
+              {SALES_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by status"
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Status</option>
+              {SALES_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by payment status"
+              value={filterPayment}
+              onChange={(e) => {
+                setFilterPayment(e.target.value);
+                setPage(1);
+              }}
+              className={filterSelectCls}
+              style={filterStyle}
+            >
+              <option value="">All Payments</option>
+              {PAYMENT_STATUSES.map((p) => (
+                <option key={p} value={p}>
+                  {p.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <FormDateField
+              aria-label="Filter from date"
+              value={filterDateFrom}
+              onChange={(value) => {
+                setFilterDateFrom(value);
+                setPage(1);
+              }}
+              className="ui-date-field-inline"
+            />
+            <FormDateField
+              aria-label="Filter to date"
+              value={filterDateTo}
+              onChange={(value) => {
+                setFilterDateTo(value);
+                setPage(1);
+              }}
+              className="ui-date-field-inline"
+            />
+            <div className="flex flex-wrap gap-1">
+              <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('today')}>
+                Today
+              </Btn>
+              <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('yesterday')}>
+                Yesterday
+              </Btn>
+              <Btn variant="secondary" size="xs" onClick={() => applyDatePreset('month')}>
+                This Month
+              </Btn>
+              <Btn variant="ghost" size="xs" onClick={() => applyDatePreset('all')}>
+                All Time
+              </Btn>
+            </div>
+          </>
+        }
+        actions={
+          <>
+            <div
+              className="inline-flex rounded-lg border p-1"
+              style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
+            >
+              <Btn
+                variant={viewMode === 'summary' ? 'primary' : 'ghost'}
+                size="xs"
+                onClick={() => {
+                  setViewMode('summary');
+                  setPage(1);
+                }}
+              >
+                Customer Summary
+              </Btn>
+              <Btn
+                variant={viewMode === 'orders' ? 'primary' : 'ghost'}
+                size="xs"
+                onClick={() => {
+                  setViewMode('orders');
+                  setPage(1);
+                }}
+              >
+                Order List
+              </Btn>
+            </div>
+            <Btn
+              variant="secondary"
+              onClick={() => exportRegister('csv')}
+              loading={exporting === 'csv'}
+              disabled={!!exporting}
+            >
+              Export CSV
+            </Btn>
+            <Btn
+              variant="secondary"
+              onClick={() => exportRegister('pdf')}
+              loading={exporting === 'pdf'}
+              disabled={!!exporting}
+            >
+              Export PDF
+            </Btn>
+            {canCreate ? (
+              <Btn variant="primary" onClick={() => setCreating(true)}>
+                + New Order
+              </Btn>
+            ) : null}
+          </>
+        }
+      />
+
+      <div className="workspace-view-bar">
+        <p>
+          {viewMode === 'summary'
+            ? 'Customer totals grouped by day'
+            : 'Select a record to review details and actions.'}
+        </p>
+        {viewMode === 'orders' && <WorkspaceViewSwitch value={layout} onChange={setLayout} />}
+      </div>
+      {viewMode === 'orders' && layout === 'focus' ? (
+        <RecordBrowser
+          title="Sales orders"
+          records={data?.data ?? []}
+          name={(o) => o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8)}
+          reference={(o) => o.customer?.name ?? o.customerName ?? 'Walk-in'}
+          status={(o) => o.status}
+          fields={[
+            { label: 'Date', value: (o) => new Date(o.orderDate).toLocaleDateString('en-GB') },
+            { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
+          ]}
+          details={[
+            { label: 'Customer', value: (o) => o.customer?.name ?? o.customerName ?? 'Walk-in' },
+            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Notes', value: (o) => o.notes || '—' },
+          ]}
+          actions={renderOrderActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={data?.total ?? 0}
+          onPage={setPage}
+          empty="No orders match your filters. Adjust the date range or search to see more."
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            {viewMode === 'summary' ? (
+              <WorkspaceTable
+                className="w-full text-sm min-w-[1100px]"
+                aria-label="Sales by customer and day"
+              >
+                <caption className="sr-only">Sales by customer and day</caption>
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Customer
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Orders
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Total
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Paid
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Outstanding
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status Mix
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Payment Mix
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <SkeletonTable rows={6} cols={9} />
+                      </td>
+                    </tr>
+                  ) : !customerDayData?.data.length ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <EmptyState
+                          title="No sales for this view"
+                          description="No customer-day sales groups match the current filters."
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    customerDayData.data.map((group) => {
+                      const expanded = !!expandedGroups[group.id];
+                      return (
+                        <Fragment key={group.id}>
+                          <tr className="hover:bg-slate-50">
+                            <td className="px-4 py-3 text-xs">{formatDateOnly(group.date)}</td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{group.customer.name}</div>
+                              <div
+                                className="text-xs"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                {group.customer.customerCode ??
+                                  (group.customer.isWalkIn ? 'Walk-in/manual' : '')}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {group.orderCount}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(group.totalAmount, group.currency)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(group.paidAmount, group.currency)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              {fmtMoney(group.outstandingAmount, group.currency)}
+                            </td>
+                            <td className="px-4 py-3 text-xs">
+                              {compactCounts(group.statusCounts) || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-xs">
+                              {compactCounts(group.paymentStatusCounts) || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Btn
+                                variant="secondary"
+                                size="xs"
+                                onClick={() =>
+                                  setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))
+                                }
+                              >
+                                {expanded ? 'Hide Orders' : 'View Orders'}
+                              </Btn>
+                            </td>
+                          </tr>
+                          {expanded && (
+                            <tr key={`${group.id}:orders`}>
+                              <td colSpan={9} className="px-4 py-3 bg-slate-950/5">
+                                <div className="space-y-2">
+                                  {group.orders.map((order) => {
+                                    const orderRef =
+                                      order.salesOrderNumber ??
+                                      order.orderNumber ??
+                                      order.id.slice(0, 8);
+                                    return (
+                                      <div
+                                        key={order.id}
+                                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                                        style={{ borderColor: 'var(--aurora-border)' }}
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="font-mono text-xs">{orderRef}</div>
+                                          <div
+                                            className="text-xs"
+                                            style={{ color: 'var(--aurora-text-muted)' }}
+                                          >
+                                            {order.branch?.name ?? 'No branch'} ·{' '}
+                                            {order.salesType.replace(/_/g, ' ')}
+                                          </div>
+                                        </div>
+                                        <div className="text-right tabular-nums">
+                                          <div>{fmtMoney(order.totalAmount, order.currency)}</div>
+                                          <div
+                                            className="text-xs"
+                                            style={{ color: 'var(--aurora-text-muted)' }}
+                                          >
+                                            Outstanding{' '}
+                                            {fmtMoney(order.outstandingAmount, order.currency)}
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                          <StatusBadge value={order.status} />
+                                          <StatusBadge value={order.paymentStatus} />
+                                          {canRecordPayment &&
+                                            order.receivableId &&
+                                            Number(order.outstandingAmount ?? 0) > 0 &&
+                                            ['CONFIRMED', 'PARTIALLY_PAID'].includes(
+                                              order.status,
+                                            ) && (
+                                              <Btn
+                                                variant="primary"
+                                                size="xs"
+                                                aria-label={`Record payment for order ${orderRef}`}
+                                                onClick={() => setRecordingPayment(order)}
+                                              >
+                                                Pay
+                                              </Btn>
+                                            )}
+                                          <Btn
+                                            variant="secondary"
+                                            size="xs"
+                                            aria-label={`View order ${orderRef}`}
+                                            onClick={() =>
+                                              router.push(`/sales-desk/sales/${order.id}`)
+                                            }
+                                          >
+                                            View
+                                          </Btn>
+                                          <DocumentPreviewLink
+                                            href={`/sales-desk/sales/${order.id}/print`}
+                                            label={`View / Print / PDF order ${orderRef}`}
+                                          />
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </WorkspaceTable>
+            ) : (
+              <WorkspaceTable className="w-full text-sm min-w-[1100px]" aria-label="Sales orders">
+                <caption className="sr-only">Sales orders</caption>
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Number
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Customer
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Type
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Total
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Outstanding
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Payment
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <SkeletonTable rows={6} cols={9} />
+                      </td>
+                    </tr>
+                  ) : !data?.data.length ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <EmptyState
+                          title="No orders"
+                          description="No sales orders match the current filters."
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    data.data.map((o) => {
+                      const orderRef = o.salesOrderNumber ?? o.orderNumber ?? o.id.slice(0, 8);
+                      return (
+                        <tr key={o.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-mono text-xs">{orderRef}</td>
+                          <td className="px-4 py-3 text-xs">
+                            {new Date(o.orderDate).toLocaleDateString('en-GB')}
+                          </td>
+                          <td className="px-4 py-3">
+                            {o.customer?.name ?? o.customerName ?? (
+                              <span
+                                className="italic"
+                                style={{ color: 'var(--aurora-text-muted)' }}
+                              >
+                                Walk-in
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs">{o.salesType.replace(/_/g, ' ')}</td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(o.totalAmount, o.currency)}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {fmtMoney(o.outstandingAmount, o.currency)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge value={o.status} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge value={o.paymentStatus} />
+                          </td>
+                          <td className="px-4 py-3 text-right space-x-1">
+                            {renderOrderActions(o)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </WorkspaceTable>
+            )}
+          </div>
+          {activePage && activePage.totalPages > 1 && (
+            <div
+              className="px-5 py-3 border-t flex items-center justify-between"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Page {activePage.page} of {activePage.totalPages} · {activePage.total} total
+              </span>
+              <div className="flex gap-2">
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Previous
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page >= activePage.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}

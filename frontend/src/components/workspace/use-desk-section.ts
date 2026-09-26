@@ -4,7 +4,11 @@ import { useWorkspaceState } from './workspace-session';
 import { useWorkspaceHistory } from './workspace-navigation';
 
 /** Section links participate in window-local history, while retaining saved view settings. */
-export function useDeskSection<T extends string>(appId: string, allowed: readonly T[]) {
+export function useDeskSection<T extends string>(
+  appId: string,
+  allowed: readonly T[],
+  source?: string,
+) {
   const history = useWorkspaceHistory();
   const [stored, setStored] = useWorkspaceState<T>(`${appId}.section`, 'overview' as T);
   const requested = history
@@ -20,11 +24,12 @@ export function useDeskSection<T extends string>(appId: string, allowed: readonl
       if (history) {
         const url = new URL(history.href, 'http://desktop.local');
         url.searchParams.set('view', next);
+        if (source) url.searchParams.set('source', source);
         url.searchParams.delete('record');
         history.navigate(`${url.pathname}${url.search}`);
       }
     },
-    [history, setStored],
+    [history, setStored, source],
   );
   return [section, setSection] as const;
 }
