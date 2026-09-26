@@ -1,10 +1,17 @@
 'use client';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
+import {
+  useWorkspaceRouter,
+  useWorkspacePathname,
+} from '@/components/workspace/workspace-navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Btn, Card, EmptyState, ErrorState, PageHeader, SkeletonTable } from '@/components/ui';
+import {
+  notifyRecordBookChanged,
+  useRecordBookRefresh,
+} from '@/features/records/record-book-refresh';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendDelete, backendGet, backendPatch } from '@/lib/api-client';
@@ -86,9 +93,10 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export function RecordBookDetailClient({ kind }: { kind: Kind }) {
-  const params = useParams<{ id: string }>();
-  const router = useRouter();
+export function RecordBookDetailClient({ kind, recordId }: { kind: Kind; recordId?: string }) {
+  const pathname = useWorkspacePathname();
+  const id = recordId ?? pathname.split('/').at(-1) ?? '';
+  const router = useWorkspaceRouter();
   const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('record_book.view');
   const beginRequest = useRequestGuard();
@@ -101,15 +109,15 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
   const [busy, setBusy] = useState(false);
 
   const isSale = kind === 'daily-sales';
-  const listHref = isSale ? '/record-book/daily-sales' : '/record-book/expenses';
+  const listHref = isSale ? '/records/daily-sales' : '/records/money-out';
 
   const load = useCallback(async () => {
-    if (authLoading || !canView || !params.id) return;
+    if (authLoading || !canView || !id) return;
     const request = beginRequest();
     setLoading(true);
     setLoadError('');
     try {
-      const data = await backendGet<DailySale | Expense>(`/record-book/${kind}/${params.id}`, {
+      const data = await backendGet<DailySale | Expense>(`/record-book/${kind}/${id}`, {
         signal: request.signal,
       });
       if (!request.current()) return;
@@ -121,11 +129,13 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
     } finally {
       if (request.current()) setLoading(false);
     }
-  }, [authLoading, beginRequest, canView, kind, params.id]);
+  }, [authLoading, beginRequest, canView, kind, id]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useRecordBookRefresh(load, !!confirmAction || busy);
 
   const request = (
     action: Omit<ConfirmAction, 'onConfirm'> & {
@@ -141,6 +151,7 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
         setError('');
         try {
           await action.execute(actionReason);
+          notifyRecordBookChanged();
           setConfirmAction(null);
           action.after?.();
           if (!action.after) await load();
@@ -227,7 +238,7 @@ export function RecordBookDetailClient({ kind }: { kind: Kind }) {
               confirmLabel: 'Move to Trash',
               tone: 'danger',
               execute: () => backendDelete(`/record-book/${kind}/${record.id}`),
-              after: () => router.push('/record-book/trash'),
+              after: () => router.push('/records/trash'),
             })
           }
         >

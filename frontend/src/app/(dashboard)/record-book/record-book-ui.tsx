@@ -1,7 +1,12 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import {
+  WorkspaceLink as Link,
+  useWorkspacePathname,
+} from '@/components/workspace/workspace-navigation';
+import { useRecordsHost } from '@/features/records/records-context';
+import { recordsHref } from '@/features/records/records-routes';
+
 import { Btn, Modal } from '@/components/ui';
 
 const NAV_ITEMS = [
@@ -14,7 +19,9 @@ const NAV_ITEMS = [
 ];
 
 export function RecordBookNav() {
-  const pathname = usePathname();
+  const pathname = useWorkspacePathname();
+  const hosted = useRecordsHost();
+  if (hosted) return null;
   return (
     <nav className="mb-5 flex flex-wrap gap-2" aria-label="Records Book">
       {NAV_ITEMS.map((item) => {
@@ -22,7 +29,7 @@ export function RecordBookNav() {
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={recordsHref(item.href)}
             className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
               active
                 ? 'border-blue-500 bg-blue-600 text-white'

@@ -32,6 +32,53 @@ export function isDesktopViewValue(appId: string, key: string, value: unknown): 
   if (key.length > 256) return false;
   let field = key.slice(appId.length + 1);
   let allowed = key.startsWith(`${appId}.`) && fields[appId]?.includes(field);
+  if (appId === 'records') {
+    const filterKeys =
+      key === 'records.book.filters'
+        ? [
+            'companyId',
+            'divisionId',
+            'branchId',
+            'dateFrom',
+            'dateTo',
+            'status',
+            'currency',
+            'search',
+          ]
+        : key === 'records.book-report.filters'
+          ? [
+              'companyId',
+              'divisionId',
+              'branchId',
+              'dateFrom',
+              'dateTo',
+              'currency',
+              'reportStatus',
+              'expenseCategoryId',
+              'receiptType',
+              'paymentMethod',
+              'search',
+            ]
+          : null;
+    if (filterKeys)
+      return (
+        !!value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.entries(value).every(([name, item]) => filterKeys.includes(name) && text(item))
+      );
+    if (
+      /^records\.book\.(sales|expenses|categories)\.page$/.test(key) ||
+      /^records\.book-trash\.(salesPage|expensePage|categoryPage)$/.test(key)
+    ) {
+      allowed = true;
+      field = 'page';
+    }
+    if (/^records\.book-trash\.(companyId|search)$/.test(key)) {
+      allowed = true;
+      field = 'search';
+    }
+  }
   if (appId === 'sales-desk') {
     const match =
       /^sales-desk\.(business-sales|customers)\.(search|page|view|companyId|type|status|payment|from|to|filters)$/.exec(

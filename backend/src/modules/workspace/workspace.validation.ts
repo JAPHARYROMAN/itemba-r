@@ -65,7 +65,7 @@ const hosts: Record<string, RegExp> = {
   reports: /^\/(reports|accounting-engine|finance\/bank-reconciliations)(?:\/|$)/,
   documents: /^\/(documents|group-control\/documents)(?:\/|$)/,
   pos: /^\/pos(?:\/activate)?$/,
-  records: /^\/records$/,
+  records: /^\/(records|record-book)(?:\/|$)/,
   settings: /^\/(settings|apps)(?:\/|$)/,
   'itemba-r': /^\//,
 };

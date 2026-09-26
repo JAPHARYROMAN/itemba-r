@@ -1,7 +1,7 @@
 'use client';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Btn,
   Card,
@@ -13,6 +13,11 @@ import {
   SkeletonTable,
   StatCard,
 } from '@/components/ui';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import {
+  notifyRecordBookChanged,
+  useRecordBookRefresh,
+} from '@/features/records/record-book-refresh';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendPage, backendPatch, type PaginatedResult } from '@/lib/api-client';
@@ -76,11 +81,11 @@ export function RecordBookTrashClient() {
   const canAdmin = hasPermission('record_book.admin');
   const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [companyId, setCompanyId] = useState('');
-  const [search, setSearch] = useState('');
-  const [salesPage, setSalesPage] = useState(1);
-  const [expensePage, setExpensePage] = useState(1);
-  const [categoryPage, setCategoryPage] = useState(1);
+  const [companyId, setCompanyId] = useWorkspaceState('records.book-trash.companyId', '');
+  const [search, setSearch] = useWorkspaceState('records.book-trash.search', '');
+  const [salesPage, setSalesPage] = useWorkspaceState('records.book-trash.salesPage', 1);
+  const [expensePage, setExpensePage] = useWorkspaceState('records.book-trash.expensePage', 1);
+  const [categoryPage, setCategoryPage] = useWorkspaceState('records.book-trash.categoryPage', 1);
   const [sales, setSales] = useState<PaginatedResult<DeletedSale> | null>(null);
   const [expenses, setExpenses] = useState<PaginatedResult<DeletedExpense> | null>(null);
   const [categories, setCategories] = useState<PaginatedResult<DeletedCategory> | null>(null);
@@ -105,7 +110,7 @@ export function RecordBookTrashClient() {
         setError(err instanceof Error ? err.message : 'Could not load companies');
       });
     return () => controller.abort();
-  }, [authLoading, canView]);
+  }, [authLoading, canView, setCompanyId]);
 
   const load = useCallback(async () => {
     if (authLoading || !canView) return;
@@ -153,11 +158,15 @@ export function RecordBookTrashClient() {
     void load();
   }, [load]);
 
+  const previousFilters = useRef(JSON.stringify([companyId, debouncedSearch]));
   useEffect(() => {
+    const nextFilters = JSON.stringify([companyId, debouncedSearch]);
+    if (previousFilters.current === nextFilters) return;
+    previousFilters.current = nextFilters;
     setSalesPage(1);
     setExpensePage(1);
     setCategoryPage(1);
-  }, [companyId, debouncedSearch]);
+  }, [companyId, debouncedSearch, setSalesPage, setExpensePage, setCategoryPage]);
 
   const askRestore = (
     kind: 'daily-sales' | 'expenses' | 'expense-categories',
@@ -176,6 +185,7 @@ export function RecordBookTrashClient() {
         try {
           await backendPatch(`/record-book/${kind}/${id}/restore`, {});
           setConfirmAction(null);
+          notifyRecordBookChanged();
           await load();
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Restore failed');
@@ -188,10 +198,12 @@ export function RecordBookTrashClient() {
 
   const totalDeleted = (sales?.total ?? 0) + (expenses?.total ?? 0) + (categories?.total ?? 0);
 
+  useRecordBookRefresh(load, !!confirmAction || busy);
+
   if (authLoading) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
-        <PageHeader title="Records Book Trash" subtitle="Loading" />
+        <PageHeader title="Records trash" subtitle="Loading" />
       </div>
     );
   }
@@ -200,7 +212,7 @@ export function RecordBookTrashClient() {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
         <PageHeader
-          title="Records Book Trash"
+          title="Records trash"
           subtitle="Recover audit-safe soft-deleted drafts and categories"
         />
         <div className="mt-8 text-center">
@@ -213,7 +225,7 @@ export function RecordBookTrashClient() {
   return (
     <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
-        title="Records Book Trash"
+        title="Records trash"
         subtitle="Recover audit-safe soft-deleted drafts and categories"
       />
       <RecordBookNav />
