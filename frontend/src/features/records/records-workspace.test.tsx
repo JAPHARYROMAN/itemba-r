@@ -123,6 +123,36 @@ function AppWindow({
   );
 }
 describe('Records Book inside Records', () => {
+  it('returns an existing overview record link to the notebook after closing its detail', async () => {
+    state.permissions = new Set(['records.view']);
+    const read = state.get.getMockImplementation()!;
+    state.get.mockImplementation((path: string) =>
+      path === '/records/note'
+        ? Promise.resolve({
+            id: 'note',
+            kind: 'NOTE',
+            title: 'Existing note',
+            status: 'ACTIVE',
+            recordDate: '2026-09-01',
+            notes: 'Keep this note',
+          })
+        : read(path),
+    );
+    const user = userEvent.setup();
+    render(
+      <WorkspaceSessionProvider>
+        <AppWindow id="Notebook" href="/records?view=overview&record=note" />
+      </WorkspaceSessionProvider>,
+    );
+    const detail = await screen.findByRole('dialog', { name: 'Existing note' });
+    await user.click(within(detail).getByRole('button', { name: 'Close', exact: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Overview', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Notebook overview', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
   it('restores a saved register page and filters without resetting them on mount', async () => {
     render(
       <WorkspaceSessionProvider>

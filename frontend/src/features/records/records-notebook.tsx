@@ -126,7 +126,8 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
     directory.reload();
   };
   function select(id: string) {
-    router.push(`/records?view=${section}${id ? `&record=${encodeURIComponent(id)}` : ''}`);
+    const base = embedded && section === 'overview' ? '/records/notebook' : '/records';
+    router.push(`${base}?view=${section}${id ? `&record=${encodeURIComponent(id)}` : ''}`);
   }
   function go(next: Section) {
     setSection(next);
