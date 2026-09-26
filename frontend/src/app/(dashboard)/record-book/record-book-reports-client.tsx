@@ -2,7 +2,7 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import Image from 'next/image';
-import Link from 'next/link';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Btn,
@@ -16,6 +16,10 @@ import {
   SkeletonTable,
   StatCard,
 } from '@/components/ui';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
+import { recordsHref } from '@/features/records/records-routes';
+import { useRecordBookRefresh } from '@/features/records/record-book-refresh';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import {
@@ -195,12 +199,14 @@ export function RecordBookReportsClient({
   const canView = hasPermission('record_book.view');
   const canExport = hasPermission('record_book.export');
   const beginRequest = useRequestGuard();
-  const [reportKey, setReportKey] = useState<ReportKey>(initialReportKey);
+  const router = useWorkspaceRouter();
+  const reportKey = initialReportKey;
+  const setReportKey = (next: ReportKey) => router.push(`/records/reports?report=${next}`);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useWorkspaceState('records.book-report.filters', {
     companyId: '',
     divisionId: '',
     branchId: '',
@@ -279,7 +285,7 @@ export function RecordBookReportsClient({
         setError(err instanceof Error ? err.message : 'Could not load report filters');
       });
     return () => controller.abort();
-  }, [authLoading, canView]);
+  }, [authLoading, canView, setFilters]);
 
   const query = useMemo(
     () => ({
@@ -396,10 +402,12 @@ export function RecordBookReportsClient({
     printHiddenColumnKeys.add('status');
   }
 
+  useRecordBookRefresh(loadReport);
+
   if (authLoading) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
-        <PageHeader title="Records Book Reports" subtitle="Loading" />
+        <PageHeader title="Records reports" subtitle="Loading" />
       </div>
     );
   }
@@ -407,7 +415,7 @@ export function RecordBookReportsClient({
   if (!canView) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
-        <PageHeader title="Records Book Reports" subtitle="Permission required" />
+        <PageHeader title="Records reports" subtitle="Permission required" />
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">Access Restricted</p>
         </div>
@@ -419,7 +427,7 @@ export function RecordBookReportsClient({
     <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <div className="record-book-no-print">
         <PageHeader
-          title="Records Book Reports"
+          title="Records reports"
           subtitle="Independent manual sales, receipt, expense, and net-movement reporting"
         />
         <RecordBookNav />
@@ -1070,7 +1078,10 @@ export function RecordBookReportsClient({
                         ))}
                         <td className="record-book-no-print px-3 py-3 text-right">
                           {href ? (
-                            <Link className="text-blue-300 hover:text-blue-200" href={href}>
+                            <Link
+                              className="text-blue-300 hover:text-blue-200"
+                              href={recordsHref(href)}
+                            >
                               View first of {row.sourceIds.length}
                             </Link>
                           ) : (

@@ -30,6 +30,20 @@ const future: WorkspaceApp = {
 };
 
 describe('App registration contract', () => {
+  it('hosts legacy Records Book and notebook links under Records with either existing view permission', () => {
+    const records = getApp('records')!;
+    for (const path of [
+      '/records',
+      '/records/money-out/entry',
+      '/record-book',
+      '/record-book/daily-sales/entry',
+    ])
+      expect(appForPath(path)).toBe(records);
+    expect(appForPath('/record-book-extra')).not.toBe(records);
+    expect(canOpenApp(records, (p) => p === 'record_book.view')).toBe(true);
+    expect(canOpenApp(records, (p) => p === 'records.view')).toBe(true);
+    expect(canOpenApp(records, (p) => p === 'cash_desk.view')).toBe(false);
+  });
   it('hosts one POS terminal with its existing permission and preserves standalone routes', () => {
     const pos = getApp('pos')!;
     expect(appForPath('/pos/activate')).toBe(pos);

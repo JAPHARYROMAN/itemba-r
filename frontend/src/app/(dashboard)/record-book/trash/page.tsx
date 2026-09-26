@@ -1,5 +1,1 @@
-import { RecordBookTrashClient } from '../record-book-trash-client';
-
-export default function RecordBookTrashPage() {
-  return <RecordBookTrashClient />;
-}
+export { RecordsApp as default } from '@/features/records/records-app';
