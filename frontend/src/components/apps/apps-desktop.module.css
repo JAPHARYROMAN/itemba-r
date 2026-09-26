@@ -126,10 +126,6 @@
   border-radius: 7px;
   max-width: 145px;
 }
-.catalogTools option {
-  background: var(--aurora-card);
-  color: var(--aurora-text);
-}
 .count {
   font-size: 11px;
   color: var(--aurora-text-secondary);

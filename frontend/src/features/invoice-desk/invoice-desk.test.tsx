@@ -7,6 +7,7 @@ import { DeskEditor } from './desk-editor';
 import { money, type Invoice } from './types';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
+import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { WorkspaceDraftsProvider } from '@/components/workspace/workspace-drafts';
 
@@ -199,14 +200,15 @@ describe('Invoice Desk experience', () => {
     expect(screen.queryByRole('button', { name: /Total outstanding TZS/ })).not.toBeInTheDocument();
   });
   it('resets division and branch when the company changes', async () => {
+    const user = userEvent.setup();
     render(<InvoiceDesk />);
-    await screen.findByRole('option', { name: 'Example company' });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'company' } });
-    fireEvent.change(screen.getByLabelText('Division'), { target: { value: 'division' } });
-    fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'branch' } });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'other' } });
-    expect(screen.getByLabelText('Division')).toHaveValue('');
-    expect(screen.getByLabelText('Branch')).toHaveValue('');
+    await waitFor(() => expect(getSelectField('Company')).toBeEnabled());
+    await chooseSelectOption('Company', 'Example company', user);
+    await chooseSelectOption('Division', 'Retail', user);
+    await chooseSelectOption('Branch', 'Central', user);
+    await chooseSelectOption('Company', 'Other company', user);
+    expect(selectFieldValue(getSelectField('Division'))).toBe('All divisions');
+    expect(selectFieldValue(getSelectField('Branch'))).toBe('All branches');
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(
         '/invoice-desk/overview',

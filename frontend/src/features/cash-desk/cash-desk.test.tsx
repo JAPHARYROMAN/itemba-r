@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDateField } from '@/test/date-field';
+import { chooseSelectOption } from '@/test/select-field';
 import { CashDesk } from './cash-desk';
 import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
@@ -76,9 +77,7 @@ describe('Cash Desk', () => {
         'Choose a company to view its sales, collections and account balances.',
       ),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Company', { exact: true }), {
-      target: { value: 'company' },
-    });
+    await chooseSelectOption('Company', 'Company');
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(
         '/cash-desk/directory',

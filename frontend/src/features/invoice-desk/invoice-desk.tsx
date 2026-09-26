@@ -29,7 +29,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { Btn, Modal } from '@/components/ui';
+import { Btn, Modal, SelectField } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet, backendUpload } from '@/lib/api-client';
@@ -262,60 +262,45 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
         />
         <div className="desk-scope" aria-label="Organisation scope">
           <Building2 size={17} />
-          <label>
-            <span>Company</span>
-            <select
-              aria-label="Company"
-              value={scope.companyId}
-              disabled={directory.loading}
-              onChange={(e) => changeScope('companyId', e.target.value)}
-            >
-              <option value="">All companies</option>
-              {dir.companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectField
+            variant="bare"
+            label="Company"
+            value={scope.companyId}
+            disabled={directory.loading}
+            onChange={(value) => changeScope('companyId', value)}
+            options={[
+              { value: '', label: 'All companies' },
+              ...dir.companies.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
           <span className="desk-scope-divider">/</span>
-          <label>
-            <span>Division</span>
-            <select
-              aria-label="Division"
-              disabled={!scope.companyId}
-              value={scope.divisionId}
-              onChange={(e) => changeScope('divisionId', e.target.value)}
-            >
-              <option value="">All divisions</option>
-              {dir.divisions
+          <SelectField
+            variant="bare"
+            label="Division"
+            value={scope.divisionId}
+            disabled={!scope.companyId}
+            onChange={(value) => changeScope('divisionId', value)}
+            options={[
+              { value: '', label: 'All divisions' },
+              ...dir.divisions
                 .filter((d) => d.companyId === scope.companyId)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-          </label>
+                .map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
           <span className="desk-scope-divider">/</span>
-          <label>
-            <span>Branch</span>
-            <select
-              aria-label="Branch"
-              disabled={!scope.divisionId}
-              value={scope.branchId}
-              onChange={(e) => changeScope('branchId', e.target.value)}
-            >
-              <option value="">All branches</option>
-              {dir.branches
+          <SelectField
+            variant="bare"
+            label="Branch"
+            value={scope.branchId}
+            disabled={!scope.divisionId}
+            onChange={(value) => changeScope('branchId', value)}
+            options={[
+              { value: '', label: 'All branches' },
+              ...dir.branches
                 .filter((b) => b.divisionId === scope.divisionId)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-          </label>
+                .map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
         </div>
         {notice && (
           <p className="desk-success" role="status">

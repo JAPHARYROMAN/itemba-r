@@ -32,6 +32,8 @@ export type { ScopeValue } from './scope-selector';
 export { FormInput, FormSelect, FormTextarea, FileUpload } from './forms';
 export { FormDateField } from './date-field';
 export type { FormDateFieldProps } from './date-field';
+export { SelectField } from './select-field';
+export type { SelectFieldOption, SelectFieldProps } from './select-field';
 export {
   DATE_DISPLAY_LOCALE,
   formatIsoDate,

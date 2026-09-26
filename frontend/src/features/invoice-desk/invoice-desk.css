@@ -160,29 +160,20 @@
   margin-bottom: 26px;
   color: var(--desk-muted);
 }
-.desk-scope label {
-  min-width: 0;
+.desk-scope .ui-select {
   flex: 1;
   max-width: 280px;
 }
-.desk-scope label > span {
+.desk-scope .ui-select-label {
   display: block;
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 1px;
   margin: 0 0 4px 3px;
 }
-.desk-scope select {
-  width: 100%;
+.desk-scope .ui-select-trigger {
   font-size: 12px;
   color: var(--desk-ink);
-  background: transparent;
-  border: 0;
-  outline-offset: 3px;
-  padding: 4px 2px;
-}
-.desk-scope select:disabled {
-  opacity: 0.5;
 }
 .desk-scope-divider {
   opacity: 0.35;
@@ -964,16 +955,17 @@
   .desk-scope-divider {
     display: none;
   }
-  .desk-scope label {
+  .desk-scope .ui-select {
     max-width: none;
     flex: 1 1 90px;
   }
-  .desk-scope label:first-of-type {
+  .desk-scope > .ui-select-field-host:first-of-type > .ui-select {
     flex-basis: 100%;
   }
-  .desk-scope select {
+  .desk-scope .ui-select-trigger {
     border: 1px solid var(--desk-line);
     border-radius: 6px;
+    margin: 0;
     padding: 7px;
     font-size: 11px;
   }
@@ -1229,16 +1221,17 @@
   .desk-scope-divider {
     display: none;
   }
-  .desk-scope label {
+  .desk-scope .ui-select {
     max-width: none;
     flex: 1 1 90px;
   }
-  .desk-scope label:first-of-type {
+  .desk-scope > .ui-select-field-host:first-of-type > .ui-select {
     flex-basis: 100%;
   }
-  .desk-scope select {
+  .desk-scope .ui-select-trigger {
     border: 1px solid var(--desk-line);
     border-radius: 6px;
+    margin: 0;
     padding: 7px;
     font-size: 11px;
   }

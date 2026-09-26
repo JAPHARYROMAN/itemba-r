@@ -19,7 +19,7 @@ import {
   ShoppingBag,
   Users,
 } from 'lucide-react';
-import { Btn, FormDateField, Modal } from '@/components/ui';
+import { Btn, FormDateField, Modal, SelectField } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet } from '@/lib/api-client';
@@ -241,17 +241,17 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                         (!scope.divisionId || b.divisionId === scope.divisionId),
                     );
             return (
-              <label key={key}>
-                <span>{['Company', 'Division', 'Branch'][i]}</span>
-                <select value={scope[key]} onChange={(e) => changeScope(key, e.target.value)}>
-                  <option value="">All {['companies', 'divisions', 'branches'][i]}</option>
-                  {list.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                key={key}
+                variant="bare"
+                label={['Company', 'Division', 'Branch'][i]}
+                value={scope[key]}
+                onChange={(value) => changeScope(key, value)}
+                options={[
+                  { value: '', label: `All ${['companies', 'divisions', 'branches'][i]}` },
+                  ...list.map((x) => ({ value: x.id, label: x.name })),
+                ]}
+              />
             );
           })}
         </div>
