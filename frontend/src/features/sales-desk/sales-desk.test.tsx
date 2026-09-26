@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { chooseSelectOption } from '@/test/select-field';
 import { DirectSalesDesk as SalesDesk } from './direct-sales-desk';
 import { SalesEditor } from './sales-editor';
 import { lineTotal, saleTotal, type Sale } from './types';
@@ -128,7 +129,7 @@ describe('Sales Desk', () => {
     api.permissions = new Set(['sales_desk.view']);
     render(<SalesDesk />);
     await screen.findByText('TZS 40.10');
-    fireEvent.change(screen.getByLabelText('Sales summary currency'), { target: { value: 'USD' } });
+    await chooseSelectOption('Currency', 'USD');
     expect(screen.getAllByText('USD 20.00')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'New sale' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Acme S-TEST/ }));

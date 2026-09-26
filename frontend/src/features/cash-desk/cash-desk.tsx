@@ -412,19 +412,17 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
               />
             </div>
             {section !== 'collections' && (
-              <label>
-                Desk account currency{' '}
-                <select
-                  value={current?.currency ?? ''}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  {currencies.length ? (
-                    currencies.map((c) => <option key={c.currency}>{c.currency}</option>)
-                  ) : (
-                    <option value="">No accounts yet</option>
-                  )}
-                </select>
-              </label>
+              <SelectField
+                label="Desk account currency"
+                labelPlacement="side"
+                value={current?.currency ?? ''}
+                onChange={setCurrency}
+                options={
+                  currencies.length
+                    ? currencies.map((c) => ({ value: c.currency, label: c.currency }))
+                    : [{ value: '', label: 'No accounts yet' }]
+                }
+              />
             )}
             <span>Dates use East Africa Time</span>
           </div>
@@ -552,36 +550,33 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                     }}
                   />
                 </label>
-                <select
+                <SelectField
                   aria-label="Movement type"
                   value={kind}
-                  onChange={(e) => {
-                    setKind(e.target.value);
+                  onChange={(value) => {
+                    setKind(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">All movements</option>
-                  {Object.entries(movementLabels).map(([k, l]) => (
-                    <option key={k} value={k}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-                <select
+                  options={[
+                    { value: '', label: 'All movements' },
+                    ...Object.entries(movementLabels).map(([k, l]) => ({ value: k, label: l })),
+                  ]}
+                />
+                <SelectField
                   aria-label="Account filter"
                   value={accountId}
-                  onChange={(e) => {
-                    setAccountId(e.target.value);
+                  onChange={(value) => {
+                    setAccountId(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">All accounts</option>
-                  {accounts.data?.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} · {a.company.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: '', label: 'All accounts' },
+                    ...(accounts.data ?? []).map((a) => ({
+                      value: a.id,
+                      label: `${a.name} · ${a.company.name}`,
+                    })),
+                  ]}
+                />
               </div>
             )}
             {section === 'sales' && (

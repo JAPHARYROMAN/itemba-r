@@ -317,15 +317,15 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
             <div className="desk-section-line">
               <h2>Your balances</h2>
               {!!overview.data?.currencies.length && (
-                <select
+                <SelectField
                   aria-label="Overview currency"
                   value={activeCurrency?.currency ?? ''}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  {overview.data.currencies.map((c) => (
-                    <option key={c.currency}>{c.currency}</option>
-                  ))}
-                </select>
+                  onChange={setCurrency}
+                  options={overview.data.currencies.map((c) => ({
+                    value: c.currency,
+                    label: c.currency,
+                  }))}
+                />
               )}
             </div>
             {overview.error ? (
@@ -499,28 +499,23 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
                   }}
                 />
               </div>
-              <select
+              <SelectField
                 aria-label="Invoice status"
                 value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
+                onChange={(value) => {
+                  setStatus(value);
                   setPage(1);
                 }}
-              >
-                {[
-                  ['all', 'All invoices'],
-                  ['unpaid', 'Unpaid'],
-                  ['partial', 'Part paid'],
-                  ['overdue', 'Overdue'],
-                  ['due', 'Due in 7 days'],
-                  ['paid', 'Paid'],
-                  ['void', 'Void'],
-                ].map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: 'all', label: 'All invoices' },
+                  { value: 'unpaid', label: 'Unpaid' },
+                  { value: 'partial', label: 'Part paid' },
+                  { value: 'overdue', label: 'Overdue' },
+                  { value: 'due', label: 'Due in 7 days' },
+                  { value: 'paid', label: 'Paid' },
+                  { value: 'void', label: 'Void' },
+                ]}
+              />
               {supplierId && (
                 <button
                   className="desk-filter-chip"

@@ -190,8 +190,10 @@
   font-size: 14px;
   letter-spacing: -0.2px;
 }
-.desk-section-line select,
-.desk-register-toolbar > select {
+.desk-section-line .ui-select-trigger,
+.desk-register-toolbar > .ui-select .ui-select-trigger {
+  width: auto;
+  line-height: inherit;
   background: var(--desk-panel);
   border: 1px solid var(--desk-line);
   border-radius: 8px;
@@ -959,7 +961,7 @@
     max-width: none;
     flex: 1 1 90px;
   }
-  .desk-scope > .ui-select-field-host:first-of-type > .ui-select {
+  .desk-scope > .ui-select:first-of-type {
     flex-basis: 100%;
   }
   .desk-scope .ui-select-trigger {
@@ -1225,7 +1227,7 @@
     max-width: none;
     flex: 1 1 90px;
   }
-  .desk-scope > .ui-select-field-host:first-of-type > .ui-select {
+  .desk-scope > .ui-select:first-of-type {
     flex-basis: 100%;
   }
   .desk-scope .ui-select-trigger {

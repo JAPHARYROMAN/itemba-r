@@ -63,6 +63,8 @@ export interface SelectFieldProps {
   className?: string;
   /** `bare` drops the box, for inline captions such as a desk's scope bar. */
   variant?: 'field' | 'bare';
+  /** `side` puts the caption beside the control, as a filter bar's "Currency" does. */
+  labelPlacement?: 'top' | 'side';
 }
 
 const SEARCH_THRESHOLD = 8;
@@ -116,11 +118,12 @@ export function SelectField({
   name,
   className = '',
   variant = 'field',
+  labelPlacement = 'top',
 }: SelectFieldProps) {
   const shake = useShakeOnError(error);
   const { fieldId, errorId, hintId, aria } = useFieldA11y(id, error, hint);
   const { contains } = useFilter({ sensitivity: 'base' });
-  const host = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useState<React.CSSProperties>();
   const items = options.map((option) => ({ ...option, id: toKey(option.value) }));
   const selected = options.some((option) => option.value === value) ? toKey(value) : null;
@@ -149,63 +152,64 @@ export function SelectField({
     </ListBox>
   );
 
+  const plainLabel = variant === 'field' && labelPlacement === 'top';
+
   return (
-    <div ref={host} className="ui-select-field-host">
-      <Select
-        className={`ui-select ui-select-${variant} ${className}`.trim()}
-        value={selected}
-        onChange={(key) => {
-          onChange(fromKey(key));
-          // Workspace drafts listen for bubbling `input` on a wrapping form, the
-          // same signal the shared date field sends.
-          host.current?.dispatchEvent(new Event('input', { bubbles: true }));
-        }}
-        onOpenChange={(open) => open && setTheme(themeOf(host.current))}
-        placeholder={placeholder}
-        isRequired={required}
-        isDisabled={disabled}
-        isInvalid={!!error}
-        name={name}
-        id={fieldId}
-        aria-label={label ? undefined : ariaLabel}
-        aria-describedby={aria['aria-describedby']}
-      >
-        {label && (
-          <AriaLabel
-            className={variant === 'field' ? LABEL_CLASS : 'ui-select-label'}
-            style={variant === 'field' ? LABEL_STYLE : undefined}
-          >
-            {label}
-            {required && <RequiredMark />}
-          </AriaLabel>
+    <Select
+      ref={root}
+      className={`ui-select ui-select-${variant}${labelPlacement === 'side' ? ' ui-select-side' : ''} ${className}`.trim()}
+      value={selected}
+      onChange={(key) => {
+        onChange(fromKey(key));
+        // Workspace drafts listen for bubbling `input` on a wrapping form, the
+        // same signal the shared date field sends.
+        root.current?.dispatchEvent(new Event('input', { bubbles: true }));
+      }}
+      onOpenChange={(open) => open && setTheme(themeOf(root.current))}
+      placeholder={placeholder}
+      isRequired={required}
+      isDisabled={disabled}
+      isInvalid={!!error}
+      name={name}
+      id={fieldId}
+      aria-label={label ? undefined : ariaLabel}
+      aria-describedby={aria['aria-describedby']}
+    >
+      {label && (
+        <AriaLabel
+          className={plainLabel ? LABEL_CLASS : 'ui-select-label'}
+          style={plainLabel ? LABEL_STYLE : undefined}
+        >
+          {label}
+          {required && <RequiredMark />}
+        </AriaLabel>
+      )}
+      <Button className={`ui-select-trigger${error ? ' ui-select-trigger-invalid' : ''}${shake}`}>
+        <SelectValue className="ui-select-value" />
+        <ChevronDown size={15} aria-hidden="true" className="ui-select-chevron" />
+      </Button>
+      <Popover className="ui-select-popover" placement="bottom start" offset={6} style={theme}>
+        {searchable ? (
+          <Autocomplete filter={contains}>
+            <SearchField
+              className="ui-select-search"
+              aria-label={`Search ${label ?? ariaLabel ?? 'options'}`}
+              autoFocus
+            >
+              <Search size={14} aria-hidden="true" />
+              <Input placeholder="Search" />
+            </SearchField>
+            {list}
+          </Autocomplete>
+        ) : (
+          list
         )}
-        <Button className={`ui-select-trigger${error ? ' ui-select-trigger-invalid' : ''}${shake}`}>
-          <SelectValue className="ui-select-value" />
-          <ChevronDown size={15} aria-hidden="true" className="ui-select-chevron" />
-        </Button>
-        <Popover className="ui-select-popover" placement="bottom start" offset={6} style={theme}>
-          {searchable ? (
-            <Autocomplete filter={contains}>
-              <SearchField
-                className="ui-select-search"
-                aria-label={`Search ${label ?? ariaLabel ?? 'options'}`}
-                autoFocus
-              >
-                <Search size={14} aria-hidden="true" />
-                <Input placeholder="Search" />
-              </SearchField>
-              {list}
-            </Autocomplete>
-          ) : (
-            list
-          )}
-        </Popover>
-      </Select>
+      </Popover>
       {error ? (
         <FieldError id={errorId}>{error}</FieldError>
       ) : hint ? (
         <Hint id={hintId}>{hint}</Hint>
       ) : null}
-    </div>
+    </Select>
   );
 }

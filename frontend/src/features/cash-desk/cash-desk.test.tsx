@@ -211,9 +211,7 @@ describe('Cash Desk', () => {
     await screen.findByText('TZS 500.20');
     expect(screen.getAllByText('TZS 125,000.10')).toHaveLength(2);
     expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Expense summary currency'), {
-      target: { value: 'USD' },
-    });
+    await chooseSelectOption('Currency', 'USD');
     expect(screen.getAllByText('USD 10.10')).toHaveLength(2);
     expect(screen.queryByText('TZS 500.20')).not.toBeInTheDocument();
   });
@@ -229,9 +227,7 @@ describe('Cash Desk', () => {
       />,
     );
     await screen.findByText('No expenses in this view');
-    fireEvent.change(screen.getByLabelText('Filter expense category'), {
-      target: { value: 'RENT' },
-    });
+    await chooseSelectOption('Filter expense category', 'Rent & premises');
     await waitFor(() =>
       expect(api.get).toHaveBeenLastCalledWith(
         '/cash-desk/expenses',
@@ -267,7 +263,7 @@ describe('Cash Desk', () => {
   it('keeps currency balances separate and formats exact decimal strings', async () => {
     render(<CashDesk />);
     await screen.findByText('TZS 9,999,999,999,999,999.99');
-    fireEvent.change(screen.getByLabelText('Desk account currency'), { target: { value: 'USD' } });
+    await chooseSelectOption('Desk account currency', 'USD');
     expect(screen.getByText('USD 20.00')).toBeInTheDocument();
     expect(screen.queryByText('TZS 9,999,999,999,999,999.99')).not.toBeInTheDocument();
   });

@@ -184,7 +184,8 @@
   align-items: center;
   gap: 8px;
 }
-.sales-section-title select {
+.sales-section-title .ui-select-trigger {
+  font: inherit;
   padding: 7px 10px;
   background: var(--desk-panel);
   border: 1px solid var(--desk-line);
@@ -270,7 +271,9 @@
   font-size: 11px;
 }
 .sales-toolbar input,
-.sales-toolbar select {
+.sales-toolbar select,
+.sales-toolbar .ui-select-trigger {
+  font: inherit;
   padding: 10px;
   border: 1px solid var(--desk-line);
   border-radius: 8px;
@@ -575,7 +578,7 @@
     grid-template-columns: 1fr;
     gap: 10px;
   }
-  .sales-toolbar > select,
+  .sales-toolbar > .ui-select,
   .sales-toolbar > label,
   .sales-toolbar > .ui-date-caption {
     width: 100%;
@@ -649,7 +652,7 @@
     grid-template-columns: 1fr;
     gap: 10px;
   }
-  .sales-toolbar > select,
+  .sales-toolbar > .ui-select,
   .sales-toolbar > label,
   .sales-toolbar > .ui-date-caption {
     width: 100%;

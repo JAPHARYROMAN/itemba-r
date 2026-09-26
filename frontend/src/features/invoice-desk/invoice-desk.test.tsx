@@ -7,7 +7,12 @@ import { DeskEditor } from './desk-editor';
 import { money, type Invoice } from './types';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
-import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
+import {
+  chooseSelectOption,
+  findSelectField,
+  getSelectField,
+  selectFieldValue,
+} from '@/test/select-field';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { WorkspaceDraftsProvider } from '@/components/workspace/workspace-drafts';
 
@@ -192,10 +197,10 @@ describe('Invoice Desk experience', () => {
   });
   it('presents currency-specific balances without combining them', async () => {
     render(<InvoiceDesk />);
-    await screen.findByLabelText('Overview currency');
+    await findSelectField('Overview currency');
     expect(screen.getAllByText('TZS 1,000,000.50').length).toBeGreaterThan(1);
     capture('invoice-desk');
-    fireEvent.change(screen.getByLabelText('Overview currency'), { target: { value: 'USD' } });
+    await chooseSelectOption('Overview currency', 'USD');
     expect(screen.getByRole('button', { name: /Total outstanding USD 50.00/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Total outstanding TZS/ })).not.toBeInTheDocument();
   });

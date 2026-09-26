@@ -819,17 +819,23 @@ select optgroup {
    React Aria's Select in place of a native `<select>`, whose open list the
    browser paints on its own terms. The `field` trigger repeats `.aurora-input`
    so it sits flush in a form grid; `bare` is the borderless caption a desk's
-   scope bar uses.
+   scope bar uses. Variant defaults sit behind `:where()` so a bar's own
+   `.some-toolbar .ui-select-trigger` restyle wins whatever order the sheets load.
    ───────────────────────────────────────────────────────────────────────── */
-
-.ui-select-field-host {
-  display: contents;
-}
 
 .ui-select {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* Caption beside the control, as in a filter bar. The caption inherits the
+   bar's own type so it reads like the text around it. */
+.ui-select-side {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.625rem;
 }
 
 .ui-select-trigger {
@@ -844,7 +850,11 @@ select optgroup {
   outline: none;
 }
 
-.ui-select-field .ui-select-trigger {
+:where(.ui-select-side) .ui-select-trigger {
+  width: auto;
+}
+
+:where(.ui-select-field) .ui-select-trigger {
   padding: 0.5rem 0.75rem;
   background-color: var(--aurora-card);
   border: 1px solid var(--aurora-border);
@@ -856,17 +866,17 @@ select optgroup {
     box-shadow var(--aurora-duration-fast) var(--aurora-ease);
 }
 
-.ui-select-field .ui-select-trigger:is([data-focus-visible], [data-pressed]),
-.ui-select-field[data-open] .ui-select-trigger {
+:where(.ui-select-field) .ui-select-trigger:is([data-focus-visible], [data-pressed]),
+:where(.ui-select-field[data-open]) .ui-select-trigger {
   border-color: var(--aurora-border-focus);
   box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
 }
 
-.ui-select-field .ui-select-trigger-invalid {
+:where(.ui-select-field) .ui-select-trigger-invalid {
   border-color: var(--aurora-danger);
 }
 
-.ui-select-bare .ui-select-trigger {
+:where(.ui-select-bare) .ui-select-trigger {
   padding: 0.25rem 0.375rem;
   margin-inline-start: -0.375rem;
   background: none;
@@ -876,12 +886,12 @@ select optgroup {
   transition: background-color var(--aurora-duration-fast) var(--aurora-ease);
 }
 
-.ui-select-bare .ui-select-trigger:hover,
-.ui-select-bare[data-open] .ui-select-trigger {
+:where(.ui-select-bare) .ui-select-trigger:hover,
+:where(.ui-select-bare[data-open]) .ui-select-trigger {
   background-color: var(--aurora-bg-subtle);
 }
 
-.ui-select-bare .ui-select-trigger[data-focus-visible] {
+:where(.ui-select-bare) .ui-select-trigger[data-focus-visible] {
   outline: 2px solid var(--aurora-border-focus);
   outline-offset: 1px;
   box-shadow: none;
@@ -892,7 +902,7 @@ select optgroup {
   cursor: not-allowed;
 }
 
-.ui-select-field .ui-select-trigger[data-disabled] {
+:where(.ui-select-field) .ui-select-trigger[data-disabled] {
   background-color: var(--aurora-bg-subtle);
 }
 

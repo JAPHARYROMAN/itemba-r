@@ -20,6 +20,12 @@ export function getSelectField(label: string, scope?: SelectFieldScope): HTMLEle
   return queries.getByRole('button', { name: new RegExp(`(^|\\s)${escape(label)}$`) });
 }
 
+/** Wait for a select field that renders once its data has loaded. */
+export function findSelectField(label: string, scope?: SelectFieldScope): Promise<HTMLElement> {
+  const queries = scope ? within(scope) : screen;
+  return queries.findByRole('button', { name: new RegExp(`(^|\\s)${escape(label)}$`) });
+}
+
 /** The label of the current choice, or the placeholder when nothing matches. */
 export function selectFieldValue(field: HTMLElement): string {
   return field.querySelector('.ui-select-value')?.textContent ?? '';

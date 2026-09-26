@@ -29,6 +29,7 @@ import {
   Modal,
   PageHeader,
   PageToolbar,
+  SelectField,
   showToast,
   SkeletonTable,
   StatCard,
@@ -1866,14 +1867,6 @@ export function BusinessSales() {
     );
   };
 
-  const filterSelectCls =
-    'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
-  const filterStyle = {
-    borderColor: 'var(--aurora-border)',
-    background: 'var(--aurora-card)',
-    color: 'var(--aurora-text)',
-  } as const;
-
   return (
     <div className="business-workspace space-y-6">
       {creating && (
@@ -1991,74 +1984,54 @@ export function BusinessSales() {
         searchPlaceholder="Order # or customer…"
         filters={
           <>
-            <select
+            <SelectField
               aria-label="Filter by company"
               value={filterCompany}
-              onChange={(e) => {
-                setFilterCompany(e.target.value);
+              onChange={(value) => {
+                setFilterCompany(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Companies</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All Companies' },
+                ...companies.map((c) => ({ value: c.id, label: c.name })),
+              ]}
+            />
+            <SelectField
               aria-label="Filter by sales type"
               value={filterType}
-              onChange={(e) => {
-                setFilterType(e.target.value);
+              onChange={(value) => {
+                setFilterType(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Types</option>
-              {SALES_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All Types' },
+                ...SALES_TYPES.map((t) => ({ value: t, label: t.replace(/_/g, ' ') })),
+              ]}
+            />
+            <SelectField
               aria-label="Filter by status"
               value={filterStatus}
-              onChange={(e) => {
-                setFilterStatus(e.target.value);
+              onChange={(value) => {
+                setFilterStatus(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Status</option>
-              {SALES_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All Status' },
+                ...SALES_STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, ' ') })),
+              ]}
+            />
+            <SelectField
               aria-label="Filter by payment status"
               value={filterPayment}
-              onChange={(e) => {
-                setFilterPayment(e.target.value);
+              onChange={(value) => {
+                setFilterPayment(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Payments</option>
-              {PAYMENT_STATUSES.map((p) => (
-                <option key={p} value={p}>
-                  {p.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: 'All Payments' },
+                ...PAYMENT_STATUSES.map((p) => ({ value: p, label: p.replace(/_/g, ' ') })),
+              ]}
+            />
             <FormDateField
               aria-label="Filter from date"
               value={filterDateFrom}

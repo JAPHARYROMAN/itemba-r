@@ -272,20 +272,17 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
           <>
             <div className="sales-section-title">
               <span>All recorded sales in this organisation scope</span>
-              <label>
-                Currency{' '}
-                <select
-                  aria-label="Sales summary currency"
-                  value={current?.currency ?? ''}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  {totals.length ? (
-                    totals.map((c) => <option key={c.currency}>{c.currency}</option>)
-                  ) : (
-                    <option value="">No sales yet</option>
-                  )}
-                </select>
-              </label>
+              <SelectField
+                label="Currency"
+                labelPlacement="side"
+                value={current?.currency ?? ''}
+                onChange={setCurrency}
+                options={
+                  totals.length
+                    ? totals.map((c) => ({ value: c.currency, label: c.currency }))
+                    : [{ value: '', label: 'No sales yet' }]
+                }
+              />
             </div>
             <div className="sales-stats">
               {[
@@ -398,27 +395,22 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                   }}
                 />
               </label>
-              <select
+              <SelectField
                 aria-label="Sale status"
                 value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
+                onChange={(value) => {
+                  setStatus(value);
                   setPage(1);
                 }}
-              >
-                {[
-                  ['all', 'All statuses'],
-                  ['unpaid', 'Unpaid'],
-                  ['partial', 'Part paid'],
-                  ['paid', 'Paid'],
-                  ['overdue', 'Overdue'],
-                  ['void', 'Void'],
-                ].map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: 'all', label: 'All statuses' },
+                  { value: 'unpaid', label: 'Unpaid' },
+                  { value: 'partial', label: 'Part paid' },
+                  { value: 'paid', label: 'Paid' },
+                  { value: 'overdue', label: 'Overdue' },
+                  { value: 'void', label: 'Void' },
+                ]}
+              />
               <div className="ui-date-caption">
                 From{' '}
                 <FormDateField
