@@ -1,0 +1,37 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "http://127.0.0.1:3191/",
+        "http://127.0.0.1:3191/services/fuel-and-lubricants",
+        "http://127.0.0.1:3191/contact",
+        "http://127.0.0.1:3191/company-profile"
+      ],
+      "numberOfRuns": 3,
+      "settings": {
+        "formFactor": "mobile",
+        "throttlingMethod": "simulate",
+        "throttling": {
+          "rttMs": 150,
+          "throughputKbps": 1638.4,
+          "cpuSlowdownMultiplier": 4
+        },
+        "chromeFlags": "--no-sandbox"
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["error", { "minScore": 0.9, "aggregationMethod": "median-run" }],
+        "categories:accessibility": ["error", { "minScore": 0.95, "aggregationMethod": "median-run" }],
+        "categories:seo": ["error", { "minScore": 0.95, "aggregationMethod": "median-run" }],
+        "largest-contentful-paint": ["error", { "maxNumericValue": 2500, "aggregationMethod": "median-run" }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.05, "aggregationMethod": "median-run" }],
+        "total-blocking-time": ["error", { "maxNumericValue": 200, "aggregationMethod": "median-run" }]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": "./test-results/lighthouse"
+    }
+  }
+}

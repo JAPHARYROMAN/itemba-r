@@ -1,0 +1,4 @@
+{
+  "$comment": "Reviewed, intentional differences from the golden baseline, read by tests/e2e/route-inventory.spec.ts. Only soft fields can be approved: description, keywords, og:title, og:description, og:image:alt, og:site_name, og:locale, og:type, twitter:title, twitter:description, twitter:image:alt. Shape: routes[\"/path\"][\"field\"] = { \"value\": \"exact new text\" | null (removed), \"reason\": \"why\" }. Hard fields (title, canonical, og:url, robots, OG image, anchors, JSON-LD coverage, EnquiryRouter intent, print hooks, headers, sitemap order, redirects) cannot be approved here. An approval that matches the baseline again fails as stale.",
+  "routes": {}
+}

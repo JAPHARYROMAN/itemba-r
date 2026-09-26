@@ -6,6 +6,12 @@ import { defineConfig, devices } from '@playwright/test';
  * exactly as the Dockerfile runs it) and point BASE_URL at it.
  *
  *   BASE_URL=http://localhost:3191 npx playwright test
+ *
+ * Suites are tagged: @contract (URLs, metadata, JSON-LD, links, analytics,
+ * QuickContact; must pass on origin/main and on every rebuild commit) and
+ * @quality (axe, no-JS; the rebuild's targets, failing on origin/main).
+ * Run them separately with `npm run test:e2e:contract` / `test:e2e:quality`;
+ * E2E_ROUTES=/about,/companies/* narrows the per-route suites.
  */
 const baseURL = process.env.BASE_URL || 'http://localhost:3191';
 
@@ -32,6 +38,9 @@ export default defineConfig({
   projects: [
     {
       name: 'phone',
+      // Server-HTML contracts do not depend on the viewport: run them once,
+      // in the desktop project.
+      testIgnore: /(route-inventory|link-crawl|jsonld)\.spec\.ts$/,
       use: {
         ...devices['Pixel 7'],
         browserName: 'chromium',
