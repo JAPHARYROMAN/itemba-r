@@ -101,6 +101,12 @@ export const mediaGenerated = {
     blurDataURL:
       "data:image/webp;base64,UklGRk4AAABXRUJQVlA4IEIAAADwAQCdASoMABAAA4BaJagCdAC9xM+UBYAA3WfUoN2zEBOQsBPN75GoPG5YEzqtDf5op+zj8PXXeN51BrVOW1VheAA=",
   },
+  "/images/fuel-stations/itemba-mpemba-coach-canopy.webp": {
+    width: 2400,
+    height: 1350,
+    blurDataURL:
+      "data:image/webp;base64,UklGRkYAAABXRUJQVlA4IDoAAACQAQCdASoQAAkAA4BaJQBOgBZHtTAA/llvkdCdQCQEWQW7jkg+5GB8+XxxyOiGKTmMRcEI9nUYAAAA",
+  },
   "/images/fuel-stations/itemba-mpemba-forecourt.webp": {
     width: 1152,
     height: 864,
@@ -112,6 +118,12 @@ export const mediaGenerated = {
     height: 960,
     blurDataURL:
       "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAAAQAgCdASoQAAwAA4BaJZACdGuAAr6C42wAAMwDHvjdtiwYeZk6p6f7Q6t2ro3PSmgZcdvvvuwjfx+7wyO3S3VjQoTHjNYsUuYAAA==",
+  },
+  "/images/fuel-stations/itemba-mpemba-hero.webp": {
+    width: 2400,
+    height: 1694,
+    blurDataURL:
+      "data:image/webp;base64,UklGRkwAAABXRUJQVlA4IEAAAAAQAgCdASoQAAsAA4BaJQBOgCPp1T1b4EgAAP7IowBms8vXjICgQorv3aFzKqkZV89GLWB2pLJ254anYI3yQAAA",
   },
   "/images/fuel-stations/itemba-mpemba-service-yard.webp": {
     width: 1152,
@@ -126,10 +138,10 @@ export const mediaGenerated = {
       "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAAAQAgCdASoQAAwAA4BaJZACdGuAAr6C42wAAMwDHvjdtiwYeZk6p6f7Q6t2ro3PSmgZcdvvvuwjfx+7wyO3S3VjQoTHjNYsUuYAAA==",
   },
   "/images/fuel-stations/itemba-mpemba-truck-canopy.webp": {
-    width: 1080,
-    height: 808,
+    width: 976,
+    height: 730,
     blurDataURL:
-      "data:image/webp;base64,UklGRmQAAABXRUJQVlA4IFgAAAAwAgCdASoQAAwAA4BaJYwCdIExGBh8aiC/8AD8js+DDXB8Wex6QpTzFdCIcHMyPsmjUCwuHOJmR/d6oU8aSULuqVT4iSY6vaCeJGiNXbWXCY2YbL4WiiAA",
+      "data:image/webp;base64,UklGRm4AAABXRUJQVlA4IGIAAAAwAgCdASoQAAwAA4BaJYwCdAYvXvqcMI4RAADgM36yj+wk7Iq+dwV2x6X9Q3zId6DjR3p5Vp+JLK65rWPZxAZoHJzUeEn9T9F1L1fzArxUzbjJdyy6U9J+8E7CXyhiSQAAAA==",
   },
   "/images/fuel-stations/itemba-mpemba-wide.webp": {
     width: 1152,
@@ -151,9 +163,9 @@ export const mediaGenerated = {
   },
   "/images/fuel-stations/itemba-uzunguni-forecourt-wide.webp": {
     width: 1152,
-    height: 864,
+    height: 580,
     blurDataURL:
-      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoQAAwAA4BaJZACdGuAAvfnaHsAAPZwbY0IsnzxFKoLe+ePqasxS+Q96praAxF9KZzejjTiwpaERt7kAqKCtJ9NxpbKX3OwAAA=",
+      "data:image/webp;base64,UklGRlQAAABXRUJQVlA4IEgAAABQAgCdASoQAAgAA4BaJZACdGuAAvgKRk2cJkAA9m+HkOh5DNg168sF4jvAOwB9wEBUWGgPktSNTCNH9fEHRty0ZuVwS+MAAAA=",
   },
   "/images/fuel-stations/itemba-uzunguni-forecourt.webp": {
     width: 1152,
@@ -243,7 +255,7 @@ export const mediaGenerated = {
     width: 720,
     height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRloAAABXRUJQVlA4IE4AAAAQAgCdASoJABAAA4BaJbACdADdsj9h1xEAAP5Cnh4Pc5aQcpJEWlZHTz6naDuPKiJIL1zq3qxQCWcdODr+ZRKdKuPqI/GD2fISIA4gAAA=",
+      "data:image/webp;base64,UklGRlQAAABXRUJQVlA4IEgAAAAQAgCdASoJABAAA4BaJYgCdAEU8nFRvfwAAP2j6E5prE8P+FFzUdSIdJ7HPhu9KltUxI1ZxHJEg6qMeeQd7R3ogMwYQ0AAAAA=",
   },
   "/images/logistics/itemba-logistics-truck-yard.webp": {
     width: 567,
@@ -259,9 +271,9 @@ export const mediaGenerated = {
   },
   "/images/parking/uzunguni-parking-truck-line.webp": {
     width: 1280,
-    height: 960,
+    height: 620,
     blurDataURL:
-      "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAAAQAgCdASoQAAwAA4BaJZACdGuAAvhMgTQAAPPNTjLeQJkcWaBNFgK16BaGf/LGHVG2oNcWAmvtBx4xLOzSrS+iieAAAA==",
+      "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAABQAgCdASoQAAgAA4BaJZACdH8IwABbw+qnFYAA8TtRUsdtshyA5CsxKNNBnmqs55dlaBvp5IgM78lCucrdtQqZrCmBakax9N+AAA==",
   },
   "/images/parking/uzunguni-parking-yard-overview.webp": {
     width: 1280,

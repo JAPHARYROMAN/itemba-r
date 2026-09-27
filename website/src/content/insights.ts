@@ -34,7 +34,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'route-business-enquiry-itemba-group',
     title: 'How to Route a Business Enquiry to Itemba Group',
-    eyebrow: 'Business Enquiries',
+    eyebrow: 'Business enquiries',
     summary:
       'A practical guide to choosing the right Itemba Group contact route for fuel, trade, logistics, construction supply, hospitality, property, and partnership enquiries.',
     metaDescription:
@@ -82,7 +82,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'tunduma-corridor-fuel-trade-logistics',
     title: 'Why the Tunduma Corridor Matters for Fuel, Trade, and Logistics',
-    eyebrow: 'Location Advantage',
+    eyebrow: 'Location advantage',
     summary:
       'How Itemba Group location in Mpemba-Tunduma supports regional fuel, distribution, logistics, and cross-border business enquiries.',
     metaDescription:
@@ -125,7 +125,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'choose-right-itemba-company',
     title: 'Choosing the Right Itemba Group Company for Your Enquiry',
-    eyebrow: 'Company Guide',
+    eyebrow: 'Company guide',
     summary:
       'A simple guide to Mwanjalisi Oil Co Ltd, Westsides Company Ltd, and Itemba Enterprises Co Ltd so visitors can contact the right operating team.',
     metaDescription:
@@ -174,7 +174,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'supplier-bulk-purchase-enquiries',
     title: 'What Suppliers and Bulk Buyers Should Prepare Before Contacting Itemba Group',
-    eyebrow: 'Partnership Readiness',
+    eyebrow: 'Partnership readiness',
     summary:
       'A checklist for supplier introductions, bulk purchase requests, construction supply enquiries, hospitality customers, and commercial partners.',
     metaDescription:

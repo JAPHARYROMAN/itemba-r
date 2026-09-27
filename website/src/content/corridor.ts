@@ -109,9 +109,9 @@ export const corridorStops = [
   {
     id: 'tunduma-border',
     name: 'Tunduma border',
-    note: 'Tanzania – Zambia, the Tunduma corridor',
+    note: 'Tanzania–Zambia, the Tunduma corridor',
     mapLabel: 'Tunduma border',
-    detail: "One of Southern Africa's busiest trade corridors, with direct access to cross-border flows and regional supply chains.",
+    detail: 'The crossing into Zambia, where goods moving between Tanzania and the countries to the south clear the border.',
   },
   {
     id: 'onward',
@@ -135,7 +135,7 @@ export const corridorCopy = {
     eyebrow: 'One hub, six sites',
     title: 'Every Itemba site sits on the same corridor.',
     body:
-      'Fuel, parking, hardware, hospitality and logistics — all anchored where the Dar es Salaam supply line meets the Tanzania-Zambia border at Tunduma. Hover or tap a pin to explore.',
+      'Fuel, parking, hardware, hospitality and logistics — all anchored where the Dar es Salaam supply line meets the Tanzania–Zambia border at Tunduma. Hover or tap a pin to explore.',
   },
   /** Legend chips, in order. */
   legend: [

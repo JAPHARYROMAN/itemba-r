@@ -131,11 +131,26 @@ export function CardLink({
 /**
  * A mixed-size grid of rounded tiles (sectors, strengths, verification
  * signals). Six columns from `lg`; cells span a third, half, two thirds or
- * the full row, and may be two rows tall. Phones get one column; `third`
- * cells pair up at `md`.
+ * the full row, and may be two rows tall. Phones get one column, or two
+ * compact ones (`phoneColumns={2}`, where a cell that must stay full width
+ * adds `col-span-2`); `third` cells pair up at `md`.
  */
-export function Bento({ as: Tag = 'div', className, children }: { as?: 'div' | 'ul'; className?: string; children: ReactNode }) {
-  return <Tag className={cn('grid grid-cols-1 gap-3 md:grid-cols-6 md:gap-4', className)}>{children}</Tag>;
+export function Bento({
+  as: Tag = 'div',
+  phoneColumns = 1,
+  className,
+  children,
+}: {
+  as?: 'div' | 'ul';
+  phoneColumns?: 1 | 2;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tag className={cn('grid gap-3 md:grid-cols-6 md:gap-4', phoneColumns === 2 ? 'grid-cols-2' : 'grid-cols-1', className)}>
+      {children}
+    </Tag>
+  );
 }
 
 const bentoSpans = {

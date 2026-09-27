@@ -64,7 +64,7 @@ export const ogCards = {
     alt: 'Itemba Group locations',
     eyebrow: 'Locations',
     title: 'Based in Songwe. Connected through Tunduma.',
-    subtitle: 'Headquartered in Mpemba-Tunduma on the Tanzania-Zambia trade corridor.',
+    subtitle: 'Headquartered in Mpemba-Tunduma on the Tanzania–Zambia trade corridor.',
   },
   partnerships: {
     alt: 'Partner with Itemba Group',

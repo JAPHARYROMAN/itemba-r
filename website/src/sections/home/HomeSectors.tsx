@@ -16,6 +16,7 @@ import {
   Reveal,
   Section,
   SmartLink,
+  cn,
   type BentoSpan,
 } from '@/ui';
 
@@ -24,10 +25,12 @@ import {
  *   energy (2/3, with its photograph) · trade (1/3)
  *   logistics · construction · hospitality (1/3 each)
  *   real estate (1/3) · the routing promise (2/3, black)
- * From `md` to `lg` the cells pair up two by two; phones stack them.
- * Only the lead cell carries a photograph, so no picture repeats one the
- * company tiles above already show, and Itemba Estate stays a typographic
- * tile (flags.estateImagery).
+ * From `md` to `lg` the cells pair up two by two. Phones get a compact
+ * two-column grid: icon, sector and the company that runs it, each card one
+ * link, and no photograph; the routing promise spans both columns.
+ * Only the lead cell carries a photograph, and it is not one the company
+ * tiles above or the company pages show; Itemba Estate stays a
+ * typographic tile (flags.estateImagery).
  */
 const spans: readonly BentoSpan[] = ['two-thirds', 'third', 'third', 'third', 'third', 'third'];
 
@@ -39,20 +42,20 @@ function SectorCell({ item, span, lead }: { item: HomeSector; span: BentoSpan; l
   const service = getServiceBySlug(item.serviceSlug);
   const company = service ? getCompanyBySlug(service.companySlug) : undefined;
   const text = (
-    <div className="flex flex-1 flex-col p-7 md:p-8">
-      <Icon name={item.icon} size="lg" strokeWidth={1.4} className="text-accent" />
-      <Heading as="h3" size="h3" className="mt-6 md:mt-10">
+    <div className="flex flex-1 flex-col p-5 md:p-8">
+      <Icon name={item.icon} size="md" strokeWidth={1.4} className="text-accent md:size-8" />
+      <Heading as="h3" size="h3" className="mt-4 max-md:text-body-lg max-md:font-semibold md:mt-10">
         <SmartLink href={serviceUrl(item.serviceSlug)} className={stretchedLink}>
           {item.name}
         </SmartLink>
       </Heading>
       {company ? (
-        <p className="mt-2 flex items-center gap-2 text-caption text-fg-muted">
+        <p className="mt-1.5 flex items-center gap-2 text-caption text-fg-muted md:mt-2">
           <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />
           {homeSectors.runBy} {company.shortName}
         </p>
       ) : null}
-      <span aria-hidden="true" className="mt-auto inline-flex items-center gap-[0.3em] pt-6 text-body text-accent-fg md:pt-8">
+      <span aria-hidden="true" className="mt-auto hidden items-center gap-[0.3em] pt-8 text-body text-accent-fg md:inline-flex">
         {homeSectors.action}
         <Chevron />
       </span>
@@ -67,16 +70,16 @@ function SectorCell({ item, span, lead }: { item: HomeSector; span: BentoSpan; l
       tone="alt"
       accent={company?.accent}
       padding="none"
-      className={lead ? 'group transition-shadow duration-base ease-apple hover:shadow-card md:flex-row' : 'group transition-shadow duration-base ease-apple hover:shadow-card'}
+      className={cn('group transition-shadow duration-base ease-apple hover:shadow-card', lead && 'md:flex-row')}
     >
       {text}
       {lead ? (
-        <Reveal className="relative aspect-[4/3] md:aspect-auto md:w-1/2 md:shrink-0">
+        <Reveal className="relative hidden md:block md:w-1/2 md:shrink-0">
           <Media
             media={item.image}
             alt={item.image.alt}
             fill
-            sizes="(min-width: 1068px) 356px, (min-width: 768px) 50vw, calc(100vw - 44px)"
+            sizes="(min-width: 1112px) 356px, (min-width: 1024px) calc((100vw - 44px) / 3), 50vw"
           />
         </Reveal>
       ) : null}
@@ -92,7 +95,7 @@ export function HomeSectors() {
       <Container>
         <div className="mx-auto max-w-prose text-center">
           <Eyebrow>{homeSectors.eyebrow}</Eyebrow>
-          <Heading as="h2" id="sectors-title" size="display" className="mt-2">
+          <Heading as="h2" id="sectors-title" size="h1" className="mt-2">
             {homeSectors.title}
           </Heading>
           <Lede tone="muted" className="mx-auto mt-5 max-w-[40rem] md:mt-6">
@@ -100,11 +103,11 @@ export function HomeSectors() {
           </Lede>
         </div>
 
-        <Bento className="mt-12 md:mt-16">
+        <Bento phoneColumns={2} className="mt-10 md:mt-16">
           {homeSectors.items.map((item, index) => (
             <SectorCell key={item.serviceSlug} item={item} span={spans[index] ?? 'third'} lead={index === 0} />
           ))}
-          <BentoCell span="half" tone="cinema" className="justify-center lg:col-span-4">
+          <BentoCell span="half" tone="cinema" className="col-span-2 justify-center lg:col-span-4">
             <Heading as="h3" size="h3">
               {routing.title}
             </Heading>

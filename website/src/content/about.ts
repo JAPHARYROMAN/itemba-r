@@ -143,7 +143,7 @@ export const aboutPage = {
     body: [
       'Our head office is at the ',
       { strong: 'Itemba Filling Station' },
-      " along the Tunduma–Ileje Highway in Mpemba, Tunduma — at the Tanzania-Zambia border, one of East and Southern Africa's most active trade corridors.",
+      " along the Tunduma–Ileje Highway in Mpemba, Tunduma — at the Tanzania–Zambia border, one of East and Southern Africa's most active trade corridors.",
     ] satisfies RichText,
     /** Unsourced claim: gated by `songweGrowthClaim`. */
     growth: {

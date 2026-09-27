@@ -1,6 +1,50 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import type { SplitHeadline } from '@/content/types';
 import { cn } from './cn';
+
+/* ── Compounds ────────────────────────────────────────────────────────── */
+
+/** Words joined by a hyphen or an en dash: ITEMBA-HARDWARE, Mpemba-Tunduma, Tanzania–Zambia, cross-border. */
+const COMPOUND = /[\p{L}\p{N}]+(?:[-‐‑–][\p{L}\p{N}]+)+/gu;
+
+/** From where a compound is kept whole: always, or from `md` for headline sizes. */
+const keepFrom = { always: 'whitespace-nowrap', md: 'md:whitespace-nowrap' } as const;
+
+function keepString(text: string, key: string, from: keyof typeof keepFrom): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(COMPOUND)) {
+    const start = match.index ?? 0;
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <span key={`${key}-${start}`} className={keepFrom[from]}>
+        {match[0]}
+      </span>,
+    );
+    last = start + match[0].length;
+  }
+  if (!parts.length) return text;
+  if (last < text.length) parts.push(text.slice(last));
+  return <Fragment key={key}>{parts}</Fragment>;
+}
+
+/**
+ * Keeps hyphenated and dashed compounds on one line, so a phone never sets
+ * "ITEMBA- / HARDWARE" or "Tanzania– / Zambia". Plain-text children only;
+ * elements pass through untouched, and the text content does not change.
+ *
+ * `always` suits copy up to h3 size. At h1 and display sizes a long
+ * compound can be wider than a phone's whole line ("Tanzania–Zambia" at
+ * 48px is about 370px), so there pass `md`: the compound is kept whole from
+ * `md`, and a phone stays free to break it after the dash.
+ */
+export function keepCompounds(children: ReactNode, from: keyof typeof keepFrom = 'always'): ReactNode {
+  if (typeof children === 'string') return keepString(children, 'c', from);
+  if (Array.isArray(children)) {
+    return children.map((child, index) => (typeof child === 'string' ? keepString(child, `c${index}`, from) : child));
+  }
+  return children;
+}
 
 /* ── Eyebrow ──────────────────────────────────────────────────────────── */
 
@@ -73,13 +117,14 @@ export type HeadingProps = {
   children: ReactNode;
 };
 
+/** Sizes small enough that any compound fits a phone's line; larger ones keep compounds whole from `md` (keepCompounds). */
+const compoundSafe: ReadonlySet<HeadingSize> = new Set(['h3', 'h4', 'h5']);
+
 export function Heading({ as: Tag, size, tone = 'default', id, className, children }: HeadingProps) {
+  const resolved = size ?? defaultSizeFor[Tag];
   return (
-    <Tag
-      id={id}
-      className={cn(headingSizes[size ?? defaultSizeFor[Tag]], tone === 'muted' ? 'text-fg-muted' : 'text-fg', className)}
-    >
-      {children}
+    <Tag id={id} className={cn(headingSizes[resolved], tone === 'muted' ? 'text-fg-muted' : 'text-fg', className)}>
+      {keepCompounds(children, compoundSafe.has(resolved) ? 'always' : 'md')}
     </Tag>
   );
 }
@@ -119,9 +164,11 @@ export type LedeProps = {
   children: ReactNode;
 };
 
-/** The 21–24px introduction under a headline. */
+/** The 21–24px introduction under a headline. Compounds stay on one line. */
 export function Lede({ tone = 'default', as: Tag = 'p', className, children }: LedeProps) {
-  return <Tag className={cn('text-lede', tone === 'muted' ? 'text-fg-muted' : 'text-fg', className)}>{children}</Tag>;
+  return (
+    <Tag className={cn('text-lede', tone === 'muted' ? 'text-fg-muted' : 'text-fg', className)}>{keepCompounds(children)}</Tag>
+  );
 }
 
 /* ── Prose ────────────────────────────────────────────────────────────── */

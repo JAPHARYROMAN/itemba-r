@@ -24,7 +24,7 @@ export type SectorVisual = 'fuel' | 'trade' | 'logistics' | 'hardware' | 'estate
 export type IconKey = 'energy' | 'trade' | 'manufacturing' | 'construction' | 'hospitality' | 'realestate' | 'logistics';
 
 /** A line icon content may name: the sector set plus a few general glyphs (src/ui/Icon.tsx). */
-export type ContentIcon = IconKey | 'globe' | 'map-pin' | 'document' | 'arrow-up-right';
+export type ContentIcon = IconKey | 'globe' | 'map-pin' | 'document' | 'droplet' | 'arrow-up-right';
 
 export type LinkItem = {
   label: string;

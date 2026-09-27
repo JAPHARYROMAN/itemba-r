@@ -42,8 +42,15 @@ export type EnquiryRouterProps = {
 
 type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
 
-/** The accent dot of each intent: group gold for the office, the company accent otherwise. */
+/** The accent of each intent: group gold for the office, the company accent otherwise. */
 const intentAccent = (id: IntentId): AccentName => (id === 'general' ? 'group' : id);
+
+/**
+ * The intent's dot: ink for the group office, the company accent otherwise.
+ * Group gold and the Mwanjalisi orange are too close to tell apart as two
+ * 8px dots side by side.
+ */
+const intentDot = (id: IntentId) => (id === 'general' ? 'bg-fg' : 'bg-accent');
 
 /** Containers wide enough for side-by-side fields and a single row of intents. */
 const wide = {
@@ -235,7 +242,7 @@ export default function EnquiryRouter({
                 className="peer sr-only"
               />
               <span className="flex min-h-14 w-full cursor-pointer items-center gap-2.5 rounded-input border border-line-strong bg-[rgb(var(--field))] px-3.5 py-2.5 text-caption font-semibold text-fg transition-[border-color,box-shadow] duration-fast ease-apple hover:border-fg peer-checked:border-fg peer-checked:shadow-[inset_0_0_0_1px_rgb(var(--fg))] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
-                <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-accent" />
+                <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', intentDot(intent.id))} />
                 {intent.segmentLabel}
               </span>
             </label>

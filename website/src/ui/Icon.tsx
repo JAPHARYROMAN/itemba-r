@@ -27,6 +27,7 @@ export type InterfaceIconName =
   | 'map-pin'
   | 'download'
   | 'document'
+  | 'droplet'
   | 'clock'
   | 'globe';
 export type IconName = IconKey | ContactIconName | InterfaceIconName;
@@ -99,6 +100,8 @@ const glyphs: Record<IconName, Glyph> = {
   },
   download: { body: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" {...round} /> },
   document: { body: <path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7l-4-4zM14 3v4h4M9 13h6M9 17h6" {...round} /> },
+  /** A drop of oil: lubricants. */
+  droplet: { body: <path d="M12 3.5s-6 6.4-6 10.7a6 6 0 0012 0C18 9.9 12 3.5 12 3.5z" {...round} /> },
   clock: {
     body: (
       <>

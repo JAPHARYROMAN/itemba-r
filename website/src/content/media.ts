@@ -40,9 +40,10 @@ export type MediaEntry = {
   /**
    * Where the subject sits vertically. A crop to another aspect ratio keeps
    * this edge (the centre when omitted), so a big sky or a signboard at the
-   * top of the frame survives a wide crop.
+   * top of the frame survives a wide crop. A number is a percentage from the
+   * top (CSS object-position), for a subject between the edge and the centre.
    */
-  focus?: 'top' | 'bottom';
+  focus?: 'top' | 'bottom' | number;
   note?: string;
 };
 
@@ -54,15 +55,30 @@ export const media = {
     entity: 'mwanjalisi',
     provenance: 'own',
     focus: 'top',
-    note: 'Raw: images/itemba filling station 002.jpg (4000x3000). Plan lead for the home hero.',
+    note: 'Raw: images/itemba filling station 002.jpg (4000x3000). Includes the fuel-price pylon; the home hero uses mpemba-hero.',
+  },
+  'mpemba-hero': {
+    src: '/images/fuel-stations/itemba-mpemba-hero.webp',
+    alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    focus: 55,
+    note: 'The plan lead for the home hero: the 4000x3000 raw without the fuel-price pylon (its live prices would date the page). Focus 55: in the wide desktop frame the canopy clears the fold under a 96px headline, with the sky above it.',
   },
   'mpemba-dusk': {
     src: '/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp',
     alt: 'ITEMBA-MPEMBA at dusk: motorbikes and a minibus at the pump island under the lit 24-hour canopy',
     entity: 'mwanjalisi',
     provenance: 'own',
-    focus: 'top',
-    note: 'Raw: images/itemba-mpemba 017.jpg (top 4:3 of the portrait). Plan lead for the energy cinema tile.',
+    focus: 40,
+    note: 'Raw: images/itemba-mpemba 017.jpg (top 4:3 of the portrait). Plan lead for the energy cinema tile. Soft and noisy past about 1100px wide: keep it in the content width.',
+  },
+  'mpemba-coach-canopy': {
+    src: '/images/fuel-stations/itemba-mpemba-coach-canopy.webp',
+    alt: 'A coach at the pumps under the ITEMBA-MPEMBA canopy, managed by Mwanjalisi Oil Company Ltd',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    note: 'Raw: images/itemba-mpemba 016.jpg (3000x4000), cropped to a 16:9 band. The Mwanjalisi Oil page hero.',
   },
   'mpemba-station-roadside': {
     src: '/images/fuel-stations/itemba-station-wide-yard.webp',
@@ -76,6 +92,7 @@ export const media = {
     alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy managed by Mwanjalisi Oil',
     entity: 'mwanjalisi',
     provenance: 'own',
+    note: 'Levelled in the pipeline (the raw is about 4.7° off).',
   },
   'mpemba-forecourt': {
     src: '/images/fuel-stations/itemba-mpemba-forecourt.webp',
@@ -100,6 +117,7 @@ export const media = {
     alt: 'ITEMBA-UZUNGUNI filling station forecourt on the TANZAM Highway',
     entity: 'mwanjalisi',
     provenance: 'own',
+    note: 'Cropped in the pipeline to the canopy and the forecourt, without the bare ground in front.',
   },
 
   // ── Mwanjalisi Oil: UZUNGUNI PARKING YARD ────────────────────────────────
@@ -120,7 +138,7 @@ export const media = {
     alt: 'A line of trucks and containers at UZUNGUNI PARKING YARD, Mpemba-Tunduma',
     entity: 'mwanjalisi',
     provenance: 'own',
-    note: 'Not used by the legacy pages; plan lead for the logistics / corridor imagery.',
+    note: 'Cropped in the pipeline to the sky and the truck line. A Mwanjalisi Oil site: never shown as an Itemba Enterprises photograph.',
   },
 
   // ── Itemba Enterprises: Itemba Logistics ─────────────────────────────────
@@ -133,9 +151,10 @@ export const media = {
   },
   'logistics-truck-front': {
     src: '/images/logistics/itemba-logistics-truck-front.webp',
-    alt: 'Itemba Logistics truck front view',
+    alt: 'An Itemba Enterprises truck, seen from the front',
     entity: 'enterprises',
     provenance: 'own',
+    note: 'Portrait 720x1280, shot with a heavy "vivid" filter: the pipeline tones its chroma down further than the rest.',
   },
   'logistics-truck-yard': {
     src: '/images/logistics/itemba-logistics-truck-yard.webp',

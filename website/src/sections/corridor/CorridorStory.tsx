@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 import { corridorCopy, corridorHubStopId, corridorSites, corridorStops } from '@/content/corridor';
 import { withFlags } from '@/content/flags';
 import { cn } from '@/ui/cn';
+import { keepCompounds } from '@/ui/text';
 import { nodeLabel, routeMap, routeNodes, routeSegments, routeTrack, siteDot } from './geometry';
 import './corridor.css';
 
@@ -52,8 +53,12 @@ export function CorridorStory({ stepHeadingLevel = 3, labelledBy, className }: C
             <path key={d} className="corridor-route__line" data-step={index + 2} d={d} pathLength={1} />
           ))}
 
-          {/* The sites light up with the hub's stop, so they share its step number (and timeline). */}
+          {/*
+            The sites light up with the hub's stop, so they share its step number (and timeline).
+            Until then only their hairline ring shows (one quiet circle, not six empty dots).
+          */}
           <g data-step={hubStep}>
+            {sites.length ? <circle className="corridor-route__ring" cx={hub.x} cy={hub.y} r={routeMap.siteRing} /> : null}
             {sites.map((site, index) => {
               const dot = siteDot(index, sites.length, hub);
               return (
@@ -96,7 +101,7 @@ export function CorridorStory({ stepHeadingLevel = 3, labelledBy, className }: C
             <div>
               <p className="text-eyebrow text-accent-fg">{stop.note}</p>
               <StopName className="corridor-step__title mt-1.5 text-h3 text-fg">{stop.name}</StopName>
-              <p className="mt-3 max-w-[34rem] text-body-lg text-fg-muted">{stop.detail}</p>
+              <p className="mt-3 max-w-[34rem] text-body-lg text-fg-muted">{keepCompounds(stop.detail)}</p>
               {stop.id === corridorHubStopId && sites.length ? (
                 <ul role="list" className="mt-6 grid gap-x-6 gap-y-3 sm:grid-cols-2">
                   {sites.map((site) => (

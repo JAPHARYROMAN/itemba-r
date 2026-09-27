@@ -25,23 +25,29 @@ export type StatProps = {
   label: ReactNode;
   /** A short note under the label. */
   note?: ReactNode;
-  /** `display` (40–72px) by default; `h1` for denser rows. */
-  size?: 'display' | 'h1';
+  /**
+   * `display` (40–72px) by default; `display-xl` (56px on phones, up to
+   * 96px) for a "by the numbers" moment that must outrank its section
+   * title; `h1` for denser rows.
+   */
+  size?: 'display-xl' | 'display' | 'h1';
   /** `accent` sets the numeral in the tone's text-safe accent (a company's figure on its page). */
   tone?: 'default' | 'accent';
   className?: string;
 };
+
+const statSizes = {
+  'display-xl': 'text-display-xl max-md:text-[3.5rem]',
+  display: 'text-display',
+  h1: 'text-h1',
+} as const;
 
 export function Stat({ value, label, note, size = 'display', tone = 'default', className }: StatProps) {
   return (
     <div className={cn('flex min-w-0 flex-col', className)}>
       <dt className="order-2 mt-2 text-body text-fg-muted">{label}</dt>
       <dd
-        className={cn(
-          'order-1 font-semibold tabular-nums',
-          tone === 'accent' ? 'text-accent-fg' : 'text-fg',
-          size === 'display' ? 'text-display' : 'text-h1',
-        )}
+        className={cn('order-1 font-semibold tabular-nums', tone === 'accent' ? 'text-accent-fg' : 'text-fg', statSizes[size])}
       >
         {value}
       </dd>

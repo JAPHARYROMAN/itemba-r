@@ -37,6 +37,7 @@ import {
   Figure,
   Heading,
   Icon,
+  Lede,
   Media,
   PageHero,
   Reveal,
@@ -174,6 +175,18 @@ describe('text and layout', () => {
     expect(render(h(Container, { children: 'x' }))).toContain('mx-auto box-content max-w-content px-gutter');
   });
 
+  it('keeps hyphenated and dashed compounds on one line, without changing the text', () => {
+    const lede = render(h(Lede, { children: 'Wholesale beverages, ITEMBA-HARDWARE and the Tanzania–Zambia border.' }));
+    expect(lede).toContain('<span class="whitespace-nowrap">ITEMBA-HARDWARE</span>');
+    expect(lede).toContain('<span class="whitespace-nowrap">Tanzania–Zambia</span>');
+    expect(lede.replace(/<[^>]*>/g, '')).toBe('Wholesale beverages, ITEMBA-HARDWARE and the Tanzania–Zambia border.');
+    expect(render(h(Heading, { as: 'h3', children: 'Logistics · Cross-border transit' }))).toContain('<span class="whitespace-nowrap">Cross-border</span>');
+    // Headline sizes keep it whole from md only: on a phone it can be wider than the line.
+    expect(render(h(Heading, { as: 'h1', size: 'display-xl', children: 'On the Tanzania–Zambia corridor.' }))).toContain(
+      'On the <span class="md:whitespace-nowrap">Tanzania–Zambia</span> corridor.',
+    );
+  });
+
   it('Eyebrow uses the text-safe accent', () => {
     expect(render(h(Eyebrow, { dot: true, children: 'Westsides Company Ltd' }))).toContain('text-accent-fg');
   });
@@ -281,6 +294,11 @@ describe('cards', () => {
 });
 
 describe('page parts', () => {
+  it('ChevronLink beside a large pill is set at the pill label size (body-lg), never larger', () => {
+    expect(render(h(ChevronLink, { href: '/partnerships', size: 'body-lg', children: 'Start a business enquiry' }))).toContain('text-body-lg');
+    expect(render(h(ContactLink, { kind: 'tel', appearance: 'chevron', size: 'lg', children: 'Call' }))).toContain('text-body-lg');
+  });
+
   it('SubNav is a named, sticky nav with anchors and the Enquire pill', () => {
     const html = render(
       h(SubNav, {
@@ -294,6 +312,14 @@ describe('page parts', () => {
     expect(html).toMatch(/^<nav aria-label="Westsides sections" data-subnav="" data-tone="light" data-accent="westsides" class="sticky/);
     expect(html).toContain('href="#services"');
     expect(html).toContain('href="/partnerships"');
+    // The global nav's material, and no phone menu without its label.
+    expect(html).toContain('material-nav');
+    expect(html).not.toContain('popover');
+    const withMenu = render(
+      h(SubNav, { title: 'Westsides', label: 'Westsides sections', menuLabel: 'Show sections', links: [{ href: '#services', label: 'Services' }] }),
+    );
+    expect(withMenu).toMatch(/<button type="button" popovertarget="subnav-sections" aria-label="Show sections"/i);
+    expect(withMenu).toMatch(/<div id="subnav-sections" popover="auto"[^>]*><ul[^>]*><li[^>]*><a href="#services"/);
   });
 
   it('CtaBand is labelled by its heading', () => {

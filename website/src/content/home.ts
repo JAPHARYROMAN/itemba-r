@@ -33,15 +33,15 @@ export type HomeSector = {
 };
 
 export const homeHero = {
-  eyebrow: 'Songwe Region · Tanzania–Zambia Corridor',
+  eyebrow: 'Songwe Region · Tanzania–Zambia corridor',
   headline: { lead: 'Fuel, trade & logistics on the', accent: 'Tanzania–Zambia corridor.' } satisfies SplitHeadline,
-  lede:
-    'Itemba Group is a diversified Tanzanian holding company based in Mpemba-Tunduma, Songwe Region — spanning fuel and energy, trade and distribution, logistics, hospitality, real estate and construction supply.',
+  /** Two lines on desktop: the group in one sentence. The sectors follow further down the page. */
+  lede: 'Itemba Group is a diversified Tanzanian holding group: three companies, six sectors, one base in Mpemba-Tunduma.',
   actions: [
     { label: 'Explore the group', href: '/companies' },
     { label: 'Start a business enquiry', href: '/partnerships' },
   ] satisfies LinkItem[],
-  image: mediaImage('mpemba-station-wide', {
+  image: mediaImage('mpemba-hero', {
     alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
   }),
 };
@@ -49,7 +49,7 @@ export const homeHero = {
 export const homeStatement = {
   headline: { lead: 'One group. Three companies.', accent: 'The corridor that moves the south.' } satisfies SplitHeadline,
   body:
-    'Each company operates independently, with full responsibility for its market — unified under one Itemba structure on the Tanzania-Zambia border.',
+    'Each company operates independently, with full responsibility for its market — unified under one Itemba structure on the Tanzania–Zambia border.',
 };
 
 /** One tile per company, in public order. */
@@ -102,8 +102,8 @@ export const homeSectors = {
       icon: 'energy',
       name: 'Energy, Fuel & Parking',
       serviceSlug: 'fuel-and-lubricants',
-      image: mediaImage('mpemba-truck-canopy', {
-        alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy',
+      image: mediaImage('uzunguni-pump-island', {
+        alt: 'Pumps under the ITEMBA-UZUNGUNI canopy, managed by Mwanjalisi Oil',
       }),
     },
     {
@@ -146,7 +146,7 @@ export const homeCorridor = {
     "The Mpemba-Tunduma base sits on one of Southern Africa's busiest trade corridors — giving every company direct access to cross-border flows and regional supply chains.",
   facts: [
     { label: 'Headquarters', value: 'Mpemba-Tunduma, Songwe Region' },
-    { label: 'Border', value: 'Tanzania – Zambia, the Tunduma corridor' },
+    { label: 'Border', value: 'Tanzania–Zambia, the Tunduma corridor' },
     { label: 'Reach', value: 'Southern Highlands · Zambia · DRC · Zimbabwe · Malawi' },
   ],
   link: { label: 'View the Songwe-Tunduma location profile', href: '/locations/songwe-tunduma' } satisfies LinkItem,
@@ -159,7 +159,7 @@ export const homeCorridorMap = {
   eyebrow: 'The corridor, mapped',
   title: 'One hub. Every business on the line.',
   body:
-    "Stations, parking, hardware, hospitality and the group office all sit where Dar es Salaam's supply line meets the Tanzania-Zambia border. Explore the cluster.",
+    "Stations, parking, hardware, hospitality and the group office all sit where Dar es Salaam's supply line meets the Tanzania–Zambia border. Explore the cluster.",
 };
 
 /** "By the numbers": static numerals, no count-up. `requires` marks the unconfirmed divisions count. */

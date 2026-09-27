@@ -150,11 +150,75 @@ html:has([data-subnav]) {
 /*
  * The sub-nav carries the page's own Enquire pill (preset to that company,
  * service or profile), so the global bar's pill steps aside, as Apple's
- * global nav does beside a product page's Buy button. Without :has() both
- * simply show.
+ * global nav does beside a product page's Buy button. From `lg` it keeps
+ * its slot (visibility, which also takes it out of the tab order and the
+ * accessibility tree), so the centred links sit at the same x on every
+ * page; below `lg` the bar has room to spare and it simply goes. Without
+ * :has() both simply show.
  */
 html:has([data-subnav]) .site-nav-cta {
+  visibility: hidden;
+}
+
+@media (max-width: 1023.98px) {
+  html:has([data-subnav]) .site-nav-cta {
+    display: none;
+  }
+}
+
+/*
+ * On phones the quick-contact bar (src/islands/QuickContact.tsx) carries the
+ * Enquire pill, so the global bar keeps only the crest and the menu, as
+ * Apple's phone bar does. The bar shows below `md` only.
+ */
+@media (max-width: 767.98px) {
+  html:has([data-quick-contact]) .site-nav-cta {
+    display: none;
+  }
+}
+
+/*
+ * The sub-nav's section menu on phones (src/islands/SubNavMenu.tsx): a
+ * native popover that drops from under the two sticky bars. It shows only
+ * while :popover-open matches, and never from `md`, where the anchors sit
+ * in the bar.
+ */
+.subnav-menu {
   display: none;
+  position: fixed;
+  inset: calc(var(--sticky-top, var(--nav-height)) + var(--subnav-height)) 0 auto;
+  width: 100%;
+  max-width: none;
+  max-height: calc(100dvh - var(--sticky-top, var(--nav-height)) - var(--subnav-height));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid rgb(var(--line));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
+}
+
+.subnav-menu:popover-open {
+  display: block;
+}
+
+.subnav-menu-toggle:has(+ .subnav-menu:popover-open) .subnav-menu-chevron {
+  transform: rotate(180deg);
+}
+
+@media (min-width: 768px) {
+  .subnav-menu {
+    display: none !important;
+  }
+}
+
+/* Without popover support the menu cannot open: its button goes too (the page still scrolls to every section). */
+@supports not selector(:popover-open) {
+  .subnav-menu,
+  .subnav-menu-toggle {
+    display: none !important;
+  }
 }
 
 /* ── LEGACY: pre-rebuild page classes. Delete in WP3.1 with the old pages. ── */

@@ -20,7 +20,7 @@ export function SiteHeader() {
     <header className="site-header material-nav sticky top-0 z-nav">
       <Container size="content" className="flex h-nav items-center gap-4">
         <Link href="/" aria-label={brandLabel} className="-ml-1 flex h-11 shrink-0 items-center px-1">
-          <Crest eager />
+          <Crest variant="nav" eager />
         </Link>
         <SiteNav
           links={headerLinks}
@@ -29,7 +29,7 @@ export function SiteHeader() {
           menuLabel={shellCopy.menuOpen}
           closeLabel={shellCopy.menuClose}
           brandLabel={brandLabel}
-          crest={<Crest />}
+          crest={<Crest variant="nav" />}
         />
       </Container>
     </header>

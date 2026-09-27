@@ -1,12 +1,13 @@
 import { companyPageCopy, type Company, type CompanySite } from '@/content/companies';
-import { Card, Container, Eyebrow, FactList, Heading, Icon, Media, Reveal, Section, cn } from '@/ui';
+import { Card, Container, Eyebrow, FactList, Heading, Icon, Media, Reveal, Section, cn, keepCompounds } from '@/ui';
 import { companySectionIds } from './CompanySubNav';
 
 /**
  * A site card: its photograph, what it is, its name and where it is. A
  * site without a photograph is typographic: among photo cards it gets a
- * quiet icon panel the size of a photograph, so the row lines up; when no
- * site has a photograph, the cards are compact, the icon above the text.
+ * panel the size of a photograph that sets its figure large ("3 upcoming
+ * stations"), or its icon when it has no figure, so the row lines up; when
+ * no site has a photograph, the cards are compact, the icon above the text.
  */
 function SiteCard({ site, sizes, panel }: { site: CompanySite; sizes: string; panel: boolean }) {
   const icon = site.icon ?? 'map-pin';
@@ -14,11 +15,19 @@ function SiteCard({ site, sizes, panel }: { site: CompanySite; sizes: string; pa
     <Card as="li" padding="none" className="flex flex-col overflow-hidden">
       {site.image ? (
         <Reveal>
-          <Media media={site.image} alt={site.image.alt} sizes={sizes} aspect="4/3" />
+          <Media media={site.image} alt={site.image.alt} sizes={sizes} aspect="3/2" />
         </Reveal>
       ) : panel ? (
-        <div className="flex aspect-[3/1] items-center justify-center border-b border-line sm:aspect-[4/3]">
-          <Icon name={icon} size="xl" strokeWidth={1.2} className="text-accent" />
+        <div className="flex aspect-[3/1] flex-col items-center justify-center border-b border-line px-6 text-center sm:aspect-[3/2]">
+          {site.figure ? (
+            // Decorative: the card's heading and text below say the same in words.
+            <p aria-hidden="true" className="flex flex-col items-center">
+              <span className="text-display-xl tabular-nums text-accent-fg">{site.figure.value}</span>
+              <span className="mt-1 text-body-lg text-fg-muted">{site.figure.label}</span>
+            </p>
+          ) : (
+            <Icon name={icon} size="xl" strokeWidth={1.2} className="text-accent" />
+          )}
         </div>
       ) : null}
       <div className="flex flex-1 flex-col p-6 md:p-7">
@@ -27,7 +36,7 @@ function SiteCard({ site, sizes, panel }: { site: CompanySite; sizes: string; pa
         <Heading as="h3" size="h4" className="mt-1.5">
           {site.name}
         </Heading>
-        <p className="mt-2 text-body text-fg-muted">{site.detail}</p>
+        <p className="mt-2 text-body text-fg-muted">{keepCompounds(site.detail)}</p>
       </div>
     </Card>
   );
@@ -37,7 +46,9 @@ function SiteCard({ site, sizes, panel }: { site: CompanySite; sizes: string; pa
  * "Brands and sites": the trading brands, stations, branches and yards the
  * company runs. Four sites sit two by two from `sm` (large enough for the
  * photographs and the ALL-CAPS brand names); three sit three across from
- * `md`. A branch list follows where the company has one.
+ * `md`. Photographs are 3:2, which trims the bare foreground most of these
+ * yard and forecourt shots carry. A branch list follows where the company
+ * has one.
  */
 export function CompanySites({ company }: { company: Company }) {
   const copy = companyPageCopy;

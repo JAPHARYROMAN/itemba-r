@@ -137,16 +137,21 @@
   stroke-dasharray: 3 6;
 }
 
+/*
+ * Sizes are in the drawing's user units, which render at about 1.14px from
+ * `lg` (src/sections/corridor/geometry.ts routeMap): the node labels read at
+ * about 17px, the border sides at 15px and the route at 3px.
+ */
 .corridor-route__side {
   fill: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .corridor-route__track,
 .corridor-route__line {
   fill: none;
-  stroke-width: 3;
+  stroke-width: 2.75;
   stroke-linecap: round;
 }
 
@@ -181,6 +186,13 @@
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+/* The six sites sit on one hairline ring around the hub node. */
+.corridor-route__ring {
+  fill: none;
+  stroke: rgb(var(--line-strong));
+  stroke-width: 1;
 }
 
 .corridor-route__site {
@@ -246,9 +258,10 @@
 
 /* Wide screens: the drawing beside the list, sticky while the stops pass. */
 @media screen and (min-width: 1024px) {
+  /* Two equal columns: the drawing fills about 500px beside the stops. */
   .corridor-story {
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     column-gap: 4rem;
     align-items: start;
   }
@@ -317,9 +330,10 @@
       --step-timeline: --corridor-step-5;
     }
 
+    /* A little over a quarter of a screen per stop keeps the whole section within 2.5 screens. */
     .corridor-step {
       display: flex;
-      min-height: 62svh;
+      min-height: 28svh;
       align-items: center;
       border-top: 0;
       view-timeline-name: var(--step-timeline);
@@ -410,14 +424,15 @@
   }
 }
 
+/* Unlit, a site is not drawn at all: only the hairline ring shows. */
 @keyframes corridor-site {
   from {
-    fill: rgb(var(--surface));
-    stroke: rgb(var(--line-strong));
+    fill-opacity: 0;
+    stroke-opacity: 0;
   }
 
   to {
-    fill: rgb(var(--manager));
-    stroke: rgb(var(--surface));
+    fill-opacity: 1;
+    stroke-opacity: 1;
   }
 }

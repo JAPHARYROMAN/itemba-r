@@ -16,17 +16,19 @@
  * Every output keeps its existing public/images path: the URLs are published
  * in JSON-LD, and the PDF script rewrites the /images/ prefix.
  *
- * Processing per image: auto-orient → optional crop/trim → resize (2400px
- * long edge for hero-class images, 1600px for the rest, never enlarged) →
- * grade → webp q82. All metadata (EXIF, GPS, device data, ICC) is dropped;
- * pixels are converted to sRGB first.
+ * Processing per image: auto-orient → optional straighten/crop/trim →
+ * resize (2400px long edge for hero-class images, 1600px for the rest,
+ * never enlarged) → grade → webp q82. All metadata (EXIF, GPS, device data,
+ * ICC) is dropped; pixels are converted to sRGB first.
  *
- * The grade (identical for every image; no HDR, no clarity, no sharpening),
+ * The grade (the same for every image; no HDR, no clarity, no sharpening),
  * computed per pixel in OKLab so hue never moves:
  * - shadows lifted slightly by a curve on lightness that pins black and
  *   white: L' = L + SHADOW_LIFT·L·(1−L)² (on 8-bit greys: 15→20, 30→37,
  *   60→68, 128→134, 200→201; pure black and white are unchanged);
- * - chroma scaled by 0.85, i.e. saturation reduced by 15%.
+ * - chroma scaled by 0.85, i.e. saturation reduced by 15%. A recipe may set
+ *   its own `saturation` where the phone already applied a heavy "vivid"
+ *   filter (the exception is noted beside its recipe).
  *
  * Usage (from website/):
  *   npm run images                     rebuild every output, then media.generated.ts
@@ -65,13 +67,34 @@ const legacy = (file) => ({ kind: 'legacy', file });
 
 /**
  * One entry per file under public/images. `hero` marks the plan's lead
- * images (2400px masters); `crop` is in auto-oriented source pixels; `trim`
- * removes the black letterbox bars left on phone screenshots.
+ * images (2400px masters); `rotate` levels a tilted shot (degrees, clockwise
+ * positive) and keeps the largest centred frame of the original shape;
+ * `crop` is in auto-oriented (and levelled) source pixels; `trim` removes
+ * the black letterbox bars left on phone screenshots; `saturation`
+ * overrides the chroma multiplier for that image.
  */
 export const RECIPES = [
   // ── Mwanjalisi Oil: ITEMBA-MPEMBA ─────────────────────────────────────────
-  // Home hero: ITEMBA-MPEMBA under a big sky (Samsung 4000x3000 original).
+  // ITEMBA-MPEMBA under a big sky (Samsung 4000x3000 original), as the
+  // company band, the profile covers and the JSON-LD have always used it.
   { out: 'fuel-stations/itemba-filling-station-wide.webp', src: raw('itemba filling station 002.jpg'), hero: true },
+  // Home hero: the same frame without the fuel-price pylon on the left (its
+  // live prices would date the page) and with less bare forecourt; the crop
+  // also centres the canopy.
+  {
+    out: 'fuel-stations/itemba-mpemba-hero.webp',
+    src: raw('itemba filling station 002.jpg'),
+    hero: true,
+    crop: { left: 600, top: 150, width: 3400, height: 2400 },
+  },
+  // A coach under the ITEMBA-MPEMBA canopy (3000x4000 original): the band
+  // from the canopy's edge to the pump island, for the Mwanjalisi Oil hero.
+  {
+    out: 'fuel-stations/itemba-mpemba-coach-canopy.webp',
+    src: raw('itemba-mpemba 016.jpg'),
+    hero: true,
+    crop: { left: 0, top: 615, width: 3000, height: 1688 },
+  },
   // Roadside panorama with a tanker: a full-width corridor band (4000x3000 original).
   { out: 'fuel-stations/itemba-station-wide-yard.webp', src: raw('itemba.jpg'), hero: true },
   // Dusk "Itemba 24 Hours" pump island for the energy cinema tile. New file:
@@ -84,7 +107,8 @@ export const RECIPES = [
     crop: { left: 0, top: 0, width: 3000, height: 2250 },
   },
   { out: 'fuel-stations/itemba-filling-station-night.webp', src: raw('itemba filling station.jpg') },
-  { out: 'fuel-stations/itemba-mpemba-truck-canopy.webp', src: raw('itemba-mpemba-015.jpg') },
+  // Shot about 4.7° off level (the canopy pillars lean): levelled.
+  { out: 'fuel-stations/itemba-mpemba-truck-canopy.webp', src: raw('itemba-mpemba-015.jpg'), rotate: -4.7 },
   { out: 'fuel-stations/itemba-mpemba-forecourt.webp', src: raw('itemba-mpemba 003.jpg') },
   { out: 'fuel-stations/itemba-mpemba-service-yard.webp', src: raw('itemba-mpemba 012.jpg') },
   { out: 'fuel-stations/itemba-mpemba-canopy.webp', src: raw('itemba-mpemba 014.jpg') },
@@ -96,7 +120,12 @@ export const RECIPES = [
   { out: 'fuel-stations/itemba-uzunguni-pump-island.webp', src: raw('itemba-uzunguni 004.jpg') },
   { out: 'fuel-stations/itemba-uzunguni-close.webp', src: raw('itemba-uzunguni 003.jpg') },
   { out: 'fuel-stations/itemba-uzunguni-station.webp', src: raw('itemba-uzunguni 003.jpg') },
-  { out: 'fuel-stations/itemba-uzunguni-forecourt-wide.webp', src: raw('itemba-uzunguni 005.jpg') },
+  // The canopy and the forecourt life, without the bare ground in front.
+  {
+    out: 'fuel-stations/itemba-uzunguni-forecourt-wide.webp',
+    src: raw('itemba-uzunguni 005.jpg'),
+    crop: { left: 0, top: 0, width: 1152, height: 580 },
+  },
   { out: 'fuel-stations/itemba-uzunguni-forecourt.webp', src: raw('itemba-uzunguni 005.jpg') },
   { out: 'fuel-stations/itemba-uzunguni-front.webp', src: raw('itemba-uzunguni 007.jpg') },
   { out: 'fuel-stations/itemba-uzunguni-roadside.webp', src: raw('itemba-uzunguni 008.jpg') },
@@ -111,14 +140,22 @@ export const RECIPES = [
 
   // ── Mwanjalisi Oil: UZUNGUNI PARKING YARD ─────────────────────────────────
   // The strongest "corridor that moves the south" photograph (logistics lead).
-  { out: 'parking/uzunguni-parking-truck-line.webp', src: raw('uzunguni-parking 002.jpg'), hero: true },
+  // Trimmed to the sky and the truck line, without most of the yard floor.
+  {
+    out: 'parking/uzunguni-parking-truck-line.webp',
+    src: raw('uzunguni-parking 002.jpg'),
+    hero: true,
+    crop: { left: 0, top: 80, width: 1280, height: 620 },
+  },
   { out: 'parking/uzunguni-parking-yard-trucks.webp', src: raw('uzunguni-parking 003.jpg') },
   { out: 'parking/uzunguni-parking-container-trucks.webp', src: raw('uzunguni-parking 006.jpg') },
   { out: 'parking/uzunguni-parking-yard-overview.webp', src: raw('uzunguni-parking 007.jpg') },
 
   // ── Itemba Enterprises: Itemba Logistics ──────────────────────────────────
   { out: 'logistics/itemba-logistics-tanker-under-canopy.webp', src: raw('itemba logistics.jpg') },
-  { out: 'logistics/itemba-logistics-truck-front.webp', src: raw('itemba logistics 002.jpg') },
+  // Shot through a heavy "vivid" phone filter (neon trees, magenta
+  // lettering): chroma 0.55 rather than 0.85 brings it back to the set.
+  { out: 'logistics/itemba-logistics-truck-front.webp', src: raw('itemba logistics 002.jpg'), saturation: 0.55 },
   { out: 'logistics/itemba-logistics-truck-yard.webp', src: raw('itemba logistics 001.jpg') },
 
   // ── Westsides: wholesale beverages ────────────────────────────────────────
@@ -189,7 +226,7 @@ const encode = (l) => TO_SRGB[Math.round(Math.min(1, Math.max(0, l)) * LINEAR_ST
 const lift = (L) => L + SHADOW_LIFT * L * (1 - L) * (1 - L);
 
 /** Apply the grade in place to packed 8-bit sRGB (3 channels). */
-function grade(data) {
+function grade(data, saturation = SATURATION) {
   for (let i = 0; i < data.length; i += 3) {
     const r = TO_LINEAR[data[i]];
     const g = TO_LINEAR[data[i + 1]];
@@ -199,8 +236,8 @@ function grade(data) {
     const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
     const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
     const L = lift(0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s);
-    const A = SATURATION * (1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s);
-    const B = SATURATION * (0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s);
+    const A = saturation * (1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s);
+    const B = saturation * (0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s);
     // OKLab → linear sRGB
     const l2 = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
     const m2 = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
@@ -218,6 +255,24 @@ async function toRaw(pipeline) {
 
 const fromRaw = (image) => sharp(image.data, { raw: image.info });
 
+/**
+ * Turn by `degrees` (clockwise positive), then keep the largest centred
+ * rectangle of the original shape that holds only photograph: a W×H frame
+ * turned by θ keeps (W, H) · 1 / (cos θ + (long side / short side) · sin θ).
+ */
+async function straighten(image, degrees) {
+  const { width, height } = image.info;
+  const theta = (Math.abs(degrees) * Math.PI) / 180;
+  const ratio = Math.max(width, height) / Math.min(width, height);
+  const scale = 1 / (Math.cos(theta) + ratio * Math.sin(theta));
+  const w = Math.floor(width * scale);
+  const h = Math.floor(height * scale);
+  const turned = await toRaw(fromRaw(image).rotate(degrees, { background: '#000000' }));
+  const left = Math.floor((turned.info.width - w) / 2);
+  const top = Math.floor((turned.info.height - h) / 2);
+  return toRaw(fromRaw(turned).extract({ left, top, width: w, height: h }));
+}
+
 /** Render one recipe to webp bytes. */
 export async function render(recipe) {
   const input = await readFile(sourcePath(recipe.src));
@@ -225,7 +280,8 @@ export async function render(recipe) {
   // 1. Auto-orient from EXIF, convert to sRGB, drop alpha. Raw pixels carry no metadata.
   let image = await toRaw(sharp(input, { failOn: 'error' }).rotate().toColourspace('srgb').removeAlpha());
 
-  // 2. Composition: explicit crop, or trim black letterbox bars.
+  // 2. Composition: level a tilted shot, explicit crop, or trim black letterbox bars.
+  if (recipe.rotate) image = await straighten(image, recipe.rotate);
   if (recipe.crop) image = await toRaw(fromRaw(image).extract(recipe.crop));
   if (recipe.trim) image = await toRaw(fromRaw(image).trim({ background: '#000000', threshold: 24 }));
 
@@ -235,9 +291,9 @@ export async function render(recipe) {
     fromRaw(image).resize({ width: max, height: max, fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' }),
   );
 
-  // 4. Grade: shadow lift on lightness, chroma −15%, hue untouched.
+  // 4. Grade: shadow lift on lightness, chroma −15% (or the recipe's own), hue untouched.
   if (image.info.channels !== 3) throw new Error(`${recipe.out}: expected 3-channel sRGB, got ${image.info.channels}`);
-  grade(image.data);
+  grade(image.data, recipe.saturation ?? SATURATION);
 
   // 5. Encode. No withMetadata(): EXIF, XMP and ICC are all omitted.
   return fromRaw(image).webp(WEBP).toBuffer();

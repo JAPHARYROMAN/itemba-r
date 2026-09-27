@@ -12,8 +12,9 @@ export const companySectionIds = {
 
 /**
  * The sticky local bar of a company page, as on an Apple product page: the
- * company's name beside its accent dot, the section anchors (from `md`) and
- * the Enquire pill, which jumps to the form preset to this company.
+ * company's name beside its accent dot, the section anchors (in the bar
+ * from `md`, in a chevron menu beside the name on phones) and the Enquire
+ * pill, which jumps to the form preset to this company.
  */
 export function CompanySubNav({ company }: { company: Company }) {
   const { nav } = companyPageCopy;
@@ -23,6 +24,7 @@ export function CompanySubNav({ company }: { company: Company }) {
       title={company.shortName}
       label={`${company.shortName} ${nav.labelSuffix}`}
       accent={company.accent}
+      menuLabel={nav.menu}
       links={[
         { href: `#${ids.whatWeDo}`, label: nav.whatWeDo },
         { href: `#${ids.sites}`, label: nav.sites },

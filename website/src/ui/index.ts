@@ -11,7 +11,7 @@
 export { cn } from './cn';
 export { Container, Section, Grid, Stack, Divider } from './layout';
 export type { ContainerSize, SectionProps, SectionSpace, GridColumns, Gap } from './layout';
-export { Eyebrow, Heading, HeadlineText, Lede, Prose } from './text';
+export { Eyebrow, Heading, HeadlineText, Lede, Prose, keepCompounds } from './text';
 export type { HeadingLevel, HeadingSize } from './text';
 export {
   Button,

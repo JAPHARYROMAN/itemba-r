@@ -80,6 +80,9 @@ describe('SiteHeader', () => {
     expect(crest).toContain('loading="eager"');
     expect(crest).toMatch(/fetchPriority="low"/i);
     expect(crest).toContain('w=96');
+    // The nav mark (the shield and ITEMBA): the full lockup's GROUP line would be about 5px tall here.
+    expect(crest).toContain('logo-nav.png');
+    expect(crest).toContain('height="30"');
     expect(html).toContain(`<nav aria-label="${shellCopy.navLabel}"`);
     expect(html).toMatch(/<a aria-label="Itemba Group home" class="[^"]*" href="\/">/);
 
@@ -132,6 +135,8 @@ describe('SiteFooter', () => {
     expect(html).toContain(
       'Mwanjalisi Oil Co Ltd, Westsides Company Ltd and Itemba Enterprises Co Ltd are legally independent companies of Itemba Group.',
     );
+    // The footer keeps the full lockup, GROUP line included.
+    expect(html.match(/<img [^>]*>/)?.[0]).toContain('logo.png');
   });
 
   it('links every section of the site', () => {

@@ -15,7 +15,7 @@ export function HomeCorridor() {
       <Container>
         <div className="mx-auto max-w-prose text-center">
           <Eyebrow>{homeCorridor.eyebrow}</Eyebrow>
-          <Heading as="h2" id="corridor-title" size="display" className="mt-2">
+          <Heading as="h2" id="corridor-title" size="h1" className="mt-2">
             {homeCorridor.title}
           </Heading>
           <Lede tone="muted" className="mx-auto mt-5 max-w-[40rem] md:mt-6">
@@ -23,9 +23,9 @@ export function HomeCorridor() {
           </Lede>
         </div>
 
-        <CorridorStory labelledBy="corridor-title" className="mt-16 md:mt-24" />
+        <CorridorStory labelledBy="corridor-title" className="mt-12 md:mt-16" />
 
-        <div className="mt-16 md:mt-24">
+        <div className="mt-12 md:mt-16">
           <FactList layout="grid" items={homeCorridor.facts.map((fact) => ({ key: fact.label, term: fact.label, detail: fact.value }))} />
           <ChevronLink href={homeCorridor.link.href} className="mt-8">
             {homeCorridor.link.label}

@@ -34,7 +34,7 @@ export const locationProfiles: LocationProfile[] = [
     summary:
       'Itemba Group is headquartered in Mpemba-Tunduma, Songwe Region, a practical operating base for fuel, trade, logistics, construction supply, hospitality, and property services.',
     detail:
-      'The group location places its companies close to regional customers, transport movement, construction demand, and the Tanzania-Zambia border corridor. This position supports both local business activity and cross-border commercial enquiries.',
+      'The group location places its companies close to regional customers, transport movement, construction demand, and the Tanzania–Zambia border corridor. This position supports both local business activity and cross-border commercial enquiries.',
     metaDescription:
       'Itemba Group location in Mpemba-Tunduma, Songwe Region, Tanzania, serving fuel, trade, logistics, construction supply, hospitality, and real estate enquiries.',
     visual: 'corridor',
@@ -102,7 +102,7 @@ export function getLocationBySlug(slug: string): LocationProfile | undefined {
 }
 
 /** Places the location's LocalBusiness serves (JSON-LD). */
-export const locationAreaServed = ['Songwe Region', 'Tunduma', 'Mpemba', 'Tanzania-Zambia corridor'] as const;
+export const locationAreaServed = ['Songwe Region', 'Tunduma', 'Mpemba', 'Tanzania–Zambia corridor'] as const;
 
 /** /locations index copy. */
 export const locationsPage = {

@@ -63,15 +63,20 @@ export function pinGeometry(id: CorridorSite['id']): PinGeometry {
 
 /* ── The route: Dar es Salaam to the border and beyond ────────────────── */
 
+/**
+ * The drawing fills a half-width column of the content container (about
+ * 500px from `lg`), so one user unit renders at about 1.14px: labels set at
+ * 15 units read at about 17px, and the 2.75-unit route at about 3px.
+ */
 export const routeMap = {
-  width: 360,
-  height: 600,
+  width: 440,
+  height: 560,
   /** The Tanzania–Zambia border line crosses the route at the Tunduma node. */
-  borderY: 446,
+  borderY: 415,
   nodeRadius: 6.5,
   /** The hub's node is a little larger; the site dots ring it. */
   hubRadius: 8.5,
-  /** Radius of the ring of site dots around the hub node, and each dot's radius. */
+  /** Radius of the ring of site dots around the hub node (drawn as a hairline), and each dot's radius. */
   siteRing: 21,
   siteRadius: 4.25,
 } as const;
@@ -80,11 +85,11 @@ type Anchor = 'start' | 'end';
 
 /** Each stop's node and the side its label sits on. North-east to south-west, as the road runs. */
 export const routeNodes: Record<CorridorStopId, { x: number; y: number; anchor: Anchor }> = {
-  'dar-es-salaam': { x: 296, y: 60, anchor: 'end' },
-  'southern-highlands': { x: 220, y: 196, anchor: 'end' },
-  songwe: { x: 136, y: 340, anchor: 'start' },
-  'tunduma-border': { x: 112, y: 446, anchor: 'start' },
-  onward: { x: 92, y: 552, anchor: 'start' },
+  'dar-es-salaam': { x: 360, y: 48, anchor: 'end' },
+  'southern-highlands': { x: 272, y: 172, anchor: 'end' },
+  songwe: { x: 172, y: 306, anchor: 'start' },
+  'tunduma-border': { x: 142, y: 415, anchor: 'start' },
+  onward: { x: 112, y: 512, anchor: 'start' },
 };
 
 /**
@@ -92,10 +97,10 @@ export const routeNodes: Record<CorridorStopId, { x: number; y: number; anchor: 
  * segment i runs from stop i to stop i + 1. Hand-tuned for a gentle S.
  */
 export const routeSegments: readonly string[] = [
-  'M296 60 C280 110 244 150 220 196',
-  'M220 196 C196 242 150 282 136 340',
-  'M136 340 C128 376 116 410 112 446',
-  'M112 446 C108 486 100 520 92 552',
+  'M360 48 C346 94 304 132 272 172',
+  'M272 172 C240 212 192 252 172 306',
+  'M172 306 C162 342 148 378 142 415',
+  'M142 415 C136 452 124 482 112 512',
 ];
 
 /** The whole route as one path (the track under the drawn line). */

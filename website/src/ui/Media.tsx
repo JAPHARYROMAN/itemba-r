@@ -56,8 +56,11 @@ export type MediaProps = {
   aspect?: MediaAspect;
   /** Fill the parent box instead (the parent sets the size and `position: relative`). */
   fill?: boolean;
-  /** Which part of the photo a crop keeps; defaults to the registry's `focus` (else the centre). */
-  position?: keyof typeof positions;
+  /**
+   * Which part of the photo a crop keeps; defaults to the registry's `focus`
+   * (else the centre). A number is a percentage from the top.
+   */
+  position?: keyof typeof positions | number;
   radius?: keyof typeof radii;
   /**
    * Where the credit line goes, for images that carry one: `below` the
@@ -131,7 +134,8 @@ export function Media({
       quality={quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}
-      className={cn('object-cover', positions[focus])}
+      className={cn('object-cover', typeof focus === 'number' ? null : positions[focus])}
+      style={typeof focus === 'number' ? { objectPosition: `50% ${focus}%` } : undefined}
     />
   ) : (
     <Image

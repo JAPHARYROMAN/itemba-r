@@ -1,12 +1,15 @@
 import { companyPageCopy, type Company } from '@/content/companies';
 import { serviceUrl } from '@/content/site';
-import { Bento, BentoCell, ChevronLink, Container, Eyebrow, Heading, Icon, Section, Stat } from '@/ui';
+import { Bento, BentoCell, ChevronLink, Container, Eyebrow, Heading, Icon, Section, Stat, keepCompounds } from '@/ui';
 import { companySectionIds } from './CompanySubNav';
 
 /**
- * "What we do", as a bento: the company in a paragraph beside its headline
- * figure, then its three lines of business, each linking to the service
- * page that covers it. The cells sit white on the alternate grey tile.
+ * "What we do", as a bento: the company in a paragraph (19px, so it reads
+ * as a paragraph, not a wall) beside its headline figure, then its three
+ * lines of business, each linking to the service page that covers it. The
+ * figure cell carries its eyebrow at the top and the numeral at display-xl
+ * at the foot, so neither end of the cell is empty. The cells sit white on
+ * the alternate grey tile.
  */
 export function CompanyWhatWeDo({ company }: { company: Company }) {
   const copy = companyPageCopy;
@@ -20,12 +23,19 @@ export function CompanyWhatWeDo({ company }: { company: Company }) {
         <Bento className="mt-10 md:mt-14">
           <BentoCell span="two-thirds" padding="lg">
             <Eyebrow dot>{company.sector}</Eyebrow>
-            <p className="mt-5 text-body-lg text-fg md:text-lede">{company.detail}</p>
+            <p className="mt-5 text-body-lg text-fg">{keepCompounds(company.detail)}</p>
           </BentoCell>
 
-          <BentoCell span="third" padding="lg" className="justify-end">
+          <BentoCell span="third" padding="lg" className="justify-between gap-10">
+            <Eyebrow>{copy.keyFigure}</Eyebrow>
             <dl>
-              <Stat value={company.keyStat.value} label={company.keyStat.label} note={company.keyStat.note} tone="accent" />
+              <Stat
+                value={company.keyStat.value}
+                label={company.keyStat.label}
+                note={company.keyStat.note}
+                size="display-xl"
+                tone="accent"
+              />
             </dl>
           </BentoCell>
 
@@ -35,7 +45,7 @@ export function CompanyWhatWeDo({ company }: { company: Company }) {
               <Heading as="h3" size="h4" className="mt-8">
                 {offering.title}
               </Heading>
-              <p className="mt-2 text-body text-fg-muted">{offering.body}</p>
+              <p className="mt-2 text-body text-fg-muted">{keepCompounds(offering.body)}</p>
               {offering.serviceSlug ? (
                 <ChevronLink href={serviceUrl(offering.serviceSlug)} context={offering.title} className="mt-auto pt-6">
                   {copy.offeringAction}

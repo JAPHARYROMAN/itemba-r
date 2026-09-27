@@ -172,7 +172,7 @@ export const serviceAreas: ServiceArea[] = [
       },
       {
         question: 'Where are the logistics operations based?',
-        answer: 'The group is headquartered in Mpemba-Tunduma, Songwe Region, close to the Tanzania-Zambia border corridor.',
+        answer: 'The group is headquartered in Mpemba-Tunduma, Songwe Region, close to the Tanzania–Zambia border corridor.',
       },
     ],
     updatedAt: contentUpdatedAt,

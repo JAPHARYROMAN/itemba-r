@@ -3,7 +3,8 @@
  *   - contact literals (phone numbers, email, P.O. Box) live only in src/content/contact.ts;
  *   - content modules carry no presentation (Tailwind classes, JSX, colours);
  *   - the large content modules are server-only, the small client-safe ones are not;
- *   - client components import only client-safe content modules.
+ *   - client components import only client-safe content modules;
+ *   - the corridor has one spelling: "Tanzania–Zambia", an unspaced en dash.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -39,6 +40,16 @@ describe('contact literals live only in src/content/contact.ts', () => {
     const offenders = sourceFiles
       .filter((file) => rel(file) !== 'src/content/contact.ts')
       .filter((file) => re.test(readFileSync(file, 'utf8')))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('one spelling of the corridor', () => {
+  it('writes Tanzania–Zambia with an unspaced en dash (facts.ts may quote the old variants)', () => {
+    const offenders = contentFiles
+      .filter((file) => rel(file) !== 'src/content/facts.ts')
+      .filter((file) => /Tanzania\s*[-‐‑—]\s*Zambia|Tanzania\s+–\s*Zambia|Tanzania\s*–\s+Zambia/.test(readFileSync(file, 'utf8')))
       .map(rel);
     expect(offenders).toEqual([]);
   });

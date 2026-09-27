@@ -56,7 +56,7 @@ export const contactPage = {
     {
       id: 'location',
       title: 'Strategic location',
-      summary: "Mpemba-Tunduma sits on the Tanzania-Zambia border — one of East Africa's most active trade corridors.",
+      summary: "Mpemba-Tunduma sits on the Tanzania–Zambia border — one of East Africa's most active trade corridors.",
     },
     {
       id: 'connections',

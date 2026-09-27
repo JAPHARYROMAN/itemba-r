@@ -48,6 +48,15 @@ const jsonLd = (html: string) =>
     const data = JSON.parse(m[1] ?? 'null') as unknown;
     return (Array.isArray(data) ? data : [data]) as Array<Record<string, unknown>>;
   });
+/** The /images/… photograph each <img> shows (next/image routes them through /_next/image?url=…). */
+const photos = (html: string) =>
+  [...html.matchAll(/<img\b[^>]*\ssrc="([^"]*)"/g)]
+    .map((m) => {
+      const src = decode(m[1] ?? '');
+      return src.startsWith('/_next/image') ? (new URL(src, 'http://x').searchParams.get('url') ?? '') : src;
+    })
+    .filter((src) => src.startsWith('/images/'));
+const repeated = (list: readonly string[]) => [...new Set(list.filter((item, index) => list.indexOf(item) !== index))];
 
 describe('home: metadata', () => {
   const { metadata } = HomeModule;
@@ -135,6 +144,32 @@ describe('home: page', () => {
       expect(textOf(block[1] ?? '').trim()).toBe('');
     }
   });
+
+  it('ranks its headings: the hero alone at display-xl, the statement and closing at display, chapters below', () => {
+    const sizeOf = (id: string) => new RegExp(`<h[12] id="${id}" class="(text-[a-z0-9-]+)`).exec(html)?.[1];
+    expect(sizeOf('page-title')).toBe('text-display-xl');
+    expect(html.match(/class="text-display-xl /g)).toHaveLength(1);
+    expect([sizeOf('statement-title'), sizeOf('closing-title')]).toEqual(['text-display', 'text-display']);
+    for (const tile of homeCompanyTiles) {
+      const company = companies.find((c) => c.slug === tile.companySlug)!;
+      expect(sizeOf(`tile-${company.slug}`), company.slug).toBe('text-h1');
+    }
+    expect([sizeOf('sectors-title'), sizeOf('corridor-title'), sizeOf('numbers-title')]).toEqual(['text-h1', 'text-h1', 'text-h2']);
+  });
+
+  it('sets the lead line in two lines on a desktop, and never splits "Tanzania–Zambia" on a phone', () => {
+    const h1 = /<h1 id="page-title" class="([^"]*)">([\s\S]*?)<\/h1>/.exec(html);
+    expect(h1?.[1]).toContain('max-w-[74rem]');
+    // On phones the size is fitted to the compound (about 7.6em wide), so it can always stay whole.
+    expect(h1?.[1]).toContain('max-md:text-[length:min(3rem,calc((100vw_-_2.75rem)_/_7.8))]');
+    expect(h1?.[2]).toContain('<span class="whitespace-nowrap">Tanzania–Zambia</span>');
+  });
+
+  it('shows no photograph twice', () => {
+    const shown = photos(html);
+    expect(shown.length).toBeGreaterThanOrEqual(4);
+    expect(repeated(shown)).toEqual([]);
+  });
 });
 
 async function renderCompany(company: Company) {
@@ -182,10 +217,29 @@ describe('company pages', () => {
     // The ready-made profile PDF, as a download.
     expect(html).toMatch(new RegExp(`href="${profilePdfHref(company.id)}"[^>]*download`));
 
+    // Phones reach the same anchors through the chevron menu beside the name.
+    const menu = subnav.match(/<div id="subnav-sections" popover="auto"[\s\S]*?<\/ul>/)?.[0] ?? '';
+    // (HTML attribute names are case-insensitive; React writes popoverTarget as given.)
+    expect(subnav).toMatch(/<button type="button" popovertarget="subnav-sections"/i);
+    expect(hrefs(menu)).toEqual(hrefs(subnav.replace(menu, '')).filter((href) => href.startsWith('#') && href !== '#main-content' && href !== '#enquire'));
+
     // Every site and question is on the page.
     for (const site of company.sites) expect(text).toContain(site.name);
     for (const faq of company.faqs) expect(tags(html, 'h3')).toContain(faq.question);
-    for (const highlight of company.highlights) expect(text).toContain(highlight);
+    // Every strength, except the one the key figure already states.
+    const strengths = html.match(/aria-labelledby="strengths-title"[\s\S]*?<\/section>/)?.[0] ?? '';
+    for (const highlight of company.highlights) {
+      if (highlight === company.keyStat.restates) expect(textOf(strengths)).not.toContain(highlight);
+      else expect(textOf(strengths)).toContain(highlight);
+    }
+    if (company.keyStat.restates) expect(company.highlights).toContain(company.keyStat.restates);
+    expect(text).toContain(company.keyStat.label);
+
+    // One photograph per place: the hero is never the home tile's, and nothing repeats on the page.
+    expect(company.heroImage.media).not.toBe(company.tileImage.media);
+    const shown = photos(html);
+    expect(shown).toContain(company.heroImage.src);
+    expect(repeated(shown)).toEqual([]);
 
     // JSON-LD: the company as a LocalBusiness under the group, its FAQs, and the visible trail.
     const ld = jsonLd(html);

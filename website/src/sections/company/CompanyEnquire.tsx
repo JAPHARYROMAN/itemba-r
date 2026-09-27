@@ -7,12 +7,14 @@ import { companySectionIds } from './CompanySubNav';
 /**
  * The enquiry form, preset to this company: the group's routing promise on
  * the left, the compact form (preferred contact and message) on the right.
- * The SubNav pill and the home tile's "Enquire ›" land here.
+ * The SubNav pill and the home tile's "Enquire ›" land here. The section is
+ * white with the form card on the alternate grey, so the page's last tile
+ * stands apart from the grey footer below it.
  */
 export function CompanyEnquire({ company }: { company: Company }) {
   const { enquire } = companyPageCopy;
   return (
-    <Section tone="alt" accent={company.accent} id={companySectionIds.enquire} labelledBy="enquire-title">
+    <Section tone="light" accent={company.accent} id={companySectionIds.enquire} labelledBy="enquire-title">
       <Container className="grid items-start gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
         <div className="lg:sticky lg:top-[calc(var(--nav-height)+var(--subnav-height)+2.5rem)]">
           <Eyebrow dot>{enquire.eyebrow}</Eyebrow>
@@ -25,7 +27,6 @@ export function CompanyEnquire({ company }: { company: Company }) {
         </div>
         <EnquiryRouter
           compact
-          tone="light"
           headingLevel={3}
           defaultIntentId={company.id}
           title={enquiryFormCopy.title}

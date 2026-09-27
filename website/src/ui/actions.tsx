@@ -137,12 +137,17 @@ export function ButtonLink({ href, variant = 'primary', size = 'md', icon, iconP
 const chevronSizes = {
   caption: 'text-caption',
   body: 'text-body',
+  'body-lg': 'text-body-lg',
   lede: 'text-lede',
 } as const;
 
 export type ChevronLinkProps = AnchorProps & {
   href: string;
-  /** Type size: `body` (17px) by default, `lede` in heroes, `caption` in dense rows. */
+  /**
+   * Type size: `body` (17px) by default; `body-lg` (19px) beside a large
+   * pill, so the secondary action never outweighs the primary; `lede` for a
+   * tile's own links; `caption` in dense rows.
+   */
   size?: keyof typeof chevronSizes;
   /** `accent` (default) uses the tone's text-safe accent; `default` the text colour. */
   tone?: 'accent' | 'default';
@@ -252,12 +257,12 @@ export function contactHref(target: ContactTarget): string {
 
 const contactIcons: Record<ContactKind, IconName> = { tel: 'phone', mailto: 'mail', whatsapp: 'whatsapp' };
 
-const chevronSizeFor: Record<ButtonSize, keyof typeof chevronSizes> = { sm: 'caption', md: 'body', lg: 'lede' };
+const chevronSizeFor: Record<ButtonSize, keyof typeof chevronSizes> = { sm: 'caption', md: 'body', lg: 'body-lg' };
 
 export type ContactLinkProps = ContactTarget & {
   /** `chevron` renders a chevron link; `plain` an unstyled anchor; the rest are pills. */
   appearance?: ButtonVariant | 'chevron' | 'plain';
-  /** Pill size; for `chevron`, the type size (sm: caption, md: body, lg: lede, to sit beside a pill of that size). */
+  /** Pill size; for `chevron`, the type size of that pill's label (sm: caption, md: body, lg: body-lg), to sit beside it. */
   size?: ButtonSize;
   /** Show the contact icon (pills only). Defaults to true. */
   withIcon?: boolean;
