@@ -327,6 +327,91 @@
       ],
       "change": "Deviation: at 360px the home h1 renders at about 40px, below display-xl's 48px floor.",
       "reason": "The no-split rule for 'Tanzania–Zambia' takes precedence: the compound is about 7.6em wide and must fit the 316px line; the h1 still leads every other heading by 1.2x or more."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "Rebuilt as the approved Apple-style page: typographic hero (\"Built for Tanzania. Built to last.\" two-tone, with \"Meet the companies\" and \"Read the company profile\"), the group structure as an SVG tier diagram, a \"Why diversification?\" bento, a 2012–2025 milestones strip, leadership cards, the head office tile and the closing call to action. The \"Who we are\" chapter (h2 \"A multi-industry business ecosystem\") and its four-photo mosaic are gone; its conglomerate model now leads the structure chapter.",
+      "reason": "P1: plan \"Pages › About\"; the old page had no body links and repeated forecourt photographs (critic)."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "Group structure: the monospace ASCII tree and the emoji tier icons are replaced by nested lists with SVG connectors. Units are listed one per brand (ITEMBA-MPEMBA and ITEMBA-UZUNGUNI split), and \"Wholesale beverages\" (Westsides) plus \"Itemba Estate\" and \"Emerging businesses\" (Itemba Enterprises) are added from src/content/companies.ts sites; the Brands tier is \"Brands and businesses\" with a rewritten summary, and the Companies tier summary reads \"each with its own identity, focus and market\".",
+      "reason": "P1: plan \"a group-structure diagram (clean SVG tiers)\"; the tree now matches each company page's \"Brands and sites\" and the core message (Enterprises: logistics, emerging businesses and Itemba Estate)."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "Structure lede: \"Each company is legally and operationally independent, with strategy, shared resources and governance from the group.\" replaces the conglomerate paragraph; the \"four specialised divisions\" sentence is not shown.",
+      "reason": "P1: the long paragraph ran four lines on desktop and six on a phone; the divisions count is unconfirmed (flags.showDivisionsStat defaults to false)."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "\"Why diversification?\" gains a lede (\"Six sectors under one structure, so no single market decides the group’s future.\"), a six-sector row linking each service page, and a \"6 Business sectors\" figure; the Revenue diversification pillar drops \"manufacturing\".",
+      "reason": "P1: plan bento; flags.mentionManufacturing defaults to false (no manufacturing offering exists)."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "New milestones strip (\"Our story\" / \"Built step by step, since 2012.\"): seven years summarising the nine company-history entries, in chronological order (2 May 2017, 9 June 2017, then \"2017 onward\").",
+      "reason": "P1: plan \"timeline (2012 to 2025) as an Apple-style horizontal milestones strip\"; the profile history lists \"2017 onward\" before 9 June 2017."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "New leadership chapter (\"The team behind the group.\"): the five company-profile leaders as typographic cards with no portraits, gated by flags.publishLegalIdentifiers.",
+      "reason": "P1: plan \"leadership as typographic cards (no fake avatars)\"; the names are already published on /company-profile and in the PDFs."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "Head office tile: \"...in Mpemba, Tunduma, on the Tanzania–Zambia border.\" replaces \"...at the Tanzania–Zambia border, one of East and Southern Africa's most active trade corridors.\"; the Songwe growth claim is hidden; the Songwe landscape (with its CC BY-SA credit) replaces the ITEMBA-MPEMBA forecourt photograph; head office, postal address, region, directions and the Songwe-Tunduma location link are added.",
+      "reason": "P1: one neutral corridor phrase (facts.corridorWording); flags.songweGrowthClaim defaults to false; the forecourt photo implied the head office is ITEMBA-MPEMBA (flags.stateHqIsItembaMpemba=false) and repeats the home hero subject."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "The hero photograph (ITEMBA-MPEMBA forecourt) is removed: the hero is typographic.",
+      "reason": "Owner photo decision: avoid repeating the forecourt-canopy subject (the home hero); the page's one photograph is the Songwe landscape at the head office tile."
+    },
+    {
+      "routes": [
+        "/about",
+        "/companies"
+      ],
+      "change": "The pages close with the site closing call to action (\"Let's move something together.\" on /about) or the routing promise (\"Every sector. One front door.\" on /companies) instead of the old global \"Ready to talk to Itemba Group?\" band, and end with the visible breadcrumb trail (Home › About, Home › Companies) and its BreadcrumbList.",
+      "reason": "P1: architecture §6 (BreadcrumbList on /about and /companies); the plan's closing pattern."
+    },
+    {
+      "routes": [
+        "/companies"
+      ],
+      "change": "The three full-height company bands become the home page's company tiles (tile summaries, no product chips), still inside #mwanjalisi, #westsides and #enterprises; the hero gains a jump row to the three anchors.",
+      "reason": "P1: plan \"Companies: an index of the three tiles\" (reuse the home tile component)."
+    },
+    {
+      "routes": [
+        "/companies"
+      ],
+      "change": "\"Open company profile\" becomes \"Explore ›\" (the company page) and the \"Send enquiry\" mailto: (subject \"<name> business enquiry\") becomes \"Enquire ›\" to the company's enquiry form (/companies/<slug>#enquire).",
+      "reason": "C0/P1: one group office routes every enquiry, through the form preset to the company; the group mailto: stays in the footer and quick-contact bar for conversion tracking."
+    },
+    {
+      "routes": [
+        "/companies"
+      ],
+      "change": "New \"At a glance\" comparison of the three companies (registered name, sector, incorporation date, brands and sites, key figure) and the routing promise with a \"Start a business enquiry\" pill to /contact; the page adds a CollectionPage JSON-LD listing the companies.",
+      "reason": "P1: institution-ready (banks and partners read across the companies); copy reused from src/content/companies.ts and home.ts."
     }
   ]
 }
