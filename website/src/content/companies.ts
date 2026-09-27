@@ -44,9 +44,16 @@ export type Company = {
   /** Also the enquiry intent id that routes to this company. */
   id: CompanyId;
   slug: CompanySlug;
-  /** Public name used in titles, e.g. "Mwanjalisi Oil Co Ltd". */
+  /**
+   * Public name used in titles and the breadcrumb data, e.g. "Mwanjalisi
+   * Oil Co Ltd" (the metadata title is a baseline contract).
+   */
   name: string;
-  /** Registered name as it appears on legal documents. */
+  /**
+   * Registered name as it appears on legal documents. The one legal form a
+   * company page shows ("At a glance"); the page's h1 is the short name.
+   * Which form is right for Mwanjalisi Oil is an open owner question.
+   */
   legalName: string;
   shortName: string;
   /** Accent token key. */
@@ -54,8 +61,20 @@ export type Company = {
   sector: string;
   eyebrow: string;
   visual: SectorVisual;
+  /** The long summary (company profile, print, FAQ index). */
   summary: string;
+  /** The long description (company profile and print). */
   detail: string;
+  /**
+   * The page hero's lede: one sentence of 110 characters or fewer, so it
+   * sets in at most three lines on a phone and the photograph follows.
+   */
+  lede: string;
+  /**
+   * "What we do": the company in one sentence, then a short list (its
+   * sites, or the markets it serves) under a small label.
+   */
+  overview: { lead: string; label: string; points: readonly string[] };
   services: readonly string[];
   highlights: readonly string[];
   image: MediaImage;
@@ -67,6 +86,11 @@ export type Company = {
    */
   tileImage: MediaImage;
   heroImage: MediaImage;
+  /**
+   * The photograph of the page's one cinema tile (key strengths), shown
+   * nowhere else on the page.
+   */
+  strengthsImage: MediaImage;
   /**
    * One headline figure, for the "What we do" bento. `restates` names the
    * highlight that says the same thing in words; the key strengths leave it
@@ -107,6 +131,16 @@ export const companies: readonly Company[] = [
       "Tanzania's petroleum retail and corridor support arm within Itemba Group, managing high-visibility ITEMBA-branded filling stations and UZUNGUNI PARKING YARD for motorists, fleet operators, and logistics customers across Songwe Region.",
     detail:
       "Positioned along major transport routes near the Tanzania–Zambia border, Mwanjalisi Oil manages retail fuel station operations that trade publicly under the ITEMBA location brand, including ITEMBA-MPEMBA near the Tunduma Bus Station and ITEMBA-UZUNGUNI along the TANZAM Highway. It also manages UZUNGUNI PARKING YARD in Uzunguni Area, Mpemba-Tunduma for corridor motorists and logistics operators.",
+    lede: 'Fuel, lubricants and truck parking for motorists and fleets on the Tanzania–Zambia corridor.',
+    overview: {
+      lead: "Tanzania's petroleum retail and corridor support arm within Itemba Group, serving motorists, fleet operators and logistics customers across Songwe Region.",
+      label: 'Sites',
+      points: [
+        'ITEMBA-MPEMBA, near the Tunduma Bus Station',
+        'ITEMBA-UZUNGUNI, along the TANZAM Highway',
+        'UZUNGUNI PARKING YARD, in Uzunguni Area, Mpemba',
+      ],
+    },
     services: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD', 'Diesel', 'Petrol', 'Kerosene', 'Lubricants', 'Commercial fleet supply enquiries'],
     highlights: [
       'ITEMBA-branded stations managed by Mwanjalisi Oil',
@@ -134,6 +168,7 @@ export const companies: readonly Company[] = [
     ],
     tileImage: mediaImage('mpemba-dusk'),
     heroImage: mediaImage('mpemba-coach-canopy'),
+    strengthsImage: mediaImage('mpemba-dusk'),
     keyStat: {
       value: '2',
       label: 'Operating ITEMBA stations',
@@ -243,11 +278,23 @@ export const companies: readonly Company[] = [
       'Wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN operations for stockists, bars, night clubs, contractors, hospitality customers, and cross-border bulk buyers.',
     detail:
       "Westsides Company Ltd manages the group's trading and hospitality brands, including wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN. Its market includes more than 50 stockists across Songwe Region, bars and night clubs in urban centres such as Tunduma, Mlowo, and Vwawa, international bulk buyers moving goods through Tunduma border, and construction companies serving the growing real estate and infrastructure market.",
+    lede: 'Beverage wholesale, hardware and hospitality for stockists, builders and travellers in Songwe.',
+    overview: {
+      lead: "The group's trading and hospitality company: wholesale beverages, ITEMBA-HARDWARE and UZUNGUNI INN.",
+      label: 'Markets',
+      points: [
+        'Stockists across Songwe Region',
+        'Bars and night clubs in Tunduma, Mlowo and Vwawa',
+        'Bulk buyers moving goods through the Tunduma border',
+        'Construction companies in real estate and infrastructure',
+      ],
+    },
     services: ['Wholesale beverages', 'ITEMBA-HARDWARE', 'UZUNGUNI INN', 'Construction equipment sales'],
     highlights: [
       'More than 50 beverage stockists across Songwe Region',
       'Serves bars, night clubs, and hospitality outlets',
       'Supports cross-border bulk buyers and construction companies',
+      'Four branches: Mpemba, Mlowo, Sogea and Tunduma',
     ],
     image: mediaImage('westsides-warehouse-stock', {
       alt: 'Westsides Company Ltd wholesale beverage warehouse stock for distribution customers',
@@ -273,9 +320,11 @@ export const companies: readonly Company[] = [
     tileImage: mediaImage('hardware-storefront', {
       alt: 'The WESTSIDES COMPANY LIMITED signboard above the ITEMBA-HARDWARE storefront and its stock',
     }),
-    heroImage: mediaImage('hardware-paint-stock', {
-      alt: 'Paint and construction supply stock at ITEMBA-HARDWARE, run by Westsides Company Ltd',
+    // Beverages lead: the first business on every line of Westsides copy.
+    heroImage: mediaImage('westsides-beer-delivery', {
+      alt: 'Beverage crates stacked on a Westsides Company Ltd delivery truck',
     }),
+    strengthsImage: mediaImage('westsides-order-truck'),
     keyStat: {
       value: '50+',
       label: 'Beverage stockists across Songwe Region',
@@ -312,8 +361,8 @@ export const companies: readonly Company[] = [
         name: 'ITEMBA-HARDWARE',
         kind: 'Tunduma Main Branch',
         detail: 'Hardware and construction equipment, supported by warehouses in Tunduma town and the Sogea area.',
-        image: mediaImage('hardware-storefront', {
-          alt: 'The ITEMBA-HARDWARE storefront in Tunduma under the WESTSIDES COMPANY LIMITED signboard',
+        image: mediaImage('hardware-paint-stock', {
+          alt: 'Paint and construction supply stock at ITEMBA-HARDWARE, run by Westsides Company Ltd',
         }),
       },
       {
@@ -385,11 +434,22 @@ export const companies: readonly Company[] = [
       "The group's logistics and emerging-business company, anchored by Dar es Salaam-to-Southern Highlands movement and cross-border transit through the Tunduma corridor.",
     detail:
       'Itemba Enterprises focuses on logistics services, cross-border transit, and emerging businesses after trading and hospitality operations were placed under Westsides Company Ltd and UZUNGUNI PARKING YARD came under Mwanjalisi Oil Co Ltd management. Its logistics target market includes local businesses sourcing goods from Dar es Salaam into the Southern Highlands regions of Songwe, Mbeya, Rukwa, Ruvuma, and Iringa, plus transit customers moving goods to and from Zambia, DRC, Zimbabwe, and Malawi.',
+    lede: 'Logistics from Dar es Salaam to the Southern Highlands, and cross-border transit via Tunduma.',
+    overview: {
+      lead: "The group's logistics and emerging-business company, moving goods for local businesses and transit customers.",
+      label: 'Markets',
+      points: [
+        'Local businesses sourcing goods from Dar es Salaam',
+        'The Southern Highlands: Songwe, Mbeya, Rukwa, Ruvuma and Iringa',
+        'Transit customers for Zambia, DRC, Zimbabwe and Malawi',
+      ],
+    },
     services: ['Local logistics', 'Cross-border transit', 'Emerging businesses'],
     highlights: [
       'Dar es Salaam to Southern Highlands logistics',
       'Transit routes to Zambia, DRC, Zimbabwe, and Malawi',
       'Direct access to the Tunduma border corridor',
+      'Emerging businesses and Itemba Estate in one company',
     ],
     image: mediaImage('logistics-tanker', {
       alt: 'Itemba Logistics fuel tanker supporting goods movement and transit operations',
@@ -412,6 +472,9 @@ export const companies: readonly Company[] = [
       alt: 'An Itemba Enterprises tanker truck in Itemba livery at a filling station',
     }),
     heroImage: mediaImage('logistics-truck-front', { alt: 'An Itemba Enterprises truck, seen from the front' }),
+    strengthsImage: mediaImage('logistics-tanker', {
+      alt: 'An Itemba Enterprises tanker truck in Itemba livery at a filling station',
+    }),
     keyStat: {
       value: '4',
       label: 'Countries of cross-border transit',
@@ -583,5 +646,12 @@ export const companyPageCopy = {
     eyebrow: 'Enquire',
     /** The group's routing promise, beside the form. */
     body: 'One group office routes every enquiry to the right company.',
+    /** How an enquiry travels, as numbered steps under the promise. */
+    stepsLabel: 'How it works',
+    steps: [
+      { title: 'Choose who it is for', body: 'The form starts with this company. Pick another, or General, at any time.' },
+      { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
+      { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
+    ],
   },
 } as const;

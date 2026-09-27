@@ -4,7 +4,6 @@ import { usePathname } from 'next/navigation';
 import { contact, contactActionLabels, mailtoWithSubject, telHref } from '@/content/contact';
 import { businessEnquirySubject } from '@/content/enquiry';
 import { quickContactCopy as copy } from '@/content/nav';
-import { VisuallyHidden } from '@/ui/a11y';
 import { buttonClasses } from '@/ui/actions';
 import { cn } from '@/ui/cn';
 import { Icon } from '@/ui/Icon';
@@ -33,8 +32,10 @@ const quietAction =
 
 /**
  * The mobile quick-contact bar: a slim bar fixed to the bottom of the
- * screen with Call, WhatsApp and an Enquire pill. It shows below `md` only
- * (the global nav's Enquire pill and the footer serve larger screens).
+ * screen with Call, WhatsApp and an Email pill (it opens the mail app, so
+ * it is not labelled "Enquire", which everywhere else leads to the form).
+ * It shows below `md` only (the global nav's Enquire pill and the footer
+ * serve larger screens).
  *
  * The hrefs are exactly origin/main's: `tel:` (primary line), the prepared
  * `wa.me/` message and the "Business enquiry" `mailto:`, which
@@ -65,9 +66,13 @@ export default function QuickContact() {
             <Icon name="whatsapp" size="sm" />
             <span>{copy.whatsapp}</span>
           </a>
-          <a href={mailtoWithSubject(businessEnquirySubject)} className={cn(buttonClasses({ size: 'sm' }), 'ml-auto')}>
-            {copy.enquire}
-            <VisuallyHidden> {copy.enquireContext}</VisuallyHidden>
+          <a
+            href={mailtoWithSubject(businessEnquirySubject)}
+            aria-label={contactActionLabels.email}
+            className={cn(buttonClasses({ size: 'sm' }), 'ml-auto')}
+          >
+            <Icon name="mail" size="xs" />
+            <span>{copy.email}</span>
           </a>
         </div>
       </aside>

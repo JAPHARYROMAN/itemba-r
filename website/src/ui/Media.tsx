@@ -123,6 +123,10 @@ export function Media({
 
   const cropped = fill || aspect !== undefined;
   const focus = position ?? entry.focus ?? 'center';
+  // A numeric focus, or a horizontal one (focusX), is set inline as object-position.
+  const inlineFocus = typeof focus === 'number' || entry.focusX !== undefined;
+  const focusY = typeof focus === 'number' ? `${focus}%` : focus === 'top' ? '0%' : focus === 'bottom' ? '100%' : '50%';
+  const focusX = focus === 'left' ? '0%' : focus === 'right' ? '100%' : `${entry.focusX ?? 50}%`;
   const placeholder = priority ? 'empty' : 'blur';
   const image = cropped ? (
     <Image
@@ -134,8 +138,8 @@ export function Media({
       quality={quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}
-      className={cn('object-cover', typeof focus === 'number' ? null : positions[focus])}
-      style={typeof focus === 'number' ? { objectPosition: `50% ${focus}%` } : undefined}
+      className={cn('object-cover', inlineFocus ? null : positions[focus])}
+      style={inlineFocus ? { objectPosition: `${focusX} ${focusY}` } : undefined}
     />
   ) : (
     <Image

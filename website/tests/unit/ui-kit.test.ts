@@ -325,7 +325,15 @@ describe('page parts', () => {
   it('CtaBand is labelled by its heading', () => {
     const html = render(h(CtaBand, { titleId: 'closing', title: "Let's move something together." }));
     expect(html).toMatch(/^<section aria-labelledby="closing" data-tone="alt"/);
-    expect(html).toContain('<h2 id="closing" class="text-display text-fg">');
+    // Display from `md`; stepped down on phones (`statement`), so the page's h1 leads it there.
+    expect(html).toContain(
+      '<h2 id="closing" class="text-display max-md:text-[length:clamp(2.0625rem,1.341rem_+_3.206vw,2.875rem)] text-fg">',
+    );
+  });
+
+  it('ChevronLink and Eyebrow take group gold whatever the accent', () => {
+    expect(render(h(ChevronLink, { href: '/x', tone: 'gold', children: 'Explore' }))).toContain('text-gold-fg');
+    expect(render(h(Eyebrow, { tone: 'gold', dot: true, children: 'Westsides Company Ltd' }))).toContain('text-gold-fg');
   });
 
   it('Icon is decorative unless titled, and every glyph renders', () => {

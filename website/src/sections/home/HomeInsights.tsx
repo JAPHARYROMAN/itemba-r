@@ -26,7 +26,7 @@ export function HomeInsights() {
               key={article.slug}
               href={insightUrl(article.slug)}
               eyebrow={article.eyebrow}
-              title={article.title}
+              title={article.displayTitle}
               description={article.summary}
               cta={homeInsights.action}
             />

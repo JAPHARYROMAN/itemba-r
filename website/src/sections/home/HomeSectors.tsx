@@ -55,7 +55,8 @@ function SectorCell({ item, span, lead }: { item: HomeSector; span: BentoSpan; l
           {homeSectors.runBy} {company.shortName}
         </p>
       ) : null}
-      <span aria-hidden="true" className="mt-auto hidden items-center gap-[0.3em] pt-8 text-body text-accent-fg md:inline-flex">
+      {/* Group gold, as every link on home: the company shows in the icon and the dot. */}
+      <span aria-hidden="true" className="mt-auto hidden items-center gap-[0.3em] pt-8 text-body text-gold-fg md:inline-flex">
         {homeSectors.action}
         <Chevron />
       </span>
@@ -63,8 +64,8 @@ function SectorCell({ item, span, lead }: { item: HomeSector; span: BentoSpan; l
   );
 
   return (
-    // Each cell is its own tone element, so the company accent re-maps the
-    // accent text colour too (theme.ts resolves --accent-fg on the tone).
+    // The cell's accent colours only its line icon and dot (graphic accent);
+    // its text and "Explore ›" stay ink and group gold.
     <BentoCell
       span={span}
       tone="alt"

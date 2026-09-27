@@ -32,7 +32,7 @@ export const serviceAreas: ServiceArea[] = [
   {
     slug: 'fuel-and-lubricants',
     title: 'Fuel and Lubricants',
-    shortTitle: 'Fuel Supply',
+    shortTitle: 'Fuel supply',
     eyebrow: 'Energy, Petroleum Retail and Parking',
     intentId: 'mwanjalisi',
     companySlug: 'mwanjalisi-oil',
@@ -272,7 +272,7 @@ export const serviceAreas: ServiceArea[] = [
   {
     slug: 'real-estate-and-property',
     title: 'Real Estate and Property',
-    shortTitle: 'Real Estate',
+    shortTitle: 'Real estate',
     eyebrow: 'Itemba Estate',
     intentId: 'enterprises',
     companySlug: 'itemba-enterprises',

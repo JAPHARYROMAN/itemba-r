@@ -49,8 +49,12 @@ export function keepCompounds(children: ReactNode, from: keyof typeof keepFrom =
 /* ── Eyebrow ──────────────────────────────────────────────────────────── */
 
 export type EyebrowProps = {
-  /** `accent` uses the tone's text-safe accent; `muted` the secondary text colour. */
-  tone?: 'accent' | 'muted';
+  /**
+   * `accent` uses the tone's text-safe accent; `gold` group gold whatever
+   * the accent (home, where a company shows only in its dot); `muted` the
+   * secondary text colour.
+   */
+  tone?: 'accent' | 'gold' | 'muted';
   /** A small dot in the graphic accent before the text (company tiles). */
   dot?: boolean;
   as?: 'p' | 'span' | 'div';
@@ -58,13 +62,15 @@ export type EyebrowProps = {
   children: ReactNode;
 };
 
+const eyebrowTones = { accent: 'text-accent-fg', gold: 'text-gold-fg', muted: 'text-fg-muted' } as const;
+
 /** 14px, weight 600, +0.01em, sentence case. Never letter-spaced capitals. */
 export function Eyebrow({ tone = 'accent', dot = false, as: Tag = 'p', className, children }: EyebrowProps) {
   return (
     <Tag
       className={cn(
         'text-eyebrow',
-        tone === 'accent' ? 'text-accent-fg' : 'text-fg-muted',
+        eyebrowTones[tone],
         dot && 'inline-flex items-center gap-2',
         className,
       )}
@@ -82,15 +88,19 @@ export type HeadingLevel = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 /**
  * Visual size, independent of the level: a section can open with a display
  * h2, and a card title can be an h3 set at card size.
- * - `display-xl` 48–96px and `display` 40–72px: hero and statement lines.
- * - `h1` 40–56, `h2` 32–40, `h3` 24–28: page, section and block titles.
+ * - `display-xl` 48–96px and `display` 40–72px: hero lines.
+ * - `statement`: display from `md`; on phones it steps down to 33px at
+ *   360px (joining display at 46px at `md`), so a page's h1 leads a
+ *   statement or closing line there by at least 1.2x.
+ * - `h1` 32–56, `h2` 32–40, `h3` 24–28: page, section and block titles.
  * - `h4` 21–24 and `h5` 19px, both weight 600: card and row titles.
  */
-export type HeadingSize = 'display-xl' | 'display' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5';
+export type HeadingSize = 'display-xl' | 'display' | 'statement' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5';
 
 const headingSizes: Record<HeadingSize, string> = {
   'display-xl': 'text-display-xl',
   display: 'text-display',
+  statement: 'text-display max-md:text-[length:clamp(2.0625rem,1.341rem_+_3.206vw,2.875rem)]',
   h1: 'text-h1',
   h2: 'text-h2',
   h3: 'text-h3',
@@ -164,10 +174,16 @@ export type LedeProps = {
   children: ReactNode;
 };
 
-/** The 21–24px introduction under a headline. Compounds stay on one line. */
+/**
+ * The 21–24px introduction under a headline. Compounds stay on one line,
+ * and a lede keeps `text-wrap: pretty` at every width (body copy drops it
+ * on phones: base.css), so its short last line never strands a word.
+ */
 export function Lede({ tone = 'default', as: Tag = 'p', className, children }: LedeProps) {
   return (
-    <Tag className={cn('text-lede', tone === 'muted' ? 'text-fg-muted' : 'text-fg', className)}>{keepCompounds(children)}</Tag>
+    <Tag className={cn('text-lede text-pretty', tone === 'muted' ? 'text-fg-muted' : 'text-fg', className)}>
+      {keepCompounds(children)}
+    </Tag>
   );
 }
 

@@ -91,7 +91,8 @@ const inlineLink = 'text-fg/80 underline decoration-fg/30 underline-offset-2 tra
 /**
  * The global footer, Apple-dense: 12px type on the #f5f5f7 alt tile.
  *
- * 1. The crest and the group's structure in one line.
+ * 1. The crest (the shield and ITEMBA mark, legible at footer size) and
+ *    the group's structure in one line.
  * 2. The directory: five columns from `md`; below it, disclosure rows built
  *    on <details> (no JS), as on Apple's phone footer.
  * 3. "More ways to reach us", with the head office, phone and email.
@@ -111,10 +112,11 @@ export function SiteFooter() {
       <Container size="content" className="pb-6 pt-5 md:pb-5">
         <div className="flex flex-col gap-3 border-b border-line pb-4 md:flex-row md:items-center md:gap-8">
           <Link href="/" aria-label={brandLabel} className="-ml-1 flex h-11 w-fit shrink-0 items-center px-1">
-            <Crest />
+            <Crest variant="nav" />
           </Link>
+          {/* Short names: the registered legal forms appear on each company's page, once. */}
           <p className="max-w-[46rem]">
-            {listFormat.format(companies.map((company) => company.name))} {footerCopy.companiesNote}
+            {listFormat.format(companies.map((company) => company.shortName))} {footerCopy.companiesNote}
           </p>
         </div>
 

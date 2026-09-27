@@ -28,7 +28,7 @@ export function CtaBand({ titleId, title, titleAs = 'h2', eyebrow, lede, actions
     <Section tone={tone} accent={accent} id={id} labelledBy={titleId}>
       <Container size="prose" className="text-center">
         {eyebrow ? <Eyebrow className="mb-3">{eyebrow}</Eyebrow> : null}
-        <Heading as={titleAs} id={titleId} size="display">
+        <Heading as={titleAs} id={titleId} size="statement">
           {title}
         </Heading>
         {lede ? (

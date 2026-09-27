@@ -52,11 +52,16 @@ const intentAccent = (id: IntentId): AccentName => (id === 'general' ? 'group' :
  */
 const intentDot = (id: IntentId) => (id === 'general' ? 'bg-fg' : 'bg-accent');
 
-/** Containers wide enough for side-by-side fields and a single row of intents. */
+/**
+ * Containers wide enough for side-by-side fields and for the intent pills
+ * two or four across. Each pill keeps its label on one line ("Itemba
+ * Enterprises" needs about 190px), so a narrow card (a phone) stacks them
+ * one per row rather than wrapping a name inside a pill.
+ */
 const wide = {
   fields: '[@container(min-width:34rem)]:grid-cols-2',
   span: '[@container(min-width:34rem)]:col-span-2',
-  intents: '[@container(min-width:44rem)]:grid-cols-4',
+  intents: '[@container(min-width:25rem)]:grid-cols-2 [@container(min-width:50rem)]:grid-cols-4',
   row: '[@container(min-width:34rem)]:flex-row [@container(min-width:34rem)]:items-center',
   auto: '[@container(min-width:34rem)]:w-auto',
 } as const;
@@ -230,7 +235,7 @@ export default function EnquiryRouter({
 
       <fieldset className="mt-8 min-w-0">
         <legend className="text-body font-semibold text-fg">{copy.intentLegend}</legend>
-        <div className={cn('mt-3 grid grid-cols-2 gap-2', wide.intents)}>
+        <div className={cn('mt-3 grid grid-cols-1 gap-2', wide.intents)}>
           {enquiryIntents.map((intent) => (
             <label key={intent.id} data-accent={intentAccent(intent.id)} className="relative flex">
               <input
@@ -241,7 +246,8 @@ export default function EnquiryRouter({
                 onChange={() => setIntentId(intent.id)}
                 className="peer sr-only"
               />
-              <span className="flex min-h-14 w-full cursor-pointer items-center gap-2.5 rounded-input border border-line-strong bg-[rgb(var(--field))] px-3.5 py-2.5 text-caption font-semibold text-fg transition-[border-color,box-shadow] duration-fast ease-apple hover:border-fg peer-checked:border-fg peer-checked:shadow-[inset_0_0_0_1px_rgb(var(--fg))] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
+              {/* A radio pill (plan: a fieldset of radio pills), its label always on one line. */}
+              <span className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-pill border border-line-strong bg-[rgb(var(--field))] px-4 py-2 text-caption font-semibold text-fg transition-[border-color,box-shadow] duration-fast ease-apple hover:border-fg peer-checked:border-fg peer-checked:shadow-[inset_0_0_0_1px_rgb(var(--fg))] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
                 <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', intentDot(intent.id))} />
                 {intent.segmentLabel}
               </span>

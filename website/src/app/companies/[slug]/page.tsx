@@ -44,6 +44,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
  * hero, at a glance, what we do, brands and sites, key strengths, FAQs and
  * the enquiry form preset to the company. The breadcrumb trail (and its
  * BreadcrumbList) closes the page above the footer, as on Apple's pages.
+ * The page shows one legal-name form, the registered name in "At a
+ * glance"; the h1 and the trail use the short name.
  */
 export default async function CompanyPage({ params }: PageProps) {
   const { slug } = await params;
@@ -62,7 +64,7 @@ export default async function CompanyPage({ params }: PageProps) {
       <CompanyFaqs company={company} />
       <CompanyEnquire company={company} />
       <FooterTrail
-        items={[crumbs.home, crumbs.companies, { name: company.name, path: companyUrl(company.slug) }]}
+        items={[crumbs.home, crumbs.companies, { name: company.shortName, path: companyUrl(company.slug) }]}
       />
     </>
   );

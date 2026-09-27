@@ -44,6 +44,13 @@ export type MediaEntry = {
    * top (CSS object-position), for a subject between the edge and the centre.
    */
   focus?: 'top' | 'bottom' | number;
+  /**
+   * Where the subject sits across, as a percentage from the left (the
+   * centre when omitted). It matters where a frame is narrower than the
+   * photograph (a square or 4:3 phone crop of a wide shot), so the crop
+   * keeps the subject rather than the middle of the frame.
+   */
+  focusX?: number;
   note?: string;
 };
 
@@ -63,7 +70,8 @@ export const media = {
     entity: 'mwanjalisi',
     provenance: 'own',
     focus: 55,
-    note: 'The plan lead for the home hero: the 4000x3000 raw without the fuel-price pylon (its live prices would date the page). Focus 55: in the wide desktop frame the canopy clears the fold under a 96px headline, with the sky above it.',
+    focusX: 45,
+    note: 'The plan lead for the home hero: the 4000x3000 raw without the fuel-price pylon (its live prices would date the page). Focus 55: in the wide desktop frame the canopy clears the fold under a 96px headline, with the sky above it. FocusX 45: the centre of the canopy, where the 1.5x phone crop (HomeHero) is taken, so the whole canopy and its ITEMBA signs fill the phone frame.',
   },
   'mpemba-dusk': {
     src: '/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp',
@@ -78,7 +86,8 @@ export const media = {
     alt: 'A coach at the pumps under the ITEMBA-MPEMBA canopy, managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
-    note: 'Raw: images/itemba-mpemba 016.jpg (3000x4000), cropped to a 16:9 band. The Mwanjalisi Oil page hero.',
+    focusX: 85,
+    note: 'Raw: images/itemba-mpemba 016.jpg (3000x4000), cropped to a 2:1 band from the canopy underside to the forecourt, with a mild contrast step against its haze. The Mwanjalisi Oil page hero. FocusX 85: a 4:3 phone crop keeps the coach, the pumps and both pillar signs.',
   },
   'mpemba-station-roadside': {
     src: '/images/fuel-stations/itemba-station-wide-yard.webp',
@@ -147,7 +156,8 @@ export const media = {
     alt: 'Itemba Logistics tanker supporting goods movement and transit operations',
     entity: 'enterprises',
     provenance: 'own',
-    note: 'Portrait 720x1280; the striped canopy is not ITEMBA signage. Small cells only.',
+    focus: 20,
+    note: 'Portrait 720x1280; the striped canopy is not ITEMBA signage. Small cells only. Focus 20 trims the bare yard below the tanker; its vivid sky is toned down in the pipeline (chroma 0.7).',
   },
   'logistics-truck-front': {
     src: '/images/logistics/itemba-logistics-truck-front.webp',
@@ -175,6 +185,13 @@ export const media = {
     alt: 'Customer beverage order loaded on a truck for Westsides distribution',
     entity: 'westsides',
     provenance: 'own',
+  },
+  'westsides-beer-delivery': {
+    src: '/images/beverages/westsides-beer-delivery-truck.webp',
+    alt: 'Beverage crates stacked on a Westsides delivery truck',
+    entity: 'westsides',
+    provenance: 'own',
+    note: 'Portrait 780x1040: crates on a truck with no dominant third-party logo. The Westsides page hero (split, beside the text).',
   },
   'westsides-softdrinks': {
     src: '/images/beverages/westsides-softdrinks-warehouse.webp',

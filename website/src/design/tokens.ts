@@ -298,13 +298,15 @@ export type TypeStyle = {
  * letter-spaced capitals).
  * - display-xl and display follow the plan's clamps (48–96px, 40–72px).
  * - h1, h2 and h3 reach 56, 40 and 28px from a 1068px viewport, and scale
- *   down to 40, 32 and 24px at 360px.
+ *   down to 32, 32 and 24px at 360px: on a phone a chapter title set at h1
+ *   size steps down to h2 size, so the page's own h1 (about 40px there)
+ *   leads every chapter by at least 1.2x.
  * - rem values scale with the reader's own font-size setting.
  */
 export const typeScale = {
   'display-xl': { size: 'clamp(3rem, 8vw, 6rem)', minPx: 48, maxPx: 96, lineHeight: '1.05', tracking: '-0.022em', weight: 600 },
   display: { size: 'clamp(2.5rem, 6vw, 4.5rem)', minPx: 40, maxPx: 72, lineHeight: '1.07', tracking: '-0.022em', weight: 600 },
-  h1: { size: 'clamp(2.5rem, 1.991rem + 2.26vw, 3.5rem)', minPx: 40, maxPx: 56, lineHeight: '1.07', tracking: '-0.02em', weight: 600 },
+  h1: { size: 'clamp(2rem, 1.237rem + 3.39vw, 3.5rem)', minPx: 32, maxPx: 56, lineHeight: '1.07', tracking: '-0.02em', weight: 600 },
   h2: { size: 'clamp(2rem, 1.746rem + 1.13vw, 2.5rem)', minPx: 32, maxPx: 40, lineHeight: '1.1', tracking: '-0.018em', weight: 600 },
   h3: { size: 'clamp(1.5rem, 1.373rem + 0.565vw, 1.75rem)', minPx: 24, maxPx: 28, lineHeight: '1.14', tracking: '-0.015em', weight: 600 },
   lede: { size: 'clamp(1.3125rem, 1.217rem + 0.424vw, 1.5rem)', minPx: 21, maxPx: 24, lineHeight: '1.33', tracking: '-0.011em', weight: 400 },

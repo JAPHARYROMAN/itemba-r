@@ -7,7 +7,10 @@ import type { CompanySlug, SplitHeadline } from './types';
 
 export type InsightArticle = {
   slug: string;
+  /** The article's title as published: the page title and metadata (a baseline contract). */
   title: string;
+  /** The same title in the site's sentence case, for cards and headings. */
+  displayTitle: string;
   eyebrow: string;
   summary: string;
   metaDescription: string;
@@ -34,6 +37,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'route-business-enquiry-itemba-group',
     title: 'How to Route a Business Enquiry to Itemba Group',
+    displayTitle: 'How to route a business enquiry to Itemba Group',
     eyebrow: 'Business enquiries',
     summary:
       'A practical guide to choosing the right Itemba Group contact route for fuel, trade, logistics, construction supply, hospitality, property, and partnership enquiries.',
@@ -82,6 +86,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'tunduma-corridor-fuel-trade-logistics',
     title: 'Why the Tunduma Corridor Matters for Fuel, Trade, and Logistics',
+    displayTitle: 'Why the Tunduma corridor matters for fuel, trade and logistics',
     eyebrow: 'Location advantage',
     summary:
       'How Itemba Group location in Mpemba-Tunduma supports regional fuel, distribution, logistics, and cross-border business enquiries.',
@@ -125,6 +130,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'choose-right-itemba-company',
     title: 'Choosing the Right Itemba Group Company for Your Enquiry',
+    displayTitle: 'Choosing the right Itemba Group company for your enquiry',
     eyebrow: 'Company guide',
     summary:
       'A simple guide to Mwanjalisi Oil Co Ltd, Westsides Company Ltd, and Itemba Enterprises Co Ltd so visitors can contact the right operating team.',
@@ -174,6 +180,7 @@ export const insightArticles: InsightArticle[] = [
   {
     slug: 'supplier-bulk-purchase-enquiries',
     title: 'What Suppliers and Bulk Buyers Should Prepare Before Contacting Itemba Group',
+    displayTitle: 'What suppliers and bulk buyers should prepare before contacting Itemba Group',
     eyebrow: 'Partnership readiness',
     summary:
       'A checklist for supplier introductions, bulk purchase requests, construction supply enquiries, hospitality customers, and commercial partners.',

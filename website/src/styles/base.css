@@ -42,8 +42,14 @@ body {
   text-wrap: balance;
 }
 
-:where(p, li, dd, figcaption, blockquote) {
-  text-wrap: pretty;
+/* Body copy wraps greedily on phones: at a 316px measure `pretty` pulls
+   words down a line to avoid a short last line, which leaves the lines
+   above it ragged (about half the measure). From `md` the measure is wide
+   enough for it. Ledes keep `pretty` everywhere (Lede, text-pretty). */
+@media (min-width: 768px) {
+  :where(p, li, dd, figcaption, blockquote) {
+    text-wrap: pretty;
+  }
 }
 
 ::selection {

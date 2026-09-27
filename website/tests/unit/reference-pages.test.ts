@@ -7,11 +7,15 @@
  *   order, the three company tiles (legal name, accent, Explore › and
  *   Enquire › straight to the company's form), six sectors with the company
  *   that runs each, the typographic estate tile, no divisions figure, and
- *   the closing call to action with the classified contact hrefs.
+ *   the closing call to action with the classified contact hrefs; one link
+ *   colour (group gold) with the company only in dots and icons; an h1
+ *   that leads every other heading on a phone.
  * - Company pages: the metadata and JSON-LD contracts, the sticky sub-nav
  *   whose anchors all land, the form preset to the company, the profile
  *   PDF, the visible breadcrumb trail matching its BreadcrumbList, and a
- *   404 for any other slug.
+ *   404 for any other slug; the short name as h1 with one legal-name form
+ *   on the page, a one-sentence lede, one hero template, and a cinema tile
+ *   that carries a photograph.
  * - Neither page renders anything at opacity 0, and the server HTML never
  *   mentions manufacturing (flags.mentionManufacturing).
  *
@@ -23,11 +27,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { companies, type Company } from '@/content/companies';
 import { contact } from '@/content/contact';
+import { enquiryFormCopy, enquiryIntents } from '@/content/enquiry';
 import { flags } from '@/content/flags';
 import { homeClosing, homeCompanyTiles, homeHero, homeNumbers, homeSectors, homeStatement } from '@/content/home';
 import { profilePdfHref } from '@/content/profile/cover';
 import { absoluteUrl, site } from '@/content/site';
 import { headlineText } from '@/content/types';
+import { heroFrame } from '@/sections/company/LeadPhoto';
 
 vi.mock('next/navigation', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/navigation')>()),
@@ -115,6 +121,27 @@ describe('home: page', () => {
     expect(html).toMatch(/aria-labelledby="tile-mwanjalisi-oil" data-tone="cinema"/);
   });
 
+  it('keeps one link colour: group gold everywhere, the company only in its dots and icons', () => {
+    // Company tiles: the eyebrow and both links are gold, never the accent text colour.
+    for (const tile of homeCompanyTiles) {
+      const company = companies.find((c) => c.slug === tile.companySlug)!;
+      const section = html.match(new RegExp(`<section[^>]*aria-labelledby="tile-${company.slug}"[\\s\\S]*?</section>`))?.[0] ?? '';
+      expect(section, company.slug).not.toContain('text-accent-fg');
+      expect(section.match(/text-gold-fg/g), company.slug).toHaveLength(3);
+      expect(section, company.slug).toContain('bg-accent');
+    }
+    // Sector cells: "Explore ›" is gold; the icon and the dot carry the company.
+    const sectors = html.match(/<section[^>]*aria-labelledby="sectors-title"[\s\S]*?<\/section>/)?.[0] ?? '';
+    const cells = sectors.split(/(?=data-accent="(?:mwanjalisi|westsides|enterprises)")/).slice(1);
+    expect(cells).toHaveLength(homeSectors.items.length);
+    for (const cell of cells) {
+      const own = cell.split(/data-tone="cinema"/)[0] ?? '';
+      expect(own).not.toContain('text-accent-fg');
+      expect(own).toContain('text-gold-fg');
+      expect(own).toContain('text-accent');
+    }
+  });
+
   it('lists the six sectors with the company that runs each; Itemba Estate stays typographic', () => {
     for (const item of homeSectors.items) expect(hrefs(html)).toContain(`/services/${item.serviceSlug}`);
     expect(text).toContain(`${homeSectors.runBy} Mwanjalisi Oil`);
@@ -157,12 +184,32 @@ describe('home: page', () => {
     expect([sizeOf('sectors-title'), sizeOf('corridor-title'), sizeOf('numbers-title')]).toEqual(['text-h1', 'text-h1', 'text-h2']);
   });
 
+  it('keeps the h1 in the lead on phones: the statement and closing lines step down there', () => {
+    // The h1 is about 40px at 360px; chapters are 32px (the h1 token) and the
+    // display lines 33px (`statement`), so it leads each by at least 1.2x.
+    const classOf = (id: string) => new RegExp(`<h2 id="${id}" class="([^"]*)"`).exec(html)?.[1] ?? '';
+    for (const id of ['statement-title', 'closing-title']) {
+      expect(classOf(id), id).toContain('max-md:text-[length:clamp(2.0625rem,1.341rem_+_3.206vw,2.875rem)]');
+    }
+  });
+
   it('sets the lead line in two lines on a desktop, and never splits "Tanzania–Zambia" on a phone', () => {
     const h1 = /<h1 id="page-title" class="([^"]*)">([\s\S]*?)<\/h1>/.exec(html);
     expect(h1?.[1]).toContain('max-w-[74rem]');
-    // On phones the size is fitted to the compound (about 7.6em wide), so it can always stay whole.
-    expect(h1?.[1]).toContain('max-md:text-[length:min(3rem,calc((100vw_-_2.75rem)_/_7.8))]');
+    // On phones the size is display-xl where the compound (about 7.6em wide)
+    // fits the line, and fitted to it below that, so it always stays whole.
+    expect(h1?.[1]).toContain('max-md:text-[length:min(max(3rem,8vw),calc((100vw_-_2.75rem)_/_7.8))]');
     expect(h1?.[2]).toContain('<span class="whitespace-nowrap">Tanzania–Zambia</span>');
+  });
+
+  it('crops the hero photograph tighter on phones, with sizes that cover the crop', () => {
+    const hero = html.match(/<section[^>]*aria-labelledby="page-title"[\s\S]*?<\/section>/)?.[0] ?? '';
+    const img = hero.match(/<img\b[^>]*>/)?.[0] ?? '';
+    expect(hero).toContain('aspect-[4/3] md:aspect-[21/9]');
+    // 1.5x about the canopy (the registry's focus), below `md` only.
+    expect(hero).toMatch(/class="absolute inset-0 max-md:\[transform:scale\(var\(--lead-zoom\)\)\]" style="--lead-zoom:1.5;transform-origin:45% 55%"/);
+    // A 1.42:1 master in a 4:3 frame draws 1.06 frames wide; zoomed, 1.59.
+    expect(decode(img)).toMatch(/sizes="\(min-width: 1484px\) 1440px, \(min-width: 768px\) calc\(100vw - 44px\), calc\(\(100vw - 44px\) \* 1\.59\)"/);
   });
 
   it('shows no photograph twice', () => {
@@ -197,8 +244,35 @@ describe('company pages', () => {
     const text = textOf(html);
     const pageIds = ids(html);
 
-    expect(tags(html, 'h1')).toEqual([company.name]);
-    expect(text).toContain(company.legalName);
+    // The h1 is the short name; the page shows one legal-name form, the
+    // registered name in "At a glance" (the metadata title keeps company.name).
+    // The form's "Routed to …" line is left aside: it is the routeTo string
+    // the enquiry payload and analytics carry (a contract).
+    expect(tags(html, 'h1')).toEqual([company.shortName]);
+    const intent = enquiryIntents.find((i) => i.id === company.id)!;
+    const visible = textOf(html.replace(/<script\b[\s\S]*?<\/script>/g, '')).replace(
+      `${enquiryFormCopy.routedToPrefix} ${intent.routeTo}`,
+      '',
+    );
+    expect(visible.split(company.legalName).length - 1, 'registered name shown once').toBe(1);
+    if (company.name !== company.legalName) expect(visible).not.toContain(company.name);
+
+    // The hero lede: one sentence of 110 characters or fewer (three lines on a phone).
+    const hero = html.match(/<section[^>]*aria-labelledby="page-title"[\s\S]*?<\/section>/)?.[0] ?? '';
+    expect(company.lede.length).toBeLessThanOrEqual(110);
+    expect(company.lede.slice(0, -1)).not.toMatch(/[.!?]\s/);
+    expect(textOf(hero)).toContain(company.lede);
+    // One hero template: a 2400px landscape framed in the content width, or a photograph beside the text.
+    expect(hero).not.toContain('max-w-wide');
+    const heroImg = decode(hero.match(/<img\b[^>]*>/)?.[0] ?? '');
+    if (heroFrame(company.heroImage).layout === 'framed') expect(heroImg).toMatch(/sizes="\(min-width: 1112px\) 1068px, /);
+    else expect(heroImg).toMatch(/sizes="\(min-width: 1024px\) \d+px, /);
+
+    // "What we do": a one-sentence lead and a short list, not the long description.
+    const whatWeDo = html.match(/<section[^>]*aria-labelledby="what-we-do-title"[\s\S]*?<\/section>/)?.[0] ?? '';
+    expect(textOf(whatWeDo)).toContain(company.overview.lead);
+    expect(tags(whatWeDo, 'li')).toEqual(company.overview.points.map((point) => point));
+    expect(text).not.toContain(company.detail);
 
     // The sub-nav: named, in the company accent, every anchor lands on the page.
     const subnav = html.match(/<nav[^>]*data-subnav[\s\S]*?<\/nav>/)?.[0] ?? '';
@@ -234,6 +308,10 @@ describe('company pages', () => {
     }
     if (company.keyStat.restates) expect(company.highlights).toContain(company.keyStat.restates);
     expect(text).toContain(company.keyStat.label);
+    // The one cinema tile carries a photograph, and at least three strengths.
+    expect(strengths).toContain('data-tone="cinema"');
+    expect(photos(strengths)).toEqual([company.strengthsImage.src]);
+    expect(tags(strengths, 'li').length).toBeGreaterThanOrEqual(3);
 
     // One photograph per place: the hero is never the home tile's, and nothing repeats on the page.
     expect(company.heroImage.media).not.toBe(company.tileImage.media);
@@ -251,7 +329,7 @@ describe('company pages', () => {
     const crumbs = ld.find((e) => e['@type'] === 'BreadcrumbList');
     const trail = html.match(/<nav aria-label="Breadcrumb"[\s\S]*?<\/nav>/)?.[0] ?? '';
     const names = (crumbs?.itemListElement as Array<{ name: string }>).map((item) => item.name);
-    expect(names).toEqual(['Home', 'Companies', company.name]);
+    expect(names).toEqual(['Home', 'Companies', company.shortName]);
     expect(tags(trail, 'li')).toEqual(names);
 
     expect(html).not.toMatch(/opacity:\s*0(?![.\d])/);

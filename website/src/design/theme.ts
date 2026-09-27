@@ -79,6 +79,10 @@ export function toneDeclarations(tone: Tone): CssDeclarations {
     declarations[variable] = hexToChannels(map[key]);
   }
   declarations['--accent-fg'] = map.accentSlot === 'cinema' ? 'var(--accent-text-cinema)' : 'var(--accent-text)';
+  // Group gold as text on this tone whatever the accent, so home's links
+  // and eyebrows stay gold inside a company's tile (plan: chevron links are
+  // text gold; the company accent colours links on company pages only).
+  declarations['--gold-fg'] = map.accentSlot === 'cinema' ? 'var(--color-gold-cinema)' : 'var(--color-gold-text)';
   declarations['color-scheme'] = map.colorScheme;
   return declarations;
 }
@@ -195,7 +199,13 @@ export const colors = {
 
   // Fixed brand colours: cinema tiles, and each accent (graphic / text / cinema).
   cinema: { DEFAULT: rgbVar('--color-cinema'), raised: rgbVar('--color-cinema-raised') },
-  gold: { DEFAULT: rgbVar('--color-gold'), text: rgbVar('--color-gold-text'), cinema: rgbVar('--color-gold-cinema') },
+  gold: {
+    DEFAULT: rgbVar('--color-gold'),
+    text: rgbVar('--color-gold-text'),
+    cinema: rgbVar('--color-gold-cinema'),
+    /** Group gold text for the tone it sits on (text gold on light tones, cinema gold on black). */
+    fg: rgbVar('--gold-fg'),
+  },
   mwanjalisi: {
     DEFAULT: rgbVar('--color-mwanjalisi'),
     text: rgbVar('--color-mwanjalisi-text'),

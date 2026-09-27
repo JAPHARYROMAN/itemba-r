@@ -47,15 +47,15 @@ export const shellCopy = {
 } as const;
 
 /**
- * The mobile quick-contact bar (Call · WhatsApp · Enquire). "Enquire" is the
- * email action, so its accessible name adds `enquireContext`.
+ * The mobile quick-contact bar (Call · WhatsApp · Email). Its pill is the
+ * group's "Business enquiry" email (the mailto: ConversionTracker counts),
+ * so it says "Email": every "Enquire" on the site leads to the form.
  */
 export const quickContactCopy = {
   label: 'Quick contact',
   call: 'Call',
   whatsapp: 'WhatsApp',
-  enquire: 'Enquire',
-  enquireContext: 'by email',
+  email: 'Email',
 } as const;
 
 /** The footer directory: five columns, as on Apple's footer. */
@@ -82,7 +82,7 @@ export const footerDirectory = {
     title: 'Resources',
     links: [
       { label: 'Insights', href: '/insights' },
-      { label: 'Company Profile', href: '/company-profile' },
+      { label: 'Company profile', href: '/company-profile' },
       { label: 'FAQ', href: '/faq' },
     ],
   },

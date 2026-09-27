@@ -23,22 +23,26 @@ export type CompanyTileProps = {
  * The accent dot and legal name, the name at h1 size (a chapter under the
  * hero's display-xl line), what it does, the summary and the two links.
  * Centred; a split tile sets it flush left beside its photograph from `lg`.
+ * Home keeps one link colour (plan): the eyebrow and both links are group
+ * gold, and the company shows only in its accent dot.
  */
 function TileText({ company, tile, split }: { company: Company; tile: HomeCompanyTile; split: boolean }) {
   const href = companyUrl(company.slug);
   return (
     <div className={cn('text-center', split && 'lg:text-left')}>
-      <Eyebrow dot>{company.legalName}</Eyebrow>
+      <Eyebrow dot tone="gold">
+        {company.legalName}
+      </Eyebrow>
       <Heading as="h2" id={`tile-${company.slug}`} size="h1" className="mt-3">
         {tile.name}
       </Heading>
       <p className="mt-2 text-h3 font-normal text-fg">{keepCompounds(tile.eyebrow)}</p>
       <p className={cn('mx-auto mt-5 max-w-[38rem] text-body-lg text-fg-muted', split && 'lg:mx-0')}>{keepCompounds(tile.summary)}</p>
       <div className={cn('mt-7 flex flex-wrap items-center justify-center gap-x-8 gap-y-3', split && 'lg:justify-start')}>
-        <ChevronLink href={href} size="lede" context={tile.name}>
+        <ChevronLink href={href} size="lede" tone="gold" context={tile.name}>
           {homeTileActions.explore}
         </ChevronLink>
-        <ChevronLink href={`${href}#enquire`} size="lede" context={tile.name}>
+        <ChevronLink href={`${href}#enquire`} size="lede" tone="gold" context={tile.name}>
           {homeTileActions.enquire}
         </ChevronLink>
       </div>
@@ -52,7 +56,9 @@ function TileText({ company, tile, split }: { company: Company; tile: HomeCompan
  * - a landscape photograph runs across the tile under the centred text,
  *   in the 1068px content width (where the dusk master stays sharp);
  * - a portrait photograph stands beside the text from `lg` (a split tile,
- *   in a 440px column), and under it, square, on smaller screens.
+ *   in a 440px column set against the grid's outer edge, where the text,
+ *   the dusk frame above and the nav align), and under it, square, on
+ *   smaller screens.
  * The links go to the company page and straight to its enquiry form there.
  */
 export function CompanyTile({ company, tile, tone, photoFirst = false }: CompanyTileProps) {
@@ -64,7 +70,12 @@ export function CompanyTile({ company, tile, tone, photoFirst = false }: Company
       <Section tone={tone} accent={company.accent} labelledBy={titleId}>
         <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-2 lg:gap-16">
           <TileText company={company} tile={tile} split />
-          <Reveal className={cn('mx-auto w-full max-w-md lg:max-w-[27.5rem]', photoFirst && 'lg:order-first')}>
+          <Reveal
+            className={cn(
+              'mx-auto w-full max-w-md lg:mx-0 lg:max-w-[27.5rem]',
+              photoFirst ? 'lg:order-first lg:justify-self-start' : 'lg:justify-self-end',
+            )}
+          >
             <LeadPhoto photo={photo} shape="portrait" width="split" />
           </Reveal>
         </Container>

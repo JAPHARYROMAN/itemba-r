@@ -141,6 +141,8 @@ const chevronSizes = {
   lede: 'text-lede',
 } as const;
 
+const chevronTones = { accent: 'text-accent-fg', gold: 'text-gold-fg', default: 'text-fg' } as const;
+
 export type ChevronLinkProps = AnchorProps & {
   href: string;
   /**
@@ -149,8 +151,12 @@ export type ChevronLinkProps = AnchorProps & {
    * tile's own links; `caption` in dense rows.
    */
   size?: keyof typeof chevronSizes;
-  /** `accent` (default) uses the tone's text-safe accent; `default` the text colour. */
-  tone?: 'accent' | 'default';
+  /**
+   * `accent` (default) uses the tone's text-safe accent; `gold` group gold
+   * whatever the accent (home, where a company shows only in its dots and
+   * icons); `default` the text colour.
+   */
+  tone?: keyof typeof chevronTones;
   /**
    * Words appended for screen readers only, so a generic "Learn more" link
    * has a unique name ("Learn more about Westsides").
@@ -188,7 +194,7 @@ export function ChevronLink({ href, size = 'body', tone = 'accent', context, cla
       className={cn(
         'group inline-block decoration-1 underline-offset-4 hover:underline',
         chevronSizes[size],
-        tone === 'accent' ? 'text-accent-fg' : 'text-fg',
+        chevronTones[tone],
         className,
       )}
       {...rest}

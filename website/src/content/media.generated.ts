@@ -103,9 +103,9 @@ export const mediaGenerated = {
   },
   "/images/fuel-stations/itemba-mpemba-coach-canopy.webp": {
     width: 2400,
-    height: 1350,
+    height: 1200,
     blurDataURL:
-      "data:image/webp;base64,UklGRkYAAABXRUJQVlA4IDoAAACQAQCdASoQAAkAA4BaJQBOgBZHtTAA/llvkdCdQCQEWQW7jkg+5GB8+XxxyOiGKTmMRcEI9nUYAAAA",
+      "data:image/webp;base64,UklGRkYAAABXRUJQVlA4IDoAAACQAQCdASoQAAgAA4BaJZQCdACewAAA/t/mlzIeiDoy708Rf+dRoStycRsCnjIihhuyPbjNF+DZ5HgA",
   },
   "/images/fuel-stations/itemba-mpemba-forecourt.webp": {
     width: 1152,
@@ -249,7 +249,7 @@ export const mediaGenerated = {
     width: 720,
     height: 1280,
     blurDataURL:
-      "data:image/webp;base64,UklGRl4AAABXRUJQVlA4IFIAAACwAQCdASoJABAAA4BaJbACdADyZrkAAP0dFAaQ/E6A/Vmpe/1nuY9A/xp0I9Kabg+jypbL0B0Vpk2c+0xSTfBFHwqm8IE6gHpcuw96AOptAAAA",
+      "data:image/webp;base64,UklGRlgAAABXRUJQVlA4IEwAAACwAQCdASoJABAAA4BaJbACdAEON6AAAP2MuzkkNb0AyUn+xISLO30U/N053y+BBUuHypbL0B0Vpk2c9TGghPnUE5ZWyHp069vxIgAA",
   },
   "/images/logistics/itemba-logistics-truck-front.webp": {
     width: 720,

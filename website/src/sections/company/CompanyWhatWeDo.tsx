@@ -4,15 +4,16 @@ import { Bento, BentoCell, ChevronLink, Container, Eyebrow, Heading, Icon, Secti
 import { companySectionIds } from './CompanySubNav';
 
 /**
- * "What we do", as a bento: the company in a paragraph (19px, so it reads
- * as a paragraph, not a wall) beside its headline figure, then its three
- * lines of business, each linking to the service page that covers it. The
- * figure cell carries its eyebrow at the top and the numeral at display-xl
- * at the foot, so neither end of the cell is empty. The cells sit white on
- * the alternate grey tile.
+ * "What we do", as a bento: the company in one sentence, then a short list
+ * (its sites, or the markets it serves) under a small label, beside its
+ * headline figure; then its three lines of business, each linking to the
+ * service page that covers it. The figure cell carries its eyebrow at the
+ * top and the numeral at display-xl at the foot, so neither end of the
+ * cell is empty. The cells sit white on the alternate grey tile.
  */
 export function CompanyWhatWeDo({ company }: { company: Company }) {
   const copy = companyPageCopy;
+  const { overview } = company;
   return (
     <Section tone="alt" accent={company.accent} id={companySectionIds.whatWeDo} labelledBy="what-we-do-title">
       <Container>
@@ -23,7 +24,15 @@ export function CompanyWhatWeDo({ company }: { company: Company }) {
         <Bento className="mt-10 md:mt-14">
           <BentoCell span="two-thirds" padding="lg">
             <Eyebrow dot>{company.sector}</Eyebrow>
-            <p className="mt-5 text-body-lg text-fg">{keepCompounds(company.detail)}</p>
+            <p className="mt-5 text-body-lg text-fg md:text-lede">{keepCompounds(overview.lead)}</p>
+            <h3 className="mt-8 text-eyebrow text-fg-muted">{overview.label}</h3>
+            <ul role="list" className="mt-2 border-t border-line">
+              {overview.points.map((point) => (
+                <li key={point} className="border-b border-line py-3 text-body text-fg">
+                  {keepCompounds(point)}
+                </li>
+              ))}
+            </ul>
           </BentoCell>
 
           <BentoCell span="third" padding="lg" className="justify-between gap-10">

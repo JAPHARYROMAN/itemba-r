@@ -5,12 +5,14 @@ import { companySectionIds } from './CompanySubNav';
 import { LeadPhoto, heroFrame } from './LeadPhoto';
 
 /**
- * The company hero: the accent dot and what the company does, its name as
- * the page's h1, its summary, then the two actions (enquire here, or take
- * the ready-made company profile away as a PDF, the link at the pill's own
- * size) and its hero photograph, which is never the one its home tile
- * shows. A 2400px landscape runs wide; a smaller landscape stays in the
- * prose width; a portrait photograph stands beside the text.
+ * The company hero: the accent dot and what the company does, its short
+ * name as the page's h1 (the registered name appears once, in "At a
+ * glance"), a one-sentence lede, then the two actions (enquire here, or
+ * take the ready-made company profile away as a PDF, the link at the
+ * pill's own size) and its hero photograph, which is never the one its
+ * home tile shows. One template for every company (LeadPhoto heroFrame):
+ * a 2400px landscape runs 2:1 under the text in the content width; any
+ * other photograph stands beside the text.
  */
 export function CompanyHero({ company }: { company: Company }) {
   const { hero } = companyPageCopy;
@@ -21,9 +23,9 @@ export function CompanyHero({ company }: { company: Company }) {
       accent={company.accent}
       eyebrow={company.eyebrow}
       eyebrowDot
-      title={company.name}
+      title={company.shortName}
       titleSize="display"
-      lede={company.summary}
+      lede={company.lede}
       actions={
         <>
           <ButtonLink href={`#${companySectionIds.enquire}`} size="lg">
@@ -35,7 +37,7 @@ export function CompanyHero({ company }: { company: Company }) {
         </>
       }
       mediaLayout={frame.layout}
-      mediaSize={frame.width === 'prose' ? 'prose' : 'wide'}
+      mediaSize="content"
       media={<LeadPhoto photo={photo} shape={frame.shape} width={frame.width} priority />}
     />
   );

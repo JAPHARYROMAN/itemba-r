@@ -58,14 +58,15 @@ describe('QuickContact bar', () => {
     for (const link of expected.links) expect(got, link.href).toContain(normaliseContactHref(link.href));
   });
 
-  it('is a slim phone-only bar with Call, WhatsApp and an Enquire pill, and reserves its own height', () => {
+  it('is a slim phone-only bar with Call, WhatsApp and an Email pill, and reserves its own height', () => {
     const html = renderToStaticMarkup(h(QuickContact));
     expect(html).toMatch(/<aside aria-label="Quick contact" data-quick-contact="" data-print="hide" class="fixed [^"]*md:hidden/);
     expect(html).toContain(`href="tel:${contact.primaryPhone}"`);
     expect(html).toContain('>Call<');
     expect(html).toContain('>WhatsApp<');
-    // "Enquire" is the email action; its accessible name says so.
-    expect(html).toMatch(/href="mailto:[^"]*"[^>]*>Enquire<span class="sr-only"> by email<\/span>/);
+    // The pill is the mailto: action, so it says "Email" (every "Enquire" on the site leads to the form).
+    expect(html).toMatch(/<a href="mailto:[^"]*" aria-label="Email Itemba Group" class="[^"]*rounded-pill[^"]*"><svg[\s\S]*?<\/svg><span>Email<\/span><\/a>/);
+    expect(html).not.toContain('Enquire');
     expect(html).toMatch(/^<div aria-hidden="true" data-print="hide" class="h-\[calc\(var\(--quickbar-height\)/);
     expect(html).not.toMatch(/opacity:\s*0/);
   });
@@ -132,11 +133,25 @@ describe('SiteFooter', () => {
     expect(html).toContain(`<nav aria-label="${footerDirectory.label}">`);
     expect(html).toContain(`Copyright © ${new Date().getFullYear()} Itemba Group. All rights reserved.`);
     expect(html).toContain('www.itembagrouptz.com');
-    expect(html).toContain(
-      'Mwanjalisi Oil Co Ltd, Westsides Company Ltd and Itemba Enterprises Co Ltd are legally independent companies of Itemba Group.',
-    );
-    // The footer keeps the full lockup, GROUP line included.
-    expect(html.match(/<img [^>]*>/)?.[0]).toContain('logo.png');
+    // Short names: each company's registered name appears on its own page.
+    expect(html).toContain('Mwanjalisi Oil, Westsides and Itemba Enterprises are legally independent companies of Itemba Group.');
+    // The shield-and-ITEMBA mark, 30px tall: the full lockup's GROUP line would be about 3px at footer size.
+    const crest = html.match(/<img [^>]*>/)?.[0] ?? '';
+    expect(crest).toContain('logo-nav.png');
+    expect(crest).toContain('height="30"');
+  });
+
+  it('sets its directory labels in sentence case', () => {
+    const labels = [...html.matchAll(/<a [^>]*>([^<]+)<\/a>/g)].map((m) => m[1] ?? '');
+    expect(labels).toContain('Company profile');
+    expect(labels).toContain('Fuel supply');
+    expect(labels).toContain('Real estate');
+    // Only proper nouns are capitalised after the first word.
+    const properNouns = /^(?:Itemba|Group|Songwe|Tunduma|Mwanjalisi|Oil|Westsides|Enterprises|FAQ|WhatsApp)$/;
+    for (const label of new Set(labels)) {
+      const [, ...rest] = label.split(/[\s-]+/);
+      for (const word of rest) if (/^[A-Z]/.test(word)) expect(word, label).toMatch(properNouns);
+    }
   });
 
   it('links every section of the site', () => {

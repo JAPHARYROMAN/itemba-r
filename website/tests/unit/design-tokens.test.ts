@@ -284,6 +284,9 @@ describe('CSS variables written by the Tailwind plugin', () => {
       expect(block[variable], `${tone} ${variable}`).toBe(hexToChannels(tones[tone][key as keyof typeof semanticVariables]));
     }
     expect(block['--accent-fg']).toBe(tone === 'cinema' ? 'var(--accent-text-cinema)' : 'var(--accent-text)');
+    // Group gold text, whatever the accent: the group swatch's slot for this tone (AA-checked above).
+    expect(block['--gold-fg']).toBe(tone === 'cinema' ? 'var(--color-gold-cinema)' : 'var(--color-gold-text)');
+    expect(styles[':root']![tone === 'cinema' ? '--color-gold-cinema' : '--color-gold-text']).toBe(hexToChannels(accentText('group', tone)));
     expect(block['color-scheme']).toBe(tone === 'cinema' ? 'dark' : 'light');
   });
 

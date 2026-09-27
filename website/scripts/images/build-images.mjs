@@ -71,7 +71,9 @@ const legacy = (file) => ({ kind: 'legacy', file });
  * positive) and keeps the largest centred frame of the original shape;
  * `crop` is in auto-oriented (and levelled) source pixels; `trim` removes
  * the black letterbox bars left on phone screenshots; `saturation`
- * overrides the chroma multiplier for that image.
+ * overrides the chroma multiplier for that image; `linear` ([a, b], each
+ * 8-bit channel becomes a·v + b after the grade) is a mild contrast step
+ * for a shot veiled by haze or a smudged lens, for that recipe only.
  */
 export const RECIPES = [
   // ── Mwanjalisi Oil: ITEMBA-MPEMBA ─────────────────────────────────────────
@@ -87,13 +89,18 @@ export const RECIPES = [
     hero: true,
     crop: { left: 600, top: 150, width: 3400, height: 2400 },
   },
-  // A coach under the ITEMBA-MPEMBA canopy (3000x4000 original): the band
-  // from the canopy's edge to the pump island, for the Mwanjalisi Oil hero.
+  // A coach under the ITEMBA-MPEMBA canopy (3000x4000 original), for the
+  // Mwanjalisi Oil hero: a 2:1 band from the canopy's underside to the
+  // forecourt, so the pillar signs sit in its top third and the pumps,
+  // the coach and people fill the middle (the sky and the bare canopy
+  // soffit above them are cut). The shot is veiled by haze (a smudged lens
+  // or glare), so it alone gets a mild contrast step.
   {
     out: 'fuel-stations/itemba-mpemba-coach-canopy.webp',
     src: raw('itemba-mpemba 016.jpg'),
     hero: true,
-    crop: { left: 0, top: 615, width: 3000, height: 1688 },
+    crop: { left: 0, top: 1150, width: 3000, height: 1500 },
+    linear: [1.14, -18],
   },
   // Roadside panorama with a tanker: a full-width corridor band (4000x3000 original).
   { out: 'fuel-stations/itemba-station-wide-yard.webp', src: raw('itemba.jpg'), hero: true },
@@ -152,7 +159,9 @@ export const RECIPES = [
   { out: 'parking/uzunguni-parking-yard-overview.webp', src: raw('uzunguni-parking 007.jpg') },
 
   // ── Itemba Enterprises: Itemba Logistics ──────────────────────────────────
-  { out: 'logistics/itemba-logistics-tanker-under-canopy.webp', src: raw('itemba logistics.jpg') },
+  // Its sky came out of the phone a saturated electric blue, far more vivid
+  // than any other photograph on the site: chroma 0.7 brings it to the set.
+  { out: 'logistics/itemba-logistics-tanker-under-canopy.webp', src: raw('itemba logistics.jpg'), saturation: 0.7 },
   // Shot through a heavy "vivid" phone filter (neon trees, magenta
   // lettering): chroma 0.55 rather than 0.85 brings it back to the set.
   { out: 'logistics/itemba-logistics-truck-front.webp', src: raw('itemba logistics 002.jpg'), saturation: 0.55 },
@@ -294,6 +303,9 @@ export async function render(recipe) {
   // 4. Grade: shadow lift on lightness, chroma −15% (or the recipe's own), hue untouched.
   if (image.info.channels !== 3) throw new Error(`${recipe.out}: expected 3-channel sRGB, got ${image.info.channels}`);
   grade(image.data, recipe.saturation ?? SATURATION);
+
+  // 4b. A recipe's own contrast step, for a shot veiled by haze.
+  if (recipe.linear) image = await toRaw(fromRaw(image).linear(recipe.linear[0], recipe.linear[1]));
 
   // 5. Encode. No withMetadata(): EXIF, XMP and ICC are all omitted.
   return fromRaw(image).webp(WEBP).toBuffer();
