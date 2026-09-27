@@ -3,7 +3,32 @@
  * Dates are ISO (YYYY-MM-DD); the article page shows them and JSON-LD publishes them.
  */
 import 'server-only';
-import type { CompanySlug, SplitHeadline } from './types';
+import { mediaImage, type MediaImage } from './media';
+import type { CompanySlug, SplitHeadline, TypeVisual } from './types';
+
+/**
+ * The company line-up in an article's lead frame: one sentence over the
+ * companies the article names, each with its accent dot and what it does.
+ */
+export type LineupVisual = {
+  kind: 'lineup';
+  /** Two short sentences, set in two tones on two lines. */
+  statement: SplitHeadline;
+};
+
+/**
+ * An article's lead visual, under its header (owner decision: the best
+ * photographs, sparingly):
+ * - a strong photograph, with a caption;
+ * - where none exists, a typographic panel (a line icon and one strong
+ *   sentence) or the company line-up.
+ */
+export type InsightLead = MediaImage | TypeVisual | LineupVisual;
+
+/** True when the lead is a photograph (a registry image). */
+export function isLeadPhoto(lead: InsightLead): lead is MediaImage {
+  return !('kind' in lead);
+}
 
 export type InsightArticle = {
   slug: string;
@@ -22,11 +47,17 @@ export type InsightArticle = {
   serviceSlugs: string[];
   companySlugs: CompanySlug[];
   locationSlugs: string[];
+  /** The visual under the article's header (and on its featured card on /insights). */
+  lead: InsightLead;
   sections: Array<{
     heading: string;
     body: string;
     points?: string[];
   }>;
+  /**
+   * The next step after reading. A general enquiry lands on the article's
+   * own form (`#enquire`); partnership and profile routes keep their pages.
+   */
   cta: {
     label: string;
     href: string;
@@ -51,6 +82,12 @@ export const insightArticles: InsightArticle[] = [
     serviceSlugs: ['fuel-and-lubricants', 'trade-and-distribution', 'logistics-and-cross-border-transit'],
     companySlugs: ['mwanjalisi-oil', 'westsides-company', 'itemba-enterprises'],
     locationSlugs: ['songwe-tunduma'],
+    lead: {
+      kind: 'type',
+      icon: 'arrow-up-right',
+      statement: 'One group office routes every enquiry to the right company.',
+      caption: 'By phone, WhatsApp, email or the enquiry form.',
+    },
     sections: [
       {
         heading: 'Start with the business need',
@@ -58,8 +95,8 @@ export const insightArticles: InsightArticle[] = [
           'The fastest route is to identify the operating area first. Fuel and lubricants, trade distribution, logistics, hardware, hospitality, and property enquiries each point to different teams within the group.',
         points: [
           'Fuel, lubricant, and UZUNGUNI PARKING YARD enquiries usually align with Mwanjalisi Oil Co Ltd.',
-          'Stockist, bar, night club, beverage, construction goods, tools, and electrical supply enquiries usually align with Westsides Company Ltd.',
-          'Dar es Salaam-to-Southern Highlands logistics and cross-border transit enquiries usually align with Itemba Enterprises Co Ltd. ITEMBA-HARDWARE and UZUNGUNI INN enquiries align with Westsides Company Ltd.',
+          'Stockist, bar, night club, beverage, ITEMBA-HARDWARE, UZUNGUNI INN, construction goods, tools, and electrical supply enquiries usually align with Westsides Company Ltd.',
+          'Dar es Salaam-to-Southern Highlands logistics and cross-border transit enquiries usually align with Itemba Enterprises Co Ltd.',
         ],
       },
       {
@@ -80,7 +117,7 @@ export const insightArticles: InsightArticle[] = [
     ],
     cta: {
       label: 'Route an enquiry',
-      href: '/partnerships',
+      href: '#enquire',
     },
   },
   {
@@ -89,7 +126,7 @@ export const insightArticles: InsightArticle[] = [
     displayTitle: 'Why the Tunduma corridor matters for fuel, trade and logistics',
     eyebrow: 'Location advantage',
     summary:
-      'How Itemba Group location in Mpemba-Tunduma supports regional fuel, distribution, logistics, and cross-border business enquiries.',
+      "How Itemba Group's location in Mpemba-Tunduma supports regional fuel, distribution, logistics, and cross-border business enquiries.",
     metaDescription:
       'Understand why Itemba Group location in Mpemba-Tunduma, Songwe Region, matters for fuel, trade distribution, logistics, and cross-border transit enquiries.',
     keywords: ['Tunduma corridor', 'Songwe logistics', 'Tanzania Zambia corridor', 'Mpemba Tunduma business'],
@@ -100,6 +137,9 @@ export const insightArticles: InsightArticle[] = [
     serviceSlugs: ['fuel-and-lubricants', 'logistics-and-cross-border-transit', 'trade-and-distribution'],
     companySlugs: ['mwanjalisi-oil', 'westsides-company', 'itemba-enterprises'],
     locationSlugs: ['songwe-tunduma'],
+    lead: mediaImage('parking-truck-line', {
+      caption: 'UZUNGUNI PARKING YARD in Mpemba-Tunduma, run by Mwanjalisi Oil.',
+    }),
     sections: [
       {
         heading: 'A practical operating base',
@@ -150,6 +190,10 @@ export const insightArticles: InsightArticle[] = [
     ],
     companySlugs: ['mwanjalisi-oil', 'westsides-company', 'itemba-enterprises'],
     locationSlugs: ['songwe-tunduma'],
+    lead: {
+      kind: 'lineup',
+      statement: { lead: 'Three companies.', accent: 'One group office.' },
+    },
     sections: [
       {
         heading: 'Mwanjalisi Oil Co Ltd',
@@ -194,6 +238,12 @@ export const insightArticles: InsightArticle[] = [
     serviceSlugs: ['trade-and-distribution', 'construction-supplies-and-hardware', 'hospitality-and-lodging'],
     companySlugs: ['westsides-company', 'itemba-enterprises'],
     locationSlugs: ['songwe-tunduma'],
+    lead: {
+      kind: 'type',
+      icon: 'document',
+      statement: 'Five details route a supplier or bulk enquiry.',
+      caption: 'Product · Volume · Delivery · Timing · Contact',
+    },
     sections: [
       {
         heading: 'Prepare the commercial basics',
@@ -266,6 +316,11 @@ export const insightsPage = {
 /** /insights/[slug] copy. */
 export const insightPageCopy = {
   backLink: 'All insights',
+  /** The article's dates and reading time, under its headline. */
+  meta: {
+    updated: 'Updated',
+    audience: 'Written for',
+  },
   relatedServices: 'Related services',
   relatedCompanies: 'Related companies',
   relatedLocation: 'Related location',
@@ -274,4 +329,20 @@ export const insightPageCopy = {
     body: 'Use the next route that best matches the business need, or open the full insights hub for more practical guidance.',
     moreLabel: 'More insights',
   },
+} as const;
+
+/**
+ * The enquiry section on an insight article and on /faq: the group's
+ * routing promise and how an enquiry travels, beside the compact form
+ * (which starts on General there).
+ */
+export const routedEnquiryCopy = {
+  eyebrow: 'Enquire',
+  body: 'One group office routes every enquiry to the right company.',
+  stepsLabel: 'How it works',
+  steps: [
+    { title: 'Choose who it is for', body: 'The form starts with General. Pick a company if you already know which one.' },
+    { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
+    { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
+  ],
 } as const;
