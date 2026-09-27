@@ -31,7 +31,12 @@ blob-report
 coverage
 .lighthouseci
 
+# Local platform links and TypeScript's incremental cache
+.vercel
+*.tsbuildinfo
+
 # Logs and OS cruft
+*.log
 npm-debug.log*
 yarn-error.log*
 .DS_Store

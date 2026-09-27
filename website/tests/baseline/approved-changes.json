@@ -327,6 +327,52 @@
       ],
       "change": "Deviation: at 360px the home h1 renders at about 40px, below display-xl's 48px floor.",
       "reason": "The no-split rule for 'Tanzania–Zambia' takes precedence: the compound is about 7.6em wide and must fit the 316px line; the h1 still leads every other heading by 1.2x or more."
+    },
+    {
+      "routes": [
+        "/this-route-does-not-exist",
+        "/companies/*",
+        "/services/*",
+        "/locations/*",
+        "/insights/*"
+      ],
+      "change": "404 page rebuilt: the title renders once as 'Page Not Found | Itemba Group' (was 'Page Not Found | Itemba Group | Itemba Group'); the h1 is 'Page not found' (was a giant '404' h1 over an h2 'Page Not Found'); the actions are the 'Back to home' pill and 'Contact the group office ›' (was Back to Home / Our Companies / Services buttons), followed by 'Three companies. Six sectors.' and the three company cards (home's tile copy, 'Explore ›'); the page no longer inherits home's canonical; robots stays noindex.",
+      "reason": "WP2.8 (architecture §6: no double suffix, h1 'Page not found', noindex; plan: a calm light page that links home). A mistyped company or service address is the likeliest way to a 404, so the companies are one click away; the footer directory follows."
+    },
+    {
+      "routes": [
+        "(error boundaries)"
+      ],
+      "change": "New src/app/error.tsx and src/app/global-error.tsx: a calm light page, 'Something went wrong', a 'Try again' pill, 'Back to home ›' and the group office (global-error adds Call, WhatsApp and Email, since the site shell is gone); robots noindex; the error message is never shown, only Next's digest as a reference.",
+      "reason": "WP2.8 (architecture §1 and §6): origin/main had no error boundaries, so a runtime error showed Next's bare default."
+    },
+    {
+      "routes": [
+        "/robots.txt"
+      ],
+      "change": "Adds 'Disallow: /api/' under 'User-Agent: *' (Allow: / and the Sitemap line unchanged).",
+      "reason": "WP2.8 (architecture §6): the enquiry endpoint and the health probe are not pages."
+    },
+    {
+      "routes": [
+        "/manifest.webmanifest"
+      ],
+      "change": "The /logo.png icon (declared 512x512, really a 930x360 white lockup) is removed; the three square PNG icons stay. The description is the flag-resolved group description (no 'and manufacturing', as on home); lang is the html lang 'en' (was 'en-TZ') and background/theme colours are the canvas #ffffff (was #080f1e).",
+      "reason": "WP2.8 (architecture §6: drop the mis-sized logo entry, lang matches html). The description follows flags.mentionManufacturing = false, the same approval as home's meta description; the colours match the light shell and the theme-color meta."
+    },
+    {
+      "routes": [
+        "/sitemap.xml"
+      ],
+      "change": "lastmod now comes from each page's content updatedAt (src/content/*) instead of one hard-coded date; the 25 URLs, order, priorities and changefreq are unchanged, and today's dates are the same (2026-05-14).",
+      "reason": "WP2.8 (architecture §6): a content edit moves only the pages it touches."
+    },
+    {
+      "routes": [
+        "*"
+      ],
+      "change": "Responses no longer carry 'X-Powered-By: Next.js' (poweredByHeader: false); the staging hosts staging-www.itembagrouptz.com and www-staging.itembagrouptz.com answer 'X-Robots-Tag: noindex'. Production hosts, redirects and every other header are unchanged.",
+      "reason": "WP2.8 (architecture §6 next.config additions): staging ran the production image with production canonicals and an allow-all robots.txt."
     }
   ]
 }
