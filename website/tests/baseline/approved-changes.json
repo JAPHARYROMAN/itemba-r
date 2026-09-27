@@ -844,6 +844,17 @@
       ],
       "change": "Enquiry form, Itemba Enterprises option: the summary reads 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, Itemba Estate property, and emerging-business enquiries.' (adds Itemba Estate). The intent id, label, routeTo and subject the API reads are unchanged.",
       "reason": "D1 integration (p2 request): the real-estate page presets this intent, and Itemba Estate is an Itemba Enterprises business (the core message), so the card no longer reads as logistics-only."
+    },
+    {
+      "routes": [
+        "/company-profile",
+        "/downloads/itemba-group-profile.pdf",
+        "/downloads/itemba-westsides-profile.pdf",
+        "/downloads/itemba-mwanjalisi-profile.pdf",
+        "/downloads/itemba-enterprises-profile.pdf"
+      ],
+      "change": "The four profile PDFs are regenerated from the rebuilt print documents (npm run pdf): set in Inter instead of Arial/Arial Black, with the same page counts (9, 4, 4, 4) and every baseline key string. Word for word the text is unchanged except the group profile's Company History, where '2017 onward - Mwanjalisi Oil expansion' now follows '9 June 2017'; the other differences are line breaks and hyphen wraps from the new typeface (and, in the Itemba Enterprises profile, the EST. 2012 badge now extracts after the directors).",
+      "reason": "D2 (WP3.3): regenerate once at the end, as planned; the history order is the chronological fix already approved for /company-profile, and the typeface is the plan's print system ('keep the light A4 system, set in Inter')."
     }
   ]
 }

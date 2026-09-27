@@ -240,7 +240,13 @@ describe('Media', () => {
     const html = render(h(Media, { media: 'mpemba-station-wide', alt: '', sizes: '100vw', aspect: '16/9', priority: true }));
     expect(html).not.toContain('background-image');
     expect(html).not.toContain('loading="lazy"');
+    expect(html).toMatch(/fetchPriority="high"/i);
     expect(html).toContain('aspect-video');
+  });
+
+  it('only priority images ask for high fetch priority', () => {
+    const html = render(h(Media, { media: 'mpemba-station-wide', alt: '', sizes: '100vw', aspect: '16/9' }));
+    expect(html).not.toMatch(/fetchPriority/i);
   });
 
   it('always renders the credit of a credited image (the CC BY-SA landscape)', () => {

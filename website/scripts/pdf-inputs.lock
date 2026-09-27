@@ -1,0 +1,57 @@
+{
+  "$comment": "PDF drift guard (architecture §5.6). The profile PDFs in public/downloads/ are generated from these inputs. After changing any of them run `npm run pdf` (build and regenerate), then `npm run pdf:lock` to record the new inputs and PDFs. Checked by tests/unit/pdf-inputs-lock.test.ts. Text inputs are hashed with CRLF folded to LF; `inputs.sha256` is the SHA-256 of the `<sha>  <path>` lines, sorted by path.",
+  "algorithm": "sha256",
+  "inputs": {
+    "roots": [
+      "src/content/profile",
+      "src/print",
+      "src/styles/print.css"
+    ],
+    "sha256": "b88ac77133089836c4b6b45e89c2947522cb1115096f8ff600cd21a2d06abaa3",
+    "files": {
+      "src/content/profile/activities.ts": "767661529a37918014fff18f801c6e914645bcbe7ecf50c9136af65577bd2b5f",
+      "src/content/profile/assets.ts": "45cb48d3909106cbfbc133e91cd44955a1969fbce124656a3a3d44ac40c324b5",
+      "src/content/profile/attachments.ts": "3c4bd800e8c036333ef6926df0619d9d7e99f9bdff036fcad370fd6735785872",
+      "src/content/profile/banking.ts": "712dc0b618ad8c05be7f5f0e651170242931ed57de048d4b5d205cb7d57f2942",
+      "src/content/profile/branches.ts": "610e249ee051d0cdfb90a8eba9ef53234f37961ff5f2dce0ed00d02d813e95b6",
+      "src/content/profile/compliance.ts": "3f2f1e71f8c2c6a85f2b5aa1455dc68d3876bae22a861111921e8a0db0ffbd76",
+      "src/content/profile/cover.ts": "d6b1aa215abb134deb4a1d1a8f68b42732a6ec3afbd0719fcb634ae7d48a43b7",
+      "src/content/profile/financial.ts": "b4bc38d0a4676f7f31a38b13cb77e36a5e0c67623431f29cab3bae7f605b2057",
+      "src/content/profile/futurePlans.ts": "20fa281baa0ee9384820b1e448e834858aae036d58f756d9a4ebab40d90afcbb",
+      "src/content/profile/history.ts": "4524e48ba3eec33f875509efe76d93d7e6baf396606742bcabb42cf50850dd06",
+      "src/content/profile/index.ts": "b1e49ded31bcc92072692145e538368c51e49f61e819bf689eeb23f5c1abc55f",
+      "src/content/profile/leadership.ts": "0f7eef38e904be9f30c868fc35c8193eaa0c6f88b42da9d62bc13e5fadbca89f",
+      "src/content/profile/legal.ts": "b041cca8e86f830683971a364841bf1590038248e5f49a33637a60c258074848",
+      "src/content/profile/markets.ts": "7fa9ad5b2b7d583ec11bcfa57ec4267291bcbdd9fb478a422619354883caeebf",
+      "src/content/profile/operations.ts": "e0154399d13dd1d9c2cfc19f00fd9c551e28ee3645a3cf3f2d7d321354f4ca34",
+      "src/content/profile/outline.ts": "81320cf14346058921d1e43bc1ad981103ef003cbb14308b090681ed3ec2c35b",
+      "src/content/profile/overview.ts": "1337f9c3465d7898dedbe1ff69946e62785ffa2ac2b39f97dbb348bf3a3c7a97",
+      "src/content/profile/ownership.ts": "036ba125daa748b11d9c9b38e8f9142de5a6b88653d19eda4add1f49a47a6cec",
+      "src/content/profile/print.ts": "92421fe3cb85e9dd11894a71a1ab97668d89d108cecc9b2add8a3a3c799ea0e7",
+      "src/content/profile/products.ts": "92a9ee6e9411084041baeb634ceb010f97db15dba5bfefffa7d60bc1dc8f107b",
+      "src/content/profile/screen.ts": "1a449457954876a77cdc4946f1480c459f1f22aad3af96d1ffd9b4f8d6a7ac5c",
+      "src/content/profile/strengths.ts": "6757b085b28c4283c42f7e940fc05d29592912aedbe76e478e88dd51a9df0a60",
+      "src/content/profile/vision.ts": "43009c90cbcfd8912d3959d689adf8603220b9eb2807778833200bb02af45a1b",
+      "src/print/ProfileDocuments.tsx": "0009c412fd41dcea7db8f3ca27d55df6c021bbc1e03fd801496c8270dc6edce8",
+      "src/styles/print.css": "0b3761ca36f9fa8dc4e91ca2e232c8270c53ab2f9f9b9a5c2be540a4c4104eaa"
+    }
+  },
+  "outputs": {
+    "public/downloads/itemba-group-profile.pdf": {
+      "sha256": "f59932245bac3eb2f296593fc5f03cf9352533a21683a0c68f994b05127552b7",
+      "bytes": 4135718
+    },
+    "public/downloads/itemba-westsides-profile.pdf": {
+      "sha256": "a25b7a14bc52d9771247a3198f0238d69b0ddff546073a1805c03a3155f62907",
+      "bytes": 6103931
+    },
+    "public/downloads/itemba-mwanjalisi-profile.pdf": {
+      "sha256": "135d69f85e585076a2f7cf0fe2dde3beeb629c9b4dc89cfd3beb40105e56da99",
+      "bytes": 2794078
+    },
+    "public/downloads/itemba-enterprises-profile.pdf": {
+      "sha256": "56ddb350ebad14100519ff7c2762989c534d88b3020453ab6a400ff78551d479",
+      "bytes": 3772889
+    }
+  }
+}

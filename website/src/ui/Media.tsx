@@ -151,6 +151,10 @@ export function Media({
   const focusY = typeof focus === 'number' ? `${focus}%` : focus === 'top' ? '0%' : focus === 'bottom' ? '100%' : '50%';
   const focusX = focus === 'left' ? '0%' : focus === 'right' ? '100%' : `${entry.focusX ?? 50}%`;
   const placeholder = priority ? 'empty' : 'blur';
+  // Next 15's `priority` preloads the image and turns off lazy loading, but
+  // leaves the request at the browser's default (low) image priority until
+  // layout; `fetchPriority="high"` raises the preload and the <img> itself.
+  const fetchPriority = priority ? 'high' : undefined;
   const image = cropped ? (
     <Image
       src={entry.src}
@@ -158,6 +162,7 @@ export function Media({
       fill
       sizes={sizes}
       priority={priority}
+      fetchPriority={fetchPriority}
       quality={quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}
@@ -172,6 +177,7 @@ export function Media({
       height={entry.height}
       sizes={sizes}
       priority={priority}
+      fetchPriority={fetchPriority}
       quality={quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}

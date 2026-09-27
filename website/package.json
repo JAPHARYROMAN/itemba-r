@@ -8,6 +8,7 @@
     "start": "next start -p 3001",
     "pdf:generate": "node scripts/generate-profile-pdfs.mjs",
     "pdf": "npm run build && npm run pdf:generate",
+    "pdf:lock": "node scripts/pdf-lock.mjs --write",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint .",
     "test:unit": "vitest run",
