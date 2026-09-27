@@ -701,6 +701,77 @@
       ],
       "change": "Deviation: the article header is not a PageHero; it is set flush left in the 680px reading column (eyebrow, h1 at h1 size, lede, date line) so it aligns with the body text.",
       "reason": "P4: PageHero centres its text in the 980px prose width, which would sit 150px off the 680px article column."
+    },
+    {
+      "routes": [
+        "/capabilities"
+      ],
+      "change": "Hero actions are now 'Route an enquiry' (the page's own form, #enquire) and 'Group profile (PDF)' (the group profile download), followed by six service shortcuts (icon and short title) that jump to each row of the capability map.",
+      "reason": "P5 (Apple support-style page): the pill goes to the form on the page (PAGE-GUIDE §1), the capability statement PDF is the page's strongest proof, and the shortcuts replace a photograph in a typographic hero."
+    },
+    {
+      "routes": [
+        "/capabilities"
+      ],
+      "change": "Verification signals: the four numbered cards become a bento with evidence in each cell: the three companies with their sectors (links to their pages) under 'The operating companies', 'See who runs each service ›' (#capability-map), 'How enquiries move ›' (/partnerships#how-enquiries-move), and the head-office address with the UZUNGUNI PARKING YARD truck-line photograph.",
+      "reason": "P5: the task's verification-signals bento; each signal now shows what it claims. The page's one photograph is a crisp, non-canopy operations frame in a small cell (1280px master)."
+    },
+    {
+      "routes": [
+        "/capabilities"
+      ],
+      "change": "Capability map rows drop the service eyebrow and the long company summary; the company is named by its short name with its accent dot, and the first three audiences are plain lines instead of pills.",
+      "reason": "P5: a spec-table row per service (what it covers, who runs it, who asks) instead of three dense columns; the company summary repeats its own page one click away."
+    },
+    {
+      "routes": [
+        "/capabilities"
+      ],
+      "change": "Due-diligence path becomes the page's cinema tile: a typographic panel ('The company profile is written for banks and partners.' / 'The group profile and a profile for each company, ready to download.'), the checklist under 'Have these ready', and the two profile buttons as chevron links.",
+      "reason": "P5: the owner photo rule (a typographic tile where no strong photograph exists); the statement is the approved core message (institution-ready profile), and one pill per screen."
+    },
+    {
+      "routes": [
+        "/capabilities"
+      ],
+      "change": "Beside the form, a legend 'Which option to choose' lists the four enquiry types (General, Mwanjalisi Oil, Westsides, Itemba Enterprises) with what each covers.",
+      "reason": "P5: the page promises 'Contact the right team'; the legend (from enquiryIntents) says which option to pick, as the company template sets its steps beside the form."
+    },
+    {
+      "routes": [
+        "/partnerships"
+      ],
+      "change": "Hero actions are now 'Route an enquiry' (#enquire) and 'See capabilities ›' (/capabilities), followed by four route shortcuts (Suppliers, Bulk buyers, Fuel & logistics, Property & hospitality) that jump to the new card anchors #suppliers, #bulk-buyers, #fuel-logistics and #property-hospitality.",
+      "reason": "P5 (Apple support-style page): the pill goes to the form on the page; the shortcuts replace a photograph in a typographic hero."
+    },
+    {
+      "routes": [
+        "/partnerships"
+      ],
+      "change": "Route cards: 'Routed to …' moves from the eyebrow into a fact row beside Companies and Services; 'Good fit for' is a plain list instead of pills; each card ends with 'In the form, choose ● <option>' and 'Enquire ›' (#enquire).",
+      "reason": "P5: partnershipAreas[].intentId (unused on origin/main) now names the option to pick; the page stays static, so the form is not preselected (the optional ?intent= preselect was not built)."
+    },
+    {
+      "routes": [
+        "/partnerships"
+      ],
+      "change": "'How enquiries move' becomes the page's cinema tile, anchored #how-enquiries-move: an h2 'From first message to follow-up.', a one-line explanation under each of the four verbatim steps, and a typographic panel 'One group office routes every enquiry to the right company.' with the three company names.",
+      "reason": "P5: the task's four-step strip given room of its own; the panel statement is the approved core message; the step lines restate existing facts (FAQ: the group office reviews and routes each enquiry)."
+    },
+    {
+      "routes": [
+        "/partnerships"
+      ],
+      "change": "The form moves from the sticky aside beside the routes to the closing section (after the questions), with 'Partnership enquiry' / 'Ready to talk to Itemba Group?', a one-sentence routing promise, and the partner checklist under 'What to include'.",
+      "reason": "P5: the company-template enquiry layout (promise and checklist on the left, the full form on the right); the checklist is the capability page's partner checklist, shown where it is used."
+    },
+    {
+      "routes": [
+        "/capabilities",
+        "/partnerships"
+      ],
+      "change": "Deviation: both heroes are typographic (no photograph).",
+      "reason": "Owner photo rule: every 2000px landscape master is a forecourt canopy; no non-canopy photograph is wide enough to lead a hero. The shortcut rows carry the heroes instead, as on Apple Support."
     }
   ]
 }
