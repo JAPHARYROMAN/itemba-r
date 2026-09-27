@@ -12,7 +12,7 @@
  *   the sub-nav whose anchors all land; the form preset to service.intentId;
  *   the company behind it, linked; its sites or route; the tone rhythm.
  * - Photographs (owner decision): none repeats on a page; at most two
- *   canopies, except the stations' own cards on the fuel page; no retired,
+ *   canopies (the fuel page's station cards included); no retired,
  *   low-resolution, unconfirmed or third-party-branded frame in a hero;
  *   no stock estate imagery (flags.estateImagery); a typographic panel
  *   where no strong photograph exists.
@@ -261,11 +261,10 @@ describe('/services/[slug]', () => {
     // The rhythm: hero light, then grey, white, the one cinema tile, grey, and a white form above the grey footer.
     expect(tones(html)).toEqual(['light', 'alt', 'light', 'cinema', 'alt', 'light']);
 
-    // Photographs: none repeats; at most two canopies outside the stations' own cards.
+    // Photographs: none repeats; at most two canopies, the fuel page's station cards included.
     const shown = photos(html);
     expect(repeated(shown)).toEqual([]);
-    const stationCards = (service.sites ?? []).filter((s) => s.image && getMedia(s.image.media).canopy).map((s) => s.image!.src);
-    expect(canopies(shown).filter((src) => !stationCards.includes(src)).length).toBeLessThanOrEqual(2);
+    expect(canopies(shown).length).toBeLessThanOrEqual(2);
 
     // The hero: a strong photograph, or a typographic panel.
     const heroVisual = service.heroVisual;
@@ -285,10 +284,15 @@ describe('/services/[slug]', () => {
     expectCalm(html);
   });
 
-  it('keeps the hospitality room photograph out of the hero, and real estate typographic', async () => {
+  it('keeps hospitality and real estate typographic: no weak INN frame, no stock estate imagery', async () => {
     const hospitality = serviceAreas.find((s) => s.slug === 'hospitality-and-lodging')!;
-    const hero = section(await renderService(hospitality), 'page-title');
+    const hospitalityHtml = await renderService(hospitality);
+    const hero = section(hospitalityHtml, 'page-title');
     expect(hero).not.toContain(getMedia('inn-lodge-room').src);
+    // None of the INN frames is strong enough (a 600px stock-looking room, third-party
+    // branding, a soft blue-cast night bar): the page shows no photograph at all.
+    expect(photos(hospitalityHtml)).toEqual([]);
+    expect(photos(hospitalityHtml)).not.toContain(getMedia('inn-bar-night').src);
 
     expect(flags.estateImagery).toBe('typographic');
     const estate = serviceAreas.find((s) => s.slug === 'real-estate-and-property')!;

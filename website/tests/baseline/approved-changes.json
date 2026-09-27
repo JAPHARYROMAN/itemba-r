@@ -855,6 +855,88 @@
       ],
       "change": "The four profile PDFs are regenerated from the rebuilt print documents (npm run pdf): set in Inter instead of Arial/Arial Black, with the same page counts (9, 4, 4, 4) and every baseline key string. Word for word the text is unchanged except the group profile's Company History, where '2017 onward - Mwanjalisi Oil expansion' now follows '9 June 2017'; the other differences are line breaks and hyphen wraps from the new typeface (and, in the Itemba Enterprises profile, the EST. 2012 badge now extracts after the directors).",
       "reason": "D2 (WP3.3): regenerate once at the end, as planned; the history order is the chronological fix already approved for /company-profile, and the typeface is the plan's print system ('keep the light A4 system, set in Inter')."
+    },
+    {
+      "routes": [
+        "/services/hospitality-and-lodging"
+      ],
+      "change": "'Where to find it': the UZUNGUNI INN card drops its night-bar photograph and becomes an icon card, beside a card for the group base ('Songwe Region and Tunduma Corridor', linking to /locations/songwe-tunduma) that replaces the separate location link. The page now shows no photograph.",
+      "reason": "D3 design review: the night-bar frame is soft and blue-cast (owner rule: best photos only, a typographic tile where no strong photo exists); the same pattern as Itemba Estate."
+    },
+    {
+      "routes": [
+        "/companies/westsides-company"
+      ],
+      "change": "'Brands and sites': Wholesale beverages, ITEMBA-HARDWARE and UZUNGUNI INN are icon cards instead of photo cards (the hazy warehouse, the paint stock and the INN restaurant frames are gone). Names and text are unchanged.",
+      "reason": "D3 design review: the warehouse frame is hazy, the paint stock repeats the storefront hero's subject, and the INN restaurant frame carries third-party beer branding, which the hospitality page already keeps out until the owner answers that question."
+    },
+    {
+      "routes": [
+        "/services/fuel-and-lubricants"
+      ],
+      "change": "Stations: the ITEMBA-MPEMBA card is an icon card (its truck-canopy photograph is gone); ITEMBA-UZUNGUNI and UZUNGUNI PARKING YARD keep theirs. The page shows two canopies: the dusk hero (ITEMBA-MPEMBA) and ITEMBA-UZUNGUNI's card.",
+      "reason": "D3 design review: owner rule to avoid repeating the forecourt-canopy subject; the hero already shows ITEMBA-MPEMBA."
+    },
+    {
+      "routes": [
+        "/services/logistics-and-cross-border-transit"
+      ],
+      "change": "Hero photograph: the Itemba truck seen from the front (alt 'An Itemba Logistics truck with ITEMBA ENERGY across its windscreen, seen from the front') instead of the tanker under a forecourt canopy.",
+      "reason": "D3 design review: the tanker frame is a canopy shot and was also the Itemba Enterprises hero, so the sibling pages led with the same photograph."
+    },
+    {
+      "routes": [
+        "/about"
+      ],
+      "change": "Where we are: the Songwe landscape's credit is a caption under the frame reading 'Songwe Region landscape, Richard grivas / Wikimedia Commons, CC BY-SA 4.0' (licence linked), as on /locations, instead of a 'Photo: …' pill over the photograph. The heading reads 'Headquartered in Songwe Region.' (period added).",
+      "reason": "D3 design review: at 360px the overlay pill covered a quarter of the photo; one credit treatment site-wide. Marketing statements end with a period, as the sibling headings do."
+    },
+    {
+      "routes": [
+        "/contact"
+      ],
+      "change": "h1 reads 'Contact Itemba Group.' (period added). The <title>, og:title and description are unchanged.",
+      "reason": "D3 design review: headline statements end with a period ('Partner with Itemba Group.'); functional labels keep none."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Screen view headings in sentence case: the 16 section titles and the contents sheet ('Company overview', 'Vision and mission', … 'Purpose of banking relationship', 'Contact information'; 'Attachments' unchanged; the cover's outline entry 'Cover page'), 'Common questions', and the branch group 'Mwanjalisi Oil Company Ltd – parking facilities' (en dash, was ' - Parking Facilities'). Anchor ids are unchanged. The print documents keep their Title Case section titles; the branch group title prints with the new wording.",
+      "reason": "D3 design review: the rest of the site uses sentence case. The outline titles are not part of the PDF contract (the print documents set their own titles), so only the screen view changes; the branch title is shared with print and changes in the regenerated PDFs."
+    },
+    {
+      "routes": [
+        "/sitemap.xml",
+        "/",
+        "/about",
+        "/services",
+        "/locations",
+        "/companies",
+        "/capabilities",
+        "/insights",
+        "/company-profile",
+        "/partnerships",
+        "/faq",
+        "/contact",
+        "/services/*",
+        "/locations/*",
+        "/companies/*",
+        "/insights/*"
+      ],
+      "change": "Content dates: contentUpdatedAt and the four articles' updatedAt move from 2026-05-14 to 2026-09-27 (the rebuild's review date), so every sitemap <lastmod>, the articles' article:modified_time and Article dateModified read 2026-09-27, and each article's date line adds 'Updated 27 September 2026' after its publication date. publishedAt is unchanged (14 May 2026).",
+      "reason": "D3 contracts review: every page was rebuilt with reviewed copy changes (this log), and a sitemap still dated 2026-05-14 told crawlers nothing changed. Move the date to the actual release date if the release lands later."
+    },
+    {
+      "routes": [
+        "/company-profile",
+        "/downloads/itemba-group-profile.pdf",
+        "/downloads/itemba-westsides-profile.pdf",
+        "/downloads/itemba-mwanjalisi-profile.pdf",
+        "/downloads/itemba-enterprises-profile.pdf"
+      ],
+      "change": "The four profile PDFs are regenerated (npm run pdf) and re-locked. Page counts are unchanged (9, 4, 4, 4) and every baseline key string and company legal record is present. Word for word the extracted text is unchanged except the group profile's Operations and Branches column title, 'Mwanjalisi Oil Company Ltd - Parking Facilities' now 'Mwanjalisi Oil Company Ltd – parking facilities'. The files are about 17-20 kB smaller: the trimmed site font (weights 400-900 and the glyphs the copy uses) is what they embed.",
+      "reason": "D3: the PDF drift guard now covers every src/ module the print documents import (companies.ts, contact.ts, site.ts, media, flags, types) and the font, and this round changed several of them (the trimmed site font, the branch title, the content date module, the legal-identifier flag gate), so the PDFs are regenerated and re-locked."
     }
   ]
 }

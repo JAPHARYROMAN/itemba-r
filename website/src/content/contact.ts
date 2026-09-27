@@ -1,6 +1,7 @@
 /**
  * The ONE place contact literals live (phone numbers, email, WhatsApp number,
- * addresses). tests/unit/content-contact-literals.test.ts fails if any other
+ * addresses). tests/unit/content-rules.test.ts ("contact literals live only in
+ * src/content/contact.ts") fails if any other
  * file under src/ spells them out. Client-safe: EnquiryRouter and the quick
  * contact bar import this module directly.
  */

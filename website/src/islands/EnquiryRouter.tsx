@@ -361,10 +361,14 @@ export default function EnquiryRouter({
       </div>
 
       <div className={cn('mt-6 flex flex-col gap-4', wide.row)}>
+        {/* Disabled only before hydration (no implicit GET submit without JS). While
+            sending it is aria-disabled instead, so it keeps keyboard focus (a disabled
+            focused button drops focus to <body>); handleSubmit ignores a second submit. */}
         <button
           type="submit"
-          disabled={!hydrated || submitting}
-          className={cn(buttonClasses({ size: 'lg' }), 'w-full', wide.auto)}
+          disabled={!hydrated}
+          aria-disabled={submitting || undefined}
+          className={cn(buttonClasses({ size: 'lg' }), 'w-full aria-disabled:cursor-wait aria-disabled:opacity-50', wide.auto)}
         >
           {submitting ? copy.submitting : copy.submit}
         </button>
@@ -415,17 +419,19 @@ export default function EnquiryRouter({
 }
 
 /**
- * The field control: 56px tall, 12px radius, a strong hairline that turns
- * the focus blue. The label sits inside the field (Field) and floats up once
- * the field is focused or filled; the hint placeholder shows only while the
- * focused field is empty.
+ * The field control: 56px tall, 12px radius, a strong hairline. Focused, it
+ * takes the site focus colour at full strength as a 2px edge (the border and
+ * a 1px ring outside it; at least 3:1 against the field and the page, as
+ * the 2px outline elsewhere) with the soft 4px halo beyond it. The label
+ * sits inside the field (Field) and floats up once the field is focused or
+ * filled; the hint placeholder shows only while the focused field is empty.
  */
 const controlClasses = cn(
   'peer block w-full rounded-input border border-line-strong bg-[rgb(var(--field))] px-4 text-body text-fg',
   'transition-[border-color,box-shadow] duration-fast ease-apple',
   'placeholder:text-transparent focus:placeholder:text-fg-muted',
-  'focus:border-focus focus:outline-none focus:ring-4 focus:ring-focus/20',
-  'aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/20',
+  'focus:border-focus focus:outline-none focus:shadow-[0_0_0_1px_rgb(var(--focus)),0_0_0_5px_rgb(var(--focus)/0.2)]',
+  'aria-[invalid=true]:border-danger aria-[invalid=true]:focus:shadow-[0_0_0_1px_rgb(var(--danger)),0_0_0_5px_rgb(var(--danger)/0.2)]',
 );
 const inputClasses = cn(controlClasses, 'h-14 pb-1.5 pt-[1.375rem]');
 const textareaClasses = cn(controlClasses, 'min-h-36 resize-y pb-3 pt-7');

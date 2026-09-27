@@ -6,7 +6,7 @@ import { ENQUIRE_ID } from './ProfileSubNav';
 
 /**
  * §1, the cover: everything above the first chapter, under the outline id
- * `cover-page` (so the contents sheet reads "Cover Page" while any of it is
+ * `cover-page` (so the contents sheet reads "Cover page" while any of it is
  * in view).
  *
  * - The hero: who the document is for, the title as Apple's two-tone line

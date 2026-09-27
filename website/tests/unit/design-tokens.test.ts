@@ -12,9 +12,10 @@
  *    and Tailwind compiles the token classes (and no others) from the real
  *    config.
  * 4. The self-hosted font files are the ones src/design/fonts.ts expects,
- *    within the font budget.
+ *    within the font budget, and the trimmed site font covers every
+ *    character the copy uses.
  */
-import { readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
@@ -375,14 +376,45 @@ describe('self-hosted fonts', () => {
   it('fonts.ts loads the committed variable woff2', () => {
     const source = readFileSync(path.join(ROOT, 'src/design/fonts.ts'), 'utf8');
     expect(source).toContain("src: '../assets/fonts/InterVariable-latin.woff2'");
-    expect(source).toContain("weight: '100 900'");
+    expect(source).toContain("weight: '400 900'");
     expect(source).toContain("variable: '--font-sans'");
   });
 
-  it('the variable woff2 is a real WOFF2 within the preload budget', () => {
+  it('the variable woff2 is a real WOFF2, trimmed well within the preload budget', () => {
     const file = path.join(fontsDir, 'InterVariable-latin.woff2');
     expect(readFileSync(file).subarray(0, 4).toString('latin1')).toBe('wOF2');
-    expect(statSync(file).size).toBeLessThanOrEqual(100 * 1024);
+    // 34 kB: it is on every page's critical path (README: weights 400-900, Basic Latin and the copy's symbols).
+    expect(statSync(file).size).toBeLessThanOrEqual(40 * 1024);
+  });
+
+  it('covers every character the copy sets (the subset in src/assets/fonts/README.md)', () => {
+    const readme = readFileSync(path.join(fontsDir, 'README.md'), 'utf8');
+    const unicodes = readme.match(/^UNI="([^"]+)"/m)?.[1] ?? '';
+    const ranges = unicodes.split(',').map((part) => {
+      const [from = '', to = from] = part.replace(/^U\+/, '').split('-');
+      return [parseInt(from, 16), parseInt(to, 16)] as const;
+    });
+    expect(ranges.length).toBeGreaterThan(5);
+    const covered = (code: number) => ranges.some(([from, to]) => code >= from && code <= to);
+    // Text the site renders: string literals and JSX text in these trees, comments stripped.
+    const uncovered = new Map<string, string>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(rel);
+        else if (/\.(tsx?|css)$/.test(entry.name)) {
+          const code = readFileSync(path.join(ROOT, rel), 'utf8')
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+          for (const char of code) {
+            const point = char.codePointAt(0)!;
+            if (point > 0x7e && !covered(point)) uncovered.set(char, rel);
+          }
+        }
+      }
+    };
+    for (const dir of ['src/app', 'src/content', 'src/sections', 'src/shell', 'src/ui', 'src/islands', 'src/print', 'src/styles']) walk(dir);
+    expect(Object.fromEntries(uncovered), 'characters outside the site font (re-cut it, README.md)').toEqual({});
   });
 
   it.each(['Inter-Regular.ttf', 'Inter-SemiBold.ttf', 'InterDisplay-SemiBold.ttf'])('og/%s is a static TrueType font for satori', (name) => {

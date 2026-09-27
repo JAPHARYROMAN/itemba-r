@@ -68,7 +68,7 @@ export type MediaProps = {
    * renders <MediaCredit> itself (Figure does).
    */
   credit?: 'below' | 'overlay' | 'none';
-  /** Encoder quality: one of next.config.ts `images.qualities` (75 when omitted). */
+  /** Encoder quality: one of next.config.ts `images.qualities` (the registry's `quality`, else 75, when omitted). */
   quality?: 60 | 75 | 85;
   className?: string;
 };
@@ -163,7 +163,7 @@ export function Media({
       sizes={sizes}
       priority={priority}
       fetchPriority={fetchPriority}
-      quality={quality}
+      quality={quality ?? entry.quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}
       className={cn('object-cover', inlineFocus ? null : positions[focus])}
@@ -178,7 +178,7 @@ export function Media({
       sizes={sizes}
       priority={priority}
       fetchPriority={fetchPriority}
-      quality={quality}
+      quality={quality ?? entry.quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}
       className="block h-auto w-full"

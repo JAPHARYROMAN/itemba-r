@@ -3,7 +3,7 @@ import { contact, mapsDirectionsUrl } from '@/content/contact';
 import { isEnabled } from '@/content/flags';
 import { footerDirectory } from '@/content/nav';
 import type { RichText } from '@/content/types';
-import { LeadPhoto } from '@/sections/company/LeadPhoto';
+import { PanoramaPhoto, PhotoCredit } from '@/sections/locations/CreditedPhoto';
 import { ChevronLink, Container, Eyebrow, FactList, Heading, Section, keepCompounds } from '@/ui';
 
 function Rich({ text }: { text: RichText }) {
@@ -26,9 +26,9 @@ function Rich({ text }: { text: RichText }) {
  * "Where we are": the page's one cinema tile and its one photograph. The
  * head office in a sentence and as facts (address, post, region), the
  * directions (a new tab) and the location page, then the Songwe landscape
- * across the content width with its CC BY-SA credit on the frame (Media
- * renders it; never crop it away). It does not fade in: the credit on its
- * frame is text, and text never animates. The head office is not equated
+ * across the content width with its CC BY-SA credit as a caption under the
+ * frame, as on /locations (never over the picture, never cropped away). It
+ * does not fade in. The head office is not equated
  * with the ITEMBA-MPEMBA station (flags.stateHqIsItembaMpemba), and the
  * unsourced growth claim stays off (flags.songweGrowthClaim).
  */
@@ -64,7 +64,14 @@ export function AboutHeadquarters() {
         </div>
       </Container>
       <Container className="mt-12 md:mt-16">
-        <LeadPhoto photo={hq.image} shape="panorama" width="content" />
+        <figure>
+          <div className="overflow-hidden rounded-tile">
+            <PanoramaPhoto photo={hq.image} />
+          </div>
+          <figcaption className="mt-3 text-legal text-fg-muted md:text-right">
+            <PhotoCredit photo={hq.image} />
+          </figcaption>
+        </figure>
       </Container>
     </Section>
   );

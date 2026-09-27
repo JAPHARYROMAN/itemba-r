@@ -67,7 +67,9 @@ their patterns, spacing, type and component use.
 - A page never shows the same photograph twice.
 - A company's own page never shows its home tile photograph.
 - A page shows at most two canopy photographs (`canopy: true`). The one
-  exception is a station's own card on the Mwanjalisi Oil and fuel pages.
+  exception is a station's own card on the Mwanjalisi Oil page; the fuel
+  service page keeps within two (its dusk hero is ITEMBA-MPEMBA, so that
+  station's card is typographic).
 - Hero roles need a strong photograph.
   - Only a landscape master of 2000px or more runs across a frame
     (`heroFrame` decides). Anything smaller, or any portrait, stands beside

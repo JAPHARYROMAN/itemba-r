@@ -69,7 +69,7 @@ export const branchOperations = [
   },
   {
     companyId: 'mwanjalisi' as CompanyId,
-    company: 'Mwanjalisi Oil Company Ltd - Parking Facilities',
+    company: 'Mwanjalisi Oil Company Ltd – parking facilities',
     summary:
       'Parking facilities trade publicly as UZUNGUNI PARKING YARD and are managed by Mwanjalisi Oil Company Ltd for corridor movement and fuel customers.',
     branches: [

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type MouseEvent } from 'react';
 import { cn } from '@/ui/cn';
 import { Icon } from '@/ui/Icon';
-import './profile-nav.css';
+// Its styles, ./profile-nav.css, load with the root stylesheet (src/app/layout.tsx).
 
 export type ProfileNavItem = { id: string; title: string };
 

@@ -186,8 +186,13 @@ jobs:
     name: Website — Lighthouse (non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    # Non-blocking until the owner signs off the Lighthouse budgets on the
-    # branch preview: failures show on the run but never fail the workflow.
+    # Non-blocking until the budgets are met or the owner signs off a changed
+    # budget: a miss fails this job (a red job on the run, with a warning per
+    # miss and a table in the job summary) but not the workflow. The mobile
+    # LCP budget (2.5 s) is not met yet on the photo-led pages: the Next 15
+    # framework script (about 110 kB of the 120 kB shared JS) sits in the LCP
+    # window on the simulated 1.6 Mbps connection. Do not add
+    # continue-on-error to the Lighthouse step: that hides the miss.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -216,8 +221,10 @@ jobs:
           cat "$RUNNER_TEMP/server.log"
           exit 1
       - name: Lighthouse CI (mobile preset, median of 3 runs)
-        continue-on-error: true
         run: npx --yes @lhci/cli@0.15.1 autorun --config=./lighthouserc.json
+      - name: Lighthouse summary (job summary and a warning per budget miss)
+        if: always()
+        run: node scripts/lighthouse-summary.mjs
       - name: Stop the server
         if: always()
         run: |

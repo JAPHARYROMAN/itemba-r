@@ -6,6 +6,7 @@
  */
 import 'server-only';
 import { contact } from '../contact';
+import { flags } from '../flags';
 import { mediaFigure, mediaImage, type MediaFigure, type MediaImage } from '../media';
 import { site } from '../site';
 import type { CompanyId } from '../types';
@@ -196,9 +197,14 @@ export const companyPrintProfiles: PrintProfile[] = legalCompanyProfiles.map((co
   coverImage: company.coverImage,
   facts: [
     { label: 'Legal Name', value: company.name },
-    { label: 'TIN', value: company.tin },
-    { label: 'Incorporated', value: company.incorporationDate },
-    { label: 'Incorporation No.', value: company.incorporationNumber },
+    // The statutory identifiers print only while the owner allows them (flags.publishLegalIdentifiers).
+    ...(flags.publishLegalIdentifiers
+      ? [
+          { label: 'TIN', value: company.tin },
+          { label: 'Incorporated', value: company.incorporationDate },
+          { label: 'Incorporation No.', value: company.incorporationNumber },
+        ]
+      : []),
     { label: 'Legal Status', value: company.status },
     { label: 'Website', value: site.domain },
     { label: 'Head Office Contact', value: contact.headOffice },
@@ -219,7 +225,7 @@ export const companyPrintProfiles: PrintProfile[] = legalCompanyProfiles.map((co
       title: 'Compliance Information',
       points: [
         `${company.name} maintains company-level statutory, tax, licensing, and business records.`,
-        `TIN: ${company.tin}. Incorporation number: ${company.incorporationNumber}.`,
+        ...(flags.publishLegalIdentifiers ? [`TIN: ${company.tin}. Incorporation number: ${company.incorporationNumber}.`] : []),
         'Supporting compliance documents can be provided directly to authorized counterparties when required.',
       ],
     },

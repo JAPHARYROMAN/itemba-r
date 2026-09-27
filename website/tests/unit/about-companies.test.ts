@@ -188,6 +188,11 @@ describe('/about: page', () => {
     for (const src of shown) expect(getMedia(idBySrc.get(src)!).canopy ?? false, src).toBe(false);
     expect(text).toContain('Richard grivas / Wikimedia Commons');
     expect(text).toContain('CC BY-SA 4.0');
+    // As on /locations: the full attribution in a caption under the frame, never a pill over the photo.
+    const hq = section(html, 'hq-title');
+    const caption = hq.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/)?.[1] ?? '';
+    expect(textOf(caption)).toBe('Songwe Region landscape, Richard grivas / Wikimedia Commons, CC BY-SA 4.0');
+    expect(hq).not.toContain('bg-black/60');
   });
 
   it('has no enquiry form, and every general enquiry goes to /contact', () => {

@@ -25,7 +25,9 @@ export const BUDGETS = Object.freeze({
    * boundaries Next loads with the root, 8.7 kB at the Phase D integration
    * (down from 13.3 kB). So the shared line is 122 kB, and the plan's
    * per-page totals (110 + 15 and 110 + 25 kB) are enforced as first-load
-   * budgets below instead.
+   * budgets below instead. The 122 kB line is a recorded deviation from the
+   * plan that the owner has still to accept explicitly, with the Lighthouse
+   * budgets (.github/workflows/website.yml, lighthouserc.json).
    */
   sharedJs: 122 * KB,
   /** JS a page loads on top of the shared set. */
@@ -38,7 +40,18 @@ export const BUDGETS = Object.freeze({
   firstLoadJsLarge: 135 * KB,
   /** Stylesheets a page loads. */
   css: 30 * KB,
-  /** Preloaded font files per page, and their total bytes. */
+  /**
+   * Render-blocking stylesheet files per page: one. Every stylesheet is
+   * imported by the root layout (and global-error, alike), so they share one
+   * chunk; a second file is a second blocking request on a slow connection.
+   */
+  cssFiles: 1,
+  /**
+   * Preloaded font files per page: at least one (the site font; without its
+   * preload the swap shifts layout, CLS about 0.09 on the text-heavy pages)
+   * and at most two, and their total bytes.
+   */
+  minFontFiles: 1,
   fontFiles: 2,
   fontBytes: 100 * KB,
   /** Prerendered HTML document. */
@@ -76,7 +89,7 @@ export const LARGE_HTML_ROUTES = Object.freeze(['/company-profile']);
  *   hasEnquiryForm: boolean,
  *   routeJs: number, routeJsLimit: number, routeFiles: { file: string, bytes: number }[],
  *   firstLoadJs: number, firstLoadJsLimit: number,
- *   css: number, cssLimit: number,
+ *   css: number, cssLimit: number, cssFiles: number,
  *   fontFiles: number, fontBytes: number,
  *   html: number, htmlLimit: number,
  * }} RouteRow
@@ -156,6 +169,7 @@ export function evaluateBudgets({ pages, sizes, budgets = BUDGETS, expectedRoute
       firstLoadJsLimit: large ? budgets.firstLoadJsLarge : budgets.firstLoadJs,
       css: sum(page.stylesheets.map(sizeOf)),
       cssLimit: budgets.css,
+      cssFiles: page.stylesheets.length,
       fontFiles: page.fonts.length,
       fontBytes: sum(page.fonts.map(sizeOf)),
       html: page.htmlGzip,
@@ -189,6 +203,24 @@ export function evaluateBudgets({ pages, sizes, budgets = BUDGETS, expectedRoute
         actual: row.css,
         limit: row.cssLimit,
         message: `${row.route}: CSS ${formatKb(row.css)} exceeds ${formatKb(row.cssLimit)}`,
+      });
+    }
+    if (row.cssFiles > budgets.cssFiles) {
+      violations.push({
+        metric: 'css-files',
+        route: row.route,
+        actual: row.cssFiles,
+        limit: budgets.cssFiles,
+        message: `${row.route}: ${row.cssFiles} render-blocking stylesheets (budget ${budgets.cssFiles}: import every stylesheet from the root layout)`,
+      });
+    }
+    if (row.fontFiles < budgets.minFontFiles) {
+      violations.push({
+        metric: 'font-preload',
+        route: row.route,
+        actual: row.fontFiles,
+        limit: budgets.minFontFiles,
+        message: `${row.route}: no preloaded font file (the site font's preload is missing: next/font preload, next-font-manifest.json)`,
       });
     }
     if (row.fontFiles > budgets.fontFiles) {

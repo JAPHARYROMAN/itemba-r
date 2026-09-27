@@ -63,6 +63,12 @@ export type MediaEntry = {
    * holds home to it; docs/PAGE-GUIDE.md, "Photographs").
    */
   canopy?: boolean;
+  /**
+   * Encoder quality for every use of a noisy frame (one of next.config.ts
+   * `images.qualities`; 75 when omitted). Grain and heavy filters cost bytes
+   * at 75 that no one sees at the sizes the site shows them.
+   */
+  quality?: 60 | 75 | 85;
   note?: string;
 };
 
@@ -194,7 +200,8 @@ export const media = {
     alt: 'An Itemba Enterprises truck, seen from the front',
     entity: 'enterprises',
     provenance: 'own',
-    note: 'Portrait 720x1280, shot with a heavy "vivid" filter: the pipeline tones its chroma down further than the rest. The Itemba Enterprises home tile (C0): no canopy, ITEMBA ENERGY on the windscreen.',
+    quality: 60,
+    note: 'Portrait 720x1280, shot with a heavy "vivid" filter: the pipeline tones its chroma down further than the rest. The Itemba Enterprises home tile (C0) and the logistics service hero: no canopy, ITEMBA ENERGY on the windscreen. Its foliage and filter grain made it 91 kB as a 750w AVIF at quality 75 (the heaviest image on home, loaded before LCP); at 60 it is 60 kB and looks the same at the sizes shown.',
   },
   'logistics-truck-yard': {
     src: '/images/logistics/itemba-logistics-truck-yard.webp',
@@ -320,7 +327,8 @@ export const media = {
     credit: 'Richard grivas / Wikimedia Commons',
     licence: 'CC BY-SA 4.0',
     licenceUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
-    note: 'The credit must be rendered wherever the image appears.',
+    quality: 60,
+    note: 'The credit must be rendered wherever the image appears. The /locations LCP image: its foliage texture made it 71 kB as a 1080w AVIF at quality 75; at 60 it is 43 kB with no visible difference at the sizes shown (no signage or text to soften).',
   },
   'profile-cover': {
     src: '/images/company-profile/itemba-group-profile-cover.webp',

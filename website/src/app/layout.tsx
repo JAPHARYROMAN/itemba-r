@@ -1,8 +1,14 @@
 import type { Metadata, Viewport } from 'next';
+// Every stylesheet, in cascade order, imported alike here and in global-error.tsx
+// (tests/unit/shell.test.ts), so the two roots share one CSS chunk and every
+// page makes a single render-blocking stylesheet request. The corridor and
+// profile-contents styles are small and ride along.
 import '@/styles/tokens.css';
 import '@/styles/base.css';
 import '@/styles/utilities.css';
 import '@/styles/print.css';
+import '@/sections/corridor/corridor.css';
+import '@/islands/profile-nav.css';
 import { shellCopy } from '@/content/nav';
 import { site } from '@/content/site';
 import { inter } from '@/design/fonts';

@@ -245,7 +245,7 @@ export const aboutPage = {
   },
   headquarters: {
     eyebrow: 'Where we are',
-    title: 'Headquartered in Songwe Region',
+    title: 'Headquartered in Songwe Region.',
     /** One neutral corridor phrase (facts.corridorWording); no superlative. */
     body: [
       'Our head office is at the ',
@@ -262,7 +262,10 @@ export const aboutPage = {
       directions: 'Get directions',
       location: { label: 'Explore the Songwe-Tunduma location', href: '/locations/songwe-tunduma' } satisfies LinkItem,
     },
-    image: mediaImage('songwe-landscape', { alt: 'Fields and mountains in Songwe Region, Tanzania' }),
+    image: mediaImage('songwe-landscape', {
+      alt: 'Fields and mountains in Songwe Region, Tanzania',
+      caption: 'Songwe Region landscape',
+    }),
     /** Unsourced claim: gated by `songweGrowthClaim`. */
     growth: {
       text: "The Songwe Region is one of Tanzania's fastest-growing regions, driven by trade, agriculture and infrastructure investment — and the group sits at the heart of it.",

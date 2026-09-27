@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- the PDF script needs plain <img src="/images/…"> in these documents. */
 import { contact } from '@/content/contact';
+import { flags } from '@/content/flags';
 import { legalCompanyProfiles, printableProfiles, printCopy, type PrintSection } from '@/content/profile';
 import { site } from '@/content/site';
 import PrintAssetLoader from '@/islands/PrintAssetLoader';
@@ -15,6 +16,12 @@ import PrintAssetLoader from '@/islands/PrintAssetLoader';
  * <img src="/images/..."> photos are load-bearing. Keep them. The cover
  * title is a styled <p> (.print-cover-title), so the hidden documents add no
  * h1 to the page.
+ *
+ * The legal identifiers (TINs, incorporation, directors) render only while
+ * flags.publishLegalIdentifiers is on, here as on the screen view: the flag
+ * covers the page source, Ctrl+P and, once regenerated (npm run pdf; the
+ * input lock forces it), the PDFs. Off, the group document lists the
+ * companies by registered name only.
  *
  * Every image is `loading="lazy"`: the documents are display:none on screen,
  * so a screen visitor downloads none of the ~11 MB of print photos.
@@ -75,7 +82,18 @@ export default function ProfileDocuments() {
             </dl>
           </section>
 
-          {profile.id === 'group' ? (
+          {profile.id === 'group' && !flags.publishLegalIdentifiers ? (
+            <section className="print-section">
+              <h2>{printCopy.legalCompaniesHeading}</h2>
+              <ul className="print-list">
+                {legalCompanyProfiles.map((company) => (
+                  <li key={company.id}>{company.name}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {profile.id === 'group' && flags.publishLegalIdentifiers ? (
             <section className="print-section">
               <h2>{printCopy.legalCompaniesHeading}</h2>
               <table className="print-table">
@@ -100,7 +118,7 @@ export default function ProfileDocuments() {
             </section>
           ) : null}
 
-          {profile.directors ? (
+          {profile.directors && flags.publishLegalIdentifiers ? (
             <section className="print-section print-section-tight">
               <h2>{printCopy.directorsHeading}</h2>
               <ul className="print-list print-list-columns">

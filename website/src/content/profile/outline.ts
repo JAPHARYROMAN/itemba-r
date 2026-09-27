@@ -1,27 +1,28 @@
 /**
  * The company profile's 17 sections, in document order. The ids are anchor
  * ids (linked from other pages and the contents navigation) and must not
- * change.
+ * change. The titles are the screen view's headings, in the site's sentence
+ * case; the print documents set their own (Title Case, ./print.ts).
  */
 import 'server-only';
 
 export const outline = [
-  { id: 'cover-page', title: 'Cover Page' },
-  { id: 'company-overview', title: 'Company Overview' },
-  { id: 'vision-mission', title: 'Vision and Mission' },
-  { id: 'business-activities', title: 'Business Activities' },
-  { id: 'products-services', title: 'Products and Services' },
-  { id: 'target-market', title: 'Target Market' },
-  { id: 'operations-branches', title: 'Operations and Branches' },
-  { id: 'management-ownership', title: 'Management and Ownership' },
-  { id: 'company-history', title: 'Company History' },
-  { id: 'assets-capacity', title: 'Assets and Capacity' },
-  { id: 'financial-overview', title: 'Financial Overview' },
-  { id: 'compliance-information', title: 'Compliance Information' },
-  { id: 'competitive-strengths', title: 'Competitive Strengths' },
-  { id: 'future-plans', title: 'Future Plans' },
-  { id: 'banking-purpose', title: 'Purpose of Banking Relationship' },
-  { id: 'contact-information', title: 'Contact Information' },
+  { id: 'cover-page', title: 'Cover page' },
+  { id: 'company-overview', title: 'Company overview' },
+  { id: 'vision-mission', title: 'Vision and mission' },
+  { id: 'business-activities', title: 'Business activities' },
+  { id: 'products-services', title: 'Products and services' },
+  { id: 'target-market', title: 'Target market' },
+  { id: 'operations-branches', title: 'Operations and branches' },
+  { id: 'management-ownership', title: 'Management and ownership' },
+  { id: 'company-history', title: 'Company history' },
+  { id: 'assets-capacity', title: 'Assets and capacity' },
+  { id: 'financial-overview', title: 'Financial overview' },
+  { id: 'compliance-information', title: 'Compliance information' },
+  { id: 'competitive-strengths', title: 'Competitive strengths' },
+  { id: 'future-plans', title: 'Future plans' },
+  { id: 'banking-purpose', title: 'Purpose of banking relationship' },
+  { id: 'contact-information', title: 'Contact information' },
   { id: 'attachments', title: 'Attachments' },
 ] as const;
 

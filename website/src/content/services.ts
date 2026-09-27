@@ -140,13 +140,15 @@ export const serviceAreas: ServiceArea[] = [
       heading: 'ITEMBA stations built for corridor movement',
       body: "Visible station brands, practical access and high-traffic positions on the corridor's main routes.",
     },
-    // The stations' own cards: the one place a page may show more than two canopies (docs/PAGE-GUIDE.md).
+    // One station photograph only: the dusk hero is already ITEMBA-MPEMBA, so
+    // its card is typographic and ITEMBA-UZUNGUNI's is the page's second and
+    // last canopy (docs/PAGE-GUIDE.md, "Photographs").
     sites: [
       {
         name: 'ITEMBA-MPEMBA',
         kind: 'Filling station',
         detail: 'Near the Tunduma Bus Station, along the Tunduma-Ileje Highway.',
-        image: mediaImage('mpemba-truck-canopy', { alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy' }),
+        icon: 'energy',
       },
       {
         name: 'ITEMBA-UZUNGUNI',
@@ -168,7 +170,7 @@ export const serviceAreas: ServiceArea[] = [
         figure: { value: '3', label: 'planned' },
       },
     ],
-    // Its strong photographs are all forecourts, and the page already shows three: typographic.
+    // Its strong photographs are all forecourts, and the page already shows two: typographic.
     companyVisual: {
       kind: 'type',
       icon: 'energy',
@@ -340,8 +342,10 @@ export const serviceAreas: ServiceArea[] = [
         caption: 'Yard-based support for local traders and transit customers.',
       }),
     ],
-    heroVisual: mediaImage('logistics-tanker', {
-      alt: 'An Itemba Logistics tanker truck in Itemba livery at a filling station',
+    // Not the tanker under a forecourt canopy that leads the Itemba Enterprises
+    // page: the fleet's own truck, with no canopy, so the sibling pages differ.
+    heroVisual: mediaImage('logistics-truck-front', {
+      alt: 'An Itemba Logistics truck with ITEMBA ENERGY across its windscreen, seen from the front',
     }),
     keyStat: { value: '4', label: 'Countries of cross-border transit' },
     features: [
@@ -525,9 +529,9 @@ export const serviceAreas: ServiceArea[] = [
       }),
     ],
     // The room photograph is 600px wide, stock-looking and unconfirmed
-    // (flags.useUnverifiedHospitalityPhotos), and the restaurant frame carries
-    // third-party beverage branding: neither may lead, and the page shows
-    // neither. Typographic.
+    // (flags.useUnverifiedHospitalityPhotos), the restaurant frame carries
+    // third-party beverage branding and the night bar is soft and blue-cast:
+    // the page shows none of them. Typographic.
     heroVisual: {
       kind: 'type',
       icon: 'hospitality',
@@ -557,7 +561,8 @@ export const serviceAreas: ServiceArea[] = [
         name: 'UZUNGUNI INN',
         kind: 'Lodging, restaurant and bar',
         detail: 'In Mpemba-Tunduma, Songwe Region, managed by Westsides Company Ltd.',
-        image: mediaImage('inn-bar-night', { alt: 'The UZUNGUNI INN bar at night' }),
+        // No INN frame is strong enough (the night bar is soft and blue-cast): an icon card beside the group base's.
+        icon: 'hospitality',
       },
     ],
     companyVisual: {

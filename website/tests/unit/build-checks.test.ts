@@ -104,7 +104,7 @@ describe('budgets', () => {
     route,
     scripts: ['framework.js', 'layout.js', `${route}.js`],
     stylesheets: ['site.css'],
-    fonts: [],
+    fonts: ['a.woff2'],
     hasEnquiryForm: false,
     htmlGzip: 10_000,
     ...extra,
@@ -157,8 +157,30 @@ describe('budgets', () => {
     });
     // Shared 130 kB: over its own line, and over each page's first-load total (125 kB; 135 kB on /company-profile).
     expect(report.violations.map((v) => `${v.metric} ${v.route ?? ''}`.trim()).sort()).toEqual(
-      ['coverage /faq', 'css /', 'first-load-js /', 'first-load-js /company-profile', 'font-bytes /', 'font-files /', 'html /', 'shared-js'].sort(),
+      [
+        'coverage /faq',
+        'css /',
+        'css-files /',
+        'first-load-js /',
+        'first-load-js /company-profile',
+        'font-bytes /',
+        'font-files /',
+        'html /',
+        'shared-js',
+      ].sort(),
     );
+  });
+
+  it('fails a page whose font preload went missing, instead of reporting 0 fonts as within budget', () => {
+    const report = evaluateBudgets({ pages: [page('/'), page('/contact', { hasEnquiryForm: true, fonts: [] })], sizes });
+    expect(report.violations.map((v) => `${v.metric} ${v.route}`)).toEqual(['font-preload /contact']);
+    expect(BUDGETS.minFontFiles).toBe(1);
+  });
+
+  it('allows one render-blocking stylesheet per page', () => {
+    expect(BUDGETS.cssFiles).toBe(1);
+    const report = evaluateBudgets({ pages: [page('/', { stylesheets: ['site.css', 'print.css'] })], sizes: { ...sizes, 'print.css': 2_000 } });
+    expect(report.violations.map((v) => `${v.metric} ${v.route}`)).toEqual(['css-files /']);
   });
 
   it('passes a build that is inside every budget', () => {
@@ -303,9 +325,11 @@ describe('checker CLIs against a fake build', () => {
     spawnSync(process.execPath, [path.join(ROOT, 'scripts', script), ...args], { cwd: ROOT, encoding: 'utf8' });
 
   const dist = path.join(tmp, 'dist');
-  const doc = (body: string) =>
-    `<html><head><script src="/_next/static/chunks/main.js" async=""></script></head><body>${body}</body></html>`;
+  const fontPreload = '<link rel="preload" href="/_next/static/media/site-s.p.woff2" as="font" crossorigin="" type="font/woff2"/>';
+  const doc = (body: string, head = fontPreload) =>
+    `<html><head>${head}<script src="/_next/static/chunks/main.js" async=""></script></head><body>${body}</body></html>`;
   write('dist/static/chunks/main.js', 'console.log(1);');
+  write('dist/static/media/site-s.p.woff2', 'wOF2');
   write('dist/server/app/index.html', doc('<main><h1>Home</h1></main>'));
   write('dist/server/app/about.html', doc('<main><div style="opacity:0"><h1>About</h1></div></main>'));
 
@@ -328,6 +352,16 @@ describe('checker CLIs against a fake build', () => {
     expect(strict.stdout).toContain(`${SITEMAP_PATHS.length - 2} violation(s)`);
     expect(run('check-budgets.mjs', ['--dist', dist, '--report-only']).status).toBe(0);
     expect(run('check-budgets.mjs', ['--dist', path.join(tmp, 'missing')]).status).toBe(2);
+  });
+
+  it('check-budgets fails a build whose pages lost the font preload', () => {
+    write('nofont/static/chunks/main.js', 'console.log(1);');
+    write('nofont/server/app/index.html', doc('<main><h1>Home</h1></main>', ''));
+    // A manifest that lists the font: not the Windows bug (an empty manifest), so a missing preload is a violation.
+    write('nofont/server/next-font-manifest.json', JSON.stringify({ pages: {}, app: { '/layout': ['static/media/site-s.p.woff2'] } }));
+    const result = run('check-budgets.mjs', ['--dist', path.join(tmp, 'nofont')]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('/: no preloaded font file');
   });
 
   it('check-budgets treats a page that references a missing asset as a broken build', () => {

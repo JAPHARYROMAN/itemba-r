@@ -46,8 +46,8 @@ export const facts = {
   legalIdentifiers: fact('TINs, incorporation numbers and directors of the three companies', {
     status: 'unconfirmed',
     flag: 'publishLegalIdentifiers',
-    note: 'Published on /company-profile and in all four PDFs today. Owner to confirm they may stay on the public web page.',
-    publicUse: ['/company-profile', 'public/downloads/*.pdf'],
+    note: 'Published on /company-profile (screen and print source) and in all four PDFs today. Owner to confirm they may stay on the public web page and in the downloads. The flag gates the screen view and the print documents; turning it off needs `npm run pdf` to take them out of the PDFs (the input lock enforces it). The incorporation numbers in the history narrative are not gated.',
+    publicUse: ['/company-profile', '/about (leadership)', 'public/downloads/*.pdf'],
   }),
   hqIsItembaMpemba: fact('The head office (Itemba Filling Station) is the ITEMBA-MPEMBA station', {
     status: 'unconfirmed',

@@ -374,26 +374,28 @@ export const companies: readonly Company[] = [
         serviceSlug: 'hospitality-and-lodging',
       },
     ],
+    // Typographic, as on Itemba Enterprises: the warehouse frame is hazy, the
+    // paint stock repeats the storefront hero above, and the INN restaurant
+    // frame carries third-party beverage branding (kept off the hospitality
+    // page too, until the owner rules on third-party brands).
     sites: [
       {
         name: 'Wholesale beverages',
         kind: 'Mpemba, Mlowo and Sogea branches',
         detail: 'Beverage distribution for more than 50 stockists, bars, night clubs and cross-border bulk buyers.',
-        image: mediaImage('westsides-warehouse-stock'),
+        icon: 'trade',
       },
       {
         name: 'ITEMBA-HARDWARE',
         kind: 'Tunduma Main Branch',
         detail: 'Hardware and construction equipment, supported by warehouses in Tunduma town and the Sogea area.',
-        image: mediaImage('hardware-paint-stock', {
-          alt: 'Paint and construction supply stock at ITEMBA-HARDWARE, run by Westsides Company Ltd',
-        }),
+        icon: 'construction',
       },
       {
         name: 'UZUNGUNI INN',
         kind: 'Lodging, restaurant and bar',
         detail: 'Lodging, a restaurant and a bar for travellers and corridor traders in Mpemba-Tunduma.',
-        image: mediaImage('inn-bar-restaurant'),
+        icon: 'hospitality',
       },
     ],
     branches: [

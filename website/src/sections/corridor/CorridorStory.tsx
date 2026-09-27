@@ -4,7 +4,7 @@ import { withFlags } from '@/content/flags';
 import { cn } from '@/ui/cn';
 import { keepCompounds } from '@/ui/text';
 import { nodeLabel, routeMap, routeNodes, routeSegments, routeTrack, siteDot } from './geometry';
-import './corridor.css';
+// Its styles, ./corridor.css, load with the root stylesheet (src/app/layout.tsx).
 
 export type CorridorStoryProps = {
   /** Level of each stop's name (h3 by default), to fit the page outline. */

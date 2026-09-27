@@ -13,7 +13,7 @@
  *
  * Rendered with react-dom/server; next/navigation's usePathname is mocked.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -256,5 +256,37 @@ describe('print.css', () => {
     used.delete('print-document-root'); // styled outside the print block
     for (const name of used) expect(printBlock, name).toContain(`.${name}`);
     expect(used.has('print-cover-title')).toBe(true);
+  });
+});
+
+describe('stylesheets', () => {
+  const cssImports = (rel: string) => [...read(rel).matchAll(/^import '([^']+\.css)';$/gm)].map(([, file = '']) => file);
+
+  it('load as one chunk: the two roots import every stylesheet, alike and in the same order', () => {
+    const layout = cssImports('src/app/layout.tsx');
+    expect(layout).toEqual([
+      '@/styles/tokens.css',
+      '@/styles/base.css',
+      '@/styles/utilities.css',
+      '@/styles/print.css',
+      '@/sections/corridor/corridor.css',
+      '@/islands/profile-nav.css',
+    ]);
+    expect(cssImports('src/app/global-error.tsx')).toEqual(layout);
+  });
+
+  it('are imported nowhere else, so no page adds a render-blocking chunk of its own', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(rel);
+        else if (/\.(tsx?|jsx?|mjs)$/.test(entry.name) && !['src/app/layout.tsx', 'src/app/global-error.tsx'].includes(rel)) {
+          if (/^import\s+['"][^'"]+\.css['"]/m.test(read(rel))) offenders.push(rel);
+        }
+      }
+    };
+    walk('src');
+    expect(offenders).toEqual([]);
   });
 });

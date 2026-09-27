@@ -12,6 +12,7 @@ import { buttonClasses, type ButtonSize, type ButtonVariant } from './button';
 import { Chevron } from './Chevron';
 import { cn } from './cn';
 import { Icon, type IconName } from './Icon';
+import { prefetchByDefault } from './prefetch';
 import { VisuallyHidden } from './a11y';
 
 export { buttonClasses, Chevron };
@@ -83,11 +84,23 @@ export function isInternalHref(href: string) {
 
 type AnchorProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'className' | 'children' | 'href'>;
 
-/** An anchor that routes internal paths through next/link. */
-export function SmartLink({ href, className, children, ...rest }: AnchorProps & { href: string; className?: string; children: ReactNode }) {
+/**
+ * An anchor that routes internal paths through next/link. `prefetch={false}`
+ * turns off next/link's viewport prefetch (dense link groups such as the
+ * footer directory); by default only the heavy profile route is not
+ * prefetched (src/ui/prefetch.ts).
+ */
+export function SmartLink({
+  href,
+  className,
+  children,
+  prefetch,
+  ...rest
+}: AnchorProps & { href: string; className?: string; children: ReactNode; prefetch?: boolean }) {
   if (isInternalHref(href) && !rest.download) {
+    const noPrefetch = prefetch === false || !prefetchByDefault(href);
     return (
-      <Link href={href} className={className} {...rest}>
+      <Link href={href} className={className} prefetch={noPrefetch ? false : undefined} {...rest}>
         {children}
       </Link>
     );

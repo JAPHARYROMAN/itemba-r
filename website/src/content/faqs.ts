@@ -189,8 +189,8 @@ export const faqPage = {
   } satisfies Record<FaqSectionKind, string>,
 } as const;
 
-/** The "Common Questions" block on /company-profile. */
+/** The "Common questions" block on /company-profile. */
 export const profileFaqCopy = {
-  title: 'Common Questions',
+  title: 'Common questions',
   body: 'Quick answers for customers, suppliers, and partners reviewing the group profile.',
 } as const;

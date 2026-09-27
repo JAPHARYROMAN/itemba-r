@@ -11,7 +11,9 @@
  *     failure copy, never a parser error, and fires no conversion;
  *   - choosing a company routes everything to it: the payload's intentId,
  *     the email subject and the prepared WhatsApp message;
- *   - the submit button is disabled until the island hydrates.
+ *   - the submit button is disabled until the island hydrates;
+ *   - while it sends, the button is aria-disabled, not disabled, so it keeps
+ *     keyboard focus, and a second submit sends nothing.
  */
 import type { Page, Route } from '@playwright/test';
 import { enquiryFormCopy as copy, enquiryIntents } from '../../src/content/enquiry';
@@ -107,6 +109,39 @@ test.describe('contract › enquiry form', { tag: '@contract' }, () => {
     await expect(form.getByRole('status')).toHaveText(copy.messages.failed);
     await expect(form.locator('[name="message"]'), 'the message is kept for a retry').toHaveValue('Automated contract test, please ignore.');
     expect(await conversions(page)).toEqual([]);
+  });
+
+  test('keeps keyboard focus on the submit button while it sends, and sends once', async ({ page }) => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let posts = 0;
+    await page.route('**/api/enquiries', async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      posts += 1;
+      await held;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, id: 'e2e-focus', emailStatus: 'not_configured', storageStatus: 'stored' }),
+      });
+    });
+    const form = await openForm(page);
+    await form.locator('[name="contactMethod"]').fill('e2e@example.com');
+    await form.locator('[name="message"]').fill('Automated contract test, please ignore.');
+    const submit = form.locator('button[type="submit"]');
+    await submit.focus();
+    await page.keyboard.press('Enter');
+
+    await expect(submit).toHaveAttribute('aria-disabled', 'true');
+    await expect(submit, 'focus stays on the button while it sends (not dropped to <body>)').toBeFocused();
+    await page.keyboard.press('Enter');
+    release();
+    await expect(form.getByRole('status')).toHaveText(copy.messages.sentAndStored);
+    await expect(submit).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(submit).toBeFocused();
+    expect(posts, 'a second Enter while sending posts nothing').toBe(1);
   });
 
   test('routes the payload, the email and the WhatsApp message to the chosen company', async ({ page }) => {

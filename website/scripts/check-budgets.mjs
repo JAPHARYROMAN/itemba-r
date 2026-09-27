@@ -9,8 +9,9 @@
  *     pages with the enquiry form, and /company-profile   <= 25 kB
  *   first-load JS (shared + route)         <= 125 kB gzip
  *     pages with the enquiry form, and /company-profile   <= 135 kB
- *   CSS per page                           <=  30 kB gzip
- *   preloaded fonts per page               <= 2 files, <= 100 kB
+ *   CSS per page                           <=  30 kB gzip, in 1 file
+ *   preloaded fonts per page               1 to 2 files, <= 100 kB
+ *     (a Windows build cannot preload: see KNOWN_WINDOWS_FONT_BUG below)
  *   HTML per page                          <=  40 kB gzip (90 kB /company-profile)
  *   every sitemap URL is prerendered (otherwise it escapes these budgets)
  *
@@ -67,6 +68,34 @@ if (missing.length) {
 }
 
 const report = evaluateBudgets({ pages, sizes, budgets: BUDGETS, expectedRoutes: SITEMAP_PATHS });
+
+/*
+ * KNOWN_WINDOWS_FONT_BUG: next build on Windows writes an empty
+ * next-font-manifest.json (Next 15's NextFontManifestPlugin looks for
+ * '/next-font-loader/index.js?' in module requests, which carry backslashes
+ * on Windows), so no page gets its font preload. Linux builds (CI, Docker,
+ * production) are unaffected, and CI enforces the preload. On a Windows
+ * build with that empty manifest, a missing preload is reported as a
+ * warning instead of a violation; anywhere else it fails.
+ */
+const fontManifestFile = path.join(dist, 'server', 'next-font-manifest.json');
+let emptyFontManifest = false;
+try {
+  const manifest = JSON.parse(readFileSync(fontManifestFile, 'utf8'));
+  emptyFontManifest = Object.keys(manifest.app ?? {}).length === 0;
+} catch {
+  emptyFontManifest = false;
+}
+if (process.platform === 'win32' && emptyFontManifest) {
+  const preloadMisses = report.violations.filter((v) => v.metric === 'font-preload');
+  if (preloadMisses.length) {
+    report.violations = report.violations.filter((v) => v.metric !== 'font-preload');
+    console.warn(
+      `[budget] WARNING: ${preloadMisses.length} page(s) have no font preload. This Windows build hit the known Next 15 bug ` +
+        '(empty .next/server/next-font-manifest.json); Linux builds and CI preload the font and enforce it.\n',
+    );
+  }
+}
 const buildIdFile = path.join(dist, 'BUILD_ID');
 const buildId = existsSync(buildIdFile) ? readFileSync(buildIdFile, 'utf8').trim() : 'unknown';
 

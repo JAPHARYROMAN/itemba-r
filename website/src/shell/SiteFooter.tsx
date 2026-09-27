@@ -76,8 +76,9 @@ function DirectoryLink({ link, className }: { link: FooterLink; className: strin
       </a>
     );
   }
+  // A dense directory: no viewport prefetch, which would fetch every route's payload on a short page.
   return (
-    <SmartLink href={link.href} aria-label={link.ariaLabel} className={classes}>
+    <SmartLink href={link.href} aria-label={link.ariaLabel} className={classes} prefetch={false}>
       {link.label}
     </SmartLink>
   );

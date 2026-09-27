@@ -72,6 +72,11 @@ async function openProfilePage(page: Page) {
 const noChrome = { '.site-header': false, '.site-footer': false, '[data-quick-contact]': false, '.skip-link': false, '[data-subnav]': false };
 
 test.describe('contract › print', { tag: '@contract' }, () => {
+  // In order, in one worker: the image steps push a dozen photos through the
+  // optimiser, and running them beside the print button's own photo wait
+  // (a 4 s cap, by design) starves the server on a busy machine. A failure
+  // still lets the rest run.
+  test.describe.configure({ mode: 'default' });
   for (const id of PROFILES) {
     test(`/company-profile prints only the ${id} profile`, async ({ page }) => {
       await openProfilePage(page);
@@ -169,6 +174,9 @@ test.describe('contract › print', { tag: '@contract' }, () => {
       // dozen photos through the optimiser: once is enough, and running them
       // in both projects starves the server for the other suites.
       test.skip(testInfo.project.name !== 'desktop', 'the PDF pipeline is viewport-independent; desktop only');
+      // The image wait below alone may take 30 s on a loaded machine (the
+      // optimiser encodes a dozen photos cold): room for it and the page load.
+      test.setTimeout(90_000);
       const responses = new Map<string, number>();
       page.on('response', (response) => responses.set(response.url(), response.status()));
       await openProfilePage(page);

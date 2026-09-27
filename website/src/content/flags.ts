@@ -18,7 +18,14 @@ export type FlagValues = {
   showDivisionsStat: boolean;
   /** "Manufacturing" in site.description, the group FAQ and the About pillars: no manufacturing offering exists. */
   mentionManufacturing: boolean;
-  /** TINs, incorporation numbers and directors on /company-profile (already in the PDF contract). */
+  /**
+   * TINs, incorporation numbers and directors: the /company-profile screen
+   * view, /about leadership and the company glance, and the print documents
+   * (page source, Ctrl+P and, after `npm run pdf`, the four PDFs; flags.ts is
+   * a PDF input, so flipping it fails the lock until they are regenerated).
+   * The incorporation dates and numbers told in the company history
+   * narrative are not covered: that stays on the owner's list.
+   */
   publishLegalIdentifiers: boolean;
   /** Copy that equates the head office (Itemba Filling Station) with the ITEMBA-MPEMBA station. */
   stateHqIsItembaMpemba: boolean;

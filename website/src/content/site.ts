@@ -37,8 +37,12 @@ export const site = {
 
 export { siteDescriptions };
 
-/** Date the current content was last reviewed (drives sitemap lastModified). */
-export const contentUpdatedAt = '2026-05-14';
+/**
+ * Date the current content was last reviewed (drives sitemap lastModified).
+ * The rebuilt pages' copy changed (tests/baseline/approved-changes.json), so
+ * it is the rebuild's review date, not origin/main's 2026-05-14.
+ */
+export const contentUpdatedAt = '2026-09-27';
 
 /** The 11 core routes in sitemap order (services, locations, companies and insights follow). */
 export const coreRoutes = [

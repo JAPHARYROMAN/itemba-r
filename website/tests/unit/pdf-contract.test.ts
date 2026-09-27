@@ -4,10 +4,19 @@
  * counts within ±30% of the origin/main baseline, and every key string from
  * tests/baseline/pdfs.json still extractable. Regenerating the PDFs (npm run
  * pdf) is expected to keep this green.
+ *
+ * They must also say what the site says: each company's registered name and,
+ * while flags.publishLegalIdentifiers is on, its TIN, incorporation date and
+ * number and its directors (src/content/companies.ts) are in the group
+ * profile and in the company's own. A stale PDF fails here even if the input
+ * lock (scripts/pdf-inputs.lock) is bypassed.
  */
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { companies } from '@/content/companies';
+import { flags } from '@/content/flags';
+import { profilePdfHref } from '@/content/profile/cover';
 import { extractPdf, textIncludes } from '../../scripts/lib/pdf-text.mjs';
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -29,5 +38,31 @@ describe('profile PDF downloads', () => {
     const text = pdf.pages.map((p) => p.text).join('\n');
     const missing = Object.keys(facts.keyStrings).filter((key) => !textIncludes(text, key));
     expect(missing).toEqual([]);
+  });
+});
+
+async function pdfText(file: string) {
+  const pdf = await extractPdf(readFileSync(path.join(ROOT, 'public/downloads', file)));
+  return pdf.pages.map((p) => p.text).join('\n');
+}
+
+describe('profile PDFs match the company records', () => {
+  const groupFile = 'itemba-group-profile.pdf';
+
+  it.each(companies.map((c) => [c.slug, c] as const))('%s', async (_slug, company) => {
+    const ownFile = path.basename(profilePdfHref(company.id));
+    expect(ownFile).not.toBe(groupFile);
+    const needles = [company.legalName];
+    if (flags.publishLegalIdentifiers) {
+      needles.push(company.legal.tin, company.legal.incorporationNumber, company.legal.incorporationDate);
+      // Directors by name (the role after " - " is not needed to identify them).
+      needles.push(...company.legal.directors.map((director) => director.split(' - ')[0]!));
+    }
+    for (const file of [groupFile, ownFile]) {
+      const text = await pdfText(file);
+      const missing = needles.filter((needle) => !textIncludes(text, needle));
+      expect(missing, `${file} is stale: run npm run pdf`).toEqual([]);
+      if (!flags.publishLegalIdentifiers) expect(textIncludes(text, company.legal.tin), file).toBe(false);
+    }
   });
 });

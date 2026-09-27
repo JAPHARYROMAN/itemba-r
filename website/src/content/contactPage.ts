@@ -27,7 +27,7 @@ export const contactPage = {
   },
   hero: {
     eyebrow: 'Get in touch',
-    headline: { lead: 'Contact', accent: 'Itemba Group' } satisfies SplitHeadline,
+    headline: { lead: 'Contact', accent: 'Itemba Group.' } satisfies SplitHeadline,
     lede: 'Reach out for business enquiries, partnerships, or general information about our companies and operations.',
     /** The pill: down to the enquiry form on this page. */
     enquire: 'Start an enquiry',

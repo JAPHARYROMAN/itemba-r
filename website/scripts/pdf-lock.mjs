@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * Checks or records scripts/pdf-inputs.lock, the drift guard between the
- * print inputs (src/content/profile/**, src/print/**, src/styles/print.css)
- * and the four committed profile PDFs.
+ * print inputs (src/content/profile/**, src/print/**, src/styles/print.css,
+ * the font, and every src/ module the print documents import, such as
+ * src/content/companies.ts; see scripts/lib/pdf-inputs.mjs) and the four
+ * committed profile PDFs.
  *
  *   node scripts/pdf-lock.mjs           check; exits 1 on drift
  *   node scripts/pdf-lock.mjs --write   record the current inputs and PDFs

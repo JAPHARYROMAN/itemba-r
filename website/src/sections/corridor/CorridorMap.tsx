@@ -2,7 +2,7 @@ import { corridorCopy, corridorSites } from '@/content/corridor';
 import { withFlags } from '@/content/flags';
 import { cn } from '@/ui/cn';
 import { hubMap, pinGeometry } from './geometry';
-import './corridor.css';
+// Its styles, ./corridor.css, load with the root stylesheet (src/app/layout.tsx).
 
 export type CorridorMapProps = {
   /** Level of each site's name (h3 by default), to fit the page outline. */

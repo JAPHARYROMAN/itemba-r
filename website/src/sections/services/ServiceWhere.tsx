@@ -152,9 +152,10 @@ function RouteStops({ stops }: { stops: readonly ServiceRouteStop[] }) {
  * "Where it runs": the sites that deliver the service (the ITEMBA stations
  * and the parking yard; the branches; the inn), or, for logistics, the
  * route from Dar es Salaam to the border and beyond; then the group's
- * location profile (a card of its own beside a lone typographic site). On the fuel page this is the stations showcase: each
- * station's own card is the one place a page may show more than two
- * canopies. White, between the grey bento and the black company tile.
+ * location profile (a card of its own beside a lone typographic site).
+ * On the fuel page this is the stations showcase, within the page's two
+ * canopies: ITEMBA-MPEMBA, already the hero, is typographic here. White,
+ * between the grey bento and the black company tile.
  */
 export function ServiceWhere({ service, company }: { service: ServiceArea; company: Company }) {
   const { where } = service;
