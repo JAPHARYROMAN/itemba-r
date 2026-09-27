@@ -13,7 +13,8 @@ import { CapabilitiesSignals } from '@/sections/capabilities/CapabilitiesSignals
 import { FooterTrail } from '@/shell/SiteFooter';
 import { StructuredData } from '@/ui';
 
-const { meta, crumb } = capabilitiesPage;
+const { meta } = capabilitiesPage;
+const crumb = crumbs.capabilities;
 
 export const metadata: Metadata = pageMetadata({
   title: meta.title,

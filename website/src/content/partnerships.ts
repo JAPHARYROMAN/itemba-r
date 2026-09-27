@@ -85,8 +85,6 @@ export const partnershipsPage = {
     ogDescription:
       'Supplier introductions, bulk purchase enquiries, fuel, logistics, construction supply, hospitality, and property opportunities with Itemba Group.',
   },
-  /** The page's step in the breadcrumb trail (and its BreadcrumbList). */
-  crumb: { name: 'Partnerships', path: '/partnerships' },
   hero: {
     eyebrow: 'Business development',
     headline: { lead: 'Partner with', accent: 'Itemba Group.' } satisfies SplitHeadline,

@@ -44,6 +44,12 @@ export type PageHeroProps = {
    * master; a smaller photograph stays sharp in `content` or `prose`.
    */
   mediaSize?: Exclude<ContainerSize, 'measure'>;
+  /**
+   * A caption or credit line under a `framed` photograph, set outside its
+   * rounded clipping frame, so it is never cropped (a CC BY-SA credit must
+   * be rendered in full). The photograph and caption become a <figure>.
+   */
+  mediaCaption?: ReactNode;
   tone?: Tone;
   accent?: AccentName;
   align?: 'center' | 'start';
@@ -74,6 +80,7 @@ export function PageHero({
   media,
   mediaLayout = 'framed',
   mediaSize = 'wide',
+  mediaCaption,
   tone = 'light',
   accent,
   align = 'center',
@@ -131,7 +138,14 @@ export function PageHero({
       {media && !split ? (
         mediaLayout === 'framed' ? (
           <Container size={mediaSize} className="mt-10 md:mt-12">
-            <div className="overflow-hidden rounded-tile">{media}</div>
+            {mediaCaption ? (
+              <figure>
+                <div className="overflow-hidden rounded-tile">{media}</div>
+                <figcaption className="mt-3 text-legal text-fg-muted md:text-right">{mediaCaption}</figcaption>
+              </figure>
+            ) : (
+              <div className="overflow-hidden rounded-tile">{media}</div>
+            )}
           </Container>
         ) : (
           <div className="mt-10 md:mt-12">{media}</div>

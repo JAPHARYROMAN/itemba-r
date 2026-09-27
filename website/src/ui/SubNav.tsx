@@ -8,6 +8,12 @@ import { Container } from './layout';
 export type SubNavProps = {
   /** The page name, shown on the left. */
   title: string;
+  /**
+   * A shorter name for phones (below `md`), where the title shares the bar
+   * with the section menu and the Enquire pill (about 168px at 360px): the
+   * full title shows from `md`.
+   */
+  shortTitle?: string;
   /** Where the title links (the page top by default). */
   titleHref?: string;
   /** The nav landmark's name, e.g. "Mwanjalisi Oil sections". */
@@ -37,7 +43,7 @@ export type SubNavProps = {
  * a chevron menu beside the title (the SubNavMenu island, a native popover
  * that also works before hydration).
  */
-export function SubNav({ title, titleHref = '#main-content', label, links = [], menuLabel, cta, accent, children }: SubNavProps) {
+export function SubNav({ title, shortTitle, titleHref = '#main-content', label, links = [], menuLabel, cta, accent, children }: SubNavProps) {
   return (
     <nav
       aria-label={label}
@@ -50,7 +56,14 @@ export function SubNav({ title, titleHref = '#main-content', label, links = [], 
         <div className="flex min-w-0 items-center gap-1.5">
           <SmartLink href={titleHref} className="flex min-w-0 items-center gap-2 text-body-lg font-semibold text-fg md:text-lede md:font-semibold">
             {accent ? <span aria-hidden="true" className="inline-block size-2 shrink-0 rounded-full bg-accent" /> : null}
-            <span className="truncate">{title}</span>
+            {shortTitle ? (
+              <>
+                <span className="truncate md:hidden">{shortTitle}</span>
+                <span className="hidden truncate md:inline">{title}</span>
+              </>
+            ) : (
+              <span className="truncate">{title}</span>
+            )}
           </SmartLink>
           {links.length && menuLabel ? <SubNavMenu links={links} label={menuLabel} /> : null}
         </div>

@@ -143,7 +143,8 @@ export const homeSectors = {
 export const homeCorridor = {
   eyebrow: 'The location advantage',
   title: 'Where Tanzania meets Zambia.',
-  body: "The Mpemba-Tunduma base sits on one of Southern Africa's busiest trade corridors, with direct access to cross-border flows.",
+  /** One neutral corridor phrase (facts.corridorWording); no superlative. */
+  body: 'The Mpemba-Tunduma base sits on the Tanzania–Zambia corridor, with direct access to cross-border flows.',
   facts: [
     { label: 'Headquarters', value: 'Mpemba-Tunduma, Songwe Region' },
     { label: 'Border', value: 'Tanzania–Zambia, the Tunduma corridor' },

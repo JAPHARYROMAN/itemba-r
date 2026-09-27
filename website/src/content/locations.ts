@@ -151,24 +151,6 @@ export function getLocationBySlug(slug: string): LocationProfile | undefined {
 /** Places the location's LocalBusiness serves (JSON-LD). */
 export const locationAreaServed = ['Songwe Region', 'Tunduma', 'Mpemba', 'Tanzania–Zambia corridor'] as const;
 
-/**
- * The map facade (/locations/[slug] and /contact): a closed <details> that
- * loads the Google Maps embed only when it is opened, with the directions
- * link always visible outside it.
- */
-export const mapCopy = {
-  /** The facade's label: the town and region, as a map labels them (the page gives the street address). */
-  place: 'Mpemba, Tunduma',
-  area: 'Songwe Region, on the Tanzania–Zambia border',
-  show: 'Show map',
-  hide: 'Hide map',
-  /** Under "Show map": nothing loads from Google until the map is opened. */
-  note: 'Opens an embedded Google Map.',
-  directions: 'Get directions',
-  /** Screen-reader note on links that open a new tab. */
-  newTab: '(opens in a new tab)',
-} as const;
-
 /** The six services of a location, as cards (index and profile). */
 export const locationServicesCopy = {
   /** Before the company that runs the service: "Run by Mwanjalisi Oil". */

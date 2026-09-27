@@ -5,31 +5,12 @@ import '@/styles/base.css';
 import '@/styles/utilities.css';
 import { useEffect } from 'react';
 import { contact, contactActionLabels, mailtoHref, telHref } from '@/content/contact';
-import { brandLabel, footerDirectory } from '@/content/nav';
-import { site } from '@/content/site';
+import { errorPage as copy } from '@/content/errors';
+import { siteLanguage } from '@/content/site';
 import { inter } from '@/design/fonts';
+import { Chevron as ChevronGlyph } from '@/ui/Chevron';
 
 /* eslint-disable @next/next/no-html-link-for-pages -- plain anchors on purpose: after the root layout fails, a full page load is the surer way back, and next/link would join every page's first load (see below). */
-
-/**
- * Copy for the error boundaries, to move into src/content/errors.ts
- * (`errorPage`) with the 404 copy; kept here until the integrator makes
- * that shared change. error.tsx carries the same wording.
- */
-const copy = {
-  metaTitle: 'Something went wrong | Itemba Group',
-  eyebrow: 'Error',
-  heading: 'Something went wrong',
-  body: 'This page could not be loaded just now. Try again, or go back to the home page.',
-  retry: 'Try again',
-  home: { label: 'Back to home', href: '/' },
-  reference: 'Reference',
-  /** Above the direct channels, which work even while the site does not. */
-  channels: 'Or reach the group office directly',
-  call: 'Call',
-  whatsapp: 'WhatsApp',
-  email: 'Email',
-} as const;
 
 type GlobalErrorProps = { error: Error & { digest?: string }; reset: () => void };
 
@@ -37,30 +18,17 @@ type GlobalErrorProps = { error: Error & { digest?: string }; reset: () => void 
  * Next ships global-error with the root of every page, so everything this
  * file imports counts against the shared first-load JS budget. It
  * therefore draws the kit's pill, chevron link and type scale from the
- * same tokens with plain elements (no next/link, next/image, UI kit or
- * design-token modules), and links with plain anchors: after the root
- * layout has failed, a full page load is the surer way back.
+ * same tokens with plain elements (no next/link, next/image or design-token
+ * modules; from the UI kit only the chevron glyph), and links with plain
+ * anchors: after the root layout has failed, a full page load is the surer
+ * way back.
  */
 const pill =
   'inline-flex min-h-[52px] select-none items-center justify-center whitespace-nowrap rounded-pill bg-btn px-8 text-body-lg text-btn-fg transition-colors duration-fast ease-apple hover:bg-btn-hover';
 const chevronLink = 'group inline-block text-accent-fg decoration-1 underline-offset-4 hover:underline';
 
 function Chevron() {
-  return (
-    <svg
-      viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-      className="ml-[0.3em] inline-block size-[0.62em] align-middle transition-transform duration-fast ease-apple group-hover:translate-x-0.5"
-    >
-      <path d="M4.25 1.75L8.5 6l-4.25 4.25" />
-    </svg>
-  );
+  return <ChevronGlyph className="ml-[0.3em] inline-block align-middle" />;
 }
 
 /**
@@ -86,7 +54,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
   ] as const;
 
   return (
-    <html lang={site.language} className={inter.variable}>
+    <html lang={siteLanguage} className={inter.variable}>
       <head>
         <title>{copy.metaTitle}</title>
         <meta name="robots" content="noindex" />
@@ -94,7 +62,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
       <body className="bg-surface font-sans text-fg">
         <header className="border-b border-line">
           <div className="mx-auto box-content flex h-nav max-w-content items-center px-gutter">
-            <a href="/" aria-label={brandLabel} className="-my-2 inline-flex min-h-11 items-center">
+            <a href="/" aria-label={copy.brandLabel} className="-my-2 inline-flex min-h-11 items-center">
               {/* A plain <img>: next/image would add its client code to every page's first load (see above). */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo-nav.png" alt="" width={85} height={30} className="block h-[1.875rem] w-auto opacity-90 brightness-0" />
@@ -131,8 +99,8 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
                   ))}
                 </ul>
                 <p className="mt-6">
-                  <a href={footerDirectory.contact.page.href} className={`${chevronLink} text-caption`}>
-                    {footerDirectory.contact.page.label}
+                  <a href={copy.contact.href} className={`${chevronLink} text-caption`}>
+                    {copy.contact.label}
                     <Chevron />
                   </a>
                 </p>

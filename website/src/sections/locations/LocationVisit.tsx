@@ -1,7 +1,5 @@
 import { locationPageCopy, type LocationProfile } from '@/content/locations';
-import { Container, Eyebrow, Heading, Section } from '@/ui';
-import { DirectionsLink } from './DirectionsLink';
-import { MapFacade } from './MapFacade';
+import { Container, DirectionsLink, Eyebrow, Heading, MapFacade, Section } from '@/ui';
 import { locationSectionIds } from './ids';
 
 /**

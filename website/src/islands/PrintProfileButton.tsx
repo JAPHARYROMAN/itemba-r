@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from 'react';
 import type { Tone } from '@/design/tokens';
 import { PRINTING_CLASS, preparePrintImages } from '@/lib/print-assets';
-import { buttonClasses } from '@/ui/actions';
+import { buttonClasses } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { Icon } from '@/ui/Icon';
 

@@ -8,9 +8,14 @@ import {
   whatsappWithMessage,
   type ContactKind,
 } from '@/content/contact';
+import { buttonClasses, type ButtonSize, type ButtonVariant } from './button';
+import { Chevron } from './Chevron';
 import { cn } from './cn';
 import { Icon, type IconName } from './Icon';
 import { VisuallyHidden } from './a11y';
+
+export { buttonClasses, Chevron };
+export type { ButtonSize, ButtonVariant };
 
 /**
  * Actions: Apple-style pills and chevron links.
@@ -23,38 +28,12 @@ import { VisuallyHidden } from './a11y';
  * - ChevronLink: "Learn more ›", in the tone's text-safe accent.
  * Every pairing is covered by tests/unit/design-tokens.test.ts.
  *
- * This module has no server-only imports, so client islands may use it
- * (import from `@/ui/actions`, not the `@/ui` barrel).
+ * This module has no server-only imports, but it brings the icon set and
+ * the contact helpers with it: client islands that only need a pill's
+ * classes import `buttonClasses` from `@/ui/button` instead.
  */
-
-export type ButtonVariant = 'primary' | 'secondary' | 'inverse';
-export type ButtonSize = 'sm' | 'md' | 'lg';
-
-const base =
-  'relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-pill text-center transition-colors duration-fast ease-apple disabled:cursor-not-allowed disabled:opacity-50';
-
-const variants: Record<ButtonVariant, string> = {
-  primary: 'bg-btn text-btn-fg hover:bg-btn-hover',
-  secondary: 'border border-fg text-fg hover:bg-fg hover:text-surface',
-  inverse: 'bg-btn text-btn-fg hover:bg-btn-hover',
-};
-
-/**
- * `sm` is 32px tall with an invisible hit area that reaches 44px; `md` is
- * 44px; `lg` is 52px.
- */
-const sizes: Record<ButtonSize, string> = {
-  sm: "min-h-8 px-4 text-caption after:absolute after:-inset-x-1 after:-inset-y-1.5 after:content-['']",
-  md: 'min-h-11 px-[22px] text-body',
-  lg: 'min-h-[52px] px-8 text-body-lg',
-};
 
 const iconSizes: Record<ButtonSize, 'xs' | 'sm'> = { sm: 'xs', md: 'sm', lg: 'sm' };
-
-/** Class list for a pill, for islands that render their own element. */
-export function buttonClasses({ variant = 'primary', size = 'md' }: { variant?: ButtonVariant; size?: ButtonSize } = {}) {
-  return cn(base, variants[variant], sizes[size]);
-}
 
 /**
  * `inverse` borrows the cinema tone's button colours by re-mapping the tone
@@ -227,24 +206,6 @@ export function ChevronLink({ href, size = 'body', tone = 'accent', context, cla
   );
 }
 
-/** The chevron glyph used by chevron links and breadcrumbs (decorative). */
-export function Chevron({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-      className={cn('size-[0.62em] shrink-0 transition-transform duration-fast ease-apple group-hover:translate-x-0.5', className)}
-    >
-      <path d="M4.25 1.75L8.5 6l-4.25 4.25" />
-    </svg>
-  );
-}
 
 /* ── Contact links ────────────────────────────────────────────────────── */
 

@@ -25,7 +25,7 @@ export function ProfileProducts() {
             <ChipList className="mt-6 pt-1">
               {service.offerings.map((offering) => (
                 <Chip key={offering} as="li">
-                  <span>{keepCompounds(offering)}</span>
+                  {keepCompounds(offering)}
                 </Chip>
               ))}
             </ChipList>

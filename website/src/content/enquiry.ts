@@ -54,7 +54,7 @@ export const enquiryIntents: readonly [EnquiryIntent, ...EnquiryIntent[]] = [
     segmentLabel: 'Itemba Enterprises',
     subject: 'Itemba Enterprises operations enquiry',
     routeTo: 'Itemba Enterprises Co Ltd',
-    summary: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, and emerging-business enquiries.',
+    summary: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, Itemba Estate property, and emerging-business enquiries.',
   },
 ];
 

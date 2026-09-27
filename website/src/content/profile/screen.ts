@@ -7,12 +7,13 @@ import { mediaImage } from '../media';
 
 export const profileScreenCopy = {
   /**
-   * The sticky sub-nav: the page name (the global nav's label, short enough
-   * to sit beside Contents and the pill on a 360px phone), its landmark
-   * name, and the pill to the enquiry form.
+   * The sticky sub-nav: the page name, and on phones the global nav's
+   * shorter label (it sits beside Contents and the pill at 360px), its
+   * landmark name, and the pill to the enquiry form.
    */
   nav: {
-    title: 'Profile',
+    title: 'Company profile',
+    shortTitle: 'Profile',
     label: 'Company profile sections',
     enquire: 'Enquire',
   },

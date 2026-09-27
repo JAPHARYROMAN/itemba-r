@@ -4,9 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import type { LinkItem } from '@/content/types';
-import { buttonClasses } from '@/ui/actions';
+import { buttonClasses } from '@/ui/button';
 import { cn } from '@/ui/cn';
-import { Icon } from '@/ui/Icon';
 
 /** id of the mobile menu sheet (the popover the menu button targets). */
 export const SITE_MENU_ID = 'site-menu';
@@ -37,6 +36,12 @@ export type SiteNavProps = {
   /** The crest link at the top of the sheet. */
   brandLabel: string;
   crest: ReactNode;
+  /**
+   * The menu and close glyphs, rendered by the server (SiteHeader), so the
+   * icon set never joins every page's first-load script.
+   */
+  menuIcon: ReactNode;
+  closeIcon: ReactNode;
 };
 
 /**
@@ -52,7 +57,7 @@ export type SiteNavProps = {
  * - Browsers without popover get the links as a scrolling row in the bar
  *   instead (src/styles/utilities.css, `@supports not selector(:popover-open)`).
  */
-export default function SiteNav({ links, cta, label, menuLabel, closeLabel, brandLabel, crest }: SiteNavProps) {
+export default function SiteNav({ links, cta, label, menuLabel, closeLabel, brandLabel, crest, menuIcon, closeIcon }: SiteNavProps) {
   const pathname = usePathname() ?? '/';
   const sheetRef = useRef<HTMLDivElement>(null);
 
@@ -91,7 +96,7 @@ export default function SiteNav({ links, cta, label, menuLabel, closeLabel, bran
           aria-label={menuLabel}
           className="site-menu-toggle -mr-2.5 inline-flex size-11 items-center justify-center rounded-pill text-fg transition-colors duration-fast hover:bg-fg/5 lg:hidden"
         >
-          <Icon name="menu" size="sm" strokeWidth={1.6} />
+          {menuIcon}
         </button>
       </div>
 
@@ -109,7 +114,7 @@ export default function SiteNav({ links, cta, label, menuLabel, closeLabel, bran
               aria-label={closeLabel}
               className="-mr-2.5 inline-flex size-11 items-center justify-center rounded-pill text-fg transition-colors duration-fast hover:bg-fg/5"
             >
-              <Icon name="close" size="sm" strokeWidth={1.6} />
+              {closeIcon}
             </button>
           </div>
           <ul className="pt-5">

@@ -108,11 +108,7 @@ function FaqTopic({ topic }: { topic: FaqSection }) {
         list drops its own outer rules there (one hairline between topics,
         never two), and its first question lines up with the icon.
       */}
-      <FaqList
-        faqs={topic.faqs}
-        headingLevel={4}
-        className="lg:-mt-5 lg:border-b-0 lg:[&>details:first-child]:border-t-0"
-      />
+      <FaqList faqs={topic.faqs} headingLevel={4} rules="lg:between" className="lg:-mt-5" />
     </div>
   );
 }

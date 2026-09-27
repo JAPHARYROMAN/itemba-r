@@ -1,5 +1,5 @@
 import { companyPageCopy, isPhoto, type Company } from '@/content/companies';
-import { Container, Eyebrow, Heading, Icon, Reveal, Section, TypePanel, keepCompounds } from '@/ui';
+import { CheckList, Container, Eyebrow, Heading, Reveal, Section, TypePanel } from '@/ui';
 import { companySectionIds } from './CompanySubNav';
 import { LeadPhoto } from './LeadPhoto';
 
@@ -32,14 +32,7 @@ export function CompanyStrengths({ company }: { company: Company }) {
           <Heading as="h2" id="strengths-title" size="h1" className="mt-3">
             {companyPageCopy.strengthsHeading}
           </Heading>
-          <ul role="list" className="mt-8 border-b border-line md:mt-10">
-            {pageStrengths(company).map((highlight) => (
-              <li key={highlight} className="flex items-start gap-4 border-t border-line py-4 md:py-5">
-                <Icon name="check" size="md" strokeWidth={1.8} className="mt-0.5 text-accent" />
-                <span className="text-body-lg text-fg md:text-lede">{keepCompounds(highlight)}</span>
-              </li>
-            ))}
-          </ul>
+          <CheckList items={pageStrengths(company)} className="mt-8 md:mt-10" />
         </div>
         {isPhoto(visual) ? (
           <Reveal className="order-first mx-auto w-full max-w-md lg:mx-0 lg:max-w-none">

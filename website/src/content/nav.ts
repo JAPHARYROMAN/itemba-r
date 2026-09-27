@@ -34,10 +34,13 @@ export const headerCta: LinkItem = { href: '/contact', label: 'Enquire' };
  */
 export const crumbs = {
   home: { name: 'Home', path: '/' },
+  about: { name: 'About', path: '/about' },
   companies: { name: 'Companies', path: '/companies' },
   services: { name: 'Services', path: '/services' },
   locations: { name: 'Locations', path: '/locations' },
   insights: { name: 'Insights', path: '/insights' },
+  capabilities: { name: 'Capabilities', path: '/capabilities' },
+  partnerships: { name: 'Partnerships', path: '/partnerships' },
 } as const;
 
 /** Accessible name of every crest link to the home page. */

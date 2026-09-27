@@ -16,7 +16,7 @@ export const ENQUIRE_ID = 'enquire';
 export function ProfileSubNav() {
   const { nav } = profileScreenCopy;
   return (
-    <SubNav title={nav.title} label={nav.label} cta={{ href: `#${ENQUIRE_ID}`, label: nav.enquire }}>
+    <SubNav title={nav.title} shortTitle={nav.shortTitle} label={nav.label} cta={{ href: `#${ENQUIRE_ID}`, label: nav.enquire }}>
       <ProfileNav outline={outline} labels={profileNavCopy} />
     </SubNav>
   );

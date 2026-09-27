@@ -20,11 +20,11 @@ export type AccentKey = 'group' | CompanyId;
 /** Sector artwork / icon key used by services, companies and locations. */
 export type SectorVisual = 'fuel' | 'trade' | 'logistics' | 'hardware' | 'estate' | 'hospitality' | 'parking';
 
-/** Line-icon key (the SectorIcon set). */
+/** Sector line-icon key (src/ui/Icon.tsx). */
 export type IconKey = 'energy' | 'trade' | 'manufacturing' | 'construction' | 'hospitality' | 'realestate' | 'logistics';
 
 /** A line icon content may name: the sector set plus a few general glyphs (src/ui/Icon.tsx). */
-export type ContentIcon = IconKey | 'globe' | 'map-pin' | 'document' | 'droplet' | 'arrow-up-right';
+export type ContentIcon = IconKey | 'globe' | 'map-pin' | 'document' | 'droplet' | 'arrow-up-right' | 'arrow-right' | 'phone';
 
 /**
  * A typographic tile in a photograph's place (owner decision: where no

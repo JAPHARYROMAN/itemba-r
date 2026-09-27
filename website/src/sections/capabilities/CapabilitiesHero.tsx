@@ -2,9 +2,8 @@ import { capabilitiesPage } from '@/content/capabilities';
 import { getCompanyBySlug } from '@/content/companies';
 import { profilePdfHref } from '@/content/profile/cover';
 import { serviceAreas, serviceIcons } from '@/content/services';
-import { ButtonLink, ChevronLink, HeadlineText, PageHero } from '@/ui';
+import { ButtonLink, ChevronLink, HeadlineText, PageHero, Shortcuts } from '@/ui';
 import { capabilitiesSectionIds as ids } from './ids';
-import { Shortcuts } from './Shortcuts';
 
 /**
  * The hero of an Apple support-style page: typographic, centred, no

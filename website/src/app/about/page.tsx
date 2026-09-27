@@ -13,7 +13,8 @@ import { HomeClosing } from '@/sections/home/HomeClosing';
 import { FooterTrail } from '@/shell/SiteFooter';
 import { StructuredData } from '@/ui';
 
-const { meta, crumb } = aboutPage;
+const { meta } = aboutPage;
+const crumb = crumbs.about;
 
 export const metadata: Metadata = pageMetadata({
   title: meta.title,

@@ -623,13 +623,10 @@ export const companiesPage = {
   hero: {
     eyebrow: 'Our subsidiaries',
     headline: { lead: 'Three companies.', accent: 'Six sectors.' } satisfies SplitHeadline,
-    lede:
-      'Each subsidiary is legally and operationally independent — with its own identity, focus and market — unified under the Itemba Group structure on the Tanzania–Zambia corridor.',
+    lede: 'Each company is legally and operationally independent, with its own identity and market, under one group structure.',
   },
-  actions: {
-    profile: 'Open company profile',
-    enquire: 'Send enquiry',
-  },
+  /** Accessible name of the hero's row of links to the three company tiles. */
+  jumpLabel: 'Jump to a company',
 } as const;
 
 /** /companies/[slug] copy. */

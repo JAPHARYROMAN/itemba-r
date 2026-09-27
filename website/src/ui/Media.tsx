@@ -83,24 +83,47 @@ export function resolveMedia(source: MediaSource): ResolvedMedia | null {
   return isEnabled(entry.requires) ? entry : null;
 }
 
-/** "Photo: Richard grivas / Wikimedia Commons · CC BY-SA 4.0" with the licence linked. */
-export function MediaCredit({ entry, label = 'Photo', className }: { entry: ResolvedMedia; label?: string; className?: string }) {
+/**
+ * The credit line of a registry image that carries one, the licence linked:
+ * - short (no `title`): "Photo: Richard grivas / Wikimedia Commons · CC BY-SA 4.0";
+ * - full, with the photograph's `title` (the attribution the licence asks
+ *   for: title, author / source, licence): "Songwe Region landscape,
+ *   Richard grivas / Wikimedia Commons, CC BY-SA 4.0".
+ */
+export function MediaCredit({
+  entry,
+  title,
+  label = 'Photo',
+  className,
+}: {
+  entry: ResolvedMedia;
+  /** The photograph's title; renders the full attribution. */
+  title?: string;
+  label?: string;
+  className?: string;
+}) {
   if (!entry.credit) return null;
+  const licence = entry.licence ? (
+    entry.licenceUrl ? (
+      <a href={entry.licenceUrl} rel="license noopener" className="underline decoration-1 underline-offset-2">
+        {entry.licence}
+      </a>
+    ) : (
+      entry.licence
+    )
+  ) : null;
+  if (title) {
+    return (
+      <span className={cn('text-legal', className)}>
+        {title}, {entry.credit}
+        {licence ? <>, {licence}</> : null}
+      </span>
+    );
+  }
   return (
     <span className={cn('text-legal', className)}>
       {label}: {entry.credit}
-      {entry.licence ? (
-        <>
-          {' · '}
-          {entry.licenceUrl ? (
-            <a href={entry.licenceUrl} rel="license noopener" className="underline decoration-1 underline-offset-2">
-              {entry.licence}
-            </a>
-          ) : (
-            entry.licence
-          )}
-        </>
-      ) : null}
+      {licence ? <>{' · '}{licence}</> : null}
     </span>
   );
 }

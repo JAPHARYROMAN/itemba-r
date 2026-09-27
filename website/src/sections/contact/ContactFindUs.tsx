@@ -3,9 +3,7 @@ import { contact } from '@/content/contact';
 import { contactPage } from '@/content/contactPage';
 import { businessEnquirySubject } from '@/content/enquiry';
 import { withFlags } from '@/content/flags';
-import { Bento, BentoCell, ContactLink, Container, Eyebrow, Heading, Icon, Section, keepCompounds, type BentoSpan, type IconName } from '@/ui';
-import { DirectionsLink } from '@/sections/locations/DirectionsLink';
-import { MapFacade } from '@/sections/locations/MapFacade';
+import { Bento, BentoCell, ContactLink, Container, DirectionsLink, Eyebrow, Heading, Icon, MapFacade, Section, keepCompounds, type BentoSpan, type IconName } from '@/ui';
 import { contactSectionIds } from './ids';
 
 /** A contact card: its line icon, what it is, then the way to use it. */

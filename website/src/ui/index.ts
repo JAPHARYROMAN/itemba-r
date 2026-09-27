@@ -5,8 +5,11 @@
  *
  * Client islands must not import this barrel: it pulls in Media and
  * Breadcrumbs, which read server-only content. Islands may import the
- * leaf modules that have no server-only imports: `@/ui/actions`,
- * `@/ui/Icon`, `@/ui/text`, `@/ui/layout`, `@/ui/a11y`, `@/ui/cn`.
+ * leaf modules that have no server-only imports: `@/ui/button` (a pill's
+ * classes), `@/ui/Chevron`, `@/ui/cn`, `@/ui/Icon`, `@/ui/text`,
+ * `@/ui/layout`, `@/ui/a11y` and `@/ui/actions`. Code that every page
+ * loads (the layout's islands, the error boundaries) keeps to the first
+ * three: `@/ui/actions` brings the icon set and the contact helpers.
  */
 export { cn } from './cn';
 export { Container, Section, Grid, Stack, Divider } from './layout';
@@ -28,6 +31,12 @@ export type { ButtonVariant, ButtonSize, ChevronSize, ContactLinkProps } from '.
 export { Card, CardLink, Bento, BentoCell } from './cards';
 export type { BentoSpan } from './cards';
 export { Stat, StatList, Chip, ChipList, FactList, FaqList } from './data';
+export { CheckList } from './CheckList';
+export { Shortcuts } from './Shortcuts';
+export type { Shortcut } from './Shortcuts';
+export { DirectionsLink } from './DirectionsLink';
+export { MapFacade } from './MapFacade';
+export type { MapFacadeProps } from './MapFacade';
 export type { Fact } from './data';
 export { Breadcrumbs } from './Breadcrumbs';
 export type { BreadcrumbItem } from './Breadcrumbs';

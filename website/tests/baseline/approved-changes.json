@@ -812,8 +812,38 @@
       "routes": [
         "/company-profile"
       ],
-      "change": "Deviation: the sticky sub-nav is titled 'Profile' (the global nav's label) rather than the page name, and carries no anchor links: its Contents control (ProfileNav) lists the 17 sections. Each chapter shows a decorative two-digit number above its h2 (the contents sheet's numbering); most chapters set the heading beside the content (5/7 columns, as the reference FAQ and enquiry sections).",
-      "reason": "'Company profile' truncates beside Contents and the Enquire pill at 360px; seventeen anchors do not fit a bar; the numbers and the two columns make a 17-chapter page read as a report."
+      "change": "Deviation: the sticky sub-nav is titled 'Company profile' from md and 'Profile' (the global nav's label) on phones (SubNav shortTitle), and carries no anchor links: its Contents control (ProfileNav) lists the 17 sections. Each chapter shows a decorative two-digit number above its h2 (the contents sheet's numbering); most chapters set the heading beside the content (5/7 columns, as the reference FAQ and enquiry sections).",
+      "reason": "'Company profile' truncates beside Contents and the Enquire pill at 360px, so phones get the short name; seventeen anchors do not fit a bar; the numbers and the two columns make a 17-chapter page read as a report."
+    },
+    {
+      "routes": [
+        "/companies"
+      ],
+      "change": "Hero lede shortened to 'Each company is legally and operationally independent, with its own identity and market, under one group structure.' (was the 170-character '... unified under the Itemba Group structure on the Tanzania–Zambia corridor.'); the row of company links under it is named 'Jump to a company' (companiesPage.jumpLabel) instead of borrowing the eyebrow.",
+      "reason": "D1 integration (p1 request): the old lede ran six lines at 360px; 120 characters or fewer, as the home tile summaries."
+    },
+    {
+      "routes": [
+        "/",
+        "/locations"
+      ],
+      "change": "Corridor section body: 'The Mpemba-Tunduma base sits on the Tanzania–Zambia corridor, with direct access to cross-border flows.' replaces '... sits on one of Southern Africa's busiest trade corridors, ...'.",
+      "reason": "D1 integration (p3 request): the plan's one neutral corridor phrase (facts.corridorWording), no unsourced superlative."
+    },
+    {
+      "routes": [
+        "/contact",
+        "/capabilities",
+        "/partnerships",
+        "/faq",
+        "/company-profile",
+        "/companies/*",
+        "/services/*",
+        "/locations/*",
+        "/insights/*"
+      ],
+      "change": "Enquiry form, Itemba Enterprises option: the summary reads 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, Itemba Estate property, and emerging-business enquiries.' (adds Itemba Estate). The intent id, label, routeTo and subject the API reads are unchanged.",
+      "reason": "D1 integration (p2 request): the real-estate page presets this intent, and Itemba Estate is an Itemba Enterprises business (the core message), so the card no longer reads as logistics-only."
     }
   ]
 }

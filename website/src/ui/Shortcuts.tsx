@@ -1,5 +1,7 @@
 import type { AccentName } from '@/design/tokens';
-import { Icon, SmartLink, cn, type IconName } from '@/ui';
+import { SmartLink } from './actions';
+import { cn } from './cn';
+import { Icon, type IconName } from './Icon';
 
 export type Shortcut = {
   href: string;

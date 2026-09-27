@@ -1,6 +1,6 @@
-import { mapsEmbedUrl } from '@/content/contact';
-import { mapCopy } from '@/content/locations';
-import { Icon, cn, type IconName } from '@/ui';
+import { mapCopy, mapsEmbedUrl } from '@/content/contact';
+import { cn } from './cn';
+import { Icon, type IconName } from './Icon';
 
 export type MapFacadeProps = {
   /** The iframe's accessible title. */

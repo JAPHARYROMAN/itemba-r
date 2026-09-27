@@ -25,8 +25,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { companies } from '@/content/companies';
 import { contact } from '@/content/contact';
+import { errorPage } from '@/content/errors';
 import { insightArticles } from '@/content/insights';
 import { locationProfiles } from '@/content/locations';
+import { brandLabel, footerDirectory } from '@/content/nav';
 import { serviceAreas } from '@/content/services';
 import { coreRoutes, site } from '@/content/site';
 import { surfaces } from '@/design/tokens';
@@ -235,6 +237,13 @@ describe('error boundaries', () => {
     expect(links.some((l) => l.startsWith(contact.whatsapp.split('?')[0] ?? 'https://wa.me/'))).toBe(true);
     expect(links.some((l) => l.startsWith('mailto:'))).toBe(true);
     expect(html).not.toContain('secret upstream failure');
+  });
+});
+
+describe('error copy', () => {
+  it("keeps its own copies of the shell labels in step with src/content/nav (the boundaries stay out of nav's bundle)", () => {
+    expect(errorPage.contact).toEqual(footerDirectory.contact.page);
+    expect(errorPage.brandLabel).toBe(brandLabel);
   });
 });
 

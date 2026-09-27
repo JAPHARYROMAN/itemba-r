@@ -15,8 +15,9 @@ their patterns, spacing, type and component use.
   `<Section tone labelledBy>` + `<Container>` with an `h2`.
 - Build from `@/ui` only. Use `PageHero`, `Section`, `Container`, `Heading`,
   `Eyebrow`, `Lede`, `ButtonLink`, `ChevronLink`, `ContactLink`, `Card`,
-  `CardLink`, `Bento`/`BentoCell`, `Stat`, `FactList`, `FaqList`, `Media`,
-  `TypePanel`, `CtaBand`, `SubNav`, `Reveal` and `Icon`. For a photograph in a
+  `CardLink`, `Bento`/`BentoCell`, `Stat`, `FactList`, `FaqList`, `CheckList`,
+  `Shortcuts`, `DirectionsLink`, `MapFacade`, `Media`, `TypePanel`, `CtaBand`,
+  `SubNav`, `Reveal` and `Icon`. For a photograph in a
   hero or tile frame, use `LeadPhoto` (`src/sections/company/LeadPhoto.tsx`).
   If the kit lacks something, ask the integrator rather than styling around
   it.
@@ -158,7 +159,7 @@ npm run typecheck
 npm run lint                       # 0 errors; no new warnings in your files
 npm run test:unit
 npm run build
-npm run budget
+npm run budget                     # enforcing: JS, CSS, HTML and font budgets, no inline opacity:0, the 'use client' allowlist
 E2E_ROUTES=/your,/routes/* npm run test:e2e:contract   # route inventory, links, JSON-LD, analytics, QuickContact
 E2E_ROUTES=/your,/routes/* npm run test:e2e:quality    # axe at 360 and 1280, no-JS
 ```

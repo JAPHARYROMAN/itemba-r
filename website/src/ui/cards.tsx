@@ -140,14 +140,19 @@ export function Bento({
   phoneColumns = 1,
   className,
   children,
+  ...aria
 }: {
   as?: 'div' | 'ul';
   phoneColumns?: 1 | 2;
   className?: string;
   children: ReactNode;
+  /** Names the grid, e.g. a `ul` labelled by its section heading. */
+  'aria-label'?: string;
+  'aria-labelledby'?: string;
+  'aria-describedby'?: string;
 }) {
   return (
-    <Tag className={cn('grid gap-3 md:grid-cols-6 md:gap-4', phoneColumns === 2 ? 'grid-cols-2' : 'grid-cols-1', className)}>
+    <Tag {...aria} className={cn('grid gap-3 md:grid-cols-6 md:gap-4', phoneColumns === 2 ? 'grid-cols-2' : 'grid-cols-1', className)}>
       {children}
     </Tag>
   );

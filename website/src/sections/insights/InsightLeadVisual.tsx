@@ -1,7 +1,7 @@
 import { companies } from '@/content/companies';
 import { isLeadPhoto, type InsightArticle, type LineupVisual } from '@/content/insights';
-import { getMedia } from '@/content/media';
-import { Figure, HeadlineText, Media, TypePanel, cn, keepCompounds } from '@/ui';
+import { LeadPhoto } from '@/sections/company/LeadPhoto';
+import { Figure, HeadlineText, TypePanel, cn, keepCompounds } from '@/ui';
 
 /**
  * The company line-up: one sentence over the companies an article names,
@@ -89,18 +89,12 @@ export function InsightLeadVisual({ article, frame, className }: InsightLeadVisu
       );
     }
     // 4:3 on phones, so the subject reads at 316px; 2:1 in the 680px column
-    // from `md`. `object-fit: cover` draws a wider photograph wider than its
-    // frame, and `sizes` says so.
-    // A registry credit (CC BY-SA) is overlaid by Media itself.
-    const { width, height } = getMedia(lead.media);
-    const cover = (ratio: number) => Math.max(1, Math.round((width / height / ratio) * 100) / 100);
-    const phone = cover(4 / 3);
-    const sizes = `(min-width: 768px) ${Math.ceil(680 * cover(2))}px, ${phone === 1 ? 'calc(100vw - 44px)' : `calc((100vw - 44px) * ${phone})`}`;
+    // from `md` (LeadPhoto's panorama frame at the measure width, whose
+    // `sizes` allow for object-fit: cover drawing a wider photograph wider
+    // than its frame). A registry credit (CC BY-SA) is overlaid by Media.
     return (
       <figure className={className}>
-        <div className="relative aspect-[4/3] overflow-hidden rounded-tile md:aspect-[2/1]">
-          <Media media={lead} alt={lead.alt} sizes={sizes} fill priority />
-        </div>
+        <LeadPhoto photo={lead} shape="panorama" width="measure" priority />
         {caption ? <figcaption className="mt-3 text-caption text-fg-muted">{caption}</figcaption> : null}
       </figure>
     );

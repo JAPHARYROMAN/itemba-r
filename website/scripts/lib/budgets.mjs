@@ -11,12 +11,31 @@
 export const KB = 1000;
 
 export const BUDGETS = Object.freeze({
-  /** JS every page loads (the intersection of all pages' scripts). */
-  sharedJs: 110 * KB,
+  /**
+   * JS every page loads (the intersection of all pages' scripts).
+   *
+   * The plan's 110 kB is below what Next 15.5 itself ships to every page of
+   * this site before any of its own code: the framework runtime (react-dom,
+   * the app router, webpack, main-app: 102.6 kB) plus next/link (3.4 kB;
+   * client-side navigation, which the page_view contract needs) and the
+   * next/image client (5.2 kB; every page imports the photo kit) is
+   * 111.2 kB. On top of that every page carries the site's own shared code:
+   * the layout islands (global nav, quick-contact route gate,
+   * ConversionTracker, the frozen Analytics' next/script) and the two error
+   * boundaries Next loads with the root, 8.7 kB at the Phase D integration
+   * (down from 13.3 kB). So the shared line is 122 kB, and the plan's
+   * per-page totals (110 + 15 and 110 + 25 kB) are enforced as first-load
+   * budgets below instead.
+   */
+  sharedJs: 122 * KB,
   /** JS a page loads on top of the shared set. */
   routeJs: 15 * KB,
   /** Route JS allowance on pages with the EnquiryRouter and on /company-profile. */
   routeJsLarge: 25 * KB,
+  /** All the JS a page loads first (shared + route): the plan's 110 + 15 kB. */
+  firstLoadJs: 125 * KB,
+  /** First-load JS on pages with the EnquiryRouter and on /company-profile: the plan's 110 + 25 kB. */
+  firstLoadJsLarge: 135 * KB,
   /** Stylesheets a page loads. */
   css: 30 * KB,
   /** Preloaded font files per page, and their total bytes. */
@@ -26,6 +45,14 @@ export const BUDGETS = Object.freeze({
   html: 40 * KB,
   htmlLarge: 90 * KB,
 });
+
+/**
+ * Prerendered routes that never ship as pages, so they are not measured:
+ * /__kit, the UI-kit catalogue, is a 404 in production builds (its HTML is
+ * an error shell with none of the layout's scripts, which would shrink the
+ * "shared" set, the scripts every page loads, to the framework alone).
+ */
+export const UNMEASURED_ROUTES = Object.freeze(['/__kit']);
 
 /** Routes that always get the larger route-JS allowance. */
 export const LARGE_JS_ROUTES = Object.freeze(['/company-profile']);
@@ -48,7 +75,7 @@ export const LARGE_HTML_ROUTES = Object.freeze(['/company-profile']);
  *   route: string,
  *   hasEnquiryForm: boolean,
  *   routeJs: number, routeJsLimit: number, routeFiles: { file: string, bytes: number }[],
- *   firstLoadJs: number,
+ *   firstLoadJs: number, firstLoadJsLimit: number,
  *   css: number, cssLimit: number,
  *   fontFiles: number, fontBytes: number,
  *   html: number, htmlLimit: number,
@@ -126,6 +153,7 @@ export function evaluateBudgets({ pages, sizes, budgets = BUDGETS, expectedRoute
       routeJsLimit: large ? budgets.routeJsLarge : budgets.routeJs,
       routeFiles,
       firstLoadJs: sharedJs + routeJs,
+      firstLoadJsLimit: large ? budgets.firstLoadJsLarge : budgets.firstLoadJs,
       css: sum(page.stylesheets.map(sizeOf)),
       cssLimit: budgets.css,
       fontFiles: page.fonts.length,
@@ -143,6 +171,15 @@ export function evaluateBudgets({ pages, sizes, budgets = BUDGETS, expectedRoute
         actual: row.routeJs,
         limit: row.routeJsLimit,
         message: `${row.route}: route JS ${formatKb(row.routeJs)} exceeds ${formatKb(row.routeJsLimit)}`,
+      });
+    }
+    if (row.firstLoadJs > row.firstLoadJsLimit) {
+      violations.push({
+        metric: 'first-load-js',
+        route: row.route,
+        actual: row.firstLoadJs,
+        limit: row.firstLoadJsLimit,
+        message: `${row.route}: first-load JS ${formatKb(row.firstLoadJs)} exceeds ${formatKb(row.firstLoadJsLimit)}`,
       });
     }
     if (row.css > row.cssLimit) {
@@ -202,16 +239,16 @@ export function formatBudgetTable(report) {
   for (const f of report.sharedJs.files) lines.push(`    ${lpad(formatKb(f.bytes), 9)}  ${f.file}`);
   lines.push('');
   lines.push(
-    `${pad('Route', width)}${lpad('route JS', 22)}${lpad('first load', 12)}${lpad('CSS', 22)}${lpad('HTML', 22)}${lpad('fonts', 14)}`,
+    `${pad('Route', width)}${lpad('route JS', 22)}${lpad('first load', 24)}${lpad('CSS', 22)}${lpad('HTML', 22)}${lpad('fonts', 14)}`,
   );
   for (const r of report.rows) {
     const cell = (actual, limit) => `${formatKb(actual)} / ${formatKb(limit)}${flag(actual, limit)}`;
     lines.push(
-      `${pad(r.route + (r.hasEnquiryForm ? ' *' : ''), width)}${lpad(cell(r.routeJs, r.routeJsLimit), 22)}${lpad(formatKb(r.firstLoadJs), 12)}${lpad(cell(r.css, r.cssLimit), 22)}${lpad(cell(r.html, r.htmlLimit), 22)}${lpad(`${r.fontFiles} / ${formatKb(r.fontBytes)}`, 14)}`,
+      `${pad(r.route + (r.hasEnquiryForm ? ' *' : ''), width)}${lpad(cell(r.routeJs, r.routeJsLimit), 22)}${lpad(cell(r.firstLoadJs, r.firstLoadJsLimit), 24)}${lpad(cell(r.css, r.cssLimit), 22)}${lpad(cell(r.html, r.htmlLimit), 22)}${lpad(`${r.fontFiles} / ${formatKb(r.fontBytes)}`, 14)}`,
     );
   }
   lines.push('');
-  lines.push('* page carries the enquiry form (route JS allowance 25 kB). ! = over budget. 1 kB = 1000 B, gzip level 9.');
+  lines.push('* page carries the enquiry form (route JS 25 kB, first load 135 kB). ! = over budget. 1 kB = 1000 B, gzip level 9.');
   return lines.join('\n');
 }
 
@@ -232,7 +269,7 @@ export function formatBudgetMarkdown(report, { reportOnly }) {
   ];
   for (const r of report.rows) {
     lines.push(
-      `| \`${r.route}\`${r.hasEnquiryForm ? ' (form)' : ''} | ${formatKb(r.routeJs)} / ${formatKb(r.routeJsLimit)} ${mark(r.routeJs, r.routeJsLimit)} | ${formatKb(r.firstLoadJs)} | ${formatKb(r.css)} / ${formatKb(r.cssLimit)} ${mark(r.css, r.cssLimit)} | ${formatKb(r.html)} / ${formatKb(r.htmlLimit)} ${mark(r.html, r.htmlLimit)} | ${r.fontFiles} / ${formatKb(r.fontBytes)} |`,
+      `| \`${r.route}\`${r.hasEnquiryForm ? ' (form)' : ''} | ${formatKb(r.routeJs)} / ${formatKb(r.routeJsLimit)} ${mark(r.routeJs, r.routeJsLimit)} | ${formatKb(r.firstLoadJs)} / ${formatKb(r.firstLoadJsLimit)} ${mark(r.firstLoadJs, r.firstLoadJsLimit)} | ${formatKb(r.css)} / ${formatKb(r.cssLimit)} ${mark(r.css, r.cssLimit)} | ${formatKb(r.html)} / ${formatKb(r.htmlLimit)} ${mark(r.html, r.htmlLimit)} | ${r.fontFiles} / ${formatKb(r.fontBytes)} |`,
     );
   }
   lines.push('', `${report.violations.length} violation(s).`, '');

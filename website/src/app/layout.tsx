@@ -4,14 +4,14 @@ import '@/styles/base.css';
 import '@/styles/utilities.css';
 import '@/styles/print.css';
 import { shellCopy } from '@/content/nav';
+import { site } from '@/content/site';
 import { inter } from '@/design/fonts';
 import { surfaces } from '@/design/tokens';
 import Analytics from '@/components/Analytics';
 import ConversionTracker from '@/components/ConversionTracker';
-import QuickContact from '@/islands/QuickContact';
 import { organizationJsonLd, websiteJsonLd } from '@/lib/jsonld';
-import { site } from '@/lib/site';
 import { pageMetadata } from '@/lib/seo';
+import { QuickContactBar } from '@/shell/QuickContactBar';
 import { SiteFooter } from '@/shell/SiteFooter';
 import { SiteHeader } from '@/shell/SiteHeader';
 import { SkipLink } from '@/ui/a11y';
@@ -94,7 +94,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
         </main>
         <SiteFooter />
-        <QuickContact />
+        <QuickContactBar />
       </body>
     </html>
   );

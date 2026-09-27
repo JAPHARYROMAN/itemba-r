@@ -1,13 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { contact, contactActionLabels, mailtoWithSubject, telHref } from '@/content/contact';
-import { businessEnquirySubject } from '@/content/enquiry';
-import { quickContactCopy as copy, headerCta } from '@/content/nav';
-import { buttonClasses } from '@/ui/actions';
-import { cn } from '@/ui/cn';
-import { Icon } from '@/ui/Icon';
+import type { ReactNode } from 'react';
 
 /**
  * Routes with an inline enquiry form, where the bar would only repeat it.
@@ -28,57 +22,15 @@ export function hasInlineEnquiry(pathname: string) {
   );
 }
 
-/** A direct channel: its icon over a short label, a 44px target, quieter than the pill. */
-const channel =
-  'inline-flex min-h-11 min-w-14 flex-col items-center justify-center gap-0.5 rounded-card px-2 text-legal font-medium text-fg transition-colors duration-fast ease-apple hover:bg-surface-alt';
-
 /**
- * The mobile quick-contact bar (plan: Call · WhatsApp · Enquire): a slim
- * bar fixed to the bottom of the screen. The direct channels (Call,
- * WhatsApp and Email) are quiet icon actions on the left; the one pill is
- * Enquire, to the general enquiry form (the global nav's headerCta), so
- * the routed enquiry leads rather than the raw mail app. It shows below
- * `md` only (the global nav's Enquire pill and the footer serve larger
- * screens), and fits a 320px screen.
- *
- * The hrefs are exactly origin/main's: `tel:` (primary line), the prepared
- * `wa.me/` message and the "Business enquiry" `mailto:`, which
- * ConversionTracker classifies as phone, WhatsApp and email clicks.
- * `data-quick-contact` marks it for the e2e harness. A spacer in the page
- * flow, painted like the footer, keeps the bar from covering the last line
- * of the page.
+ * The quick-contact bar's only script: it shows the bar (server markup,
+ * src/shell/QuickContactBar.tsx, passed in as children) on every route
+ * without an inline enquiry form, following client-side navigation. The
+ * bar itself, its icons and its contact hrefs stay server-rendered, so
+ * this island is the pathname check alone.
  */
-export default function QuickContact() {
+export default function QuickContact({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? '/';
   if (hasInlineEnquiry(pathname)) return null;
-
-  return (
-    <>
-      <div aria-hidden="true" data-print="hide" className="h-[calc(var(--quickbar-height)+env(safe-area-inset-bottom))] bg-surface-alt md:hidden" />
-      <aside
-        aria-label={copy.label}
-        data-quick-contact=""
-        data-print="hide"
-        className="fixed inset-x-0 bottom-0 z-quick-bar border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
-      >
-        <div className="mx-auto flex h-quickbar max-w-content items-center gap-1 px-gutter">
-          <a href={telHref(contact.primaryPhone)} aria-label={contactActionLabels.call} className={cn(channel, '-ml-2')}>
-            <Icon name="phone" size="sm" />
-            <span>{copy.call}</span>
-          </a>
-          <a href={contact.whatsapp} aria-label={contactActionLabels.whatsapp} className={channel}>
-            <Icon name="whatsapp" size="sm" />
-            <span>{copy.whatsapp}</span>
-          </a>
-          <a href={mailtoWithSubject(businessEnquirySubject)} aria-label={contactActionLabels.email} className={channel}>
-            <Icon name="mail" size="sm" />
-            <span>{copy.email}</span>
-          </a>
-          <Link href={headerCta.href} className={cn(buttonClasses({ size: 'sm' }), 'ml-auto')}>
-            {headerCta.label}
-          </Link>
-        </div>
-      </aside>
-    </>
-  );
+  return <>{children}</>;
 }

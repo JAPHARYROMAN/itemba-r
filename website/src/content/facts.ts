@@ -19,7 +19,10 @@ export type Fact<T> = {
   note: string;
   /** The flag that decides whether the rebuilt pages show it. */
   flag?: FlagName;
-  /** Where the claim is visible today (legacy pages / documents). */
+  /**
+   * Where the rebuilt site and the documents state the claim (page and
+   * section). A flagged claim is listed where it shows when its flag is on.
+   */
   publicUse: readonly string[];
 };
 
@@ -32,7 +35,7 @@ export const facts = {
     status: 'unconfirmed',
     flag: 'showDivisionsStat',
     note: 'Home shows "5 Specialised divisions"; About says "four specialised divisions". Owner: 4 or 5?',
-    publicUse: ['/ (hero stat)', '/about (Who we are)'],
+    publicUse: ['/ (By the numbers)'],
   }),
   manufacturing: fact('Manufacturing is one of the group sectors', {
     status: 'unconfirmed',

@@ -2,8 +2,7 @@ import { partnerChecklist } from '@/content/capabilities';
 import { enquiryPrompts } from '@/content/enquiry';
 import { partnershipsPage } from '@/content/partnerships';
 import EnquiryRouter from '@/islands/EnquiryRouter';
-import { CheckList } from '@/sections/capabilities/CheckList';
-import { Container, Eyebrow, Heading, Lede, Section } from '@/ui';
+import { CheckList, Container, Eyebrow, Heading, Lede, Section } from '@/ui';
 import { partnershipsSectionIds as ids } from './ids';
 
 /**

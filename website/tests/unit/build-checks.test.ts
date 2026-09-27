@@ -152,19 +152,33 @@ describe('budgets', () => {
         page('/', { stylesheets: ['site.css', 'big.css'], fonts: ['a.woff2', 'b.woff2', 'c.woff2'], htmlGzip: 41_000 }),
         page('/company-profile', { htmlGzip: 89_000 }),
       ],
-      sizes: { ...sizes, 'framework.js': 100_000 },
+      sizes: { ...sizes, 'framework.js': 110_000 },
       expectedRoutes: ['/', '/company-profile', '/faq'],
     });
+    // Shared 130 kB: over its own line, and over each page's first-load total (125 kB; 135 kB on /company-profile).
     expect(report.violations.map((v) => `${v.metric} ${v.route ?? ''}`.trim()).sort()).toEqual(
-      ['coverage /faq', 'css /', 'font-bytes /', 'font-files /', 'html /', 'shared-js'].sort(),
+      ['coverage /faq', 'css /', 'first-load-js /', 'first-load-js /company-profile', 'font-bytes /', 'font-files /', 'html /', 'shared-js'].sort(),
     );
   });
 
   it('passes a build that is inside every budget', () => {
     const report = evaluateBudgets({ pages: [page('/'), page('/contact', { hasEnquiryForm: true })], sizes, expectedRoutes: ['/', '/contact'] });
     expect(report.violations).toEqual([]);
-    expect(formatBudgetTable(report)).toContain('Shared first-load JS: 80.0 kB / 110.0 kB');
+    expect(formatBudgetTable(report)).toContain('Shared first-load JS: 80.0 kB / 122.0 kB');
     expect(formatBudgetMarkdown(report, { reportOnly: true })).toContain('0 violation(s).');
+  });
+
+  it('holds each page to the first-load total even when the shared line and its route JS each fit', () => {
+    // Shared 120 kB (under 122) + / at 10 kB (under 15) = 130 kB, over the 125 kB total;
+    // /contact carries the form: 120 + 12 = 132 kB fits its 135 kB.
+    const report = evaluateBudgets({
+      pages: [page('/'), page('/contact', { hasEnquiryForm: true })],
+      sizes: { ...sizes, 'framework.js': 100_000, '/contact.js': 12_000 },
+    });
+    expect(report.rows.find((r) => r.route === '/')!.firstLoadJsLimit).toBe(BUDGETS.firstLoadJs);
+    expect(report.rows.find((r) => r.route === '/contact')!.firstLoadJsLimit).toBe(BUDGETS.firstLoadJsLarge);
+    expect(report.violations.map((v) => `${v.metric} ${v.route}`)).toEqual(['first-load-js /']);
+    expect(formatBudgetMarkdown(report, { reportOnly: false })).toContain('1 violation(s).');
   });
 
   it('refuses to guess: no pages or an unmeasured asset is an error', () => {

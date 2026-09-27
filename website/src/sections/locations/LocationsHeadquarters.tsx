@@ -1,8 +1,7 @@
 import { getCompanyBySlug, type Company } from '@/content/companies';
 import { locationsPage, type LocationProfile } from '@/content/locations';
 import { companyUrl, locationUrl } from '@/content/site';
-import { Card, ChevronLink, Container, Eyebrow, Heading, Icon, Section, SmartLink, keepCompounds } from '@/ui';
-import { DirectionsLink } from './DirectionsLink';
+import { Card, ChevronLink, Container, DirectionsLink, Eyebrow, Heading, Icon, Section, SmartLink, keepCompounds } from '@/ui';
 
 /**
  * The one location, as Apple lists a store: its name and why it matters on

@@ -12,7 +12,8 @@ import { PartnershipsRoutes } from '@/sections/partnerships/PartnershipsRoutes';
 import { FooterTrail } from '@/shell/SiteFooter';
 import { StructuredData } from '@/ui';
 
-const { meta, crumb } = partnershipsPage;
+const { meta } = partnershipsPage;
+const crumb = crumbs.partnerships;
 
 export const metadata: Metadata = pageMetadata({
   title: meta.title,

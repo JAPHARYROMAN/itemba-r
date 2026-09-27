@@ -3,7 +3,7 @@
  */
 import 'server-only';
 import { mediaImage } from './media';
-import type { SplitHeadline, TypeVisual } from './types';
+import type { ContentIcon, SplitHeadline, TypeVisual } from './types';
 
 /** One capability line per operating company (kept from the origin/main data set). */
 export const capabilityAreas = [
@@ -48,6 +48,8 @@ export type VerificationSignal = {
   id: VerificationSignalId;
   title: string;
   summary: string;
+  /** The cell's line icon (the group-structure cell shows the three companies' dots instead). */
+  icon?: ContentIcon;
 };
 
 export const verificationSignals: readonly VerificationSignal[] = [
@@ -58,16 +60,19 @@ export const verificationSignals: readonly VerificationSignal[] = [
   },
   {
     id: 'ownership',
+    icon: 'arrow-right',
     title: 'Service ownership',
     summary: 'Each service area maps back to the company most closely responsible for handling that enquiry.',
   },
   {
     id: 'base',
+    icon: 'map-pin',
     title: 'Local operating base',
     summary: 'The Mpemba-Tunduma head office and Songwe Region location profile are consistent across the site.',
   },
   {
     id: 'contact',
+    icon: 'phone',
     title: 'Contact accountability',
     summary: 'Partnership, service, company, and contact pages route enquiries through the same group channels.',
   },
@@ -90,8 +95,6 @@ export const capabilitiesPage = {
     ogDescription:
       'See how Itemba Group maps services, companies, location presence, and enquiry routing for customers, suppliers, and partners.',
   },
-  /** The page's step in the breadcrumb trail (and its BreadcrumbList). */
-  crumb: { name: 'Capabilities', path: '/capabilities' },
   hero: {
     eyebrow: 'Capability proof',
     headline: { lead: 'Verify the fit.', accent: 'Contact the right team.' } satisfies SplitHeadline,

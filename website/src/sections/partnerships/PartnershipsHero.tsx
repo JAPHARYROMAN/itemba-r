@@ -1,7 +1,6 @@
 import { partnershipAreas, partnershipsPage } from '@/content/partnerships';
 import { headlineText } from '@/content/types';
-import { Shortcuts } from '@/sections/capabilities/Shortcuts';
-import { ButtonLink, ChevronLink, PageHero } from '@/ui';
+import { ButtonLink, ChevronLink, PageHero, Shortcuts } from '@/ui';
 import { partnershipsSectionIds as ids } from './ids';
 import { routeAccent } from './routeAccent';
 

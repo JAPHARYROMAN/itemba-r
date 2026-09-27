@@ -64,19 +64,23 @@ export type EyebrowProps = {
 
 const eyebrowTones = { accent: 'text-accent-fg', gold: 'text-gold-fg', muted: 'text-fg-muted' } as const;
 
-/** 14px, weight 600, +0.01em, sentence case. Never letter-spaced capitals. */
+/**
+ * 14px, weight 600, +0.01em, sentence case. Never letter-spaced capitals.
+ *
+ * With `dot`, the text sits in its own span beside the dot, so text split
+ * by keepCompounds still wraps as one line of text (not as separate flex
+ * items), and a wrapped eyebrow hangs under its first word. The dot sits
+ * in a box one line tall (1.43em, the eyebrow's line height), so it stays
+ * centred on the first line when the eyebrow wraps.
+ */
 export function Eyebrow({ tone = 'accent', dot = false, as: Tag = 'p', className, children }: EyebrowProps) {
+  if (!dot) return <Tag className={cn('text-eyebrow', eyebrowTones[tone], className)}>{children}</Tag>;
   return (
-    <Tag
-      className={cn(
-        'text-eyebrow',
-        eyebrowTones[tone],
-        dot && 'inline-flex items-center gap-2',
-        className,
-      )}
-    >
-      {dot ? <span aria-hidden="true" className="inline-block size-2 shrink-0 rounded-full bg-accent" /> : null}
-      {children}
+    <Tag className={cn('text-eyebrow', eyebrowTones[tone], 'inline-flex items-start gap-2', className)}>
+      <span aria-hidden="true" className="flex h-[1.43em] shrink-0 items-center">
+        <span className="inline-block size-2 rounded-full bg-accent" />
+      </span>
+      <span className="min-w-0">{children}</span>
     </Tag>
   );
 }

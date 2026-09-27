@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { brandLabel, headerCta, headerLinks, shellCopy } from '@/content/nav';
 import SiteNav from '@/islands/SiteNav';
+import { Icon } from '@/ui/Icon';
 import { Container } from '@/ui/layout';
 import { Crest } from './Crest';
 
@@ -30,6 +31,8 @@ export function SiteHeader() {
           closeLabel={shellCopy.menuClose}
           brandLabel={brandLabel}
           crest={<Crest variant="nav" />}
+          menuIcon={<Icon name="menu" size="sm" strokeWidth={1.6} />}
+          closeIcon={<Icon name="close" size="sm" strokeWidth={1.6} />}
         />
       </Container>
     </header>

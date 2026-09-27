@@ -16,6 +16,7 @@
 import 'server-only';
 import type {
   Article,
+  Blog,
   BreadcrumbList,
   ContactPoint,
   FAQPage,
@@ -300,6 +301,44 @@ export function headOfficeJsonLd(location: LocationProfile): WithContext<LocalBu
       '@type': 'Offer',
       itemOffered: { '@type': 'Service', name: service.title, url: absoluteUrl(serviceUrl(service.slug)) },
     })),
+  };
+}
+
+/**
+ * The insights index as a Blog (@id `<path>#insights`, the baseline's),
+ * part of the WebSite and published by the group, listing each article as
+ * a BlogPosting with its dates and its OG card as the image.
+ */
+export function blogJsonLd(input: {
+  name: string;
+  description: string;
+  path: string;
+  articles: readonly InsightArticle[];
+}): WithContext<Blog> {
+  return {
+    '@context': CONTEXT,
+    '@type': 'Blog',
+    '@id': entityId(input.path, 'insights'),
+    name: input.name,
+    description: input.description,
+    url: absoluteUrl(input.path),
+    inLanguage: site.language,
+    isPartOf: { '@id': WEBSITE_ID },
+    publisher: orgRef,
+    blogPost: input.articles.map((article) => {
+      const path = insightUrl(article.slug);
+      return {
+        '@type': 'BlogPosting',
+        headline: article.title,
+        description: article.metaDescription,
+        url: absoluteUrl(path),
+        image: absoluteUrl(`${path}/opengraph-image`),
+        datePublished: article.publishedAt,
+        dateModified: article.updatedAt,
+        author: orgRef,
+        publisher: orgRef,
+      };
+    }),
   };
 }
 

@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
-import { insightsPage } from '@/content/insights';
+import { insightArticles, insightsPage } from '@/content/insights';
 import { crumbs } from '@/content/nav';
+import { blogJsonLd } from '@/lib/jsonld';
 import { pageMetadata } from '@/lib/seo';
 import { InsightsDirectRoute, InsightsFeatured, InsightsGuides, InsightsHero, insightsOrder } from '@/sections/insights/InsightsIndex';
-import { insightsBlogJsonLd } from '@/sections/insights/structured-data';
 import { FooterTrail } from '@/shell/SiteFooter';
 import { StructuredData } from '@/ui';
 
@@ -27,7 +27,7 @@ export default function InsightsPage() {
   const { featured, rest } = insightsOrder();
   return (
     <>
-      <StructuredData data={insightsBlogJsonLd()} />
+      <StructuredData data={blogJsonLd({ name: meta.ogTitle, description: meta.description, path: '/insights', articles: insightArticles })} />
       <InsightsHero />
       <InsightsFeatured article={featured} />
       <InsightsGuides articles={rest} />

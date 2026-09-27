@@ -1,6 +1,7 @@
-import { mapsDirectionsUrl } from '@/content/contact';
-import { mapCopy } from '@/content/locations';
-import { Icon, VisuallyHidden, cn } from '@/ui';
+import { mapCopy, mapsDirectionsUrl } from '@/content/contact';
+import { VisuallyHidden } from './a11y';
+import { cn } from './cn';
+import { Icon } from './Icon';
 
 const sizes = { body: 'text-body', 'body-lg': 'text-body-lg' } as const;
 

@@ -15,17 +15,10 @@ import {
   Section,
   SmartLink,
   keepCompounds,
-  type IconName,
 } from '@/ui';
 import { capabilitiesSectionIds as ids } from './ids';
 
 const { signals } = capabilitiesPage;
-
-const icons: Record<Exclude<VerificationSignalId, 'structure'>, IconName> = {
-  ownership: 'arrow-right',
-  base: 'map-pin',
-  contact: 'phone',
-};
 
 const signalById = (id: VerificationSignalId): VerificationSignal => {
   const signal = verificationSignals.find((item) => item.id === id);
@@ -51,7 +44,7 @@ function CompaniesMark() {
 function SignalHead({ signal }: { signal: VerificationSignal }) {
   return (
     <>
-      {signal.id === 'structure' ? <CompaniesMark /> : <Icon name={icons[signal.id]} size="lg" strokeWidth={1.4} className="text-accent" />}
+      {signal.icon ? <Icon name={signal.icon} size="lg" strokeWidth={1.4} className="text-accent" /> : <CompaniesMark />}
       <Heading as="h3" size="h4" className="mt-8">
         {signal.title}
       </Heading>

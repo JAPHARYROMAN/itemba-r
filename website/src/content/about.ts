@@ -66,8 +66,6 @@ export const aboutPage = {
     ogDescription:
       'A Tanzanian holding group built on diversification, resilience, and long-term growth across multiple sectors.',
   },
-  /** The page's own breadcrumb (the visible trail and its BreadcrumbList). */
-  crumb: { name: 'About', path: '/about' },
   /** The AboutPage JSON-LD name. */
   jsonLdName: 'About Itemba Group',
   hero: {

@@ -17,7 +17,7 @@ import { Media, cn } from '@/ui';
  */
 
 export type LeadPhotoShape = 'cinema' | 'panorama' | 'landscape' | 'photo' | 'portrait' | 'square';
-export type LeadPhotoWidth = 'wide' | 'content' | 'prose' | 'split';
+export type LeadPhotoWidth = 'wide' | 'content' | 'prose' | 'measure' | 'split';
 
 /** From a viewport width (px) up, the frame's aspect ratio (width / height). */
 type ShapeStep = { from: number; ratio: number };
@@ -84,6 +84,8 @@ const widths: Record<LeadPhotoWidth, readonly WidthStep[]> = {
   wide: [{ from: 0 }, { from: fullWidthFrom(containers.wide), px: containers.wide }],
   content: [{ from: 0 }, { from: fullWidthFrom(containers.content), px: containers.content }],
   prose: [{ from: 0 }, { from: fullWidthFrom(containers.prose), px: containers.prose }],
+  /** The 680px reading column of an article. */
+  measure: [{ from: 0 }, { from: fullWidthFrom(containers.measure), px: containers.measure }],
   split: [{ from: 0 }, { from: fullWidthFrom(448), px: 448 }, { from: breakpoints.lg, px: 440 }],
 };
 

@@ -1,6 +1,5 @@
 import { capabilitiesPage, partnerChecklist } from '@/content/capabilities';
-import { ChevronLink, Container, Eyebrow, Heading, Lede, Section, TypePanel } from '@/ui';
-import { CheckList } from './CheckList';
+import { CheckList, ChevronLink, Container, Eyebrow, Heading, Lede, Section, TypePanel } from '@/ui';
 import { capabilitiesSectionIds as ids } from './ids';
 
 const { diligence } = capabilitiesPage;

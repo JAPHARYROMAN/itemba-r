@@ -4,8 +4,8 @@ import { cn } from './cn';
 
 /**
  * Line icons on a 24px grid, drawn with `currentColor`.
- * - The sector set (IconKey) is the legacy SectorIcon artwork; SectorIcon now
- *   renders through this component, so the paths live in one place.
+ * - The sector set (IconKey) is the original site's sector artwork, kept
+ *   as line icons.
  * - Contact icons (phone, mail, whatsapp) are the ones the footer, quick
  *   contact and enquiry fallbacks use.
  * - Interface glyphs (chevrons, plus, close…) complete the kit. No emoji.
@@ -37,7 +37,7 @@ type Glyph = { body: ReactNode; filled?: boolean };
 const round = { strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
 const glyphs: Record<IconName, Glyph> = {
-  // ── Sectors (legacy SectorIcon set) ──
+  // ── Sectors ──
   energy: { body: <path d="M13 2L4.5 14h7L11 22l8.5-12h-7L13 2z" {...round} /> },
   trade: {
     body: (

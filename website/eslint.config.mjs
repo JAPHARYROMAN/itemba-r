@@ -65,10 +65,9 @@ const config = [
       'tailwindcss/classnames-order': 'off',
       'tailwindcss/enforces-shorthand': 'off',
       // Undefined utility classes (e.g. a colour step that does not exist)
-      // are the bug this plugin is here to catch. Warn while the legacy
-      // pages still use the retired palette and the legacy classes in
-      // src/styles/utilities.css (both deleted in WP3.1).
-      'tailwindcss/no-custom-classname': 'warn',
+      // are the bug this plugin is here to catch. Hand-written classes are
+      // defined in src/styles/*.css, which the plugin reads.
+      'tailwindcss/no-custom-classname': 'error',
     },
   },
   {

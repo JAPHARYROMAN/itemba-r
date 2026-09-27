@@ -1,7 +1,7 @@
 /**
- * `@/lib/site` stays API-compatible with origin/main while its data moves to
- * src/content: the same export names, and the legacy values the old pages and
- * the frozen API route rely on.
+ * `@/lib/site` stays API-compatible with origin/main while its data lives in
+ * src/content: the same export names, the values the frozen API route relies
+ * on, and the flag-resolved content every page shows.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -44,20 +44,17 @@ describe('@/lib/site barrel', () => {
     expect(Object.keys(barrel).sort()).toEqual([...ORIGIN_MAIN_EXPORTS].sort());
   });
 
-  it('pins the origin/main copy that the content flags change', () => {
-    expect(barrel.site.description).toBe(
-      'Itemba Group is a Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating across energy, trade, logistics, construction, hospitality, real estate, and manufacturing.',
+  it('serves the flag-resolved content the pages show (the legacy pins went with the legacy pages)', () => {
+    expect(barrel.site).toBe(contentSite);
+    // The unconfirmed sector stays out while flags.mentionManufacturing is off.
+    expect(barrel.site.description).not.toMatch(/manufacturing/);
+    expect(barrel.groupFaqs.find((f) => f.question === 'Which sectors does Itemba Group operate in?')?.answer).not.toMatch(
+      /manufacturing/,
     );
-    expect(barrel.groupFaqs.find((f) => f.question === 'Which sectors does Itemba Group operate in?')?.answer).toBe(
-      'The group operates across energy, trade, logistics, construction supplies, hospitality, parking, real estate, and manufacturing-related activities.',
-    );
-    // The flag-resolved content drops the unconfirmed sector.
-    expect(contentSite.description).not.toMatch(/manufacturing/);
   });
 
-  it('keeps the legacy company shape (accent classes included) in public order', () => {
+  it('keeps the company list in public order', () => {
     expect(barrel.companyProfiles.map((c) => c.slug)).toEqual(companies.map((c) => c.slug));
-    expect(barrel.companyProfiles.map((c) => c.accentBg)).toEqual(['bg-amber-500', 'bg-blue-500', 'bg-emerald-500']);
     for (const company of barrel.companyProfiles) {
       expect(company.image.src.startsWith('/images/')).toBe(true);
       expect(company.gallery.length).toBeGreaterThan(0);

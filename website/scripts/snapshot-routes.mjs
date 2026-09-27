@@ -468,6 +468,7 @@ async function main() {
       defaultIntent: intentIdFor(r.defaultIntent) ?? r.defaultIntent ?? intentIdFor(r.defaultIntentLabel),
     }));
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omits the raw JSON-LD text from the snapshot
     const { jsonLdRaw, ...rest } = dom;
     routes[pathname] = {
       url: absoluteUrl(pathname),

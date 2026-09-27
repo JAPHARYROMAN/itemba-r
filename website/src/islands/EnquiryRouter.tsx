@@ -17,10 +17,10 @@ import {
   resolveIntentId,
   type RequiredField,
 } from '@/lib/enquiry-client';
-import { buttonClasses } from '@/ui/actions';
+import { buttonClasses } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { Icon, type IconName } from '@/ui/Icon';
-import { Eyebrow, Heading, type HeadingLevel } from '@/ui/text';
+import { Eyebrow, Heading, keepCompounds, type HeadingLevel } from '@/ui/text';
 import { useHydrated } from './use-hydrated';
 
 export type EnquiryRouterProps = {
@@ -230,7 +230,7 @@ export default function EnquiryRouter({
         <Heading as={HeadingTag} size={compact ? 'h3' : 'h2'} id={ids.heading} className="mt-2">
           {title}
         </Heading>
-        <p className={cn('mt-3 text-fg-muted', compact ? 'text-body' : 'text-body-lg')}>{description}</p>
+        <p className={cn('mt-3 text-fg-muted', compact ? 'text-body' : 'text-body-lg')}>{keepCompounds(description)}</p>
       </div>
 
       <fieldset className="mt-8 min-w-0">

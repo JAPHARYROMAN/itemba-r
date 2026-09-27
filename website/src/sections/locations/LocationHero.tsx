@@ -1,6 +1,5 @@
 import { locationPageCopy, type LocationProfile } from '@/content/locations';
-import { ButtonLink, PageHero, TypePanel } from '@/ui';
-import { DirectionsLink } from './DirectionsLink';
+import { ButtonLink, DirectionsLink, PageHero, TypePanel } from '@/ui';
 import { locationSectionIds } from './ids';
 
 /**

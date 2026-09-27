@@ -7,16 +7,6 @@ import { companyUrl } from '@/content/site';
 import { ButtonLink, CardLink, ChevronLink, Heading, HeadlineText, Lede, PageHero } from '@/ui';
 
 /**
- * Copy this page adds to src/content/errors.ts (`notFoundPage`): the h1 in
- * sentence case, and the home pill's label. Kept here until the integrator
- * moves it into the content module (listed as a shared request).
- */
-const copy = {
-  heading: 'Page not found',
-  home: { label: 'Back to home', href: '/' },
-} as const;
-
-/**
  * "Page Not Found": the root template adds " | Itemba Group" once
  * (origin/main set a title that already carried the suffix, so it rendered
  * twice). Not indexable, and no canonical: a missing page has no address
@@ -48,12 +38,12 @@ export default function NotFound() {
     <PageHero
       titleId="page-title"
       eyebrow={notFoundPage.eyebrow}
-      title={copy.heading}
+      title={notFoundPage.heading}
       lede={notFoundPage.body}
       actions={
         <>
-          <ButtonLink href={copy.home.href} size="lg">
-            {copy.home.label}
+          <ButtonLink href={notFoundPage.home.href} size="lg">
+            {notFoundPage.home.label}
           </ButtonLink>
           <ChevronLink href={footerDirectory.contact.page.href} size="body-lg">
             {footerDirectory.contact.page.label}

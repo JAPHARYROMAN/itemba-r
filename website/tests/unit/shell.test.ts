@@ -25,7 +25,8 @@ import { normaliseContactHref } from '../e2e/support/baseline';
 const route = vi.hoisted(() => ({ pathname: '/' }));
 vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
 
-const { default: QuickContact, hasInlineEnquiry } = await import('@/islands/QuickContact');
+const { hasInlineEnquiry } = await import('@/islands/QuickContact');
+const { QuickContactBar } = await import('@/shell/QuickContactBar');
 const { SiteHeader } = await import('@/shell/SiteHeader');
 const { SiteFooter, FooterTrail } = await import('@/shell/SiteFooter');
 
@@ -45,7 +46,7 @@ beforeEach(() => {
 describe('QuickContact bar', () => {
   it.each(Object.keys(baselineRoutes))('%s keeps the origin/main visibility and targets', (pathname) => {
     route.pathname = pathname;
-    const html = renderToStaticMarkup(h(QuickContact));
+    const html = renderToStaticMarkup(h(QuickContactBar));
     const expected = baselineRoutes[pathname]!.quickContact;
 
     expect(html.includes('data-quick-contact'), `bar on ${pathname}`).toBe(expected.present);
@@ -59,7 +60,7 @@ describe('QuickContact bar', () => {
   });
 
   it('is a slim phone-only bar: Call, WhatsApp and Email as quiet actions, then the Enquire pill to the form', () => {
-    const html = renderToStaticMarkup(h(QuickContact));
+    const html = renderToStaticMarkup(h(QuickContactBar));
     expect(html).toMatch(/<aside aria-label="Quick contact" data-quick-contact="" data-print="hide" class="fixed [^"]*md:hidden/);
     expect(html).toContain(`href="tel:${contact.primaryPhone}"`);
     expect(html).toContain('>Call<');

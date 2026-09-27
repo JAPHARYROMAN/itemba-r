@@ -1,6 +1,6 @@
 import { aboutPage, type StructureCompany } from '@/content/about';
 import { companyUrl } from '@/content/site';
-import { Container, Eyebrow, Heading, Lede, Section, SmartLink, cn, keepCompounds } from '@/ui';
+import { Chip, Container, Eyebrow, Heading, Lede, Section, SmartLink, cn, keepCompounds } from '@/ui';
 
 /**
  * The group structure as a three-tier diagram: the parent on black, the
@@ -95,10 +95,9 @@ function CompanyBranch({ company, position, flagshipLabel }: { company: Structur
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-body font-semibold text-fg">
               {keepCompounds(unit.name)}
               {unit.flagship ? (
-                <span className="inline-flex items-center gap-1.5 rounded-pill border border-line px-2.5 text-caption font-normal text-fg-muted">
-                  <span aria-hidden="true" className="inline-block size-1.5 shrink-0 rounded-full bg-accent" />
+                <Chip dot size="compact">
                   {flagshipLabel}
-                </span>
+                </Chip>
               ) : null}
             </p>
             <p className="mt-0.5 text-caption text-fg-muted">{keepCompounds(unit.focus)}</p>

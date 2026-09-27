@@ -11,8 +11,8 @@
  *   - .print-document-root > article.print-profile-document[data-profile=<id>],
  *     hidden on screen, plus every print-* layout class below.
  *
- * The rules are shape-independent: they no longer assume the page content
- * sits inside one wrapper <div> in <main> (the old PageTransition shape).
+ * The rules are shape-independent: they do not assume the page content
+ * sits inside one wrapper <div> in <main>.
  * In print mode, everything in #main-content that is not the print root, not
  * inside it and not one of its ancestors is hidden, wherever the root sits.
  * Site chrome is hidden by class or marker, never by element name, so a
@@ -62,16 +62,6 @@
 
   main {
     display: block !important;
-  }
-
-  .print-sheet {
-    max-width: none !important;
-  }
-
-  .gradient-text {
-    background: none !important;
-    -webkit-text-fill-color: #080f1e !important;
-    color: #080f1e !important;
   }
 
   body.printing-company-profile,

@@ -1,9 +1,8 @@
 import type { LocationProfile } from '@/content/locations';
 import { locationsPage } from '@/content/locations';
 import { locationUrl } from '@/content/site';
-import { ButtonLink, Container, HeadlineText, PageHero } from '@/ui';
-import { CreditedPhoto } from './CreditedPhoto';
-import { DirectionsLink } from './DirectionsLink';
+import { ButtonLink, DirectionsLink, HeadlineText, PageHero } from '@/ui';
+import { PanoramaPhoto, PhotoCredit } from './CreditedPhoto';
 
 /**
  * The /locations hero: "Based in Songwe. Connected through Tunduma." as
@@ -13,10 +12,10 @@ import { DirectionsLink } from './DirectionsLink';
  * Region landscape under a big sky, with its CC BY-SA credit under the
  * frame.
  *
- * The photograph sits in the same 1068px frame a `framed` PageHero gives
- * it, but through the `bleed` slot, which has no clipping wrapper, so the
- * credit line can sit below the rounded frame (a framed hero clips its
- * media to the frame's radius). Static server HTML: nothing here animates.
+ * The photograph sits in a `framed` hero in the 1068px content width, its
+ * credit in the hero's caption slot under the rounded frame (the frame
+ * clips its media to the radius; the credit is never cropped). Static
+ * server HTML: nothing here animates.
  */
 export function LocationsHero({ location }: { location: LocationProfile }) {
   const { hero, headquarters } = locationsPage;
@@ -34,14 +33,9 @@ export function LocationsHero({ location }: { location: LocationProfile }) {
           <DirectionsLink size="body-lg" />
         </>
       }
-      mediaLayout="bleed"
-      media={
-        location.image ? (
-          <Container>
-            <CreditedPhoto photo={location.image} priority />
-          </Container>
-        ) : undefined
-      }
+      mediaSize="content"
+      media={location.image ? <PanoramaPhoto photo={location.image} priority /> : undefined}
+      mediaCaption={location.image ? <PhotoCredit photo={location.image} /> : undefined}
     />
   );
 }

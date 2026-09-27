@@ -1,25 +1,39 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { startTransition, useEffect } from 'react';
-import { footerDirectory } from '@/content/nav';
-import { Button, ChevronLink } from '@/ui/actions';
-
-/**
- * Copy for the error boundaries, to move into src/content/errors.ts
- * (`errorPage`) with the 404 copy; kept here until the integrator makes
- * that shared change. global-error.tsx carries the same wording.
- */
-const copy = {
-  eyebrow: 'Error',
-  heading: 'Something went wrong',
-  body: 'This page could not be loaded just now. Try again, or go back to the home page.',
-  retry: 'Try again',
-  home: { label: 'Back to home', href: '/' },
-  reference: 'Reference',
-} as const;
+import { startTransition, useEffect, type ReactNode } from 'react';
+import { errorPage as copy } from '@/content/errors';
+import { buttonClasses } from '@/ui/button';
+import { Chevron } from '@/ui/Chevron';
+import { cn } from '@/ui/cn';
 
 type ErrorProps = { error: Error & { digest?: string }; reset: () => void };
+
+/**
+ * A chevron link as @/ui/actions draws it (the tone's text-safe accent,
+ * the last word kept on one line with the chevron), for a plain-text label.
+ */
+function ChevronTextLink({ href, className, children }: { href: string; className: string; children: string }) {
+  const cut = children.lastIndexOf(' ') + 1;
+  return (
+    <Link href={href} className={cn('group inline-block text-accent-fg decoration-1 underline-offset-4 hover:underline', className)}>
+      {children.slice(0, cut)}
+      <span className="whitespace-nowrap">
+        {children.slice(cut)}
+        <Chevron className="ml-[0.3em] inline-block align-middle" />
+      </span>
+    </Link>
+  );
+}
+
+function Pill({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} className={buttonClasses({ size: 'lg' })}>
+      <span>{children}</span>
+    </button>
+  );
+}
 
 /**
  * The error boundary for every route below the root layout: the same calm
@@ -30,10 +44,10 @@ type ErrorProps = { error: Error & { digest?: string }; reset: () => void };
  * whoever runs the site; the error itself is never shown.
  *
  * Next loads this boundary with the root layout on every page, so it keeps
- * its imports to the pill and chevron link the layout's islands already
- * ship (@/ui/actions), and sets the kit's section, eyebrow, display and
- * lede styles on plain elements rather than pulling in @/ui/text and
- * @/ui/layout.
+ * its imports to the pill's classes (@/ui/button), the chevron glyph and
+ * next/link, which every page already ships, and sets the kit's section,
+ * eyebrow, display and lede styles on plain elements rather than pulling
+ * in @/ui/actions (and with it the icon set), @/ui/text and @/ui/layout.
  *
  * Not indexable: React hoists the robots <meta> into <head>. The page's
  * own <title> stays (a second hoisted <title> would compete with it).
@@ -64,17 +78,15 @@ export default function RouteError({ error, reset }: ErrorProps) {
         </h1>
         <p className="mx-auto mt-5 max-w-2xl text-pretty text-lede text-fg max-md:text-body-lg md:mt-6">{copy.body}</p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
-          <Button size="lg" onClick={retry}>
-            {copy.retry}
-          </Button>
-          <ChevronLink href={copy.home.href} size="body-lg">
+          <Pill onClick={retry}>{copy.retry}</Pill>
+          <ChevronTextLink href={copy.home.href} className="text-body-lg">
             {copy.home.label}
-          </ChevronLink>
+          </ChevronTextLink>
         </div>
         <p className="mt-10">
-          <ChevronLink href={footerDirectory.contact.page.href} size="caption">
-            {footerDirectory.contact.page.label}
-          </ChevronLink>
+          <ChevronTextLink href={copy.contact.href} className="text-caption">
+            {copy.contact.label}
+          </ChevronTextLink>
         </p>
         {error.digest ? (
           <p className="mt-4 text-caption text-fg-muted">

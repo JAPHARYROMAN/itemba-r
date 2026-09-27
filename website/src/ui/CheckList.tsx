@@ -1,4 +1,6 @@
-import { Icon, cn, keepCompounds } from '@/ui';
+import { cn } from './cn';
+import { Icon } from './Icon';
+import { keepCompounds } from './text';
 
 /**
  * A checklist as hairline rows, each marked with a check in the tone's

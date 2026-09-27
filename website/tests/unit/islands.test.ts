@@ -7,7 +7,7 @@
  * - the EnquiryRouter island's server HTML: a fieldset of radio intents,
  *   named and labelled fields, an always-mounted status line, a submit
  *   button that is disabled until hydration, the no-JS fallbacks, the
- *   snapshot markers; the legacy import path is the same component;
+ *   snapshot markers;
  * - ProfileNav renders a native dialog sheet of the whole outline;
  * - PrintProfileButton keeps its print-hidden picker; the print documents'
  *   images are lazy plain <img src="/images/…"> and next.config pins the
@@ -34,10 +34,8 @@ vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
 
 const client = await import('@/lib/enquiry-client');
 const { default: EnquiryRouter } = await import('@/islands/EnquiryRouter');
-const { default: LegacyEnquiryRouter } = await import('@/components/EnquiryRouter');
 const { default: ProfileNav } = await import('@/islands/ProfileNav');
 const { default: PrintProfileButton } = await import('@/islands/PrintProfileButton');
-const { default: LegacyPrintProfileButton } = await import('@/components/PrintProfileButton');
 const { default: ProfileDocuments } = await import('@/print/ProfileDocuments');
 const { CorridorMap } = await import('@/sections/corridor/CorridorMap');
 const { CorridorStory } = await import('@/sections/corridor/CorridorStory');
@@ -286,10 +284,6 @@ describe('EnquiryRouter island: server HTML', () => {
   it('never renders content at opacity 0', () => {
     expect(full).not.toMatch(/opacity:\s*0/);
   });
-
-  it('is what the legacy import path renders', () => {
-    expect(LegacyEnquiryRouter).toBe(EnquiryRouter);
-  });
 });
 
 /* ── ProfileNav ────────────────────────────────────────────────────────── */
@@ -338,10 +332,6 @@ describe('PrintProfileButton island', () => {
     expect(html).toContain(printProfileOptions[0].description);
     expect(html).toContain('>Print selected profile</span>');
     expect('disabled' in attrs(tagWith(html, /type="button"/))).toBe(false);
-  });
-
-  it('is what the legacy import path renders', () => {
-    expect(LegacyPrintProfileButton).toBe(PrintProfileButton);
   });
 });
 
@@ -456,12 +446,10 @@ describe('CorridorStory (server)', () => {
 /* ── Client boundaries ─────────────────────────────────────────────────── */
 
 describe('client boundaries', () => {
-  it('the islands are client components and the legacy paths are plain re-exports', () => {
+  it('the islands are client components and the print documents are server markup', () => {
     for (const file of ['EnquiryRouter', 'ProfileNav', 'PrintProfileButton', 'PrintAssetLoader']) {
       expect(hasUseClientDirective(read(`src/islands/${file}.tsx`)), file).toBe(true);
     }
-    for (const file of ['src/components/EnquiryRouter.tsx', 'src/components/PrintProfileButton.tsx', 'src/print/ProfileDocuments.tsx']) {
-      expect(hasUseClientDirective(read(file)), file).toBe(false);
-    }
+    expect(hasUseClientDirective(read('src/print/ProfileDocuments.tsx'))).toBe(false);
   });
 });

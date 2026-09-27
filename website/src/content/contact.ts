@@ -93,3 +93,20 @@ export const contactActionLabels = {
   whatsappFooter: 'Message Itemba Group on WhatsApp',
   email: 'Email Itemba Group',
 } as const;
+
+/**
+ * The head office map (the zero-JS map facade and the directions link):
+ * its label, the facade's controls and the new-tab note.
+ */
+export const mapCopy = {
+  /** The facade's label: the town and region, as a map labels them (the page gives the street address). */
+  place: 'Mpemba, Tunduma',
+  area: 'Songwe Region, on the Tanzania–Zambia border',
+  show: 'Show map',
+  hide: 'Hide map',
+  /** Under "Show map": nothing loads from Google until the map is opened. */
+  note: 'Opens an embedded Google Map.',
+  directions: 'Get directions',
+  /** Screen-reader note on links that open a new tab. */
+  newTab: '(opens in a new tab)',
+} as const;

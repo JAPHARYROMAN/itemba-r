@@ -26,7 +26,7 @@ export function CompaniesHero() {
       titleSize="display"
       lede={hero.lede}
     >
-      <nav aria-label={hero.eyebrow}>
+      <nav aria-label={companiesPage.jumpLabel}>
         <ul role="list" className="mx-auto grid max-w-lg grid-cols-3 gap-2 md:gap-4">
           {companies.map((company) => (
             <li key={company.id} data-accent={company.accent}>

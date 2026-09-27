@@ -12,6 +12,9 @@ const siteDescriptions = {
     'Itemba Group is a Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating across energy, trade, logistics, construction, hospitality, real estate, and manufacturing.',
 } as const;
 
+/** html lang (also on its own, for the global error page's client bundle). */
+export const siteLanguage = 'en';
+
 export const site = {
   name: 'Itemba Group',
   url: 'https://www.itembagrouptz.com',
@@ -22,7 +25,7 @@ export const site = {
   shortDescription: 'A multi-industry business ecosystem in Tanzania.',
   locale: 'en_TZ',
   /** html lang */
-  language: 'en',
+  language: siteLanguage,
   /** Founding year shown on the print letterhead ("EST. 2012"). */
   established: 2012,
   /** Default meta keywords for the root layout. */

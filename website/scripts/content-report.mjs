@@ -66,11 +66,11 @@ console.log('Content flags in effect (src/content/flags.ts)');
 for (const [name, value] of Object.entries(flags)) console.log(`  ${name.padEnd(32)} ${JSON.stringify(value)}`);
 console.log('');
 console.log(`Unconfirmed facts: ${unconfirmed.length} of ${rows.length} (src/content/facts.ts)`);
-console.log('The legacy pages still render the origin/main copy; "rebuilt" is what the new pages show under the flags above.');
+console.log('"shown" is what the site shows under the flags above; "appears in" lists where the claim is stated when shown.');
 for (const r of unconfirmed) {
   console.log('');
   console.log(`- ${r.key}: ${typeof r.value === 'string' ? r.value : JSON.stringify(r.value)}`);
-  if (r.flag) console.log(`    flag: ${r.flag} = ${JSON.stringify(r.flagValue)}  (rebuilt pages show it: ${r.shownWhenRebuilt})`);
-  console.log(`    public today: ${r.publicUse.length ? r.publicUse.join('; ') : 'not stated anywhere'}`);
+  if (r.flag) console.log(`    flag: ${r.flag} = ${JSON.stringify(r.flagValue)}  (shown: ${r.shownWhenRebuilt})`);
+  console.log(`    appears in: ${r.publicUse.length ? r.publicUse.join('; ') : 'not stated anywhere'}`);
   console.log(`    why: ${r.note}`);
 }
