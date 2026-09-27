@@ -616,6 +616,91 @@
       ],
       "change": "'Our companies' cards now link to each company page and show the company's one-line lede (were unlinked name + sector cards with a hover state); context cards use line icons instead of emoji under a new 'Why Mpemba-Tunduma' heading, and 'Strategic location' reads 'Mpemba-Tunduma sits on the Tanzania–Zambia border, on the Tunduma trade corridor.' (was '… — one of East Africa's most active trade corridors.'). 'Growing economy' stays hidden (flags.songweGrowthClaim).",
       "reason": "Design map: cards that look clickable must be links; no emoji; the plan's one neutral corridor phrase instead of an unsourced superlative."
+    },
+    {
+      "routes": [
+        "/insights/route-business-enquiry-itemba-group"
+      ],
+      "change": "The article's 'Route an enquiry' pill goes to the page's own enquiry form (#enquire) instead of /partnerships.",
+      "reason": "P4 (C0 rule): a general enquiry never goes to /partnerships; a page with its own form links #enquire."
+    },
+    {
+      "routes": [
+        "/insights/route-business-enquiry-itemba-group"
+      ],
+      "change": "First section's points: ITEMBA-HARDWARE and UZUNGUNI INN move into the Westsides point; the Itemba Enterprises point ends at 'cross-border transit enquiries usually align with Itemba Enterprises Co Ltd.'",
+      "reason": "P4: the mapping flagged the Westsides brands as mis-attached to the Enterprises bullet (message.md, awkward insight copy); same facts, each under its own company."
+    },
+    {
+      "routes": [
+        "/insights/tunduma-corridor-fuel-trade-logistics",
+        "/insights",
+        "/"
+      ],
+      "change": "Article summary: 'How Itemba Group location in …' reads 'How Itemba Group's location in …' (article lede, insight cards on /insights and home, the article's OG card subtitle).",
+      "reason": "P4: grammar fix; the metaDescription (a soft baseline field) is unchanged."
+    },
+    {
+      "routes": [
+        "/insights/route-business-enquiry-itemba-group",
+        "/insights/tunduma-corridor-fuel-trade-logistics",
+        "/insights/choose-right-itemba-company",
+        "/insights/supplier-bulk-purchase-enquiries"
+      ],
+      "change": "Article template: the h1 and the last breadcrumb use the sentence-case displayTitle (the <title> keeps the published title); a visible '14 May 2026 · 4 min read' date line in <time datetime>; the '← All insights' back link is replaced by 'More insights ›' after the article and the breadcrumb trail; the audience chips move to the article's foot under 'Written for'; related services and companies are listed by short name with the running company or its line of business.",
+      "reason": "P4: Apple newsroom-style 680px reading column; the date must be visible to match the Article JSON-LD; short names follow the site convention (registered names stay on the company pages)."
+    },
+    {
+      "routes": [
+        "/insights/route-business-enquiry-itemba-group",
+        "/insights/tunduma-corridor-fuel-trade-logistics",
+        "/insights/choose-right-itemba-company",
+        "/insights/supplier-bulk-purchase-enquiries"
+      ],
+      "change": "Each article has a lead visual under its header: the UZUNGUNI PARKING YARD truck line (caption 'UZUNGUNI PARKING YARD in Mpemba-Tunduma, run by Mwanjalisi Oil.') on the Tunduma corridor guide; typographic panels on ink elsewhere: 'One group office routes every enquiry to the right company.' / 'By phone, WhatsApp, email or the enquiry form.'; 'Three companies. One group office.' over the three companies and what each does; 'Five details route a supplier or bulk enquiry.' / 'Product · Volume · Delivery · Timing · Contact'.",
+      "reason": "P4 photo discipline (owner decision): the best photograph sparingly (a crisp, non-canopy 1280px master kept in the 680px column), a typographic tile where no strong photograph exists. Statements restate the articles’ own facts."
+    },
+    {
+      "routes": [
+        "/insights/route-business-enquiry-itemba-group",
+        "/insights/tunduma-corridor-fuel-trade-logistics",
+        "/insights/choose-right-itemba-company",
+        "/insights/supplier-bulk-purchase-enquiries",
+        "/faq"
+      ],
+      "change": "The compact enquiry form sits in an #enquire section with the page's prompt as its heading ('Ask about this topic' / 'Still need help?'), the routing promise 'One group office routes every enquiry to the right company.' and three 'How it works' steps; the form itself is titled 'Route an enquiry' with the page's prompt description.",
+      "reason": "P4: the company template’s enquiry pattern (CompanyEnquire), with steps worded for a form that starts on General."
+    },
+    {
+      "routes": [
+        "/insights"
+      ],
+      "change": "The featured guide shows its typographic lead panel instead of the BrandVisual corridor graphic, with its date line; the other guides' cards drop the two service chips and gain the date line.",
+      "reason": "P4: no clip-art placeholders (design.md); the date is the one fact a reader scans for on an index."
+    },
+    {
+      "routes": [
+        "/faq"
+      ],
+      "change": "The group answer 'Which sectors does Itemba Group operate in?' is the flag-resolved one (manufacturing-related activities dropped), on the page and in the FAQPage JSON-LD.",
+      "reason": "P4: flags.mentionManufacturing defaults to false (no manufacturing offering exists; src/content/facts.ts)."
+    },
+    {
+      "routes": [
+        "/faq"
+      ],
+      "change": "The twelve topics (anchor ids unchanged) are grouped under four new chapter headings, 'One group.', 'Three companies.', 'Six sectors.' and 'One corridor.'; 'Browse topics' lists them per chapter with question counts; the topic eyebrows name what the company does, the company running a sector (short name) or the place, instead of 'Company' / 'Service' / 'Location'; company topics use the company's one-sentence lede instead of its long summary; the questions are h4 under h3 topic titles; the hero gains 'Ask the group office ›' (#enquire); the breadcrumb reads 'FAQ'.",
+      "reason": "P4: Apple support-style FAQ without a wall of twelve cards; the long Mwanjalisi summary reads as a national claim ('Tanzania's petroleum retail … arm', message.md)."
+    },
+    {
+      "routes": [
+        "/insights/route-business-enquiry-itemba-group",
+        "/insights/tunduma-corridor-fuel-trade-logistics",
+        "/insights/choose-right-itemba-company",
+        "/insights/supplier-bulk-purchase-enquiries"
+      ],
+      "change": "Deviation: the article header is not a PageHero; it is set flush left in the 680px reading column (eyebrow, h1 at h1 size, lede, date line) so it aligns with the body text.",
+      "reason": "P4: PageHero centres its text in the 980px prose width, which would sit 150px off the 680px article column."
     }
   ]
 }

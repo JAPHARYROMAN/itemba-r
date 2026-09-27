@@ -4,12 +4,12 @@
  * anchor ids other pages link to.
  */
 import 'server-only';
-import { companies } from './companies';
+import { companies, getCompanyBySlug } from './companies';
 import { flags } from './flags';
 import { locationProfiles } from './locations';
-import { serviceAreas } from './services';
+import { serviceAreas, serviceIcons } from './services';
 import { companyUrl, locationUrl, serviceUrl } from './site';
-import type { Faq, SplitHeadline } from './types';
+import type { AccentKey, ContentIcon, Faq, SplitHeadline } from './types';
 
 export type { Faq } from './types';
 
@@ -60,68 +60,101 @@ export const partnershipFaqs: Faq[] = [
   },
 ];
 
+/** The four families of /faq topics, in page order. */
+export type FaqSectionKind = 'group' | 'company' | 'service' | 'location';
+
 export type FaqSection = {
   /** Anchor id on /faq (stable: other pages and JSON-LD link to it). */
   id: string;
+  kind: FaqSectionKind;
   eyebrow: string;
   title: string;
   description: string;
   href: string;
   linkLabel: string;
+  /** The topic's line icon and accent (the company that runs it; group gold for the group). */
+  icon: ContentIcon;
+  accent: AccentKey;
   faqs: readonly Faq[];
 };
 
 /**
- * The /faq topic sections in page order. `groupFaqs` overrides the group set
- * (the legacy page passes the verbatim origin/main copy).
+ * The /faq topic sections in page order: the group family (partnerships,
+ * the group), the three companies, the six sectors and the location. /faq
+ * renders the flag-resolved group set; `groupFaqs` overrides it for a
+ * caller that must show another wording (the legacy origin/main set).
  */
 export function faqSections(options: { groupFaqs?: readonly Faq[] } = {}): FaqSection[] {
   return [
     {
       id: 'partnerships',
+      kind: 'group',
       eyebrow: 'Partnerships',
       title: 'Partnerships and Supplier Enquiries',
       description: 'Questions for suppliers, bulk buyers, logistics customers, contractors, and regional business partners.',
       href: '/partnerships',
       linkLabel: 'View partnerships',
+      icon: 'document',
+      accent: 'group',
       faqs: partnershipFaqs,
     },
     {
       id: 'group',
+      kind: 'group',
       eyebrow: 'Group',
       title: 'Itemba Group',
       description: 'Core questions about the group structure, sectors, and enquiry channels.',
       href: '/company-profile',
       linkLabel: 'View company profile',
+      icon: 'globe',
+      accent: 'group',
       faqs: options.groupFaqs ?? groupFaqs,
     },
-    ...companies.map((company) => ({
-      id: `company-${company.slug}`,
-      eyebrow: 'Company',
-      title: company.name,
-      description: company.summary,
-      href: companyUrl(company.slug),
-      linkLabel: 'View company',
-      faqs: company.faqs,
-    })),
-    ...serviceAreas.map((service) => ({
-      id: `service-${service.slug}`,
-      eyebrow: 'Service',
-      title: service.title,
-      description: service.summary,
-      href: serviceUrl(service.slug),
-      linkLabel: 'View service',
-      faqs: service.faqs,
-    })),
-    ...locationProfiles.map((location) => ({
-      id: `location-${location.slug}`,
-      eyebrow: 'Location',
-      title: location.title,
-      description: location.summary,
-      href: locationUrl(location.slug),
-      linkLabel: 'View location',
-      faqs: location.faqs,
-    })),
+    ...companies.map(
+      (company): FaqSection => ({
+        id: `company-${company.slug}`,
+        kind: 'company',
+        eyebrow: company.eyebrow,
+        title: company.name,
+        // The one-sentence lede: the long summary reads as a national claim for Mwanjalisi Oil.
+        description: company.lede,
+        href: companyUrl(company.slug),
+        linkLabel: 'View company',
+        icon: serviceIcons[company.visual],
+        accent: company.accent,
+        faqs: company.faqs,
+      }),
+    ),
+    ...serviceAreas.map((service): FaqSection => {
+      const company = getCompanyBySlug(service.companySlug);
+      return {
+        id: `service-${service.slug}`,
+        kind: 'service',
+        // The company that runs the sector, by its short name (as on home).
+        eyebrow: company?.shortName ?? service.companyName,
+        title: service.title,
+        description: service.summary,
+        href: serviceUrl(service.slug),
+        linkLabel: 'View service',
+        icon: serviceIcons[service.visual],
+        accent: company?.accent ?? 'group',
+        faqs: service.faqs,
+      };
+    }),
+    ...locationProfiles.map(
+      (location): FaqSection => ({
+        id: `location-${location.slug}`,
+        kind: 'location',
+        eyebrow: location.eyebrow,
+        title: location.title,
+        description: location.summary,
+        href: locationUrl(location.slug),
+        linkLabel: 'View location',
+        icon: 'map-pin',
+        accent: 'group',
+        faqs: location.faqs,
+      }),
+    ),
   ];
 }
 
@@ -139,8 +172,21 @@ export const faqPage = {
     eyebrow: 'Frequently asked questions',
     headline: { lead: 'Answers for', accent: 'customers and partners.' } satisfies SplitHeadline,
     lede: 'Quick answers about Itemba Group companies, services, location, and how to route business enquiries to the right operating team.',
+    /** The hero's link to the enquiry form at the foot of the page. */
+    ask: 'Ask the group office',
   },
+  /** The breadcrumb trail's name for the page. */
+  crumb: 'FAQ',
   topicsHeading: 'Browse topics',
+  /** Under each topic tile: "4 questions". */
+  questions: { one: 'question', other: 'questions' },
+  /** The four topic families, as the page's chapters, in page order. */
+  groups: {
+    group: 'One group.',
+    company: 'Three companies.',
+    service: 'Six sectors.',
+    location: 'One corridor.',
+  } satisfies Record<FaqSectionKind, string>,
 } as const;
 
 /** The "Common Questions" block on /company-profile. */
