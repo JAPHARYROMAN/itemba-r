@@ -1,10 +1,18 @@
 /**
- * Where the group operates from: one location profile today (Songwe-Tunduma).
+ * Where the group operates from: one location profile today (Songwe-Tunduma),
+ * plus the copy of /locations and /locations/[slug].
  */
 import 'server-only';
 import { mediaImage, type MediaImage } from './media';
 import { contentUpdatedAt } from './site';
-import type { CompanySlug, Faq, SplitHeadline } from './types';
+import type { CompanySlug, ContentIcon, Faq, LinkItem, SplitHeadline, TypeVisual } from './types';
+
+export type LocationAdvantage = {
+  /** A line icon for the advantage's bento cell. */
+  icon: ContentIcon;
+  title: string;
+  summary: string;
+};
 
 export type LocationProfile = {
   slug: string;
@@ -12,13 +20,33 @@ export type LocationProfile = {
   shortTitle: string;
   eyebrow: string;
   summary: string;
+  /**
+   * The page hero's lede: one sentence of 110 characters or fewer, so it
+   * sets in at most three lines on a phone.
+   */
+  lede: string;
   detail: string;
   metaDescription: string;
   visual: 'corridor' | 'operations' | 'logistics';
+  /**
+   * The location's photograph (Place JSON-LD and the /locations hero). Its
+   * `caption` is the photograph's title; the author, source and licence
+   * come from the media registry and are rendered beside it.
+   */
   image?: MediaImage;
+  /**
+   * The page hero's visual. There is no photograph of the head office
+   * itself (flags.stateHqIsItembaMpemba), so it is typographic: a line icon
+   * and one strong sentence.
+   */
+  heroPanel: TypeVisual;
+  /** "At a glance", straight under the hero. */
+  facts: ReadonlyArray<{ label: string; value: string }>;
   addressLines: string[];
   searchTerms: string[];
-  advantages: Array<{ title: string; summary: string }>;
+  advantages: LocationAdvantage[];
+  /** The photograph beside the lead advantage (border corridor access). */
+  advantagesImage?: MediaImage;
   serviceSlugs: string[];
   companySlugs: CompanySlug[];
   faqs: Faq[];
@@ -33,6 +61,7 @@ export const locationProfiles: LocationProfile[] = [
     eyebrow: 'Mpemba, Tunduma, Tanzania',
     summary:
       'Itemba Group is headquartered in Mpemba-Tunduma, Songwe Region, a practical operating base for fuel, trade, logistics, construction supply, hospitality, and property services.',
+    lede: 'Home to the group head office and the Itemba sites, on the Tanzania–Zambia border at Tunduma.',
     detail:
       'The group location places its companies close to regional customers, transport movement, construction demand, and the Tanzania–Zambia border corridor. This position supports both local business activity and cross-border commercial enquiries.',
     metaDescription:
@@ -40,8 +69,22 @@ export const locationProfiles: LocationProfile[] = [
     visual: 'corridor',
     image: mediaImage('songwe-landscape', {
       alt: 'Fields and mountains in Songwe Region, Tanzania',
-      caption: 'Songwe Region landscape, Richard grivas / Wikimedia Commons, CC BY-SA 4.0.',
+      caption: 'Songwe Region landscape',
     }),
+    heroPanel: {
+      kind: 'type',
+      icon: 'map-pin',
+      statement: 'Where the Dar es Salaam supply line meets the Zambia border.',
+      caption: 'Mpemba · Tunduma · Songwe Region',
+    },
+    facts: [
+      { label: 'Head office', value: 'Itemba Filling Station, Mpemba' },
+      { label: 'Region', value: 'Songwe Region, Tanzania' },
+      { label: 'Border', value: 'Tanzania–Zambia, the Tunduma corridor' },
+      { label: 'Reach', value: 'Southern Highlands · Zambia · DRC · Zimbabwe · Malawi' },
+      { label: 'Companies', value: 'Mwanjalisi Oil · Westsides · Itemba Enterprises' },
+      { label: 'Sectors', value: 'Fuel · trade · logistics · construction · hospitality · property' },
+    ],
     addressLines: ['Itemba Filling Station', 'Along Tunduma-Ileje Highway', 'Mpemba, Tunduma', 'Songwe Region, Tanzania'],
     searchTerms: [
       'Itemba Group Tunduma',
@@ -52,21 +95,25 @@ export const locationProfiles: LocationProfile[] = [
     ],
     advantages: [
       {
-        title: 'Border Corridor Access',
+        icon: 'globe',
+        title: 'Border corridor access',
         summary:
           'The Tunduma area connects local businesses with cross-border trade movement between Tanzania, Zambia, and wider regional markets.',
       },
       {
-        title: 'Multi-Sector Coverage',
+        icon: 'trade',
+        title: 'Multi-sector coverage',
         summary:
           'One group location supports enquiries across fuel, wholesale supply, logistics, hardware, hospitality, parking, and property services.',
       },
       {
-        title: 'Local Operating Presence',
+        icon: 'map-pin',
+        title: 'Local operating presence',
         summary:
           'The Mpemba-Tunduma headquarters gives customers and partners a clear regional point of contact for Itemba Group companies.',
       },
     ],
+    advantagesImage: mediaImage('parking-truck-line'),
     serviceSlugs: [
       'fuel-and-lubricants',
       'trade-and-distribution',
@@ -104,6 +151,31 @@ export function getLocationBySlug(slug: string): LocationProfile | undefined {
 /** Places the location's LocalBusiness serves (JSON-LD). */
 export const locationAreaServed = ['Songwe Region', 'Tunduma', 'Mpemba', 'Tanzania–Zambia corridor'] as const;
 
+/**
+ * The map facade (/locations/[slug] and /contact): a closed <details> that
+ * loads the Google Maps embed only when it is opened, with the directions
+ * link always visible outside it.
+ */
+export const mapCopy = {
+  /** The facade's label: the town and region, as a map labels them (the page gives the street address). */
+  place: 'Mpemba, Tunduma',
+  area: 'Songwe Region, on the Tanzania–Zambia border',
+  show: 'Show map',
+  hide: 'Hide map',
+  /** Under "Show map": nothing loads from Google until the map is opened. */
+  note: 'Opens an embedded Google Map.',
+  directions: 'Get directions',
+  /** Screen-reader note on links that open a new tab. */
+  newTab: '(opens in a new tab)',
+} as const;
+
+/** The six services of a location, as cards (index and profile). */
+export const locationServicesCopy = {
+  /** Before the company that runs the service: "Run by Mwanjalisi Oil". */
+  runBy: 'Run by',
+  action: 'Learn more',
+} as const;
+
 /** /locations index copy. */
 export const locationsPage = {
   meta: {
@@ -117,22 +189,57 @@ export const locationsPage = {
   hero: {
     eyebrow: 'Local presence',
     headline: { lead: 'Based in Songwe.', accent: 'Connected through Tunduma.' } satisfies SplitHeadline,
-    fallbackVisualLabel: 'Songwe and Tunduma corridor',
+    lede: 'Itemba Group is headquartered in Mpemba-Tunduma, Songwe Region, on the Tanzania–Zambia corridor.',
   },
   headquarters: {
     eyebrow: 'Headquarters',
     action: 'View location profile',
+    addressLabel: 'Group head office',
+    companiesLabel: 'Companies based here',
   },
   servicesHeading: 'Services connected to this location',
+  servicesLede: 'Six sectors and three companies, with one group office in Mpemba-Tunduma routing every enquiry.',
+  closing: {
+    title: 'Talk to the group office.',
+    body: 'Suppliers, bulk buyers, fuel and logistics customers: one office in Mpemba-Tunduma routes every enquiry to the right company.',
+    enquire: { label: 'Start an enquiry', href: '/contact' } satisfies LinkItem,
+    whatsapp: 'WhatsApp',
+    call: 'Call',
+  },
 } as const;
 
 /** /locations/[slug] copy. */
 export const locationPageCopy = {
-  backLink: 'All locations',
-  whyHeading: 'Why this location matters',
-  servicesHeading: 'Services available through this location',
-  faqHeading: 'Location questions',
+  hero: {
+    /** The pill: down to the form. Not "Enquire", which the global nav's pill (to /contact) already says. */
+    enquire: 'Ask about this location',
+  },
+  glanceTitle: 'At a glance',
+  visit: {
+    eyebrow: 'Find us',
+    title: 'The group head office',
+    addressHeading: 'Address',
+  },
   mapTitle: 'Itemba Group Songwe-Tunduma location map',
-  addressHeading: 'Address',
+  whyHeading: 'Why this location matters',
+  routing: {
+    title: 'One group office routes every enquiry.',
+    body: 'Fuel, trade, logistics, hospitality or property: the head office in Mpemba-Tunduma sends it to the right company.',
+    action: 'Ask about this location',
+  },
+  servicesHeading: 'Services available through this location',
   companiesHeading: 'Operating companies',
+  companiesLede: 'Three legally independent companies of Itemba Group, and one group office for every enquiry.',
+  companiesAction: 'Learn more',
+  faqHeading: 'Location questions',
+  enquire: {
+    eyebrow: 'Enquire',
+    body: 'One group office routes every enquiry to the right company.',
+    stepsLabel: 'How it works',
+    steps: [
+      { title: 'Choose who it is for', body: 'The form starts with General. Pick a company if you already know which one you need.' },
+      { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
+      { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
+    ],
+  },
 } as const;

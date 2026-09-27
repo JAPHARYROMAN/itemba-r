@@ -327,6 +327,84 @@
       ],
       "change": "Deviation: at 360px the home h1 renders at about 40px, below display-xl's 48px floor.",
       "reason": "The no-split rule for 'Tanzania–Zambia' takes precedence: the compound is about 7.6em wide and must fit the 316px line; the h1 still leads every other heading by 1.2x or more."
+    },
+    {
+      "routes": [
+        "/locations"
+      ],
+      "change": "P3 hero: the lede is 'Itemba Group is headquartered in Mpemba-Tunduma, Songwe Region, on the Tanzania–Zambia corridor.' (was the long location summary); the actions are the 'View location profile' pill and 'Get directions ↗' (Google Maps, new tab); the headline sets as a two-tone line.",
+      "reason": "P3: hero ledes are one sentence of 110 characters or fewer (the company-page rule), so the photograph follows on a phone; the core message (HQ in Mpemba-Tunduma, Songwe Region, on the corridor) is kept."
+    },
+    {
+      "routes": [
+        "/locations"
+      ],
+      "change": "The Songwe Region landscape now shows its credit under the hero frame: 'Songwe Region landscape, Richard grivas / Wikimedia Commons, CC BY-SA 4.0' (licence linked).",
+      "reason": "CC BY-SA 4.0 requires attribution; origin/main never rendered it (assets map)."
+    },
+    {
+      "routes": [
+        "/locations"
+      ],
+      "change": "Page sections: the corridor story ('Where Tanzania meets Zambia.', home's section reused) follows the hero; the head office is a card (address, the three companies based there, linked); 'Services connected to this location' gains a lede and each card names the company that runs it; a closing 'Talk to the group office.' band (Start an enquiry → /contact, WhatsApp, Call) ends the page. The three advantage cards moved to the location profile's bento.",
+      "reason": "P3: the plan's locations page (corridor story, advantages, map facade, credit); the advantages are not repeated on two pages one click apart."
+    },
+    {
+      "routes": [
+        "/locations/songwe-tunduma"
+      ],
+      "change": "Hero: the '← All locations' link is replaced by the visible breadcrumb trail above the footer; the lede is 'Home to the group head office and the Itemba sites, on the Tanzania–Zambia border at Tunduma.'; the actions are 'Ask about this location' (#enquire) and 'Get directions ↗'. Deviation: the hero visual is a typographic panel ('Where the Dar es Salaam supply line meets the Zambia border.' · Mpemba · Tunduma · Songwe Region) instead of the Songwe landscape.",
+      "reason": "Owner photo rule: use the best photographs sparingly. The landscape leads /locations one click away, and there is no photograph of the head office itself (flags.stateHqIsItembaMpemba), so a typographic tile takes the hero here."
+    },
+    {
+      "routes": [
+        "/locations/songwe-tunduma"
+      ],
+      "change": "New 'At a glance' facts (head office, region, border, reach, companies, sectors); the advantages become a bento with sentence-case titles ('Border corridor access', 'Multi-sector coverage', 'Local operating presence'), the UZUNGUNI PARKING YARD truck-line photograph and a routing cell ('One group office routes every enquiry.' → #enquire); 'Operating companies' becomes a section of three linked company cards with a lede.",
+      "reason": "P3 Apple-style profile: the same facts and advantages, set as the company template sets its own (glance, bento, cards); sentence case per the design spec."
+    },
+    {
+      "routes": [
+        "/locations/songwe-tunduma",
+        "/contact"
+      ],
+      "change": "The Google Maps iframe loads only after the visitor opens a closed 'Show map' disclosure (label 'Mpemba, Tunduma' · 'Songwe Region, on the Tanzania–Zambia border' · 'Opens an embedded Google Map.'); 'Get directions ↗' stays visible beside the address.",
+      "reason": "Architecture §3 map facade: no third-party request or layout cost on load, zero JavaScript."
+    },
+    {
+      "routes": [
+        "/locations/songwe-tunduma"
+      ],
+      "change": "Enquiry section: heading 'Ask about this location' (h2) with the routing promise and three 'How it works' steps; the compact form's own heading is 'Route an enquiry' (h3) with the location description. Default intent unchanged (general).",
+      "reason": "The company template pattern (CompanyEnquire): the page names the section, the form keeps its standard title."
+    },
+    {
+      "routes": [
+        "/contact"
+      ],
+      "change": "Removed the 'Business enquiries' note sentence 'For sector-specific enquiries, we recommend contacting the relevant subsidiary company directly. Each company operates with its own team and management structure.'; its links move to a closing 'More ways we can help' row of cards: 'Partnership enquiry routes' (/partnerships), 'Frequently asked questions' (was 'Browse frequently asked questions', /faq) and a new 'Company profile' (/company-profile).",
+      "reason": "Plan and message map: the sentence contradicted the routing model (one group office routes every enquiry; no per-subsidiary contacts exist)."
+    },
+    {
+      "routes": [
+        "/contact"
+      ],
+      "change": "Hero gains actions ('Start an enquiry' → #enquire, WhatsApp, Call); the full form follows the hero at once, beside 'Tell us what you need.' with the routing promise and 'How it works' steps; the form's heading 'Route an enquiry' is now an h3 under that h2.",
+      "reason": "P3 support-style page: every Enquire pill lands here, so the form stays high; the quick-contact bar is hidden on /contact, so the hero carries WhatsApp and Call for phones."
+    },
+    {
+      "routes": [
+        "/contact"
+      ],
+      "change": "'Find us / Group headquarters' is a bento of contact cards: Phone (both numbers), WhatsApp ('Message the group office'), Email (the 'Business enquiry' mailto; the plain mailto: link is gone), Head office (with 'Get directions ↗'), Postal address; the separate Call / WhatsApp / Email button row is removed (the cards and the form's fallbacks carry the same tel:, wa.me and mailto: targets).",
+      "reason": "Plan: contact cards from @/content/contact only; one card per channel instead of the same numbers twice."
+    },
+    {
+      "routes": [
+        "/contact"
+      ],
+      "change": "'Our companies' cards now link to each company page and show the company's one-line lede (were unlinked name + sector cards with a hover state); context cards use line icons instead of emoji under a new 'Why Mpemba-Tunduma' heading, and 'Strategic location' reads 'Mpemba-Tunduma sits on the Tanzania–Zambia border, on the Tunduma trade corridor.' (was '… — one of East Africa's most active trade corridors.'). 'Growing economy' stays hidden (flags.songweGrowthClaim).",
+      "reason": "Design map: cards that look clickable must be links; no emoji; the plan's one neutral corridor phrase instead of an unsourced superlative."
     }
   ]
 }

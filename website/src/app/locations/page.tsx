@@ -1,159 +1,64 @@
-import Link from 'next/link';
 import type { Metadata } from 'next';
-import AnimatedSection from '@/components/AnimatedSection';
-import BrandVisual from '@/components/BrandVisual';
-import CinematicImage from '@/components/cine/CinematicImage';
-import JsonLd from '@/components/JsonLd';
-import {
-  absoluteUrl,
-  breadcrumbJsonLd,
-  locationProfiles,
-  locationUrl,
-  serviceAreas,
-  serviceUrl,
-  site,
-} from '@/lib/site';
-import { locationsPage } from '@/content/locations';
+import { notFound } from 'next/navigation';
+import { locationProfiles, locationsPage } from '@/content/locations';
+import { crumbs } from '@/content/nav';
+import { locationUrl } from '@/content/site';
+import { webPageJsonLd } from '@/lib/jsonld';
+import { pageMetadata } from '@/lib/seo';
+import { HomeCorridor } from '@/sections/home/HomeCorridor';
+import { LocationServices } from '@/sections/locations/LocationServices';
+import { LocationsClosing } from '@/sections/locations/LocationsClosing';
+import { LocationsHeadquarters } from '@/sections/locations/LocationsHeadquarters';
+import { LocationsHero } from '@/sections/locations/LocationsHero';
+import { FooterTrail } from '@/shell/SiteFooter';
+import { StructuredData } from '@/ui';
 
-const { meta, hero, headquarters } = locationsPage;
+const { meta } = locationsPage;
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: meta.title,
   description: meta.description,
-  alternates: { canonical: absoluteUrl('/locations') },
-  openGraph: {
-    title: meta.ogTitle,
-    description: meta.ogDescription,
-    url: absoluteUrl('/locations'),
-  },
-};
+  path: '/locations',
+  ogTitle: meta.ogTitle,
+  ogDescription: meta.ogDescription,
+});
 
-const locationsJsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'CollectionPage',
-  '@id': `${absoluteUrl('/locations')}#locations`,
-  name: meta.ogTitle,
-  url: absoluteUrl('/locations'),
-  about: {
-    '@id': `${site.url}/#organization`,
-  },
-  mainEntity: {
-    '@type': 'ItemList',
-    itemListElement: locationProfiles.map((location, index) => ({
-      '@type': 'ListItem',
-      position: index + 1,
-      name: location.title,
-      url: absoluteUrl(locationUrl(location.slug)),
-    })),
-  },
-};
-
+/**
+ * /locations, a server component: where the group is based and why it
+ * matters. The hero (the Songwe landscape, credited), the corridor story
+ * (home's signature section, reused: Dar es Salaam to the border and
+ * beyond), the head office as a store-style card, the services connected
+ * to it, and a closing call to action. No enquiry form on this page, so the
+ * quick-contact bar shows. The CollectionPage lists the location profiles;
+ * the breadcrumb trail (and its BreadcrumbList) closes the page.
+ */
 export default function LocationsPage() {
-  const primaryLocation = locationProfiles[0];
-  const featuredServices = serviceAreas.filter((service) =>
-    primaryLocation.serviceSlugs.includes(service.slug),
-  );
-
+  const [location] = locationProfiles;
+  if (!location) notFound();
   return (
-    <div className="bg-ink-950">
-      <JsonLd
-        data={[
-          locationsJsonLd,
-          breadcrumbJsonLd([
-            { name: 'Home', path: '/' },
-            { name: 'Locations', path: '/locations' },
-          ]),
-        ]}
+    <>
+      <StructuredData
+        data={webPageJsonLd({
+          type: 'CollectionPage',
+          name: meta.ogTitle,
+          path: '/locations',
+          fragment: 'locations',
+          description: meta.ogDescription,
+          items: locationProfiles.map((profile) => ({ name: profile.title, path: locationUrl(profile.slug) })),
+        })}
       />
-
-      {/* ── Hero ──────────────────────────────────────────────────── */}
-      <section className="relative flex min-h-[78vh] items-end overflow-hidden bg-ink-950">
-        {primaryLocation.image ? (
-          <CinematicImage src={primaryLocation.image.src} alt="" priority className="animate-kenburns" />
-        ) : (
-          <BrandVisual variant="corridor" label={hero.fallbackVisualLabel} className="absolute inset-0" />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/70 to-ink-950/30" />
-        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-transparent to-ink-950/70" />
-        <div className="grain-overlay" />
-        <div className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-16 pt-40 sm:px-8">
-          <AnimatedSection>
-            <div className="mb-5 flex items-center gap-3">
-              <span className="h-px w-10 bg-gold-400" />
-              <span className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-300">
-                {hero.eyebrow}
-              </span>
-            </div>
-            <h1 className="cine-shadow font-tight text-5xl font-black leading-[0.92] tracking-tight text-white sm:text-6xl lg:text-7xl">
-              {hero.headline.lead} <span className="gradient-text">{hero.headline.accent}</span>
-            </h1>
-            <p className="mt-7 max-w-2xl text-lg leading-relaxed text-slate-200/90">
-              {primaryLocation.summary}
-            </p>
-          </AnimatedSection>
-        </div>
-      </section>
-
-      {/* ── Headquarters ──────────────────────────────────────────── */}
-      <section className="overflow-hidden bg-ink-950 px-5 py-24 sm:px-8">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 lg:grid-cols-[0.9fr_1.1fr]">
-          <AnimatedSection>
-            <div className="gold-line mb-6" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">
-              {headquarters.eyebrow}
-            </p>
-            <h2 className="mb-5 font-tight text-4xl font-black leading-tight tracking-tight text-white">
-              {primaryLocation.title}
-            </h2>
-            <p className="mb-8 text-lg leading-relaxed text-slate-300">{primaryLocation.detail}</p>
-            <Link
-              href={locationUrl(primaryLocation.slug)}
-              className="btn-primary inline-flex rounded-full bg-gold-500 px-6 py-3 text-sm font-semibold text-white hover:bg-gold-400"
-            >
-              {headquarters.action}
-            </Link>
-          </AnimatedSection>
-
-          <AnimatedSection direction="left">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {primaryLocation.advantages.map((advantage) => (
-                <div key={advantage.title} className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
-                  <h3 className="mb-3 font-tight text-lg font-bold text-white">{advantage.title}</h3>
-                  <p className="text-sm leading-relaxed text-slate-400">{advantage.summary}</p>
-                </div>
-              ))}
-            </div>
-          </AnimatedSection>
-        </div>
-      </section>
-
-      {/* ── Connected services ────────────────────────────────────── */}
-      <section className="overflow-hidden bg-ink-950 px-5 py-20 sm:px-8">
-        <div className="mx-auto max-w-7xl">
-          <AnimatedSection className="mb-10">
-            <div className="gold-line mb-6" />
-            <h2 className="font-tight text-3xl font-black leading-tight tracking-tight text-white">
-              {locationsPage.servicesHeading}
-            </h2>
-          </AnimatedSection>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {featuredServices.map((service, index) => (
-              <AnimatedSection key={service.slug} delay={index * 0.05}>
-                <Link
-                  href={serviceUrl(service.slug)}
-                  className="block h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-gold-400/50 hover:bg-white/[0.06]"
-                >
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-400">
-                    {service.eyebrow}
-                  </p>
-                  <h3 className="mb-3 font-tight text-xl font-bold text-white">{service.title}</h3>
-                  <p className="text-sm leading-relaxed text-slate-400">{service.summary}</p>
-                </Link>
-              </AnimatedSection>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
+      <LocationsHero location={location} />
+      <HomeCorridor />
+      <LocationsHeadquarters location={location} />
+      <LocationServices
+        location={location}
+        titleId="services-title"
+        title={locationsPage.servicesHeading}
+        lede={locationsPage.servicesLede}
+        tone="alt"
+      />
+      <LocationsClosing />
+      <FooterTrail items={[crumbs.home, crumbs.locations]} />
+    </>
   );
 }
