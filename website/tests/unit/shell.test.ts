@@ -58,15 +58,20 @@ describe('QuickContact bar', () => {
     for (const link of expected.links) expect(got, link.href).toContain(normaliseContactHref(link.href));
   });
 
-  it('is a slim phone-only bar with Call, WhatsApp and an Email pill, and reserves its own height', () => {
+  it('is a slim phone-only bar: Call, WhatsApp and Email as quiet actions, then the Enquire pill to the form', () => {
     const html = renderToStaticMarkup(h(QuickContact));
     expect(html).toMatch(/<aside aria-label="Quick contact" data-quick-contact="" data-print="hide" class="fixed [^"]*md:hidden/);
     expect(html).toContain(`href="tel:${contact.primaryPhone}"`);
     expect(html).toContain('>Call<');
     expect(html).toContain('>WhatsApp<');
-    // The pill is the mailto: action, so it says "Email" (every "Enquire" on the site leads to the form).
-    expect(html).toMatch(/<a href="mailto:[^"]*" aria-label="Email Itemba Group" class="[^"]*rounded-pill[^"]*"><svg[\s\S]*?<\/svg><span>Email<\/span><\/a>/);
-    expect(html).not.toContain('Enquire');
+    // Email keeps the mailto: ConversionTracker counts, as a quiet action (not a pill).
+    expect(html).toMatch(/<a href="mailto:[^"]*" aria-label="Email Itemba Group" class="[^"]*"><svg[\s\S]*?<\/svg><span>Email<\/span><\/a>/);
+    expect(html).not.toMatch(/<a href="mailto:[^"]*"[^>]*rounded-pill/);
+    // The one pill (plan: Call · WhatsApp · Enquire) is Enquire, to the enquiry form, last in the bar.
+    const pills = [...html.matchAll(/<a [^>]*class="[^"]*rounded-pill[^"]*"[^>]*>([^<]*)<\/a>/g)];
+    expect(pills.map((m) => m[1])).toEqual([headerCta.label]);
+    expect(html).toMatch(new RegExp(`<a class="[^"]*rounded-pill[^"]*" href="${headerCta.href}">${headerCta.label}</a></div></aside>$`));
+    expect(headerCta.href).toBe('/contact');
     expect(html).toMatch(/^<div aria-hidden="true" data-print="hide" class="h-\[calc\(var\(--quickbar-height\)/);
     expect(html).not.toMatch(/opacity:\s*0/);
   });

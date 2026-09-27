@@ -19,8 +19,13 @@ export const headerLinks: LinkItem[] = [
   { href: '/contact', label: 'Contact' },
 ];
 
-/** The persistent Enquire pill: the full enquiry router on /partnerships. */
-export const headerCta: LinkItem = { href: '/partnerships', label: 'Enquire' };
+/**
+ * The persistent Enquire pill (global nav, mobile menu, quick-contact bar):
+ * the general enquiry form on /contact, where one group office routes every
+ * enquiry to the right company. /partnerships stays in the footer for
+ * supplier and partnership routes.
+ */
+export const headerCta: LinkItem = { href: '/contact', label: 'Enquire' };
 
 /**
  * The first steps of every breadcrumb trail (the visible trail and its
@@ -47,9 +52,10 @@ export const shellCopy = {
 } as const;
 
 /**
- * The mobile quick-contact bar (Call · WhatsApp · Email). Its pill is the
- * group's "Business enquiry" email (the mailto: ConversionTracker counts),
- * so it says "Email": every "Enquire" on the site leads to the form.
+ * The mobile quick-contact bar (plan: Call · WhatsApp · Enquire). The three
+ * direct channels are quiet actions, Email among them (the group's
+ * "Business enquiry" mailto: that ConversionTracker counts); the pill is
+ * Enquire, to the enquiry form (headerCta).
  */
 export const quickContactCopy = {
   label: 'Quick contact',

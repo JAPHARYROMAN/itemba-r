@@ -16,7 +16,7 @@ import { Media, cn } from '@/ui';
  *   and the company heroes keep to the 1068px content width.
  */
 
-export type LeadPhotoShape = 'cinema' | 'panorama' | 'landscape' | 'photo' | 'portrait';
+export type LeadPhotoShape = 'cinema' | 'panorama' | 'landscape' | 'photo' | 'portrait' | 'square';
 export type LeadPhotoWidth = 'wide' | 'content' | 'prose' | 'split';
 
 /** From a viewport width (px) up, the frame's aspect ratio (width / height). */
@@ -54,6 +54,12 @@ const shapes: Record<LeadPhotoShape, { className: string; steps: readonly ShapeS
       { from: breakpoints.md, ratio: 3 / 2 },
     ],
   },
+  /**
+   * Square at every width: a company hero's photograph beside the text
+   * (heroFrame), about as tall as the text block beside it, so the text
+   * does not float in a band of white beside a tall photograph.
+   */
+  square: { className: 'aspect-square', steps: [{ from: 0, ratio: 1 }] },
   /** Square until `lg`, then 3:4 beside the text. */
   portrait: {
     className: 'aspect-square lg:aspect-[3/4]',
@@ -135,17 +141,24 @@ export function isWideMaster(photo: MediaImage) {
 /**
  * The frame a company hero gives its photograph, one template for every
  * company page:
- * - a landscape master 2000px or wider runs under the text in the 1068px
- *   content width, 2:1 from `md` (at most 2.1:1, so the subject enters the
- *   first screen under the headline, and never taller than it can fill);
+ * - a landscape master 2000px or wider runs under the centred text in the
+ *   1068px content width, 2:1 from `md` (at most 2.1:1, so the subject
+ *   enters the first screen under the headline, and never taller than it
+ *   can fill), magnified on phones by the registry's `phoneZoom`;
  * - any other photograph (a portrait, or a phone-resolution landscape)
- *   stands beside the text in a column of at most 440px, as on the home
- *   tiles, where it stays sharp.
+ *   stands beside the text, square, in a column of at most 440px, where it
+ *   stays sharp and about matches the text block's height. This split is a
+ *   recorded deviation from the plan's centred hero (the photograph below
+ *   the text): a phone-resolution photograph cannot fill a 1068px frame.
  */
-export function heroFrame(photo: MediaImage): { layout: 'framed' | 'split'; shape: LeadPhotoShape; width: LeadPhotoWidth } {
-  if (isPortrait(photo)) return { layout: 'split', shape: 'portrait', width: 'split' };
-  if (!isWideMaster(photo)) return { layout: 'split', shape: 'photo', width: 'split' };
-  return { layout: 'framed', shape: 'panorama', width: 'content' };
+export function heroFrame(photo: MediaImage): {
+  layout: 'framed' | 'split';
+  shape: LeadPhotoShape;
+  width: LeadPhotoWidth;
+  zoom?: number;
+} {
+  if (isPortrait(photo) || !isWideMaster(photo)) return { layout: 'split', shape: 'square', width: 'split' };
+  return { layout: 'framed', shape: 'panorama', width: 'content', zoom: getMedia(photo.media).phoneZoom };
 }
 
 export type LeadPhotoProps = {

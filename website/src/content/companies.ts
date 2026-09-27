@@ -5,7 +5,15 @@
 import 'server-only';
 import { mediaFigure, mediaImage, type MediaFigure, type MediaImage } from './media';
 import { contentUpdatedAt } from './site';
-import type { CompanyId, CompanySlug, ContentIcon, Faq, SectorVisual, SplitHeadline } from './types';
+import type { CompanyId, CompanySlug, ContentIcon, Faq, SectorVisual, SplitHeadline, TypeVisual } from './types';
+
+/** A tile's visual: a photograph, or a typographic panel where no strong photograph exists. */
+export type CompanyVisual = MediaImage | TypeVisual;
+
+/** True when the visual is a photograph (a registry image), not a typographic panel. */
+export function isPhoto(visual: CompanyVisual): visual is MediaImage {
+  return !('kind' in visual);
+}
 
 /** Something the company does: a cell of the "What we do" bento on its page. */
 export type CompanyOffering = {
@@ -27,7 +35,7 @@ export type CompanySite = {
   icon?: ContentIcon;
   /**
    * A typographic card among photographs sets this figure large in the
-   * photograph's place ("3", "upcoming stations").
+   * photograph's place ("3", "planned").
    */
   figure?: { value: string; label: string };
 };
@@ -80,17 +88,22 @@ export type Company = {
   image: MediaImage;
   gallery: readonly MediaFigure[];
   /**
-   * The company's photograph on its home tile, and a different one for its
-   * page hero, so the two never repeat. A portrait photograph is set beside
-   * the text (a split tile); a landscape one runs across the tile.
+   * The company's visual on its home tile: a photograph (a portrait one is
+   * set beside the text, a landscape one runs across the tile) or, where no
+   * strong photograph exists, a typographic panel.
    */
-  tileImage: MediaImage;
+  tileVisual: CompanyVisual;
+  /**
+   * The page hero's photograph: the strongest the company has, and never
+   * the one its home tile shows.
+   */
   heroImage: MediaImage;
   /**
-   * The photograph of the page's one cinema tile (key strengths), shown
-   * nowhere else on the page.
+   * The visual of the page's one cinema tile (key strengths): a photograph
+   * shown nowhere else on the page and not on the company's home tile (one
+   * click away), or a typographic panel.
    */
-  strengthsImage: MediaImage;
+  strengthsVisual: CompanyVisual;
   /**
    * One headline figure, for the "What we do" bento. `restates` names the
    * highlight that says the same thing in words; the key strengths leave it
@@ -143,8 +156,7 @@ export const companies: readonly Company[] = [
     },
     services: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD', 'Diesel', 'Petrol', 'Kerosene', 'Lubricants', 'Commercial fleet supply enquiries'],
     highlights: [
-      'ITEMBA-branded stations managed by Mwanjalisi Oil',
-      'UZUNGUNI PARKING YARD managed by Mwanjalisi Oil',
+      'Runs the ITEMBA stations and UZUNGUNI PARKING YARD',
       'Located along major corridor routes and near a major bus stand',
       'Serves motorists, fleets, and logistics operators',
       'Two operating stations with three upcoming fuel locations',
@@ -166,13 +178,21 @@ export const companies: readonly Company[] = [
         caption: 'UZUNGUNI PARKING YARD supports corridor vehicle staging and parking.',
       }),
     ],
-    tileImage: mediaImage('mpemba-dusk'),
-    heroImage: mediaImage('mpemba-coach-canopy'),
-    strengthsImage: mediaImage('mpemba-dusk'),
+    tileVisual: mediaImage('mpemba-dusk'),
+    heroImage: mediaImage('mpemba-station-roadside', {
+      alt: 'An ITEMBA filling station and a corridor tanker, seen from the highway under a wide Songwe sky',
+    }),
+    // Its strong photographs are all forecourts (the hero and the site cards
+    // already show three) or the home tile's dusk shot: the strengths tile is typographic.
+    strengthsVisual: {
+      kind: 'type',
+      icon: 'energy',
+      statement: 'Fuel and parking where the TANZAM Highway meets the border.',
+      caption: 'Diesel · Petrol · Kerosene · Lubricants',
+    },
     keyStat: {
       value: '2',
       label: 'Operating ITEMBA stations',
-      note: 'Three more locations upcoming',
       restates: 'Two operating stations with three upcoming fuel locations',
     },
     offerings: [
@@ -215,11 +235,11 @@ export const companies: readonly Company[] = [
         image: mediaImage('parking-truck-line'),
       },
       {
-        name: 'Three upcoming ITEMBA stations',
+        name: 'New ITEMBA stations',
         kind: 'Planned expansion',
-        detail: 'Further stations will carry the ITEMBA-location name, under Mwanjalisi Oil management.',
+        detail: 'Three more stations will carry the ITEMBA-location name, under Mwanjalisi Oil management.',
         icon: 'energy',
-        figure: { value: '3', label: 'upcoming stations' },
+        figure: { value: '3', label: 'planned' },
       },
     ],
     enquiryLabel: 'Fuel supply enquiry',
@@ -293,8 +313,8 @@ export const companies: readonly Company[] = [
     highlights: [
       'More than 50 beverage stockists across Songwe Region',
       'Serves bars, night clubs, and hospitality outlets',
-      'Supports cross-border bulk buyers and construction companies',
-      'Four branches: Mpemba, Mlowo, Sogea and Tunduma',
+      'Bulk supply for cross-border buyers at Tunduma',
+      'Construction supply through ITEMBA-HARDWARE',
     ],
     image: mediaImage('westsides-warehouse-stock', {
       alt: 'Westsides Company Ltd wholesale beverage warehouse stock for distribution customers',
@@ -317,14 +337,18 @@ export const companies: readonly Company[] = [
         caption: 'UZUNGUNI INN adds lodging, restaurant, and bar services under Westsides.',
       }),
     ],
-    tileImage: mediaImage('hardware-storefront', {
+    // No Westsides photograph is strong enough for a home tile: its tile is typographic.
+    tileVisual: {
+      kind: 'type',
+      icon: 'trade',
+      statement: 'Four branches across Songwe Region.',
+      caption: 'Mpemba · Mlowo · Sogea · Tunduma',
+    },
+    // The one frame that names the company: the WESTSIDES COMPANY LIMITED signboard.
+    heroImage: mediaImage('hardware-storefront', {
       alt: 'The WESTSIDES COMPANY LIMITED signboard above the ITEMBA-HARDWARE storefront and its stock',
     }),
-    // Beverages lead: the first business on every line of Westsides copy.
-    heroImage: mediaImage('westsides-beer-delivery', {
-      alt: 'Beverage crates stacked on a Westsides Company Ltd delivery truck',
-    }),
-    strengthsImage: mediaImage('westsides-order-truck'),
+    strengthsVisual: mediaImage('westsides-order-truck'),
     keyStat: {
       value: '50+',
       label: 'Beverage stockists across Songwe Region',
@@ -468,13 +492,19 @@ export const companies: readonly Company[] = [
         caption: 'Yard-based movement support for local businesses and transit customers.',
       }),
     ],
-    tileImage: mediaImage('logistics-tanker', {
+    tileVisual: mediaImage('logistics-truck-front', {
+      alt: 'An Itemba Enterprises truck with ITEMBA ENERGY across its windscreen, seen from the front',
+    }),
+    heroImage: mediaImage('logistics-tanker', {
       alt: 'An Itemba Enterprises tanker truck in Itemba livery at a filling station',
     }),
-    heroImage: mediaImage('logistics-truck-front', { alt: 'An Itemba Enterprises truck, seen from the front' }),
-    strengthsImage: mediaImage('logistics-tanker', {
-      alt: 'An Itemba Enterprises tanker truck in Itemba livery at a filling station',
-    }),
+    // The remaining fleet photographs repeat the home tile's truck: the strengths tile is typographic.
+    strengthsVisual: {
+      kind: 'type',
+      icon: 'logistics',
+      statement: 'The corridor that moves the south.',
+      caption: 'Itemba Logistics, from Dar es Salaam to the Tunduma border.',
+    },
     keyStat: {
       value: '4',
       label: 'Countries of cross-border transit',

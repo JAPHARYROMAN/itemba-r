@@ -139,28 +139,53 @@ export function Heading({ as: Tag, size, tone = 'default', id, className, childr
   );
 }
 
+/** A short sentence (up to this many characters) may be kept on one line, even on a phone. */
+const SHORT_SENTENCE = 20;
+
+/**
+ * Keeps each short sentence of a lead on one line ("One group. / Three
+ * companies.", never "One group. Three / companies."). Longer sentences
+ * wrap freely, so nothing can overflow a phone.
+ */
+function keepSentences(text: string): ReactNode {
+  const parts = text.split(/(?<=[.!?])\s+/);
+  if (parts.length < 2) return text;
+  return parts.map((part, index) => (
+    <Fragment key={index}>
+      {index ? ' ' : null}
+      {part.length <= SHORT_SENTENCE ? <span className="whitespace-nowrap">{part}</span> : part}
+    </Fragment>
+  ));
+}
+
 /**
  * The words of a SplitHeadline, read as one sentence (`${lead} ${accent}`).
  * - `muted`: Apple's two-tone line, the accent in the secondary colour.
- * - `break`: the accent starts a new line (from `md`), same colour.
- * - `muted-break`: both: two tones, on two lines from `md`.
+ * - `break`: the accent starts a new line, same colour.
+ * - `muted-break`: both: two tones, on two lines.
  * - `inline`: plain text.
+ * The break applies from `md` by default; `breakFrom="always"` keeps it on
+ * phones too, and keeps each short sentence of the lead whole, so a
+ * two-tone statement keeps its structure at 360px.
  * Place it inside a Heading.
  */
 export function HeadlineText({
   headline,
   variant = 'muted',
+  breakFrom = 'md',
 }: {
   headline: SplitHeadline;
   variant?: 'muted' | 'break' | 'muted-break' | 'inline';
+  breakFrom?: 'md' | 'always';
 }) {
   if (variant === 'inline') return <>{`${headline.lead} ${headline.accent}`}</>;
   const muted = variant === 'muted' || variant === 'muted-break';
   const broken = variant === 'break' || variant === 'muted-break';
+  const always = broken && breakFrom === 'always';
   return (
     <>
-      {headline.lead}{' '}
-      <span className={cn(muted && 'text-fg-muted', broken && 'md:block')}>{headline.accent}</span>
+      {always ? keepSentences(headline.lead) : headline.lead}{' '}
+      <span className={cn(muted && 'text-fg-muted', broken && (always ? 'block' : 'md:block'))}>{headline.accent}</span>
     </>
   );
 }

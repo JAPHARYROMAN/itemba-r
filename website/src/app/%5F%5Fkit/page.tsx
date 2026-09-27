@@ -25,6 +25,7 @@ import {
 } from '@/content/home';
 import { enquiryPrompts } from '@/content/enquiry';
 import { insightArticles } from '@/content/insights';
+import { headerCta } from '@/content/nav';
 import { mediaImage } from '@/content/media';
 import { printButtonCopy, printProfileOptions, profileNavCopy } from '@/content/profile';
 import { serviceAreas } from '@/content/services';
@@ -34,6 +35,7 @@ import ProfileNav from '@/islands/ProfileNav';
 import { pageMetadata } from '@/lib/seo';
 import { CorridorMap } from '@/sections/corridor/CorridorMap';
 import { CorridorStory } from '@/sections/corridor/CorridorStory';
+import { CompanyTile } from '@/sections/home/HomeCompanies';
 import {
   Bento,
   BentoCell,
@@ -60,7 +62,6 @@ import {
   Media,
   PageHero,
   Prose,
-  Reveal,
   Section,
   Stat,
   StatList,
@@ -88,8 +89,6 @@ const kitOutline = [
   { id: 'print', title: 'Print picker' },
 ] as const;
 
-const companyPaths: Record<string, string> = Object.fromEntries(companies.map((c) => [c.slug, `/companies/${c.slug}`]));
-
 export default function KitPage() {
   if (process.env.NODE_ENV === 'production') notFound();
 
@@ -111,7 +110,7 @@ export default function KitPage() {
           { href: '#data', label: 'Data' },
           { href: '#media', label: 'Media' },
         ]}
-        cta={{ href: '/partnerships', label: 'Enquire' }}
+        cta={headerCta}
       >
         <ProfileNav outline={kitOutline} labels={profileNavCopy} />
       </SubNav>
@@ -131,7 +130,7 @@ export default function KitPage() {
         actions={
           <>
             <ButtonLink href={homeHero.actions[0]!.href}>{homeHero.actions[0]!.label}</ButtonLink>
-            <ChevronLink href={homeHero.actions[1]!.href} size="lede">
+            <ChevronLink href={homeHero.actions[1]!.href}>
               {homeHero.actions[1]!.label}
             </ChevronLink>
           </>
@@ -185,12 +184,12 @@ export default function KitPage() {
                 Actions on {tone}
               </Heading>
               <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-                <ButtonLink href="/partnerships">Enquire</ButtonLink>
+                <ButtonLink href={headerCta.href}>{headerCta.label}</ButtonLink>
                 <ButtonLink href="/contact" variant="secondary">
                   Contact the group
                 </ButtonLink>
-                <ButtonLink href="/partnerships" size="sm">
-                  Enquire
+                <ButtonLink href={headerCta.href} size="sm">
+                  {headerCta.label}
                 </ButtonLink>
                 <ButtonLink href="/company-profile" size="lg" icon="download">
                   Company profile
@@ -219,40 +218,8 @@ export default function KitPage() {
 
       <div id="companies">
         {homeCompanyTiles.map((tile, index) => {
-          const tone = tones[index % 3]!;
           const company = companies.find((c) => c.slug === tile.companySlug)!;
-          return (
-            <Section key={tile.companySlug} tone={tone} accent={company.accent} labelledBy={`tile-${tile.companySlug}`}>
-              <Container className="text-center">
-                <Eyebrow dot>{company.legalName}</Eyebrow>
-                <Heading as="h2" id={`tile-${tile.companySlug}`} size="display" className="mt-3">
-                  {tile.name}
-                </Heading>
-                <Lede className="mx-auto mt-5 max-w-2xl" tone="muted">
-                  {tile.summary}
-                </Lede>
-                <div className="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
-                  <ChevronLink href={companyPaths[tile.companySlug]!} size="lede" context={tile.name}>
-                    Explore
-                  </ChevronLink>
-                  <ChevronLink href="/partnerships" size="lede" context={tile.name}>
-                    Enquire
-                  </ChevronLink>
-                </div>
-              </Container>
-              <Reveal>
-                <Container size="wide" className="mt-12">
-                  <Media
-                    media={company.tileImage}
-                    alt={company.tileImage.alt}
-                    sizes="(min-width: 1484px) 1440px, calc(100vw - 44px)"
-                    aspect="21/9"
-                    radius="tile"
-                  />
-                </Container>
-              </Reveal>
-            </Section>
-          );
+          return <CompanyTile key={tile.companySlug} company={company} tile={tile} tone={tones[index % 3]!} photoFirst={index === 2} />;
         })}
       </div>
 

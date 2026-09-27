@@ -1,5 +1,5 @@
 {
-  "$comment": "Reviewed, intentional differences from the golden baseline, read by tests/e2e/route-inventory.spec.ts. Only soft fields can be approved: description, keywords, og:title, og:description, og:image:alt, og:site_name, og:locale, og:type, twitter:title, twitter:description, twitter:image:alt. Shape: routes[\"/path\"][\"field\"] = { \"value\": \"exact new text\" | null (removed), \"reason\": \"why\" }. Hard fields (title, canonical, og:url, robots, OG image, anchors, JSON-LD coverage, EnquiryRouter intent, print hooks, headers, sitemap order, redirects) cannot be approved here. An approval that matches the baseline again fails as stale.",
+  "$comment": "Reviewed, intentional differences from the golden baseline, read by tests/e2e/route-inventory.spec.ts. Only soft fields can be approved: description, keywords, og:title, og:description, og:image:alt, og:site_name, og:locale, og:type, twitter:title, twitter:description, twitter:image:alt. Shape: routes[\"/path\"][\"field\"] = { \"value\": \"exact new text\" | null (removed), \"reason\": \"why\" }. Hard fields (title, canonical, og:url, robots, OG image, anchors, JSON-LD coverage, EnquiryRouter intent, print hooks, headers, sitemap order, redirects) cannot be approved here. An approval that matches the baseline again fails as stale. The top-level \"visible\" list is a review log, not read by the tests: every intentional change to visible page copy, link targets or a recorded deviation from the design spec, as { routes, change, reason }.",
   "routes": {
     "/": {
       "description": {
@@ -247,5 +247,86 @@
         "reason": "WP1.2b: the root layout keeps only twitter:card (architecture §6), so Next fills twitter:description from this page's og:description instead of repeating the site tagline on every page."
       }
     }
-  }
+  },
+  "visible": [
+    {
+      "routes": [
+        "*"
+      ],
+      "change": "The persistent 'Enquire' pill (global nav, mobile menu) and the quick-contact bar's Enquire pill go to /contact instead of /partnerships.",
+      "reason": "C0: one group office routes every enquiry; /contact is the general enquiry form, while /partnerships opens with \"Partner with Itemba Group\" (critic round 3)."
+    },
+    {
+      "routes": [
+        "/"
+      ],
+      "change": "'Start a business enquiry' (hero chevron, sectors routing cell, closing pill) goes to /contact instead of /partnerships.",
+      "reason": "C0: the same general enquiry target as every site-wide Enquire action."
+    },
+    {
+      "routes": [
+        "*"
+      ],
+      "change": "Mobile quick-contact bar: Call, WhatsApp and Email are quiet icon-over-label actions and the one pill is Enquire (to /contact); the Email pill is gone. The tel:, wa.me/ and mailto: hrefs are unchanged.",
+      "reason": "C0: the plan's 'Call · WhatsApp · Enquire'; the mailto: action stays for conversion tracking and the QuickContact contract."
+    },
+    {
+      "routes": [
+        "/"
+      ],
+      "change": "Statement lede: '... under one Itemba structure.' (dropped 'on the Tanzania–Zambia border'); sectors lede rewritten as 'Start from your need: each sector opens onto its service, the company behind it and the way to enquire.'; corridor lede shortened to '..., with direct access to cross-border flows.'.",
+      "reason": "C0: centred ledes ran six lines at 360px (critic round 3); each now sets in four lines or fewer on a phone."
+    },
+    {
+      "routes": [
+        "/"
+      ],
+      "change": "Company tile summaries shortened (Mwanjalisi Oil, Westsides, Itemba Enterprises) to about 130-145 characters.",
+      "reason": "C0: tile summaries ran six lines at 360px; same facts, fewer clauses."
+    },
+    {
+      "routes": [
+        "/"
+      ],
+      "change": "Westsides home tile: a typographic panel ('Four branches across Songwe Region.' / Mpemba · Mlowo · Sogea · Tunduma) replaces the storefront photograph, which now leads the Westsides page.",
+      "reason": "C0 photo discipline: owner decision to prefer a typographic tile where no strong photograph exists, and never repeat a home tile photograph on the company page."
+    },
+    {
+      "routes": [
+        "/companies/mwanjalisi-oil"
+      ],
+      "change": "Key figure note 'Three more locations upcoming' removed; the planned-site card is 'New ITEMBA stations' with the panel '3 planned'; the first two strengths merged into 'Runs the ITEMBA stations and UZUNGUNI PARKING YARD'.",
+      "reason": "C0: 'three upcoming' was said three times within one scroll, and 'managed by Mwanjalisi Oil' twice in a row (critic round 3)."
+    },
+    {
+      "routes": [
+        "/companies/mwanjalisi-oil",
+        "/companies/itemba-enterprises"
+      ],
+      "change": "The key-strengths cinema tile is a typographic panel (a line icon and one sentence) instead of the home tile photograph.",
+      "reason": "C0: the strengths photograph repeated the home tile one click away; no other strong, non-canopy photograph exists for these companies."
+    },
+    {
+      "routes": [
+        "/companies/westsides-company"
+      ],
+      "change": "Strength 'Four branches: Mpemba, Mlowo, Sogea and Tunduma' replaced by 'Bulk supply for cross-border buyers at Tunduma' and 'Construction supply through ITEMBA-HARDWARE' (the former 'Supports cross-border bulk buyers and construction companies' split in two).",
+      "reason": "C0: the branch row restated the Branches table directly above it (critic round 3)."
+    },
+    {
+      "routes": [
+        "/companies/westsides-company",
+        "/companies/itemba-enterprises"
+      ],
+      "change": "Deviation: the company hero sets its photograph beside the text (square, 440px column) rather than below it, whenever the photograph is not a 2000px landscape master.",
+      "reason": "C0: the only strong Westsides and Enterprises frames are phone-resolution portraits (the WESTSIDES signboard, the tanker); a 1068px frame would show them soft. Square keeps the text and the photograph about the same height."
+    },
+    {
+      "routes": [
+        "/"
+      ],
+      "change": "Deviation: at 360px the home h1 renders at about 40px, below display-xl's 48px floor.",
+      "reason": "The no-split rule for 'Tanzania–Zambia' takes precedence: the compound is about 7.6em wide and must fit the 316px line; the h1 still leads every other heading by 1.2x or more."
+    }
+  ]
 }

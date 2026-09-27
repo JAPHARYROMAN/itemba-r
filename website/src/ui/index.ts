@@ -24,7 +24,7 @@ export {
   contactHref,
   isInternalHref,
 } from './actions';
-export type { ButtonVariant, ButtonSize, ContactLinkProps } from './actions';
+export type { ButtonVariant, ButtonSize, ChevronSize, ContactLinkProps } from './actions';
 export { Card, CardLink, Bento, BentoCell } from './cards';
 export type { BentoSpan } from './cards';
 export { Stat, StatList, Chip, ChipList, FactList, FaqList } from './data';
@@ -34,6 +34,8 @@ export type { BreadcrumbItem } from './Breadcrumbs';
 export { Media, Figure, MediaCredit, resolveMedia } from './Media';
 export type { MediaAspect, MediaSource } from './Media';
 export { PageHero } from './PageHero';
+export { TypePanel } from './TypePanel';
+export type { TypePanelProps } from './TypePanel';
 export { CtaBand } from './CtaBand';
 export { SubNav } from './SubNav';
 export { Reveal } from './Reveal';

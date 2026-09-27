@@ -134,23 +134,31 @@ export function ButtonLink({ href, variant = 'primary', size = 'md', icon, iconP
 
 /* ── Chevron link ─────────────────────────────────────────────────────── */
 
+/**
+ * The CTA hierarchy: a chevron link is always quieter than the page's
+ * primary pill. There is deliberately no size above `body-lg` (19px, the
+ * large pill's own label size), so no tile or card link can outweigh a
+ * hero or closing pill.
+ */
 const chevronSizes = {
   caption: 'text-caption',
   body: 'text-body',
   'body-lg': 'text-body-lg',
-  lede: 'text-lede',
 } as const;
+
+export type ChevronSize = keyof typeof chevronSizes;
 
 const chevronTones = { accent: 'text-accent-fg', gold: 'text-gold-fg', default: 'text-fg' } as const;
 
 export type ChevronLinkProps = AnchorProps & {
   href: string;
   /**
-   * Type size: `body` (17px) by default; `body-lg` (19px) beside a large
-   * pill, so the secondary action never outweighs the primary; `lede` for a
-   * tile's own links; `caption` in dense rows.
+   * Type size: `body` (17px) by default, and for every tile, card and
+   * bento link ("Explore ›", "Enquire ›", "Learn more ›"); `body-lg` (19px)
+   * only beside a large (`lg`) pill, at the pill label's own size, so the
+   * secondary action never outweighs the primary; `caption` in dense rows.
    */
-  size?: keyof typeof chevronSizes;
+  size?: ChevronSize;
   /**
    * `accent` (default) uses the tone's text-safe accent; `gold` group gold
    * whatever the accent (home, where a company shows only in its dots and

@@ -8,8 +8,9 @@ import { companySectionIds } from './CompanySubNav';
  * (its sites, or the markets it serves) under a small label, beside its
  * headline figure; then its three lines of business, each linking to the
  * service page that covers it. The figure cell carries its eyebrow at the
- * top and the numeral at display-xl at the foot, so neither end of the
- * cell is empty. The cells sit white on the alternate grey tile.
+ * top and the display-xl numeral centred in the space below it, so a tall
+ * row (the neighbouring list sets its height) never leaves a band of empty
+ * card between the two. The cells sit white on the alternate grey tile.
  */
 export function CompanyWhatWeDo({ company }: { company: Company }) {
   const copy = companyPageCopy;
@@ -35,9 +36,9 @@ export function CompanyWhatWeDo({ company }: { company: Company }) {
             </ul>
           </BentoCell>
 
-          <BentoCell span="third" padding="lg" className="justify-between gap-10">
+          <BentoCell span="third" padding="lg">
             <Eyebrow>{copy.keyFigure}</Eyebrow>
-            <dl>
+            <dl className="my-auto pt-8">
               <Stat
                 value={company.keyStat.value}
                 label={company.keyStat.label}

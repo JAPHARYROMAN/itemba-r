@@ -11,8 +11,8 @@ import { LeadPhoto, heroFrame } from './LeadPhoto';
  * take the ready-made company profile away as a PDF, the link at the
  * pill's own size) and its hero photograph, which is never the one its
  * home tile shows. One template for every company (LeadPhoto heroFrame):
- * a 2400px landscape runs 2:1 under the text in the content width; any
- * other photograph stands beside the text.
+ * a 2400px landscape runs 2:1 under the text in the content width (tighter
+ * on phones); any other photograph stands beside the text, square.
  */
 export function CompanyHero({ company }: { company: Company }) {
   const { hero } = companyPageCopy;
@@ -38,7 +38,7 @@ export function CompanyHero({ company }: { company: Company }) {
       }
       mediaLayout={frame.layout}
       mediaSize="content"
-      media={<LeadPhoto photo={photo} shape={frame.shape} width={frame.width} priority />}
+      media={<LeadPhoto photo={photo} shape={frame.shape} width={frame.width} zoom={frame.zoom} priority />}
     />
   );
 }

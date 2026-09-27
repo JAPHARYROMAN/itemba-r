@@ -26,6 +26,20 @@ export type IconKey = 'energy' | 'trade' | 'manufacturing' | 'construction' | 'h
 /** A line icon content may name: the sector set plus a few general glyphs (src/ui/Icon.tsx). */
 export type ContentIcon = IconKey | 'globe' | 'map-pin' | 'document' | 'droplet' | 'arrow-up-right';
 
+/**
+ * A typographic tile in a photograph's place (owner decision: where no
+ * strong photograph exists, a tile carries a line icon and one strong
+ * sentence instead). Rendered by TypePanel (src/ui).
+ */
+export type TypeVisual = {
+  kind: 'type';
+  icon: ContentIcon;
+  /** One strong sentence, set large. */
+  statement: string;
+  /** A short line under it, such as a list of places. */
+  caption?: string;
+};
+
 export type LinkItem = {
   label: string;
   href: string;

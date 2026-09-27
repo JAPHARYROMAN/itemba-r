@@ -22,6 +22,7 @@ export type HomeCompanyTile = {
   name: string;
   /** The line under the headline: what the company does, in three words. */
   eyebrow: string;
+  /** One sentence of about 150 characters or fewer: five lines at most on a phone. */
   summary: string;
 };
 
@@ -39,7 +40,7 @@ export const homeHero = {
   lede: 'Itemba Group is a diversified Tanzanian holding group: three companies, six sectors, one base in Mpemba-Tunduma.',
   actions: [
     { label: 'Explore the group', href: '/companies' },
-    { label: 'Start a business enquiry', href: '/partnerships' },
+    { label: 'Start a business enquiry', href: '/contact' },
   ] satisfies LinkItem[],
   image: mediaImage('mpemba-hero', {
     alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
@@ -48,8 +49,8 @@ export const homeHero = {
 
 export const homeStatement = {
   headline: { lead: 'One group. Three companies.', accent: 'The corridor that moves the south.' } satisfies SplitHeadline,
-  body:
-    'Each company operates independently, with full responsibility for its market — unified under one Itemba structure on the Tanzania–Zambia border.',
+  /** Three lines on a phone: the structure in one sentence. */
+  body: 'Each company operates independently, with full responsibility for its market, under one Itemba structure.',
 };
 
 /** One tile per company, in public order. */
@@ -59,21 +60,21 @@ export const homeCompanyTiles: HomeCompanyTile[] = [
     name: 'Mwanjalisi Oil',
     eyebrow: 'Energy · Fuel · Parking',
     summary:
-      'ITEMBA-branded filling stations and UZUNGUNI PARKING YARD — diesel, petrol, kerosene and lubricants for the motorists, buses, trucks and fleets that keep the corridor moving.',
+      'ITEMBA-branded filling stations and UZUNGUNI PARKING YARD: diesel, petrol, kerosene and lubricants for the fleets that keep the corridor moving.',
   },
   {
     companySlug: 'westsides-company',
     name: 'Westsides',
     eyebrow: 'Trade · Distribution',
     summary:
-      'Wholesale beverages, ITEMBA-HARDWARE and UZUNGUNI INN — supplying 50+ stockists, bars, contractors, hospitality and cross-border bulk buyers across Songwe Region.',
+      'Wholesale beverages, ITEMBA-HARDWARE and UZUNGUNI INN, supplying 50+ stockists, bars, contractors and cross-border buyers across Songwe.',
   },
   {
     companySlug: 'itemba-enterprises',
     name: 'Itemba Enterprises',
     eyebrow: 'Logistics · Cross-border transit',
     summary:
-      'Dar es Salaam to the Southern Highlands and cross-border transit through Tunduma — moving goods for businesses across Songwe, Mbeya, Rukwa, Ruvuma and Iringa, and on to four neighbouring countries.',
+      'Goods moved from Dar es Salaam to the Southern Highlands, and cross-border transit through Tunduma to four neighbouring countries.',
   },
 ];
 
@@ -86,8 +87,7 @@ export const homeTileActions = {
 export const homeSectors = {
   eyebrow: 'What we do',
   title: 'Six sectors. One corridor.',
-  body:
-    'Start from the sector that matches your need — each opens onto a focused service, the company behind it, and the right way to make an enquiry.',
+  body: 'Start from your need: each sector opens onto its service, the company behind it and the way to enquire.',
   action: 'Explore',
   /** Before the company that runs a sector: "Run by Mwanjalisi Oil". */
   runBy: 'Run by',
@@ -95,15 +95,16 @@ export const homeSectors = {
   routing: {
     title: 'Every sector. One front door.',
     body: 'One group office routes every enquiry to the right company.',
-    link: { label: 'Start a business enquiry', href: '/partnerships' } satisfies LinkItem,
+    link: { label: 'Start a business enquiry', href: '/contact' } satisfies LinkItem,
   },
   items: [
     {
       icon: 'energy',
       name: 'Energy, Fuel & Parking',
       serviceSlug: 'fuel-and-lubricants',
-      image: mediaImage('uzunguni-pump-island', {
-        alt: 'Pumps under the ITEMBA-UZUNGUNI canopy, managed by Mwanjalisi Oil',
+      // Not a canopy: the hero and the Mwanjalisi tile already show two (docs/PAGE-GUIDE.md).
+      image: mediaImage('parking-yard-trucks', {
+        alt: 'Trucks at UZUNGUNI PARKING YARD, managed by Mwanjalisi Oil',
       }),
     },
     {
@@ -142,8 +143,7 @@ export const homeSectors = {
 export const homeCorridor = {
   eyebrow: 'The location advantage',
   title: 'Where Tanzania meets Zambia.',
-  body:
-    "The Mpemba-Tunduma base sits on one of Southern Africa's busiest trade corridors — giving every company direct access to cross-border flows and regional supply chains.",
+  body: "The Mpemba-Tunduma base sits on one of Southern Africa's busiest trade corridors, with direct access to cross-border flows.",
   facts: [
     { label: 'Headquarters', value: 'Mpemba-Tunduma, Songwe Region' },
     { label: 'Border', value: 'Tanzania–Zambia, the Tunduma corridor' },
@@ -187,8 +187,8 @@ export const homeClosing = {
   title: "Let's move something together.",
   body: 'Suppliers, bulk buyers, fuel and logistics customers — start from your need and reach the right company faster.',
   actions: [
-    { label: 'Start a business enquiry', href: '/partnerships' },
-    { label: 'Contact the group', href: '/contact' },
+    // The general enquiry form (/contact), as every site-wide Enquire action.
+    { label: 'Start a business enquiry', href: '/contact' },
   ] satisfies LinkItem[],
   /** Visible labels of the direct channels beside the Enquire pill. */
   channels: {

@@ -51,6 +51,18 @@ export type MediaEntry = {
    * keeps the subject rather than the middle of the frame.
    */
   focusX?: number;
+  /**
+   * Art direction below `md` for a photograph that leads a page (a hero):
+   * how far to magnify it about its focus, so a subject that sits small in
+   * a wide master still reads in a phone-sized frame.
+   */
+  phoneZoom?: number;
+  /**
+   * Shows a filling-station forecourt canopy, the site's most repeated
+   * subject. A page shows at most two (tests/unit/reference-pages.test.ts
+   * holds home to it; docs/PAGE-GUIDE.md, "Photographs").
+   */
+  canopy?: boolean;
   note?: string;
 };
 
@@ -61,6 +73,7 @@ export const media = {
     alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
     focus: 'top',
     note: 'Raw: images/itemba filling station 002.jpg (4000x3000). Includes the fuel-price pylon; the home hero uses mpemba-hero.',
   },
@@ -69,15 +82,17 @@ export const media = {
     alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
-    focus: 55,
+    canopy: true,
+    focus: 45,
     focusX: 45,
-    note: 'The plan lead for the home hero: the 4000x3000 raw without the fuel-price pylon (its live prices would date the page). Focus 55: in the wide desktop frame the canopy clears the fold under a 96px headline, with the sky above it. FocusX 45: the centre of the canopy, where the 1.5x phone crop (HomeHero) is taken, so the whole canopy and its ITEMBA signs fill the phone frame.',
+    note: 'The plan lead for the home hero: the 4000x3000 raw without the fuel-price pylon (its live prices would date the page). Focus 45: in the wide desktop frame the canopy clears the fold under a 96px headline with the sky above it, and the dark shadow wedge at the bottom-left of the forecourt stays out of frame. FocusX 45: the centre of the canopy, where the 1.5x phone crop (HomeHero) is taken, so the whole canopy and its ITEMBA signs fill the phone frame.',
   },
   'mpemba-dusk': {
     src: '/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp',
     alt: 'ITEMBA-MPEMBA at dusk: motorbikes and a minibus at the pump island under the lit 24-hour canopy',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
     focus: 40,
     note: 'Raw: images/itemba-mpemba 017.jpg (top 4:3 of the portrait). Plan lead for the energy cinema tile. Soft and noisy past about 1100px wide: keep it in the content width.',
   },
@@ -86,21 +101,27 @@ export const media = {
     alt: 'A coach at the pumps under the ITEMBA-MPEMBA canopy, managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
     focusX: 85,
-    note: 'Raw: images/itemba-mpemba 016.jpg (3000x4000), cropped to a 2:1 band from the canopy underside to the forecourt, with a mild contrast step against its haze. The Mwanjalisi Oil page hero. FocusX 85: a 4:3 phone crop keeps the coach, the pumps and both pillar signs.',
+    note: 'Raw: images/itemba-mpemba 016.jpg (3000x4000), cropped to a 2:1 band from the canopy underside to the forecourt, with a mild contrast step against its haze. Retired from the Mwanjalisi Oil hero (C0): still hazy, and its subject is a third-party coach livery. Not for a lead role.',
   },
   'mpemba-station-roadside': {
     src: '/images/fuel-stations/itemba-station-wide-yard.webp',
     alt: 'ITEMBA filling station forecourt seen from the highway on the Songwe Region corridor',
     entity: 'mwanjalisi',
     provenance: 'own',
-    note: 'Raw: images/itemba.jpg (4000x3000).',
+    canopy: true,
+    focus: 70,
+    focusX: 53,
+    phoneZoom: 1.8,
+    note: 'Raw: images/itemba.jpg (4000x3000): crisp, blue sky, the ITEMBA canopy with a corridor tanker, seen from the road. The Mwanjalisi Oil page hero (C0). Focus 70: the 2:1 frame keeps the clouds above the station and the road below it, with little of the verge. On phones (4:3, the whole master) it is magnified 1.8x about the canopy (focusX 53), so the station reads at 316px.',
   },
   'mpemba-truck-canopy': {
     src: '/images/fuel-stations/itemba-mpemba-truck-canopy.webp',
     alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy managed by Mwanjalisi Oil',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
     note: 'Levelled in the pipeline (the raw is about 4.7° off).',
   },
   'mpemba-forecourt': {
@@ -108,24 +129,28 @@ export const media = {
     alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
   },
   'mpemba-service-yard': {
     src: '/images/fuel-stations/itemba-mpemba-service-yard.webp',
     alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
   },
   'uzunguni-pump-island': {
     src: '/images/fuel-stations/itemba-uzunguni-pump-island.webp',
     alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
   },
   'uzunguni-forecourt-wide': {
     src: '/images/fuel-stations/itemba-uzunguni-forecourt-wide.webp',
     alt: 'ITEMBA-UZUNGUNI filling station forecourt on the TANZAM Highway',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
     note: 'Cropped in the pipeline to the canopy and the forecourt, without the bare ground in front.',
   },
 
@@ -135,12 +160,16 @@ export const media = {
     alt: 'Container trucks parked at UZUNGUNI PARKING YARD',
     entity: 'mwanjalisi',
     provenance: 'own',
+    focusX: 40,
+    note: 'Crisp, under a blue sky, no canopy, but the bare yard fills the lower third: any frame narrower than 4:3 shows it. FocusX 40 keeps the red container truck and the row of cabs.',
   },
   'parking-yard-trucks': {
     src: '/images/parking/uzunguni-parking-yard-trucks.webp',
     alt: 'Truck parking at UZUNGUNI PARKING YARD',
     entity: 'mwanjalisi',
     provenance: 'own',
+    focusX: 30,
+    note: 'The home sectors bento photograph for Energy, Fuel & Parking (C0): not a canopy, and shown nowhere else on home. FocusX 30: a tall crop keeps the blue truck cab.',
   },
   'parking-truck-line': {
     src: '/images/parking/uzunguni-parking-truck-line.webp',
@@ -156,15 +185,16 @@ export const media = {
     alt: 'Itemba Logistics tanker supporting goods movement and transit operations',
     entity: 'enterprises',
     provenance: 'own',
+    canopy: true,
     focus: 20,
-    note: 'Portrait 720x1280; the striped canopy is not ITEMBA signage. Small cells only. Focus 20 trims the bare yard below the tanker; its vivid sky is toned down in the pipeline (chroma 0.7).',
+    note: 'Portrait 720x1280; the striped canopy is not ITEMBA signage. The Itemba Enterprises page hero, square beside the text (C0); never across a tile. Focus 20 trims the bare yard below the tanker; its vivid sky is toned down in the pipeline (chroma 0.7).',
   },
   'logistics-truck-front': {
     src: '/images/logistics/itemba-logistics-truck-front.webp',
     alt: 'An Itemba Enterprises truck, seen from the front',
     entity: 'enterprises',
     provenance: 'own',
-    note: 'Portrait 720x1280, shot with a heavy "vivid" filter: the pipeline tones its chroma down further than the rest.',
+    note: 'Portrait 720x1280, shot with a heavy "vivid" filter: the pipeline tones its chroma down further than the rest. The Itemba Enterprises home tile (C0): no canopy, ITEMBA ENERGY on the windscreen.',
   },
   'logistics-truck-yard': {
     src: '/images/logistics/itemba-logistics-truck-yard.webp',
@@ -191,7 +221,7 @@ export const media = {
     alt: 'Beverage crates stacked on a Westsides delivery truck',
     entity: 'westsides',
     provenance: 'own',
-    note: 'Portrait 780x1040: crates on a truck with no dominant third-party logo. The Westsides page hero (split, beside the text).',
+    note: 'Portrait 780x1040: crates on a truck with no dominant third-party logo. Retired from the Westsides hero (C0): a steep, tilted shot of a grimy truck side that never shows the company.',
   },
   'westsides-softdrinks': {
     src: '/images/beverages/westsides-softdrinks-warehouse.webp',
@@ -213,7 +243,7 @@ export const media = {
     entity: 'westsides',
     provenance: 'own',
     focus: 'top',
-    note: 'Portrait 960x1280 under the WESTSIDES COMPANY LIMITED signboard: the plan lead for trade.',
+    note: 'Portrait 960x1280 under the WESTSIDES COMPANY LIMITED signboard: the plan lead for trade, and the only frame that names the company. The Westsides page hero (C0), square from the top beside the text, which leaves the sacks and the bicycle at the foot of the frame out.',
   },
   'hardware-paint-stock': {
     src: '/images/hardware/itemba-hardware-paint-stock.webp',
@@ -297,6 +327,7 @@ export const media = {
     alt: 'ITEMBA-UZUNGUNI filling station canopy, the Itemba Group company profile cover',
     entity: 'mwanjalisi',
     provenance: 'own',
+    canopy: true,
     note: 'A crop of the ITEMBA-UZUNGUNI front scene; group print cover.',
   },
 } as const satisfies Record<string, MediaEntry>;

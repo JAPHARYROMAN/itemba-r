@@ -1,13 +1,14 @@
-import { getCompanyBySlug, type Company } from '@/content/companies';
+import { getCompanyBySlug, isPhoto, type Company } from '@/content/companies';
 import { homeCompanyTiles, homeTileActions, type HomeCompanyTile } from '@/content/home';
 import { companyUrl } from '@/content/site';
 import type { Tone } from '@/design/tokens';
 import { LeadPhoto, isPortrait } from '@/sections/company/LeadPhoto';
-import { ChevronLink, Container, Eyebrow, Heading, Reveal, Section, cn, keepCompounds } from '@/ui';
+import { ChevronLink, Container, Eyebrow, Heading, Reveal, Section, TypePanel, cn, keepCompounds } from '@/ui';
 
 /**
  * The home rhythm for the three tiles: the energy tile carries the dusk
- * photograph on black, then white, then the alternate grey.
+ * photograph on black, then white (Westsides, typographic), then the
+ * alternate grey.
  */
 const tileTones: readonly Tone[] = ['cinema', 'light', 'alt'];
 
@@ -24,7 +25,9 @@ export type CompanyTileProps = {
  * hero's display-xl line), what it does, the summary and the two links.
  * Centred; a split tile sets it flush left beside its photograph from `lg`.
  * Home keeps one link colour (plan): the eyebrow and both links are group
- * gold, and the company shows only in its accent dot.
+ * gold, and the company shows only in its accent dot. The links are body
+ * size (17px), quieter than the hero's and the closing band's 19px pills
+ * (the CTA hierarchy in src/ui/actions.tsx).
  */
 function TileText({ company, tile, split }: { company: Company; tile: HomeCompanyTile; split: boolean }) {
   const href = companyUrl(company.slug);
@@ -39,10 +42,10 @@ function TileText({ company, tile, split }: { company: Company; tile: HomeCompan
       <p className="mt-2 text-h3 font-normal text-fg">{keepCompounds(tile.eyebrow)}</p>
       <p className={cn('mx-auto mt-5 max-w-[38rem] text-body-lg text-fg-muted', split && 'lg:mx-0')}>{keepCompounds(tile.summary)}</p>
       <div className={cn('mt-7 flex flex-wrap items-center justify-center gap-x-8 gap-y-3', split && 'lg:justify-start')}>
-        <ChevronLink href={href} size="lede" tone="gold" context={tile.name}>
+        <ChevronLink href={href} tone="gold" context={tile.name}>
           {homeTileActions.explore}
         </ChevronLink>
-        <ChevronLink href={`${href}#enquire`} size="lede" tone="gold" context={tile.name}>
+        <ChevronLink href={`${href}#enquire`} tone="gold" context={tile.name}>
           {homeTileActions.enquire}
         </ChevronLink>
       </div>
@@ -52,19 +55,42 @@ function TileText({ company, tile, split }: { company: Company; tile: HomeCompan
 
 /**
  * One company, one tile, as Apple sets a product on its home page, with
- * one photograph:
+ * one visual:
  * - a landscape photograph runs across the tile under the centred text,
  *   in the 1068px content width (where the dusk master stays sharp);
  * - a portrait photograph stands beside the text from `lg` (a split tile,
  *   in a 440px column set against the grid's outer edge, where the text,
  *   the dusk frame above and the nav align), and under it, square, on
- *   smaller screens.
+ *   smaller screens;
+ * - where the company has no photograph strong enough, a typographic
+ *   panel (its line icon and one strong sentence) takes the photograph's
+ *   place in the split, on the tile's alternate surface.
  * The links go to the company page and straight to its enquiry form there.
  */
 export function CompanyTile({ company, tile, tone, photoFirst = false }: CompanyTileProps) {
   const titleId = `tile-${company.slug}`;
-  const photo = company.tileImage;
+  const visual = company.tileVisual;
 
+  if (!isPhoto(visual)) {
+    return (
+      <Section tone={tone} accent={company.accent} labelledBy={titleId}>
+        <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-2 lg:gap-16">
+          <TileText company={company} tile={tile} split />
+          <TypePanel
+            icon={visual.icon}
+            statement={visual.statement}
+            caption={visual.caption}
+            className={cn(
+              'mx-auto aspect-[4/3] w-full max-w-md sm:aspect-square lg:mx-0 lg:max-w-[27.5rem]',
+              photoFirst ? 'lg:order-first lg:justify-self-start' : 'lg:justify-self-end',
+            )}
+          />
+        </Container>
+      </Section>
+    );
+  }
+
+  const photo = visual;
   if (isPortrait(photo)) {
     return (
       <Section tone={tone} accent={company.accent} labelledBy={titleId}>
@@ -97,7 +123,7 @@ export function CompanyTile({ company, tile, tone, photoFirst = false }: Company
   );
 }
 
-/** 3. The three company tiles, in public order; split tiles alternate the photograph's side. */
+/** 3. The three company tiles, in public order; split tiles alternate the visual's side. */
 export function HomeCompanies() {
   let splits = 0;
   return (
@@ -105,7 +131,9 @@ export function HomeCompanies() {
       {homeCompanyTiles.map((tile, index) => {
         const company = getCompanyBySlug(tile.companySlug);
         if (!company) return null;
-        const photoFirst = isPortrait(company.tileImage) && splits++ % 2 === 1;
+        const visual = company.tileVisual;
+        const split = !isPhoto(visual) || isPortrait(visual);
+        const photoFirst = split && splits++ % 2 === 1;
         return (
           <CompanyTile
             key={tile.companySlug}

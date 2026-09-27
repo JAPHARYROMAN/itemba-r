@@ -18,6 +18,10 @@
  *   that carries a photograph.
  * - Neither page renders anything at opacity 0, and the server HTML never
  *   mentions manufacturing (flags.mentionManufacturing).
+ * - Stage C0 (shared fixes): every general Enquire action goes to /contact;
+ *   tile links are quieter than the pills; home shows at most two canopy
+ *   photographs; a company page never repeats its home tile's photograph;
+ *   a tile with no strong photograph is a typographic panel.
  *
  * Rendered with react-dom/server; next/navigation's usePathname is mocked
  * for the EnquiryRouter island.
@@ -25,11 +29,13 @@
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { companies, type Company } from '@/content/companies';
+import { companies, isPhoto, type Company } from '@/content/companies';
 import { contact } from '@/content/contact';
 import { enquiryFormCopy, enquiryIntents } from '@/content/enquiry';
 import { flags } from '@/content/flags';
-import { homeClosing, homeCompanyTiles, homeHero, homeNumbers, homeSectors, homeStatement } from '@/content/home';
+import { getMedia, media, type MediaId } from '@/content/media';
+import { headerCta } from '@/content/nav';
+import { homeClosing, homeCompanyTiles, homeCorridor, homeHero, homeNumbers, homeSectors, homeStatement } from '@/content/home';
 import { profilePdfHref } from '@/content/profile/cover';
 import { absoluteUrl, site } from '@/content/site';
 import { headlineText } from '@/content/types';
@@ -63,6 +69,12 @@ const photos = (html: string) =>
     })
     .filter((src) => src.startsWith('/images/'));
 const repeated = (list: readonly string[]) => [...new Set(list.filter((item, index) => list.indexOf(item) !== index))];
+/** Registry ids by public src, to read a shown photograph's registry entry. */
+const idBySrc = new Map(Object.entries(media).map(([id, entry]) => [entry.src as string, id as MediaId]));
+const canopies = (srcs: readonly string[]) => srcs.filter((src) => getMedia(idBySrc.get(src)!).canopy);
+/** Classes of every chevron link (ChevronLink's anchor starts "group inline-block"). */
+const chevronClasses = (html: string) =>
+  [...html.matchAll(/<a\b[^>]*class="(group inline-block [^"]*)"/g)].map((m) => m[1] ?? '');
 
 describe('home: metadata', () => {
   const { metadata } = HomeModule;
@@ -116,6 +128,10 @@ describe('home: page', () => {
       expect(hrefs(section)).toEqual(expect.arrayContaining([`/companies/${company.slug}`, `/companies/${company.slug}#enquire`]));
       expect(textOf(section)).toContain(`Explore ${tile.name}`);
       expect(textOf(section)).toContain(`Enquire ${tile.name}`);
+      // Quieter than the pills: the tile links are body size (17px), never the lede.
+      const links = chevronClasses(section);
+      expect(links, company.slug).toHaveLength(2);
+      for (const classes of links) expect(classes, company.slug).toMatch(/\btext-body\b/);
     }
     // Light, cinema and alt: the energy tile carries the dusk photograph on black.
     expect(html).toMatch(/aria-labelledby="tile-mwanjalisi-oil" data-tone="cinema"/);
@@ -159,8 +175,22 @@ describe('home: page', () => {
 
   it('closes with the Enquire pill, WhatsApp and Call, in the hrefs ConversionTracker classifies', () => {
     const closing = html.match(/aria-labelledby="closing-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    expect(hrefs(closing)).toEqual(expect.arrayContaining(['/partnerships', contact.whatsapp, `tel:${contact.primaryPhone}`]));
+    expect(hrefs(closing)).toEqual(expect.arrayContaining(['/contact', contact.whatsapp, `tel:${contact.primaryPhone}`]));
     expect(contact.whatsapp).toContain('wa.me/');
+  });
+
+  it('sends every general enquiry action to the enquiry form on /contact, never to /partnerships', () => {
+    expect(headerCta).toEqual({ href: '/contact', label: 'Enquire' });
+    expect(hrefs(html)).not.toContain('/partnerships');
+    expect(homeHero.actions.map((a) => a.href)).toEqual(['/companies', '/contact']);
+    expect(homeSectors.routing.link.href).toBe('/contact');
+  });
+
+  it('keeps the CTA hierarchy: no chevron link is larger than the 19px pill label', () => {
+    const links = chevronClasses(html);
+    expect(links.length).toBeGreaterThanOrEqual(8);
+    for (const classes of links) expect(classes).toMatch(/\btext-(?:caption|body|body-lg)\b/);
+    expect(html).not.toMatch(/class="group inline-block [^"]*\btext-lede\b/);
   });
 
   it('renders nothing hidden and never mentions manufacturing', () => {
@@ -207,15 +237,44 @@ describe('home: page', () => {
     const img = hero.match(/<img\b[^>]*>/)?.[0] ?? '';
     expect(hero).toContain('aspect-[4/3] md:aspect-[21/9]');
     // 1.5x about the canopy (the registry's focus), below `md` only.
-    expect(hero).toMatch(/class="absolute inset-0 max-md:\[transform:scale\(var\(--lead-zoom\)\)\]" style="--lead-zoom:1.5;transform-origin:45% 55%"/);
+    expect(hero).toMatch(/class="absolute inset-0 max-md:\[transform:scale\(var\(--lead-zoom\)\)\]" style="--lead-zoom:1.5;transform-origin:45% 45%"/);
     // A 1.42:1 master in a 4:3 frame draws 1.06 frames wide; zoomed, 1.59.
     expect(decode(img)).toMatch(/sizes="\(min-width: 1484px\) 1440px, \(min-width: 768px\) calc\(100vw - 44px\), calc\(\(100vw - 44px\) \* 1\.59\)"/);
   });
 
-  it('shows no photograph twice', () => {
+  it('shows no photograph twice, and at most two forecourt canopies', () => {
     const shown = photos(html);
     expect(shown.length).toBeGreaterThanOrEqual(4);
     expect(repeated(shown)).toEqual([]);
+    // The hero and the Mwanjalisi tile; nothing else on home is a canopy.
+    expect(canopies(shown)).toEqual([homeHero.image.src, '/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp']);
+  });
+
+  it('sets a typographic panel where a company has no strong photograph', () => {
+    for (const tile of homeCompanyTiles) {
+      const company = companies.find((c) => c.slug === tile.companySlug)!;
+      const section = html.match(new RegExp(`<section[^>]*aria-labelledby="tile-${company.slug}"[\\s\\S]*?</section>`))?.[0] ?? '';
+      const visual = company.tileVisual;
+      if (isPhoto(visual)) {
+        expect(photos(section), company.slug).toEqual([visual.src]);
+      } else {
+        expect(section, company.slug).toContain('data-type-panel=""');
+        expect(photos(section), company.slug).toEqual([]);
+        expect(textOf(section)).toContain(visual.statement);
+      }
+    }
+    expect(companies.some((c) => !isPhoto(c.tileVisual))).toBe(true);
+  });
+
+  it('keeps phone reading short: tile summaries and chapter ledes set in five lines or fewer at 360px', () => {
+    for (const tile of homeCompanyTiles) expect(tile.summary.length, tile.companySlug).toBeLessThanOrEqual(150);
+    for (const lede of [homeStatement.body, homeSectors.body, homeCorridor.body]) expect(lede.length, lede).toBeLessThanOrEqual(130);
+  });
+
+  it('keeps the statement two-tone on every width: the grey line always starts its own line', () => {
+    const statement = /<h2 id="statement-title"[^>]*>([\s\S]*?)<\/h2>/.exec(html)?.[1] ?? '';
+    expect(statement).toContain(`<span class="text-fg-muted block">${homeStatement.headline.accent}</span>`);
+    expect(statement).toContain('<span class="whitespace-nowrap">One group.</span> <span class="whitespace-nowrap">Three companies.</span>');
   });
 });
 
@@ -308,16 +367,28 @@ describe('company pages', () => {
     }
     if (company.keyStat.restates) expect(company.highlights).toContain(company.keyStat.restates);
     expect(text).toContain(company.keyStat.label);
-    // The one cinema tile carries a photograph, and at least three strengths.
+    // The one cinema tile carries a photograph, or a typographic panel where
+    // no strong one exists, and at least three strengths.
     expect(strengths).toContain('data-tone="cinema"');
-    expect(photos(strengths)).toEqual([company.strengthsImage.src]);
+    const strengthsVisual = company.strengthsVisual;
+    if (isPhoto(strengthsVisual)) {
+      expect(photos(strengths)).toEqual([strengthsVisual.src]);
+    } else {
+      expect(strengths).toContain('data-type-panel=""');
+      expect(photos(strengths)).toEqual([]);
+      expect(textOf(strengths)).toContain(strengthsVisual.statement);
+    }
     expect(tags(strengths, 'li').length).toBeGreaterThanOrEqual(3);
 
-    // One photograph per place: the hero is never the home tile's, and nothing repeats on the page.
-    expect(company.heroImage.media).not.toBe(company.tileImage.media);
+    // One photograph per place: nothing repeats on the page, and the page never
+    // shows the company's home tile photograph (one click away).
     const shown = photos(html);
     expect(shown).toContain(company.heroImage.src);
     expect(repeated(shown)).toEqual([]);
+    const tile = company.tileVisual;
+    if (isPhoto(tile)) expect(shown, 'home tile photograph repeated on the page').not.toContain(tile.src);
+    // The frames the critic retired (hazy, unflattering) never lead a page.
+    expect(['mpemba-coach-canopy', 'westsides-beer-delivery']).not.toContain(company.heroImage.media);
 
     // JSON-LD: the company as a LocalBusiness under the group, its FAQs, and the visible trail.
     const ld = jsonLd(html);
