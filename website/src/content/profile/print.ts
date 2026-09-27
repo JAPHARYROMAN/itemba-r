@@ -19,7 +19,7 @@ import { companyFinancialStatement, groupFinancialStatement } from './financial'
 import { futurePlans } from './futurePlans';
 import { history } from './history';
 import { legalCompanyProfiles } from './legal';
-import { groupPrintTargetMarkets } from './markets';
+import { targetMarketGroups } from './markets';
 import { strengths } from './strengths';
 import { visionMission } from './vision';
 
@@ -141,7 +141,7 @@ export const groupPrintProfile: PrintProfile = {
     {
       title: 'Target Market',
       pageBreakBefore: true,
-      columns: groupPrintTargetMarkets,
+      columns: targetMarketGroups.map(({ title, points }) => ({ title, points })),
     },
     {
       title: 'Operations and Branches',

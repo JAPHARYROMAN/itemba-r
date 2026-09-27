@@ -1,5 +1,7 @@
 /**
- * Company profile §9: company history, as published (the page WP reorders it chronologically).
+ * Company profile §9: company history, in chronological order: "2017
+ * onward" follows the 9 June 2017 incorporation. The screen timeline, the
+ * group print document and its PDF all read this order.
  */
 import 'server-only';
 
@@ -35,16 +37,16 @@ export const history = [
       'For improved administrative and financial efficiency, Mwanjalisi Oil Company Ltd was incorporated under the Companies Act, 2002 as a private limited company on 2 May 2017 with incorporation number 134897. The fuel station business was transferred from Itemba Enterprises Co Ltd to Mwanjalisi Oil Company Ltd.',
   },
   {
-    date: '2017 onward',
-    title: 'Mwanjalisi Oil expansion',
-    body:
-      'Mwanjalisi Oil Company Ltd later opened the ITEMBA-MPEMBA outlet at Mpemba near the Tunduma Bus Station along the Tunduma-Ileje Highway, with more ITEMBA-branded outlets planned.',
-  },
-  {
     date: '9 June 2017',
     title: 'Westsides Company Ltd incorporated',
     body:
       'Westsides Company Ltd was incorporated on 9 June 2017 with incorporation number 135764 to strengthen sales and beverage distribution across the entire Songwe Region.',
+  },
+  {
+    date: '2017 onward',
+    title: 'Mwanjalisi Oil expansion',
+    body:
+      'Mwanjalisi Oil Company Ltd later opened the ITEMBA-MPEMBA outlet at Mpemba near the Tunduma Bus Station along the Tunduma-Ileje Highway, with more ITEMBA-branded outlets planned.',
   },
   {
     date: '2021',

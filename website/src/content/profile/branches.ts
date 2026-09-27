@@ -1,11 +1,16 @@
 /**
- * Company profile §7: branches and sites per company.
+ * Company profile §7: branches and sites per company (`companyId` for the
+ * accent on screen). The rebuilt screen view sets the branch schedule as
+ * type, with two photographs of its own (./screen `operationsVisuals`); the
+ * per-branch photographs are kept for reuse and are not rendered.
  */
 import 'server-only';
 import { mediaImage } from '../media';
+import type { CompanyId } from '../types';
 
 export const branchOperations = [
   {
+    companyId: 'westsides' as CompanyId,
     company: 'Westsides Company Ltd',
     summary:
       'Westsides Company Ltd operates four main branches within Songwe Region across wholesale beverage distribution, hardware, and construction equipment sales.',
@@ -38,6 +43,7 @@ export const branchOperations = [
     ],
   },
   {
+    companyId: 'mwanjalisi' as CompanyId,
     company: 'Mwanjalisi Oil Company Ltd',
     summary:
       'Mwanjalisi Oil Company Ltd manages the retail fuel station business. Each filling station carries the ITEMBA brand name followed by its location name only.',
@@ -62,6 +68,7 @@ export const branchOperations = [
     ],
   },
   {
+    companyId: 'mwanjalisi' as CompanyId,
     company: 'Mwanjalisi Oil Company Ltd - Parking Facilities',
     summary:
       'Parking facilities trade publicly as UZUNGUNI PARKING YARD and are managed by Mwanjalisi Oil Company Ltd for corridor movement and fuel customers.',

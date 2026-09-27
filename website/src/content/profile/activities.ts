@@ -1,10 +1,13 @@
 /**
  * Company profile §4: business activities by company (Westsides by division).
+ * `companyId` gives the screen view each company's accent.
  */
 import 'server-only';
+import type { CompanyId } from '../types';
 
 export const businessActivities = [
   {
+    companyId: 'mwanjalisi' as CompanyId,
     company: 'Mwanjalisi Oil Co Ltd',
     title: 'Petroleum Retail, Fuel Supply, and Parking',
     summary:
@@ -12,6 +15,7 @@ export const businessActivities = [
     points: ['Diesel and petrol supply', 'Kerosene and lubricants', 'UZUNGUNI PARKING YARD', 'Retail, business fuel, and parking enquiries'],
   },
   {
+    companyId: 'westsides' as CompanyId,
     company: 'Westsides Company Ltd',
     title: 'Three Major Operating Divisions',
     summary:
@@ -35,6 +39,7 @@ export const businessActivities = [
     ],
   },
   {
+    companyId: 'enterprises' as CompanyId,
     company: 'Itemba Enterprises Co Ltd',
     title: 'Logistics and Emerging Businesses',
     summary:

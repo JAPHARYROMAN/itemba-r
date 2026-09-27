@@ -772,6 +772,48 @@
       ],
       "change": "Deviation: both heroes are typographic (no photograph).",
       "reason": "Owner photo rule: every 2000px landscape master is a forecourt canopy; no non-canopy photograph is wide enough to lead a hero. The shortcut rows carry the heroes instead, as on Apple Support."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Cover: eyebrow 'Company Profile and Capability Statement' becomes 'Prepared for institutional review' (the print cover's kicker); the lede ends at '… operating through three independent companies.' (the sector list follows in 'At a glance'); the cover photograph is ITEMBA-MPEMBA from the highway (mpemba-station-roadside) instead of the forecourt with the fuel-price pylon, and its caption line is dropped.",
+      "reason": "P6: the eyebrow no longer repeats the h1 ('Itemba Group / Company Profile'); a 220-character lede ran seven lines on a phone; the pylon's live prices date the page (media.ts note)."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Downloads and print: the hero's primary action is 'Download PDF' (the group profile, download attribute); the four PDFs move into a 'Download or print the profile.' section of cards, each 'Download PDF ›', beside 'Print the live profile' and the print picker. The old 'Download PDF' heading and the note 'Ready-made snapshots — use Print above for the live, current page.' are replaced by that section's copy.",
+      "reason": "P6 (plan: 'Download cards for the four PDFs'): banks and partners take the profile away first; the hrefs, download attributes and the picker's contract are unchanged."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Link targets: 'Send enquiry' (hero) and the sub-nav 'Enquire' pill go to the form on the page (#enquire, in Contact Information) instead of /contact; new 'Request documents ›' (Attachments) goes there too. The group phone numbers and inbox in Overview and Contact Information become tel:/mailto: links (the secondary line's tel: is new).",
+      "reason": "PAGE-GUIDE §1: a page with its own form links #enquire; contact hrefs come from src/content/contact.ts in the forms ConversionTracker classifies."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Target Market lists the four audience groups of the group print document (fuel and corridor; Westsides wholesale, hospitality and construction; logistics and transit; institutional and stakeholder) instead of two company groups plus an 11-item list that repeated them; the corridor opportunity leads the chapter. Company History is in date order ('2017 onward' now follows '9 June 2017'), which the group PDF picks up when regenerated.",
+      "reason": "P6: the same markets, each listed once, and the same list on screen and on paper; architecture §2 invariant: the history is chronological."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Photographs: the screen view shows three (the cover; the ITEMBA-HARDWARE storefront under the WESTSIDES signboard beside the Westsides branches; the truck line at UZUNGUNI PARKING YARD) instead of seven per-branch photographs with blurred backdrops; the org chart becomes a 'Group structure' diagram (Itemba Group — 'Central strategic oversight, governance and coordination' — over its three companies); the operating-company cards gain a decorative 'Explore ›'.",
+      "reason": "Owner photo rule: the best photographs, sparingly, at most one canopy here; the diagram's line restates the ownership summary's second point."
+    },
+    {
+      "routes": [
+        "/company-profile"
+      ],
+      "change": "Deviation: the sticky sub-nav is titled 'Profile' (the global nav's label) rather than the page name, and carries no anchor links: its Contents control (ProfileNav) lists the 17 sections. Each chapter shows a decorative two-digit number above its h2 (the contents sheet's numbering); most chapters set the heading beside the content (5/7 columns, as the reference FAQ and enquiry sections).",
+      "reason": "'Company profile' truncates beside Contents and the Enquire pill at 360px; seventeen anchors do not fit a bar; the numbers and the two columns make a 17-chapter page read as a report."
     }
   ]
 }
