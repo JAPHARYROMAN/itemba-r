@@ -88,15 +88,24 @@ export function Heading({ as: Tag, size, tone = 'default', id, className, childr
  * The words of a SplitHeadline, read as one sentence (`${lead} ${accent}`).
  * - `muted`: Apple's two-tone line, the accent in the secondary colour.
  * - `break`: the accent starts a new line (from `md`), same colour.
+ * - `muted-break`: both: two tones, on two lines from `md`.
  * - `inline`: plain text.
  * Place it inside a Heading.
  */
-export function HeadlineText({ headline, variant = 'muted' }: { headline: SplitHeadline; variant?: 'muted' | 'break' | 'inline' }) {
+export function HeadlineText({
+  headline,
+  variant = 'muted',
+}: {
+  headline: SplitHeadline;
+  variant?: 'muted' | 'break' | 'muted-break' | 'inline';
+}) {
   if (variant === 'inline') return <>{`${headline.lead} ${headline.accent}`}</>;
+  const muted = variant === 'muted' || variant === 'muted-break';
+  const broken = variant === 'break' || variant === 'muted-break';
   return (
     <>
       {headline.lead}{' '}
-      <span className={cn(variant === 'muted' && 'text-fg-muted', variant === 'break' && 'md:block')}>{headline.accent}</span>
+      <span className={cn(muted && 'text-fg-muted', broken && 'md:block')}>{headline.accent}</span>
     </>
   );
 }

@@ -147,6 +147,16 @@ html:has([data-subnav]) {
   scroll-padding-top: calc(var(--sticky-top, var(--nav-height)) + var(--subnav-height) + 8px);
 }
 
+/*
+ * The sub-nav carries the page's own Enquire pill (preset to that company,
+ * service or profile), so the global bar's pill steps aside, as Apple's
+ * global nav does beside a product page's Buy button. Without :has() both
+ * simply show.
+ */
+html:has([data-subnav]) .site-nav-cta {
+  display: none;
+}
+
 /* ── LEGACY: pre-rebuild page classes. Delete in WP3.1 with the old pages. ── */
 
 @layer utilities {

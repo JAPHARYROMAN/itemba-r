@@ -37,6 +37,12 @@ export type MediaEntry = {
   licenceUrl?: string;
   /** Only render when this flag is on. */
   requires?: BooleanFlagName;
+  /**
+   * Where the subject sits vertically. A crop to another aspect ratio keeps
+   * this edge (the centre when omitted), so a big sky or a signboard at the
+   * top of the frame survives a wide crop.
+   */
+  focus?: 'top' | 'bottom';
   note?: string;
 };
 
@@ -47,7 +53,16 @@ export const media = {
     alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
+    focus: 'top',
     note: 'Raw: images/itemba filling station 002.jpg (4000x3000). Plan lead for the home hero.',
+  },
+  'mpemba-dusk': {
+    src: '/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp',
+    alt: 'ITEMBA-MPEMBA at dusk: motorbikes and a minibus at the pump island under the lit 24-hour canopy',
+    entity: 'mwanjalisi',
+    provenance: 'own',
+    focus: 'top',
+    note: 'Raw: images/itemba-mpemba 017.jpg (top 4:3 of the portrait). Plan lead for the energy cinema tile.',
   },
   'mpemba-station-roadside': {
     src: '/images/fuel-stations/itemba-station-wide-yard.webp',
@@ -161,6 +176,8 @@ export const media = {
     alt: 'ITEMBA-HARDWARE storefront and construction supply stock managed by Westsides Company Ltd',
     entity: 'westsides',
     provenance: 'own',
+    focus: 'top',
+    note: 'Portrait 960x1280 under the WESTSIDES COMPANY LIMITED signboard: the plan lead for trade.',
   },
   'hardware-paint-stock': {
     src: '/images/hardware/itemba-hardware-paint-stock.webp',

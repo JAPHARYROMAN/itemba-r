@@ -242,7 +242,13 @@ export default function KitPage() {
               </Container>
               <Reveal>
                 <Container size="wide" className="mt-12">
-                  <Media media={tile.image} alt={tile.image.alt} sizes="(min-width: 1484px) 1440px, calc(100vw - 44px)" aspect="21/9" radius="tile" />
+                  <Media
+                    media={company.showcase[0]!}
+                    alt={company.showcase[0]!.alt}
+                    sizes="(min-width: 1484px) 1440px, calc(100vw - 44px)"
+                    aspect="21/9"
+                    radius="tile"
+                  />
                 </Container>
               </Reveal>
             </Section>

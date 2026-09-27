@@ -11,15 +11,18 @@ export type HomeStat = Gated & {
   label: string;
 };
 
+/**
+ * A company's tile on home. The legal name, accent and photographs come
+ * from the company itself (src/content/companies.ts), so the tile and the
+ * company page never drift apart.
+ */
 export type HomeCompanyTile = {
   companySlug: CompanySlug;
-  eyebrow: string;
+  /** The tile's headline: the company's public short name. */
   name: string;
+  /** The line under the headline: what the company does, in three words. */
+  eyebrow: string;
   summary: string;
-  brands: string[];
-  stat: { value: string; label: string };
-  image: MediaImage;
-  ctaLabel: string;
 };
 
 export type HomeSector = {
@@ -38,25 +41,10 @@ export const homeHero = {
     { label: 'Explore the group', href: '/companies' },
     { label: 'Start a business enquiry', href: '/partnerships' },
   ] satisfies LinkItem[],
-  image: mediaImage('mpemba-station-wide'),
+  image: mediaImage('mpemba-station-wide', {
+    alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
+  }),
 };
-
-/** Hero stat strip (legacy home). `requires` marks the unconfirmed divisions count. */
-export const homeHeroStats: HomeStat[] = [
-  { value: '3', label: 'Operating companies' },
-  { value: '6', label: 'Business sectors' },
-  { value: '5', label: 'Specialised divisions', requires: 'showDivisionsStat' },
-  { value: 'Songwe', label: 'Regional base' },
-];
-
-/** "By the numbers": static numerals, no count-up. */
-export const homeNumbers: HomeStat[] = [
-  { value: '3', label: 'Operating companies' },
-  { value: '6', label: 'Business sectors' },
-  { value: '50+', label: 'Stockists served' },
-  { value: '4', label: 'Countries of transit' },
-  { value: '5', label: 'Specialised divisions', requires: 'showDivisionsStat' },
-];
 
 export const homeStatement = {
   headline: { lead: 'One group. Three companies.', accent: 'The corridor that moves the south.' } satisfies SplitHeadline,
@@ -68,44 +56,32 @@ export const homeStatement = {
 export const homeCompanyTiles: HomeCompanyTile[] = [
   {
     companySlug: 'mwanjalisi-oil',
-    eyebrow: 'Energy · Fuel · Parking',
     name: 'Mwanjalisi Oil',
+    eyebrow: 'Energy · Fuel · Parking',
     summary:
       'ITEMBA-branded filling stations and UZUNGUNI PARKING YARD — diesel, petrol, kerosene and lubricants for the motorists, buses, trucks and fleets that keep the corridor moving.',
-    brands: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD'],
-    stat: { value: '2 live · 3 coming', label: 'Fuel stations' },
-    image: mediaImage('mpemba-truck-canopy', {
-      alt: 'Trucks refuelling under an ITEMBA filling station canopy managed by Mwanjalisi Oil',
-    }),
-    ctaLabel: 'Enter Mwanjalisi Oil',
   },
   {
     companySlug: 'westsides-company',
-    eyebrow: 'Trade · Distribution',
     name: 'Westsides',
+    eyebrow: 'Trade · Distribution',
     summary:
       'Wholesale beverages, ITEMBA-HARDWARE and UZUNGUNI INN — supplying 50+ stockists, bars, contractors, hospitality and cross-border bulk buyers across Songwe Region.',
-    brands: ['Wholesale beverages', 'ITEMBA-HARDWARE', 'UZUNGUNI INN'],
-    stat: { value: '50+', label: 'Stockists served' },
-    image: mediaImage('westsides-warehouse-stock', {
-      alt: 'Westsides Company Ltd wholesale beverage warehouse stock for distribution customers',
-    }),
-    ctaLabel: 'Enter Westsides',
   },
   {
     companySlug: 'itemba-enterprises',
-    eyebrow: 'Logistics · Cross-border transit',
     name: 'Itemba Enterprises',
+    eyebrow: 'Logistics · Cross-border transit',
     summary:
       'Dar es Salaam to the Southern Highlands and cross-border transit through Tunduma — moving goods for businesses across Songwe, Mbeya, Rukwa, Ruvuma and Iringa, and on to four neighbouring countries.',
-    brands: ['Dar → Highlands', 'Cross-border transit', 'Emerging businesses'],
-    stat: { value: '4 countries', label: 'Transit reach' },
-    image: mediaImage('logistics-tanker', {
-      alt: 'Itemba Logistics tanker supporting goods movement and cross-border transit',
-    }),
-    ctaLabel: 'Enter Itemba Enterprises',
   },
 ];
+
+/** The two links on every company tile: the company page and its enquiry form. */
+export const homeTileActions = {
+  explore: 'Explore',
+  enquire: 'Enquire',
+} as const;
 
 export const homeSectors = {
   eyebrow: 'What we do',
@@ -113,12 +89,22 @@ export const homeSectors = {
   body:
     'Start from the sector that matches your need — each opens onto a focused service, the company behind it, and the right way to make an enquiry.',
   action: 'Explore',
+  /** Before the company that runs a sector: "Run by Mwanjalisi Oil". */
+  runBy: 'Run by',
+  /** The last cell of the sectors grid: the group's routing promise. */
+  routing: {
+    title: 'Every sector. One front door.',
+    body: 'One group office routes every enquiry to the right company.',
+    link: { label: 'Start a business enquiry', href: '/partnerships' } satisfies LinkItem,
+  },
   items: [
     {
       icon: 'energy',
       name: 'Energy, Fuel & Parking',
       serviceSlug: 'fuel-and-lubricants',
-      image: mediaImage('mpemba-forecourt'),
+      image: mediaImage('mpemba-truck-canopy', {
+        alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy',
+      }),
     },
     {
       icon: 'trade',
@@ -176,11 +162,25 @@ export const homeCorridorMap = {
     "Stations, parking, hardware, hospitality and the group office all sit where Dar es Salaam's supply line meets the Tanzania-Zambia border. Explore the cluster.",
 };
 
+/** "By the numbers": static numerals, no count-up. `requires` marks the unconfirmed divisions count. */
+export const homeNumbers: HomeStat[] = [
+  { value: '3', label: 'Operating companies' },
+  { value: '6', label: 'Business sectors' },
+  { value: '50+', label: 'Stockists served' },
+  { value: '4', label: 'Countries of transit' },
+  { value: '5', label: 'Specialised divisions', requires: 'showDivisionsStat' },
+];
+
+export const homeNumbersCopy = {
+  title: 'Itemba Group, by the numbers.',
+} as const;
+
 export const homeInsights = {
   eyebrow: 'Business guides',
   title: 'Insights for suppliers, buyers & partners.',
   action: 'Read insight',
   count: 3,
+  all: { label: 'All insights', href: '/insights' } satisfies LinkItem,
 };
 
 export const homeClosing = {
@@ -190,5 +190,10 @@ export const homeClosing = {
     { label: 'Start a business enquiry', href: '/partnerships' },
     { label: 'Contact the group', href: '/contact' },
   ] satisfies LinkItem[],
+  /** Visible labels of the direct channels beside the Enquire pill. */
+  channels: {
+    whatsapp: 'WhatsApp',
+    call: 'Call',
+  },
   link: { label: 'Browse frequently asked questions', href: '/faq' } satisfies LinkItem,
 };

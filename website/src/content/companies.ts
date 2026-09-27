@@ -5,7 +5,27 @@
 import 'server-only';
 import { mediaFigure, mediaImage, type MediaFigure, type MediaImage } from './media';
 import { contentUpdatedAt } from './site';
-import type { CompanyId, CompanySlug, Faq, SectorVisual, SplitHeadline } from './types';
+import type { CompanyId, CompanySlug, ContentIcon, Faq, SectorVisual, SplitHeadline } from './types';
+
+/** Something the company does: a cell of the "What we do" bento on its page. */
+export type CompanyOffering = {
+  icon: ContentIcon;
+  title: string;
+  body: string;
+  /** The service page that covers it, when there is one. */
+  serviceSlug?: string;
+};
+
+/** A trading brand, branch or site the company runs ("Brands and sites"). */
+export type CompanySite = {
+  name: string;
+  /** What it is: "Filling station", "Tunduma Main Branch". */
+  kind: string;
+  detail: string;
+  /** A photograph of the site. Without one the card is typographic, drawn with `icon`. */
+  image?: MediaImage;
+  icon?: ContentIcon;
+};
 
 export type CompanyLegal = {
   tin: string;
@@ -35,6 +55,19 @@ export type Company = {
   highlights: readonly string[];
   image: MediaImage;
   gallery: readonly MediaFigure[];
+  /**
+   * The company's lead photographs, lead first: its home tile and its page
+   * hero. One wide photograph, or three that stand side by side (the lead
+   * alone on phones).
+   */
+  showcase: readonly MediaImage[];
+  /** One headline figure, for the "What we do" bento. */
+  keyStat: { value: string; label: string; note?: string };
+  /** Three things the company does ("What we do"). */
+  offerings: readonly CompanyOffering[];
+  sites: readonly CompanySite[];
+  /** Branch list, where the company runs branches (Westsides; company profile §7). */
+  branches?: readonly { name: string; detail: string }[];
   enquiryLabel: string;
   faqs: readonly Faq[];
   metaDescription: string;
@@ -88,6 +121,52 @@ export const companies: readonly Company[] = [
         alt: 'Truck parking at Uzunguni Parking Yard',
         caption: 'UZUNGUNI PARKING YARD supports corridor vehicle staging and parking.',
       }),
+    ],
+    showcase: [mediaImage('mpemba-dusk')],
+    keyStat: { value: '2', label: 'Operating ITEMBA stations', note: 'Three more locations upcoming' },
+    offerings: [
+      {
+        icon: 'energy',
+        title: 'Diesel, petrol and kerosene',
+        body: 'Retail fuel for motorists, buses, trucks and fleets at the ITEMBA filling stations.',
+        serviceSlug: 'fuel-and-lubricants',
+      },
+      {
+        icon: 'document',
+        title: 'Lubricants and fleet supply',
+        body: 'Lubricants at the forecourt, and business fuel enquiries for commercial fleets and transport operators.',
+      },
+      {
+        icon: 'map-pin',
+        title: 'Parking and vehicle staging',
+        body: 'Truck and logistics parking at UZUNGUNI PARKING YARD for corridor motorists and transport operators.',
+      },
+    ],
+    sites: [
+      {
+        name: 'ITEMBA-MPEMBA',
+        kind: 'Filling station',
+        detail: 'Near the Tunduma Bus Station, along the Tunduma-Ileje Highway.',
+        image: mediaImage('mpemba-truck-canopy', { alt: 'Trucks refuelling under the ITEMBA-MPEMBA canopy' }),
+      },
+      {
+        name: 'ITEMBA-UZUNGUNI',
+        kind: 'Filling station',
+        detail: 'Along the TANZAM Highway in Uzunguni Area, Mpemba.',
+        image: mediaImage('uzunguni-forecourt-wide'),
+      },
+      {
+        name: 'UZUNGUNI PARKING YARD',
+        kind: 'Parking and vehicle staging',
+        detail: 'Truck and vehicle parking in Uzunguni Area, Mpemba-Tunduma.',
+        image: mediaImage('parking-truck-line'),
+      },
+      {
+        name: 'Three upcoming ITEMBA stations',
+        kind: 'Planned expansion',
+        detail: 'Further stations will carry the ITEMBA-location name, under Mwanjalisi Oil management.',
+        icon: 'energy',
+      },
     ],
     enquiryLabel: 'Fuel supply enquiry',
     faqs: [
@@ -172,6 +251,60 @@ export const companies: readonly Company[] = [
         caption: 'UZUNGUNI INN adds lodging, restaurant, and bar services under Westsides.',
       }),
     ],
+    showcase: [
+      mediaImage('hardware-storefront', {
+        alt: 'The WESTSIDES COMPANY LIMITED signboard above the ITEMBA-HARDWARE storefront and its stock',
+      }),
+      mediaImage('westsides-order-truck'),
+      mediaImage('westsides-softdrinks'),
+    ],
+    keyStat: { value: '50+', label: 'Beverage stockists across Songwe Region' },
+    offerings: [
+      {
+        icon: 'trade',
+        title: 'Wholesale beverages',
+        body: 'Beer, spirits, soft drinks and bottled water in volume for stockists, bars, night clubs and bulk buyers.',
+        serviceSlug: 'trade-and-distribution',
+      },
+      {
+        icon: 'construction',
+        title: 'Building materials and tools',
+        body: 'Roofing sheets, wire nails, pipes, beams, paints and construction equipment through ITEMBA-HARDWARE.',
+        serviceSlug: 'construction-supplies-and-hardware',
+      },
+      {
+        icon: 'hospitality',
+        title: 'Hospitality',
+        body: 'Lodging, restaurant and bar services at UZUNGUNI INN in Mpemba-Tunduma.',
+        serviceSlug: 'hospitality-and-lodging',
+      },
+    ],
+    sites: [
+      {
+        name: 'Wholesale beverages',
+        kind: 'Mpemba, Mlowo and Sogea branches',
+        detail: 'Beverage distribution for more than 50 stockists, bars, night clubs and cross-border bulk buyers.',
+        image: mediaImage('westsides-warehouse-stock'),
+      },
+      {
+        name: 'ITEMBA-HARDWARE',
+        kind: 'Tunduma Main Branch',
+        detail: 'Hardware and construction equipment, supported by warehouses in Tunduma town and the Sogea area.',
+        image: mediaImage('hardware-paint-stock'),
+      },
+      {
+        name: 'UZUNGUNI INN',
+        kind: 'Lodging, restaurant and bar',
+        detail: 'Lodging, a restaurant and a bar for travellers and corridor traders in Mpemba-Tunduma.',
+        image: mediaImage('inn-bar-restaurant'),
+      },
+    ],
+    branches: [
+      { name: 'Mpemba Main Branch', detail: 'Beverage distribution in wholesale only, for Mpemba and the surrounding business area.' },
+      { name: 'Mlowo Branch', detail: 'Beverage distribution centre for Mlowo town and its neighbouring villages and wards.' },
+      { name: 'Sogea Branch', detail: 'Beverage distribution for Sogea and Tunduma town as a whole.' },
+      { name: 'Tunduma Main Branch', detail: 'Hardware and construction equipment sales across Songwe Region.' },
+    ],
     enquiryLabel: 'Trade supply enquiry',
     faqs: [
       {
@@ -250,6 +383,51 @@ export const companies: readonly Company[] = [
         alt: 'Itemba Logistics truck in a yard',
         caption: 'Yard-based movement support for local businesses and transit customers.',
       }),
+    ],
+    showcase: [
+      mediaImage('logistics-truck-front', { alt: 'An Itemba Logistics truck, seen from the front' }),
+      mediaImage('logistics-tanker'),
+      mediaImage('logistics-truck-yard'),
+    ],
+    keyStat: { value: '4', label: 'Countries of cross-border transit', note: 'Zambia, DRC, Zimbabwe and Malawi' },
+    offerings: [
+      {
+        icon: 'logistics',
+        title: 'Local logistics',
+        body: 'Goods movement from Dar es Salaam into Songwe, Mbeya, Rukwa, Ruvuma and Iringa.',
+        serviceSlug: 'logistics-and-cross-border-transit',
+      },
+      {
+        icon: 'globe',
+        title: 'Cross-border transit',
+        body: 'Transit to and from Zambia, DRC, Zimbabwe and Malawi through the Tunduma corridor.',
+      },
+      {
+        icon: 'realestate',
+        title: 'Real estate and property',
+        body: 'Property development and property-related services through Itemba Estate.',
+        serviceSlug: 'real-estate-and-property',
+      },
+    ],
+    sites: [
+      {
+        name: 'Itemba Logistics',
+        kind: 'Flagship',
+        detail: 'Dar es Salaam to the Southern Highlands, and cross-border transit through Tunduma.',
+        icon: 'logistics',
+      },
+      {
+        name: 'Itemba Estate',
+        kind: 'Real estate and property',
+        detail: 'Property development, real estate and property-related services.',
+        icon: 'realestate',
+      },
+      {
+        name: 'Emerging businesses',
+        kind: 'New opportunities',
+        detail: 'Emerging business activities, developed under the Itemba Enterprises structure.',
+        icon: 'arrow-up-right',
+      },
     ],
     enquiryLabel: 'Operations enquiry',
     faqs: [
@@ -334,8 +512,33 @@ export const companiesPage = {
 
 /** /companies/[slug] copy. */
 export const companyPageCopy = {
-  backLink: 'All companies',
-  servicesHeading: 'Services & market focus',
+  /** The sticky sub-nav: section anchors and the Enquire pill. */
+  nav: {
+    /** Follows the company's short name: "Mwanjalisi Oil sections". */
+    labelSuffix: 'sections',
+    whatWeDo: 'What we do',
+    sites: 'Brands & sites',
+    strengths: 'Strengths',
+    faq: 'FAQ',
+    enquire: 'Enquire',
+  },
+  hero: {
+    enquire: 'Enquire',
+    /** The company's ready-made profile PDF. */
+    download: 'Download the company profile',
+    downloadFormat: 'PDF',
+  },
+  glance: {
+    title: 'At a glance',
+    registeredName: 'Registered name',
+    incorporated: 'Incorporated',
+    status: 'Status',
+  },
+  servicesHeading: 'What we do',
+  /** The chevron link on an offering that has a service page. */
+  offeringAction: 'Learn more',
+  sitesHeading: 'Brands and sites',
+  branchesHeading: 'Branches',
   faqHeading: 'Frequently asked questions',
   strengthsHeading: 'Key strengths',
   sectorLabel: 'Sector',
@@ -343,4 +546,9 @@ export const companyPageCopy = {
     { label: 'Structure', value: 'Subsidiary of Itemba Group' },
     { label: 'Location', value: 'Songwe Region, Tanzania' },
   ],
+  enquire: {
+    eyebrow: 'Enquire',
+    /** The group's routing promise, beside the form. */
+    body: 'One group office routes every enquiry to the right company.',
+  },
 } as const;

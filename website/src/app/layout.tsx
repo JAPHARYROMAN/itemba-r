@@ -6,22 +6,22 @@ import '@/styles/print.css';
 import { shellCopy } from '@/content/nav';
 import { inter } from '@/design/fonts';
 import { surfaces } from '@/design/tokens';
-import JsonLd from '@/components/JsonLd';
 import Analytics from '@/components/Analytics';
 import ConversionTracker from '@/components/ConversionTracker';
 import QuickContact from '@/islands/QuickContact';
-import { absoluteUrl, companyProfiles, contact, site } from '@/lib/site';
+import { organizationJsonLd, websiteJsonLd } from '@/lib/jsonld';
+import { site } from '@/lib/site';
 import { pageMetadata } from '@/lib/seo';
 import { SiteFooter } from '@/shell/SiteFooter';
 import { SiteHeader } from '@/shell/SiteHeader';
 import { SkipLink } from '@/ui/a11y';
+import { StructuredData } from '@/ui/StructuredData';
 
 /**
- * Home's metadata, built by seo.ts. The home page is still the legacy client
- * page, which cannot export metadata until WP2.1, so the layout carries it:
- * this canonical and openGraph are what `/` renders. Every other page sets
- * its own canonical and a complete openGraph (a page's openGraph replaces the
- * layout's; it does not merge).
+ * Site-wide defaults, built by seo.ts. Every page, home included
+ * (src/app/page.tsx), sets its own canonical and a complete openGraph (a
+ * page's openGraph replaces the layout's; it does not merge), so these only
+ * reach a route that sets none.
  */
 const home = pageMetadata({
   title: { absolute: site.title },
@@ -74,51 +74,6 @@ export const viewport: Viewport = {
   colorScheme: 'light',
 };
 
-const organizationJsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'Organization',
-  '@id': `${site.url}/#organization`,
-  name: site.name,
-  url: site.url,
-  logo: absoluteUrl('/logo.png'),
-  email: contact.email,
-  telephone: [contact.primaryPhoneDisplay, contact.secondaryPhoneDisplay],
-  address: {
-    '@type': 'PostalAddress',
-    streetAddress: contact.headOffice,
-    addressLocality: contact.address.locality,
-    addressRegion: contact.address.region,
-    addressCountry: contact.address.countryCode,
-    postOfficeBoxNumber: contact.postal,
-  },
-  contactPoint: [
-    {
-      '@type': 'ContactPoint',
-      telephone: contact.primaryPhoneDisplay,
-      contactType: 'business enquiries',
-      areaServed: contact.areaServed,
-      availableLanguage: contact.availableLanguages,
-    },
-  ],
-  subOrganization: companyProfiles.map((company) => ({
-    '@type': 'Organization',
-    name: company.name,
-    url: absoluteUrl(`/companies/${company.slug}`),
-  })),
-};
-
-const websiteJsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'WebSite',
-  '@id': `${site.url}/#website`,
-  name: site.name,
-  url: site.url,
-  inLanguage: 'en',
-  publisher: {
-    '@id': `${site.url}/#organization`,
-  },
-};
-
 /**
  * The shell: skip link, global nav, <main> with no wrapper (the print rules
  * and the PDF script see the page content directly), footer, and the mobile
@@ -132,7 +87,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SkipLink>{shellCopy.skipLink}</SkipLink>
         <Analytics />
         <ConversionTracker />
-        <JsonLd data={[organizationJsonLd, websiteJsonLd]} />
+        {/* The group, declared once per page; every other entity refers to it by @id (src/lib/jsonld.ts). */}
+        <StructuredData data={[organizationJsonLd(), websiteJsonLd()]} />
         <SiteHeader />
         <main id="main-content" tabIndex={-1}>
           {children}

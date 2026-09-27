@@ -1,8 +1,13 @@
 import type { Graph, Thing, WithContext } from 'schema-dts';
 import JsonLd from '@/components/JsonLd';
 
-/** A top-level JSON-LD entity built by src/lib/jsonld.ts. */
-export type JsonLdEntity = WithContext<Exclude<Thing, string>> | Graph;
+/**
+ * A top-level JSON-LD entity built by src/lib/jsonld.ts. schema-dts lets
+ * some types (Organization, LocalBusiness…) also be a bare string, so
+ * `WithContext<Organization>` carries a `string & {…}` member; the builders
+ * only ever return objects, and this type accepts what they return.
+ */
+export type JsonLdEntity = WithContext<Thing> | Graph;
 
 /**
  * Renders JSON-LD entities through the frozen JsonLd component (which

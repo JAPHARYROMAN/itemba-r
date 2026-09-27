@@ -155,24 +155,55 @@ export type ChevronLinkProps = AnchorProps & {
   children: ReactNode;
 };
 
-/** "Learn more ›": a text link with a trailing chevron. */
+/**
+ * A plain-text label as [everything before the last word, the last word],
+ * so the last word and the chevron can be kept on one line. Labels that are
+ * not plain text come back whole, as `[null, children]`.
+ */
+function splitLastWord(children: ReactNode): [string | null, ReactNode] {
+  const parts = Array.isArray(children) ? children : [children];
+  if (!parts.every((part) => typeof part === 'string' || typeof part === 'number')) return [null, children];
+  const text = parts.join('');
+  const cut = text.lastIndexOf(' ');
+  return cut < 0 ? ['', text] : [text.slice(0, cut + 1), text.slice(cut + 1)];
+}
+
+/**
+ * "Learn more ›": a text link with a trailing chevron. When a long label
+ * wraps, its last word and the chevron move to the next line together, so
+ * the chevron never sits alone or drifts to the far edge.
+ */
 export function ChevronLink({ href, size = 'body', tone = 'accent', context, className, children, ...rest }: ChevronLinkProps) {
+  const [head, tail] = splitLastWord(children);
+  const hidden = context ? <VisuallyHidden> {context}</VisuallyHidden> : null;
+  const chevron = <Chevron className="ml-[0.3em] inline-block align-middle" />;
   return (
     <SmartLink
       href={href}
       className={cn(
-        'group inline-flex items-center gap-[0.3em] decoration-1 underline-offset-4 hover:underline',
+        'group inline-block decoration-1 underline-offset-4 hover:underline',
         chevronSizes[size],
         tone === 'accent' ? 'text-accent-fg' : 'text-fg',
         className,
       )}
       {...rest}
     >
-      <span>
-        {children}
-        {context ? <VisuallyHidden> {context}</VisuallyHidden> : null}
-      </span>
-      <Chevron />
+      {head === null ? (
+        <>
+          {children}
+          {hidden}
+          {chevron}
+        </>
+      ) : (
+        <>
+          {head}
+          <span className="whitespace-nowrap">
+            {tail}
+            {hidden}
+            {chevron}
+          </span>
+        </>
+      )}
     </SmartLink>
   );
 }
@@ -221,9 +252,12 @@ export function contactHref(target: ContactTarget): string {
 
 const contactIcons: Record<ContactKind, IconName> = { tel: 'phone', mailto: 'mail', whatsapp: 'whatsapp' };
 
+const chevronSizeFor: Record<ButtonSize, keyof typeof chevronSizes> = { sm: 'caption', md: 'body', lg: 'lede' };
+
 export type ContactLinkProps = ContactTarget & {
   /** `chevron` renders a chevron link; `plain` an unstyled anchor; the rest are pills. */
   appearance?: ButtonVariant | 'chevron' | 'plain';
+  /** Pill size; for `chevron`, the type size (sm: caption, md: body, lg: lede, to sit beside a pill of that size). */
   size?: ButtonSize;
   /** Show the contact icon (pills only). Defaults to true. */
   withIcon?: boolean;
@@ -251,7 +285,7 @@ export function ContactLink(props: ContactLinkProps) {
   }
   if (appearance === 'chevron') {
     return (
-      <ChevronLink href={href} className={className} {...common}>
+      <ChevronLink href={href} size={chevronSizeFor[size]} className={className} {...common}>
         {children}
       </ChevronLink>
     );

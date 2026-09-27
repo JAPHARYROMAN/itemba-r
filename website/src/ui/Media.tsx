@@ -56,6 +56,7 @@ export type MediaProps = {
   aspect?: MediaAspect;
   /** Fill the parent box instead (the parent sets the size and `position: relative`). */
   fill?: boolean;
+  /** Which part of the photo a crop keeps; defaults to the registry's `focus` (else the centre). */
   position?: keyof typeof positions;
   radius?: keyof typeof radii;
   /**
@@ -108,7 +109,7 @@ export function Media({
   priority = false,
   aspect,
   fill = false,
-  position = 'center',
+  position,
   radius = 'none',
   credit = 'below',
   quality,
@@ -118,6 +119,7 @@ export function Media({
   if (!entry) return null;
 
   const cropped = fill || aspect !== undefined;
+  const focus = position ?? entry.focus ?? 'center';
   const placeholder = priority ? 'empty' : 'blur';
   const image = cropped ? (
     <Image
@@ -129,7 +131,7 @@ export function Media({
       quality={quality}
       placeholder={placeholder}
       blurDataURL={entry.blurDataURL}
-      className={cn('object-cover', positions[position])}
+      className={cn('object-cover', positions[focus])}
     />
   ) : (
     <Image

@@ -22,6 +22,19 @@ export const headerLinks: LinkItem[] = [
 /** The persistent Enquire pill: the full enquiry router on /partnerships. */
 export const headerCta: LinkItem = { href: '/partnerships', label: 'Enquire' };
 
+/**
+ * The first steps of every breadcrumb trail (the visible trail and its
+ * BreadcrumbList): home, then the section index a page belongs to. A page
+ * appends itself: `[crumbs.home, crumbs.companies, { name, path }]`.
+ */
+export const crumbs = {
+  home: { name: 'Home', path: '/' },
+  companies: { name: 'Companies', path: '/companies' },
+  services: { name: 'Services', path: '/services' },
+  locations: { name: 'Locations', path: '/locations' },
+  insights: { name: 'Insights', path: '/insights' },
+} as const;
+
 /** Accessible name of every crest link to the home page. */
 export const brandLabel = 'Itemba Group home';
 

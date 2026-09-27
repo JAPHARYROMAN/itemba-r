@@ -81,7 +81,8 @@ export default function SiteNav({ links, cta, label, menuLabel, closeLabel, bran
       </ul>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 lg:ml-0">
-        <Link href={cta.href} className={buttonClasses({ size: 'sm' })}>
+        {/* site-nav-cta: steps aside on pages whose sub-nav carries its own Enquire pill (utilities.css). */}
+        <Link href={cta.href} className={cn(buttonClasses({ size: 'sm' }), 'site-nav-cta')}>
           {cta.label}
         </Link>
         <button

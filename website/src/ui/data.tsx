@@ -27,14 +27,24 @@ export type StatProps = {
   note?: ReactNode;
   /** `display` (40–72px) by default; `h1` for denser rows. */
   size?: 'display' | 'h1';
+  /** `accent` sets the numeral in the tone's text-safe accent (a company's figure on its page). */
+  tone?: 'default' | 'accent';
   className?: string;
 };
 
-export function Stat({ value, label, note, size = 'display', className }: StatProps) {
+export function Stat({ value, label, note, size = 'display', tone = 'default', className }: StatProps) {
   return (
     <div className={cn('flex min-w-0 flex-col', className)}>
       <dt className="order-2 mt-2 text-body text-fg-muted">{label}</dt>
-      <dd className={cn('order-1 font-semibold tabular-nums text-fg', size === 'display' ? 'text-display' : 'text-h1')}>{value}</dd>
+      <dd
+        className={cn(
+          'order-1 font-semibold tabular-nums',
+          tone === 'accent' ? 'text-accent-fg' : 'text-fg',
+          size === 'display' ? 'text-display' : 'text-h1',
+        )}
+      >
+        {value}
+      </dd>
       {note ? <dd className="order-3 mt-1 text-caption text-fg-muted">{note}</dd> : null}
     </div>
   );

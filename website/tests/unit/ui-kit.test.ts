@@ -109,9 +109,17 @@ describe('actions', () => {
 
   it('chevron links add screen-reader context and a decorative chevron', () => {
     const html = render(h(ChevronLink, { href: '/about', context: 'about the group', children: 'Learn more' }));
-    expect(html).toContain('Learn more<span class="sr-only"> about the group</span>');
+    expect(html).toContain('Learn <span class="whitespace-nowrap">more<span class="sr-only"> about the group</span>');
     expect(html).toMatch(/<svg[^>]*aria-hidden="true"/);
     expect(html).toContain('text-accent-fg');
+  });
+
+  it('chevron links keep the last word and the chevron on one line', () => {
+    const html = render(h(ChevronLink, { href: '/locations/songwe-tunduma', children: 'View the location profile' }));
+    expect(html).toMatch(/View the location <span class="whitespace-nowrap">profile<svg[^>]*aria-hidden="true"/);
+    // A label assembled from several strings is still split at its last word.
+    const parts = render(h(ChevronLink, { href: '/x.pdf', children: ['Download the profile', ' (', 'PDF', ')'] }));
+    expect(parts).toMatch(/Download the profile <span class="whitespace-nowrap">\(PDF\)<svg/);
   });
 });
 

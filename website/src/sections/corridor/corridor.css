@@ -166,12 +166,13 @@
   stroke-width: 3;
 }
 
-/* Labels wear a halo of the surface, so the route and the border line never run through them. */
+/* Labels wear a halo of the surface, so the route and the border line never run through them
+   (wide enough to clear the dashes either side of "Tunduma border", which sits on the line). */
 .corridor-route__node text,
 .corridor-route__side {
   paint-order: stroke;
   stroke: rgb(var(--surface));
-  stroke-width: 5px;
+  stroke-width: 12px;
   stroke-linejoin: round;
 }
 
