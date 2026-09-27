@@ -1,10 +1,13 @@
 /**
- * Company profile §5: products and services by brand.
+ * Company profile §5: products and services by brand, each with the company
+ * that runs it (`companyId`, for its accent on screen).
  */
 import 'server-only';
+import type { CompanyId } from '../types';
 
 export const profileProductsServices = [
   {
+    companyId: 'westsides' as CompanyId,
     eyebrow: 'Westsides Company Ltd',
     title: 'Wholesale Beverage Distribution',
     summary:
@@ -17,6 +20,7 @@ export const profileProductsServices = [
     ],
   },
   {
+    companyId: 'westsides' as CompanyId,
     eyebrow: 'Westsides Company Ltd',
     title: 'ITEMBA-HARDWARE',
     summary:
@@ -34,6 +38,7 @@ export const profileProductsServices = [
     ],
   },
   {
+    companyId: 'westsides' as CompanyId,
     eyebrow: 'Westsides Company Ltd',
     title: 'UZUNGUNI INN',
     summary:
@@ -41,6 +46,7 @@ export const profileProductsServices = [
     offerings: ['Lodging', 'Restaurant services', 'Bar services', 'Business guest support'],
   },
   {
+    companyId: 'mwanjalisi' as CompanyId,
     eyebrow: 'Mwanjalisi Oil Co Ltd',
     title: 'UZUNGUNI PARKING YARD',
     summary:
@@ -48,6 +54,7 @@ export const profileProductsServices = [
     offerings: ['Vehicle parking', 'Truck and logistics parking', 'Corridor vehicle staging', 'Parking facility enquiries'],
   },
   {
+    companyId: 'mwanjalisi' as CompanyId,
     eyebrow: 'Mwanjalisi Oil Co Ltd',
     title: 'Fuel and Lubricants',
     summary:
@@ -55,6 +62,7 @@ export const profileProductsServices = [
     offerings: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'Diesel', 'Petrol', 'Kerosene', 'Lubricants', 'Business fuel enquiries'],
   },
   {
+    companyId: 'enterprises' as CompanyId,
     eyebrow: 'Itemba Enterprises Co Ltd',
     title: 'Logistics and Emerging Businesses',
     summary:

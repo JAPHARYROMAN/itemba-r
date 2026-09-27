@@ -14,6 +14,7 @@ export const profileMeta = {
   ogDescription: 'A full company profile and capability statement for Itemba Group in Songwe Region, Tanzania.',
 } as const;
 
+/** "At a glance" under the hero: the facts a bank or partner reads first. */
 export const coverFacts = [
   { label: 'Group', value: 'Itemba Group' },
   { label: 'Head Office', value: 'Mpemba-Tunduma, Songwe Region' },
@@ -21,20 +22,21 @@ export const coverFacts = [
   { label: 'Sectors', value: 'Fuel, parking, wholesale beverages, hardware, lodging, restaurant, bar, and logistics' },
 ];
 
+/**
+ * The cover: who the document is for, the title as a two-tone line, one
+ * sentence on the group (the sectors follow in "At a glance"), the two
+ * actions (the group profile as a PDF, and the enquiry form further down
+ * the page) and the cover photograph: ITEMBA-MPEMBA seen from the highway,
+ * a 2400px landscape master.
+ */
 export const profileCover = {
-  eyebrow: 'Company Profile and Capability Statement',
+  eyebrow: 'Prepared for institutional review',
   headline: { lead: 'Itemba Group', accent: 'Company Profile' } satisfies SplitHeadline,
-  lede:
-    'A Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating through three independent companies across energy, trade, logistics, construction supply, hospitality, real estate, and related services.',
+  lede: 'A Tanzanian holding group headquartered in Mpemba-Tunduma, Songwe Region, operating through three independent companies.',
+  downloadLabel: 'Download PDF',
   enquireLabel: 'Send enquiry',
-  image: mediaImage('mpemba-station-wide', {
-    alt: 'ITEMBA-MPEMBA filling station forecourt representing Itemba Group operations',
-  }),
-  imageCaption: 'Prepared for customers, suppliers, partners, and banking review.',
-  downloads: {
-    heading: 'Download PDF',
-    note: 'Ready-made snapshots — use Print above for the live, current page.',
-  },
+  image: mediaImage('mpemba-station-roadside'),
+  glanceTitle: 'At a glance',
 } as const;
 
 /** Public URL of a profile's ready-made PDF (committed under public/downloads). */
