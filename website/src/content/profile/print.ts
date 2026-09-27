@@ -76,6 +76,17 @@ export const printProfileOptions = [
   },
 ] as const;
 
+/**
+ * The print picker's labels (src/islands/PrintProfileButton.tsx). The island
+ * keeps these as its defaults, so the page may pass them or omit them.
+ */
+export const printButtonCopy = {
+  label: 'Select profile to print',
+  action: 'Print selected profile',
+  /** Shown on the button while the chosen profile's photos load (4 s at most). */
+  preparing: 'Preparing profile…',
+} as const;
+
 export const groupPrintProfile: PrintProfile = {
   id: 'group',
   title: 'Itemba Group Company Profile',

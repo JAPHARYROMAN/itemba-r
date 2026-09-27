@@ -13,11 +13,27 @@ import { notFound } from 'next/navigation';
 import { Fragment } from 'react';
 import { companies } from '@/content/companies';
 import { withFlags } from '@/content/flags';
-import { homeClosing, homeCompanyTiles, homeCorridor, homeHero, homeNumbers, homeSectors, homeStatement } from '@/content/home';
+import {
+  homeClosing,
+  homeCompanyTiles,
+  homeCorridor,
+  homeCorridorMap,
+  homeHero,
+  homeNumbers,
+  homeSectors,
+  homeStatement,
+} from '@/content/home';
+import { enquiryPrompts } from '@/content/enquiry';
 import { insightArticles } from '@/content/insights';
 import { mediaImage } from '@/content/media';
+import { printButtonCopy, printProfileOptions, profileNavCopy } from '@/content/profile';
 import { serviceAreas } from '@/content/services';
+import EnquiryRouter from '@/islands/EnquiryRouter';
+import PrintProfileButton from '@/islands/PrintProfileButton';
+import ProfileNav from '@/islands/ProfileNav';
 import { pageMetadata } from '@/lib/seo';
+import { CorridorMap } from '@/sections/corridor/CorridorMap';
+import { CorridorStory } from '@/sections/corridor/CorridorStory';
 import {
   Bento,
   BentoCell,
@@ -58,6 +74,20 @@ export const metadata: Metadata = pageMetadata({
   noindex: true,
 });
 
+/** The kit's own sections, for the ProfileNav demo in its sub-nav (scrollspy and contents sheet). */
+const kitOutline = [
+  { id: 'type', title: 'Type scale' },
+  { id: 'actions', title: 'Actions' },
+  { id: 'companies', title: 'Company tiles' },
+  { id: 'bento', title: 'Bento' },
+  { id: 'data', title: 'Data display' },
+  { id: 'media', title: 'Cards and media' },
+  { id: 'enquiry', title: 'Enquiry form' },
+  { id: 'corridor', title: 'Corridor story' },
+  { id: 'sites', title: 'Corridor sites' },
+  { id: 'print', title: 'Print picker' },
+] as const;
+
 const companyPaths: Record<string, string> = Object.fromEntries(companies.map((c) => [c.slug, `/companies/${c.slug}`]));
 
 export default function KitPage() {
@@ -82,7 +112,9 @@ export default function KitPage() {
           { href: '#media', label: 'Media' },
         ]}
         cta={{ href: '/partnerships', label: 'Enquire' }}
-      />
+      >
+        <ProfileNav outline={kitOutline} labels={profileNavCopy} />
+      </SubNav>
 
       <PageHero
         breadcrumbs={
@@ -329,6 +361,68 @@ export default function KitPage() {
               ))}
             </ul>
           </div>
+        </Container>
+      </Section>
+
+      <Section id="enquiry" tone="alt" labelledBy="enquiry-title">
+        <Container>
+          <Eyebrow>Islands</Eyebrow>
+          <Heading as="h2" id="enquiry-title" className="mt-2">
+            The enquiry form
+          </Heading>
+          <div className="mt-12 grid items-start gap-10 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            <EnquiryRouter headingLevel={3} tone="light" />
+            <EnquiryRouter
+              compact
+              headingLevel={3}
+              defaultIntentId="westsides"
+              title={enquiryPrompts.service.title}
+              description={enquiryPrompts.service.description}
+            />
+          </div>
+        </Container>
+      </Section>
+
+      <Section id="corridor" labelledBy="corridor-title">
+        <Container>
+          <div className="mx-auto max-w-prose text-center">
+            <Eyebrow>{homeCorridor.eyebrow}</Eyebrow>
+            <Heading as="h2" id="corridor-title" size="display" className="mt-2">
+              {homeCorridor.title}
+            </Heading>
+            <Lede tone="muted" className="mx-auto mt-6 max-w-[40rem]">
+              {homeCorridor.body}
+            </Lede>
+          </div>
+          <CorridorStory labelledBy="corridor-title" className="mt-16 md:mt-24" />
+        </Container>
+      </Section>
+
+      <Section id="sites" tone="alt" labelledBy="sites-title">
+        <Container>
+          <Eyebrow>{homeCorridorMap.eyebrow}</Eyebrow>
+          <Heading as="h2" id="sites-title" className="mt-2">
+            {homeCorridorMap.title}
+          </Heading>
+          <Lede tone="muted" className="mt-5 max-w-[40rem]">
+            {homeCorridorMap.body}
+          </Lede>
+          <CorridorMap labelledBy="sites-title" className="mt-12" />
+        </Container>
+      </Section>
+
+      <Section id="print" labelledBy="print-title">
+        <Container>
+          <Heading as="h2" id="print-title" size="h3">
+            Print picker
+          </Heading>
+          <PrintProfileButton
+            className="mt-8"
+            profiles={printProfileOptions}
+            label={printButtonCopy.label}
+            actionLabel={printButtonCopy.action}
+            preparingLabel={printButtonCopy.preparing}
+          />
         </Container>
       </Section>
 

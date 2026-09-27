@@ -11,7 +11,12 @@
  *     prints the group profile;
  *   - on screen, the print documents stay hidden;
  *   - any other page prints its content without the nav, footer or
- *     quick-contact bar.
+ *     quick-contact bar;
+ *   - the print photos (~11 MB) are lazy: a screen visit downloads none of
+ *     them, and picking a profile loads that document's photos, both the way
+ *     the PDF script does it (its exact image steps, through the optimiser at
+ *     w=828 q=75) and through PrintProfileButton, which waits for them before
+ *     it calls window.print().
  *
  * The print rules must not depend on the DOM shape inside <main>, which is
  * why they are checked in a real layout rather than against selectors.
@@ -123,5 +128,124 @@ test.describe('contract › print', { tag: '@contract' }, () => {
     expect(state.mainShown, '<main> prints').toBe(true);
     expect(state.shownOutsideRoot.length, 'the page content prints').toBeGreaterThan(0);
     expect(state.chrome).toEqual(noChrome);
+  });
+
+  test('/company-profile on screen requests none of the print photos', async ({ page }) => {
+    const requested: string[] = [];
+    page.on('request', (request) => requested.push(new URL(request.url()).pathname));
+    await openProfilePage(page);
+    // Walk the whole page, so anything lazy near the viewport would have loaded.
+    await page.evaluate(async () => {
+      for (let y = 0; y < document.documentElement.scrollHeight; y += window.innerHeight) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    });
+    await page.waitForLoadState('networkidle');
+
+    const printImages = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLImageElement>('.print-document-root img')].map((img) => ({
+        src: img.getAttribute('src') ?? '',
+        loading: img.getAttribute('loading'),
+      })),
+    );
+    expect(printImages.length, 'the print documents have photos').toBeGreaterThan(8);
+    for (const image of printImages) expect(image.loading, image.src).toBe('lazy');
+    // A photo the screen view shows itself (as a plain <img>) may load; one only the print documents use must not.
+    const onScreen = new Set(
+      await page.evaluate(() =>
+        [...document.querySelectorAll('img')].filter((img) => !img.closest('.print-document-root')).map((img) => img.getAttribute('src') ?? ''),
+      ),
+    );
+    const printOnly = [...new Set(printImages.map((i) => i.src))].filter((src) => !onScreen.has(src));
+    expect(printOnly.length, 'photos only the print documents use').toBeGreaterThan(4);
+    const leaked = printOnly.filter((src) => requested.includes(src));
+    expect(leaked, 'print-only photos requested by a screen visit').toEqual([]);
+  });
+
+  for (const id of ['group', 'mwanjalisi'] as const) {
+    test(`/company-profile: the PDF script's image steps load every ${id} photo`, async ({ page }, testInfo) => {
+      // The PDF script runs one desktop Chromium, and these steps push a
+      // dozen photos through the optimiser: once is enough, and running them
+      // in both projects starves the server for the other suites.
+      test.skip(testInfo.project.name !== 'desktop', 'the PDF pipeline is viewport-independent; desktop only');
+      const responses = new Map<string, number>();
+      page.on('response', (response) => responses.set(response.url(), response.status()));
+      await openProfilePage(page);
+      await page.emulateMedia({ media: 'print' });
+      // scripts/generate-profile-pdfs.mjs (frozen), verbatim apart from the listener.
+      await page.evaluate((profileId) => {
+        document.body.dataset.printProfile = profileId;
+        document.body.classList.add('printing-company-profile');
+        for (const doc of document.querySelectorAll('.print-profile-document')) {
+          const active = doc.getAttribute('data-profile') === profileId;
+          for (const img of doc.querySelectorAll('img')) {
+            if (!active) {
+              img.removeAttribute('src');
+              img.removeAttribute('srcset');
+              continue;
+            }
+            const src = img.getAttribute('src') || '';
+            if (src.startsWith('/images/')) {
+              img.setAttribute('src', `/_next/image?url=${encodeURIComponent(src)}&w=828&q=75`);
+            }
+          }
+        }
+      }, id);
+
+      // The script then waits for the images: every one must load for real.
+      const selector = `.print-profile-document[data-profile="${id}"] img`;
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              (sel) => [...document.querySelectorAll<HTMLImageElement>(sel)].filter((img) => !(img.complete && img.naturalWidth > 0)).length,
+              selector,
+            ),
+          { timeout: 30_000, message: `${id}: images still loading or broken` },
+        )
+        .toBe(0);
+      const eager = await page.evaluate((sel) => [...document.querySelectorAll<HTMLImageElement>(sel)].every((img) => img.loading === 'eager'), selector);
+      expect(eager, 'PrintAssetLoader switched the chosen document to eager loading').toBe(true);
+      // The photos came through the optimiser at the script's pinned size and quality.
+      const photos = await page.evaluate(
+        (sel) => [...document.querySelectorAll<HTMLImageElement>(sel)].map((img) => img.src).filter((src) => src.includes('/_next/image?')),
+        selector,
+      );
+      expect(photos.length, 'the chosen document has optimised photos').toBeGreaterThan(2);
+      for (const src of photos) {
+        expect(src).toMatch(/&w=828&q=75$/);
+        expect(responses.get(src), src).toBe(200);
+      }
+    });
+  }
+
+  test("/company-profile: the print button waits for the chosen profile's photos before printing", async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __printCalls: { profile: string | undefined; printing: boolean; pending: number }[] };
+      w.__printCalls = [];
+      window.print = () => {
+        const id = document.body.dataset.printProfile;
+        const images = [...document.querySelectorAll<HTMLImageElement>(`.print-profile-document[data-profile="${id}"] img`)];
+        w.__printCalls.push({
+          profile: id,
+          printing: document.body.classList.contains('printing-company-profile'),
+          pending: images.filter((img) => !(img.complete && img.naturalWidth > 0)).length,
+        });
+      };
+    });
+    await openProfilePage(page);
+    const picker = page.locator('.print-hidden').filter({ has: page.locator('select') }).first();
+    await picker.locator('select').selectOption('westsides');
+    await picker.getByRole('button').click();
+
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __printCalls: unknown[] }).__printCalls.length), { timeout: 10_000 }).toBe(1);
+    const [call] = await page.evaluate(() => (window as unknown as { __printCalls: unknown[] }).__printCalls);
+    expect(call).toEqual({ profile: 'westsides', printing: true, pending: 0 });
+    // Only the chosen profile was fetched.
+    const others = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLImageElement>('.print-profile-document:not([data-profile="westsides"]) img[src^="/images/"]')].filter((img) => img.complete && img.naturalWidth > 0).length,
+    );
+    expect(others, 'photos of the other profiles loaded').toBe(0);
   });
 });

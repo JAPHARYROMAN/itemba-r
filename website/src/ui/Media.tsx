@@ -64,7 +64,8 @@ export type MediaProps = {
    * renders <MediaCredit> itself (Figure does).
    */
   credit?: 'below' | 'overlay' | 'none';
-  quality?: number;
+  /** Encoder quality: one of next.config.ts `images.qualities` (75 when omitted). */
+  quality?: 60 | 75 | 85;
   className?: string;
 };
 

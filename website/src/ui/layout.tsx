@@ -100,7 +100,11 @@ export function Section({
   if (inset) {
     return (
       <Tag id={id} {...a11y} data-accent={accent} className="px-gutter py-1.5 md:py-2">
-        <div data-tone={tone} className={cn('mx-auto max-w-wide overflow-hidden rounded-tile', sectionSpace[space], className)}>
+        {/* overflow: clip, not hidden, where supported: a clip is not a scroll container, so sticky children and scroll-driven (view()) animations inside the tile still follow the page. */}
+        <div
+          data-tone={tone}
+          className={cn('mx-auto max-w-wide overflow-hidden rounded-tile supports-[overflow:clip]:overflow-clip', sectionSpace[space], className)}
+        >
           {children}
         </div>
       </Tag>

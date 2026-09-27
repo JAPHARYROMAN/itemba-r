@@ -44,6 +44,11 @@ const config = [
     files: ['**/*.{js,jsx,mjs,cjs,ts,tsx}'],
     rules: {
       ...jsxA11y.flatConfigs.recommended.rules,
+      // Tailwind's preflight sets list-style: none on every list, and WebKit
+      // then stops exposing a list outside <nav> as a list. role="list" puts
+      // the semantics back where the count and order carry meaning (the
+      // corridor stops and sites, the profile contents), so it is allowed.
+      'jsx-a11y/no-redundant-roles': ['error', { ul: ['list'], ol: ['list'] }],
     },
   },
   ...tailwind.configs['flat/recommended'],

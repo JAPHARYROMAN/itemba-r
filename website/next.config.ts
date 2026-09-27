@@ -11,6 +11,15 @@ const config: NextConfig = {
   },
   images: {
     formats: ['image/avif', 'image/webp'],
+    // Pinned, not left to the defaults: scripts/generate-profile-pdfs.mjs
+    // (frozen) rewrites print photos to /_next/image?…&w=828&q=75, so 828
+    // must stay a device size and 75 an allowed quality through any upgrade
+    // (Next 16 narrows the default qualities to [75]). The sizes are Next
+    // 15's defaults; <Media quality> may use any of the three qualities.
+    // tests/unit/islands.test.ts checks the pins.
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    qualities: [60, 75, 85],
   },
   async headers() {
     return [

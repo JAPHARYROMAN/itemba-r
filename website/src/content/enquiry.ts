@@ -12,6 +12,8 @@ export type EnquiryIntent = {
   id: IntentId;
   label: string;
   shortLabel: string;
+  /** The option's name in the form's intent control: the group office or the company it routes to. */
+  segmentLabel: string;
   subject: string;
   routeTo: string;
   summary: string;
@@ -22,6 +24,7 @@ export const enquiryIntents: readonly [EnquiryIntent, ...EnquiryIntent[]] = [
     id: 'general',
     label: 'General business enquiry',
     shortLabel: 'General',
+    segmentLabel: 'General',
     subject: 'General business enquiry',
     routeTo: 'Itemba Group office',
     summary: 'Partnerships, group information, supplier introductions, and other business matters.',
@@ -30,6 +33,7 @@ export const enquiryIntents: readonly [EnquiryIntent, ...EnquiryIntent[]] = [
     id: 'mwanjalisi',
     label: 'Fuel and petroleum supply',
     shortLabel: 'Fuel',
+    segmentLabel: 'Mwanjalisi Oil',
     subject: 'Mwanjalisi Oil fuel supply enquiry',
     routeTo: 'Mwanjalisi Oil Co Ltd',
     summary: 'Diesel, petrol, kerosene, lubricants, UZUNGUNI PARKING YARD, and business fuel supply enquiries.',
@@ -38,6 +42,7 @@ export const enquiryIntents: readonly [EnquiryIntent, ...EnquiryIntent[]] = [
     id: 'westsides',
     label: 'Trade and distribution',
     shortLabel: 'Trade',
+    segmentLabel: 'Westsides',
     subject: 'Westsides Company trade supply enquiry',
     routeTo: 'Westsides Company Ltd',
     summary: 'Stockists, bars, night clubs, beverages, building materials, tools, electrical supplies, and bulk purchase enquiries.',
@@ -46,6 +51,7 @@ export const enquiryIntents: readonly [EnquiryIntent, ...EnquiryIntent[]] = [
     id: 'enterprises',
     label: 'Logistics and operations',
     shortLabel: 'Logistics',
+    segmentLabel: 'Itemba Enterprises',
     subject: 'Itemba Enterprises operations enquiry',
     routeTo: 'Itemba Enterprises Co Ltd',
     summary: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, and emerging-business enquiries.',
@@ -63,16 +69,27 @@ export const businessEnquirySubject = 'Business enquiry';
 
 /** The enquiry form's fixed copy. */
 export const enquiryFormCopy = {
-  eyebrow: 'Business Enquiry',
+  eyebrow: 'Business enquiry',
   title: 'Route an enquiry',
   description: 'Choose the area that best matches your enquiry and contact the right team with a prepared message.',
   intentLegend: 'Enquiry type',
   routedToPrefix: 'Routed to',
+  /** Appended to the labels of the fields a visitor may leave empty. */
+  optional: 'optional',
   fields: {
     name: { label: 'Name', placeholder: 'Your name' },
     organization: { label: 'Organisation', placeholder: 'Company or organisation' },
-    contactMethod: { label: 'Preferred contact', placeholder: 'Phone, email, or WhatsApp number' },
-    message: { label: 'Message', placeholder: 'Briefly describe what you need' },
+    contactMethod: {
+      label: 'Preferred contact',
+      placeholder: 'Phone, email, or WhatsApp number',
+      /** Under the field when it is left blank. */
+      error: 'Add a phone number, email or WhatsApp number.',
+    },
+    message: {
+      label: 'Message',
+      placeholder: 'Briefly describe what you need',
+      error: 'Add a short message.',
+    },
   },
   submit: 'Submit enquiry',
   submitting: 'Submitting enquiry...',
@@ -81,6 +98,8 @@ export const enquiryFormCopy = {
     email: 'Email',
     call: 'Call',
   },
+  /** Lead-in to the WhatsApp, email and call fallbacks under the form. */
+  fallbackLead: 'Or reach the group office directly.',
   messages: {
     required: 'Preferred contact and message are required.',
     failed: 'The enquiry could not be submitted.',

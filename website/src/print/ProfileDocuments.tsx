@@ -2,6 +2,7 @@
 import { contact } from '@/content/contact';
 import { legalCompanyProfiles, printableProfiles, printCopy, type PrintSection } from '@/content/profile';
 import { site } from '@/content/site';
+import PrintAssetLoader from '@/islands/PrintAssetLoader';
 
 /**
  * The four print documents (group + one per company) rendered, hidden on
@@ -14,16 +15,23 @@ import { site } from '@/content/site';
  * <img src="/images/..."> photos are load-bearing. Keep them. The cover
  * title is a styled <p> (.print-cover-title), so the hidden documents add no
  * h1 to the page.
+ *
+ * Every image is `loading="lazy"`: the documents are display:none on screen,
+ * so a screen visitor downloads none of the ~11 MB of print photos.
+ * PrintAssetLoader switches the chosen document's images to eager when a
+ * profile is picked for printing (by the print button or the PDF script),
+ * and PrintProfileButton waits for them before it prints.
  */
 export default function ProfileDocuments() {
   return (
     <div className="print-document-root" aria-hidden="true">
+      <PrintAssetLoader />
       {printableProfiles.map((profile) => (
         <article key={profile.id} className="print-profile-document" data-profile={profile.id}>
           <header className="print-letterhead">
             <div className="print-letterhead-brand">
               <div className="print-logo-mark">
-                <img src="/logo-print.png" alt={printCopy.logoAlt} />
+                <img loading="lazy" src="/logo-print.png" alt={printCopy.logoAlt} />
                 <span>{printCopy.established}</span>
               </div>
               <div>
@@ -43,7 +51,7 @@ export default function ProfileDocuments() {
             <div>
               <div className="print-cover-identity">
                 <div className="print-cover-logo">
-                  <img src="/logo-print.png" alt={printCopy.logoAlt} />
+                  <img loading="lazy" src="/logo-print.png" alt={printCopy.logoAlt} />
                   <span>{printCopy.established}</span>
                 </div>
                 <span>{site.domain}</span>
@@ -52,7 +60,7 @@ export default function ProfileDocuments() {
               <p className="print-cover-title">{profile.title}</p>
               <p className="print-subtitle">{profile.subtitle}</p>
             </div>
-            <img src={profile.coverImage.src} alt={profile.coverImage.alt} />
+            <img loading="lazy" src={profile.coverImage.src} alt={profile.coverImage.alt} />
           </section>
 
           <section className="print-section print-section-tight">
@@ -108,7 +116,7 @@ export default function ProfileDocuments() {
             <div className="print-image-grid">
               {profile.images.map((image) => (
                 <figure key={image.src}>
-                  <img src={image.src} alt={image.alt} />
+                  <img loading="lazy" src={image.src} alt={image.alt} />
                   <figcaption>{image.caption}</figcaption>
                 </figure>
               ))}

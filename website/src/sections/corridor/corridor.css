@@ -1,0 +1,422 @@
+/*
+ * The corridor graphics (src/sections/corridor): the hub site map and the
+ * corridor story. Colours come from the tone variables, so both work on the
+ * light, alt and cinema tiles; the company colours are the fixed brand
+ * swatches, and the group office is always group gold.
+ *
+ * Neither needs JavaScript. The drawings are aria-hidden; the ordered lists
+ * beside them are the content.
+ */
+
+:is(.corridor-map, .corridor-story) [data-manager='mwanjalisi'] {
+  --manager: var(--color-mwanjalisi);
+}
+
+:is(.corridor-map, .corridor-story) [data-manager='westsides'] {
+  --manager: var(--color-westsides);
+}
+
+:is(.corridor-map, .corridor-story) [data-manager='group'] {
+  --manager: var(--color-gold);
+}
+
+/* ── Hub site map ────────────────────────────────────────────────────── */
+
+.corridor-map__svg {
+  overflow: visible;
+}
+
+.corridor-map__spine {
+  stroke: rgb(var(--accent) / 0.6);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.corridor-map__terminus {
+  fill: rgb(var(--fg-muted));
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.corridor-map__hub {
+  fill: rgb(var(--accent) / 0.1);
+  stroke: rgb(var(--accent));
+  stroke-width: 1.5;
+}
+
+.corridor-map__hub-label {
+  fill: rgb(var(--fg));
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.corridor-map__spoke {
+  stroke: rgb(var(--manager) / calc(0.35 + var(--site-on, 0) * 0.65));
+  stroke-width: calc(1.25px + var(--site-on, 0) * 1px);
+  stroke-linecap: round;
+  transition:
+    stroke var(--duration-fast) var(--ease),
+    stroke-width var(--duration-fast) var(--ease);
+}
+
+.corridor-map__pin {
+  transform: scale(calc(1 + var(--site-on, 0) * 0.16));
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: calc(1 - var(--site-dim, 0) * (1 - var(--site-on, 0)) * 0.5);
+  transition:
+    transform var(--duration-base) var(--ease-emphasized),
+    opacity var(--duration-fast) var(--ease);
+}
+
+.corridor-map__pin circle {
+  fill: rgb(var(--surface));
+  stroke: rgb(var(--manager));
+  stroke-width: 2.5;
+}
+
+.corridor-map__pin text {
+  fill: rgb(var(--fg));
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.corridor-map__swatch {
+  background-color: rgb(var(--manager));
+}
+
+.corridor-site {
+  background-color: rgb(var(--fg) / calc(var(--site-on, 0) * 0.04));
+  transition: background-color var(--duration-fast) var(--ease);
+}
+
+.corridor-site__marker {
+  box-shadow: inset 0 0 0 2px rgb(var(--manager));
+  background-color: rgb(var(--manager) / calc(var(--site-on, 0) * 0.18));
+  transition: background-color var(--duration-fast) var(--ease);
+}
+
+/*
+ * Pointing at a site (its row, pin or spoke) lifts all three and quiets the
+ * other pins. One rule per site id (src/content/corridor.ts corridorSites;
+ * tests/unit/islands.test.ts keeps the list complete). Browsers without
+ * :has() simply show the map at rest.
+ */
+.corridor-map:has([data-site='mpemba']:hover) [data-site='mpemba'],
+.corridor-map:has([data-site='yard']:hover) [data-site='yard'],
+.corridor-map:has([data-site='hardware']:hover) [data-site='hardware'],
+.corridor-map:has([data-site='uzunguni']:hover) [data-site='uzunguni'],
+.corridor-map:has([data-site='inn']:hover) [data-site='inn'],
+.corridor-map:has([data-site='hq']:hover) [data-site='hq'] {
+  --site-on: 1;
+}
+
+.corridor-map:has([data-site]:hover) {
+  --site-dim: 1;
+}
+
+/* ── Corridor story ──────────────────────────────────────────────────── */
+
+/*
+ * At rest (and wherever the scroll-driven version below does not apply) the
+ * route is fully drawn and every node lit.
+ */
+.corridor-story__figure {
+  display: none;
+}
+
+.corridor-route {
+  display: block;
+  overflow: visible;
+}
+
+.corridor-route__border {
+  stroke: rgb(var(--line-strong));
+  stroke-width: 1;
+  stroke-dasharray: 3 6;
+}
+
+.corridor-route__side {
+  fill: rgb(var(--fg-muted));
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.corridor-route__track,
+.corridor-route__line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.corridor-route__track {
+  stroke: rgb(var(--line));
+}
+
+.corridor-route__line {
+  stroke: rgb(var(--accent));
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 0;
+}
+
+.corridor-route__node circle {
+  fill: rgb(var(--accent));
+  stroke: rgb(var(--surface));
+  stroke-width: 3;
+}
+
+/* Labels wear a halo of the surface, so the route and the border line never run through them. */
+.corridor-route__node text,
+.corridor-route__side {
+  paint-order: stroke;
+  stroke: rgb(var(--surface));
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.corridor-route__node text {
+  fill: rgb(var(--fg));
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.corridor-route__site {
+  fill: rgb(var(--manager));
+  stroke: rgb(var(--surface));
+  stroke-width: 1.5;
+}
+
+.corridor-story__site-dot {
+  background-color: rgb(var(--manager));
+}
+
+/* Narrow screens and print: the list draws the route as a rail, one node per stop. */
+.corridor-story__steps {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.corridor-step {
+  position: relative;
+  padding: 0 0 2.5rem 2.5rem;
+}
+
+.corridor-step:last-child {
+  padding-bottom: 0;
+}
+
+.corridor-step::before {
+  content: '';
+  position: absolute;
+  top: 0.1875rem;
+  left: 0.25rem;
+  z-index: 1;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  background-color: rgb(var(--accent));
+  box-shadow: 0 0 0 4px rgb(var(--surface));
+}
+
+.corridor-step[data-hub]::before {
+  top: 0.0625rem;
+  left: 0.125rem;
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.corridor-step::after {
+  content: '';
+  position: absolute;
+  top: 0.5rem;
+  bottom: -0.5rem;
+  left: calc(0.6875rem - 1px);
+  width: 2px;
+  background-color: rgb(var(--accent));
+}
+
+.corridor-step:last-child::after {
+  display: none;
+}
+
+/* Wide screens: the drawing beside the list, sticky while the stops pass. */
+@media screen and (min-width: 1024px) {
+  .corridor-story {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    column-gap: 4rem;
+    align-items: start;
+  }
+
+  .corridor-story__figure {
+    position: sticky;
+    top: calc(var(--sticky-top, var(--nav-height)) + 2rem);
+    display: flex;
+    height: min(calc(100svh - var(--sticky-top, var(--nav-height)) - 4rem), 46rem);
+    align-items: center;
+    justify-content: center;
+  }
+
+  .corridor-route {
+    width: auto;
+    max-width: 100%;
+    height: 100%;
+  }
+
+  .corridor-step {
+    padding: 2rem 0;
+    border-top: 1px solid rgb(var(--line));
+  }
+
+  .corridor-step:first-child {
+    border-top: 0;
+  }
+
+  .corridor-step::before,
+  .corridor-step::after {
+    display: none;
+  }
+}
+
+/*
+ * Scrollytelling, only on wide screens, where motion is welcome and the
+ * browser has scroll-driven animations with timeline-scope. Each stop is a
+ * named view timeline; the drawing (not inside the stops) reaches those
+ * names through timeline-scope. Every animation runs from the unlit state
+ * to the at-rest state above, so the end of the story is the static picture.
+ * One --step-timeline per stop: src/content/corridor.ts corridorStops has five.
+ */
+@media screen and (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) and (timeline-scope: --corridor-step-1) {
+    .corridor-story {
+      timeline-scope: --corridor-step-1, --corridor-step-2, --corridor-step-3, --corridor-step-4, --corridor-step-5;
+    }
+
+    .corridor-story [data-step='1'] {
+      --step-timeline: --corridor-step-1;
+    }
+
+    .corridor-story [data-step='2'] {
+      --step-timeline: --corridor-step-2;
+    }
+
+    .corridor-story [data-step='3'] {
+      --step-timeline: --corridor-step-3;
+    }
+
+    .corridor-story [data-step='4'] {
+      --step-timeline: --corridor-step-4;
+    }
+
+    .corridor-story [data-step='5'] {
+      --step-timeline: --corridor-step-5;
+    }
+
+    .corridor-step {
+      display: flex;
+      min-height: 62svh;
+      align-items: center;
+      border-top: 0;
+      view-timeline-name: var(--step-timeline);
+      view-timeline-axis: block;
+    }
+
+    /* The stop in view reads in full colour; the others step back. */
+    .corridor-step__title {
+      animation: corridor-step-title linear both;
+      animation-timeline: var(--step-timeline);
+      animation-range: cover 0% cover 100%;
+    }
+
+    /* The route draws into each stop as it rises to the middle of the screen. */
+    .corridor-route__line {
+      animation: corridor-draw linear both;
+      animation-timeline: var(--step-timeline);
+      animation-range: cover 18% cover 48%;
+    }
+
+    .corridor-route__node circle {
+      animation: corridor-node linear both;
+      animation-timeline: var(--step-timeline);
+      animation-range: cover 44% cover 50%;
+    }
+
+    .corridor-route__node text {
+      animation: corridor-label linear both;
+      animation-timeline: var(--step-timeline);
+      animation-range: cover 44% cover 50%;
+    }
+
+    /* At the hub, the six sites light up one after another. */
+    .corridor-route__site {
+      animation: corridor-site linear both;
+      animation-timeline: var(--step-timeline);
+      animation-range: cover calc(46% + var(--i, 0) * 2.5%) cover calc(50% + var(--i, 0) * 2.5%);
+    }
+  }
+}
+
+@keyframes corridor-step-title {
+  0%,
+  24% {
+    color: rgb(var(--fg-muted));
+  }
+
+  40%,
+  62% {
+    color: rgb(var(--fg));
+  }
+
+  78%,
+  100% {
+    color: rgb(var(--fg-muted));
+  }
+}
+
+@keyframes corridor-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes corridor-node {
+  from {
+    fill: rgb(var(--surface));
+    stroke: rgb(var(--line-strong));
+  }
+
+  to {
+    fill: rgb(var(--accent));
+    stroke: rgb(var(--surface));
+  }
+}
+
+@keyframes corridor-label {
+  from {
+    fill: rgb(var(--fg-muted));
+  }
+
+  to {
+    fill: rgb(var(--fg));
+  }
+}
+
+@keyframes corridor-site {
+  from {
+    fill: rgb(var(--surface));
+    stroke: rgb(var(--line-strong));
+  }
+
+  to {
+    fill: rgb(var(--manager));
+    stroke: rgb(var(--surface));
+  }
+}
