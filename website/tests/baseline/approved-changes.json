@@ -327,6 +327,86 @@
       ],
       "change": "Deviation: at 360px the home h1 renders at about 40px, below display-xl's 48px floor.",
       "reason": "The no-split rule for 'Tanzania–Zambia' takes precedence: the compound is about 7.6em wide and must fit the 316px line; the h1 still leads every other heading by 1.2x or more."
+    },
+    {
+      "routes": [
+        "/services"
+      ],
+      "change": "Rebuilt index: the h1 stays 'Find the service. Meet the team behind it.' (two-tone); the lede is new ('Six service areas, each run by one of the three Itemba Group companies, so every enquiry has a clear owner.'); the fact row ('6 service areas · 3 operating companies · Songwe · Tunduma corridor') is gone; the hero actions are 'Meet the companies' (/companies) and 'Start a business enquiry' (/contact).",
+      "reason": "P2: the lede says what the fact row listed, once; the hero actions follow home (explore, then enquire at /contact)."
+    },
+    {
+      "routes": [
+        "/services"
+      ],
+      "change": "'Services people search for' and 'Company-led delivery' become one directory: each company (Mwanjalisi Oil, Westsides, Itemba Enterprises) is an h2 with 'Explore <company> ›', and its services are cards (icon, title, one-sentence lede, a short 'what it covers' line, 'Learn more ›') in place of the summary, three offering chips and 'View service'. The page closes with 'Every sector. One front door.' (Enquire at /contact, WhatsApp, Call). One photograph (the ITEMBA-UZUNGUNI canopy) on the fuel card; the other cards are typographic.",
+      "reason": "P2: the page answers its headline (find the service, meet the team behind it) in one structure instead of two lists; owner decision: the best photographs, sparingly."
+    },
+    {
+      "routes": [
+        "/services"
+      ],
+      "change": "Deviation: the /services hero has no photograph; the directory directly under it opens with the page's one photograph.",
+      "reason": "P2: an index page; the strongest station photographs already lead home, the Mwanjalisi Oil page and the fuel page, and a second canopy here would repeat them."
+    },
+    {
+      "routes": [
+        "/services/fuel-and-lubricants",
+        "/services/trade-and-distribution",
+        "/services/logistics-and-cross-border-transit",
+        "/services/construction-supplies-and-hardware",
+        "/services/hospitality-and-lodging",
+        "/services/real-estate-and-property"
+      ],
+      "change": "Rebuilt on the company template: sub-nav (Overview · <sites> · Company · FAQ · Enquire), hero with a new one-sentence lede (service.lede) in place of the long summary, 'Enquire' and 'Run by <company> ›'; 'What this covers' becomes 'What it covers' (overview sentence, 'Who it serves', a key figure where one is confirmed, three feature cells); 'Operations gallery' is gone; a 'Where it runs' section (sites, branches or route, and the Songwe-Tunduma location link); the aside 'Operating company' card becomes the cinema tile 'The company behind it' (registered name, incorporation date, the company's other services, 'Explore <company> ›', the company profile PDF); the '← All services' link is replaced by the sub-nav and the breadcrumb trail.",
+      "reason": "P2: the approved Apple-style service template (plan: hero, offerings, the company behind it, related sites, FAQs, compact form)."
+    },
+    {
+      "routes": [
+        "/services/fuel-and-lubricants",
+        "/services/trade-and-distribution",
+        "/services/logistics-and-cross-border-transit",
+        "/services/construction-supplies-and-hardware",
+        "/services/hospitality-and-lodging",
+        "/services/real-estate-and-property"
+      ],
+      "change": "The compact enquiry form sits in its own section, h2 'Start a service enquiry' with the routing promise and three steps beside it; the form card's own heading is 'Route an enquiry'. Preset intent unchanged (service.intentId).",
+      "reason": "P2: the company-page pattern (CompanyEnquire), so every Enquire pill on the page lands on one form."
+    },
+    {
+      "routes": [
+        "/services/fuel-and-lubricants"
+      ],
+      "change": "The fuel showcase keeps 'ITEMBA stations built for corridor movement', with a shorter intro ('Visible station brands, practical access and high-traffic positions on the corridor's main routes.'); its three captioned photographs become station cards (ITEMBA-MPEMBA, ITEMBA-UZUNGUNI, UZUNGUNI PARKING YARD, and '3 planned' new ITEMBA stations) rendered with next/image; the three positioning cards (Route Advantage, Transit Demand, Expansion Pipeline) are dropped. The hero is the dusk '24 hours' photograph.",
+      "reason": "P2: the positioning cards restated the station cards, the audience list and the key figure on the same screen; the plan names the dusk shot as the energy lead."
+    },
+    {
+      "routes": [
+        "/services/trade-and-distribution"
+      ],
+      "change": "'Who it serves' reads 'Stockists across Songwe Region', 'Bars and night clubs in Tunduma, Mlowo and Vwawa', 'International bulk buyers', 'Construction companies and developers', 'Hospitality businesses' (was six chips including 'More than 50 Songwe stockists'); the Mpemba, Mlowo and Sogea beverage branches are listed.",
+      "reason": "P2: '50+ beverage stockists' is the page's key figure, so the list does not repeat it."
+    },
+    {
+      "routes": [
+        "/services/logistics-and-cross-border-transit"
+      ],
+      "change": "'Who it serves' merges 'Transit customers to Zambia / to DRC / to Zimbabwe and Malawi' into 'Cross-border transit customers'; a four-stop route (Dar es Salaam · Southern Highlands · Tunduma · Beyond the border) names the countries once.",
+      "reason": "P2: the countries were listed three times within one scroll."
+    },
+    {
+      "routes": [
+        "/services/hospitality-and-lodging"
+      ],
+      "change": "The hero is a typographic panel ('A place to stay on the corridor.' / UZUNGUNI INN · Mpemba-Tunduma) instead of the full-bleed room photograph; the room and restaurant photographs are not shown; UZUNGUNI INN's card carries the bar-at-night photograph.",
+      "reason": "Owner decision and PAGE-GUIDE: the 600px room photograph is low-resolution and unconfirmed (flags.useUnverifiedHospitalityPhotos), and the restaurant frame carries third-party beverage branding; neither may lead."
+    },
+    {
+      "routes": [
+        "/services/real-estate-and-property"
+      ],
+      "change": "No estate photographs anywhere (the hero, the four-image gallery, and the Service JSON-LD image): a typographic hero panel, typographic cards, and Itemba Estate beside the Songwe-Tunduma group base card.",
+      "reason": "flags.estateImagery (typographic by default): the images are external, unlicensed and not Itemba projects; service.image and service.gallery are only set when the flag is 'current'."
     }
   ]
 }
