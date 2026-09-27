@@ -4,9 +4,10 @@ The marketing site (`website/`) is an independent Next.js 15 app, separate from
 the ERP `frontend/` and `backend/`. It ships as a single container using Next's
 **standalone** output and serves on port **3001**.
 
-> The container is fully self-contained: the homepage, all cinematic pages, the
-> per-page Open Graph images, and the `/api/enquiries` endpoint are all served by
-> the one Node process in `Dockerfile`. No external Next server is required.
+> The container is fully self-contained: every page, the per-page Open Graph
+> images, `sitemap.xml`, `robots.txt`, the web manifest, and the `/api/enquiries`
+> and `/api/health` endpoints are all served by the one Node process in
+> `Dockerfile`. No external Next server is required.
 
 ---
 
@@ -34,7 +35,7 @@ If neither analytics ID is set, the `<Analytics />` component renders nothing
 | `RESEND_API_KEY` | for email | Sends enquiry emails via Resend. Without it, enquiries can only rely on durable file storage in Docker/self-hosted deployments. |
 | `ENQUIRY_EMAIL_TO` | for email | Destination inbox for enquiry submissions. |
 | `ENQUIRY_EMAIL_FROM` | for email | Verified sender address for Resend. |
-| `ENQUIRY_STORAGE_DIR` | optional | Where each enquiry is appended (`enquiries.jsonl`). Defaults to **`/app/data`** in the container (pre-created and writable by the runtime user; declared as a `VOLUME`). Every `POST /api/enquiries` writes here — even when email is configured — so the dir must stay writable. Mount a volume at `/app/data`, or point this at a mounted path, to persist enquiries across deploys. |
+| `ENQUIRY_STORAGE_DIR` | optional | Where each enquiry is appended (`enquiries.jsonl`). Defaults to **`/app/data`** in the container (pre-created and writable by the runtime user; declared as a `VOLUME`), and `.env.example` sets the same path. Every `POST /api/enquiries` writes here — even when email is configured — so the dir must stay writable. Mount a volume at `/app/data`, or point this at a mounted path, to persist enquiries across deploys. |
 
 > **Vercel note:** Vercel/serverless filesystem writes are temporary, so the app
 > does not use file storage there as a trustworthy fallback. On Vercel, configure
@@ -84,10 +85,24 @@ The site is now on `http://<host>:3001`.
 Point **`www.itembagrouptz.com`** at the host and terminate TLS at a reverse
 proxy (Nginx / Caddy / your platform's load balancer) forwarding to `:3001`.
 
-`next.config.ts` already 301-redirects the apex and the legacy `itembagroup.com`
-hosts to `https://www.itembagrouptz.com`, so configure DNS for both the apex and
-`www`, and let the app normalise them. Set the DNS `A`/`AAAA` (or `CNAME` for
-`www`) records accordingly.
+`next.config.ts` already redirects the apex and the legacy `itembagroup.com` and
+`www.itembagroup.com` hosts to `https://www.itembagrouptz.com`, keeping the path
+and query. The redirects are permanent (`permanent: true`), which Next sends as
+**308**, not 301. Configure DNS for both the apex and `www`, and let the app
+normalise them. Set the DNS `A`/`AAAA` (or `CNAME` for `www`) records
+accordingly. The legacy hosts only redirect if DNS and the reverse proxy also
+send them to the app. Next also 308-redirects a trailing slash to the path
+without it (`/about/` → `/about`).
+
+Search engines and headers:
+
+- `robots.txt` allows the whole site except `/api/`, and points at
+  `https://www.itembagrouptz.com/sitemap.xml`.
+- The staging hosts `staging-www.itembagrouptz.com` and
+  `www-staging.itembagrouptz.com` answer with `X-Robots-Tag: noindex`, so a
+  staging deploy of the same image stays out of search results. Production
+  hosts never get that header.
+- Responses carry no `X-Powered-By` header (`poweredByHeader: false`).
 
 ## 5. Verify after deploy
 
@@ -95,13 +110,22 @@ hosts to `https://www.itembagrouptz.com`, so configure DNS for both the apex and
 curl -I https://www.itembagrouptz.com/                      # 200, text/html
 curl -I https://www.itembagrouptz.com/companies/mwanjalisi-oil/opengraph-image  # 200, image/png
 curl -s https://www.itembagrouptz.com/ | grep -o '<title>[^<]*</title>'
+curl -s https://www.itembagrouptz.com/robots.txt                # Disallow: /api/ and the Sitemap line
+curl -sI https://staging-www.itembagrouptz.com/ | grep -i x-robots-tag  # staging only: noindex
 ```
 
-- **Analytics:** open the site with GA DebugView (or the GTM Preview) and confirm
-  a `page_view` on navigation, a `website_conversion` on a phone/email/WhatsApp
-  click, and an `enquiry_submit` after submitting the enquiry form. All three are
-  wired in `ConversionTracker` and `EnquiryRouter`; they only emit once a GA/GTM
-  ID is present in the build.
+- **Analytics:** open the site with GA DebugView (or the GTM Preview) and confirm:
+  - a `page_view` event on client-side navigation;
+  - a `website_conversion` event with `conversion_action` set to `phone_click`,
+    `email_click` or `whatsapp_click` when a phone, email or WhatsApp link is
+    clicked;
+  - a `website_conversion` event with `conversion_action` set to
+    `enquiry_submit` after a successful enquiry form submission.
+
+  `enquiry_submit` is a value of `conversion_action`, not an event of its own.
+  The events are wired in `src/components/ConversionTracker.tsx` and
+  `src/islands/EnquiryRouter.tsx`, and they only emit once a GA/GTM ID is
+  present in the build.
 - **Social cards:** paste a page URL into the
   [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/) or
   [X Card Validator](https://cards-dev.twitter.com/validator) — every route now
@@ -131,8 +155,9 @@ the runtime image serves them as static files (no Chromium in the container).
 They are produced from the same `@media print` layouts the in-browser "Print"
 button uses, via Chromium's print engine, so they stay in sync with the print
 output. **Regenerate them whenever the profile content changes** — i.e. after
-editing `src/app/company-profile/page.tsx` or the `contact`/`site` data in
-`src/lib/site.ts`:
+editing the profile content (`src/content/profile/**`), the print documents
+(`src/print/**`) or their stylesheet (`src/styles/print.css`), or the contact
+and site data (`src/content/contact.ts`, `src/content/site.ts`):
 
 ```bash
 # one-time, downloads the headless browser into the Playwright cache (not the image)

@@ -1,8 +1,17 @@
 import type { NextConfig } from 'next';
 
+/**
+ * Staging hosts run the same image as production, with production
+ * canonicals and an allow-all robots.txt. `X-Robots-Tag: noindex` keeps
+ * them out of search results; production hosts never get the header.
+ */
+const STAGING_HOSTS = ['staging-www.itembagrouptz.com', 'www-staging.itembagrouptz.com'];
+
 const config: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: __dirname,
+  // No `X-Powered-By: Next.js` on responses.
+  poweredByHeader: false,
   // The OG cards (src/lib/og-card.tsx) read their fonts and the crest from
   // disk at request time, e.g. for a slug that was not prerendered. The file
   // tracer cannot see those reads, so list the files for every card route.
@@ -65,6 +74,14 @@ const config: NextConfig = {
           },
         ],
       },
+      // No Cache-Control rule for /:path*/opengraph-image: Next already
+      // serves every route's card as `public, immutable, no-transform,
+      // max-age=31536000` (tests/baseline/og-images.json).
+      ...STAGING_HOSTS.map((host) => ({
+        source: '/:path*',
+        has: [{ type: 'host' as const, value: host }],
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex' }],
+      })),
     ];
   },
   async redirects() {
