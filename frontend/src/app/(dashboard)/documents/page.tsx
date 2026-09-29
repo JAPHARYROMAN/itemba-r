@@ -7,6 +7,8 @@ export default async function DocumentsPage({
 }) {
   const { view } = await searchParams;
   const initialView: DocumentsView | undefined =
-    view === 'home' || view === 'library' || view === 'letter' ? view : undefined;
+    view === 'home' || view === 'library' || view === 'letter' || view === 'linked'
+      ? view
+      : undefined;
   return <DocumentsApp initialView={initialView} syncRoute />;
 }

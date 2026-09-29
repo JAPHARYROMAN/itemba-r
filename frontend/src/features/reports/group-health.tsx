@@ -66,8 +66,8 @@ export function GroupHealth() {
       canCash && !future,
     );
   const sources = [
-    { name: 'Customer balances', allowed: canSales, resource: sales },
-    { name: 'Supplier balances', allowed: canBuy, resource: purchases },
+    { name: 'Direct customer balances', allowed: canSales, resource: sales },
+    { name: 'Direct supplier balances', allowed: canBuy, resource: purchases },
     { name: 'Cash Desk accounts', allowed: canCash, resource: cash },
     { name: 'ERP loans & schedules', allowed: canLoans, resource: loans },
     { name: 'Intercompany lending', allowed: canCash, resource: internal },
@@ -171,6 +171,11 @@ export function GroupHealth() {
   ];
   return (
     <section className="group-health">
+      <p className="workspace-notice">
+        This view covers direct registers and financing.{' '}
+        <a href="/reports?view=business">Open connected business records</a> for original sales,
+        receivables, payables, expenses and bank balances.
+      </p>
       <header className="reports-heading health-heading">
         <div>
           <p className="reports-eyebrow">ITEMBA OS · GROUP HEALTH</p>

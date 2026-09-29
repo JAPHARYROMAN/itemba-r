@@ -1,3 +1,4 @@
+import { DeskPartyLinksService } from '../../common/services/desk-party-links.service';
 import {
   BadRequestException,
   ConflictException,
@@ -31,7 +32,15 @@ const names = {
   company: { select: { name: true } },
   division: { select: { name: true } },
   branch: { select: { name: true } },
-  customer: { select: { name: true, email: true, phone: true } },
+  customer: {
+    select: {
+      name: true,
+      email: true,
+      phone: true,
+      canonicalCustomerId: true,
+      canonicalCustomer: { select: { name: true, email: true, phone: true } },
+    },
+  },
 } as const;
 @Injectable()
 export class SalesDeskService {
@@ -41,6 +50,7 @@ export class SalesDeskService {
     private readonly org: OrganizationScopeService,
     private readonly audit: AuditLogsService,
     private readonly cash: CashDeskService,
+    private readonly parties?: DeskPartyLinksService,
   ) {}
   directory(user: AuthUser) {
     return this.cash.directory(user);
@@ -63,6 +73,15 @@ export class SalesDeskService {
     if (q.from && q.to && q.from > q.to)
       throw new BadRequestException('Start date must be on or before end date.');
     const open = { voidedAt: null, paidAmount: { lt: this.db.salesDeskSale.fields.totalAmount } };
+    const selectedParty = q.customerId
+      ? await this.db.salesDeskCustomer.findFirst({
+          where: {
+            id: q.customerId,
+            AND: [await this.companies.companyWhereFor(user, q.companyId)],
+          },
+          select: { canonicalCustomerId: true },
+        })
+      : null;
     const statuses: Record<string, Prisma.SalesDeskSaleWhereInput> = {
       unpaid: { voidedAt: null, paidAmount: 0 },
       partial: { AND: [open, { paidAmount: { gt: 0 } }] },
@@ -77,7 +96,18 @@ export class SalesDeskService {
         {
           divisionId: q.divisionId,
           branchId: q.branchId,
-          customerId: q.customerId,
+          ...(q.customerId
+            ? {
+                OR: [
+                  { customerId: q.customerId },
+                  {
+                    customer: {
+                      canonicalCustomerId: selectedParty?.canonicalCustomerId ?? q.customerId,
+                    },
+                  },
+                ],
+              }
+            : {}),
           saleDate: {
             gte: q.from ? new Date(q.from) : undefined,
             lte: q.to ? new Date(q.to) : undefined,
@@ -101,34 +131,49 @@ export class SalesDeskService {
     };
   }
   async customers(user: AuthUser, q: SalesQuery) {
-    return this.db.salesDeskCustomer.findMany({
-      where: {
-        AND: [
-          await this.companies.companyWhereFor(user, q.companyId),
-          q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {},
-        ],
-      },
-      include: { company: { select: { name: true } } },
-      orderBy: { name: 'asc' },
-    });
+    return this.parties!.choices(user, 'customer', q);
   }
-  async createCustomer(user: AuthUser, d: SalesCustomerDto) {
-    await this.companies.assertCanAccessCompany(user, d.companyId, AccessLevel.WRITE);
-    if (!d.name.trim()) throw new BadRequestException('Enter a customer name.');
-    return this.transaction(async (tx) => {
-      const row = await tx.salesDeskCustomer.create({
-        data: { ...d, name: d.name.trim(), nameKey: deskKey(d.name) },
-      });
-      await this.audit.logStrictInTransaction(tx, {
-        action: 'SALES_DESK_CUSTOMER_CREATED',
-        entityType: 'SalesDeskCustomer',
-        entityId: row.id,
-        companyId: row.companyId,
-        userId: user.id,
-        newValue: { name: row.name },
-      });
-      return row;
+  async createCustomer(_user: AuthUser, _d: SalesCustomerDto) {
+    throw new BadRequestException(
+      'Create the customer in Sales Desk Customers, then select its shared profile.',
+    );
+  }
+  async unlinkedCustomers(user: AuthUser) {
+    return this.parties!.unmatched(user, 'customer');
+  }
+  async linkCustomer(user: AuthUser, id: string, canonicalCustomerId: string) {
+    return this.parties!.link(user, 'customer', id, canonicalCustomerId);
+  }
+  async customerSales(user: AuthUser, canonicalCustomerId: string, q: SalesQuery) {
+    const customer = await this.db.customer.findFirst({
+      where: {
+        id: canonicalCustomerId,
+        deletedAt: null,
+        AND: [await this.companies.companyWhereFor(user)],
+      },
+      select: { id: true },
     });
+    if (!customer) throw new NotFoundException('Customer not found.');
+    const where = { AND: [await this.where(user, q), { customer: { canonicalCustomerId } }] };
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.salesDeskSale.findMany({
+          where,
+          include: names,
+          orderBy: [{ saleDate: 'desc' }, { id: 'asc' }],
+          take: 25,
+          skip: ((q.page || 1) - 1) * 25,
+        }),
+        this.db.salesDeskSale.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    return {
+      rows: rows.map((row) => ({ ...row, ...deskBalance(row) })),
+      total,
+      page: q.page || 1,
+      pageSize: 25,
+    };
   }
   private async event(
     tx: Prisma.TransactionClient,
@@ -172,11 +217,7 @@ export class SalesDeskService {
         },
       },
     });
-    const customer = await this.db.salesDeskCustomer.findFirst({
-      where: { id: d.customerId, companyId: d.companyId },
-    });
-    if (!branch || !customer)
-      throw new BadRequestException('Choose a customer and branch belonging to this company.');
+    if (!branch) throw new BadRequestException('Choose a branch belonging to this company.');
     const saleDate = cashDate(d.saleDate),
       dueDate = new Date(d.dueDate);
     if (dueDate < saleDate) throw new BadRequestException('Due date cannot precede the sale date.');
@@ -190,6 +231,13 @@ export class SalesDeskService {
         return existing;
       }
       const saleNumber = `S-${d.saleDate.replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const customerId = await this.parties!.resolve(
+        tx,
+        user,
+        'customer',
+        d.customerId,
+        d.companyId,
+      );
       const row = await tx.salesDeskSale.create({
         data: {
           requestId: d.requestId,
@@ -197,7 +245,7 @@ export class SalesDeskService {
           companyId: d.companyId,
           divisionId: d.divisionId,
           branchId: d.branchId,
-          customerId: d.customerId,
+          customerId,
           saleNumber,
           numberKey: saleNumber,
           currency: d.currency,
@@ -220,7 +268,7 @@ export class SalesDeskService {
     });
   }
   async list(user: AuthUser, q: SalesQuery) {
-    const where = await this.where(user, q);
+    const where = { ...(await this.where(user, q)), canonicalSalesOrderId: null };
     const [rows, total] = await this.db.$transaction(
       [
         this.db.salesDeskSale.findMany({
@@ -235,7 +283,11 @@ export class SalesDeskService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
     return {
-      rows: rows.map((r) => ({ ...r, ...deskBalance(r) })),
+      rows: rows.map((r) => ({
+        ...r,
+        customer: { ...r.customer, ...(r.customer.canonicalCustomer ?? {}) },
+        ...deskBalance(r),
+      })),
       total,
       page: q.page || 1,
       pageSize: 25,
@@ -252,12 +304,18 @@ export class SalesDeskService {
             branchId: q.branchId,
             page: 1,
           }),
-          { voidedAt: null },
+          { voidedAt: null, canonicalSalesOrderId: null },
         ],
       },
       select: {
         customerId: true,
-        customer: { select: { name: true } },
+        customer: {
+          select: {
+            name: true,
+            canonicalCustomerId: true,
+            canonicalCustomer: { select: { name: true } },
+          },
+        },
         currency: true,
         totalAmount: true,
         paidAmount: true,
@@ -296,10 +354,10 @@ export class SalesDeskService {
       c.count++;
       currencies.set(r.currency, c);
       if (balance.gt(0)) {
-        const key = `${r.customerId}:${r.currency}`,
+        const key = `${r.customer.canonicalCustomerId ?? r.customerId}:${r.currency}`,
           customer = customers.get(key) ?? {
-            id: r.customerId,
-            name: r.customer.name,
+            id: r.customer.canonicalCustomerId ?? r.customerId,
+            name: r.customer.canonicalCustomer?.name ?? r.customer.name,
             currency: r.currency,
             outstanding: new Prisma.Decimal(0),
             count: 0,
@@ -334,10 +392,18 @@ export class SalesDeskService {
       },
     });
     if (!row) throw new NotFoundException('Sale not found.');
-    return { ...row, ...deskBalance(row) };
+    return {
+      ...row,
+      customer: { ...row.customer, ...(row.customer.canonicalCustomer ?? {}) },
+      ...deskBalance(row),
+    };
   }
   private async writable(user: AuthUser, id: string) {
     const row = await this.detail(user, id);
+    if (row.canonicalSalesOrderId)
+      throw new ConflictException(
+        'Open the linked business transaction to continue this workflow.',
+      );
     await this.companies.assertCanAccessCompany(user, row.companyId, AccessLevel.WRITE);
     await this.org.assertCanAccessScope(user, row.divisionId, row.branchId, AccessLevel.WRITE);
     return row;
@@ -357,7 +423,7 @@ export class SalesDeskService {
         return existing;
       }
       const changed = await tx.salesDeskSale.updateMany({
-        where: { id, version: d.version, voidedAt: null },
+        where: { id, version: d.version, voidedAt: null, canonicalSalesOrderId: null },
         data: { version: { increment: 1 } },
       });
       if (changed.count !== 1)
@@ -393,7 +459,13 @@ export class SalesDeskService {
     if (d.reason.trim().length < 3) throw new BadRequestException('Enter a reason.');
     return this.transaction(async (tx) => {
       const changed = await tx.salesDeskSale.updateMany({
-        where: { id, version: d.version, voidedAt: null, paidAmount: 0 },
+        where: {
+          id,
+          version: d.version,
+          voidedAt: null,
+          paidAmount: 0,
+          canonicalSalesOrderId: null,
+        },
         data: { version: { increment: 1 }, voidedAt: new Date() },
       });
       if (changed.count !== 1)

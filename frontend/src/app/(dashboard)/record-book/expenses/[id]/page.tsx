@@ -1,5 +1,1 @@
-import { RecordBookDetailClient } from '../../record-book-detail-client';
-
-export default function RecordBookExpenseDetailPage() {
-  return <RecordBookDetailClient kind="expenses" />;
-}
+export { RecordsApp as default } from '@/features/records/records-app';

@@ -79,6 +79,40 @@ describe('workspace storage validation', () => {
       }),
     ).toThrow();
   });
+  it('recovers Records Book links in independent Records windows without storing financial forms', () => {
+    const layout = (href: string, values: Record<string, unknown>) => ({
+      version: 1,
+      activeId: 'one',
+      windows: [{ ...window, appId: 'records', href, viewState: { version: 1, values } }],
+    });
+    for (const href of [
+      '/record-book/daily-sales/existing-id',
+      '/records/money-out/existing-id',
+      '/records/reports?report=daily-sales',
+    ]) {
+      expect(
+        validateLayout(
+          layout(href, {
+            'records.book.filters': { companyId: 'company', search: 'reference', status: 'DRAFT' },
+            'records.book.sales.page': 2,
+            'records.book-report.filters': { currency: 'TZS', receiptType: 'CASH' },
+          }),
+        ),
+      ).toBeTruthy();
+    }
+    for (const href of ['/record-books', '/operations/suppliers', '//outside.test/records']) {
+      expect(() => validateLayout(layout(href, {}))).toThrow('Invalid app location');
+    }
+    for (const values of [
+      { 'records.book.filters': { amount: 100 } },
+      { 'records.book.form': { receipts: [{ amount: 100 }] } },
+      { 'records.book.sales.page': -1 },
+      { 'cash-desk.search': 'other app' },
+    ])
+      expect(() => validateLayout(layout('/records/daily-sales', values))).toThrow(
+        'Unsupported window view settings',
+      );
+  });
   it('accepts view recovery but refuses form contents or another app in the layout', () => {
     const layout = (values: Record<string, unknown>) => ({
       version: 1,

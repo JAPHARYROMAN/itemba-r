@@ -1,3 +1,5 @@
+import { BusinessReportsController } from './business-reports.controller';
+import { BusinessReportsService } from './business-reports.service';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
@@ -16,6 +18,7 @@ import { CashConnectionsController } from './cash-connections.controller';
   imports: [PrismaModule, AuditLogsModule],
   controllers: [
     DeskReportsController,
+    BusinessReportsController,
     FinancingReportsController,
     DeskPostingController,
     CashConnectionsController,
@@ -24,6 +27,7 @@ import { CashConnectionsController } from './cash-connections.controller';
   providers: [
     CashConnectionsService,
     DeskReportsService,
+    BusinessReportsService,
     DeskPostingService,
     FinancingReportsService,
     AccountResolverService,

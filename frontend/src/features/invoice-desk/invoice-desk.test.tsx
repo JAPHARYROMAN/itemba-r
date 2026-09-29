@@ -240,7 +240,8 @@ describe('Invoice Desk experience', () => {
     expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Attach invoice document')).not.toBeInTheDocument();
   });
-  it('offers an honest empty state with supplier-first onboarding', async () => {
+  it('offers an honest empty state with the shared supplier directory', async () => {
+    api.permissions.add('suppliers.view');
     api.get.mockImplementation(async (path: string) =>
       path.endsWith('directory')
         ? directory
@@ -250,7 +251,7 @@ describe('Invoice Desk experience', () => {
     );
     render(<InvoiceDesk />);
     await screen.findByText('A fresh start for your invoices.');
-    expect(screen.getByRole('button', { name: /Add your first supplier/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open supplier directory/ })).toBeInTheDocument();
     expect(screen.queryByText(/1,000,000/)).not.toBeInTheDocument();
   });
   it('keeps the same payment request ID on retry and prevents double submissions', async () => {

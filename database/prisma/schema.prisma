@@ -1987,21 +1987,26 @@ model Group {
 /// Sensitive financial records (bank accounts, loans, etc.) are owned here
 /// but may only be accessed via GROUP-scoped permissions.
 model InvoiceDeskSupplier {
-  id        String               @id @default(uuid())
-  companyId String
-  name      String               @db.VarChar(160)
-  nameKey   String               @db.VarChar(160)
-  email     String?              @db.VarChar(254)
-  phone     String?              @db.VarChar(60)
-  createdAt DateTime             @default(now())
-  company   Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  invoices  InvoiceDeskInvoice[]
+  id                  String               @id @default(uuid())
+  companyId           String
+  canonicalSupplierId String?
+  name                String               @db.VarChar(160)
+  nameKey             String               @db.VarChar(160)
+  email               String?              @db.VarChar(254)
+  phone               String?              @db.VarChar(60)
+  createdAt           DateTime             @default(now())
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  canonicalSupplier   Supplier?             @relation(fields: [canonicalSupplierId], references: [id], onDelete: Restrict)
+  invoices            InvoiceDeskInvoice[]
 
   @@unique([companyId, nameKey])
+  @@index([canonicalSupplierId])
   @@map("invoice_desk_suppliers")
 }
 
 model InvoiceDeskInvoice {
+  canonicalInvoiceId String? @unique
+  canonicalInvoice SupplierInvoice? @relation(fields: [canonicalInvoiceId], references: [id], onDelete: Restrict)
   id            String                  @id @default(uuid())
   companyId     String
   divisionId    String
@@ -4794,6 +4799,7 @@ enum SupplierOrderDraftStatus {
 // ── Models ───────────────────────────────────────────────────────────────────
 
 model Customer {
+  salesDeskLinks SalesDeskCustomer[]
   id             String         @id @default(uuid())
   customerCode   String
   companyId      String
@@ -4887,6 +4893,7 @@ model Supplier {
   updatedAt      DateTime       @updatedAt
 
   company             Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoiceDeskLinks    InvoiceDeskSupplier[]
   division            Division?                 @relation(fields: [divisionId], references: [id], onDelete: SetNull)
   branch              Branch?                   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   createdBy           User?                     @relation("SupplierCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -5281,6 +5288,7 @@ model StockAdjustmentLine {
 }
 
 model SalesOrder {
+  directDeskSale SalesDeskSale?
   id                  String             @id @default(uuid())
   salesOrderNumber    String
   companyId           String
@@ -15557,6 +15565,7 @@ model GoodsReceivedNoteLine {
 }
 
 model SupplierInvoice {
+  directDeskInvoice InvoiceDeskInvoice?
   id                    String                @id @default(uuid())
   supplierInvoiceNumber String
   companyId             String
@@ -17385,6 +17394,8 @@ model RecordEvent {
 }
 
 model SalesDeskCustomer {
+  canonicalCustomerId String?
+  canonicalCustomer Customer? @relation(fields: [canonicalCustomerId], references: [id], onDelete: Restrict)
   id        String          @id @default(uuid())
   companyId String
   name      String          @db.VarChar(160)
@@ -17396,6 +17407,7 @@ model SalesDeskCustomer {
   sales     SalesDeskSale[]
 
   @@unique([companyId, nameKey])
+  @@index([canonicalCustomerId])
   @@map("sales_desk_customers")
 }
 
@@ -17438,6 +17450,8 @@ model LoanFinancialEvent {
 }
 
 model SalesDeskSale {
+  canonicalSalesOrderId String? @unique
+  canonicalSalesOrder SalesOrder? @relation(fields: [canonicalSalesOrderId], references: [id], onDelete: Restrict)
   id          String             @id @default(uuid())
   requestId   String             @unique
   payloadKey  String

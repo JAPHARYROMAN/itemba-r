@@ -1,4 +1,6 @@
 'use client';
+import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
@@ -251,7 +253,10 @@ function CashAccountModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -439,7 +444,7 @@ export default function CashAccountsPage() {
   const [list, setList] = useState<CashAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [companyId, setCompanyId] = useState('');
+  const [companyId, setCompanyId] = useWorkspaceState('finance/cash-accounts.companyId', '');
   const [divisionId, setDivisionId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [accountType, setAccountType] = useState('');
@@ -480,10 +485,12 @@ export default function CashAccountsPage() {
 
     const controller = new AbortController();
     Promise.allSettled([
-      fetch(`/api/backend/divisions?companyId=${companyId}&limit=200`, { signal: controller.signal }).then((r) => r.json()),
-      fetch(`/api/backend/branches?companyId=${companyId}&activeOnly=true&limit=500`, { signal: controller.signal }).then((r) =>
-        r.json(),
-      ),
+      fetch(`/api/backend/divisions?companyId=${companyId}&limit=200`, {
+        signal: controller.signal,
+      }).then((r) => r.json()),
+      fetch(`/api/backend/branches?companyId=${companyId}&activeOnly=true&limit=500`, {
+        signal: controller.signal,
+      }).then((r) => r.json()),
     ]).then(([divisionResult, branchResult]) => {
       if (controller.signal.aborted) return;
       if (divisionResult.status === 'fulfilled') {
@@ -544,7 +551,16 @@ export default function CashAccountsPage() {
     } finally {
       if (request.current()) setLoading(false);
     }
-  }, [authLoading, beginRequest, canView, companyId, divisionId, branchId, accountType, activeFilter]);
+  }, [
+    authLoading,
+    beginRequest,
+    canView,
+    companyId,
+    divisionId,
+    branchId,
+    accountType,
+    activeFilter,
+  ]);
 
   useEffect(() => {
     load();
@@ -583,6 +599,7 @@ export default function CashAccountsPage() {
           companies={companies}
           onClose={() => setCreating(false)}
           onSaved={() => {
+            notifyDeskSaved('cash-desk');
             setCreating(false);
             load();
           }}
@@ -595,6 +612,7 @@ export default function CashAccountsPage() {
           companies={companies}
           onClose={() => setEditing(null)}
           onSaved={() => {
+            notifyDeskSaved('cash-desk');
             setEditing(null);
             load();
           }}
@@ -605,6 +623,7 @@ export default function CashAccountsPage() {
           acc={deleting}
           onClose={() => setDeleting(null)}
           onDeleted={() => {
+            notifyDeskSaved('cash-desk');
             setDeleting(null);
             load();
           }}
@@ -633,7 +652,8 @@ export default function CashAccountsPage() {
       <PageToolbar
         filters={
           <>
-            <select aria-label="All Companies"
+            <select
+              aria-label="All Companies"
               value={companyId}
               onChange={(e) => {
                 setCompanyId(e.target.value);
@@ -650,7 +670,8 @@ export default function CashAccountsPage() {
                 </option>
               ))}
             </select>
-            <select aria-label="All Divisions"
+            <select
+              aria-label="All Divisions"
               value={divisionId}
               onChange={(e) => {
                 setDivisionId(e.target.value);
@@ -667,7 +688,8 @@ export default function CashAccountsPage() {
                 </option>
               ))}
             </select>
-            <select aria-label="All Branches"
+            <select
+              aria-label="All Branches"
               value={branchId}
               onChange={(e) => setBranchId(e.target.value)}
               className={filterSelectCls}
@@ -681,7 +703,8 @@ export default function CashAccountsPage() {
                 </option>
               ))}
             </select>
-            <select aria-label="All Types"
+            <select
+              aria-label="All Types"
               value={accountType}
               onChange={(e) => setAccountType(e.target.value)}
               className={filterSelectCls}
@@ -694,7 +717,8 @@ export default function CashAccountsPage() {
                 </option>
               ))}
             </select>
-            <select aria-label="All Status"
+            <select
+              aria-label="All Status"
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value)}
               className={filterSelectCls}

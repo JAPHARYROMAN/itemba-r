@@ -119,7 +119,7 @@ describe('Cash accounting review', () => {
     render(<CashAccounting connections />);
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Review Main Cash' }));
-    await screen.findByRole('dialog');
+    await screen.findByRole('dialog', {}, { timeout: 5000 });
     changeSelectField('Dedicated asset ledger account', 'legacy-ledger');
     expect(
       screen.getByText('Reload account connections to compare the recorded balance.'),

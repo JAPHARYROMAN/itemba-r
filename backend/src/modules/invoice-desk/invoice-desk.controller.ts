@@ -1,3 +1,5 @@
+import { DeskTransactionLinksService } from '../../common/services/desk-transaction-links.service';
+import { IsString, MinLength, MaxLength } from 'class-validator';
 import {
   Body,
   Controller,
@@ -26,8 +28,12 @@ import {
   DeskQuery,
   DeskReasonDto,
   DeskSupplierDto,
+  DeskSupplierLinkDto,
 } from './invoice-desk.dto';
 
+class LinkBusinessTransactionDto {
+  @IsString() @MinLength(1) @MaxLength(128) canonicalId!: string;
+}
 /**
  * `@AgentExcluded` — added by the ITEMBA OS redesign (4a155f19) and not yet
  * reviewed for agent eligibility. Every route here stays out of Msaidizi's tool
@@ -37,21 +43,67 @@ import {
 @RequirePermissions('invoice_desk.view')
 @AgentExcluded()
 export class InvoiceDeskController {
-  constructor(private readonly service: InvoiceDeskService) {}
+  constructor(
+    private readonly service: InvoiceDeskService,
+    private readonly links: DeskTransactionLinksService,
+  ) {}
+  @Patch('invoices/:id/business-link')
+  @RequirePermissions('invoice_desk.view', 'invoice_desk.manage')
+  linkBusiness(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: LinkBusinessTransactionDto,
+  ) {
+    return this.links.link(u, 'invoice', id, d.canonicalId);
+  }
   @Get('directory') directory(@CurrentUser() u: AuthUser) {
     return this.service.directory(u);
   }
-  @Get('suppliers') suppliers(@CurrentUser() u: AuthUser, @Query() q: DeskQuery) {
+  @Get('suppliers')
+  @RequirePermissions('invoice_desk.view', 'suppliers.view')
+  suppliers(@CurrentUser() u: AuthUser, @Query() q: DeskQuery) {
     return this.service.suppliers(u, q);
   }
-  @Post('suppliers') @RequirePermissions('invoice_desk.view', 'invoice_desk.manage') supplier(
+  @Get('suppliers/unlinked')
+  @RequirePermissions('invoice_desk.view', 'suppliers.view')
+  unlinkedSuppliers(@CurrentUser() u: AuthUser) {
+    return this.service.unlinkedSuppliers(u);
+  }
+  @Patch('suppliers/:supplierId/link')
+  @RequirePermissions(
+    'invoice_desk.view',
+    'invoice_desk.manage',
+    'suppliers.view',
+    'suppliers.update',
+  )
+  linkSupplier(
     @CurrentUser() u: AuthUser,
-    @Body() d: DeskSupplierDto,
+    @Param('supplierId', ParseUUIDPipe) supplierId: string,
+    @Body() d: DeskSupplierLinkDto,
   ) {
+    return this.service.linkSupplier(u, supplierId, d.canonicalSupplierId);
+  }
+  @Get('suppliers/:supplierId/invoices')
+  @RequirePermissions('invoice_desk.view', 'suppliers.view')
+  supplierInvoices(
+    @CurrentUser() u: AuthUser,
+    @Param('supplierId', ParseUUIDPipe) supplierId: string,
+    @Query() q: DeskQuery,
+  ) {
+    return this.service.supplierInvoices(u, supplierId, q);
+  }
+  @Post('suppliers')
+  @RequirePermissions('invoice_desk.view', 'invoice_desk.manage')
+  supplier(@CurrentUser() u: AuthUser, @Body() d: DeskSupplierDto) {
     return this.service.createSupplier(u, d);
   }
   @Get('overview') overview(@CurrentUser() u: AuthUser, @Query() q: DeskQuery) {
     return this.service.overview(u, q);
+  }
+  @Get('attachments')
+  @RequirePermissions('invoice_desk.view', 'documents.view')
+  attachments(@CurrentUser() u: AuthUser, @Query() q: DeskQuery) {
+    return this.service.attachments(u, q);
   }
   @Get('invoices') list(@CurrentUser() u: AuthUser, @Query() q: DeskQuery) {
     return this.service.list(u, q);

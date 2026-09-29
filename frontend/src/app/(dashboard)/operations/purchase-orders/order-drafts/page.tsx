@@ -1,8 +1,9 @@
 'use client';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { Copy, FilePlus2, Send, Trash2 } from 'lucide-react';
 import {
   Btn,
@@ -59,18 +60,27 @@ export default function SupplierOrderDraftsPage() {
   const { hasPermission } = useAuth();
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [data, setData] = useState<DraftListResponse | null>(null);
-  const [companyId, setCompanyId] = useState('');
+  const [companyId, setCompanyId] = useWorkspaceState(
+    'operations/purchase-orders/order-drafts.companyId',
+    '',
+  );
   const [divisionId, setDivisionId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [divisions, setDivisions] = useState<DivisionOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useWorkspaceState(
+    'operations/purchase-orders/order-drafts.status',
+    '',
+  );
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useWorkspaceState(
+    'operations/purchase-orders/order-drafts.search',
+    '',
+  );
+  const [page, setPage] = useWorkspaceState('operations/purchase-orders/order-drafts.page', 1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);

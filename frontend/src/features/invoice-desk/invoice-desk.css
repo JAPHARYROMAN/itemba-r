@@ -48,10 +48,11 @@
   margin-top: 3px;
 }
 .desk-rail nav {
+  flex-wrap: wrap;
   display: grid;
   gap: 6px;
 }
-.desk-rail nav button {
+.desk-rail nav :is(button, a) {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -61,18 +62,18 @@
   color: var(--desk-muted);
   font-weight: 500;
 }
-.desk-rail nav button > svg:last-child {
+.desk-rail nav :is(button, a) > svg:last-child {
   margin-left: auto;
   opacity: 0;
 }
-.desk-rail nav button[aria-current='page'] {
+.desk-rail nav :is(button, a)[aria-current='page'] {
   color: #3375b4;
   background: color-mix(in srgb, #5b9edb 13%, transparent);
 }
-.desk-rail nav button[aria-current='page'] > svg:last-child {
+.desk-rail nav :is(button, a)[aria-current='page'] > svg:last-child {
   opacity: 1;
 }
-.desk-rail nav button:hover {
+.desk-rail nav :is(button, a):hover {
   background: color-mix(in srgb, #5b9edb 9%, transparent);
 }
 .desk-rail-note {
@@ -907,14 +908,14 @@
     gap: 5px;
     margin-bottom: 12px;
   }
-  .desk-rail nav button {
+  .desk-rail nav :is(button, a) {
     flex: 1;
     padding: 10px 8px;
     font-size: 12px;
     justify-content: center;
     gap: 6px;
   }
-  .desk-rail nav button > svg:last-child {
+  .desk-rail nav :is(button, a) > svg:last-child {
     display: none;
   }
   .desk-rail-note,
@@ -1173,14 +1174,14 @@
     gap: 5px;
     margin-bottom: 12px;
   }
-  .desk-rail nav button {
+  .desk-rail nav :is(button, a) {
     flex: 1;
     padding: 10px 8px;
     font-size: 12px;
     justify-content: center;
     gap: 6px;
   }
-  .desk-rail nav button > svg:last-child {
+  .desk-rail nav :is(button, a) > svg:last-child {
     display: none;
   }
   .desk-rail-note,
@@ -1362,4 +1363,27 @@
     flex-shrink: 0;
     margin-top: 2px;
   }
+}
+
+.invoice-desk .desk-rail a:focus-visible {
+  outline: 2px solid var(--aurora-primary);
+  outline-offset: 3px;
+}
+.invoice-desk .desk-rail-note a {
+  display: block;
+  color: var(--aurora-primary);
+  margin-top: 12px;
+}
+.desk-source-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--aurora-card);
+  border-bottom: 1px solid var(--aurora-border);
+  color: var(--aurora-text-secondary);
+  font-size: 12px;
+}
+.desk-source-bar a {
+  color: var(--aurora-primary);
 }

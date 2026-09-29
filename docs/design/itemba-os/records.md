@@ -1,6 +1,16 @@
 # Records
 
-Records is an independent notebook for debtors, creditors, sales, purchases, expenses and free-form notes. Its entries, settlements and history use their own tables. It never creates ERP customers, suppliers, stock movements, cash movements or journals.
+Records brings the existing Records Book and independent notebook into one desktop app. Daily sales, receipt breakdowns, money out, categories, reports and trash use the original Records Book tables and permissions. Notebook debtors, creditors, sales, purchases, expenses and notes retain their independent entries, settlements and history. Neither register creates ERP customers, suppliers, stock movements, cash movements or journals.
+
+## Records Book unification — 26 September 2026
+
+The unified home links to **Daily records** and **Notebook**. Daily sales are aggregate day totals; notebook sales are individual entries. Their monetary totals remain separate so the same activity is never added twice. The notebook retains partial payments, reversals and debtor/creditor statements.
+
+Canonical daily-record routes are `/records/daily-summary`, `/records/daily-sales`, `/records/money-out`, `/records/categories`, `/records/reports` and `/records/trash`. Detail paths retain the original entry ID. Existing `/record-book` links and report source links open in the Records host; notebook links such as `/records?view=debtors&record=<id>` remain supported. The legacy sidebar points to these same workspaces.
+
+Users with either `record_book.view` or `records.view` can open the app. Each section enforces its own existing permissions and organisation scope. No roles, grants, database tables or business records are migrated. Original create/edit, finalize, void, delete/restore and export operations continue through `/record-book` APIs, preserving audit history and record identity.
+
+Daily-record filters, report selections and pagination are window-specific. Safe view settings participate in desktop session recovery; form values and receipt contents never enter layout storage. Edited forms warn before closing, switching sections or leaving the app. Saving in one window refreshes other open registers, deferring refresh while an editor or confirmation is open. Unsaved forms still require an explicit save; this change does not add automatic draft recovery.
 
 ## Access and organisation
 

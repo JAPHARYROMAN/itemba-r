@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
-type Desk = 'invoice-desk' | 'cash-desk' | 'sales-desk';
+type Desk = 'invoice-desk' | 'cash-desk' | 'sales-desk' | 'reports';
 const EVENT = 'itemba:desk-saved';
 
 /** In-tab invalidation only: every receiver refetches through its authorised endpoints. */

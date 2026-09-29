@@ -2,7 +2,10 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import {
+  useWorkspacePathname,
+  useWorkspaceRouter as useRouter,
+} from '@/components/workspace/workspace-navigation';
 import { Btn, Card, PageHeader, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
 import { backendGet, backendPage } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
@@ -60,8 +63,8 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
-  const params = useParams();
-  const id = String(params.id ?? '');
+  const path = useWorkspacePathname();
+  const id = decodeURIComponent(path.split('/')[3] ?? '');
   const { hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const [order, setOrder] = useState<AnyRecord | null>(null);

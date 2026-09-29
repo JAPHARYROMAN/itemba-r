@@ -1,5 +1,6 @@
 'use client';
 
+import { CustomerDirectHistory } from './customer-direct-history';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useMemo, useState } from 'react';
 import { Btn, Card, PageHeader, SkeletonCardGrid, StatusBadge } from '@/components/ui';
@@ -25,7 +26,8 @@ type Tab =
   | 'Statements'
   | 'Pricing'
   | 'Credit'
-  | 'Audit';
+  | 'Audit'
+  | 'Direct history';
 
 interface CustomerDetail {
   id: string;
@@ -231,6 +233,7 @@ const TABS: Tab[] = [
   'Pricing',
   'Credit',
   'Audit',
+  'Direct history',
 ];
 
 function money(value: number | string | null | undefined, currency = 'TZS') {
@@ -613,7 +616,9 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
 
       <Card padding="none" className="overflow-hidden">
         <ProfileSections
-          items={TABS}
+          items={TABS.filter(
+            (item) => item !== 'Direct history' || hasPermission('sales_desk.view'),
+          )}
           value={tab}
           onChange={(next) => request(() => setTab(next))}
         />
@@ -623,6 +628,7 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
           aria-label={`${tab} section`}
           className="partner-profile-content"
         >
+          {tab === 'Direct history' && <CustomerDirectHistory customerId={customerId} />}
           {tab === 'Overview' &&
             (() => {
               // When the true server-side aging is available, the bucket total IS the

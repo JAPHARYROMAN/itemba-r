@@ -14,6 +14,7 @@ const invoice = () => ({
   divisionId: 'division',
   branchId: 'branch',
   invoiceNumber: 'INV-01',
+  supplier: { name: 'Supplier', email: null, phone: null, canonicalSupplier: null },
   invoiceDate: new Date('2026-01-01'),
   dueDate: new Date('2026-01-31'),
   totalAmount: d('100.30'),
@@ -116,7 +117,7 @@ describe('Invoice Desk protected workflow', () => {
     expect(where.AND).toContainEqual({ companyId: { in: ['company'] } });
     expect(where.AND).toContainEqual({ OR: [{ branchId: { in: ['branch'] } }] });
     expect(where.AND[3]).toMatchObject({ voidedAt: null, paidAmount: { lt: 'totalAmount' } });
-    expect(where.AND[4].OR).toHaveLength(3);
+    expect(where.AND[4].OR).toHaveLength(5);
   });
   it('hides out-of-scope invoices and attachments', async () => {
     const f = fixture();
@@ -147,7 +148,7 @@ describe('Invoice Desk protected workflow', () => {
     const f = fixture();
     await f.service.payment(user, 'invoice', payment);
     expect(f.tx.invoiceDeskInvoice.updateMany).toHaveBeenCalledWith({
-      where: { id: 'invoice', version: 1, voidedAt: null },
+      where: { id: 'invoice', version: 1, voidedAt: null, canonicalInvoiceId: null },
       data: { version: { increment: 1 } },
     });
     expect(
@@ -333,7 +334,7 @@ describe('Invoice attachment Quick Look', () => {
   });
   it('keeps downloads private and only uses inline disposition for supported files', async () => {
     const f = fixture();
-    const controller = new InvoiceDeskController(f.service);
+    const controller = new InvoiceDeskController(f.service, {} as never);
     const response = { setHeader: jest.fn(), send: jest.fn() };
     f.db.invoiceDeskAttachment.findFirst.mockResolvedValue({
       content: Buffer.from('%PDF-'),

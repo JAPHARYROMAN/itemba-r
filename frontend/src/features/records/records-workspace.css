@@ -1,0 +1,176 @@
+.records-unified {
+  align-items: start;
+}
+.records-unified > .records-rail {
+  min-height: 100%;
+  padding-bottom: 24px;
+}
+.records-unified .records-rail nav a {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  color: var(--records-muted);
+  text-decoration: none;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+.records-unified .records-rail nav a:hover {
+  background: color-mix(in srgb, var(--aurora-primary, #2e9984) 8%, transparent);
+}
+.records-unified .records-rail nav a[aria-current='page'] {
+  background: color-mix(in srgb, var(--aurora-primary, #2e9984) 13%, transparent);
+  color: var(--aurora-text);
+  font-weight: 600;
+}
+.records-unified a:focus-visible {
+  outline: 2px solid var(--aurora-primary, #2e9984);
+  outline-offset: 3px;
+}
+.records-nav-group {
+  margin: 20px 10px 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--records-muted);
+}
+.records-unified-content {
+  min-width: 0;
+}
+.records-notebook-embedded {
+  display: block;
+  min-width: 0;
+}
+.records-unified .record-book-workspace {
+  padding: 28px;
+}
+.records-home-panel {
+  border: 1px solid var(--records-line);
+  border-radius: 18px;
+  background: var(--records-panel);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.records-home-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: start;
+}
+.records-home-heading h2 {
+  font-size: 19px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  letter-spacing: -0.4px;
+}
+.records-home-heading p,
+.records-home-note {
+  color: var(--records-muted);
+  line-height: 1.6;
+}
+.records-home-heading a,
+.records-home-links a {
+  color: var(--aurora-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.records-home-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 24px 0;
+  gap: 16px;
+}
+.records-home-counts dt {
+  color: var(--records-muted);
+  font-size: 12px;
+}
+.records-home-counts dd {
+  font-size: 27px;
+  font-weight: 600;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.records-home-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--records-line);
+}
+.records-home-balance {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0;
+}
+.records-home-note {
+  font-size: 12px;
+}
+.records-unified .record-book-workspace :is(.text-slate-100, .text-slate-200, .text-slate-300) {
+  color: var(--aurora-text);
+}
+.records-unified .record-book-workspace :is(.text-slate-400, .text-slate-500) {
+  color: var(--records-muted);
+}
+.records-unified .record-book-workspace :is(.bg-slate-800, .bg-slate-900) {
+  background: var(--records-panel);
+}
+.records-unified .record-book-workspace :is(.border-slate-700, .border-slate-800) {
+  border-color: var(--records-line);
+}
+.records-unified .record-book-workspace .text-blue-300 {
+  color: var(--aurora-primary);
+}
+@container os-workspace (max-width:900px) {
+  .records-unified {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .records-unified > .records-rail {
+    min-height: 0;
+    padding: 14px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--records-line);
+  }
+  .records-unified .records-identity {
+    margin-bottom: 12px;
+  }
+  .records-unified .record-book-workspace {
+    padding: 20px 18px;
+  }
+}
+@media (max-width: 900px) {
+  .records-unified {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .records-unified > .records-rail {
+    min-height: 0;
+    padding: 14px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--records-line);
+  }
+  .records-unified .records-identity {
+    margin-bottom: 12px;
+  }
+  .records-unified .record-book-workspace {
+    padding: 20px 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .records-unified .records-rail nav a {
+    transition: none;
+  }
+}
+@media print {
+  .records-unified > .records-rail {
+    display: none;
+  }
+  .records-unified {
+    display: block;
+  }
+}

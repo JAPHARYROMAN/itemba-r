@@ -1,8 +1,8 @@
 'use client';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
-import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Btn,
   Card,
@@ -17,6 +17,12 @@ import {
   SkeletonTable,
   StatCard,
 } from '@/components/ui';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
+import {
+  notifyRecordBookChanged,
+  useRecordBookRefresh,
+} from '@/features/records/record-book-refresh';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import {
@@ -289,7 +295,7 @@ function SaleModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState(() => ({
+  const [form, setFormState] = useState(() => ({
     companyId: initial?.companyId ?? filters.companyId,
     divisionId: initial?.divisionId ?? filters.divisionId,
     branchId: initial?.branchId ?? filters.branchId,
@@ -299,6 +305,11 @@ function SaleModal({
     notes: initial?.notes ?? '',
     receipts: initial?.receipts?.length ? initial.receipts : DEFAULT_RECEIPTS,
   }));
+  const guard = useFormGuard(form, setFormState);
+  const setForm: typeof setFormState = (update) => guard.change(() => setFormState(update));
+  const close = () => {
+    if (!saving) guard.requestClose(onClose);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -351,6 +362,7 @@ function SaleModal({
     try {
       if (initial) await backendPatch(`/record-book/daily-sales/${initial.id}`, body);
       else await backendPost('/record-book/daily-sales', body);
+      guard.markSaved();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save daily sales record');
@@ -362,12 +374,13 @@ function SaleModal({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={close}
+      onChangeCapture={guard.touch}
       title={initial ? 'Edit Daily Sales Record' : 'New Daily Sales Record'}
       size="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>
+          <Btn variant="secondary" onClick={close}>
             Cancel
           </Btn>
           <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>
@@ -573,7 +586,7 @@ function ExpenseModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState(() => ({
+  const [form, setFormState] = useState(() => ({
     companyId: initial?.companyId ?? filters.companyId,
     divisionId: initial?.divisionId ?? filters.divisionId,
     branchId: initial?.branchId ?? filters.branchId,
@@ -588,6 +601,11 @@ function ExpenseModal({
     reference: initial?.reference ?? '',
     notes: initial?.notes ?? '',
   }));
+  const guard = useFormGuard(form, setFormState);
+  const setForm: typeof setFormState = (update) => guard.change(() => setFormState(update));
+  const close = () => {
+    if (!saving) guard.requestClose(onClose);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const scopedDivisions = divisions.filter(
@@ -632,6 +650,7 @@ function ExpenseModal({
     try {
       if (initial) await backendPatch(`/record-book/expenses/${initial.id}`, body);
       else await backendPost('/record-book/expenses', body);
+      guard.markSaved();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save expense');
@@ -643,12 +662,13 @@ function ExpenseModal({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={close}
+      onChangeCapture={guard.touch}
       title={initial ? 'Edit Money Out Record' : 'New Money Out Record'}
       size="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>
+          <Btn variant="secondary" onClick={close}>
             Cancel
           </Btn>
           <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>
@@ -808,12 +828,17 @@ function CategoryModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState(() => ({
+  const [form, setFormState] = useState(() => ({
     companyId: initial?.companyId ?? filters.companyId,
     name: initial?.name ?? '',
     description: initial?.description ?? '',
     isActive: initial?.isActive ?? true,
   }));
+  const guard = useFormGuard(form, setFormState);
+  const setForm: typeof setFormState = (update) => guard.change(() => setFormState(update));
+  const close = () => {
+    if (!saving) guard.requestClose(onClose);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const canSave = form.companyId && form.name.trim();
@@ -834,6 +859,7 @@ function CategoryModal({
       };
       if (initial) await backendPatch(`/record-book/expense-categories/${initial.id}`, body);
       else await backendPost('/record-book/expense-categories', body);
+      guard.markSaved();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save category');
@@ -845,12 +871,13 @@ function CategoryModal({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={close}
+      onChangeCapture={guard.touch}
       title={initial ? 'Edit Records Book Category' : 'New Records Book Category'}
       size="md"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>
+          <Btn variant="secondary" onClick={close}>
             Cancel
           </Btn>
           <Btn variant="primary" onClick={submit} loading={saving} disabled={!canSave}>
@@ -915,7 +942,9 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const canExport = hasPermission('record_book.export');
   const beginRequest = useRequestGuard();
 
-  const [filters, setFilters] = useState<Filters>({ ...BLANK_FILTERS });
+  const [filters, setFilters] = useWorkspaceState<Filters>('records.book.filters', {
+    ...BLANK_FILTERS,
+  });
   const [companies, setCompanies] = useState<Company[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -931,9 +960,12 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [expenseModal, setExpenseModal] = useState<RecordExpense | null | 'new'>(null);
   const [categoryModal, setCategoryModal] = useState<Category | null | 'new'>(null);
   const [exporting, setExporting] = useState('');
-  const [salesPage, setSalesPage] = useState(1);
-  const [expensePage, setExpensePage] = useState(1);
-  const [categoryPageNumber, setCategoryPageNumber] = useState(1);
+  const [salesPage, setSalesPage] = useWorkspaceState('records.book.sales.page', 1);
+  const [expensePage, setExpensePage] = useWorkspaceState('records.book.expenses.page', 1);
+  const [categoryPageNumber, setCategoryPageNumber] = useWorkspaceState(
+    'records.book.categories.page',
+    1,
+  );
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmReason, setConfirmReason] = useState('');
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -999,7 +1031,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         setError(err instanceof Error ? err.message : 'Could not load scope data');
       });
     return () => controller.abort();
-  }, [authLoading, canView]);
+  }, [authLoading, canView, setFilters]);
 
   const loadData = useCallback(async () => {
     if (authLoading || !canView) return;
@@ -1059,25 +1091,26 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     void loadData();
   }, [loadData]);
 
+  const previousFilters = useRef(JSON.stringify(filters));
   useEffect(() => {
+    const nextFilters = JSON.stringify(filters);
+    if (previousFilters.current === nextFilters) return;
+    previousFilters.current = nextFilters;
     setSalesPage(1);
     setExpensePage(1);
     setCategoryPageNumber(1);
-  }, [
-    filters.companyId,
-    filters.divisionId,
-    filters.branchId,
-    filters.dateFrom,
-    filters.dateTo,
-    filters.status,
-    filters.currency,
-    filters.search,
-  ]);
+  }, [filters, setSalesPage, setExpensePage, setCategoryPageNumber]);
+
+  useRecordBookRefresh(
+    loadData,
+    !!saleModal || !!expenseModal || !!categoryModal || !!confirmAction,
+  );
 
   const refreshAfterModal = async () => {
     setSaleModal(null);
     setExpenseModal(null);
     setCategoryModal(null);
+    notifyRecordBookChanged();
     await loadData();
   };
 
@@ -1092,6 +1125,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
         setError('');
         try {
           await action.execute(reason);
+          notifyRecordBookChanged();
           await loadData();
           setConfirmAction(null);
           setConfirmReason('');
@@ -1159,7 +1193,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   if (authLoading) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
-        <PageHeader title="Records Book" subtitle="Loading" />
+        <PageHeader title="Daily records" subtitle="Loading" />
       </div>
     );
   }
@@ -1167,7 +1201,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   if (!canView) {
     return (
       <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
-        <PageHeader title="Records Book" subtitle="Manual daily sales and money-out records" />
+        <PageHeader title="Daily records" subtitle="Manual daily sales and money-out records" />
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">Access Restricted</p>
         </div>
@@ -1181,8 +1215,16 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   return (
     <div className="record-book-workspace mx-auto w-full max-w-[1440px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 xl:px-10">
       <PageHeader
-        title="Records Book"
-        subtitle="Manual day-end sales and money-out records. Independent from accounting and operations."
+        title={
+          initialTab === 'dashboard'
+            ? 'Daily overview'
+            : initialTab === 'daily-sales'
+              ? 'Daily sales'
+              : initialTab === 'expenses'
+                ? 'Money out'
+                : 'Categories'
+        }
+        subtitle="Day-end sales, receipt breakdowns and money out."
         actions={
           <div className="flex flex-wrap gap-2">
             {canCreate && (
@@ -1460,7 +1502,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
                               <Link
-                                href={`/record-book/daily-sales/${sale.id}`}
+                                href={`/records/daily-sales/${sale.id}`}
                                 className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800"
                               >
                                 View
@@ -1631,7 +1673,7 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
                               <Link
-                                href={`/record-book/expenses/${expense.id}`}
+                                href={`/records/money-out/${expense.id}`}
                                 className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800"
                               >
                                 View

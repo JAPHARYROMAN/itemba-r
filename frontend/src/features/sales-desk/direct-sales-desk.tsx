@@ -1,6 +1,7 @@
 'use client';
+import { useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
 import { useDeferredValue, useState } from 'react';
-import Link from 'next/link';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { AppGlyph } from '@/components/os/app-glyph';
 import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { getApp } from '@/lib/apps';
@@ -23,6 +24,7 @@ import { Btn, FormDateField, Modal, SelectField } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet } from '@/lib/api-client';
+import { BusinessTransactionLink } from '@/components/workspace/business-transaction-link';
 import { SalesEditor } from './sales-editor';
 import { Customer, Directory, Editor, Page, Sale, Scope, Summary, dateLabel, money } from './types';
 import '../invoice-desk/invoice-desk.css';
@@ -35,6 +37,7 @@ const sections = [
 ] as const;
 const emptyDirectory: Directory = { companies: [], divisions: [], branches: [] };
 export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
+  const router = useWorkspaceRouter();
   const { hasPermission } = useAuth(),
     allowed = hasPermission('sales_desk.view'),
     manage = hasPermission('sales_desk.manage'),
@@ -216,7 +219,11 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
             {manage && (
               <Btn
                 icon={<Plus size={15} />}
-                onClick={() => setEditor({ kind: section === 'customers' ? 'customer' : 'sale' })}
+                onClick={() =>
+                  section === 'customers'
+                    ? router.push('/sales-desk/customers')
+                    : setEditor({ kind: 'sale' })
+                }
               >
                 {section === 'customers' ? 'New customer' : 'New sale'}
               </Btn>
@@ -321,7 +328,7 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                   <Btn
                     variant="secondary"
                     icon={<Plus size={15} />}
-                    onClick={() => setEditor({ kind: 'customer' })}
+                    onClick={() => router.push('/sales-desk/customers')}
                   >
                     Add your first customer
                   </Btn>
@@ -537,6 +544,7 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
               </Btn>
               {detail.data &&
                 !detail.data.voidedAt &&
+                !detail.data.canonicalSalesOrderId &&
                 pay &&
                 !/^0(?:\.0+)?$/.test(detail.data.outstanding) && (
                   <Btn
@@ -559,6 +567,13 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
           ) : (
             detail.data && (
               <div className="sales-detail">
+                <BusinessTransactionLink
+                  kind="sale"
+                  id={detail.data.id}
+                  companyId={detail.data.companyId}
+                  canonicalId={detail.data.canonicalSalesOrderId}
+                  reload={reload}
+                />
                 <div className="sales-detail-heading">
                   <div>
                     <h2>{detail.data.customer.name}</h2>
@@ -624,7 +639,7 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                 ) : (
                   <p className="desk-muted">No payments recorded yet.</p>
                 )}
-                {!pay && !detail.data.voidedAt && (
+                {!pay && !detail.data.voidedAt && !detail.data.canonicalSalesOrderId && (
                   <p className="desk-muted">
                     Recording receipts requires Sales Desk payment access and Cash Desk recording
                     access.
@@ -641,14 +656,17 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                     </div>
                   ))}
                 </div>
-                {manage && !detail.data.voidedAt && /^0(?:\.0+)?$/.test(detail.data.paidAmount) && (
-                  <button
-                    className="desk-text-button"
-                    onClick={() => setEditor({ kind: 'void', sale: detail.data! })}
-                  >
-                    Void this sale
-                  </button>
-                )}
+                {manage &&
+                  !detail.data.voidedAt &&
+                  !detail.data.canonicalSalesOrderId &&
+                  /^0(?:\.0+)?$/.test(detail.data.paidAmount) && (
+                    <button
+                      className="desk-text-button"
+                      onClick={() => setEditor({ kind: 'void', sale: detail.data! })}
+                    >
+                      Void this sale
+                    </button>
+                  )}
               </div>
             )
           )}
