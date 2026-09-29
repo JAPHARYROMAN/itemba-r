@@ -40,13 +40,34 @@ export class DeskReportsService {
       scope = await this.scope(user, q);
     return this.db.$transaction(
       async (tx) => {
+        const selectedParty = q.partyId
+          ? await tx.salesDeskCustomer.findFirst({
+              where: {
+                id: q.partyId,
+                AND: [await this.companies.companyWhereFor(user, q.companyId)],
+              },
+              select: { canonicalCustomerId: true },
+            })
+          : null;
         const where: Prisma.SalesDeskSaleWhereInput = {
+          canonicalSalesOrderId: null,
           AND: [
             scope,
             {
               voidedAt: null,
               currency: q.currency,
-              customerId: q.partyId,
+              ...(q.partyId
+                ? {
+                    OR: [
+                      { customerId: q.partyId },
+                      {
+                        customer: {
+                          canonicalCustomerId: selectedParty?.canonicalCustomerId ?? q.partyId,
+                        },
+                      },
+                    ],
+                  }
+                : {}),
               saleDate: { lte: new Date(period.to) },
             },
           ],
@@ -61,7 +82,13 @@ export class DeskReportsService {
           where,
           include: {
             ...names,
-            customer: { select: { name: true } },
+            customer: {
+              select: {
+                name: true,
+                canonicalCustomerId: true,
+                canonicalCustomer: { select: { name: true } },
+              },
+            },
             payments: {
               where: { reversedAt: null, paymentDate: { lte: new Date(period.to) } },
               select: { id: true, amount: true, paymentDate: true, reference: true },
@@ -75,8 +102,8 @@ export class DeskReportsService {
             reference: d.saleNumber,
             date: d.saleDate,
             amount: d.totalAmount,
-            partyId: d.customerId,
-            party: d.customer.name,
+            partyId: d.customer.canonicalCustomerId ?? d.customerId,
+            party: d.customer.canonicalCustomer?.name ?? d.customer.name,
             company: d.company.name,
             division: d.division.name,
             branch: d.branch.name,
@@ -94,13 +121,34 @@ export class DeskReportsService {
       scope = await this.scope(user, q);
     return this.db.$transaction(
       async (tx) => {
+        const selectedParty = q.partyId
+          ? await tx.invoiceDeskSupplier.findFirst({
+              where: {
+                id: q.partyId,
+                AND: [await this.companies.companyWhereFor(user, q.companyId)],
+              },
+              select: { canonicalSupplierId: true },
+            })
+          : null;
         const where: Prisma.InvoiceDeskInvoiceWhereInput = {
+          canonicalInvoiceId: null,
           AND: [
             scope,
             {
               voidedAt: null,
               currency: q.currency,
-              supplierId: q.partyId,
+              ...(q.partyId
+                ? {
+                    OR: [
+                      { supplierId: q.partyId },
+                      {
+                        supplier: {
+                          canonicalSupplierId: selectedParty?.canonicalSupplierId ?? q.partyId,
+                        },
+                      },
+                    ],
+                  }
+                : {}),
               invoiceDate: { lte: new Date(period.to) },
             },
           ],
@@ -115,7 +163,13 @@ export class DeskReportsService {
           where,
           include: {
             ...names,
-            supplier: { select: { name: true } },
+            supplier: {
+              select: {
+                name: true,
+                canonicalSupplierId: true,
+                canonicalSupplier: { select: { name: true } },
+              },
+            },
             payments: {
               where: { reversedAt: null, paymentDate: { lte: new Date(period.to) } },
               select: { id: true, amount: true, paymentDate: true, reference: true },
@@ -129,8 +183,8 @@ export class DeskReportsService {
             reference: d.invoiceNumber,
             date: d.invoiceDate,
             amount: d.totalAmount,
-            partyId: d.supplierId,
-            party: d.supplier.name,
+            partyId: d.supplier.canonicalSupplierId ?? d.supplierId,
+            party: d.supplier.canonicalSupplier?.name ?? d.supplier.name,
             company: d.company.name,
             division: d.division.name,
             branch: d.branch.name,

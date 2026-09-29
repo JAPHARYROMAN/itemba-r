@@ -38,6 +38,7 @@ import {
   type ReportResponse,
 } from './report-data';
 import './reports.css';
+import { BusinessReports, canReadBusinessReports } from './business-reports';
 import { BusinessOverview, ReportAnalysis } from './report-analysis';
 import { SavedReports } from './saved-reports';
 import { GroupHealth } from './group-health';
@@ -54,6 +55,7 @@ const icons = {
   cash: Wallet,
   loans: HandCoins,
   health: Activity,
+  business: BarChart3,
   accounting: Landmark,
 };
 export function ReportsApp() {
@@ -82,6 +84,9 @@ function ReportsWorkspace() {
   ].some((permission) => hasPermission(permission));
   const nav = [
     { id: '', name: 'All reports' },
+    ...(canReadBusinessReports(hasPermission)
+      ? [{ id: 'business', name: 'Business records' }]
+      : []),
     ...(healthAllowed ? [{ id: 'health', name: 'Group Health' }] : []),
     ...(hasPermission('journal_entries.view')
       ? [{ id: 'accounting', name: 'Accounting readiness' }]
@@ -149,12 +154,24 @@ function ReportsWorkspace() {
         </label>
         <SavedReports />
         <AccountingDraftShelf />
-        {view === 'accounting' && hasPermission('journal_entries.view') ? (
+        {view === 'business' ? (
+          <BusinessReports />
+        ) : view === 'accounting' && hasPermission('journal_entries.view') ? (
           <AccountingReadiness />
         ) : view === 'health' && healthAllowed ? (
           <GroupHealth />
         ) : !view ? (
           <>
+            {canReadBusinessReports(hasPermission) && (
+              <div className="workspace-notice">
+                <strong>Business records are connected.</strong>
+                <p>
+                  Read original sales, receivables, payables, expenses and cash accounts across the
+                  apps.
+                </p>
+                <Link href="/reports?view=business">Open connected business reports</Link>
+              </div>
+            )}
             <header className="reports-heading">
               <p className="reports-eyebrow">ITEMBA OS · REPORTS</p>
               <h1>A clearer view of your business.</h1>

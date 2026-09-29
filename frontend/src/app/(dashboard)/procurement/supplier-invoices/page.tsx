@@ -1,9 +1,26 @@
 'use client';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { Btn, Card, ConfirmDialog, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, showToast, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
+import {
+  Btn,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageToolbar,
+  showToast,
+  SkeletonTable,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -495,7 +512,10 @@ function InvoiceModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div
+          role="alert"
+          className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
           {error}
         </div>
       )}
@@ -906,11 +926,17 @@ export default function SupplierInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [companyId, setCompanyId] = useState('');
-  const [status, setStatus] = useState('');
-  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useWorkspaceState(
+    'procurement/supplier-invoices.searchInput',
+    '',
+  );
+  const [search, setSearch] = useWorkspaceState('procurement/supplier-invoices.search', '');
+  const [companyId, setCompanyId] = useWorkspaceState(
+    'procurement/supplier-invoices.companyId',
+    '',
+  );
+  const [status, setStatus] = useWorkspaceState('procurement/supplier-invoices.status', '');
+  const [page, setPage] = useWorkspaceState('procurement/supplier-invoices.page', 1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SupplierInvoice | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -1227,7 +1253,10 @@ export default function SupplierInvoicesPage() {
       />
 
       {loadError && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {loadError}
           <button type="button" className="ml-3 font-medium underline" onClick={() => void load()}>
             Try again
@@ -1236,7 +1265,10 @@ export default function SupplierInvoicesPage() {
       )}
 
       {error && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {error}
         </div>
       )}

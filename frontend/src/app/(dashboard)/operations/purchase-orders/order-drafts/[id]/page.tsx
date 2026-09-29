@@ -2,8 +2,11 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
+import {
+  useWorkspacePathname,
+  useWorkspaceRouter as useRouter,
+} from '@/components/workspace/workspace-navigation';
 import { Copy, ExternalLink, Pencil, Send, Share2 } from 'lucide-react';
 import { DocumentArtifactButton } from '@/components/documents';
 import {
@@ -44,7 +47,8 @@ function Field({ label, value }: { label: string; value?: React.ReactNode }) {
 }
 
 export default function SupplierOrderDraftDetailPage() {
-  const params = useParams<{ id: string }>();
+  const path = useWorkspacePathname();
+  const params = { id: path.split('/')[4] ?? '' };
   const router = useRouter();
   const { hasPermission } = useAuth();
   const canView = hasPermission('supplier_order_drafts.view');

@@ -1,15 +1,33 @@
 'use client';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Btn, Card, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, SkeletonTable, StatCard, StatusBadge } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  EmptyState,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  SkeletonTable,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendList, backendPost } from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
-interface Company { id: string; name: string; code?: string | null }
+interface Company {
+  id: string;
+  name: string;
+  code?: string | null;
+}
 interface PurchaseOrder {
   id: string;
   purchaseOrderNumber?: string | null;
@@ -90,8 +108,11 @@ export default function ThreeWayMatchingPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [grns, setGrns] = useState<GoodsReceivedNote[]>([]);
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
-  const [companyId, setCompanyId] = useState('');
-  const [status, setStatus] = useState('');
+  const [companyId, setCompanyId] = useWorkspaceState(
+    'procurement/three-way-matching.companyId',
+    '',
+  );
+  const [status, setStatus] = useWorkspaceState('procurement/three-way-matching.status', '');
   const [selected, setSelected] = useState<ThreeWayMatch | null>(null);
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -187,10 +208,18 @@ export default function ThreeWayMatchingPage() {
 
   const poById = useMemo(() => new Map(purchaseOrders.map((po) => [po.id, po])), [purchaseOrders]);
   const grnById = useMemo(() => new Map(grns.map((grn) => [grn.id, grn])), [grns]);
-  const invoiceById = useMemo(() => new Map(invoices.map((invoice) => [invoice.id, invoice])), [invoices]);
-  const variances = rows.filter((row) => ['VARIANCE', 'FAILED', 'PARTIAL_MATCH'].includes(row.matchStatus)).length;
+  const invoiceById = useMemo(
+    () => new Map(invoices.map((invoice) => [invoice.id, invoice])),
+    [invoices],
+  );
+  const variances = rows.filter((row) =>
+    ['VARIANCE', 'FAILED', 'PARTIAL_MATCH'].includes(row.matchStatus),
+  ).length;
   const approved = rows.filter((row) => row.approvedAt).length;
-  const totalVariance = rows.reduce((sum, row) => sum + Math.abs(Number(row.amountVariance ?? 0)), 0);
+  const totalVariance = rows.reduce(
+    (sum, row) => sum + Math.abs(Number(row.amountVariance ?? 0)),
+    0,
+  );
 
   const openCreate = () => {
     setForm({
@@ -212,7 +241,12 @@ export default function ThreeWayMatchingPage() {
       'Match Date': new Date(row.matchDate).toLocaleDateString('en-GB'),
       'Purchase Order': poById.get(row.purchaseOrderId)?.purchaseOrderNumber ?? row.purchaseOrderId,
       Invoice: row.supplierInvoiceId
-        ? invoiceLabel(invoiceById.get(row.supplierInvoiceId) ?? { id: row.supplierInvoiceId, companyId: row.companyId })
+        ? invoiceLabel(
+            invoiceById.get(row.supplierInvoiceId) ?? {
+              id: row.supplierInvoiceId,
+              companyId: row.companyId,
+            },
+          )
         : '',
       'Quantity Variance': Number(row.quantityVariance ?? 0),
       'Amount Variance': Number(row.amountVariance ?? 0),
@@ -235,7 +269,9 @@ export default function ThreeWayMatchingPage() {
       const filters = [
         companyId ? (companies.find((company) => company.id === companyId)?.name ?? '') : '',
         status,
-      ].filter(Boolean).join(' · ');
+      ]
+        .filter(Boolean)
+        .join(' · ');
       await downloadTablePdf({
         title: 'Three-Way Matching',
         subtitle: filters || undefined,
@@ -256,7 +292,9 @@ export default function ThreeWayMatchingPage() {
     ? grns.filter((grn) => !grn.purchaseOrderId || grn.purchaseOrderId === form.purchaseOrderId)
     : grns;
   const filteredInvoices = form.purchaseOrderId
-    ? invoices.filter((invoice) => !invoice.purchaseOrderId || invoice.purchaseOrderId === form.purchaseOrderId)
+    ? invoices.filter(
+        (invoice) => !invoice.purchaseOrderId || invoice.purchaseOrderId === form.purchaseOrderId,
+      )
     : invoices;
 
   const saveMatch = async () => {
@@ -306,7 +344,10 @@ export default function ThreeWayMatchingPage() {
   if (authLoading) {
     return (
       <div className="p-6">
-        <PageHeader title="Three-Way Matching" subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval" />
+        <PageHeader
+          title="Three-Way Matching"
+          subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval"
+        />
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">Loading</p>
         </div>
@@ -317,10 +358,16 @@ export default function ThreeWayMatchingPage() {
   if (!canView) {
     return (
       <div className="p-6">
-        <PageHeader title="Three-Way Matching" subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval" />
+        <PageHeader
+          title="Three-Way Matching"
+          subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval"
+        />
         <Card className="mt-6">
           <div className="px-6 py-12 text-center">
-            <p className="text-[15px] font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+            <p
+              className="text-[15px] font-medium"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
               Access Restricted
             </p>
             <p className="mt-1 text-[13px]" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -334,7 +381,10 @@ export default function ThreeWayMatchingPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="Three-Way Matching" subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval" />
+      <PageHeader
+        title="Three-Way Matching"
+        subtitle="Reconcile purchase orders, goods received notes, and supplier invoices before approval"
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Matches" value={rows.length} />
@@ -345,20 +395,55 @@ export default function ThreeWayMatchingPage() {
 
       <Card className="p-4">
         <div className="grid md:grid-cols-[1fr_190px_auto_auto_auto] gap-3 items-end">
-          <FormSelect label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="All companies">
-            {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
+          <FormSelect
+            label="Company"
+            value={companyId}
+            onChange={(e) => setCompanyId(e.target.value)}
+            placeholder="All companies"
+          >
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {optionLabel(company)}
+              </option>
+            ))}
           </FormSelect>
-          <FormSelect label="Match Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="All statuses">
-            {MATCH_STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
+          <FormSelect
+            label="Match Status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            placeholder="All statuses"
+          >
+            {MATCH_STATUSES.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
           </FormSelect>
-          <Btn variant="secondary" onClick={exportCsv} disabled={rows.length === 0} aria-label="Export matches to CSV">Export CSV</Btn>
-          <Btn variant="secondary" onClick={exportPdf} disabled={rows.length === 0 || exportingPdf} aria-label="Export matches to PDF">Export PDF</Btn>
+          <Btn
+            variant="secondary"
+            onClick={exportCsv}
+            disabled={rows.length === 0}
+            aria-label="Export matches to CSV"
+          >
+            Export CSV
+          </Btn>
+          <Btn
+            variant="secondary"
+            onClick={exportPdf}
+            disabled={rows.length === 0 || exportingPdf}
+            aria-label="Export matches to PDF"
+          >
+            Export PDF
+          </Btn>
           {canCreate && <Btn onClick={openCreate}>New Match</Btn>}
         </div>
       </Card>
 
       {loadError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+        <div
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          role="alert"
+        >
           {loadError}
           <button type="button" className="ml-3 font-medium underline" onClick={() => void load()}>
             Try again
@@ -366,26 +451,56 @@ export default function ThreeWayMatchingPage() {
         </div>
       )}
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</div>}
+      {error && (
+        <div
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
 
       <div className="grid xl:grid-cols-[minmax(0,1fr)_440px] gap-5">
         <Card className="overflow-hidden">
           {loading ? (
-            <div className="p-4"><SkeletonTable rows={6} cols={6} /></div>
+            <div className="p-4">
+              <SkeletonTable rows={6} cols={6} />
+            </div>
           ) : rows.length === 0 ? (
-            <EmptyState title="No matches" description="No three-way matches were found for the current filters." />
+            <EmptyState
+              title="No matches"
+              description="No three-way matches were found for the current filters."
+            />
           ) : (
             <div className="overflow-x-auto">
               <WorkspaceTable className="w-full text-sm">
-                <caption className="sr-only">Three-way matches between purchase orders, goods received notes, and supplier invoices</caption>
+                <caption className="sr-only">
+                  Three-way matches between purchase orders, goods received notes, and supplier
+                  invoices
+                </caption>
                 <thead>
-                  <tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}>
-                    <th scope="col" className="px-4 py-3">Match</th>
-                    <th scope="col" className="px-4 py-3">Purchase Order</th>
-                    <th scope="col" className="px-4 py-3">Invoice</th>
-                    <th scope="col" className="px-4 py-3 text-right">Qty Var.</th>
-                    <th scope="col" className="px-4 py-3 text-right">Amount Var.</th>
-                    <th scope="col" className="px-4 py-3">Status</th>
+                  <tr
+                    className="text-left text-xs uppercase bg-gray-50"
+                    style={{ color: 'var(--aurora-text-muted)' }}
+                  >
+                    <th scope="col" className="px-4 py-3">
+                      Match
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Purchase Order
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Invoice
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Qty Var.
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Amount Var.
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -410,17 +525,39 @@ export default function ThreeWayMatchingPage() {
                       >
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs">{row.matchNumber}</div>
-                          <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{new Date(row.matchDate).toLocaleDateString('en-GB')}</div>
+                          <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            {new Date(row.matchDate).toLocaleDateString('en-GB')}
+                          </div>
                         </td>
-                        <td className="px-4 py-3">{poById.get(row.purchaseOrderId)?.purchaseOrderNumber ?? row.purchaseOrderId}</td>
-                        <td className="px-4 py-3">{row.supplierInvoiceId ? invoiceLabel(invoiceById.get(row.supplierInvoiceId) ?? { id: row.supplierInvoiceId, companyId: row.companyId }) : '-'}</td>
-                        <td className={`px-4 py-3 text-right font-mono ${qtyVar ? 'text-red-600' : 'text-emerald-600'}`}>
-                          {qtyVar ? '⚠ ' : '✓ '}{qtyVar.toLocaleString()}
+                        <td className="px-4 py-3">
+                          {poById.get(row.purchaseOrderId)?.purchaseOrderNumber ??
+                            row.purchaseOrderId}
                         </td>
-                        <td className={`px-4 py-3 text-right font-mono ${amtVar ? 'text-red-600' : 'text-emerald-600'}`}>
-                          {amtVar ? '⚠ ' : '✓ '}{fmtMoney(row.amountVariance)}
+                        <td className="px-4 py-3">
+                          {row.supplierInvoiceId
+                            ? invoiceLabel(
+                                invoiceById.get(row.supplierInvoiceId) ?? {
+                                  id: row.supplierInvoiceId,
+                                  companyId: row.companyId,
+                                },
+                              )
+                            : '-'}
                         </td>
-                        <td className="px-4 py-3"><StatusBadge status={row.matchStatus} /></td>
+                        <td
+                          className={`px-4 py-3 text-right font-mono ${qtyVar ? 'text-red-600' : 'text-emerald-600'}`}
+                        >
+                          {qtyVar ? '⚠ ' : '✓ '}
+                          {qtyVar.toLocaleString()}
+                        </td>
+                        <td
+                          className={`px-4 py-3 text-right font-mono ${amtVar ? 'text-red-600' : 'text-emerald-600'}`}
+                        >
+                          {amtVar ? '⚠ ' : '✓ '}
+                          {fmtMoney(row.amountVariance)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={row.matchStatus} />
+                        </td>
                       </tr>
                     );
                   })}
@@ -432,22 +569,68 @@ export default function ThreeWayMatchingPage() {
 
         <Card className="p-4 space-y-4">
           {!selected ? (
-            <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>Select a match to review procurement references and approve.</div>
+            <div className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+              Select a match to review procurement references and approve.
+            </div>
           ) : (
             <>
               <div>
                 <div className="font-semibold">{selected.matchNumber}</div>
-                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{new Date(selected.matchDate).toLocaleDateString('en-GB')}</div>
+                <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                  {new Date(selected.matchDate).toLocaleDateString('en-GB')}
+                </div>
               </div>
               <div className="space-y-2 text-sm">
-                <ReferenceRow label="Purchase Order" value={poById.get(selected.purchaseOrderId) ? poLabel(poById.get(selected.purchaseOrderId)!) : selected.purchaseOrderId} />
-                <ReferenceRow label="GRN" value={selected.goodsReceivedNoteId ? grnLabel(grnById.get(selected.goodsReceivedNoteId) ?? { id: selected.goodsReceivedNoteId, companyId: selected.companyId }) : 'Not linked'} />
-                <ReferenceRow label="Supplier Invoice" value={selected.supplierInvoiceId ? invoiceLabel(invoiceById.get(selected.supplierInvoiceId) ?? { id: selected.supplierInvoiceId, companyId: selected.companyId }) : 'Not linked'} />
-                <ReferenceRow label="Quantity Variance" value={`${Number(selected.quantityVariance) !== 0 ? '⚠ ' : '✓ '}${Number(selected.quantityVariance ?? 0).toLocaleString()}`} danger={Number(selected.quantityVariance) !== 0} />
-                <ReferenceRow label="Amount Variance" value={`${Number(selected.amountVariance) !== 0 ? '⚠ ' : '✓ '}${fmtMoney(selected.amountVariance)}`} danger={Number(selected.amountVariance) !== 0} />
+                <ReferenceRow
+                  label="Purchase Order"
+                  value={
+                    poById.get(selected.purchaseOrderId)
+                      ? poLabel(poById.get(selected.purchaseOrderId)!)
+                      : selected.purchaseOrderId
+                  }
+                />
+                <ReferenceRow
+                  label="GRN"
+                  value={
+                    selected.goodsReceivedNoteId
+                      ? grnLabel(
+                          grnById.get(selected.goodsReceivedNoteId) ?? {
+                            id: selected.goodsReceivedNoteId,
+                            companyId: selected.companyId,
+                          },
+                        )
+                      : 'Not linked'
+                  }
+                />
+                <ReferenceRow
+                  label="Supplier Invoice"
+                  value={
+                    selected.supplierInvoiceId
+                      ? invoiceLabel(
+                          invoiceById.get(selected.supplierInvoiceId) ?? {
+                            id: selected.supplierInvoiceId,
+                            companyId: selected.companyId,
+                          },
+                        )
+                      : 'Not linked'
+                  }
+                />
+                <ReferenceRow
+                  label="Quantity Variance"
+                  value={`${Number(selected.quantityVariance) !== 0 ? '⚠ ' : '✓ '}${Number(selected.quantityVariance ?? 0).toLocaleString()}`}
+                  danger={Number(selected.quantityVariance) !== 0}
+                />
+                <ReferenceRow
+                  label="Amount Variance"
+                  value={`${Number(selected.amountVariance) !== 0 ? '⚠ ' : '✓ '}${fmtMoney(selected.amountVariance)}`}
+                  danger={Number(selected.amountVariance) !== 0}
+                />
               </div>
               {selected.notes && (
-                <div className="rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--aurora-border)' }}>
+                <div
+                  className="rounded-lg border p-3 text-sm"
+                  style={{ borderColor: 'var(--aurora-border)' }}
+                >
                   {selected.notes}
                 </div>
               )}
@@ -472,29 +655,125 @@ export default function ThreeWayMatchingPage() {
       </div>
 
       {creating && (
-        <Modal open title="Create Three-Way Match" onClose={() => setCreating(false)} size="xl" footer={<><Btn variant="secondary" onClick={() => setCreating(false)}>Cancel</Btn><Btn loading={saving} onClick={saveMatch}>Create</Btn></>}>
+        <Modal
+          open
+          title="Create Three-Way Match"
+          onClose={() => setCreating(false)}
+          size="xl"
+          footer={
+            <>
+              <Btn variant="secondary" onClick={() => setCreating(false)}>
+                Cancel
+              </Btn>
+              <Btn loading={saving} onClick={saveMatch}>
+                Create
+              </Btn>
+            </>
+          }
+        >
           <div className="grid md:grid-cols-2 gap-3">
-            <FormSelect label="Company" required value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value, purchaseOrderId: '', goodsReceivedNoteId: '', supplierInvoiceId: '' }))} placeholder="Select company">
-              {companies.map((company) => <option key={company.id} value={company.id}>{optionLabel(company)}</option>)}
+            <FormSelect
+              label="Company"
+              required
+              value={form.companyId}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  companyId: e.target.value,
+                  purchaseOrderId: '',
+                  goodsReceivedNoteId: '',
+                  supplierInvoiceId: '',
+                }))
+              }
+              placeholder="Select company"
+            >
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {optionLabel(company)}
+                </option>
+              ))}
             </FormSelect>
-            <FormSelect label="Purchase Order" required value={form.purchaseOrderId} onChange={(e) => setForm((f) => ({ ...f, purchaseOrderId: e.target.value, goodsReceivedNoteId: '', supplierInvoiceId: '' }))} placeholder={form.companyId ? 'Select PO' : 'Select company first'} disabled={!form.companyId}>
-              {purchaseOrders.filter((po) => po.companyId === form.companyId).map((po) => <option key={po.id} value={po.id}>{poLabel(po)}</option>)}
+            <FormSelect
+              label="Purchase Order"
+              required
+              value={form.purchaseOrderId}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  purchaseOrderId: e.target.value,
+                  goodsReceivedNoteId: '',
+                  supplierInvoiceId: '',
+                }))
+              }
+              placeholder={form.companyId ? 'Select PO' : 'Select company first'}
+              disabled={!form.companyId}
+            >
+              {purchaseOrders
+                .filter((po) => po.companyId === form.companyId)
+                .map((po) => (
+                  <option key={po.id} value={po.id}>
+                    {poLabel(po)}
+                  </option>
+                ))}
             </FormSelect>
-            <FormDateField label="Match Date" value={form.matchDate} onChange={(value) => setForm((f) => ({ ...f, matchDate: value }))} />
-            <FormSelect label="Goods Received Note" value={form.goodsReceivedNoteId} onChange={(e) => setForm((f) => ({ ...f, goodsReceivedNoteId: e.target.value }))} placeholder="Optional GRN" disabled={!form.purchaseOrderId}>
-              {filteredGrns.map((grn) => <option key={grn.id} value={grn.id}>{grnLabel(grn)}</option>)}
+            <FormDateField
+              label="Match Date"
+              value={form.matchDate}
+              onChange={(value) => setForm((f) => ({ ...f, matchDate: value }))}
+            />
+            <FormSelect
+              label="Goods Received Note"
+              value={form.goodsReceivedNoteId}
+              onChange={(e) => setForm((f) => ({ ...f, goodsReceivedNoteId: e.target.value }))}
+              placeholder="Optional GRN"
+              disabled={!form.purchaseOrderId}
+            >
+              {filteredGrns.map((grn) => (
+                <option key={grn.id} value={grn.id}>
+                  {grnLabel(grn)}
+                </option>
+              ))}
             </FormSelect>
-            <FormSelect label="Supplier Invoice" required value={form.supplierInvoiceId} onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceId: e.target.value }))} placeholder={form.purchaseOrderId ? 'Select invoice' : 'Select purchase order first'} disabled={!form.purchaseOrderId}>
-              {filteredInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceLabel(invoice)}</option>)}
+            <FormSelect
+              label="Supplier Invoice"
+              required
+              value={form.supplierInvoiceId}
+              onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceId: e.target.value }))}
+              placeholder={form.purchaseOrderId ? 'Select invoice' : 'Select purchase order first'}
+              disabled={!form.purchaseOrderId}
+            >
+              {filteredInvoices.map((invoice) => (
+                <option key={invoice.id} value={invoice.id}>
+                  {invoiceLabel(invoice)}
+                </option>
+              ))}
             </FormSelect>
             <div />
-            <FormInput label="Quantity Variance (computed)" type="number" value={form.quantityVariance} readOnly disabled />
-            <FormInput label="Amount Variance (computed)" type="number" value={form.amountVariance} readOnly disabled />
+            <FormInput
+              label="Quantity Variance (computed)"
+              type="number"
+              value={form.quantityVariance}
+              readOnly
+              disabled
+            />
+            <FormInput
+              label="Amount Variance (computed)"
+              type="number"
+              value={form.amountVariance}
+              readOnly
+              disabled
+            />
             <div className="md:col-span-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
               The match number is assigned automatically; variance and match status are calculated
               server-side from the linked PO, GRN, and invoice.
             </div>
-            <div className="md:col-span-2"><FormTextarea label="Notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} /></div>
+            <div className="md:col-span-2">
+              <FormTextarea
+                label="Notes"
+                value={form.notes}
+                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
           </div>
         </Modal>
       )}
@@ -502,9 +781,20 @@ export default function ThreeWayMatchingPage() {
   );
 }
 
-function ReferenceRow({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
+function ReferenceRow({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--aurora-border)' }}>
+    <div
+      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
+      style={{ borderColor: 'var(--aurora-border)' }}
+    >
       <span style={{ color: 'var(--aurora-text-muted)' }}>{label}</span>
       <span className={`text-right font-medium ${danger ? 'text-red-600' : ''}`}>{value}</span>
     </div>

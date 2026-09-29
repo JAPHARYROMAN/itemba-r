@@ -202,6 +202,8 @@ describe('Reports read boundaries', () => {
   ])('%s is scoped and read from a repeatable snapshot', async (method, table, payments, party) => {
     const findMany = jest.fn().mockResolvedValue([]),
       tx = {
+        invoiceDeskSupplier: { findFirst: jest.fn(async () => null) },
+        salesDeskCustomer: { findFirst: jest.fn(async () => null) },
         [table]: { count: jest.fn().mockResolvedValue(0), findMany },
         [payments]: { count: jest.fn().mockResolvedValue(0) },
       };
@@ -221,7 +223,7 @@ describe('Reports read boundaries', () => {
     expect(companies.companyWhereFor).toHaveBeenCalledWith(user, 'allowed');
     expect(org.recordWhereFor).toHaveBeenCalledWith(user);
     expect(findMany.mock.calls[0][0].where.AND[1]).toMatchObject({
-      [party]: 'party',
+      OR: expect.arrayContaining([{ [party]: 'party' }]),
       voidedAt: null,
     });
     expect(findMany.mock.calls[0][0].where.AND[0].AND).toContainEqual({

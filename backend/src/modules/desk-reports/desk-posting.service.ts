@@ -56,12 +56,12 @@ export class DeskPostingService {
     const rows =
       kind === 'sales'
         ? await tx.salesDeskSale.findMany({
-            where: { ...scope, saleDate: date },
+            where: { ...scope, saleDate: date, canonicalSalesOrderId: null },
             take: 1001,
             orderBy: { saleDate: 'desc' },
           })
         : await tx.invoiceDeskInvoice.findMany({
-            where: { ...scope, invoiceDate: date },
+            where: { ...scope, invoiceDate: date, canonicalInvoiceId: null },
             take: 1001,
             orderBy: { invoiceDate: 'desc' },
           });

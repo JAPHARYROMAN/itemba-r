@@ -11,6 +11,7 @@ const navigationSourceFiles = [
   path.join(process.cwd(), 'src', 'features', 'reports', 'reports-app.tsx'),
   path.join(process.cwd(), 'src', 'features', 'sales-desk', 'sales-desk.tsx'),
   path.join(process.cwd(), 'src', 'features', 'records', 'records-app.tsx'),
+  path.join(process.cwd(), 'src', 'features', 'cash-desk', 'cash-workspace.tsx'),
 ];
 const minPageRoutes = 190;
 

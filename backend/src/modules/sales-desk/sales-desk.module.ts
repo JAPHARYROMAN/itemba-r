@@ -1,3 +1,5 @@
+import { DeskTransactionLinksService } from '../../common/services/desk-transaction-links.service';
+import { DeskPartyLinksService } from '../../common/services/desk-party-links.service';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
@@ -9,6 +11,12 @@ import { SalesDeskService } from './sales-desk.service';
 @Module({
   imports: [PrismaModule, AuditLogsModule, CashDeskModule],
   controllers: [SalesDeskController],
-  providers: [SalesDeskService, CompanyScopeService, OrganizationScopeService],
+  providers: [
+    DeskTransactionLinksService,
+    DeskPartyLinksService,
+    SalesDeskService,
+    CompanyScopeService,
+    OrganizationScopeService,
+  ],
 })
 export class SalesDeskModule {}

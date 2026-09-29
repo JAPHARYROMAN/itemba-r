@@ -1,9 +1,9 @@
 export const REPORTS = [
   {
     id: 'customers',
-    name: 'Customer reports',
+    name: 'Direct customer balances',
     description: 'Activity, statements, payments and overdue balances.',
-    source: 'Sales Desk',
+    source: 'Sales Desk direct register',
     permission: 'sales_desk.view',
     path: '/sales-desk/overview',
     directory: '/sales-desk/directory',
@@ -11,9 +11,9 @@ export const REPORTS = [
   },
   {
     id: 'suppliers',
-    name: 'Supplier reports',
+    name: 'Direct supplier balances',
     description: 'Purchases, statements, payments and what you owe.',
-    source: 'Invoice Desk',
+    source: 'Invoice Desk direct register',
     permission: 'invoice_desk.view',
     path: '/invoice-desk/overview',
     directory: '/invoice-desk/directory',
@@ -21,9 +21,9 @@ export const REPORTS = [
   },
   {
     id: 'sales',
-    name: 'Sales report',
+    name: 'Direct sales report',
     description: 'Sales, payments and outstanding amounts.',
-    source: 'Sales Desk',
+    source: 'Sales Desk direct register',
     permission: 'sales_desk.view',
     path: '/sales-desk/sales',
     directory: '/sales-desk/directory',
@@ -31,9 +31,9 @@ export const REPORTS = [
   },
   {
     id: 'purchases',
-    name: 'Purchase report',
+    name: 'Direct invoice report',
     description: 'Purchase invoices and their payment status.',
-    source: 'Invoice Desk',
+    source: 'Invoice Desk direct register',
     permission: 'invoice_desk.view',
     path: '/invoice-desk/invoices',
     directory: '/invoice-desk/directory',
@@ -41,7 +41,7 @@ export const REPORTS = [
   },
   {
     id: 'expenses',
-    name: 'Expense report',
+    name: 'Cash register expenses',
     description: 'Spending by category, payee and date.',
     source: 'Cash Desk',
     permission: 'cash_desk.view',
@@ -51,7 +51,7 @@ export const REPORTS = [
   },
   {
     id: 'cash',
-    name: 'Cash movements',
+    name: 'Cash register movements',
     description: 'Receipts, transfers and money paid out.',
     source: 'Cash Desk',
     permission: 'cash_desk.view',

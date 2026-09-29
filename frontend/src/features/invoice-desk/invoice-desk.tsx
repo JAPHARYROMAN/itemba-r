@@ -1,6 +1,7 @@
 'use client';
 import { useDeferredValue, useRef, useState } from 'react';
-import Link from 'next/link';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
+import { BusinessTransactionLink } from '@/components/workspace/business-transaction-link';
 import { FilePreviewDialog } from '@/components/documents/FilePreviewDialog';
 import type { FilePreviewSource } from '@/components/documents/file-preview-source';
 import { AppGlyph } from '@/components/os/app-glyph';
@@ -34,7 +35,9 @@ import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet, backendUpload } from '@/lib/api-client';
 import { DeskEditor } from './desk-editor';
-import { Directory, Invoice, Overview, Scope, Supplier, dateLabel, money } from './types';
+import { Directory, Invoice, Overview, Scope, dateLabel, money } from './types';
+import { TradingPartnerWorkspace } from '@/components/workspace/trading-partner-workspace';
+import { InvoiceSupplierReconciliation } from './invoice-supplier-reconciliation';
 import './invoice-desk.css';
 
 const emptyDirectory: Directory = { companies: [], divisions: [], branches: [] };
@@ -57,11 +60,11 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
   const allowed = hasPermission('invoice_desk.view'),
     manage = hasPermission('invoice_desk.manage'),
     payments = hasPermission('invoice_desk.payments');
-  const [section, setSection] = useDeskSection('invoice-desk', [
-    'overview',
-    'invoices',
-    'suppliers',
-  ] as const);
+  const [section, setSection] = useDeskSection(
+    'invoice-desk',
+    ['overview', 'invoices', 'suppliers'] as const,
+    'direct',
+  );
   const [scope, setScope] = useWorkspaceState<Scope>('invoice-desk.scope', {
     companyId: '',
     divisionId: '',
@@ -95,11 +98,6 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
     },
     allowed && section !== 'suppliers',
   );
-  const suppliers = useWorkspaceResource<Supplier[]>(
-    '/invoice-desk/suppliers',
-    { ...(scope.companyId ? { companyId: scope.companyId } : {}), search: deferredSearch },
-    allowed && section === 'suppliers',
-  );
   const detail = useWorkspaceResource<Invoice>(
     `/invoice-desk/invoices/${encodeURIComponent(selected)}`,
     {},
@@ -113,7 +111,6 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
   function reload() {
     overview.reload();
     invoices.reload();
-    suppliers.reload();
     detail.reload();
   }
   useLinkedDeskChanges('invoice-desk', !!editor, reload);
@@ -243,14 +240,9 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
             >
               <RefreshCw size={17} />
             </button>
-            {manage && (
-              <Btn
-                icon={<Plus size={16} />}
-                onClick={() =>
-                  setEditor({ kind: section === 'suppliers' ? 'supplier' : 'invoice' })
-                }
-              >
-                {section === 'suppliers' ? 'New supplier' : 'New invoice'}
+            {manage && section !== 'suppliers' && (
+              <Btn icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'invoice' })}>
+                New invoice
               </Btn>
             )}
           </div>
@@ -260,63 +252,65 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
           onResume={resumeDraft}
           activeDraftId={editor?.draftId}
         />
-        <div className="desk-scope" aria-label="Organisation scope">
-          <Building2 size={17} />
-          <label>
-            <span>Company</span>
-            <select
-              aria-label="Company"
-              value={scope.companyId}
-              disabled={directory.loading}
-              onChange={(e) => changeScope('companyId', e.target.value)}
-            >
-              <option value="">All companies</option>
-              {dir.companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <span className="desk-scope-divider">/</span>
-          <label>
-            <span>Division</span>
-            <select
-              aria-label="Division"
-              disabled={!scope.companyId}
-              value={scope.divisionId}
-              onChange={(e) => changeScope('divisionId', e.target.value)}
-            >
-              <option value="">All divisions</option>
-              {dir.divisions
-                .filter((d) => d.companyId === scope.companyId)
-                .map((c) => (
+        {section !== 'suppliers' && (
+          <div className="desk-scope" aria-label="Organisation scope">
+            <Building2 size={17} />
+            <label>
+              <span>Company</span>
+              <select
+                aria-label="Company"
+                value={scope.companyId}
+                disabled={directory.loading}
+                onChange={(e) => changeScope('companyId', e.target.value)}
+              >
+                <option value="">All companies</option>
+                {dir.companies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
-            </select>
-          </label>
-          <span className="desk-scope-divider">/</span>
-          <label>
-            <span>Branch</span>
-            <select
-              aria-label="Branch"
-              disabled={!scope.divisionId}
-              value={scope.branchId}
-              onChange={(e) => changeScope('branchId', e.target.value)}
-            >
-              <option value="">All branches</option>
-              {dir.branches
-                .filter((b) => b.divisionId === scope.divisionId)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-        </div>
+              </select>
+            </label>
+            <span className="desk-scope-divider">/</span>
+            <label>
+              <span>Division</span>
+              <select
+                aria-label="Division"
+                disabled={!scope.companyId}
+                value={scope.divisionId}
+                onChange={(e) => changeScope('divisionId', e.target.value)}
+              >
+                <option value="">All divisions</option>
+                {dir.divisions
+                  .filter((d) => d.companyId === scope.companyId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <span className="desk-scope-divider">/</span>
+            <label>
+              <span>Branch</span>
+              <select
+                aria-label="Branch"
+                disabled={!scope.divisionId}
+                value={scope.branchId}
+                onChange={(e) => changeScope('branchId', e.target.value)}
+              >
+                <option value="">All branches</option>
+                {dir.branches
+                  .filter((b) => b.divisionId === scope.divisionId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+        )}
         {notice && (
           <p className="desk-success" role="status">
             <Check size={15} />
@@ -406,22 +400,23 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
                     <div>
                       <h2>A fresh start for your invoices.</h2>
                       <p>
-                        Add a supplier, record your first purchase, and give every payment a place
-                        to belong.
+                        Use the shared supplier directory, then record purchases and payments here.
+                        Supplier profiles and Invoice Desk balances stay connected without
+                        double-counting payables.
                       </p>
                       <div className="desk-welcome-steps">
-                        <span>01 · Add a supplier</span>
+                        <span>01 · Choose a supplier</span>
                         <span>02 · Save an invoice</span>
                         <span>03 · Track payments</span>
                       </div>
                     </div>
-                    {manage && (
+                    {hasPermission('suppliers.view') && (
                       <Btn
                         variant="secondary"
                         iconRight={<ArrowUpRight size={15} />}
-                        onClick={() => setEditor({ kind: 'supplier' })}
+                        onClick={() => go('suppliers')}
                       >
-                        Add your first supplier
+                        Open supplier directory
                       </Btn>
                     )}
                   </div>
@@ -590,62 +585,10 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
           </section>
         )}
         {section === 'suppliers' && (
-          <section className="desk-panel">
-            <div className="desk-register-toolbar">
-              <div className="desk-search">
-                <Search size={17} />
-                <input
-                  aria-label="Search suppliers"
-                  placeholder="Find a supplier"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <p>Supplier directory · Company level</p>
-            </div>
-            {suppliers.error ? (
-              <ErrorNotice text={suppliers.error} retry={suppliers.reload} />
-            ) : suppliers.loading ? (
-              <p className="desk-loading" role="status">
-                Loading suppliers…
-              </p>
-            ) : !suppliers.data?.length ? (
-              <div className="desk-empty">
-                <Users size={30} />
-                <h3>{search ? 'No matching suppliers' : 'A home for your suppliers'}</h3>
-                <p>
-                  {search
-                    ? 'Try another name.'
-                    : 'Add a supplier once, then keep all their invoices together.'}
-                </p>
-              </div>
-            ) : (
-              <div className="desk-suppliers">
-                {suppliers.data.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      go('invoices');
-                      setSupplierId(s.id);
-                      setStatus('all');
-                    }}
-                  >
-                    <span className="desk-avatar">{s.name.slice(0, 1)}</span>
-                    <span>
-                      <strong>{s.name}</strong>
-                      <small>
-                        {dir.companies.find((c) => c.id === s.companyId)?.name ?? 'Company'}
-                      </small>
-                      <small>{s.email || s.phone || 'No contact details'}</small>
-                    </span>
-                    <span className="desk-supplier-open">
-                      View invoices <ArrowUpRight size={15} />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
+          <>
+            <TradingPartnerWorkspace kind="suppliers" workspace="invoice-desk" embedded />
+            <InvoiceSupplierReconciliation />
+          </>
         )}
       </div>
       {!!selected && !editor && (
@@ -809,6 +752,13 @@ function InvoiceDetail({
   }
   return (
     <div className="desk-detail">
+      <BusinessTransactionLink
+        kind="invoice"
+        id={r.id}
+        companyId={r.companyId}
+        canonicalId={r.canonicalInvoiceId}
+        reload={reload}
+      />
       <div className="desk-detail-top">
         <div>
           <span className={`desk-badge desk-badge-${r.status.toLowerCase().replace(' ', '-')}`}>
@@ -843,7 +793,7 @@ function InvoiceDetail({
           <strong>{dateLabel(r.dueDate)}</strong>
         </div>
       </div>
-      {!r.voidedAt && (
+      {!r.voidedAt && !r.canonicalInvoiceId && (
         <div className="desk-detail-actions">
           {manage && !r.payments?.length && (
             <Btn variant="secondary" onClick={() => onAction('edit')}>
@@ -900,7 +850,7 @@ function InvoiceDetail({
       <section>
         <div className="desk-panel-title">
           <h3>Original invoice & documents</h3>
-          {manage && !r.voidedAt && (
+          {manage && !r.voidedAt && !r.canonicalInvoiceId && (
             <label className="desk-upload">
               <Paperclip size={14} />
               {busy ? 'Uploading…' : 'Attach file'}

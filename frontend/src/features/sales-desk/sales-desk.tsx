@@ -12,6 +12,7 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { getApp } from '@/lib/apps';
 import { SALES_DESK_PERMISSIONS, salesDeskRoute } from './sales-desk-routes';
+import { SalesCustomerReconciliation } from './sales-customer-reconciliation';
 import { SalesDeskOverview } from './sales-desk-overview';
 import '../invoice-desk/invoice-desk.css';
 import './sales-desk.css';
@@ -129,7 +130,10 @@ export function SalesDesk({ targetRecordId }: { targetRecordId?: string } = {}) 
         ) : route.kind === 'sales' ? (
           <Sales />
         ) : route.kind === 'customers' ? (
-          <Customers kind="customers" workspace="sales-desk" />
+          <>
+            <Customers kind="customers" workspace="sales-desk" />
+            <SalesCustomerReconciliation />
+          </>
         ) : route.kind === 'sale' ? (
           <Sale key={route.id} saleId={route.id} />
         ) : route.kind === 'customer' ? (

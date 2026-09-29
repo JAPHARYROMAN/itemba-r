@@ -1,4 +1,6 @@
 'use client';
+import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -8,7 +10,20 @@ import { RecordBrowser } from '@/components/workspace/record-browser';
 import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { DocumentArtifactButton } from '@/components/documents';
 import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
@@ -357,7 +372,10 @@ function ReceivableDetailModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
           {error}
         </div>
       )}
@@ -805,7 +823,10 @@ export function RecordPaymentModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -934,7 +955,10 @@ function WriteOffDialog({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -1084,7 +1108,10 @@ function ReceivableModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -1245,9 +1272,9 @@ export default function ReceivablesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [layout, setLayout] = useWorkspaceLayout('/finance/receivables');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useWorkspaceState('finance/receivables.search', '');
   const [query, setQuery] = useState('');
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useWorkspaceState('finance/receivables.page', 1);
   useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search);
@@ -1257,8 +1284,8 @@ export default function ReceivablesPage() {
   }, [search]);
   const [viewMode, setViewMode] = useState<'accounts' | 'documents'>('documents');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
-  const [companyId, setCompanyId] = useState('');
-  const [status, setStatus] = useState('');
+  const [companyId, setCompanyId] = useWorkspaceState('finance/receivables.companyId', '');
+  const [status, setStatus] = useWorkspaceState('finance/receivables.status', '');
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<Receivable | null>(null);
   const [editing, setEditing] = useState<Receivable | null>(null);
@@ -1428,6 +1455,7 @@ export default function ReceivablesPage() {
           companies={companies}
           onClose={() => setCreating(false)}
           onSaved={() => {
+            notifyDeskSaved('cash-desk');
             setCreating(false);
             load();
           }}
@@ -1441,6 +1469,7 @@ export default function ReceivablesPage() {
           companies={companies}
           onClose={() => setEditing(null)}
           onSaved={() => {
+            notifyDeskSaved('cash-desk');
             setEditing(null);
             load();
           }}
@@ -1451,6 +1480,7 @@ export default function ReceivablesPage() {
           receivable={deleting}
           onClose={() => setDeleting(null)}
           onDeleted={() => {
+            notifyDeskSaved('cash-desk');
             setDeleting(null);
             load();
           }}

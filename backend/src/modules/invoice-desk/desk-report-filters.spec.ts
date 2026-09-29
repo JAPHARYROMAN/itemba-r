@@ -53,7 +53,7 @@ describe('Desk report scope and dates', () => {
       expect(JSON.stringify(where)).toContain('2026-09-01T00:00:00.000Z');
       expect(JSON.stringify(where)).toContain('2026-09-18T00:00:00.000Z');
       expect(JSON.stringify(where)).toContain('text');
-      expect(where.AND).toContainEqual({ voidedAt: null });
+      expect(where.AND).toContainEqual(expect.objectContaining({ voidedAt: null }));
       expect(result.currencies[0].outstanding.toFixed(2)).toBe('9007199254740993.01');
     },
   );
