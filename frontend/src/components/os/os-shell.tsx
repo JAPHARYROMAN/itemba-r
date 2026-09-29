@@ -171,7 +171,7 @@ export function OsShell({
           (saved === link.href || saved.startsWith(`${link.href}/`)),
       )
       .sort((a, b) => b.href.length - a.href.length)[0];
-    return matched && canSee(matched)
+    return !isAppPath(saved) && matched && canSee(matched)
       ? saved
       : (permitted.find((link) => link.href === '/dashboard')?.href ??
           permitted[0]?.href ??
