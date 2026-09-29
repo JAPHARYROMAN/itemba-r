@@ -1,4 +1,6 @@
 'use client';
+import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -7,9 +9,22 @@ import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
 import { RecordBrowser } from '@/components/workspace/record-browser';
 import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
-import Link from 'next/link';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { downloadTablePdf } from '@/lib/export-download';
 import { DocumentArtifactButton } from '@/components/documents/DocumentArtifactButton';
@@ -213,7 +228,10 @@ function RejectDialog({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -329,7 +347,10 @@ function PayExpenseDialog({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          role="alert"
+          className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
           {error}
         </div>
       )}
@@ -490,13 +511,19 @@ function ExpenseDetailDialog({
       {loading ? (
         <PageSpinner />
       ) : error && !expense ? (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {error}
         </div>
       ) : expense ? (
         <div className="space-y-5">
           {error && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div
+              role="alert"
+              className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
               {error}
             </div>
           )}
@@ -772,7 +799,10 @@ function ExpenseModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -969,7 +999,10 @@ function DeleteConfirm({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          role="alert"
+          className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
           {error}
         </div>
       )}
@@ -994,9 +1027,9 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [layout, setLayout] = useWorkspaceLayout('/finance/expenses');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useWorkspaceState('finance/expenses.search', '');
   const [query, setQuery] = useState('');
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useWorkspaceState('finance/expenses.page', 1);
   useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search);
@@ -1004,8 +1037,8 @@ export default function ExpensesPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
-  const [companyId, setCompanyId] = useState('');
-  const [status, setStatus] = useState('');
+  const [companyId, setCompanyId] = useWorkspaceState('finance/expenses.companyId', '');
+  const [status, setStatus] = useWorkspaceState('finance/expenses.status', '');
   const [categoryId, setCategoryId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -1287,6 +1320,7 @@ export default function ExpensesPage() {
           companies={companies}
           onClose={() => setCreating(false)}
           onSaved={() => {
+            notifyDeskSaved('cash-desk');
             setCreating(false);
             load();
           }}
@@ -1314,6 +1348,7 @@ export default function ExpensesPage() {
           companies={companies}
           onClose={() => setEditing(null)}
           onSaved={() => {
+            notifyDeskSaved('cash-desk');
             setEditing(null);
             load();
           }}
@@ -1324,6 +1359,7 @@ export default function ExpensesPage() {
           expense={deleting}
           onClose={() => setDeleting(null)}
           onDeleted={() => {
+            notifyDeskSaved('cash-desk');
             setDeleting(null);
             load();
           }}
@@ -1344,6 +1380,7 @@ export default function ExpensesPage() {
           expense={paying}
           onClose={() => setPaying(null)}
           onPaid={() => {
+            notifyDeskSaved('cash-desk');
             setPaying(null);
             load();
           }}
@@ -1370,7 +1407,10 @@ export default function ExpensesPage() {
       </div>
 
       {actionMsg && (
-        <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700"
+        >
           {actionMsg}
         </div>
       )}
@@ -1397,7 +1437,8 @@ export default function ExpensesPage() {
                 </option>
               ))}
             </select>
-            <select aria-label="All Categories"
+            <select
+              aria-label="All Categories"
               value={categoryId}
               onChange={(e) => reset(setCategoryId)(e.target.value)}
               className={filterSelectCls}

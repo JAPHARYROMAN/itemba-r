@@ -63,3 +63,7 @@ export class SalesVoidDto {
   @IsInt() @Min(1) version!: number;
   @IsString() @MinLength(3) @MaxLength(500) reason!: string;
 }
+
+export class SalesCustomerLinkDto {
+  @IsString() @MaxLength(128) canonicalCustomerId!: string;
+}

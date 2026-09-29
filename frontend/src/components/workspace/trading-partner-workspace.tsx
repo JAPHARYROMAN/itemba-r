@@ -45,11 +45,13 @@ interface PartnerSummary {
 export function TradingPartnerWorkspace({
   kind,
   workspace,
+  embedded = false,
 }: {
   kind: PartnerKind;
-  workspace?: 'sales-desk';
+  workspace?: 'sales-desk' | 'invoice-desk';
+  embedded?: boolean;
 }) {
-  const stateKey = (field: string) => (workspace ? `sales-desk.customers.${field}` : undefined);
+  const stateKey = (field: string) => (workspace ? `${workspace}.${kind}.${field}` : undefined);
   const { hasPermission, loading: authLoading } = useAuth();
   const canRead = !authLoading && hasPermission(`${kind}.view`),
     canCreate = hasPermission(`${kind}.create`),
@@ -165,22 +167,42 @@ export function TradingPartnerWorkspace({
           : (value ?? '—');
   return (
     <div className="business-workspace record-workspace partner-workspace">
-      <PageHeader
-        title={title}
-        subtitle={
-          supplier
-            ? 'Supplier relationships, procurement scope and payment exposure.'
-            : 'Customer relationships, sales scope and credit exposure.'
-        }
-        breadcrumbs={[
-          {
-            label: workspace ? 'Sales Desk' : 'Operations',
-            href: workspace ? '/sales-desk' : '/operations',
-          },
-          { label: title },
-        ]}
-        actions={canCreate && <Btn onClick={() => setEditor({})}>New {label.toLowerCase()}</Btn>}
-      />
+      {!embedded && (
+        <PageHeader
+          title={title}
+          subtitle={
+            supplier
+              ? 'Supplier relationships, procurement scope and payment exposure.'
+              : 'Customer relationships, sales scope and credit exposure.'
+          }
+          breadcrumbs={[
+            {
+              label:
+                workspace === 'sales-desk'
+                  ? 'Sales Desk'
+                  : workspace === 'invoice-desk'
+                    ? 'Invoice Desk'
+                    : 'Operations',
+              href:
+                workspace === 'sales-desk'
+                  ? '/sales-desk'
+                  : workspace === 'invoice-desk'
+                    ? '/invoice-desk?view=suppliers'
+                    : '/operations',
+            },
+            { label: title },
+          ]}
+          actions={canCreate && <Btn onClick={() => setEditor({})}>New {label.toLowerCase()}</Btn>}
+        />
+      )}
+      {embedded && (
+        <p className="workspace-notice">
+          This directory uses ITEMBA-R supplier records. Supplier profiles contain the existing
+          organisation details, categories, purchase history, payables, statements and activity.
+          Linked Invoice Desk invoices are available in each supplier profile. Its balances remain
+          separate from ITEMBA-R payables.
+        </p>
+      )}
       <div className="workspace-summary">
         <div>
           <span>Matching {kind}</span>
@@ -314,9 +336,12 @@ export function TradingPartnerWorkspace({
           </>
         }
         actions={
-          <Btn variant="secondary" onClick={refresh} disabled={result.loading || summary.loading}>
-            Refresh
-          </Btn>
+          <>
+            <Btn variant="secondary" onClick={refresh} disabled={result.loading || summary.loading}>
+              Refresh
+            </Btn>
+            {embedded && canCreate && <Btn onClick={() => setEditor({})}>New supplier</Btn>}
+          </>
         }
       />
       <RecordBrowser
@@ -390,7 +415,13 @@ export function TradingPartnerWorkspace({
         actions={(r) => (
           <>
             <Link
-              href={workspace ? `/sales-desk/customers/${r.id}` : `/operations/${kind}/${r.id}`}
+              href={
+                workspace === 'sales-desk'
+                  ? `/sales-desk/customers/${r.id}`
+                  : workspace === 'invoice-desk' && supplier
+                    ? `/invoice-desk/suppliers/${r.id}`
+                    : `/operations/${kind}/${r.id}`
+              }
             >
               Open profile
             </Link>

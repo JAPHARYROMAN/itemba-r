@@ -20,12 +20,15 @@ const loading = () => <PageSpinner label="Opening your workspace" />;
 const preservesPosCounter = (from: string, to: string) =>
   from.split(/[?#]/)[0] === '/pos' && to.split(/[?#]/)[0] === '/pos';
 const Invoice = dynamic(
-  () => import('@/features/invoice-desk/invoice-desk').then((m) => m.InvoiceDesk),
+  () => import('@/features/invoice-desk/invoice-workspace').then((m) => m.InvoiceWorkspace),
   { loading },
 );
-const Cash = dynamic(() => import('@/features/cash-desk/cash-desk').then((m) => m.CashDesk), {
-  loading,
-});
+const Cash = dynamic(
+  () => import('@/features/cash-desk/cash-workspace').then((m) => m.CashWorkspace),
+  {
+    loading,
+  },
+);
 const Sales = dynamic(() => import('@/features/sales-desk/sales-desk').then((m) => m.SalesDesk), {
   loading,
 });
@@ -68,7 +71,6 @@ function Surface({ appId }: { appId: string }) {
   const record = params.get('record') ?? undefined;
   const view = params.get('view');
   const path = useWorkspacePathname();
-
   const content =
     appId === 'documents' && /^\/group-control\/documents\/[^/]+$/.test(path) ? (
       <DocumentDetail />
@@ -83,7 +85,10 @@ function Surface({ appId }: { appId: string }) {
     ) : appId === 'records' ? (
       <Records />
     ) : appId === 'documents' ? (
-      <Documents initialView={view === 'library' || view === 'letter' ? view : 'home'} syncRoute />
+      <Documents
+        initialView={view === 'library' || view === 'letter' || view === 'linked' ? view : 'home'}
+        syncRoute
+      />
     ) : (
       <AppSurface appId={appId as 'inventory' | 'reports' | 'payroll'} navigation={false} />
     );

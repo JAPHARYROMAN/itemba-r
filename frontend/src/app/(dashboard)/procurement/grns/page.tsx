@@ -1,4 +1,5 @@
 'use client';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -21,7 +22,14 @@ import { Stepper } from '@/components/aurora/overlays/Stepper';
 import { DocumentArtifactButton } from '@/components/documents';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
-import { ApiError, backendGet, backendList, backendPage, backendPost, backendPut } from '@/lib/api-client';
+import {
+  ApiError,
+  backendGet,
+  backendList,
+  backendPage,
+  backendPost,
+  backendPut,
+} from '@/lib/api-client';
 import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 
@@ -102,7 +110,12 @@ interface PoLine {
   unitCost?: number | string | null;
   batchNumber?: string | null;
   expiryDate?: string | null;
-  product?: { id: string; name?: string | null; sku?: string | null; productCode?: string | null } | null;
+  product?: {
+    id: string;
+    name?: string | null;
+    sku?: string | null;
+    productCode?: string | null;
+  } | null;
   unit?: { id: string; name?: string | null; symbol?: string | null } | null;
 }
 
@@ -320,10 +333,7 @@ function ReceiveGoodsWizard({
     [],
   );
 
-  const linesToSubmit = useMemo(
-    () => lines.filter((line) => toNum(line.received) > 0),
-    [lines],
-  );
+  const linesToSubmit = useMemo(() => lines.filter((line) => toNum(line.received) > 0), [lines]);
 
   const hasQtyError = useMemo(
     () =>
@@ -373,7 +383,9 @@ function ReceiveGoodsWizard({
       return;
     }
     if (hasQtyError) {
-      setFormError('Check the quantities — rejected cannot exceed received and values must be positive');
+      setFormError(
+        'Check the quantities — rejected cannot exceed received and values must be positive',
+      );
       return;
     }
     setSubmitting(true);
@@ -420,13 +432,7 @@ function ReceiveGoodsWizard({
 
   return (
     <Modal open={open} onClose={onClose} title="Receive Goods" size="3xl">
-      <Stepper
-        steps={steps}
-        current={step}
-        allowStepNavigation
-        hideFooter
-        onStepChange={setStep}
-      >
+      <Stepper steps={steps} current={step} allowStepNavigation hideFooter onStepChange={setStep}>
         {(ctx) => (
           <div className="space-y-5">
             {formError && <ErrorState message={formError} />}
@@ -554,7 +560,10 @@ function ReceiveGoodsWizard({
               <div className="space-y-4">
                 <div
                   className="rounded-lg border px-4 py-3 text-sm"
-                  style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-bg-subtle)' }}
+                  style={{
+                    borderColor: 'var(--aurora-border)',
+                    background: 'var(--aurora-bg-subtle)',
+                  }}
                 >
                   <span className="font-medium">{selectedPo.purchaseOrderNumber}</span>
                   <span style={{ color: 'var(--aurora-text-muted)' }}>
@@ -698,8 +707,8 @@ function ReceiveGoodsWizard({
                   </div>
                 )}
                 <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                  Accepted is received minus rejected. Unit cost defaults to the PO cost; override to
-                  capture the landed cost. Lines with a received quantity of 0 are skipped.
+                  Accepted is received minus rejected. Unit cost defaults to the PO cost; override
+                  to capture the landed cost. Lines with a received quantity of 0 are skipped.
                 </p>
               </div>
             )}
@@ -808,19 +817,11 @@ function ReceiveGoodsWizard({
               className="mt-6 flex items-center justify-between gap-3 border-t pt-4"
               style={{ borderColor: 'var(--aurora-border)' }}
             >
-              <Btn
-                variant="ghost"
-                onClick={ctx.isFirst ? onClose : ctx.back}
-                disabled={submitting}
-              >
+              <Btn variant="ghost" onClick={ctx.isFirst ? onClose : ctx.back} disabled={submitting}>
                 {ctx.isFirst ? 'Cancel' : 'Back'}
               </Btn>
               {ctx.index === 0 ? (
-                <Btn
-                  variant="primary"
-                  onClick={ctx.next}
-                  disabled={!selectedPo || poLoading}
-                >
+                <Btn variant="primary" onClick={ctx.next} disabled={!selectedPo || poLoading}>
                   Next
                 </Btn>
               ) : ctx.index === 1 ? (
@@ -926,7 +927,10 @@ function GrnDetailModal({ grn, onClose, companyLabel, canGeneratePdf }: GrnDetai
 
   const field = (label: string, value: ReactNode) => (
     <div>
-      <span className="mb-1 block text-xs font-medium" style={{ color: 'var(--aurora-text-muted)' }}>
+      <span
+        className="mb-1 block text-xs font-medium"
+        style={{ color: 'var(--aurora-text-muted)' }}
+      >
         {label}
       </span>
       <div className="text-sm">{value}</div>
@@ -1391,11 +1395,11 @@ export default function GRNsPage() {
   const [data, setData] = useState<Paginated<Grn> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [companyId, setCompanyId] = useState('');
-  const [status, setStatus] = useState('');
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [companyId, setCompanyId] = useWorkspaceState('procurement/grns.companyId', '');
+  const [status, setStatus] = useWorkspaceState('procurement/grns.status', '');
+  const [searchInput, setSearchInput] = useWorkspaceState('procurement/grns.searchInput', '');
+  const [search, setSearch] = useWorkspaceState('procurement/grns.search', '');
+  const [page, setPage] = useWorkspaceState('procurement/grns.page', 1);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, setPending] = useState<{ grn: Grn; action: 'approve' | 'post' } | null>(null);
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -1484,7 +1488,10 @@ export default function GRNsPage() {
   if (authLoading) {
     return (
       <div className="p-6">
-        <PageHeader title="Goods Received Notes" subtitle="Record and track goods received from suppliers" />
+        <PageHeader
+          title="Goods Received Notes"
+          subtitle="Record and track goods received from suppliers"
+        />
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">Loading</p>
         </div>
@@ -1495,10 +1502,16 @@ export default function GRNsPage() {
   if (!canView) {
     return (
       <div className="p-6">
-        <PageHeader title="Goods Received Notes" subtitle="Record and track goods received from suppliers" />
+        <PageHeader
+          title="Goods Received Notes"
+          subtitle="Record and track goods received from suppliers"
+        />
         <Card className="mt-6">
           <div className="px-6 py-12 text-center">
-            <p className="text-[15px] font-medium" style={{ color: 'var(--aurora-text-secondary)' }}>
+            <p
+              className="text-[15px] font-medium"
+              style={{ color: 'var(--aurora-text-secondary)' }}
+            >
               Access Restricted
             </p>
             <p className="mt-1 text-[13px]" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -1540,7 +1553,7 @@ export default function GRNsPage() {
     try {
       const rows = buildExportRows();
       const filters = [
-        companyId ? companyNameById.get(companyId) ?? companyId : 'All companies',
+        companyId ? (companyNameById.get(companyId) ?? companyId) : 'All companies',
         status ? status.replace(/_/g, ' ') : 'All statuses',
         search.trim() ? `Search: ${search.trim()}` : null,
       ].filter(Boolean);
@@ -1608,7 +1621,9 @@ export default function GRNsPage() {
 
       <ConfirmDialog
         open={pending !== null}
-        title={pending?.action === 'post' ? 'Post goods received note' : 'Approve goods received note'}
+        title={
+          pending?.action === 'post' ? 'Post goods received note' : 'Approve goods received note'
+        }
         message={
           pending?.action === 'post'
             ? `Post GRN ${pending?.grn.grnNumber}? This receives the accepted quantities into inventory and cannot be undone.`

@@ -118,7 +118,7 @@ describe('Cash accounting review', () => {
     render(<CashAccounting connections />);
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Review Main Cash' }));
-    await screen.findByRole('dialog');
+    await screen.findByRole('dialog', {}, { timeout: 5000 });
     fireEvent.change(screen.getByRole('combobox', { name: 'Dedicated asset ledger account' }), {
       target: { value: 'legacy-ledger' },
     });

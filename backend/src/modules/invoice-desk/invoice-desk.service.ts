@@ -1,6 +1,8 @@
+import { DeskPartyLinksService } from '../../common/services/desk-party-links.service';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -26,7 +28,24 @@ const names = {
   company: { select: { name: true } },
   division: { select: { name: true } },
   branch: { select: { name: true } },
-  supplier: { select: { name: true, email: true, phone: true } },
+  supplier: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      canonicalSupplierId: true,
+      canonicalSupplier: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          supplierCode: true,
+        },
+      },
+    },
+  },
 } as const;
 const attachmentMeta = {
   id: true,
@@ -43,6 +62,7 @@ export class InvoiceDeskService {
     private readonly companies: CompanyScopeService,
     private readonly org: OrganizationScopeService,
     private readonly audit: AuditLogsService,
+    private readonly parties?: DeskPartyLinksService,
   ) {}
 
   private async where(
@@ -59,6 +79,15 @@ export class InvoiceDeskService {
       voidedAt: null,
       paidAmount: { lt: this.db.invoiceDeskInvoice.fields.totalAmount },
     };
+    const selectedParty = q.supplierId
+      ? await this.db.invoiceDeskSupplier.findFirst({
+          where: {
+            id: q.supplierId,
+            AND: [await this.companies.companyWhereFor(user, q.companyId)],
+          },
+          select: { canonicalSupplierId: true },
+        })
+      : null;
     const statuses: Record<string, Prisma.InvoiceDeskInvoiceWhereInput> = {
       unpaid: { voidedAt: null, paidAmount: 0 },
       partial: { AND: [open, { paidAmount: { gt: 0 } }] },
@@ -77,7 +106,18 @@ export class InvoiceDeskService {
         {
           divisionId: q.divisionId,
           branchId: q.branchId,
-          supplierId: q.supplierId,
+          ...(q.supplierId
+            ? {
+                OR: [
+                  { supplierId: q.supplierId },
+                  {
+                    supplier: {
+                      canonicalSupplierId: selectedParty?.canonicalSupplierId ?? q.supplierId,
+                    },
+                  },
+                ],
+              }
+            : {}),
           invoiceDate: {
             gte: q.from ? new Date(q.from) : undefined,
             lte: q.to ? new Date(q.to) : undefined,
@@ -90,6 +130,20 @@ export class InvoiceDeskService {
                 { invoiceNumber: { contains: q.search.trim(), mode: 'insensitive' } },
                 { description: { contains: q.search.trim(), mode: 'insensitive' } },
                 { supplier: { name: { contains: q.search.trim(), mode: 'insensitive' } } },
+                {
+                  supplier: {
+                    canonicalSupplier: {
+                      is: { name: { contains: q.search.trim(), mode: 'insensitive' } },
+                    },
+                  },
+                },
+                {
+                  supplier: {
+                    canonicalSupplier: {
+                      is: { supplierCode: { contains: q.search.trim(), mode: 'insensitive' } },
+                    },
+                  },
+                },
               ],
             }
           : {},
@@ -167,40 +221,61 @@ export class InvoiceDeskService {
   }
 
   async suppliers(user: AuthUser, q: DeskQuery) {
-    return this.db.invoiceDeskSupplier.findMany({
-      where: {
-        AND: [
-          await this.companies.companyWhereFor(user, q.companyId),
-          q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {},
-        ],
-      },
-      orderBy: { name: 'asc' },
-    });
+    return this.parties!.choices(user, 'supplier', q);
   }
 
-  async createSupplier(user: AuthUser, dto: DeskSupplierDto) {
-    await this.companies.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-    if (!dto.name.trim()) throw new BadRequestException('Enter a supplier name.');
-    return this.unique(() =>
-      this.db.$transaction(async (tx) => {
-        const supplier = await tx.invoiceDeskSupplier.create({
-          data: { ...dto, name: dto.name.trim(), nameKey: deskKey(dto.name) },
-        });
-        await this.audit.logStrictInTransaction(tx, {
-          action: 'INVOICE_DESK_SUPPLIER_CREATED',
-          entityType: 'InvoiceDeskSupplier',
-          entityId: supplier.id,
-          companyId: dto.companyId,
-          userId: user.id,
-          newValue: { name: supplier.name },
-        });
-        return supplier;
-      }),
+  async supplierInvoices(user: AuthUser, canonicalSupplierId: string, q: DeskQuery) {
+    const page = q.page || 1;
+    const master = await this.db.supplier.findFirst({
+      where: {
+        id: canonicalSupplierId,
+        deletedAt: null,
+        AND: [await this.companies.companyWhereFor(user)],
+      },
+      select: { id: true, companyId: true, name: true, email: true, phone: true },
+    });
+    if (!master) return { rows: [], total: 0, page, pageSize: 25 };
+    const where = { AND: [await this.where(user, q), { supplier: { canonicalSupplierId } }] };
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.invoiceDeskInvoice.findMany({
+          where,
+          include: names,
+          orderBy: [{ invoiceDate: 'desc' }, { id: 'asc' }],
+          skip: (page - 1) * 25,
+          take: 25,
+        }),
+        this.db.invoiceDeskInvoice.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    return {
+      rows: rows.map((row) => ({
+        ...row,
+        supplier: this.masterSupplierDisplay(row.supplier),
+        ...deskBalance(row),
+      })),
+      total,
+      page,
+      pageSize: 25,
+    };
+  }
+
+  async createSupplier(_user: AuthUser, _dto: DeskSupplierDto) {
+    throw new BadRequestException(
+      'Add suppliers in Invoice Desk Suppliers so their profile, purchasing history and balances stay connected.',
     );
   }
 
+  async unlinkedSuppliers(user: AuthUser) {
+    return this.parties!.unmatched(user, 'supplier');
+  }
+  async linkSupplier(user: AuthUser, legacySupplierId: string, canonicalSupplierId: string) {
+    return this.parties!.link(user, 'supplier', legacySupplierId, canonicalSupplierId);
+  }
+
   async list(user: AuthUser, q: DeskQuery) {
-    const where = await this.where(user, q),
+    const where = { ...(await this.where(user, q)), canonicalInvoiceId: null },
       page = q.page || 1;
     const [rows, total] = await this.db.$transaction(
       [
@@ -216,7 +291,11 @@ export class InvoiceDeskService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
     return {
-      rows: rows.map((row) => ({ ...row, ...deskBalance(row) })),
+      rows: rows.map((row) => ({
+        ...row,
+        supplier: this.masterSupplierDisplay(row.supplier),
+        ...deskBalance(row),
+      })),
       total,
       page,
       pageSize: 25,
@@ -234,12 +313,18 @@ export class InvoiceDeskService {
             branchId: q.branchId,
             page: 1,
           }),
-          { voidedAt: null },
+          { voidedAt: null, canonicalInvoiceId: null },
         ],
       },
       select: {
         supplierId: true,
-        supplier: { select: { name: true } },
+        supplier: {
+          select: {
+            name: true,
+            canonicalSupplierId: true,
+            canonicalSupplier: { select: { name: true } },
+          },
+        },
         currency: true,
         totalAmount: true,
         paidAmount: true,
@@ -284,10 +369,10 @@ export class InvoiceDeskService {
       else if (row.dueDate <= next) c.due = c.due.plus(balance);
       currencies.set(row.currency, c);
       if (balance.gt(0)) {
-        const key = `${row.supplierId}:${row.currency}`;
+        const key = `${row.supplier.canonicalSupplierId ?? row.supplierId}:${row.currency}`;
         const s = suppliers.get(key) ?? {
-          id: row.supplierId,
-          name: row.supplier.name,
+          id: row.supplier.canonicalSupplierId ?? row.supplierId,
+          name: row.supplier.canonicalSupplier?.name ?? row.supplier.name,
           currency: row.currency,
           outstanding: new Prisma.Decimal(0),
           count: 0,
@@ -320,11 +405,29 @@ export class InvoiceDeskService {
       },
     });
     if (!row) throw new NotFoundException('Invoice not found.');
-    return { ...row, ...deskBalance(row) };
+    return { ...row, supplier: this.masterSupplierDisplay(row.supplier), ...deskBalance(row) };
+  }
+
+  private masterSupplierDisplay<
+    T extends {
+      name: string;
+      email?: string | null;
+      phone?: string | null;
+      canonicalSupplier?: { name: string; email: string | null; phone: string | null } | null;
+    },
+  >(supplier: T) {
+    const master = supplier.canonicalSupplier;
+    return master
+      ? { ...supplier, name: master.name, email: master.email, phone: master.phone }
+      : supplier;
   }
 
   private async writable(user: AuthUser, id: string) {
     const row = await this.detail(user, id);
+    if (row.canonicalInvoiceId)
+      throw new ConflictException(
+        'Open the linked business transaction to continue this workflow.',
+      );
     await this.companies.assertCanAccessCompany(user, row.companyId, AccessLevel.WRITE);
     await this.org.assertCanAccessScope(user, row.divisionId, row.branchId, AccessLevel.WRITE);
     return row;
@@ -373,11 +476,7 @@ export class InvoiceDeskService {
         },
       },
     });
-    const supplier = await this.db.invoiceDeskSupplier.findFirst({
-      where: { id: dto.supplierId, companyId: dto.companyId },
-    });
-    if (!branch || !supplier)
-      throw new BadRequestException('Select a supplier and branch belonging to this company.');
+    if (!branch) throw new BadRequestException('Select a branch belonging to this company.');
     if (!dto.invoiceNumber.trim() || !dto.description.trim())
       throw new BadRequestException('Enter an invoice number and purchase description.');
     const invoiceDate = new Date(dto.invoiceDate),
@@ -389,9 +488,17 @@ export class InvoiceDeskService {
     const totalAmount = positiveAmount(dto.totalAmount);
     return this.unique(() =>
       this.db.$transaction(async (tx) => {
+        const supplierId = await this.parties!.resolve(
+          tx,
+          user,
+          'supplier',
+          dto.supplierId,
+          dto.companyId,
+        );
         const row = await tx.invoiceDeskInvoice.create({
           data: {
             ...dto,
+            supplierId,
             invoiceNumber: dto.invoiceNumber.trim(),
             description: dto.description.trim(),
             numberKey: deskKey(dto.invoiceNumber),
@@ -482,7 +589,7 @@ export class InvoiceDeskService {
 
   private async claim(tx: Prisma.TransactionClient, id: string, version: number) {
     const updated = await tx.invoiceDeskInvoice.updateMany({
-      where: { id, version, voidedAt: null },
+      where: { id, version, voidedAt: null, canonicalInvoiceId: null },
       data: { version: { increment: 1 } },
     });
     if (updated.count !== 1)
@@ -610,6 +717,36 @@ export class InvoiceDeskService {
       await this.event(tx, user, invoice, 'VOIDED', dto.reason.trim());
       return { success: true };
     });
+  }
+
+  async attachments(user: AuthUser, q: DeskQuery) {
+    if (!['invoice_desk.view', 'documents.view'].every((p) => user.permissions.includes(p)))
+      throw new ForbiddenException('Documents and Invoice Desk access are required.');
+    const where = {
+      invoice: await this.where(user, { ...q, search: undefined }),
+      ...(q.search?.trim()
+        ? { name: { contains: q.search.trim(), mode: 'insensitive' as const } }
+        : {}),
+    };
+    const page = q.page || 1;
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.invoiceDeskAttachment.findMany({
+          where,
+          select: {
+            ...attachmentMeta,
+            invoiceId: true,
+            invoice: { select: { invoiceNumber: true, company: { select: { name: true } } } },
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+          skip: (page - 1) * 25,
+          take: 25,
+        }),
+        this.db.invoiceDeskAttachment.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    return { rows, total, page, pageSize: 25 };
   }
 
   async attach(user: AuthUser, id: string, file?: Express.Multer.File) {

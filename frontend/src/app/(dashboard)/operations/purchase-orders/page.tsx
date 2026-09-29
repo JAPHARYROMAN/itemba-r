@@ -1,4 +1,5 @@
 'use client';
+import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -8,9 +9,26 @@ import { RecordBrowser } from '@/components/workspace/record-browser';
 import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { DocumentPreviewLink } from '@/components/documents';
-import { Btn, Card, ConfirmDialog, EmptyState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageToolbar, showToast, SkeletonTable, StatCard, StatusBadge, SupplierPicker } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageToolbar,
+  showToast,
+  SkeletonTable,
+  StatCard,
+  StatusBadge,
+  SupplierPicker,
+} from '@/components/ui';
 import {
   backendDelete,
   backendGet,
@@ -509,7 +527,10 @@ function PurchaseOrderModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -747,7 +768,10 @@ function InvoiceReferenceModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
           {error}
         </div>
       )}
@@ -838,7 +862,10 @@ function DeleteConfirm({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -895,7 +922,10 @@ function ReceiveOrderModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          role="alert"
+          className="mb-3 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
           {error}
         </div>
       )}
@@ -923,16 +953,43 @@ export default function PurchaseOrdersPage() {
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useWorkspaceLayout('/operations/purchase-orders');
-  const [searchInput, setSearchInput] = useState('');
-  const [filterSearch, setFilterSearch] = useState('');
-  const [filterCompany, setFilterCompany] = useState('');
-  const [filterType, setFilterType] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterPayment, setFilterPayment] = useState('');
-  const [filterInvoiceStatus, setFilterInvoiceStatus] = useState('');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
-  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useWorkspaceState(
+    'operations/purchase-orders.searchInput',
+    '',
+  );
+  const [filterSearch, setFilterSearch] = useWorkspaceState(
+    'operations/purchase-orders.filterSearch',
+    '',
+  );
+  const [filterCompany, setFilterCompany] = useWorkspaceState(
+    'operations/purchase-orders.filterCompany',
+    '',
+  );
+  const [filterType, setFilterType] = useWorkspaceState(
+    'operations/purchase-orders.filterType',
+    '',
+  );
+  const [filterStatus, setFilterStatus] = useWorkspaceState(
+    'operations/purchase-orders.filterStatus',
+    '',
+  );
+  const [filterPayment, setFilterPayment] = useWorkspaceState(
+    'operations/purchase-orders.filterPayment',
+    '',
+  );
+  const [filterInvoiceStatus, setFilterInvoiceStatus] = useWorkspaceState(
+    'operations/purchase-orders.filterInvoiceStatus',
+    '',
+  );
+  const [filterDateFrom, setFilterDateFrom] = useWorkspaceState(
+    'operations/purchase-orders.filterDateFrom',
+    '',
+  );
+  const [filterDateTo, setFilterDateTo] = useWorkspaceState(
+    'operations/purchase-orders.filterDateTo',
+    '',
+  );
+  const [page, setPage] = useWorkspaceState('operations/purchase-orders.page', 1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
   const [deleting, setDeleting] = useState<PurchaseOrder | null>(null);

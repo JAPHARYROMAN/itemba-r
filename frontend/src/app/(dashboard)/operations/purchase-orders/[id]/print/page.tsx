@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useWorkspacePathname } from '@/components/workspace/workspace-navigation';
 import {
   DocumentActions,
   DocumentKeyValueGrid,
@@ -95,7 +95,7 @@ interface PurchaseOrder {
 }
 
 export default function PurchaseOrderPrintPage() {
-  const params = useParams<{ id: string }>();
+  const params = { id: decodeURIComponent(useWorkspacePathname().split('/')[3] ?? '') };
   const id = params?.id as string;
   const { hasPermission } = useAuth();
   const canView = hasPermission('purchases.view');

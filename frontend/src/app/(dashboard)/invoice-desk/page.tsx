@@ -1,10 +1,10 @@
-import { InvoiceDesk } from '@/features/invoice-desk/invoice-desk';
+import { InvoiceWorkspace } from '@/features/invoice-desk/invoice-workspace';
 export const metadata = { title: 'Invoice Desk · ITEMBA OS' };
-export default async function InvoiceDeskPage({
+export default async function InvoiceWorkspacePage({
   searchParams,
 }: {
   searchParams: Promise<{ record?: string | string[] }>;
 }) {
   const { record } = await searchParams;
-  return <InvoiceDesk targetRecordId={typeof record === 'string' ? record : undefined} />;
+  return <InvoiceWorkspace targetRecordId={typeof record === 'string' ? record : undefined} />;
 }

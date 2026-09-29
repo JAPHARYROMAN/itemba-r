@@ -3,6 +3,7 @@ export type Directory = { companies: Choice[]; divisions: Choice[]; branches: Ch
 export type Scope = { companyId: string; divisionId: string; branchId: string };
 export type Supplier = Choice & { email?: string | null; phone?: string | null };
 export type Invoice = Scope & {
+  canonicalInvoiceId?: string | null;
   id: string;
   supplierId: string;
   invoiceNumber: string;

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
+import { useWorkspacePathname } from '@/components/workspace/workspace-navigation';
 import { Printer, Share2 } from 'lucide-react';
 import { DocumentArtifactButton } from '@/components/documents';
 import { Btn, ErrorState, PageSpinner } from '@/components/ui';
@@ -22,7 +22,8 @@ function text(...values: Array<string | null | undefined>) {
 }
 
 export default function SupplierOrderDraftPrintPage() {
-  const params = useParams<{ id: string }>();
+  const path = useWorkspacePathname();
+  const params = { id: path.split('/')[4] ?? '' };
   const { hasPermission } = useAuth();
   const canView = hasPermission('supplier_order_drafts.view');
   const canExport = hasPermission('supplier_order_drafts.export');

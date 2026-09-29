@@ -33,6 +33,9 @@ export class DeskSupplierDto {
   @IsOptional() @IsEmail() @MaxLength(254) email?: string;
   @IsOptional() @IsString() @MaxLength(60) phone?: string;
 }
+export class DeskSupplierLinkDto {
+  @IsUUID() canonicalSupplierId!: string;
+}
 export class DeskInvoiceDto {
   @IsUUID() companyId!: string;
   @IsUUID() divisionId!: string;

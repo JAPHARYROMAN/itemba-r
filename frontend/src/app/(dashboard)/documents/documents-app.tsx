@@ -15,10 +15,11 @@ import {
   type WorkspaceDraft,
 } from '@/components/workspace/workspace-drafts';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { LinkedInvoiceFiles } from '@/components/documents/LinkedInvoiceFiles';
 import Library from '../group-control/documents/page';
 import styles from './documents.module.css';
 
-export type DocumentsView = 'home' | 'library' | 'letter';
+export type DocumentsView = 'home' | 'library' | 'letter' | 'linked';
 
 export default function DocumentsApp({
   initialView,
@@ -204,6 +205,14 @@ function DocumentsWorkspace({
             Write a letter
           </button>
         )}
+        {hasPermission('invoice_desk.view') && (
+          <button
+            aria-current={view === 'linked' ? 'page' : undefined}
+            onClick={() => setView('linked')}
+          >
+            Linked invoice files
+          </button>
+        )}
       </nav>
       {canWrite && (
         <WorkspaceDraftShelf
@@ -300,6 +309,7 @@ function DocumentsWorkspace({
         </>
       )}
       {view === 'library' && <Library />}
+      {view === 'linked' && <LinkedInvoiceFiles />}
       {view === 'letter' && canWrite && (
         <div className={styles.editor}>
           <form className={styles.form} onSubmit={exportLetter} {...guard.capture}>
