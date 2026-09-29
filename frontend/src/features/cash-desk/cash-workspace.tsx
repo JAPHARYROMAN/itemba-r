@@ -15,20 +15,37 @@ const Receivables = dynamic(() => import('@/app/(dashboard)/finance/receivables/
 });
 const Expenses = dynamic(() => import('@/app/(dashboard)/finance/expenses/page'), { loading });
 export const cashWorkflows = [
-  { key: 'accounts', label: 'Business accounts', permission: 'cash_accounts.view' },
-  { key: 'payables', label: 'Supplier payments', permission: 'payables.view' },
-  { key: 'receivables', label: 'Customer collections', permission: 'receivables.view' },
-  { key: 'expenses', label: 'Business expenses', permission: 'expenses.view' },
+  {
+    key: 'accounts',
+    href: '/cash-desk/accounts',
+    label: 'Business accounts',
+    permission: 'cash_accounts.view',
+  },
+  {
+    key: 'payables',
+    href: '/cash-desk/payables',
+    label: 'Supplier payments',
+    permission: 'payables.view',
+  },
+  {
+    key: 'receivables',
+    href: '/cash-desk/receivables',
+    label: 'Customer collections',
+    permission: 'receivables.view',
+  },
+  {
+    key: 'expenses',
+    href: '/cash-desk/expenses',
+    label: 'Business expenses',
+    permission: 'expenses.view',
+  },
 ] as const;
 export function CashWorkspace({ targetRecordId }: { targetRecordId?: string } = {}) {
   const { hasPermission, loading: authLoading } = useAuth();
   const path = useWorkspacePathname();
   const active =
     cashWorkflows.find((w) =>
-      [
-        `/cash-desk/${w.key}`,
-        `/finance/${w.key === 'accounts' ? 'cash-accounts' : w.key}`,
-      ].includes(path),
+      [w.href, `/finance/${w.key === 'accounts' ? 'cash-accounts' : w.key}`].includes(path),
     ) ??
     (path === '/cash-desk' && !hasPermission('cash_desk.view')
       ? cashWorkflows.find((w) => hasPermission(w.permission))
@@ -47,7 +64,7 @@ export function CashWorkspace({ targetRecordId }: { targetRecordId?: string } = 
           .map((w) => (
             <Link
               key={w.key}
-              href={`/cash-desk/${w.key}`}
+              href={w.href}
               aria-current={active?.key === w.key ? 'page' : undefined}
             >
               {w.label}
