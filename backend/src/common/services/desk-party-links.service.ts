@@ -44,10 +44,16 @@ export class DeskPartyLinksService {
       throw new ForbiddenException('You do not have access to this shared directory.');
   }
   private async masterScope(user: AuthUser, companyId?: string) {
+    const organisationScope = await this.org.recordWhereFor(user);
     return {
       AND: [
         await this.companies.companyWhereFor(user, companyId),
-        { OR: [{ divisionId: null, branchId: null }, await this.org.recordWhereFor(user)] },
+        // Prisma ignores an empty object inside OR rather than treating it as
+        // unrestricted. Keep company/group readers unrestricted within their
+        // authorised company, while branch readers retain the directory filter.
+        ...(Object.keys(organisationScope).length
+          ? [{ OR: [{ divisionId: null, branchId: null }, organisationScope] }]
+          : []),
       ],
       deletedAt: null,
     };

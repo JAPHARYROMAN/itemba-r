@@ -69,10 +69,10 @@ async function main() {
   });
   const scope = { companyId: company.id, divisionId: division.id, branchId: branch.id };
   const supplier = await db.supplier.create({
-    data: { companyId: company.id, supplierCode: 'SUP', name: 'Shared supplier' },
+    data: { ...scope, supplierCode: 'SUP', name: 'Shared supplier' },
   });
   const customer = await db.customer.create({
-    data: { companyId: company.id, customerCode: 'CUS', name: 'Shared customer' },
+    data: { ...scope, customerCode: 'CUS', name: 'Shared customer' },
   });
   // Select only existing columns until migration has been applied.
   const oldSupplier = await db.invoiceDeskSupplier.create({
@@ -160,6 +160,31 @@ async function main() {
   await parties.link(user, 'supplier', oldSupplier.id, supplier.id);
   await parties.link(user, 'customer', oldCustomer.id, customer.id);
   assert.equal((await parties.choices(user, 'supplier', {}))[0].canonicalId, supplier.id);
+  for (const kind of ['supplier', 'customer']) {
+    const masterId = kind === 'supplier' ? supplier.id : customer.id;
+    const groupReader = { ...user, roleScopes: ['GROUP'] };
+    assert.equal((await parties.choices(groupReader, kind, {}))[0].canonicalId, masterId);
+    const branchReader = {
+      ...user,
+      roleScopes: ['BRANCH'],
+      divisionAccess: [],
+      branchAccess: [{ branchId: branch.id, accessLevel: 'READ' }],
+    };
+    assert.equal((await parties.choices(branchReader, kind, {}))[0].canonicalId, masterId);
+    assert.equal(
+      (
+        await parties.choices(
+          {
+            ...branchReader,
+            branchAccess: [{ branchId: otherBranch.id, accessLevel: 'READ' }],
+          },
+          kind,
+          {},
+        )
+      ).length,
+      0,
+    );
+  }
   assert.equal(
     (await invoices.supplierInvoices(user, supplier.id, { page: 1 })).rows[0].id,
     oldInvoice.id,
