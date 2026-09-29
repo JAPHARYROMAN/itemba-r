@@ -57,7 +57,9 @@ beforeEach(() => {
 describe('record book route gates', () => {
   it.each(pages)('does not read %s without record_book.view', (_name, Page) => {
     render(<Page />);
-    expect(screen.getByText('Access Restricted')).toBeInTheDocument();
+    expect(screen.getAllByText(/^(Access Restricted|Permission required)$/).length).toBeGreaterThan(
+      0,
+    );
     expect(state.fetch).not.toHaveBeenCalled();
   });
 });

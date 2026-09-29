@@ -10,6 +10,7 @@ const navigationSourceFiles = [
   path.join(process.cwd(), 'src', 'lib', 'payroll-app.ts'),
   path.join(process.cwd(), 'src', 'features', 'reports', 'reports-app.tsx'),
   path.join(process.cwd(), 'src', 'features', 'sales-desk', 'sales-desk.tsx'),
+  path.join(process.cwd(), 'src', 'features', 'records', 'records-app.tsx'),
 ];
 const minPageRoutes = 190;
 
@@ -120,6 +121,14 @@ describe('route smoke coverage manifest', () => {
       '/desktop',
       // The standalone Fuel Reporting portal owns its sign-in flow, outside ERP navigation.
       '/fuel-reporting/login',
+      // Records Book bookmarks now open the unified Records host. Navigation
+      // advertises the canonical /records paths, while these aliases stay live.
+      '/record-book',
+      '/record-book/daily-sales',
+      '/record-book/expenses',
+      '/record-book/categories',
+      '/record-book/reports',
+      '/record-book/trash',
       // Legacy inventory URLs redirect into the consolidated Inventory workspace.
       // They remain on disk only to preserve live bookmarks and shared links.
       '/operations/inventory',

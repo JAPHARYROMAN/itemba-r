@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { WindowModalProvider } from '@/components/ui/modal';
-import { RecordsApp } from './records-app';
+import { RecordsNotebook as RecordsApp } from './records-notebook';
 import { RecordsEditor } from './records-editor';
 import { emptyDirectory, emptyScope, Entry, paymentRemaining } from './types';
 import { RecordsStatement } from './records-statement';

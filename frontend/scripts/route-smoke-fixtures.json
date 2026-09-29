@@ -31,5 +31,6 @@
   "/westsides/customers/[id]/print": "/westsides/customers/e2e-customer/print",
   "/westsides/delivery-notes/[id]/print": "/westsides/delivery-notes/e2e-delivery-note/print",
   "/westsides/proforma-invoices/[id]/print": "/westsides/proforma-invoices/e2e-proforma-invoice/print",
-  "/westsides/quotations/[id]/print": "/westsides/quotations/e2e-quotation/print"
+  "/westsides/quotations/[id]/print": "/westsides/quotations/e2e-quotation/print",
+  "/records/[...path]": "/records/daily-sales"
 }
