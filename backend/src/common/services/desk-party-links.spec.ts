@@ -76,6 +76,20 @@ describe.each(['supplier', 'customer'] as const)('%s shared directory', (kind) =
     await expect(f.run()).rejects.toThrow('every associated transaction');
     expect(f.party.update).not.toHaveBeenCalled();
   });
+  it('keeps company and group readers eligible for division and branch profiles', async () => {
+    const f = fixture(kind);
+    f.org.recordWhereFor.mockResolvedValue({} as never);
+    await f.run();
+    expect(f.canonical.findFirst.mock.calls[0][0].where.AND).toEqual([{ companyId: 'company' }]);
+  });
+  it('retains branch restrictions alongside company-wide directory profiles', async () => {
+    const f = fixture(kind);
+    await f.run();
+    expect(f.canonical.findFirst.mock.calls[0][0].where.AND).toEqual([
+      { companyId: 'company' },
+      { OR: [{ divisionId: null, branchId: null }, { branchId: 'branch' }] },
+    ]);
+  });
   it('rejects a master outside the source company and authorised directory', async () => {
     const f = fixture(kind);
     f.canonical.findFirst.mockResolvedValue(null);
