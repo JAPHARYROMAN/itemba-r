@@ -37,8 +37,8 @@ import {
   type PaginatedResult,
 } from '@/lib/api-client';
 import { downloadTextFile } from '@/lib/report-export';
-import { downloadTablePdf } from '@/lib/export-download';
-import { buildRecordBookPdfRequest } from './record-book-export';
+import { downloadBinaryGet } from '@/lib/export-download';
+import { RecordsPdfButton } from '@/features/records/records-pdf-button';
 import {
   type ConfirmAction,
   RecordBookConfirmDialog,
@@ -1156,20 +1156,9 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     try {
       const query = buildFilterQuery(filters, { type, format });
       if (format === 'pdf') {
-        const rows = await exportRows(type, 'pdf');
-        if (!rows.length) throw new Error('No rows to export');
-        await downloadTablePdf(
-          buildRecordBookPdfRequest(type, rows, {
-            companyId: filters.companyId || undefined,
-            companyName: companies.find((company) => company.id === filters.companyId)?.name,
-            divisionId: filters.divisionId || undefined,
-            divisionName: divisions.find((division) => division.id === filters.divisionId)?.name,
-            branchId: filters.branchId || undefined,
-            branchName: branches.find((branch) => branch.id === filters.branchId)?.name,
-            dateFrom: filters.dateFrom || undefined,
-            dateTo: filters.dateTo || undefined,
-            status: filters.status || undefined,
-          }),
+        await downloadBinaryGet(
+          `/record-book/export/pdf${buildQuery(buildFilterQuery(filters, { type, ...(initialTab === 'dashboard' && !filters.status ? { status: 'FINALIZED' } : {}) }))}`,
+          `records-${type}.pdf`,
         );
       } else if (format === 'json') {
         const rows = await exportRows(type, 'json');
@@ -1356,13 +1345,24 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
       )}
 
       <div className="mb-5 flex flex-wrap gap-2">
+        {canExport && initialTab === 'categories' && (
+          <RecordsPdfButton
+            path="/record-book/export/pdf"
+            query={{ type: 'categories', companyId: filters.companyId, search: filters.search }}
+          />
+        )}
         {canExport &&
+          initialTab !== 'categories' &&
           (['pdf', 'csv', 'json', 'xlsx'] as const).map((format) => (
             <Btn
               key={format}
               variant="secondary"
               size="sm"
               loading={exporting === `${activeType}-${format}`}
+              disabled={
+                !!exporting ||
+                (!!filters.dateFrom && !!filters.dateTo && filters.dateFrom > filters.dateTo)
+              }
               onClick={() => handleExport(activeType as 'sales' | 'expenses' | 'combined', format)}
             >
               Export {format.toUpperCase()}

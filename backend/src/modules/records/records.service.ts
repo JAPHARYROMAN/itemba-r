@@ -21,6 +21,7 @@ import {
 import { csvCell, isDebt, presentRecord, recordValues, requestKey, today } from './records.domain';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
 import { statementRows, statementCsv, statementPdf } from './records.statement';
+import { recordsPdf, recordDetailPdf } from './records.pdf';
 
 const names = {
   company: { select: { name: true } },
@@ -523,7 +524,7 @@ export class RecordsService {
       mimeType: format === 'csv' ? 'text/csv; charset=utf-8' : 'application/pdf',
     };
   }
-  async export(user: AuthUser, q: RecordsQuery) {
+  private async exportRecords(user: AuthUser, q: RecordsQuery) {
     const rows = await this.db.recordEntry.findMany({
       where: await this.where(user, q),
       include: names,
@@ -532,6 +533,23 @@ export class RecordsService {
     });
     if (rows.length > 10000)
       throw new BadRequestException('Choose a smaller date range to export up to 10,000 records.');
+    return rows;
+  }
+  async exportPdf(user: AuthUser, q: RecordsQuery) {
+    const rows = await this.exportRecords(user, q);
+    return this.documents.renderLetterheadPdf(
+      { companyId: q.scope === 'personal' ? null : q.companyId },
+      recordsPdf(rows, q),
+      user,
+    );
+  }
+  async exportDetailPdf(user: AuthUser, id: string) {
+    const row = await this.detail(user, id);
+    if (isDebt(row.kind)) return (await this.exportStatement(user, id, {})).buffer;
+    return this.documents.renderLetterheadPdf(row, recordDetailPdf(row), user);
+  }
+  async export(user: AuthUser, q: RecordsQuery) {
+    const rows = await this.exportRecords(user, q);
     const headings = [
       'Register',
       'Date',

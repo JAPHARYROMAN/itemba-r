@@ -5,6 +5,7 @@ import { GeneratedDocumentsModule } from '../generated-documents/generated-docum
 import { RecordBookController } from './record-book.controller';
 import { RecordBookService } from './record-book.service';
 import { RecordBookReportsService } from './record-book-reports.service';
+import { RecordBookPdfService } from './record-book-pdf.service';
 
 @Module({
   imports: [AuditLogsModule, GeneratedDocumentsModule],
@@ -12,6 +13,7 @@ import { RecordBookReportsService } from './record-book-reports.service';
   providers: [
     RecordBookService,
     RecordBookReportsService,
+    RecordBookPdfService,
     CompanyScopeService,
     OrganizationScopeService,
   ],

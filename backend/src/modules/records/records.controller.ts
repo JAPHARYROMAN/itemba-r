@@ -43,6 +43,34 @@ export class RecordsController {
   @Get() list(@CurrentUser() u: AuthUser, @Query() q: RecordsQuery) {
     return this.service.list(u, q);
   }
+  @Get('export/pdf')
+  @RequirePermissions('records.view', 'records.export')
+  async exportPdf(@CurrentUser() u: AuthUser, @Query() q: RecordsQuery, @Res() res: Response) {
+    const buffer = await this.service.exportPdf(u, q);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="records-register.pdf"',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(buffer);
+  }
+  @Get(':id/export/pdf')
+  @RequirePermissions('records.view', 'records.export')
+  async exportDetailPdf(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.service.exportDetailPdf(u, id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="records-${id.slice(0, 8)}.pdf"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(buffer);
+  }
   @Get(':id') detail(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.detail(u, id);
   }

@@ -4,6 +4,8 @@ import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { Btn } from '@/components/ui';
 import { money, type Summary } from './types';
 import { useRecordBookRefresh } from './record-book-refresh';
+import { useAuth } from '@/hooks/use-auth';
+import { RecordsPdfButton } from './records-pdf-button';
 
 type DailySummary = { salesCount: number; expenseCount: number; draftRecords: number };
 export function RecordsOverview({
@@ -13,6 +15,7 @@ export function RecordsOverview({
   canBook: boolean;
   canNotebook: boolean;
 }) {
+  const { hasPermission } = useAuth();
   const daily = useWorkspaceResource<DailySummary>('/record-book/summary', {}, canBook);
   const notebook = useWorkspaceResource<Summary[]>('/records/summary', {}, canNotebook);
   useRecordBookRefresh(daily.reload, !canBook);
@@ -60,6 +63,13 @@ export function RecordsOverview({
             </dl>
           )}
           <div className="records-home-links">
+            {hasPermission('record_book.export') && (
+              <RecordsPdfButton
+                path="/record-book/export/pdf"
+                query={{ type: 'combined' }}
+                label="Daily records PDF"
+              />
+            )}
             <Link href="/records/daily-sales">Daily sales</Link>
             <Link href="/records/money-out">Money out</Link>
             <Link href="/records/reports">Reports & exports</Link>
@@ -121,6 +131,9 @@ export function RecordsOverview({
             </>
           )}
           <div className="records-home-links">
+            {hasPermission('records.export') && (
+              <RecordsPdfButton path="/records/export/pdf" label="Notebook PDF" />
+            )}
             <Link href="/records?view=debtors">Debtors & statements</Link>
             <Link href="/records?view=creditors">Creditors & payments</Link>
             <Link href="/records?view=notes">Notes</Link>

@@ -13,6 +13,7 @@ import {
   useRecordBookRefresh,
 } from '@/features/records/record-book-refresh';
 import { useAuth } from '@/hooks/use-auth';
+import { RecordsPdfButton } from '@/features/records/records-pdf-button';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendDelete, backendGet, backendPatch } from '@/lib/api-client';
 import {
@@ -166,6 +167,12 @@ export function RecordBookDetailClient({ kind, recordId }: { kind: Kind; recordI
 
   const actionButtons = record ? (
     <div className="flex flex-wrap gap-2">
+      {hasPermission('record_book.export') && (
+        <RecordsPdfButton
+          path="/record-book/export/pdf"
+          query={{ type: isSale ? 'sales' : 'expenses', recordId: id }}
+        />
+      )}
       <Link
         href={listHref}
         className="inline-flex items-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"

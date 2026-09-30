@@ -29,6 +29,7 @@ import { backendGet } from '@/lib/api-client';
 import { getApp } from '@/lib/apps';
 import { RecordsEditor } from './records-editor';
 import { RecordsStatement } from './records-statement';
+import { RecordsPdfButton } from './records-pdf-button';
 import {
   Directory,
   Editor,
@@ -276,6 +277,13 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
               <RefreshCw size={16} />
             </Btn>
             {hasPermission('records.export') && (
+              <RecordsPdfButton
+                path="/records/export/pdf"
+                query={{ ...listQuery, search }}
+                disabled={invalidDates}
+              />
+            )}
+            {hasPermission('records.export') && (
               <Btn
                 variant="secondary"
                 icon={<Download size={16} />}
@@ -283,7 +291,7 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
                 disabled={invalidDates}
                 onClick={() => void exportRows()}
               >
-                Export
+                Export CSV
               </Btn>
             )}
             {manage && (
@@ -677,6 +685,9 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
           <p role="status">Loading record…</p>
         ) : (
           <div className="records-detail">
+            {!isDebt(selectedEntry.kind) && hasPermission('records.export') && (
+              <RecordsPdfButton path={`/records/${selectedEntry.id}/export/pdf`} />
+            )}
             <div className="records-detail-top">
               <Status value={selectedEntry.status} />
               <span>{selectedEntry.company?.name ?? 'Private to you'}</span>

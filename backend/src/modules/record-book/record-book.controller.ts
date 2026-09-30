@@ -5,11 +5,13 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { RecordBookService } from './record-book.service';
 import { RecordBookReportsService } from './record-book-reports.service';
+import { RecordBookPdfService } from './record-book-pdf.service';
 import {
   CreateDailySaleDto,
   CreateRecordBookCategoryDto,
   CreateRecordBookExpenseDto,
   ExportRecordBookDto,
+  RecordBookPdfQuery,
   ExportRecordBookReportDto,
   QueryRecordBookDto,
   QueryRecordBookReportDto,
@@ -26,6 +28,7 @@ export class RecordBookController {
   constructor(
     private readonly service: RecordBookService,
     private readonly reports: RecordBookReportsService,
+    private readonly pdf: RecordBookPdfService,
   ) {}
 
   @Get('summary')
@@ -51,6 +54,24 @@ export class RecordBookController {
   @RequirePermissions('record_book.export')
   auditExport(@Body() dto: RecordBookExportAuditDto, @CurrentUser() user: AuthUser) {
     return this.reports.auditExport(dto, user);
+  }
+
+  @Get('export/pdf')
+  @AgentExcluded('read_writes_audit_ledger')
+  @RequirePermissions('record_book.view', 'record_book.export')
+  async exportPdf(
+    @Query() query: RecordBookPdfQuery,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const result = await this.pdf.export(query, user);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(result.buffer);
   }
 
   @Get('reports/:reportKey/export')
