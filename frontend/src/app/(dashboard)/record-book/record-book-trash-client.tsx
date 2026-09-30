@@ -19,6 +19,7 @@ import {
   useRecordBookRefresh,
 } from '@/features/records/record-book-refresh';
 import { useAuth } from '@/hooks/use-auth';
+import { RecordsPdfButton } from '@/features/records/records-pdf-button';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendGet, backendPage, backendPatch, type PaginatedResult } from '@/lib/api-client';
 import {
@@ -229,6 +230,12 @@ export function RecordBookTrashClient() {
         subtitle="Recover audit-safe soft-deleted drafts and categories"
       />
       <RecordBookNav />
+      {hasPermission('record_book.export') && (
+        <RecordsPdfButton
+          path="/record-book/export/pdf"
+          query={{ type: 'trash', companyId, search }}
+        />
+      )}
       {!canAdmin && (
         <div className="mb-4 rounded-lg border border-amber-700 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
           You can review deleted entries, but record_book.admin is required to restore them.

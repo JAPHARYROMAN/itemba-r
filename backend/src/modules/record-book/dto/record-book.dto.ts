@@ -231,3 +231,10 @@ export class ExportRecordBookDto extends QueryRecordBookDto {
   @IsIn(['json', 'csv', 'xlsx', 'pdf'])
   format?: 'json' | 'csv' | 'xlsx' | 'pdf';
 }
+
+export class RecordBookPdfQuery extends QueryRecordBookDto {
+  @IsOptional()
+  @IsIn(['sales', 'expenses', 'combined', 'categories', 'trash'])
+  type?: 'sales' | 'expenses' | 'combined' | 'categories' | 'trash';
+  @IsOptional() @IsString() @MaxLength(100) recordId?: string;
+}
