@@ -20,6 +20,8 @@ describe('persistent-write GET policy', () => {
     'CustomersController.findOne',
     'OperationsReportsController.getSupplier360',
     'OperationsReportsController.exportSupplier360',
+    // PDF exports write the same export audit ledger as the existing formats.
+    'RecordBookController.exportPdf',
     // Inline previews added by the ITEMBA OS redesign (4a155f19); both resolve
     // through the audited DocumentsService.findOne access path.
     'DocumentsController.preview',
