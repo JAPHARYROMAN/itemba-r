@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BarChart3,
   ChevronRight,
@@ -35,6 +35,7 @@ import { getApp } from '@/lib/apps';
 import '@/components/fuel-reporting/fuel-reporting.css';
 import '../invoice-desk/invoice-desk.css';
 import './petrodollar.css';
+import { PetroDollarPosting } from './petrodollar-posting';
 
 const VIEWS = ['report', 'receive', 'daily', 'history'] as const;
 type View = (typeof VIEWS)[number];
@@ -100,7 +101,9 @@ export function PetroDollarApp() {
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [locked, setLocked] = useState(false);
+  const [editorLocked, setEditorLocked] = useState(false);
+  const [postingLocked, setPostingLocked] = useState(false);
+  const locked = editorLocked || postingLocked;
   // History only needs the station list; the other views also wait for the shift's workspace.
   const loading = view === 'history' ? booting : booting || loadingWorkspace;
   const branch = bootstrap?.branches.find((b) => b.id === branchId);
@@ -109,11 +112,22 @@ export function PetroDollarApp() {
   // The editor reports "unsaved or saving"; mirror it into the window's unsaved-work guard so
   // closing the window or leaving the app asks first. touch/markSaved are stable callbacks.
   const { touch, markSaved } = useFormGuard({ unsaved: locked });
+  const locks = useRef({ editor: false, posting: false });
   const onLock = useCallback(
     (value: boolean) => {
-      setLocked(value);
-      if (value) touch();
+      locks.current.editor = value;
+      if (locks.current.editor || locks.current.posting) touch();
       else markSaved();
+      setEditorLocked(value);
+    },
+    [touch, markSaved],
+  );
+  const onPostingLock = useCallback(
+    (value: boolean) => {
+      locks.current.posting = value;
+      if (locks.current.editor || locks.current.posting) touch();
+      else markSaved();
+      setPostingLocked(value);
     },
     [touch, markSaved],
   );
@@ -400,6 +414,13 @@ export function PetroDollarApp() {
                     onLock={onLock}
                     apiBase="/petrodollar"
                   />
+                  {workspace.report?.status === 'CLOSED' && (
+                    <PetroDollarPosting
+                      key={`${workspace.report.id}:${workspace.report.version}`}
+                      report={workspace.report}
+                      onLock={onPostingLock}
+                    />
+                  )}
                 </div>
               ))}
             {view === 'daily' && (

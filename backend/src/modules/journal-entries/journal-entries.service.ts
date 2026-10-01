@@ -242,6 +242,8 @@ export class JournalEntriesService {
     if (
       [
         'DeskCash',
+        'PetroDollar',
+        'PetroDollarReversal',
         'DeskSale',
         'DeskPurchase',
         'LoanLifecycle',
@@ -323,6 +325,8 @@ export class JournalEntriesService {
     if (
       [
         'DeskCash',
+        'PetroDollar',
+        'PetroDollarReversal',
         'DeskSale',
         'DeskPurchase',
         'LoanLifecycle',
@@ -494,6 +498,25 @@ export class JournalEntriesService {
 
   async reverse(id: string, dto: ReverseJournalEntryDto, user: AuthUser) {
     const original = await this.findOne(id, user, AccessLevel.WRITE);
+    if (['PetroDollar', 'PetroDollarReversal'].includes(original.referenceType || ''))
+      throw new BadRequestException(
+        'Reverse the entire shift posting in PetroDollar so inventory, cash and journals stay together.',
+      );
+    if (
+      original.referenceId &&
+      ['DeskSale', 'DeskPurchase'].includes(original.referenceType || '')
+    ) {
+      const source =
+        original.referenceType === 'DeskSale'
+          ? await this.prisma.salesDeskSale.findUnique({ where: { id: original.referenceId } })
+          : await this.prisma.invoiceDeskInvoice.findUnique({
+              where: { id: original.referenceId },
+            });
+      if (source?.fuelReportPostingId)
+        throw new BadRequestException(
+          'Reverse the entire shift posting in PetroDollar before correcting this journal.',
+        );
+    }
     if (original.referenceType === 'PayrollRun')
       throw new BadRequestException('Cancel the unpaid run in Payroll to reverse its accrual.');
     if (original.referenceType === 'PayrollRunPayment')

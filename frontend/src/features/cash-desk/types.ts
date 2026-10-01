@@ -15,6 +15,7 @@ export type Account = {
   branch: { name: string };
 };
 export type Movement = {
+  fuelReportPostingId?: string | null;
   payrollRunId?: string | null;
   loanFinancialEvent?: { loanId: string; id: string } | null;
   salesPaymentId?: string | null;

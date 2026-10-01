@@ -244,6 +244,8 @@ jobs:
         run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
       - name: Run e2e smoke tests
         run: npm run test:e2e:ci
+      - name: Prove PetroDollar station posting, payments, reversal and corrections
+        run: npm run test:petrodollar-posting
       - name: Prove the Msaidizi chat expense workflow in a separate database
         env:
           DATABASE_URL: postgresql://itemba:1618@localhost:5432/msaidizi_chat_proof?schema=public

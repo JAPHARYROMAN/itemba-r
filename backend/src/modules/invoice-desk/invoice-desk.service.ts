@@ -520,7 +520,11 @@ export class InvoiceDeskService {
   }
 
   async edit(user: AuthUser, id: string, dto: DeskEditDto) {
-    await this.writable(user, id);
+    const source = await this.writable(user, id);
+    if (source.fuelReportPostingId)
+      throw new ConflictException(
+        'Reverse the complete shift posting in PetroDollar before editing this invoice.',
+      );
     const invoiceDate = new Date(dto.invoiceDate),
       dueDate = new Date(dto.dueDate);
     if (!dto.invoiceNumber.trim() || !dto.description.trim())
@@ -707,7 +711,11 @@ export class InvoiceDeskService {
   }
 
   async void(user: AuthUser, id: string, dto: DeskReasonDto) {
-    await this.writable(user, id);
+    const source = await this.writable(user, id);
+    if (source.fuelReportPostingId)
+      throw new ConflictException(
+        'Reverse the complete shift posting in PetroDollar before correcting this invoice.',
+      );
     if (dto.reason.trim().length < 3) throw new BadRequestException('Enter a reason for voiding.');
     return this.db.$transaction(async (tx) => {
       const invoice = await this.claim(tx, id, dto.version);

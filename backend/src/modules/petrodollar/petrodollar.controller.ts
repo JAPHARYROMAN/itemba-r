@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { ReopenFuelReportDto, SaveFuelReportDto } from '../fuel-reporting/fuel-reporting.dto';
 import { PetroDollarService } from './petrodollar.service';
+import { PetroDollarPostingService } from './petrodollar-posting.service';
+import { PostPetroDollarDto, ReversePetroDollarDto } from './petrodollar-posting.dto';
 
 /**
  * Mwanjalisi-only station operations for the PetroDollar OS app. It reuses the Fuel
@@ -16,7 +18,43 @@ import { PetroDollarService } from './petrodollar.service';
 @Controller('petrodollar')
 @AgentExcluded()
 export class PetroDollarController {
-  constructor(private readonly service: PetroDollarService) {}
+  constructor(
+    private readonly service: PetroDollarService,
+    private readonly posting: PetroDollarPostingService,
+  ) {}
+
+  @Get('reports/:id/posting')
+  @RequirePermissions(
+    'fuel_reporting.read',
+    'journal_entries.view',
+    'sales_desk.view',
+    'cash_desk.view',
+    'customers.view',
+    'inventory.view',
+  )
+  postingReview(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.posting.review(user, id);
+  }
+
+  @Post('reports/:id/posting')
+  @RequirePermissions('fuel_reporting.manage', 'journal_entries.create', 'journal_entries.post')
+  postShift(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PostPetroDollarDto,
+  ) {
+    return this.posting.post(user, id, dto);
+  }
+
+  @Post('reports/:id/posting/reverse')
+  @RequirePermissions('fuel_reporting.manage', 'journal_entries.reverse')
+  reversePosting(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReversePetroDollarDto,
+  ) {
+    return this.posting.reverse(user, id, dto);
+  }
 
   @Get('bootstrap')
   @RequirePermissions('fuel_reporting.read')

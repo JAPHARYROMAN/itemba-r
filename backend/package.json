@@ -54,7 +54,8 @@
     "db:seed": "cross-env NODE_PATH=./node_modules ts-node --project tsconfig.json --transpile-only ../database/seeds/seed.ts",
     "attestation:create": "ts-node --transpile-only scripts/create-provider-contract-attestation.ts",
     "test:msaidizi-task-event-cursor-migration": "prisma db execute --schema=../database/prisma/schema.prisma --file=../database/prisma/migrations/20260829120000_msaidizi_task_event_cursor_allocated_under_lock/regression.sql",
-    "test:loan-lifecycle": "node scripts/run-loan-lifecycle-proof.cjs"
+    "test:loan-lifecycle": "node scripts/run-loan-lifecycle-proof.cjs",
+    "test:petrodollar-posting": "node scripts/verify-petrodollar-posting.cjs"
   },
   "prisma": {
     "schema": "../database/prisma/schema.prisma",

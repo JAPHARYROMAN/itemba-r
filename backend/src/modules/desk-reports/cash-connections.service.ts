@@ -626,13 +626,19 @@ export class CashConnectionsService {
       })),
     };
   }
-  async review(user: AuthUser, id: string) {
+  async review(user: AuthUser, id: string, tx?: Tx) {
+    if (tx) return this.prepare(tx, user, await this.source(tx, user, id));
     return this.db.$transaction(
       async (tx) => this.prepare(tx, user, await this.source(tx, user, id)),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30000 },
     );
   }
-  async post(user: AuthUser, id: string, input: { fingerprint: string; offsetAccountId?: string }) {
+  async post(
+    user: AuthUser,
+    id: string,
+    input: { fingerprint: string; offsetAccountId?: string },
+    transaction?: Tx,
+  ) {
     this.permission(
       user,
       'cash_desk.view',
@@ -640,81 +646,79 @@ export class CashConnectionsService {
       'journal_entries.create',
       'journal_entries.post',
     );
-    return this.db.$transaction(
-      async (tx) => {
-        const initial = await this.source(tx, user, id);
-        // Match operational lock ordering: sale, cash accounts, movement, invoice.
-        if (initial.salesPayment)
-          await tx.$queryRaw`SELECT id FROM sales_desk_sales WHERE id = ${initial.salesPayment.saleId} FOR UPDATE`;
-        for (const e of initial.entries)
-          await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${e.accountId} FOR UPDATE`;
-        await tx.$queryRaw`SELECT id FROM cash_desk_movements WHERE id = ${id} FOR UPDATE`;
-        if (initial.invoicePayment)
-          await tx.$queryRaw`SELECT id FROM invoice_desk_invoices WHERE id = ${initial.invoicePayment.invoiceId} FOR UPDATE`;
-        const row = await this.source(tx, user, id);
-        for (const e of row.entries) await this.writeScope(user, e.account);
-        const review = await this.prepare(tx, user, row);
-        if (review.journals.length)
-          throw new ConflictException(
-            'This movement already has a journal. It cannot be posted twice.',
-          );
-        if (review.fingerprint !== input.fingerprint)
-          throw new ConflictException('The movement or its connection changed. Review it again.');
-        if (review.issues.length) throw new BadRequestException(review.issues.join(' '));
-        const offsetId = review.offsetId ?? input.offsetAccountId;
-        if (row.kind !== 'TRANSFER' && !review.accounts.some((a) => a.id === offsetId))
-          throw new BadRequestException('Choose a valid offset account.');
-        const lines = cashLines(
-          row.kind,
-          row.amount,
-          row.entries.map((e) => ({
-            accountId: e.account.erpCashAccount!.ledgerAccountId!,
-            amount: e.amount,
-          })),
-          offsetId,
+    const work = async (tx: Tx) => {
+      const initial = await this.source(tx, user, id);
+      // Match operational lock ordering: sale, cash accounts, movement, invoice.
+      if (initial.salesPayment)
+        await tx.$queryRaw`SELECT id FROM sales_desk_sales WHERE id = ${initial.salesPayment.saleId} FOR UPDATE`;
+      for (const e of initial.entries)
+        await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${e.accountId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM cash_desk_movements WHERE id = ${id} FOR UPDATE`;
+      if (initial.invoicePayment)
+        await tx.$queryRaw`SELECT id FROM invoice_desk_invoices WHERE id = ${initial.invoicePayment.invoiceId} FOR UPDATE`;
+      const row = await this.source(tx, user, id);
+      for (const e of row.entries) await this.writeScope(user, e.account);
+      const review = await this.prepare(tx, user, row);
+      if (review.journals.length)
+        throw new ConflictException(
+          'This movement already has a journal. It cannot be posted twice.',
         );
-        const first = row.entries[0].account;
-        const result = await this.engine.postLines(
-          {
-            companyId: first.companyId,
-            divisionId: row.entries.every((e) => e.account.divisionId === first.divisionId)
-              ? first.divisionId
-              : null,
-            branchId: row.entries.every((e) => e.account.branchId === first.branchId)
-              ? first.branchId
-              : null,
-            transactionDate: row.businessDate,
-            description: `Cash Desk · ${row.description} [cash-record:${cashFingerprint(review.source)}] [desk-cash:${input.fingerprint}]`,
-            referenceType: 'DeskCash',
-            referenceId: id,
-            journalNumber: `JE-CASH-${randomUUID()}`,
-            userId: user.id,
-            moduleName: 'CashDesk',
-            lines,
-          },
-          tx,
-        );
-        // Keep the organisation on each cash leg, including cross-branch transfers.
-        for (const e of row.entries)
-          await tx.journalEntryLine.updateMany({
-            where: {
-              journalEntryId: result.id,
-              accountId: e.account.erpCashAccount!.ledgerAccountId!,
-            },
-            data: { divisionId: e.account.divisionId, branchId: e.account.branchId },
-          });
-        await this.audit.logStrictInTransaction(tx, {
-          action: 'POST',
-          entityType: 'DeskCash',
-          entityId: id,
+      if (review.fingerprint !== input.fingerprint)
+        throw new ConflictException('The movement or its connection changed. Review it again.');
+      if (review.issues.length) throw new BadRequestException(review.issues.join(' '));
+      const offsetId = review.offsetId ?? input.offsetAccountId;
+      if (row.kind !== 'TRANSFER' && !review.accounts.some((a) => a.id === offsetId))
+        throw new BadRequestException('Choose a valid offset account.');
+      const lines = cashLines(
+        row.kind,
+        row.amount,
+        row.entries.map((e) => ({
+          accountId: e.account.erpCashAccount!.ledgerAccountId!,
+          amount: e.amount,
+        })),
+        offsetId,
+      );
+      const first = row.entries[0].account;
+      const result = await this.engine.postLines(
+        {
           companyId: first.companyId,
+          divisionId: row.entries.every((e) => e.account.divisionId === first.divisionId)
+            ? first.divisionId
+            : null,
+          branchId: row.entries.every((e) => e.account.branchId === first.branchId)
+            ? first.branchId
+            : null,
+          transactionDate: row.businessDate,
+          description: `Cash Desk · ${row.description} [cash-record:${cashFingerprint(review.source)}] [desk-cash:${input.fingerprint}]`,
+          referenceType: 'DeskCash',
+          referenceId: id,
+          journalNumber: `JE-CASH-${randomUUID()}`,
           userId: user.id,
-          metadata: { ...input, journalEntryId: result.id },
+          moduleName: 'CashDesk',
+          lines,
+        },
+        tx,
+      );
+      // Keep the organisation on each cash leg, including cross-branch transfers.
+      for (const e of row.entries)
+        await tx.journalEntryLine.updateMany({
+          where: {
+            journalEntryId: result.id,
+            accountId: e.account.erpCashAccount!.ledgerAccountId!,
+          },
+          data: { divisionId: e.account.divisionId, branchId: e.account.branchId },
         });
-        return result;
-      },
-      { timeout: 30000 },
-    );
+      await this.audit.logStrictInTransaction(tx, {
+        action: 'POST',
+        entityType: 'DeskCash',
+        entityId: id,
+        companyId: first.companyId,
+        userId: user.id,
+        metadata: { ...input, journalEntryId: result.id },
+      });
+      return result;
+    };
+    return transaction ? work(transaction) : this.db.$transaction(work, { timeout: 30000 });
   }
   async reverseInTransaction(
     tx: Tx,

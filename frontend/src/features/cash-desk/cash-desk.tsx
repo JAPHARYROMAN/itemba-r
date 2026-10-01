@@ -801,6 +801,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 !selected.reversedAt &&
                 !selected.loanFinancialEvent &&
                 !selected.payrollRunId &&
+                !selected.fuelReportPostingId &&
                 selected.kind !== 'REVERSAL' &&
                 (!selected.invoicePaymentId ||
                   (invoiceAccess && hasPermission('invoice_desk.payments'))) &&
@@ -832,6 +833,12 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 {dateLabel(selected.businessDate)} · {money(selected.amount, selected.currency)}
               </p>
               <p className="desk-muted">{selected.reference || 'No reference'}</p>
+              {selected.fuelReportPostingId && (
+                <p className="desk-muted">
+                  Posted from PetroDollar. Reverse the entire shift posting there to keep cash,
+                  stock and accounting together.
+                </p>
+              )}
               {selected.kind === 'EXPENSE' && (
                 <div className="cash-expense-detail">
                   <p>
