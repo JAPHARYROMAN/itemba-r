@@ -85,7 +85,7 @@ This section separates what runs out of the box from what is behind a switch, an
 | Automation dispatch (overdue reminders, low-stock alerts, scheduled-report emails) | `AUTOMATION_DISPATCH_ENABLED`, which runs inside the job worker and so also needs `JOB_WORKER_ENABLED` | Off |
 | Automatic tax capture (copies tax from confirmed sales and purchase orders and approved expenses into the tax ledger that filing reports read) | `TAX_AUTO_APPLY` | Off, so this tax data is not collected automatically until enabled |
 | Public self-registration | `ALLOW_PUBLIC_REGISTRATION` | Off |
-| Fuel Grid launcher | `FUELGRID_APP_URL` and `FUELGRID_HEALTH_URL`, read by the frontend server at runtime | No code default, so not configured when unset; `frontend/.env.example` points the app URL at `http://localhost:3000` and leaves the health URL empty |
+| Fuel Grid launcher | `FUELGRID_APP_URL` and `FUELGRID_HEALTH_URL`, read by the frontend server at runtime | No code default, so not configured when unset; `frontend/.env.example` leaves both empty. Set `FUELGRID_APP_URL` to enable the launcher; the health check falls back to the app URL when `FUELGRID_HEALTH_URL` is empty |
 
 The shipped production and staging compose files forward only some of these variables to the containers (for example `JOB_WORKER_ENABLED`, the `MSAIDIZI_*` switches and the frontend build argument `NEXT_PUBLIC_ITEMBA_OS_ENABLED`). `TAX_AUTO_APPLY`, `AUTOMATION_DISPATCH_ENABLED` and `ALLOW_PUBLIC_REGISTRATION` (backend service) and `FUELGRID_APP_URL` and `FUELGRID_HEALTH_URL` (frontend service) must be added to the service's `environment:` block before setting them in an env file has any effect. The `FUELGRID_*_HOST` variables are already forwarded, but only to Caddy.
 
@@ -208,7 +208,13 @@ This starts PostgreSQL 16 on host port **5433**, Redis 7 on **6379** and pgAdmin
 
 ### 2. Configure and start the backend
 
-Create `backend/.env`. `backend/src/config/env.validation.ts` is the authoritative list of variables, and `backend/.env.example` documents most of them; copy individual variables from it rather than the whole file. The minimum for local development is:
+Copy the example:
+
+```bash
+cp backend/.env.example backend/.env    # PowerShell: Copy-Item backend/.env.example backend/.env
+```
+
+As shipped it works against the database from step 1: `DATABASE_URL` matches `docker-compose.yml`, and the secrets are local-development placeholders, so replace them before any shared or hosted use. `backend/src/config/env.validation.ts` holds the boot-time checks. If you would rather write the file by hand, the minimum for local development is:
 
 ```dotenv
 # Local development only: these match the throwaway credentials in docker-compose.yml
@@ -220,7 +226,7 @@ APP_ENCRYPTION_KEY=<a third, distinct 32+ random characters; required at boot in
 # REDIS_HOST=localhost                   # optional: the API runs without Redis
 ```
 
-Generate each secret with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (run it once per variable so every value is different). Then:
+To replace the placeholder secrets, generate each one with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (run it once per variable so every value is different). Then:
 
 ```bash
 cd backend
