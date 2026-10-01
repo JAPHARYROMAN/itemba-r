@@ -113,6 +113,17 @@ describe('workspace storage validation', () => {
         'Unsupported window view settings',
       );
   });
+  it('recovers PetroDollar windows only at their own address', () => {
+    const layout = (href: string) => ({
+      version: 1,
+      activeId: 'one',
+      windows: [{ ...window, appId: 'petrodollar', href }],
+    });
+    for (const href of ['/petrodollar', '/petrodollar?view=daily'])
+      expect(validateLayout(layout(href))).toBeTruthy();
+    for (const href of ['/fuel-reporting', '/petrodollars', '//outside.test/petrodollar'])
+      expect(() => validateLayout(layout(href))).toThrow('Invalid app location');
+  });
   it('accepts view recovery but refuses form contents or another app in the layout', () => {
     const layout = (values: Record<string, unknown>) => ({
       version: 1,

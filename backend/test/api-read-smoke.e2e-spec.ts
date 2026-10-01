@@ -191,6 +191,14 @@ describe('API read route smoke coverage (e2e)', () => {
       return;
     }
 
+    if (route.path.startsWith('/api/v1/petrodollar/') && response.status === 503) {
+      // PetroDollar is pinned to the Mwanjalisi company by code and fails closed when that
+      // company is missing, which is the case in this disposable database. Bind the exception
+      // to the PetroDollar routes and their exact message so other 503s are still caught.
+      expect(JSON.stringify(response.body)).toContain('PetroDollar is not set up');
+      return;
+    }
+
     expect(response.status).toBeLessThan(500);
     expect(response.status).not.toBe(401);
   });

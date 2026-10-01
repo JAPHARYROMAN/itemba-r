@@ -37,6 +37,10 @@ const Pos = dynamic(() => import('./desktop-pos').then((m) => m.DesktopPos), { l
 const Records = dynamic(() => import('@/features/records/records-app').then((m) => m.RecordsApp), {
   loading,
 });
+const PetroDollar = dynamic(
+  () => import('@/features/petrodollar/petrodollar-app').then((m) => m.PetroDollarApp),
+  { loading },
+);
 const DocumentDetail = dynamic(
   () => import('@/app/(dashboard)/group-control/documents/[id]/page'),
   { loading },
@@ -84,6 +88,8 @@ function Surface({ appId }: { appId: string }) {
       <Pos />
     ) : appId === 'records' ? (
       <Records />
+    ) : appId === 'petrodollar' ? (
+      <PetroDollar />
     ) : appId === 'documents' ? (
       <Documents
         initialView={view === 'library' || view === 'letter' || view === 'linked' ? view : 'home'}

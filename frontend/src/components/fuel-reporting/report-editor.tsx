@@ -31,6 +31,7 @@ export function ReportEditor({
   mode,
   onSaved,
   onLock,
+  apiBase = '/fuel-reporting',
 }: {
   branch: Branch;
   date: string;
@@ -40,6 +41,8 @@ export function ReportEditor({
   mode: 'report' | 'receive';
   onSaved: (report: Report) => void;
   onLock: (locked: boolean) => void;
+  /** Where reports are saved, reopened and listed. PetroDollar passes its company-pinned base. */
+  apiBase?: string;
 }) {
   const { hasPermission } = useAuth();
   const [report, setReport] = useState(workspace.report);
@@ -97,7 +100,7 @@ export function ReportEditor({
       setNotice('');
       const sent = JSON.stringify(payload);
       try {
-        const result = await backendPost<Report>('/fuel-reporting/reports', {
+        const result = await backendPost<Report>(`${apiBase}/reports`, {
           branchId: branch.id,
           businessDate: date,
           shift,
@@ -121,7 +124,7 @@ export function ReportEditor({
         setBusy(false);
       }
     },
-    [readOnly, payload, branch.id, date, shift, report, onSaved],
+    [readOnly, payload, branch.id, date, shift, report, onSaved, apiBase],
   );
 
   useEffect(() => {
@@ -169,7 +172,7 @@ export function ReportEditor({
     setBusy(true);
     setError('');
     try {
-      const result = await backendPost<Report>(`/fuel-reporting/reports/${report.id}/reopen`, {
+      const result = await backendPost<Report>(`${apiBase}/reports/${report.id}/reopen`, {
         version: report.version,
         reason: correction,
       });
@@ -186,7 +189,7 @@ export function ReportEditor({
   async function loadRevisions() {
     if (!report) return;
     try {
-      setRevisions(await backendGet<Revision[]>(`/fuel-reporting/reports/${report.id}/revisions`));
+      setRevisions(await backendGet<Revision[]>(`${apiBase}/reports/${report.id}/revisions`));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load revisions.');
     }

@@ -8,5 +8,6 @@ import { FuelReportingService } from './fuel-reporting.service';
   imports: [AuditLogsModule],
   controllers: [FuelReportingController],
   providers: [FuelReportingService, CompanyScopeService],
+  exports: [FuelReportingService],
 })
 export class FuelReportingModule {}

@@ -9,6 +9,7 @@ import {
   type WorkspaceApp,
 } from './apps';
 import { getAppConnection } from './app-connections';
+import { isWindowApp } from './desktop';
 
 const future: WorkspaceApp = {
   id: 'field-notes',
@@ -43,6 +44,18 @@ describe('App registration contract', () => {
     expect(canOpenApp(records, (p) => p === 'record_book.view')).toBe(true);
     expect(canOpenApp(records, (p) => p === 'records.view')).toBe(true);
     expect(canOpenApp(records, (p) => p === 'cash_desk.view')).toBe(false);
+  });
+  it('registers PetroDollar as an independent OS window gated by station reporting access', () => {
+    const petrodollar = getApp('petrodollar')!;
+    expect(petrodollar.launch.kind).toBe('route');
+    expect(petrodollar.hosting.kind).toBe('independent');
+    for (const path of ['/petrodollar', '/petrodollar?view=daily'])
+      expect(appForPath(path.split('?')[0])).toBe(petrodollar);
+    expect(appForPath('/petrodollars')).not.toBe(petrodollar);
+    expect(appForPath('/fuel-reporting')).not.toBe(petrodollar);
+    expect(canOpenApp(petrodollar, (p) => p === 'fuel_reporting.read')).toBe(true);
+    expect(canOpenApp(petrodollar, (p) => p === 'fuel_grid.access')).toBe(false);
+    expect(isWindowApp('petrodollar')).toBe(true);
   });
   it('hosts one POS terminal with its existing permission and preserves standalone routes', () => {
     const pos = getApp('pos')!;
