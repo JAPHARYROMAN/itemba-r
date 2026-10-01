@@ -665,6 +665,7 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                   ))}
                 </div>
                 {manage &&
+                  !detail.data.fuelReportPostingId &&
                   !detail.data.voidedAt &&
                   !detail.data.canonicalSalesOrderId &&
                   /^0(?:\.0+)?$/.test(detail.data.paidAmount) && (
@@ -675,6 +676,12 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                       Void this sale
                     </button>
                   )}
+                {detail.data.fuelReportPostingId && (
+                  <p className="desk-muted">
+                    Posted from PetroDollar. Correct the entire shift posting there to keep cash,
+                    stock and accounting together.
+                  </p>
+                )}
               </div>
             )
           )}

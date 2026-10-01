@@ -2005,6 +2005,8 @@ model InvoiceDeskSupplier {
 }
 
 model InvoiceDeskInvoice {
+  fuelReportPostingId String?
+  fuelReportPosting FuelReportPosting? @relation(fields: [fuelReportPostingId], references: [id], onDelete: Restrict)
   canonicalInvoiceId String? @unique
   canonicalInvoice SupplierInvoice? @relation(fields: [canonicalInvoiceId], references: [id], onDelete: Restrict)
   id            String                  @id @default(uuid())
@@ -2035,6 +2037,7 @@ model InvoiceDeskInvoice {
 
   @@unique([companyId, supplierId, numberKey])
   @@index([companyId, divisionId, branchId, dueDate])
+  @@index([fuelReportPostingId])
   @@map("invoice_desk_invoices")
 }
 
@@ -5792,6 +5795,7 @@ enum FuelDailyReconciliationStatus {
 // labels; each revision preserves the complete report and calculated discrepancies.
 // These reports do not post a second time into the operational fuel ledger.
 model FuelReport {
+  postings FuelReportPosting[]
   id           String               @id @default(uuid())
   companyId    String
   branchId     String
@@ -5829,6 +5833,30 @@ model FuelReportRevision {
 
   @@unique([reportId, version])
   @@map("fuel_report_revisions")
+}
+
+/// One atomic, reviewed financial posting of a closed station shift. Reversals
+/// retain the original linked records and evidence; a new revision can be posted.
+model FuelReportPosting {
+  id String @id @default(uuid())
+  reportId String
+  reportVersion Int
+  requestId String @unique
+  fingerprint String
+  selections Json
+  evidence Json
+  createdBy String
+  createdAt DateTime @default(now())
+  reversedAt DateTime?
+  reversedBy String?
+  reversalReason String?
+  report FuelReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  sales SalesDeskSale[]
+  invoices InvoiceDeskInvoice[]
+  movements CashDeskMovement[]
+
+  @@unique([reportId, reportVersion])
+  @@map("fuel_report_postings")
 }
 
 model FuelTank {
@@ -17221,6 +17249,8 @@ model CashDeskAccount {
 }
 
 model CashDeskMovement {
+  fuelReportPostingId String?
+  fuelReportPosting FuelReportPosting? @relation(fields: [fuelReportPostingId], references: [id], onDelete: Restrict)
   salaryPayments        SalaryPayment[]
   payrollRunId          String?
   payrollRun            PayrollRun?         @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
@@ -17261,6 +17291,7 @@ model CashDeskMovement {
 
   @@index([businessDate, createdAt])
   @@index([payrollRunId])
+  @@index([fuelReportPostingId])
   @@map("cash_desk_movements")
 }
 
@@ -17450,6 +17481,8 @@ model LoanFinancialEvent {
 }
 
 model SalesDeskSale {
+  fuelReportPostingId String?
+  fuelReportPosting FuelReportPosting? @relation(fields: [fuelReportPostingId], references: [id], onDelete: Restrict)
   canonicalSalesOrderId String? @unique
   canonicalSalesOrder SalesOrder? @relation(fields: [canonicalSalesOrderId], references: [id], onDelete: Restrict)
   id          String             @id @default(uuid())
@@ -17481,6 +17514,7 @@ model SalesDeskSale {
 
   @@unique([companyId, numberKey])
   @@index([companyId, divisionId, branchId, saleDate])
+  @@index([fuelReportPostingId])
   @@map("sales_desk_sales")
 }
 

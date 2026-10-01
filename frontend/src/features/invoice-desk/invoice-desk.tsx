@@ -795,7 +795,7 @@ function InvoiceDetail({
       </div>
       {!r.voidedAt && !r.canonicalInvoiceId && (
         <div className="desk-detail-actions">
-          {manage && !r.payments?.length && (
+          {manage && !r.fuelReportPostingId && !r.payments?.length && (
             <Btn variant="secondary" onClick={() => onAction('edit')}>
               Edit invoice
             </Btn>
@@ -803,12 +803,18 @@ function InvoiceDetail({
           {payments && r.outstanding !== '0.00' && (
             <Btn onClick={() => onAction('payment')}>Record payment</Btn>
           )}
-          {manage && Number(r.paidAmount) === 0 && (
+          {manage && !r.fuelReportPostingId && Number(r.paidAmount) === 0 && (
             <button className="desk-text-button" onClick={() => onAction('void')}>
               Void invoice
             </button>
           )}
         </div>
+      )}
+      {r.fuelReportPostingId && (
+        <p className="desk-muted">
+          Posted from PetroDollar. Correct the entire shift posting there to keep cash, stock and
+          accounting together.
+        </p>
       )}
       {r.notes && (
         <div className="desk-detail-notes">

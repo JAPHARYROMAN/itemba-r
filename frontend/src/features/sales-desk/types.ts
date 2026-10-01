@@ -9,6 +9,7 @@ export type Customer = {
   company?: { name: string };
 };
 export type Sale = {
+  fuelReportPostingId?: string | null;
   canonicalSalesOrderId?: string | null;
   id: string;
   companyId: string;

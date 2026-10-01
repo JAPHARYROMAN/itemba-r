@@ -59,6 +59,7 @@ website/data/
 
 # Disposable Fuel Reporting verification artifacts
 .tmp-fuel-reporting/
+.tmp-petrodollar/
 
 # Local release rehearsal secrets, database dumps and detailed audit output
 .release/

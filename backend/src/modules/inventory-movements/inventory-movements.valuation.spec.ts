@@ -29,7 +29,10 @@ type BalanceRow = {
 
 function makeService() {
   const prisma = { $transaction: jest.fn() } as any;
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const codes = { next: jest.fn().mockResolvedValue('IM-1') } as any;
   const companyScope = {
     companyWhereFor: jest.fn().mockResolvedValue({}),
@@ -186,6 +189,33 @@ describe('InventoryMovementsService WAC valuation (#3, #13)', () => {
     expect(Number(written.quantityOnHand)).toBe(10);
     expect(Number(written.totalValue)).toBe(100); // 40 + 5*12, additive
     expect(Number(written.averageCost)).toBe(10); // 100 / 10
+  });
+
+  it('uses an exact supplier receipt value when per-litre cost requires rounding', async () => {
+    const { service, auditLogs } = makeService();
+    const { tx, updateCalls } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(5),
+        averageCost: new Prisma.Decimal(8),
+        totalValue: new Prisma.Decimal(40),
+      }),
+    );
+    const movement = await service.createMovement({
+      ...base,
+      quantity: 3,
+      unitCost: 33.3333,
+      receiptValue: new Prisma.Decimal('100.01'),
+      movementType: 'PURCHASE_RECEIPT',
+      tx,
+    });
+    expect(movement.totalCost?.toString()).toBe('100.01');
+    expect(updateCalls[0].data.totalValue.toString()).toBe('140.01');
+    expect(updateCalls[0].data.averageCost.toString()).toBe('17.50125');
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ entityId: movement.id }),
+    );
+    expect(auditLogs.log).not.toHaveBeenCalled();
   });
 
   it('holds totalValue/averageCost on a cost-less inbound', async () => {

@@ -390,6 +390,10 @@ export class FuelReportingService {
     return this.prisma.$transaction(async (db) => {
       await this.lock(db, report.branchId);
       const current = await db.fuelReport.findUniqueOrThrow({ where: { id } });
+      if (await db.fuelReportPosting.count({ where: { reportId: id, reversedAt: null } }))
+        throw new ConflictException(
+          'Reverse this shift’s posting in PetroDollar before reopening it.',
+        );
       if (current.version !== dto.version || current.status !== 'CLOSED')
         throw new ConflictException('The report changed; reload before reopening.');
       const latest = await db.fuelReport.findFirst({

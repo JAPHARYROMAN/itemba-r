@@ -455,7 +455,11 @@ export class SalesDeskService {
     });
   }
   async void(user: AuthUser, id: string, d: SalesVoidDto) {
-    await this.writable(user, id);
+    const source = await this.writable(user, id);
+    if (source.fuelReportPostingId)
+      throw new ConflictException(
+        'Reverse the complete shift posting in PetroDollar before correcting this sale.',
+      );
     if (d.reason.trim().length < 3) throw new BadRequestException('Enter a reason.');
     return this.transaction(async (tx) => {
       const changed = await tx.salesDeskSale.updateMany({

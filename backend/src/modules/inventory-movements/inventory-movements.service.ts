@@ -198,6 +198,8 @@ export class InventoryMovementsService {
     quantity: number;
     unitId: string;
     unitCost?: number;
+    /** Exact supplier invoice value for a costed receipt owned by a larger transaction. */
+    receiptValue?: Prisma.Decimal;
     movementDate: Date;
     createdById: string;
     referenceType?: string;
@@ -230,6 +232,17 @@ export class InventoryMovementsService {
       await this.validateMovementReferences({ ...data, ...scope }, db);
       await this.profit.assertInventoryMovementHasCost(data, db);
 
+      if (
+        data.receiptValue &&
+        (!data.tx ||
+          data.movementType !== 'PURCHASE_RECEIPT' ||
+          data.unitCost == null ||
+          !data.receiptValue.gt(0) ||
+          data.receiptValue.decimalPlaces() > 2)
+      )
+        throw new BadRequestException(
+          'An exact receipt value requires a costed purchase receipt in its owning transaction.',
+        );
       const movementNumber = await this.codes.next({
         entityType: 'InventoryMovement',
         companyId: data.companyId,
@@ -244,7 +257,9 @@ export class InventoryMovementsService {
           quantity: data.quantity,
           unitId: data.unitId,
           unitCost: data.unitCost,
-          totalCost: data.unitCost != null ? data.quantity * data.unitCost : undefined,
+          totalCost:
+            data.receiptValue ??
+            (data.unitCost != null ? data.quantity * data.unitCost : undefined),
           movementDate: data.movementDate,
           createdById: data.createdById,
           referenceType: data.referenceType,
@@ -259,14 +274,15 @@ export class InventoryMovementsService {
 
       await this.applyMovementToBalance(movement, db, {
         allowNegativeOnHand: data.allowNegativeOnHand,
+        receiptValue: data.receiptValue,
       });
       return movement;
     };
 
     const movement = data.tx ? await run(data.tx) : await this.prisma.$transaction((tx) => run(tx));
 
-    // Audit logs are written outside the transaction; failures must not block the movement.
-    await this.auditLogs.log({
+    // A supplied transaction keeps the audit record atomic with its owning workflow.
+    const auditEntry = {
       action: 'INVENTORY_MOVEMENT_CREATE',
       entityType: 'InventoryMovement',
       entityId: movement.id,
@@ -281,7 +297,9 @@ export class InventoryMovementsService {
         referenceType: data.referenceType,
         referenceId: data.referenceId,
       } as any,
-    });
+    };
+    if (data.tx) await this.auditLogs.logStrictInTransaction(data.tx, auditEntry);
+    else await this.auditLogs.log(auditEntry);
 
     return movement;
   }
@@ -289,7 +307,7 @@ export class InventoryMovementsService {
   private async applyMovementToBalance(
     movement: InventoryMovement,
     db: Prisma.TransactionClient,
-    opts?: { allowNegativeOnHand?: boolean },
+    opts?: { allowNegativeOnHand?: boolean; receiptValue?: Prisma.Decimal },
   ) {
     const isInbound = INBOUND_TYPES.includes(movement.movementType);
     const isOutbound = OUTBOUND_TYPES.includes(movement.movementType);
@@ -362,10 +380,7 @@ export class InventoryMovementsService {
     // ADJUSTMENT_OUT, TRANSFER_OUT, PRODUCTION_OUT, PURCHASE_RETURN) represent
     // real physical depletion and may draw against on-hand even when reserved —
     // they are only bounded by the negative-stock guard above.
-    if (
-      movement.movementType === 'SALE_ISSUE' &&
-      currentQty - reservedQty < quantity
-    ) {
+    if (movement.movementType === 'SALE_ISSUE' && currentQty - reservedQty < quantity) {
       throw new BadRequestException(
         `Insufficient available stock at branch/location ${movement.branchId}: requested ${quantity}, available ${Math.max(0, currentQty - reservedQty)} after reservations`,
       );
@@ -390,7 +405,9 @@ export class InventoryMovementsService {
     let newAvgCostDec = new Prisma.Decimal(existing.averageCost);
     let newTotalValueDec: Prisma.Decimal;
     if (isInbound && movement.unitCost != null) {
-      const totalCost = existingTotalValue.plus(qtyDec.times(movement.unitCost));
+      const totalCost = existingTotalValue.plus(
+        opts?.receiptValue ?? qtyDec.times(movement.unitCost),
+      );
       newAvgCostDec = newQtyDec.gt(0) ? totalCost.dividedBy(newQtyDec) : new Prisma.Decimal(0);
       newTotalValueDec = totalCost;
     } else if (isInbound) {

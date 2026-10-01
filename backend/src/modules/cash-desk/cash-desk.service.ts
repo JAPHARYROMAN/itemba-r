@@ -652,6 +652,10 @@ export class CashDeskService {
       },
     });
     if (!original) throw new NotFoundException('Movement not found.');
+    if (original.fuelReportPostingId)
+      throw new BadRequestException(
+        'Reverse the complete shift posting in PetroDollar so cash, stock and journals stay together.',
+      );
     if (original.payrollRunId)
       throw new BadRequestException(
         'Reverse this payment in Payroll so cash, payroll and journal balances stay together.',
@@ -815,6 +819,78 @@ export class CashDeskService {
       }
       return reversal;
     });
+  }
+
+  /** Internal atomic station posting. The caller owns the report lock and transaction. */
+  async recordFuelMovement(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    input: {
+      postingId: string;
+      accountId: string;
+      companyId: string;
+      branchId: string;
+      date: Date;
+      amount: Prisma.Decimal;
+      kind: 'SALE_RECEIPT' | 'SUPPLIER_PAYMENT' | 'EXPENSE';
+      description: string;
+      reference: string;
+      requestId: string;
+      salesPaymentId?: string;
+      invoicePaymentId?: string;
+      expenseCategory?: string;
+      expenseNotes?: string;
+    },
+  ) {
+    if (!['cash_desk.view', 'cash_desk.record'].every((p) => user.permissions.includes(p)))
+      throw new ForbiddenException('Cash Desk recording access is required.');
+    await this.writable(user, input.accountId);
+    const account = await tx.cashDeskAccount.findUniqueOrThrow({ where: { id: input.accountId } });
+    if (
+      account.companyId !== input.companyId ||
+      account.branchId !== input.branchId ||
+      account.currency !== 'TZS'
+    )
+      throw new BadRequestException('Choose a TZS cash account belonging to this station.');
+    await this.lockAccounts(tx, [account]);
+    if (
+      input.kind === 'SALE_RECEIPT' &&
+      (await tx.cashDeskMovement.count({
+        where: {
+          kind: 'DAILY_SALES',
+          businessDate: input.date,
+          reversedAt: null,
+          entries: { some: { accountId: account.id } },
+        },
+      }))
+    )
+      throw new ConflictException(
+        'A manual daily sales total covers this account and date. Reverse that total before posting the shift.',
+      );
+    const movement = await tx.cashDeskMovement.create({
+      data: {
+        fuelReportPostingId: input.postingId,
+        requestId: input.requestId,
+        payloadKey: payloadKey(input),
+        kind: input.kind,
+        amount: input.amount,
+        currency: 'TZS',
+        businessDate: input.date,
+        description: input.description.slice(0, 500),
+        reference: input.reference.slice(0, 160),
+        salesPaymentId: input.salesPaymentId,
+        invoicePaymentId: input.invoicePaymentId,
+        expenseCategory: input.expenseCategory,
+        expenseNotes: input.expenseNotes,
+        createdBy: user.id,
+        actorName: user.fullName || user.email,
+      },
+    });
+    await this.entries(tx, movement.id, input.date, [
+      { account, amount: input.kind === 'SALE_RECEIPT' ? input.amount : input.amount.negated() },
+    ]);
+    await this.auditMovement(tx, user, movement.id, [account], input.kind);
+    return movement;
   }
 
   async receiveSalesPayment(
