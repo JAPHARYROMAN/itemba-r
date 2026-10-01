@@ -11,6 +11,7 @@ import { redisConfig } from './common/config/redis.config';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { FuelReportingModule } from './modules/fuel-reporting/fuel-reporting.module';
+import { PetroDollarModule } from './modules/petrodollar/petrodollar.module';
 import { SalesDeskModule } from './modules/sales-desk/sales-desk.module';
 import { RecordsModule } from './modules/records/records.module';
 import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
@@ -251,6 +252,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PrismaModule,
     AuthModule,
     FuelReportingModule,
+    PetroDollarModule,
     InvoiceDeskModule,
     CashDeskModule,
     SalesDeskModule,

@@ -66,6 +66,7 @@ const hosts: Record<string, RegExp> = {
   documents: /^\/(documents|group-control\/documents)(?:\/|$)/,
   pos: /^\/pos(?:\/activate)?$/,
   records: /^\/(records|record-book)(?:\/|$)/,
+  petrodollar: /^\/petrodollar(?:\/|$)/,
   settings: /^\/(settings|apps)(?:\/|$)/,
   'itemba-r': /^\//,
 };

@@ -11,6 +11,7 @@ export const WINDOW_APP_IDS = [
   'documents',
   'pos',
   'records',
+  'petrodollar',
 ] as const;
 export const isWindowApp = (id: string) => WINDOW_APP_IDS.some((value) => value === id);
 export type WindowMode =

@@ -1,0 +1,235 @@
+/*
+ * PetroDollar shares the desk shell (invoice-desk.css). Only its own pieces are styled here, plus a
+ * scoped re-skin of the Fuel Reporting editor, whose stylesheet is a light-only design. Everything
+ * is under `.petrodollar`, so the standalone /fuel-reporting portal is unaffected.
+ */
+.petrodollar {
+  --pd-accent: #55741f;
+  --pd-teal: #076a66;
+  --pd-soft: color-mix(in srgb, var(--desk-ink) 5%, var(--desk-panel));
+  --pd-soft-strong: color-mix(in srgb, var(--desk-ink) 9%, var(--desk-panel));
+}
+.dark .petrodollar {
+  --pd-accent: #a9c866;
+  --pd-teal: #4cc4b9;
+}
+
+/* Rail */
+.petrodollar .desk-rail nav button[aria-current='page'] {
+  color: var(--pd-accent);
+  background: color-mix(in srgb, #8fb04a 16%, transparent);
+}
+.petrodollar .desk-rail nav button {
+  white-space: nowrap;
+}
+.petrodollar .desk-rail nav button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.petrodollar .desk-eyebrow {
+  color: var(--pd-accent);
+}
+
+/* Company, station, date and shift */
+.petrodollar .pd-scope {
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 28px;
+}
+.petrodollar .pd-scope label {
+  flex: 0 1 240px;
+}
+.petrodollar .pd-fact > span,
+.petrodollar .pd-scope .ui-date-caption > span {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 4px 3px;
+}
+.petrodollar .pd-fact > strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--desk-ink);
+  padding: 4px 2px;
+}
+.petrodollar .pd-shift {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--pd-soft-strong);
+}
+.petrodollar .pd-shift button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--desk-muted);
+}
+.petrodollar .pd-shift button[aria-pressed='true'] {
+  background: var(--desk-panel);
+  color: var(--desk-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px #0000001f;
+}
+.petrodollar .pd-shift button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.petrodollar .pd-notice {
+  padding: 13px 16px;
+  border-radius: 9px;
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--desk-ink);
+  background: color-mix(in srgb, #d99a2b 12%, transparent);
+  border: 1px solid color-mix(in srgb, #d99a2b 30%, transparent);
+}
+
+/* History */
+.petrodollar .pd-history {
+  background: var(--desk-panel);
+  border: 1px solid var(--desk-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.petrodollar .pd-history .desk-empty {
+  padding: 28px 24px;
+}
+.petrodollar .pd-number {
+  font-variant-numeric: tabular-nums;
+}
+/* On phones WorkspaceTable turns rows into labelled cards, which must stay left-aligned. */
+@media screen and (min-width: 701px) {
+  .petrodollar .pd-number {
+    text-align: right;
+    white-space: nowrap;
+  }
+}
+
+/* The Fuel Reporting editor, re-skinned for the OS window (light and dark). */
+.petrodollar .fuel-reporting.pd-fr {
+  --fr-teal: var(--pd-teal);
+  --fr-line: var(--desk-line);
+  --fr-muted: var(--desk-muted);
+  --fr-navy: var(--desk-ink);
+  color: var(--desk-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  max-width: none;
+  margin: 0;
+  overflow: visible;
+  font-size: 13px;
+}
+.petrodollar .pd-fr .fr-content {
+  padding: 0;
+}
+.petrodollar .pd-fr input,
+.petrodollar .pd-fr select,
+.petrodollar .pd-fr textarea {
+  background: var(--desk-panel);
+  color: var(--desk-ink);
+  border-color: var(--desk-line);
+}
+.petrodollar .pd-fr fieldset:disabled input,
+.petrodollar .pd-fr fieldset:disabled select,
+.petrodollar .pd-fr fieldset:disabled textarea {
+  background: var(--pd-soft);
+  color: var(--desk-muted);
+}
+.petrodollar .pd-fr .fr-section,
+.petrodollar .pd-fr .fr-metrics,
+.petrodollar .pd-fr .fr-shift-cards > div,
+.petrodollar .pd-fr .fr-history,
+.petrodollar .pd-fr .fr-save-bar {
+  background: var(--desk-panel);
+  border-color: var(--desk-line);
+}
+.petrodollar .pd-fr .fr-save-bar {
+  box-shadow: 0 5px 25px #0000001f;
+}
+.petrodollar .pd-fr th {
+  background: var(--pd-soft);
+  color: var(--desk-muted);
+}
+.petrodollar .pd-fr td {
+  border-bottom-color: var(--desk-line);
+}
+.petrodollar .pd-fr .fr-field > span,
+.petrodollar .pd-fr .fr-empty,
+.petrodollar .pd-fr .fr-empty-state,
+.petrodollar .pd-fr .fr-loading {
+  color: var(--desk-muted);
+}
+.petrodollar .pd-fr .fr-step,
+.petrodollar .pd-fr .fr-attachments > div,
+.petrodollar .pd-fr .fr-close-confirm {
+  background: var(--pd-soft-strong);
+  border-color: var(--desk-line);
+  color: var(--desk-ink);
+}
+.petrodollar .pd-fr .fr-step {
+  color: var(--pd-teal);
+}
+.petrodollar .pd-fr .fr-primary {
+  background: #076a66;
+  border-color: #076a66;
+  color: #fff;
+}
+.petrodollar .pd-fr .fr-primary:hover:not(:disabled) {
+  background: #07524f;
+}
+.petrodollar .pd-fr .fr-secondary {
+  background: var(--desk-panel);
+  border-color: var(--desk-line);
+  color: var(--desk-ink);
+}
+.petrodollar .pd-fr .fr-secondary:hover:not(:disabled) {
+  background: var(--pd-soft);
+}
+.petrodollar .pd-fr .fr-variance,
+.petrodollar .pd-fr .fr-metric-warning {
+  background: color-mix(in srgb, #d99a2b 14%, transparent);
+  color: color-mix(in srgb, #b8741a 80%, var(--desk-ink));
+}
+.petrodollar .pd-fr .fr-negative {
+  color: color-mix(in srgb, #d92d20 80%, var(--desk-ink));
+}
+.petrodollar .pd-fr .fr-badge {
+  background: color-mix(in srgb, #d99a2b 18%, var(--desk-panel));
+  color: color-mix(in srgb, #b8741a 75%, var(--desk-ink));
+}
+.petrodollar .pd-fr .fr-badge-closed {
+  background: color-mix(in srgb, #2e9e6b 16%, var(--desk-panel));
+  color: color-mix(in srgb, #1d7a52 75%, var(--desk-ink));
+}
+.petrodollar .pd-fr .fr-error {
+  background: color-mix(in srgb, #d92d20 10%, var(--desk-panel));
+  border-color: color-mix(in srgb, #d92d20 28%, transparent);
+  color: color-mix(in srgb, #d92d20 75%, var(--desk-ink));
+}
+.petrodollar .pd-fr .fr-success {
+  background: color-mix(in srgb, #2e9e6b 12%, var(--desk-panel));
+  border-color: color-mix(in srgb, #2e9e6b 28%, transparent);
+  color: color-mix(in srgb, #1d7a52 75%, var(--desk-ink));
+}
+.petrodollar .pd-fr .fr-notice {
+  background: color-mix(in srgb, #d99a2b 12%, var(--desk-panel));
+  border-color: color-mix(in srgb, #d99a2b 30%, transparent);
+  color: var(--desk-ink);
+}
+
+@container os-workspace (max-width: 760px) {
+  .petrodollar .desk-main {
+    padding: 22px 16px;
+  }
+  .petrodollar .pd-scope label {
+    flex-basis: 100%;
+  }
+}
