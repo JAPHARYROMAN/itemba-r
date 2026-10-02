@@ -8,6 +8,7 @@ import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
 import { LinkReceivableCustomerDto } from './dto/link-receivable-customer.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 @Controller('receivables')
 export class ReceivablesController {
@@ -54,6 +55,7 @@ export class ReceivablesController {
   }
 
   @Patch(':id/link-customer')
+  @AgentExcluded()
   @RequirePermissions('receivables.manage')
   linkCustomer(
     @Param('id') id: string,

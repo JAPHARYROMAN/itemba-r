@@ -12,12 +12,18 @@ export class SupplierPaymentsController {
   constructor(private readonly service: SupplierPaymentsService) {}
 
   @Get()
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (collection read).
+  @AgentExcluded()
   @RequirePermissions('supplier-payments.view')
   findAll(@Query() query: QuerySupplierPaymentDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
   @Get(':id')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (path read).
+  @AgentExcluded()
   @RequirePermissions('supplier-payments.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);

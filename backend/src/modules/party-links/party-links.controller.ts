@@ -26,6 +26,9 @@ export class PartyLinksController {
   constructor(private readonly service: PartyLinksService) {}
 
   @Get('unlinked')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (collection read).
+  @AgentExcluded()
   @RequirePermissions('party_links.view')
   unlinked(@Query() query: UnlinkedQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.unlinked(user, query);

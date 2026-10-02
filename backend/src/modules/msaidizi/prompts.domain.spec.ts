@@ -432,16 +432,16 @@ describe('the load-bearing claims in DOMAIN_PRIMER are still true', () => {
     expect(models.has('Customer')).toBe(true);
   });
 
-  it('customer-credit-profiles carries a customerId but no relation to Customer', () => {
+  it('customer-credit-profiles points at a Customer by customerId (party linkage phase 1)', () => {
     const profile = models.get('CustomerCreditProfile');
     expect(profile?.fields).toContain('customerId');
-    expect([...(profile?.typeOf.values() ?? [])]).not.toContain('Customer');
+    expect([...(profile?.typeOf.values() ?? [])]).toContain('Customer');
   });
 
   it('supplier-performance stands in exactly the same relation to suppliers', () => {
     const profile = models.get('SupplierPerformanceProfile');
     expect(profile?.fields).toContain('supplierId');
-    expect([...(profile?.typeOf.values() ?? [])]).not.toContain('Supplier');
+    expect([...(profile?.typeOf.values() ?? [])]).toContain('Supplier');
   });
 
   it('the sales credit check reads Customer.creditLimit and ignores the credit profile', () => {
@@ -451,13 +451,13 @@ describe('the load-bearing claims in DOMAIN_PRIMER are still true', () => {
     expect(salesOrders).not.toMatch(/customerCreditProfile/);
   });
 
-  it('debts name a free-text creditor with no customer or supplier link', () => {
+  it('debts name a free-text creditor, optionally matched to a supplier, never to a customer', () => {
     const debt = models.get('Debt');
     expect(debt?.typeOf.get('creditorName')).toBe('String');
     expect(debt?.fields).not.toContain('customerId');
-    expect(debt?.fields).not.toContain('supplierId');
+    expect(debt?.fields).toContain('supplierId');
     expect([...(debt?.typeOf.values() ?? [])]).not.toContain('Customer');
-    expect([...(debt?.typeOf.values() ?? [])]).not.toContain('Supplier');
+    expect([...(debt?.typeOf.values() ?? [])]).toContain('Supplier');
   });
 
   it('receivables are owed by a customer and payables are owed to a supplier', () => {

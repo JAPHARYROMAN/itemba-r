@@ -59,7 +59,10 @@ describe('closed-world create generated-field evidence', () => {
         }).length
       );
     }, 0);
-    expect(requiredGeneratedFieldCount).toBe(108);
+    // 108 before party linkage phase 1; CustomerStatementRun.customerId and
+    // SupplierStatementRun.supplierId became nullable (NULL = whole-company run), so two
+    // generated fields are no longer required scalars.
+    expect(requiredGeneratedFieldCount).toBe(106);
   });
 
   it('keeps request aliases out of persisted field declarations', () => {

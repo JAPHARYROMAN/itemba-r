@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { PartyBalanceService } from './party-balance.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 const asOfDate = (value?: string) => {
   if (!value) return undefined;
@@ -15,6 +16,9 @@ export class PartyBalanceController {
   constructor(private readonly service: PartyBalanceService) {}
 
   @Get('suppliers/:id')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (path read).
+  @AgentExcluded()
   @RequirePermissions('suppliers.view')
   supplier(
     @Param('id') id: string,
@@ -25,6 +29,9 @@ export class PartyBalanceController {
   }
 
   @Get('customers/:id')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (path read).
+  @AgentExcluded()
   @RequirePermissions('customers.view')
   customer(
     @Param('id') id: string,
