@@ -987,7 +987,14 @@ function MovementList({
       {rows.map((m) => (
         <button key={m.id} onClick={() => onSelect(m)}>
           <span className={`cash-movement-icon ${m.reversedAt ? 'is-reversed' : ''}`}>
-            {['DAILY_SALES', 'SALE_RECEIPT', 'OTHER_IN', 'OPENING', 'BORROWING'].includes(
+            {[
+              'DAILY_SALES',
+              'SALE_RECEIPT',
+              'CUSTOMER_RECEIPT',
+              'OTHER_IN',
+              'OPENING',
+              'BORROWING',
+            ].includes(
               m.kind,
             ) ? (
               <ArrowDownLeft size={18} />

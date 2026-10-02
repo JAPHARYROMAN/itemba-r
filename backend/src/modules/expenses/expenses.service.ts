@@ -20,6 +20,7 @@ import { PayExpenseDto } from './dto/pay-expense.dto';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
 import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
 import { toPaymentMethodGeneral } from '../supplier-payments/payment-method';
+import { CashBookService } from '../cash-book/cash-book.service';
 
 @Injectable()
 export class ExpensesService {
@@ -35,6 +36,7 @@ export class ExpensesService {
     private readonly accountResolver: AccountResolverService,
     private readonly taxAutoApply: TaxAutoApplyService,
     private readonly supplierPayments?: SupplierPaymentsService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   private async resolveCashLedgerAccountId(
@@ -945,8 +947,9 @@ export class ExpensesService {
       // expense names a supplier; a one-off vendor has nothing to attach the payment to
       // until it is matched (Unmatched parties, W7). Record-only: this method already
       // posted the settlement journal, relieved cash and closed the payable above.
+      let supplierPaymentId: string | null = null;
       if (existing.supplierId && this.supplierPayments) {
-        await this.supplierPayments.recordInTransaction(tx, user, {
+        const supplierPayment = await this.supplierPayments.recordInTransaction(tx, user, {
           companyId: existing.companyId,
           divisionId: existing.divisionId,
           branchId: existing.branchId,
@@ -963,7 +966,33 @@ export class ExpensesService {
             : [],
           journalEntryId: je.id,
         });
+        supplierPaymentId = supplierPayment.id;
       }
+
+      // Cash book (W4): the expense payment is one Cash Desk movement carrying the
+      // supplier (when known), the expense and the settlement journal.
+      const movement = await this.cashBook?.recordInTransaction(tx, user, {
+        kind: 'EXPENSE',
+        companyId: existing.companyId,
+        cashAccountId: cashAccount.id,
+        amount: existing.amount,
+        currency: existing.currency,
+        businessDate: paymentDate,
+        description: `Expense ${existing.expenseNumber} · ${existing.description}`,
+        reference: existing.expenseNumber,
+        requestId: `Expense:${existing.id}`,
+        partyType: existing.supplierId ? 'SUPPLIER' : 'NONE',
+        supplierId: existing.supplierId ?? null,
+        expenseId: existing.id,
+        supplierPaymentId,
+        journalEntryId: je.id,
+        journalReferenceType: 'Expense',
+      });
+      if (movement && supplierPaymentId)
+        await tx.supplierPayment.update({
+          where: { id: supplierPaymentId },
+          data: { cashDeskMovementId: movement.id },
+        });
 
       return tx.expense.update({
         where: { id },

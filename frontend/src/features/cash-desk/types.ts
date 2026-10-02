@@ -90,6 +90,8 @@ export const movementLabels: Record<string, string> = {
   LOAN: 'Intercompany loan',
   LOAN_REPAYMENT: 'Loan repayment',
   SUPPLIER_PAYMENT: 'Supplier payment',
+  CUSTOMER_RECEIPT: 'Customer collection',
+  REFUND: 'Customer refund',
   OPENING: 'Opening balance',
   REVERSAL: 'Reversal',
   BORROWING: 'Borrowing received',

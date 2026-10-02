@@ -18,6 +18,7 @@ import {
   LockedPayable,
   SupplierPaymentsService,
 } from '../supplier-payments/supplier-payments.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 
 @Injectable()
 export class PayablesService {
@@ -29,6 +30,7 @@ export class PayablesService {
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly supplierPayments: SupplierPaymentsService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   async findAll(query: QueryPayableDto, user: AuthUser) {
@@ -488,7 +490,7 @@ export class PayablesService {
       this.accountResolver.resolve(locked.companyId, cashRole, tx),
     ]);
     const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
-    await this.postingEngine.postLines(
+    const journal = await this.postingEngine.postLines(
       {
         companyId: locked.companyId,
         divisionId: locked.divisionId,
@@ -520,6 +522,22 @@ export class PayablesService {
       await tx.cashAccount.updateMany({
         where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
         data: { currentBalance: { decrement: paymentAmount } },
+      });
+      // Cash book (W4): no shared supplier yet, but the cash still moved.
+      await this.cashBook?.recordInTransaction(tx, { id: userId } as AuthUser, {
+        kind: 'SUPPLIER_PAYMENT',
+        companyId: locked.companyId,
+        cashAccountId: dto.cashAccountId,
+        amount: paymentAmount,
+        currency: locked.currency ?? 'TZS',
+        businessDate: settlementDate,
+        description: `Payable settlement ${locked.payableNumber} · ${locked.supplierName ?? 'supplier'}`,
+        reference: locked.payableNumber,
+        requestId: `Payable:${locked.id}:${journal.id}`,
+        partyType: 'NONE',
+        payableId: locked.id,
+        journalEntryId: journal.id,
+        journalReferenceType: 'Payable',
       });
     }
     await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);

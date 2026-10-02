@@ -4,10 +4,11 @@ import { PayablesController } from './payables.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { SupplierPaymentsModule } from '../supplier-payments/supplier-payments.module';
+import { CashBookModule } from '../cash-book/cash-book.module';
 import { CompanyScopeService } from '../../common/services';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule, SupplierPaymentsModule],
+  imports: [PrismaModule, AuditLogsModule, SupplierPaymentsModule, CashBookModule],
   controllers: [PayablesController],
   providers: [PayablesService, CompanyScopeService],
   exports: [PayablesService],

@@ -18,6 +18,7 @@ import { RecordReceivablePaymentDto } from './dto/record-receivable-payment.dto'
 import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
 import { LinkReceivableCustomerDto } from './dto/link-receivable-customer.dto';
 import { CustomerPaymentsService } from '../customer-payments/customer-payments.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { pagination } from '../../common/utils/pagination';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -44,6 +45,7 @@ export class ReceivablesService {
     private readonly codes: EntityCodeGeneratorService,
     private readonly org: OrganizationScopeService,
     private readonly customerPayments: CustomerPaymentsService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
@@ -521,7 +523,7 @@ export class ReceivablesService {
       this.accountResolver.resolve(locked.companyId, 'AR_CONTROL', tx),
     ]);
     const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
-    await this.postingEngine.postLines(
+    const journal = await this.postingEngine.postLines(
       {
         companyId: locked.companyId,
         divisionId: locked.divisionId,
@@ -553,6 +555,22 @@ export class ReceivablesService {
       await tx.cashAccount.updateMany({
         where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
         data: { currentBalance: { increment: paymentAmount } },
+      });
+      // Cash book (W4): no shared customer yet, but the cash still arrived.
+      await this.cashBook?.recordInTransaction(tx, { id: userId } as AuthUser, {
+        kind: 'CUSTOMER_RECEIPT',
+        companyId: locked.companyId,
+        cashAccountId: dto.cashAccountId,
+        amount: paymentAmount,
+        currency: locked.currency,
+        businessDate: settlementDate,
+        description: `Receivable settlement ${locked.receivableNumber} · ${locked.customerName ?? 'customer'}`,
+        reference: locked.receivableNumber,
+        requestId: `Receivable:${locked.id}:${journal.id}`,
+        partyType: 'NONE',
+        receivableId: locked.id,
+        journalEntryId: journal.id,
+        journalReferenceType: 'Receivable',
       });
     }
     await this.syncSalesOrderPaymentFromReceivable(tx, updated);

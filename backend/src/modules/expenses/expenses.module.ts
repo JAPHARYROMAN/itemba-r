@@ -7,6 +7,7 @@ import { AccountingControlService, CompanyScopeService } from '../../common/serv
 import { AccountingEngineModule } from '../accounting-engine/accounting-engine.module';
 import { TaxAutoApplyModule } from '../tax-auto-apply/tax-auto-apply.module';
 import { SupplierPaymentsModule } from '../supplier-payments/supplier-payments.module';
+import { CashBookModule } from '../cash-book/cash-book.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SupplierPaymentsModule } from '../supplier-payments/supplier-payments.m
     AccountingEngineModule,
     TaxAutoApplyModule,
     SupplierPaymentsModule,
+    CashBookModule,
   ],
   controllers: [ExpensesController],
   providers: [ExpensesService, AccountingControlService, CompanyScopeService],

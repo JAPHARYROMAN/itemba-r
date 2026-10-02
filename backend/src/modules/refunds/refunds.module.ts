@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { CashBookModule } from '../cash-book/cash-book.module';
 import { RefundsController } from './refunds.controller';
 import { RefundsService } from './refunds.service';
 import { CompanyScopeService } from '../../common/services';
@@ -11,7 +12,7 @@ import { CompanyScopeService } from '../../common/services';
  * to be injected — no explicit import here (matches peers like receivables).
  */
 @Module({
-  imports: [PrismaModule, AuditLogsModule],
+  imports: [PrismaModule, AuditLogsModule, CashBookModule],
   controllers: [RefundsController],
   providers: [RefundsService, CompanyScopeService],
   exports: [RefundsService],

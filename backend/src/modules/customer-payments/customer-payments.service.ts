@@ -21,6 +21,7 @@ import {
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateCustomerPaymentDto } from './dto/create-customer-payment.dto';
@@ -76,6 +77,7 @@ export class CustomerPaymentsService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   // ── queries ─────────────────────────────────────────────────────────────────
@@ -410,6 +412,25 @@ export class CustomerPaymentsService {
         where: { id: input.cashAccountId, companyId: input.companyId, deletedAt: null },
         data: { currentBalance: { increment: amount } },
       });
+      // Cash book (W4): the collection is one Cash Desk movement carrying the customer,
+      // the receivable it settled and the journal that already explains it.
+      await this.cashBook?.recordInTransaction(tx, user, {
+        kind: 'CUSTOMER_RECEIPT',
+        companyId: input.companyId,
+        cashAccountId: input.cashAccountId,
+        amount,
+        currency: paymentCurrency,
+        businessDate: paymentDate,
+        description: `Customer payment ${created.paymentNumber} · ${customer.name ?? input.customerId}`,
+        reference: input.reference ?? created.paymentNumber,
+        requestId: `CustomerPayment:${created.id}`,
+        partyType: 'CUSTOMER',
+        customerId: input.customerId,
+        receivableId: orderedAllocations.length === 1 ? orderedAllocations[0].receivableId : null,
+        customerPaymentId: created.id,
+        journalEntryId: journalEntry.id,
+        journalReferenceType: 'CustomerPayment',
+      });
     }
 
     // Sync balances for every customer whose receivables changed (all == this
@@ -528,6 +549,21 @@ export class CustomerPaymentsService {
           },
           data: { currentBalance: { decrement: new Prisma.Decimal(current.amount) } },
         });
+      }
+      // Reverse the cash-book movement written for this payment (W4), if any.
+      if (reversalJe && this.cashBook) {
+        const carried = await tx.cashDeskMovement.findUnique({
+          where: { customerPaymentId: current.id },
+          select: { id: true, journalEntryId: true },
+        });
+        if (carried?.journalEntryId)
+          await this.cashBook.reverseInTransaction(
+            tx,
+            user,
+            carried.id,
+            dto.reason ?? null,
+            reversalJe.id,
+          );
       }
 
       const updated = await tx.customerPayment.update({

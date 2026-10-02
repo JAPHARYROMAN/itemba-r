@@ -683,6 +683,10 @@ export class CashDeskService {
       throw new BadRequestException(
         'Reverse this payment from the loan financial history so principal, schedules, cash and accounting stay together.',
       );
+    if (original.journalEntryId)
+      throw new BadRequestException(
+        'This movement was written by its payment. Reverse the payment in Payables, Receivables, Expenses or Refunds so cash and accounting stay together.',
+      );
     if (original.kind === 'REVERSAL')
       throw new BadRequestException(
         'A reversal cannot be reversed. Record a new corrected movement.',

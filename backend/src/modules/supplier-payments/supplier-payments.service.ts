@@ -21,6 +21,7 @@ import {
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
@@ -119,6 +120,7 @@ export class SupplierPaymentsService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   // ── queries ─────────────────────────────────────────────────────────────────
@@ -402,8 +404,37 @@ export class SupplierPaymentsService {
       });
     }
 
+    // Cash book (W4): the same payment is one Cash Desk movement carrying the supplier,
+    // the payable it settled and the journal that already explains it.
+    const movement = input.cashAccountId
+      ? await this.cashBook?.recordInTransaction(tx, user, {
+          kind: 'SUPPLIER_PAYMENT',
+          companyId: input.companyId,
+          cashAccountId: input.cashAccountId,
+          amount,
+          currency,
+          businessDate: input.paymentDate,
+          description: `Supplier payment ${payment.paymentNumber} · ${supplier.name}`,
+          reference: input.reference ?? payment.paymentNumber,
+          requestId: `SupplierPayment:${payment.id}`,
+          partyType: 'SUPPLIER',
+          supplierId: input.supplierId,
+          payableId: ordered.length === 1 ? ordered[0].payableId : null,
+          supplierPaymentId: payment.id,
+          journalEntryId: journalEntry.id,
+          journalReferenceType: 'SupplierPayment',
+        })
+      : null;
+    const final = movement
+      ? await tx.supplierPayment.update({
+          where: { id: payment.id },
+          data: { cashDeskMovementId: movement.id },
+          include: this.includeScope(),
+        })
+      : withJournal;
+
     await this.syncSupplierBalance(tx, input.companyId, input.supplierId);
-    return { payment: withJournal, payables };
+    return { payment: final, payables };
   }
 
   /**
@@ -529,7 +560,15 @@ export class SupplierPaymentsService {
       throw new ConflictException(
         'Reverse this payment in Invoice Desk (or Cash Desk when it was recorded there) to keep the invoice and cash balances together.',
       );
-    if (current.cashDeskMovementId && !opts.fromCashDesk && !opts.fromDesk)
+    // A movement written by the cash book (ERP payment) is reversed here with its journal;
+    // a movement recorded in Cash Desk must be reversed from Cash Desk.
+    const carried = current.cashDeskMovementId
+      ? await tx.cashDeskMovement.findUnique({
+          where: { id: current.cashDeskMovementId },
+          select: { id: true, journalEntryId: true },
+        })
+      : null;
+    if (carried && !carried.journalEntryId && !opts.fromCashDesk && !opts.fromDesk)
       throw new ConflictException(
         'Reverse this payment in Cash Desk so the cash movement is reversed with it.',
       );
@@ -569,6 +608,14 @@ export class SupplierPaymentsService {
         data: { currentBalance: { increment: new Prisma.Decimal(current.amount) } },
       });
     }
+    if (carried?.journalEntryId)
+      await this.cashBook?.reverseInTransaction(
+        tx,
+        user,
+        carried.id,
+        reason,
+        reversalJe?.id ?? null,
+      );
 
     const updated = await tx.supplierPayment.update({
       where: { id: current.id },

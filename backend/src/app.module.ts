@@ -16,6 +16,7 @@ import { SalesDeskModule } from './modules/sales-desk/sales-desk.module';
 import { RecordsModule } from './modules/records/records.module';
 import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
 import { CashDeskModule } from './modules/cash-desk/cash-desk.module';
+import { CashBookModule } from './modules/cash-book/cash-book.module';
 import { InvoiceDeskModule } from './modules/invoice-desk/invoice-desk.module';
 import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -257,6 +258,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PetroDollarModule,
     InvoiceDeskModule,
     CashDeskModule,
+    CashBookModule,
     SalesDeskModule,
     RecordsModule,
     DeskReportsModule,

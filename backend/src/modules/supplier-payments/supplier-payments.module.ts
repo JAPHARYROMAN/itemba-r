@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { CashBookModule } from '../cash-book/cash-book.module';
 import { SupplierPaymentsController } from './supplier-payments.controller';
 import { SupplierPaymentsService } from './supplier-payments.service';
 import { CompanyScopeService } from '../../common/services';
@@ -13,7 +14,7 @@ import { CompanyScopeService } from '../../common/services';
  * SupplierPayment row.
  */
 @Module({
-  imports: [PrismaModule, AuditLogsModule],
+  imports: [PrismaModule, AuditLogsModule, CashBookModule],
   controllers: [SupplierPaymentsController],
   providers: [SupplierPaymentsService, CompanyScopeService],
   exports: [SupplierPaymentsService],
