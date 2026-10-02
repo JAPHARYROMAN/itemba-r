@@ -136,6 +136,10 @@ export const ALL_PERMISSIONS: PermDef[] = [
   // 'supplier-payments.view'/'supplier-payments.manage') — granted wherever
   // payables view/manage is granted (via FINANCE_MODULES).
   ...perms('supplier-payments', ['view', 'manage']),
+  // Unmatched parties (party linkage, W7): list rows that carry only a typed name and
+  // match them to a shared supplier / customer. Linking also needs the source app’s own
+  // write permission and suppliers.update / customers.update (enforced in the service).
+  ...perms('party_links', ['view', 'manage']),
   ...perms('payables', ['view', 'manage']),
   ...perms('intercompany', ['view', 'manage', 'approve', 'post']),
 
@@ -858,6 +862,7 @@ const FINANCE_MODULES = [
   'customer-payments',
   'payables',
   'supplier-payments',
+  'party_links',
   'intercompany',
 ];
 

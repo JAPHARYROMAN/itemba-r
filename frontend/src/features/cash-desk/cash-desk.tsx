@@ -994,9 +994,7 @@ function MovementList({
               'OTHER_IN',
               'OPENING',
               'BORROWING',
-            ].includes(
-              m.kind,
-            ) ? (
+            ].includes(m.kind) ? (
               <ArrowDownLeft size={18} />
             ) : ['LOAN', 'TRANSFER', 'LOAN_REPAYMENT'].includes(m.kind) ? (
               <ArrowLeftRight size={18} />
