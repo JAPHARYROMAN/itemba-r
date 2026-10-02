@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AccessLevel, CurrencyCode, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -663,7 +664,13 @@ export class SupplierInvoicesService {
             orderBy: { createdAt: 'desc' },
           });
           if (incremental && incremental.lines.length > 0) {
-            await this.reverseSupplierInvoiceJournal(tx, existing, incremental, dto?.reason, user.id);
+            await this.reverseSupplierInvoiceJournal(
+              tx,
+              existing,
+              incremental,
+              dto?.reason,
+              user.id,
+            );
           }
 
           // Restore the payable to its pre-invoice, receipt-created state. The
@@ -1570,19 +1577,7 @@ export class SupplierInvoicesService {
     companyId: string,
     supplierId?: string | null,
   ) {
-    if (!supplierId) return;
-    const summary = await tx.payable.aggregate({
-      where: {
-        companyId,
-        supplierId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.supplier.updateMany({
-      where: { id: supplierId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'supplier', companyId, supplierId);
   }
 }

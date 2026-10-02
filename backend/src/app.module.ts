@@ -17,6 +17,7 @@ import { RecordsModule } from './modules/records/records.module';
 import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
 import { CashDeskModule } from './modules/cash-desk/cash-desk.module';
 import { CashBookModule } from './modules/cash-book/cash-book.module';
+import { PartyBalanceModule } from './modules/party-balance/party-balance.module';
 import { InvoiceDeskModule } from './modules/invoice-desk/invoice-desk.module';
 import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -259,6 +260,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     InvoiceDeskModule,
     CashDeskModule,
     CashBookModule,
+    PartyBalanceModule,
     SalesDeskModule,
     RecordsModule,
     DeskReportsModule,

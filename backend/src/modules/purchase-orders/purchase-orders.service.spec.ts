@@ -2,6 +2,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 
 function makeService() {
   const prisma = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     purchaseOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data, lines: [] })),

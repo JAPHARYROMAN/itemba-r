@@ -33,7 +33,7 @@ function setup(opts: { locked?: Record<string, unknown>; invoices?: any[]; exist
         payable = { ...payable, ...data };
         return { ...payable };
       }),
-      groupBy: jest.fn(async () => [{ currency: 'TZS', _sum: { outstandingAmount: d('0') } }]),
+      aggregate: jest.fn(async () => ({ _sum: { outstandingAmount: d('0') } })),
     },
     supplier: {
       findFirst: jest.fn(async () => ({

@@ -154,6 +154,7 @@ function makeFinanceHarness(opts: {
   };
 
   const tx: any = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     externalPayment: {
       updateMany: jest.fn(async ({ where, data }: any) => {
         const statusOk = where.status?.in

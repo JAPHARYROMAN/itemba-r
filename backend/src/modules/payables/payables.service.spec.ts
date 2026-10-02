@@ -39,6 +39,7 @@ function makeService(
         return { ...stagedRow };
       }),
       groupBy: jest.fn().mockResolvedValue([]),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { outstandingAmount: '0' } }),
     },
     supplier: {
       updateMany: jest.fn(),
@@ -419,7 +420,7 @@ describe('PayablesService.update supplier balance projection', () => {
 
     await service.update('pay-1', { notes: 'Updated note' } as any, user);
 
-    expect(tx.payable.groupBy).not.toHaveBeenCalled();
+    expect(tx.payable.aggregate).not.toHaveBeenCalled();
     expect(tx.supplier.updateMany).not.toHaveBeenCalled();
   });
 
@@ -439,7 +440,7 @@ describe('PayablesService.update supplier balance projection', () => {
 
     await service.update('pay-1', { supplierId: 'supplier-2' } as any, user);
 
-    expect(tx.payable.groupBy).toHaveBeenCalledTimes(2);
+    expect(tx.payable.aggregate).toHaveBeenCalledTimes(2);
     expect(tx.supplier.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.supplier.updateMany.mock.calls.map(([args]: [any]) => args.where.id)).toEqual([
       'supplier-1',
@@ -615,14 +616,20 @@ describe('PayablesService.syncSupplierBalance mixed-currency (#22)', () => {
   it('writes only the base-currency outstanding, not a cross-currency sum', async () => {
     const { service, tx } = makeService(lockedPayable());
 
-    // Supplier has 1,000,000 TZS and 1,000 USD open. Base currency is TZS.
-    tx.payable.groupBy.mockResolvedValue([
-      { currency: 'TZS', _sum: { outstandingAmount: new Prisma.Decimal('1000000') } },
-      { currency: 'USD', _sum: { outstandingAmount: new Prisma.Decimal('1000') } },
-    ]);
+    // Supplier has 1,000,000 TZS and 1,000 USD open. Base currency is TZS. The shared
+    // writer (party-balance.helper) asks the database for the base currency only.
+    tx.payable.aggregate.mockImplementation(async ({ where }: any) => ({
+      _sum: {
+        outstandingAmount:
+          where.currency === 'TZS' ? new Prisma.Decimal('1000000') : new Prisma.Decimal('1000'),
+      },
+    }));
 
     await (service as any).syncSupplierBalance(tx, 'company-1', 'supplier-1');
 
+    expect(tx.payable.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ currency: 'TZS' }) }),
+    );
     expect(tx.supplier.updateMany).toHaveBeenCalledWith({
       where: { id: 'supplier-1', companyId: 'company-1', deletedAt: null },
       data: { currentBalance: new Prisma.Decimal('1000000') },
@@ -632,9 +639,7 @@ describe('PayablesService.syncSupplierBalance mixed-currency (#22)', () => {
   it('writes zero when no payable matches the base currency', async () => {
     const { service, tx } = makeService(lockedPayable());
     tx.companyProfile.findUnique.mockResolvedValue({ currency: 'TZS' });
-    tx.payable.groupBy.mockResolvedValue([
-      { currency: 'USD', _sum: { outstandingAmount: new Prisma.Decimal('1000') } },
-    ]);
+    tx.payable.aggregate.mockResolvedValue({ _sum: { outstandingAmount: null } });
 
     await (service as any).syncSupplierBalance(tx, 'company-1', 'supplier-1');
 

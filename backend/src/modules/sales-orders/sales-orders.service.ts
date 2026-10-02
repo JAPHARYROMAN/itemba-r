@@ -7,6 +7,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  liveCustomerExposure,
+  refreshCachedPartyBalance,
+} from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
@@ -2044,7 +2048,10 @@ export class SalesOrdersService {
     const creditLimit = Number(customer.creditLimit ?? 0);
     if (creditLimit <= 0) return;
 
-    const projectedBalance = Number(customer.currentBalance ?? 0) + input.totalAmount;
+    // Party linkage (W5): live exposure (open receivables plus unpromoted Sales Desk sales)
+    // instead of the cached balance alone, so desk credit counts against the limit.
+    const exposure = await liveCustomerExposure(tx, input.companyId, input.customerId);
+    const projectedBalance = exposure + input.totalAmount;
     if (projectedBalance > creditLimit) {
       throw new BadRequestException(
         `Credit sale exceeds ${customer.name}'s credit limit. Limit: ${creditLimit.toFixed(
@@ -2985,19 +2992,7 @@ export class SalesOrdersService {
     companyId: string,
     customerId?: string | null,
   ) {
-    if (!customerId) return;
-    const summary = await tx.receivable.aggregate({
-      where: {
-        companyId,
-        customerId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.customer.updateMany({
-      where: { id: customerId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'customer', companyId, customerId);
   }
 }

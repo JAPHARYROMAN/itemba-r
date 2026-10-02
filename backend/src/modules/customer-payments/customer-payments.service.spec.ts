@@ -116,6 +116,7 @@ function makeService(
   ];
 
   const tx: any = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $queryRaw: jest.fn(async (_strings: any, id: string) => {
       const row = receivablesById[id];
       return row ? [row] : [];

@@ -34,6 +34,7 @@ function makeService(txOverrides: Record<string, any> = {}) {
     supplier: {
       findFirst: jest.fn(async () => ({ id: 'supplier-1', name: 'Acme' })),
     },
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     ...txOverrides,
   };
@@ -264,6 +265,7 @@ function makeUpdateService(prismaOverrides: Record<string, any> = {}) {
     division: {
       findFirst: jest.fn(async () => ({ companyId: 'company-1' })),
     },
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     ...prismaOverrides,
   };
@@ -1080,6 +1082,7 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
         ),
         update: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data })),
       },
+      companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
       $transaction: jest.fn(async (fn: any) => fn(prisma)),
       ...opts.overrides,
     };

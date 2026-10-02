@@ -28,6 +28,7 @@ function makeService(
   let committedRow = { ...lockedRow };
   let stagedRow = { ...committedRow };
   const tx = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
     receivable: {
       update: jest.fn().mockImplementation(({ data }: any) => {

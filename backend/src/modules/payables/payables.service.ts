@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessLevel, CashAccountType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import type { AccountRole } from '../../common/services/account-resolver.service';
@@ -1087,42 +1088,7 @@ export class PayablesService {
     companyId: string,
     supplierId?: string | null,
   ) {
-    if (!supplierId) return;
-
-    // Supplier.currentBalance is a single Decimal with no currency tag, so it
-    // can only meaningfully hold one currency. Aggregating outstandingAmount
-    // across payables of different currencies would produce a nonsense figure
-    // (e.g. 1,000 USD + 1,000,000 TZS = 1,001,000 of nothing) and corrupt any
-    // credit-limit/exposure check. We therefore group by currency and write the
-    // balance for the company's base currency only.
-    //
-    // The company's base currency lives on CompanyProfile.currency (defaults to
-    // TZS). For the common single-currency supplier this is identical to the
-    // old behaviour; it only changes the mixed-currency case, where the foreign
-    // payables are intentionally excluded rather than silently summed in.
-    const profile = await tx.companyProfile.findUnique({
-      where: { companyId },
-      select: { currency: true },
-    });
-    const baseCurrency = profile?.currency ?? 'TZS';
-
-    const grouped = await tx.payable.groupBy({
-      by: ['currency'],
-      where: {
-        companyId,
-        supplierId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-
-    const baseRow = grouped.find((g) => g.currency === baseCurrency);
-    const balance = baseRow?._sum.outstandingAmount ?? 0;
-
-    await tx.supplier.updateMany({
-      where: { id: supplierId, companyId, deletedAt: null },
-      data: { currentBalance: balance },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'supplier', companyId, supplierId);
   }
 }

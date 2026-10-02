@@ -12,6 +12,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService, assertCashAccountForScope } from '../../common/services';
 import {
@@ -720,28 +721,13 @@ export class SupplierPaymentsService {
    * Refresh Supplier.currentBalance from open payables in the company's base currency
    * (same rule as payables.service; the single resolver replaces both in W5).
    */
-  private async syncSupplierBalance(tx: Tx, companyId: string, supplierId: string | null) {
-    if (!supplierId) return;
-    const profile = await tx.companyProfile.findUnique({
-      where: { companyId },
-      select: { currency: true },
-    });
-    const baseCurrency = profile?.currency ?? CurrencyCode.TZS;
-    const grouped = await tx.payable.groupBy({
-      by: ['currency'],
-      where: {
-        companyId,
-        supplierId,
-        deletedAt: null,
-        status: { in: [...OPEN_PAYABLE_STATUSES] },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    const base = grouped.find((g) => g.currency === baseCurrency);
-    await tx.supplier.updateMany({
-      where: { id: supplierId, companyId, deletedAt: null },
-      data: { currentBalance: base?._sum.outstandingAmount ?? 0 },
-    });
+  private async syncSupplierBalance(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    supplierId?: string | null,
+  ) {
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'supplier', companyId, supplierId);
   }
 
   private async reversePaymentJournal(

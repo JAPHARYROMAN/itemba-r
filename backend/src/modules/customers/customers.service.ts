@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyBalanceService } from '../party-balance/party-balance.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { auditFor, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -31,6 +32,7 @@ export class CustomersService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly partyBalance?: PartyBalanceService,
   ) {}
 
   async findAll(query: QueryCustomerDto, user: AuthUser) {
@@ -176,8 +178,12 @@ export class CustomersService {
 
     const creditLimit = toNumber(customer.creditLimit);
     const currentBalance = receivablesSummary.totals.openReceivableBalance;
+    // Party linkage (W5): the one balance (ERP, desk, NoteBook, per currency) beside the
+    // legacy summary figures, so the profile can show the breakdown.
+    const balance = (await this.partyBalance?.forParty('customer', customer)) ?? null;
     return {
       customer,
+      balance,
       summary: {
         lifetimeSalesTotal: salesSummary.totals.lifetimeSalesTotal,
         ytdSalesTotal: salesSummary.totals.ytdSalesTotal,
@@ -612,7 +618,10 @@ export class CustomersService {
         where: {
           companyId: customer.companyId,
           customerId: id,
-          status: 'OVERDUE' as any,
+          // Overdue is derived from the due date; nothing writes an OVERDUE status.
+          status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
+          dueDate: { lt: new Date() },
+          outstandingAmount: { gt: 0 },
           deletedAt: null,
         },
         _sum: { outstandingAmount: true },
