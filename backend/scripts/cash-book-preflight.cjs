@@ -21,12 +21,18 @@ async function main() {
   const db = new PrismaClient();
   try {
     const since = new Date(Date.now() - days * 86400000);
+    const hasSupplierPayments = (
+      await db.$queryRawUnsafe("SELECT to_regclass('supplier_payments') IS NOT NULL AS present")
+    )[0].present;
+    const supplierPaymentsUnion = hasSupplierPayments
+      ? 'UNION ALL SELECT "cashAccountId", \'supplier_payments\' FROM "supplier_payments" WHERE "paymentDate" >= $1 AND "cashAccountId" IS NOT NULL'
+      : '';
     const used = await db.$queryRawUnsafe(
       `WITH used AS (
          SELECT "cashAccountId" AS id, 'expenses' AS source FROM "expenses" WHERE "paidAt" >= $1 AND "cashAccountId" IS NOT NULL
          UNION ALL SELECT "cashAccountId", 'refunds' FROM "refunds" WHERE "postedAt" >= $1
          UNION ALL SELECT "cashAccountId", 'customer_payments' FROM "customer_payments" WHERE "paymentDate" >= $1 AND "cashAccountId" IS NOT NULL
-         UNION ALL SELECT "cashAccountId", 'supplier_payments' FROM "supplier_payments" WHERE "paymentDate" >= $1 AND "cashAccountId" IS NOT NULL
+         ${supplierPaymentsUnion}
          UNION ALL SELECT "cashAccountId", 'sales_orders' FROM "sales_orders" WHERE "createdAt" >= $1 AND "cashAccountId" IS NOT NULL
        )
        SELECT ca."id", ca."accountName", ca."companyId", ca."currency", ca."accountType",
