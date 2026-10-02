@@ -1,10 +1,10 @@
 'use client';
 
-export default function FuelPortalError({ reset }: { reset: () => void }) {
+export default function LegacyFuelError({ reset }: { reset: () => void }) {
   return (
-    <main className="fp-access" role="alert">
-      <h1>Unable to open Fuel Reporting</h1>
-      <p>Something went wrong while loading this page. Try again to return to your station.</p>
+    <main role="alert">
+      <h1>Unable to open PetroDollar</h1>
+      <p>Try again, or open PetroDollar from the ITEMBA OS desktop.</p>
       <button type="button" onClick={reset}>
         Try again
       </button>

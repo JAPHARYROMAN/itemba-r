@@ -74,7 +74,7 @@ export function PumpReadings({ payload: p, catalog, change }: Props) {
           No pumps are configured for this branch. An admin must add them in Station setup.
         </p>
       ) : null}
-      <div className="fr-table-scroll">
+      <div className="fr-table-scroll" role="region" aria-label="Pump meter readings" tabIndex={0}>
         <table>
           <thead>
             <tr>
@@ -514,7 +514,7 @@ export function TankDips({ payload: p, catalog, change }: Props) {
       title="Closing tank dips"
       detail="Required to close the shift. Copy each measured volume in litres from the paper dip record. A blank reading is not zero."
     >
-      <div className="fr-table-scroll">
+      <div className="fr-table-scroll" role="region" aria-label="Tank dip readings" tabIndex={0}>
         <table>
           <thead>
             <tr>

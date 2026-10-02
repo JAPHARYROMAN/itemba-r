@@ -24,6 +24,7 @@ export type WindowMode =
   | 'bottom-left'
   | 'bottom-right';
 export type Bounds = { x: number; y: number; width: number; height: number };
+export type DesktopInsets = { left: number; right: number; bottom: number };
 export interface DesktopWindow {
   id: string;
   appId: string;
@@ -213,23 +214,45 @@ export function parseDesktopSession(input: unknown): DesktopSession {
   };
 }
 export function fitBounds(bounds: Bounds, width: number, height: number): Bounds {
-  const w = Math.min(Math.max(480, bounds.width), Math.max(320, width - 16));
-  const h = Math.min(Math.max(360, bounds.height), Math.max(240, height - 16));
+  const w = Math.min(
+    Math.max(480, Math.round(bounds.width)),
+    Math.max(320, Math.floor(width) - 16),
+  );
+  const h = Math.min(
+    Math.max(360, Math.round(bounds.height)),
+    Math.max(240, Math.floor(height) - 16),
+  );
   return {
     width: w,
     height: h,
-    x: Math.max(8, Math.min(bounds.x, width - w - 8)),
-    y: Math.max(8, Math.min(bounds.y, height - h - 8)),
+    x: Math.max(8, Math.min(Math.round(bounds.x), Math.floor(width) - w - 8)),
+    y: Math.max(8, Math.min(Math.round(bounds.y), Math.floor(height) - h - 8)),
   };
 }
-export function windowBounds(window: DesktopWindow, width: number, height: number): Bounds {
-  if (window.mode === 'floating') return fitBounds(window.bounds, width, height);
+export function windowBounds(
+  window: DesktopWindow,
+  width: number,
+  height: number,
+  insets?: DesktopInsets,
+): Bounds {
+  if (window.mode === 'floating') {
+    const left = insets?.left ?? 0;
+    const bounds = fitBounds(
+      { ...window.bounds, x: window.bounds.x - left },
+      width - left - (insets?.right ?? 0),
+      height - (insets?.bottom ?? 0),
+    );
+    return { ...bounds, x: bounds.x + left };
+  }
+  width = Math.max(0, Math.floor(width));
+  height = Math.max(0, Math.floor(height));
+  if (window.mode === 'maximized') return { x: 0, y: 0, width, height };
   const quarter = window.mode.includes('-');
   const right = window.mode.includes('right');
   const bottom = window.mode.startsWith('bottom');
-  const w = window.mode === 'maximized' ? width - 16 : (width - 24) / 2;
-  const h = quarter ? (height - 24) / 2 : height - 16;
-  return { x: right ? width / 2 + 4 : 8, y: bottom ? height / 2 + 4 : 8, width: w, height: h };
+  const w = Math.max(0, Math.floor((width - 24) / 2));
+  const h = Math.max(0, quarter ? Math.floor((height - 24) / 2) : height - 16);
+  return { x: right ? width - w - 8 : 8, y: bottom ? height - h - 8 : 8, width: w, height: h };
 }
 /** WCAG relative luminance, used for user-selected accent foregrounds. */
 function luminance(hex: string) {

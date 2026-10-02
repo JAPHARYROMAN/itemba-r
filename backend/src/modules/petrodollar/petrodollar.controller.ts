@@ -3,7 +3,14 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
-import { ReopenFuelReportDto, SaveFuelReportDto } from '../fuel-reporting/fuel-reporting.dto';
+import {
+  CreateReportingStationDto,
+  ReportingStationDetailsDto,
+  CreateReportingPumpDto,
+  CreateReportingTankDto,
+  ReopenFuelReportDto,
+  SaveFuelReportDto,
+} from '../fuel-reporting/fuel-reporting.dto';
 import { PetroDollarService } from './petrodollar.service';
 import { PetroDollarPostingService } from './petrodollar-posting.service';
 import { PostPetroDollarDto, ReversePetroDollarDto } from './petrodollar-posting.dto';
@@ -60,6 +67,58 @@ export class PetroDollarController {
   @RequirePermissions('fuel_reporting.read')
   bootstrap(@CurrentUser() user: AuthUser) {
     return this.service.bootstrap(user);
+  }
+
+  @Get('stations')
+  @RequirePermissions('fuel_reporting.admin')
+  stations(@CurrentUser() user: AuthUser) {
+    return this.service.stations(user);
+  }
+
+  @Post('stations')
+  @RequirePermissions('fuel_reporting.admin')
+  createStation(@CurrentUser() user: AuthUser, @Body() dto: CreateReportingStationDto) {
+    return this.service.createStation(user, dto);
+  }
+
+  @Post('stations/:id/update')
+  @RequirePermissions('fuel_reporting.admin')
+  updateStation(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportingStationDetailsDto,
+  ) {
+    return this.service.updateStation(user, id, dto);
+  }
+
+  @Post('stations/:id/deactivate')
+  @RequirePermissions('fuel_reporting.admin')
+  deactivateStation(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.setStationActive(user, id, false);
+  }
+
+  @Post('stations/:id/restore')
+  @RequirePermissions('fuel_reporting.admin')
+  restoreStation(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.setStationActive(user, id, true);
+  }
+
+  @Post('pumps')
+  @RequirePermissions('fuel_reporting.admin')
+  createPump(@CurrentUser() user: AuthUser, @Body() dto: CreateReportingPumpDto) {
+    return this.service.createPump(user, dto);
+  }
+
+  @Post('pumps/:id/deactivate')
+  @RequirePermissions('fuel_reporting.admin')
+  deactivatePump(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.deactivatePump(user, id);
+  }
+
+  @Post('tanks')
+  @RequirePermissions('fuel_reporting.admin')
+  createTank(@CurrentUser() user: AuthUser, @Body() dto: CreateReportingTankDto) {
+    return this.service.createTank(user, dto);
   }
 
   @Get('workspace')

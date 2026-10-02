@@ -1,13 +1,20 @@
 /*
  * PetroDollar shares the desk shell (invoice-desk.css). Only its own pieces are styled here, plus a
- * scoped re-skin of the Fuel Reporting editor, whose stylesheet is a light-only design. Everything
- * is under `.petrodollar`, so the standalone /fuel-reporting portal is unaffected.
+ * scoped materials for its reporting and station administration forms.
  */
 .petrodollar {
   --pd-accent: #55741f;
   --pd-teal: #076a66;
   --pd-soft: color-mix(in srgb, var(--desk-ink) 5%, var(--desk-panel));
   --pd-soft-strong: color-mix(in srgb, var(--desk-ink) 9%, var(--desk-panel));
+}
+.petrodollar .fr-table-scroll {
+  position: relative;
+  min-width: 0;
+}
+.petrodollar .fr-table-scroll:focus-visible {
+  outline: 2px solid var(--pd-accent);
+  outline-offset: 3px;
 }
 .dark .petrodollar {
   --pd-accent: #a9c866;
@@ -226,11 +233,31 @@
 }
 
 @container os-workspace (max-width: 760px) {
+  .petrodollar .desk-rail nav {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .petrodollar .desk-rail nav button {
+    flex: 0 0 auto;
+  }
   .petrodollar .desk-main {
     padding: 22px 16px;
   }
   .petrodollar .pd-scope label {
     flex-basis: 100%;
+  }
+}
+@media (max-width: 760px) {
+  .petrodollar .desk-rail nav {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .petrodollar .desk-rail nav button {
+    flex: 0 0 auto;
   }
 }
 .petrodollar .pd-posting {

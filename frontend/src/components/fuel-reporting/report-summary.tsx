@@ -39,7 +39,12 @@ export function Discrepancies({ summary }: { summary: Summary }) {
       title="Reconciliation"
       detail="Negative differences indicate shortages; positive differences indicate excesses. Fuel stock is reconciled by type across all its tanks."
     >
-      <div className="fr-table-scroll">
+      <div
+        className="fr-table-scroll"
+        role="region"
+        aria-label="Fuel stock reconciliation"
+        tabIndex={0}
+      >
         <table>
           <thead>
             <tr>
@@ -184,7 +189,7 @@ export function DailySummary({
         </div>
       </div>
       <Section title="Daily performance">
-        <div className="fr-table-scroll">
+        <div className="fr-table-scroll" role="region" aria-label="Daily performance" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -246,7 +251,12 @@ export function DailySummary({
         ) : null}
       </Section>
       <Section title="Fuel movement by type">
-        <div className="fr-table-scroll">
+        <div
+          className="fr-table-scroll"
+          role="region"
+          aria-label="Fuel movement by type"
+          tabIndex={0}
+        >
           <table>
             <thead>
               <tr>

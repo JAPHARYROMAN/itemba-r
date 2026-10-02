@@ -8,6 +8,8 @@ import {
   History,
   Moon,
   RefreshCw,
+  Settings2,
+  MapPin,
   Sun,
   Truck,
   type LucideIcon,
@@ -15,6 +17,8 @@ import {
 import { fuelCompanyName } from '@/components/fuel-reporting/default-company';
 import { ReportEditor } from '@/components/fuel-reporting/report-editor';
 import { DailySummary } from '@/components/fuel-reporting/report-summary';
+import { StationRegister } from '@/components/fuel-reporting/station-register';
+import { StationSetup } from '@/components/fuel-reporting/station-setup';
 import {
   amount,
   stationDate,
@@ -32,13 +36,18 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { ApiError, backendGet } from '@/lib/api-client';
 import { getApp } from '@/lib/apps';
+import {
+  petrodollarHref,
+  petrodollarDate,
+  petrodollarView,
+  type PetroDollarView as View,
+} from '@/lib/petrodollar-navigation';
+export { petrodollarView } from '@/lib/petrodollar-navigation';
 import '@/components/fuel-reporting/fuel-reporting.css';
 import '../invoice-desk/invoice-desk.css';
 import './petrodollar.css';
 import { PetroDollarPosting } from './petrodollar-posting';
 
-const VIEWS = ['report', 'receive', 'daily', 'history'] as const;
-type View = (typeof VIEWS)[number];
 const SECTIONS: { id: View; label: string; blurb: string; icon: LucideIcon }[] = [
   {
     id: 'report',
@@ -64,9 +73,19 @@ const SECTIONS: { id: View; label: string; blurb: string; icon: LucideIcon }[] =
     blurb: 'Every saved shift, with its differences and revisions.',
     icon: History,
   },
+  {
+    id: 'stations',
+    label: 'Stations',
+    blurb: 'Manage Mwanjalisi stations and their organisation links.',
+    icon: MapPin,
+  },
+  {
+    id: 'setup',
+    label: 'Station setup',
+    blurb: 'Tanks, pumps and nozzle connections for this station.',
+    icon: Settings2,
+  },
 ];
-export const petrodollarView = (value: string | null): View =>
-  (VIEWS as readonly string[]).includes(value ?? '') ? (value as View) : 'report';
 
 interface Bootstrap {
   company: { id: string; code: string; name: string };
@@ -91,9 +110,14 @@ export function PetroDollarApp() {
   const permitted = hasPermission('fuel_reporting.read');
 
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
-  const [branchId, setBranchId] = useState('');
-  const [date, setDate] = useState(stationDate);
-  const [shift, setShift] = useState('DAY');
+  const [today] = useState(stationDate);
+  const requestedBranch = params.get('branchId');
+  const branchId =
+    bootstrap?.branches.find((b) => b.id === requestedBranch)?.id ??
+    bootstrap?.branches[0]?.id ??
+    '';
+  const date = petrodollarDate(params.get('date'), today);
+  const shift = params.get('shift') === 'NIGHT' ? 'NIGHT' : 'DAY';
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [history, setHistory] = useState<Report[]>([]);
   const [moreHistory, setMoreHistory] = useState(false);
@@ -103,20 +127,21 @@ export function PetroDollarApp() {
   const [reloadKey, setReloadKey] = useState(0);
   const [editorLocked, setEditorLocked] = useState(false);
   const [postingLocked, setPostingLocked] = useState(false);
-  const locked = editorLocked || postingLocked;
+  const [setupLocked, setSetupLocked] = useState(false);
+  const locked = editorLocked || postingLocked || setupLocked;
   // History only needs the station list; the other views also wait for the shift's workspace.
-  const loading = view === 'history' ? booting : booting || loadingWorkspace;
+  const loading = view === 'history' || view === 'stations' ? booting : booting || loadingWorkspace;
   const branch = bootstrap?.branches.find((b) => b.id === branchId);
   const reload = () => setReloadKey((key) => key + 1);
 
   // The editor reports "unsaved or saving"; mirror it into the window's unsaved-work guard so
   // closing the window or leaving the app asks first. touch/markSaved are stable callbacks.
   const { touch, markSaved } = useFormGuard({ unsaved: locked });
-  const locks = useRef({ editor: false, posting: false });
+  const locks = useRef({ editor: false, posting: false, setup: false });
   const onLock = useCallback(
     (value: boolean) => {
       locks.current.editor = value;
-      if (locks.current.editor || locks.current.posting) touch();
+      if (locks.current.editor || locks.current.posting || locks.current.setup) touch();
       else markSaved();
       setEditorLocked(value);
     },
@@ -125,12 +150,24 @@ export function PetroDollarApp() {
   const onPostingLock = useCallback(
     (value: boolean) => {
       locks.current.posting = value;
-      if (locks.current.editor || locks.current.posting) touch();
+      if (locks.current.editor || locks.current.posting || locks.current.setup) touch();
       else markSaved();
       setPostingLocked(value);
     },
     [touch, markSaved],
   );
+  const onSetupLock = useCallback(
+    (value: boolean) => {
+      locks.current.setup = value;
+      if (locks.current.editor || locks.current.posting || value) touch();
+      else markSaved();
+      setSetupLocked(value);
+    },
+    [touch, markSaved],
+  );
+
+  const go = (next: View, scope: Record<string, string> = {}) =>
+    router.push(petrodollarHref(params, { view: next, ...scope }));
 
   useEffect(() => {
     if (!permitted) {
@@ -143,10 +180,6 @@ export function PetroDollarApp() {
         if (cancelled) return;
         setBootstrap(data);
         setProblem(null);
-        setBranchId(
-          (current) =>
-            data.branches.find((b) => b.id === current)?.id ?? data.branches[0]?.id ?? '',
-        );
         setBooting(false);
       })
       .catch((error) => {
@@ -158,6 +191,20 @@ export function PetroDollarApp() {
       cancelled = true;
     };
   }, [permitted, reloadKey]);
+
+  // Persist the selected station/day/shift in this window's own navigation history.
+  // Run before the first editor is loaded, so normal panel changes preserve dirty inputs.
+  useEffect(() => {
+    if (
+      locked ||
+      !branchId ||
+      (params.get('branchId') === branchId &&
+        params.get('date') === date &&
+        params.get('shift') === shift)
+    )
+      return;
+    router.replace(petrodollarHref(params, { branchId, date, shift }));
+  }, [branchId, date, shift, params, router, locked]);
 
   useEffect(() => {
     if (!branchId) {
@@ -219,8 +266,18 @@ export function PetroDollarApp() {
       ),
     [],
   );
-  const go = (next: View) =>
-    router.push(next === 'report' ? '/petrodollar' : `/petrodollar?view=${next}`);
+  async function refreshStation() {
+    const data = await backendGet<Bootstrap>('/petrodollar/bootstrap');
+    setBootstrap(data);
+    const selected = data.branches.find((b) => b.id === branchId)?.id ?? data.branches[0]?.id;
+    if (selected === branchId) {
+      setWorkspace(
+        await backendGet<Workspace>('/petrodollar/workspace', {
+          query: { branchId, businessDate: date, shift },
+        }),
+      );
+    }
+  }
   async function olderReports() {
     try {
       const rows = await backendGet<Report[]>('/petrodollar/history', {
@@ -264,19 +321,30 @@ export function PetroDollarApp() {
           </div>
         </div>
         <nav aria-label="PetroDollar">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              aria-current={view === s.id ? 'page' : undefined}
-              disabled={locked && !(editing(view) && editing(s.id))}
-              onClick={() => go(s.id)}
-            >
-              <s.icon size={17} />
-              {s.label}
-              <ChevronRight size={13} />
-            </button>
-          ))}
+          {SECTIONS.filter((s) => !['stations', 'setup'].includes(s.id) || bootstrap?.canAdmin).map(
+            (s) => (
+              <button
+                key={s.id}
+                type="button"
+                aria-current={view === s.id ? 'page' : undefined}
+                disabled={
+                  locked &&
+                  !(
+                    editorLocked &&
+                    !postingLocked &&
+                    !setupLocked &&
+                    editing(view) &&
+                    editing(s.id)
+                  )
+                }
+                onClick={() => go(s.id)}
+              >
+                <s.icon size={17} />
+                {s.label}
+                <ChevronRight size={13} />
+              </button>
+            ),
+          )}
         </nav>
         <span className="desk-os-label">ITEMBA OS</span>
       </aside>
@@ -310,7 +378,7 @@ export function PetroDollarApp() {
             {problem.message} <button onClick={reload}>Retry</button>
           </p>
         )}
-        {stations.length > 0 && (
+        {stations.length > 0 && view !== 'stations' && (
           <div className="desk-scope pd-scope">
             <div className="pd-fact">
               <span>Company</span>
@@ -323,7 +391,7 @@ export function PetroDollarApp() {
                   aria-label="Station"
                   value={branchId}
                   disabled={locked}
-                  onChange={(e) => setBranchId(e.target.value)}
+                  onChange={(e) => go(view, { branchId: e.target.value })}
                 >
                   {stations.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -338,7 +406,7 @@ export function PetroDollarApp() {
                 <strong>{stations[0].name}</strong>
               </div>
             )}
-            {view !== 'history' && (
+            {(editing(view) || view === 'daily') && (
               <div className="ui-date-caption">
                 <span>Business date</span>
                 <FormDateField
@@ -347,7 +415,7 @@ export function PetroDollarApp() {
                   max={stationDate()}
                   disabled={locked}
                   onChange={(value) => {
-                    if (value) setDate(value);
+                    if (value) go(view, { date: value });
                   }}
                 />
               </div>
@@ -358,7 +426,7 @@ export function PetroDollarApp() {
                   type="button"
                   aria-pressed={shift === 'DAY'}
                   disabled={locked}
-                  onClick={() => setShift('DAY')}
+                  onClick={() => go(view, { shift: 'DAY' })}
                 >
                   <Sun size={15} />
                   Day
@@ -367,7 +435,7 @@ export function PetroDollarApp() {
                   type="button"
                   aria-pressed={shift === 'NIGHT'}
                   disabled={locked}
-                  onClick={() => setShift('NIGHT')}
+                  onClick={() => go(view, { shift: 'NIGHT' })}
                 >
                   <Moon size={15} />
                   Night
@@ -381,15 +449,20 @@ export function PetroDollarApp() {
             Loading station records…
           </p>
         )}
-        {!loading && bootstrap && !stations.length && (
+        {!loading && bootstrap && !stations.length && view !== 'stations' && (
           <div className="desk-empty">
             <Fuel size={34} />
             <h3>No station assigned</h3>
             <p>
               {bootstrap.canAdmin
-                ? 'No Mwanjalisi station is available to you. Add one in Fuel Reporting (Stations), or check that you have access to Mwanjalisi Oil.'
+                ? 'No Mwanjalisi station is available to you. Add one in Stations, or check that you have access to Mwanjalisi Oil.'
                 : 'An administrator needs to assign you an active Mwanjalisi fuel station before you can report.'}
             </p>
+            {bootstrap.canAdmin && (
+              <button className="desk-primary" onClick={() => go('stations')}>
+                Manage stations
+              </button>
+            )}
           </div>
         )}
         {!loading && workspace && branch && (
@@ -397,8 +470,13 @@ export function PetroDollarApp() {
             {editing(view) &&
               (unconfigured ? (
                 <p role="status" className="pd-notice">
-                  An administrator must set up this station’s tanks and pumps in Fuel Reporting
-                  (Station setup) before its first report.
+                  An administrator must set up this station’s tanks and pumps before its first
+                  report.
+                  {bootstrap?.canAdmin && (
+                    <button className="fr-text-button" onClick={() => go('setup')}>
+                      Open station setup
+                    </button>
+                  )}
                 </p>
               ) : (
                 <div className="fuel-reporting pd-fr">
@@ -426,6 +504,18 @@ export function PetroDollarApp() {
             {view === 'daily' && (
               <div className="fuel-reporting pd-fr">
                 <DailySummary reports={workspace.daily} date={date} branchName={branch.name} />
+              </div>
+            )}
+            {view === 'setup' && bootstrap?.canAdmin && (
+              <div className="fuel-reporting pd-fr">
+                <StationSetup
+                  key={branchId}
+                  branchId={branchId}
+                  workspace={workspace}
+                  refresh={refreshStation}
+                  apiBase="/petrodollar"
+                  onLock={onSetupLock}
+                />
               </div>
             )}
           </>
@@ -460,9 +550,7 @@ export function PetroDollarApp() {
                         type="button"
                         className="desk-text-button"
                         onClick={() => {
-                          setDate(r.businessDate.slice(0, 10));
-                          setShift(r.shift);
-                          go('report');
+                          go('report', { date: r.businessDate.slice(0, 10), shift: r.shift });
                         }}
                       >
                         Open report →
@@ -483,6 +571,21 @@ export function PetroDollarApp() {
               </div>
             )}
           </div>
+        )}
+        {!booting && bootstrap && view === 'stations' && bootstrap.canAdmin && (
+          <div className="fuel-reporting pd-fr">
+            <StationRegister
+              apiBase="/petrodollar"
+              onChanged={refreshStation}
+              onConfigure={(id) => go('setup', { branchId: id })}
+              onLock={onSetupLock}
+            />
+          </div>
+        )}
+        {!booting && bootstrap && ['stations', 'setup'].includes(view) && !bootstrap.canAdmin && (
+          <p role="alert" className="desk-error">
+            Station administration is available to authorised group administrators.
+          </p>
         )}
       </div>
     </div>

@@ -5,13 +5,7 @@ import { useEffect, useState } from 'react';
 const inputClassName =
   'mt-1 w-full rounded-xl border border-[#cbd5df] bg-white px-4 py-3 text-sm text-[#071321] shadow-sm outline-none transition placeholder:text-[#8290a3] focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#d9e3ed]';
 
-export function SignInForm({
-  defaultTarget = '/dashboard',
-  reporting = false,
-}: {
-  defaultTarget?: string;
-  reporting?: boolean;
-}) {
+export function SignInForm({ defaultTarget = '/dashboard' }: { defaultTarget?: string }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -110,8 +104,7 @@ export function SignInForm({
   function redirectAfterLogin(data: { user?: { fullName?: unknown } }) {
     const from = new URLSearchParams(window.location.search).get('from');
     const safePath = from?.startsWith('/') && !from.startsWith('//') && !/[\\\x00-\x1f]/.test(from);
-    const isReportingPath = from === '/fuel-reporting' || from?.startsWith('/fuel-reporting?');
-    const target = from && safePath && (!reporting || isReportingPath) ? from : defaultTarget;
+    const target = from && safePath ? from : defaultTarget;
     const firstName =
       typeof data?.user?.fullName === 'string' ? data.user.fullName.split(' ')[0] : '';
     setWelcomeName(firstName || 'karibu');
@@ -131,18 +124,12 @@ export function SignInForm({
           Welcome back
         </div>
         <h2 className="mt-4 text-2xl font-semibold text-[#071321]">
-          {passwordChangeToken
-            ? 'Set a new password'
-            : reporting
-              ? 'Station manager sign in'
-              : 'Account sign in'}
+          {passwordChangeToken ? 'Set a new password' : 'Account sign in'}
         </h2>
         <p className="mt-2 text-sm leading-6 text-[#526277]">
           {passwordChangeToken
             ? 'Your account requires a password update before opening the workspace.'
-            : reporting
-              ? 'Use your existing Itemba account to open your assigned station.'
-              : 'Use the email and password assigned to your Itemba Group user profile.'}
+            : 'Use the email and password assigned to your Itemba Group user profile.'}
         </p>
       </div>
 

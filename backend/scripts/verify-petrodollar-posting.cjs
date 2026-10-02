@@ -373,6 +373,7 @@ async function main() {
     app.setGlobalPrefix('api/v1');
     const users = {
       'fixture-manager': manager,
+      'fixture-admin': adminUser,
       'fixture-no-post': { ...manager, permissions: ['fuel_reporting.read'] },
       'fixture-read-only': {
         ...manager,
@@ -419,6 +420,65 @@ async function main() {
       assert.equal(r.status, status, JSON.stringify(r.body));
       return r.body;
     };
+    // The OS app owns station administration too, using the same master records.
+    await check('stations', null, 403);
+    const station = await check(
+      'stations',
+      {
+        divisionId: division.id,
+        code: 'OS-ADMIN',
+        name: 'OS Admin Station',
+        location: 'Proof only',
+      },
+      201,
+      'fixture-admin',
+    );
+    const stationTank = await check(
+      'tanks',
+      {
+        branchId: station.id,
+        productId: product.id,
+        code: 'OS-TANK',
+        name: 'OS Tank',
+        capacityLitres: 5000,
+      },
+      201,
+      'fixture-admin',
+    );
+    const stationPump = await check(
+      'pumps',
+      {
+        branchId: station.id,
+        code: 'OS-PUMP',
+        name: 'OS Pump',
+        nozzles: [{ code: 'OS-N1', tankId: stationTank.id }],
+      },
+      201,
+      'fixture-admin',
+    );
+    await check(
+      `stations/${station.id}/update`,
+      { code: 'OS-ADMIN', name: 'OS Station Updated', location: 'Proof only' },
+      201,
+      'fixture-admin',
+    );
+    await check(`pumps/${stationPump.id}/deactivate`, {}, 201, 'fixture-admin');
+    await check(`stations/${station.id}/deactivate`, {}, 201, 'fixture-admin');
+    const removedRegister = await check('stations', null, 200, 'fixture-admin');
+    assert.equal(removedRegister.stations.find((row) => row.id === station.id).isActive, false);
+    await check(`stations/${station.id}/restore`, {}, 201, 'fixture-admin');
+    const foreignDivision = await db.division.create({
+      data: { companyId: foreignCompany.id, code: 'FUEL', name: 'Foreign fuel', type: 'PETROLEUM' },
+    });
+    await check(
+      'stations',
+      { divisionId: foreignDivision.id, code: 'FORBIDDEN', name: 'Foreign station', location: '' },
+      404,
+      'fixture-admin',
+    );
+    const scopedRegister = await check('stations', null, 200, 'fixture-admin');
+    assert(scopedRegister.divisions.every((row) => row.companyId === company.id));
+    assert.equal(await db.branch.count({ where: { divisionId: foreignDivision.id } }), 0);
     const draft = await check('reports', dto);
     assert.equal(await db.cashDeskMovement.count(), 0, 'A draft cannot create cash');
     assert.equal(await db.inventoryMovement.count(), 0, 'A draft cannot move stock');
@@ -731,6 +791,7 @@ async function main() {
         {
           passed: true,
           checks: [
+            'OS station administration, role enforcement and company isolation',
             'additive migration',
             'draft and close do not post',
             'scope and permission enforcement',

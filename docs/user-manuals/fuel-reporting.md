@@ -1,16 +1,16 @@
-# Fuel Reporting
+# PetroDollar — Fuel reporting
 
-Fuel Reporting is the station manager’s manual shift book. Open it from the login
-page’s **Fuel Reporting** card or from the signed-in sidebar. Sign in with an
-existing Itemba account. MWANJALISI is the default company when accessible; the
-branch selector uses the active fuel stations already registered in Itemba.
+Fuel reporting is the station manager’s shift book inside **PetroDollar**. Open
+PetroDollar from ITEMBA OS’s Apps launcher, dock, or `/petrodollar`. It uses the
+normal OS sign-in, appearance, window controls and navigation. Existing
+`/fuel-reporting` bookmarks redirect into the corresponding PetroDollar view.
 
-The portal lives at `/fuel-reporting`, outside the Itemba dashboard layout, with
-its own navigation and sign-in page at `/fuel-reporting/login`. Shared accounts,
-branch permissions, and reporting data still come from Itemba. **Open Itemba**
-returns to the main application. Signing out returns to the Fuel Reporting
-sign-in page and ends the shared session. Sign-out is disabled while a report
-has unsaved changes or is saving.
+PetroDollar uses Mwanjalisi Oil Co Ltd’s existing fuel stations and reports.
+Station, business date and shift selections belong to each window and are kept
+in its URL and Back/Forward history. Switching between **Shift report** and
+**Fuel received** preserves the same unfinished report. The OS asks before
+closing a window containing unsaved report or station-configuration inputs.
+There is no separate Fuel Reporting portal or sign-in session.
 
 ## Access and setup
 
@@ -30,17 +30,17 @@ has unsaved changes or is saving.
 
 ## Manage stations as an admin
 
-Open **Stations** within Fuel Reporting. Choose the company and division, enter
+Open **Stations** within PetroDollar. Choose an available Mwanjalisi division, enter
 a unique station code and name, and optionally a location, then select **Add
-station**. Mwanjalisi Oil Co Ltd is selected by default, including when returning
-from editing another company's station. If the account has no available Mwanjalisi
-division, the company selection stays empty instead of defaulting to Itemba.
+station**. Company ownership is restricted to Mwanjalisi on the server as well
+as in the UI. If the account has no available Mwanjalisi division, ask an
+administrator to check organisation access and division setup.
 Use **Configure**
 on the new station to open its tank and pump setup.
 
 Use **Edit station** to change the name, code, or location. The company and
 division stay fixed so existing records keep their ownership. **Remove station**
-makes the shared branch inactive in both Fuel Reporting and Itemba. Close all
+makes the shared branch inactive across ITEMBA OS. Close all
 draft Fuel Reporting reports first. Removal retains reports, revisions, tanks,
 pumps, and branch assignments; **Restore station** makes them available again.
 Station changes are recorded in the audit log. Managers cannot use these controls
@@ -83,8 +83,12 @@ Stock is reconciled by fuel type, aggregating all tanks of that type. Deliveries
 never require a receiving tank. Differences in opening meters and opening tank
 volumes against the preceding report are recorded too. Negative differences are
 shortages; positive differences are excesses. Zero results are retained as well.
-These are manual reporting records; they do not post duplicate sales, stock or
-accounting entries into other operational ledgers. They are not a profit statement.
+Saving or closing a report alone does not create sales, stock or accounting
+entries. A closed report has a **Connect this shift to your apps** review within PetroDollar:
+authorised users select the required customers, suppliers, cash accounts and
+ledger accounts before explicitly posting to Sales Desk, Invoice Desk, Cash Desk,
+Inventory and accounting. Existing request identities and revision checks prevent
+repeated posting. These reporting totals alone are not a profit statement.
 
 Daily totals include **closed reports only**. A day is complete only after both
 Day and Night have closed. Unknown delivery costs are explicitly marked; totals
@@ -122,17 +126,23 @@ From `backend`, run:
 
 ```powershell
 npm test -- --runTestsByPath src/modules/fuel-reporting/fuel-reporting.calculate.spec.ts src/modules/fuel-reporting/fuel-reporting.service.spec.ts
-node scripts/verify-fuel-reporting.cjs
+npm test -- --runTestsByPath src/modules/petrodollar/petrodollar.service.spec.ts
+npm run test:petrodollar-posting
 ```
 
-The integration runner requires local PostgreSQL with CREATE DATABASE rights and
-`psql` on PATH. It creates a uniquely named disposable database, tests the actual
-migration, permissions, service/API, concurrent saves and persistence, then removes
-that database. It never migrates the application database.
+The PetroDollar integration runner requires local PostgreSQL with CREATE DATABASE
+rights. It creates a uniquely named disposable database, tests station administration,
+role/company boundaries, financial posting, retries, balances and reversals, then
+removes that database. It never migrates the application database.
 
-For browser verification, run the integration runner with `--serve` (fixture API
-at `127.0.0.1:3014`), point the local frontend’s `BACKEND_INTERNAL_URL` to
-`http://127.0.0.1:3014/api/v1`, start the frontend on port 3009, and run
-`node scripts/smoke-fuel-reporting.mjs` from the repository root. This uses Chrome,
-fixture authentication and real reporting requests through the Next proxy into
-the isolated database. Stop the fixture runner with Ctrl+C to clean up.
+For browser verification, run `node scripts/verify-petrodollar-posting.cjs --serve`
+from `backend` (fixture API at `127.0.0.1:3017`), point the local frontend’s
+`BACKEND_INTERNAL_URL` to `http://127.0.0.1:3017/api/v1`, and start the frontend.
+Use the disposable `fixture-manager` or `fixture-admin` session; never use a real
+production account with this fixture. Check legacy redirects, the OS window,
+station configuration, report/receipt panel continuity, refresh restoration and
+390px layout. Stop the fixture runner with Ctrl+C to clean up.
+
+The former standalone portal UI smoke scripts are superseded by the PetroDollar
+tests in `frontend/src/features/petrodollar/petrodollar.test.tsx`, the compatibility
+route tests in `frontend/src/proxy.test.ts`, and the real database proof above.

@@ -6,7 +6,13 @@ import { AppGlyph } from './app-glyph';
 import { WindowModalProvider } from '@/components/ui/modal';
 import { WindowNavigationProvider } from './window-navigation-context';
 import type { WorkspaceApp } from '@/lib/apps';
-import { windowBounds, type Bounds, type DesktopWindow, type WindowMode } from '@/lib/desktop';
+import {
+  windowBounds,
+  type Bounds,
+  type DesktopInsets,
+  type DesktopWindow,
+  type WindowMode,
+} from '@/lib/desktop';
 
 const positions: { mode: WindowMode; label: string }[] = [
   { mode: 'floating', label: 'Restore' },
@@ -38,6 +44,7 @@ export function DesktopWindowFrame({
   concealed,
   zIndex,
   area,
+  floatingInsets,
   narrow,
   onFocus,
   onChange,
@@ -55,6 +62,7 @@ export function DesktopWindowFrame({
   concealed: boolean;
   zIndex: number;
   area: { width: number; height: number };
+  floatingInsets?: DesktopInsets;
   narrow: boolean;
   onFocus: () => void;
   onChange: (change: Partial<DesktopWindow>) => void;
@@ -83,9 +91,13 @@ export function DesktopWindowFrame({
   const lastFocus = useRef<HTMLElement | null>(null);
   const [modalTarget, setModalTarget] = useState<HTMLDivElement | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<HTMLDivElement | null>(null);
-  const frame =
-    resizing ??
-    windowBounds(narrow ? { ...item, mode: 'maximized' } : item, area.width, area.height);
+  const mode = narrow ? 'maximized' : item.mode;
+  const frame = windowBounds(
+    { ...item, mode, ...(resizing ? { bounds: resizing } : {}) },
+    area.width,
+    area.height,
+    floatingInsets,
+  );
   useEffect(() => {
     setAnchor(dockAnchor(app.id));
   }, [app.id, item.minimized, area.width, area.height]);
@@ -152,6 +164,7 @@ export function DesktopWindowFrame({
       className="desktop-window"
       data-active={active}
       data-window-id={item.id}
+      data-window-mode={mode}
       role="region"
       aria-label={`${app.label} window`}
       aria-describedby={contextLabel ? `${item.id}-context` : undefined}
@@ -160,10 +173,23 @@ export function DesktopWindowFrame({
       inert={concealed}
       style={{
         zIndex,
+        left: frame.x,
+        top: frame.y,
         width: frame.width,
         height: frame.height,
+        willChange: 'auto',
         visibility: concealed && finishedHiding ? 'hidden' : 'visible',
         pointerEvents: concealed ? 'none' : 'auto',
+      }}
+      // Keep normal text painting at rest. Transforms belong to movement and
+      // launch/minimise effects, never to a settled or resized app surface.
+      transformTemplate={(transform) => {
+        const x = parseFloat(String(transform.x ?? frame.x)) - frame.x;
+        const y = parseFloat(String(transform.y ?? frame.y)) - frame.y;
+        const scale = Number(transform.scale ?? 1);
+        return x === 0 && y === 0 && scale === 1
+          ? 'none'
+          : `translate(${x}px, ${y}px) scale(${scale})`;
       }}
       initial={noMotion ? false : { opacity: 0, ...dockPosition }}
       animate={{
