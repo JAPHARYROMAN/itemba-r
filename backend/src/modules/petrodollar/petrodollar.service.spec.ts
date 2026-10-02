@@ -89,6 +89,7 @@ describe('PetroDollar company pin', () => {
       ],
     });
     const result = await service.bootstrap(user);
+    expect(fuel.bootstrap).toHaveBeenCalledWith(user, mwanjalisi);
     expect(result.branches.map((b) => b.id)).toEqual([ownBranch]);
     expect(result.company).toEqual({
       id: mwanjalisi,
@@ -162,6 +163,10 @@ describe('PetroDollar company pin', () => {
 
   it('filters station administration to Mwanjalisi divisions, including inactive stations', async () => {
     fuel.stations.mockResolvedValue({
+      companies: [
+        { id: mwanjalisi, code: 'MWANJALISI', name: 'Mwanjalisi Oil', canManageStations: false },
+        { id: other, code: 'OTHER', name: 'Other company', canManageStations: true },
+      ],
       divisions: [
         { id: 'own', companyId: mwanjalisi },
         { id: 'foreign', companyId: other },
@@ -172,8 +177,27 @@ describe('PetroDollar company pin', () => {
       ],
     });
     const data = await service.stations(user);
+    expect(fuel.stations).toHaveBeenCalledWith(user, mwanjalisi);
+    expect(data.companies).toEqual([
+      { id: mwanjalisi, code: 'MWANJALISI', name: 'Mwanjalisi Oil', canManageStations: false },
+    ]);
     expect(data.divisions).toEqual([{ id: 'own', companyId: mwanjalisi }]);
     expect(data.stations).toEqual([{ id: ownBranch, divisionId: 'own', isActive: false }]);
+  });
+
+  it('keeps the company visible when it has no active divisions', async () => {
+    const company = {
+      id: mwanjalisi,
+      code: 'MWANJALISI',
+      name: 'Mwanjalisi Oil',
+      canManageStations: true,
+    };
+    fuel.stations.mockResolvedValue({ companies: [company], divisions: [], stations: [] });
+    await expect(service.stations(user)).resolves.toEqual({
+      companies: [company],
+      divisions: [],
+      stations: [],
+    });
   });
 
   it('rejects foreign station and hardware mutations before delegation', async () => {

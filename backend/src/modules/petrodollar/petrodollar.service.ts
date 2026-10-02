@@ -70,7 +70,7 @@ export class PetroDollarService {
 
   async bootstrap(user: AuthUser) {
     const pinned = await this.pinned();
-    const data = await this.fuel.bootstrap(user);
+    const data = await this.fuel.bootstrap(user, pinned.id);
     return {
       company: { id: pinned.id, code: pinned.code, name: pinned.name },
       canManage: data.canManage,
@@ -86,10 +86,14 @@ export class PetroDollarService {
 
   async stations(user: AuthUser) {
     const pinned = await this.pinned();
-    const data = await this.fuel.stations(user);
+    const data = await this.fuel.stations(user, pinned.id);
     const divisions = data.divisions.filter((division) => division.companyId === pinned.id);
     const ids = new Set(divisions.map((division) => division.id));
-    return { divisions, stations: data.stations.filter((station) => ids.has(station.divisionId)) };
+    return {
+      companies: data.companies.filter((company) => company.id === pinned.id),
+      divisions,
+      stations: data.stations.filter((station) => ids.has(station.divisionId)),
+    };
   }
 
   async createStation(user: AuthUser, dto: CreateReportingStationDto) {

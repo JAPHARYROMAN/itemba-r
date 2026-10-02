@@ -219,6 +219,111 @@ describe('PetroDollar', () => {
     expect(screen.queryByText(/Open Itemba/)).toBeNull();
   });
 
+  it('shows a readable company and divisions while explaining missing write access', async () => {
+    state.search = new URLSearchParams('view=stations');
+    serve({
+      '/petrodollar/bootstrap': bootstrap([mpemba], true),
+      '/petrodollar/stations': {
+        companies: [
+          {
+            id: 'mwanjalisi',
+            code: 'MWANJALISI',
+            name: 'Mwanjalisi Oil',
+            canManageStations: false,
+          },
+        ],
+        divisions: [
+          {
+            id: 'division',
+            name: 'Fuel',
+            companyId: 'mwanjalisi',
+            companyName: 'Mwanjalisi Oil',
+            companyCode: 'MWANJALISI',
+          },
+        ],
+        stations: [
+          { id: mpemba.id, divisionId: 'division', name: 'Mpemba', code: 'M', isActive: true },
+        ],
+      },
+    });
+    renderApp();
+    const company = await screen.findByRole('combobox', { name: 'Station company' });
+    expect(company).toHaveValue('mwanjalisi');
+    expect(screen.getByRole('combobox', { name: 'Station division' })).toHaveValue('division');
+    expect(screen.getByText(/You have read-only access to Mwanjalisi Oil Co Ltd/)).toBeVisible();
+    expect(screen.queryByText(/No active division/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add station' })).toBeDisabled();
+    for (const name of ['Configure', 'Edit station', 'Remove station'])
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Station name' })).toBeDisabled();
+    fireEvent.submit(screen.getByRole('button', { name: 'Add station' }).closest('form')!);
+    expect(state.post).not.toHaveBeenCalled();
+  });
+
+  it('keeps the company selected and shows one setup message when divisions are missing', async () => {
+    state.search = new URLSearchParams('view=stations');
+    serve({
+      '/petrodollar/bootstrap': bootstrap([], true),
+      '/petrodollar/stations': {
+        companies: [
+          { id: 'mwanjalisi', code: 'MWANJALISI', name: 'Mwanjalisi Oil', canManageStations: true },
+        ],
+        divisions: [],
+        stations: [],
+      },
+    });
+    renderApp();
+    const company = await screen.findByRole('combobox', { name: 'Station company' });
+    expect(company).toHaveValue('mwanjalisi');
+    expect(
+      screen.getAllByText(/No active division is available for Mwanjalisi Oil Co Ltd/),
+    ).toHaveLength(1);
+    expect(screen.queryByText(/read-only access/)).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Station division' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add station' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Station name' })).toBeDisabled();
+  });
+
+  it('submits a station under the selected company division when write access is available', async () => {
+    state.search = new URLSearchParams('view=stations');
+    serve({
+      '/petrodollar/bootstrap': bootstrap([mpemba], true),
+      '/petrodollar/stations': {
+        companies: [
+          { id: 'mwanjalisi', code: 'MWANJALISI', name: 'Mwanjalisi Oil', canManageStations: true },
+        ],
+        divisions: [
+          {
+            id: 'division',
+            name: 'Fuel',
+            companyId: 'mwanjalisi',
+            companyName: 'Mwanjalisi Oil',
+            companyCode: 'MWANJALISI',
+          },
+        ],
+        stations: [],
+      },
+    });
+    state.post.mockResolvedValue({ id: 'new-station', isActive: true });
+    renderApp();
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Station code' }), {
+      target: { value: 'NEW' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Station name' }), {
+      target: { value: 'New station' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add station' }));
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith('/petrodollar/stations', {
+        divisionId: 'division',
+        code: 'NEW',
+        name: 'New station',
+        location: '',
+      }),
+    );
+    expect(await screen.findByText(/Station added. Select Configure/)).toBeVisible();
+  });
+
   it('uses PetroDollar endpoints to configure tanks without leaving the app', async () => {
     state.search = new URLSearchParams('view=setup');
     serve({
