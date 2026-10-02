@@ -12,7 +12,7 @@
 | Reports → Business records | SalesOrder, Receivable, Payable, Expense, CashAccount | Permission-scoped current balances, organisation/date/currency filters and CSV export |
 | Documents → Linked invoice files | InvoiceDeskAttachment | Original private attachments, with invoice access checked again on preview/download |
 | Inventory / Payroll | Existing inventory and employee/payroll services | Retained; purchasing and payment screens reuse their existing services rather than introducing another stock or employee database |
-| Records | Existing independent Records and record-book integration | Financial separation retained intentionally |
+| Records | Existing independent Records and record-book integration | Financial separation retained; debtor and creditor records may carry a shared customer or supplier identity (party linkage phase 1), never money |
 
 Legacy purchasing and cash URLs remain valid. The desktop registry recognises their explicit app hosts. No iframe or cached arbitrary route children are used. List filters are held in each window's workspace state.
 
@@ -44,11 +44,38 @@ Business report dates select originating documents; paid amounts and balances ar
 
 Group Health still describes its existing source coverage. The new business report view is not a replacement for a reconciled, consolidated group balance sheet. Unknown duplicates across old registers still require review.
 
+## Party linkage phase 1 — 2 October 2026
+
+Decisions adopted (see `PARTY_LINKAGE_PHASE_1_PLAN_2026-10-02.md` at the repository root for the plan and `SUPPLIER_CUSTOMER_LINKAGE_REPORT_2026-10-02.md` for the findings):
+
+- **D1** Separate nullable `supplierId` / `customerId` columns on each money row, no Party table. `CashDeskMovement.partyType` is NONE, SUPPLIER, CUSTOMER, EMPLOYEE or COMPANY and must agree with the id (database CHECK).
+- **D2** NoteBook records carry identity only. A debtor may name a shared customer, a creditor a shared supplier; no settlement writes to Cash Desk, receivables, payables or journals, and `npm run test:records` still asserts zero ERP writes.
+- **D3** Cash Desk is the cash book. Behind `CASH_BOOK_UNIFIED` every ERP supplier payment, customer collection, expense payment and refund writes one Cash Desk movement through the connected account (`CashDeskAccount.erpCashAccountId`); an ERP cash account without a connection is refused. Accounting connections shows those movements as "Posted (ERP)" and never offers them for posting; Cash Desk refuses to reverse them (reverse the payment instead).
+- **D4** Desk invoices and sales stay the entry surface. New desk payments require the canonical supplier; the ERP document underneath is Phase 2.
+- **D5** EMPLOYEE and COMPANY are party types on movements only.
+- **D6** NoteBook permission widening is deferred to Phase 2.
+
+What exists now:
+
+- `SupplierPayment` + `SupplierPaymentAllocation` mirror `CustomerPayment`. Paying a payable, paying an expense that names a supplier, paying an Invoice Desk invoice and a Cash Desk SUPPLIER_PAYMENT all create one row. Approved supplier invoices behind a payable follow its paid / outstanding figures.
+- Receivable collections for a linked customer create a `CustomerPayment` with one allocation, so customer statements include every collection. `PATCH receivables/:id/link-customer` matches an unlinked receivable to a shared customer.
+- Unlinked documents (free-text supplier or customer name only) keep the legacy direct settlement path: journal referenced to the payable or receivable, no payment row. The Msaidizi financial-action evidence pack, executed end to end in CI, pins that behaviour for both capabilities, and an unlinked document has no party to attach a payment to. The Unmatched parties queue surfaces them.
+- `GET /party-balance/suppliers/:id` and `/customers/:id` are the one balance: ERP sub-ledger with date-based overdue and aging, desk ledger, NoteBook (informal), total, credit position. `refreshCachedPartyBalance` is the single writer of `Supplier.currentBalance` / `Customer.currentBalance` (open ERP outstanding in the company base currency). Overdue is derived from due dates everywhere; nothing writes an OVERDUE status.
+- Unmatched parties (`/finance/unmatched-parties`, permissions `party_links.view` / `party_links.manage` plus the source app's own write permission): Cash Desk expense and supplier-payment movements, expenses, NoteBook debtors and creditors, Records Book money out, Group Control debts, supplier and customer contracts, supplier-credit loans, receivables and payables that still carry only a typed name, grouped by normalised name. A master is suggested only when exactly one active master in the company has the same normalised name; nothing is linked without a person confirming. Linking changes identity only and is audited (`PARTY_LINKED`).
+- Soft `supplierId` / `customerId` columns (goods received notes, supplier invoices, RFQs, quotations, bid comparisons, requisition lines, performance profiles, statement runs, credit profiles, segment memberships) are real foreign keys. Statement runs use NULL for a whole-company run; the `'ALL'` sentinel is gone. Polymorphic SUPPLIER / CUSTOMER references on contact persons, communication logs, documents, tasks and approval requests must point at a live master in the same company.
+
+Migrations, all additive: `20261002120000_party_columns` (columns, CHECKs, id-only backfill of existing Cash Desk chains), `20261002130000_party_relations` (foreign keys added NOT VALID then VALIDATE; nullable orphans NULLed and profile rows for a missing master deleted, each copied to `archive_party_orphans` first), `20261002140000_supplier_payments`.
+
+Pre-flights, both read-only: `node backend/scripts/party-orphans.cjs` must report no BLOCKING rows before `party_relations` (required-column orphans fail the deploy, which is the intended gate); `node backend/scripts/cash-book-preflight.cjs` lists ERP cash accounts used by payments with no Cash Desk connection and connected pairs whose balances differ, and must be clean before `CASH_BOOK_UNIFIED=true`.
+
+Rollback: every migration leaves old columns and behaviour intact. `CASH_BOOK_UNIFIED` returns the cash book to the previous split behaviour without a schema change. Older code does not know the new tables but is not broken by them.
+
 ## Release procedure
 
 1. Back up the deployment database using the existing release procedure.
 2. Apply `20260928180000_invoice_desk_supplier_master_link`. It adds references, indexes and foreign keys only; it performs no name matching or financial backfill.
 3. Generate the Prisma client and deploy compatible backend/frontend builds together.
+3a. Party linkage phase 1: run `node backend/scripts/party-orphans.cjs` against the target database and clear any BLOCKING rows, apply `20261002120000_party_columns`, `20261002130000_party_relations` and `20261002140000_supplier_payments` (additive; the second validates the new foreign keys), then run `node backend/scripts/cash-book-preflight.cjs` and connect every listed ERP cash account in Cash Desk → Accounts before setting `CASH_BOOK_UNIFIED=true`.
 4. Verify supplier/customer counts, organisation access and old deep links using authorised staging roles.
 5. Verify purchase → receipt → invoice → payable payment, sale → collection and payroll → payment through the existing transaction services. Check printing and exports in the staging browser.
 6. Match older parties, then review candidate duplicate transactions. Compare source counts, per-currency balances, cash movements and journal history before and after.

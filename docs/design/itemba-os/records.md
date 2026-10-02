@@ -1,6 +1,6 @@
 # Records
 
-Records brings the existing Records Book and independent notebook into one desktop app. Daily sales, receipt breakdowns, money out, categories, reports and trash use the original Records Book tables and permissions. Notebook debtors, creditors, sales, purchases, expenses and notes retain their independent entries, settlements and history. Neither register creates ERP customers, suppliers, stock movements, cash movements or journals.
+Records brings the existing Records Book and independent notebook into one desktop app. Daily sales, receipt breakdowns, money out, categories, reports and trash use the original Records Book tables and permissions. Notebook debtors, creditors, sales, purchases, expenses and notes retain their independent entries, settlements and history. Neither register creates ERP customers, suppliers, stock movements, cash movements or journals. Since party linkage phase 1 (2 October 2026) a debtor record may carry the shared customer’s identity and a creditor record the shared supplier’s (`customerId` / `supplierId`), set only through the Unmatched parties queue and recorded in the record’s own history; this is identity only, so settlements still write nothing to Cash Desk, receivables, payables or journals, and `npm run test:records` continues to assert zero ERP writes.
 
 ## Records Book unification — 26 September 2026
 
