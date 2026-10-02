@@ -4326,6 +4326,7 @@ model Payable {
   fuelDeliveries FuelDelivery[]
 
   cashDeskMovements CashDeskMovement[]
+  supplierInvoices  SupplierInvoice[]
 
   @@unique([companyId, payableNumber])
   @@index([companyId])
@@ -4872,6 +4873,9 @@ model Customer {
   cashDeskMovements CashDeskMovement[]
   recordEntries     RecordEntry[]
   contracts         Contract[]
+  creditProfiles     CustomerCreditProfile[]
+  segmentMemberships CustomerSegmentMembership[]
+  statementRuns      CustomerStatementRun[]
   mobilePosGeneralTerminals MobilePosTerminal[] @relation("MobilePosTerminalGeneralCustomer")
 
   // Westsides (Milestone 6)
@@ -4947,6 +4951,16 @@ model Supplier {
   debts              Debt[]
   contracts          Contract[]
   loans              Loan[]
+  goodsReceivedNotes        GoodsReceivedNote[]
+  supplierInvoices          SupplierInvoice[]
+  rfqInvitations            RFQSupplier[]
+  supplierQuotations        SupplierQuotation[]
+  bidComparisonLines        BidComparisonLine[]
+  recommendedBidComparisons BidComparison[]           @relation("BidComparisonRecommendedSupplier")
+  awardedRfqs               RequestForQuotation[]     @relation("RFQAwardedSupplier")
+  preferredRequisitionLines PurchaseRequisitionLine[]
+  performanceProfiles       SupplierPerformanceProfile[]
+  statementRuns             SupplierStatementRun[]
 
   // Westsides (Milestone 6)
   productBatches   ProductBatch[]
@@ -15420,8 +15434,10 @@ model PurchaseRequisitionLine {
   updatedAt             DateTime @updatedAt
 
   purchaseRequisition PurchaseRequisition @relation(fields: [purchaseRequisitionId], references: [id], onDelete: Cascade)
+  preferredSupplier   Supplier?           @relation(fields: [preferredSupplierId], references: [id], onDelete: SetNull)
 
   @@index([purchaseRequisitionId])
+  @@index([preferredSupplierId])
   @@map("purchase_requisition_lines")
 }
 
@@ -15445,12 +15461,14 @@ model RequestForQuotation {
 
   company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   createdBy          User                @relation("RFQCreatedBy", fields: [createdById], references: [id])
+  awardedSupplier    Supplier?           @relation("RFQAwardedSupplier", fields: [awardedSupplierId], references: [id], onDelete: SetNull)
   rfqSuppliers       RFQSupplier[]
   supplierQuotations SupplierQuotation[]
   bidComparisons     BidComparison[]
 
   @@unique([companyId, rfqNumber])
   @@index([companyId, status, rfqDate])
+  @@index([awardedSupplierId])
   @@map("request_for_quotations")
 }
 
@@ -15465,6 +15483,7 @@ model RFQSupplier {
   updatedAt      DateTime                  @updatedAt
 
   rfq RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier Supplier         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([rfqId, supplierId])
   @@map("rfq_suppliers")
@@ -15497,6 +15516,7 @@ model SupplierQuotation {
   rfq                RequestForQuotation?    @relation(fields: [rfqId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("SupplierQuotCreatedBy", fields: [createdById], references: [id])
   acceptedBy         User?                   @relation("SupplierQuotAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+  supplier           Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   lines              SupplierQuotationLine[]
   bidComparisonLines BidComparisonLine[]
 
@@ -15549,9 +15569,11 @@ model BidComparison {
   rfq        RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Restrict)
   preparedBy User                @relation("BidCompPreparedBy", fields: [preparedById], references: [id])
   approvedBy User?               @relation("BidCompApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  recommendedSupplier Supplier? @relation("BidComparisonRecommendedSupplier", fields: [recommendedSupplierId], references: [id], onDelete: SetNull)
   lines      BidComparisonLine[]
 
   @@index([companyId, rfqId, status])
+  @@index([recommendedSupplierId])
   @@map("bid_comparisons")
 }
 
@@ -15571,6 +15593,7 @@ model BidComparisonLine {
 
   bidComparison     BidComparison     @relation(fields: [bidComparisonId], references: [id], onDelete: Cascade)
   supplierQuotation SupplierQuotation @relation(fields: [supplierQuotationId], references: [id], onDelete: Restrict)
+  supplier          Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([bidComparisonId, supplierId])
   @@map("bid_comparison_lines")
@@ -15601,6 +15624,7 @@ model GoodsReceivedNote {
   branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
   receivedBy       User                    @relation("GRNReceivedBy", fields: [receivedById], references: [id])
   approvedBy       User?                   @relation("GRNApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  supplier         Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   lines            GoodsReceivedNoteLine[]
   supplierInvoices SupplierInvoice[]
   threeWayMatches  ThreeWayMatch[]
@@ -15671,6 +15695,8 @@ model SupplierInvoice {
   purchaseOrder     PurchaseOrder?        @relation("PurchaseOrderSupplierInvoices", fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   createdBy         User                  @relation("SupplierInvCreatedBy", fields: [createdById], references: [id])
   approvedBy        User?                 @relation("SupplierInvApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  supplier          Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  payable           Payable?              @relation(fields: [payableId], references: [id], onDelete: SetNull)
   lines             SupplierInvoiceLine[]
   threeWayMatches   ThreeWayMatch[]
 
@@ -15678,6 +15704,7 @@ model SupplierInvoice {
   @@index([companyId, supplierId, status, invoiceDate])
   @@index([divisionId])
   @@index([branchId])
+  @@index([payableId])
   @@map("supplier_invoices")
 }
 
@@ -15847,6 +15874,7 @@ model CustomerCreditProfile {
 
   company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reviewedBy User?   @relation("CreditProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, customerId])
   @@index([companyId, customerId, creditStatus])
@@ -15873,6 +15901,7 @@ model SupplierPerformanceProfile {
 
   company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reviewedBy User?   @relation("SupplierPerfReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, supplierId])
   @@index([companyId, supplierId, rating])
@@ -15907,9 +15936,11 @@ model CustomerSegmentMembership {
   notes             String?
 
   customerSegment CustomerSegment @relation(fields: [customerSegmentId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([customerSegmentId, customerId])
   @@index([customerSegmentId, customerId])
+  @@index([customerId])
   @@map("customer_segment_memberships")
 }
 
@@ -15917,7 +15948,7 @@ model CustomerStatementRun {
   id                 String                  @id @default(uuid())
   statementRunNumber String                  @unique
   companyId          String
-  customerId         String
+  customerId         String?
   periodStart        DateTime
   periodEnd          DateTime
   openingBalance     Decimal                 @default(0) @db.Decimal(18, 4)
@@ -15934,6 +15965,7 @@ model CustomerStatementRun {
 
   company     Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   generatedBy User    @relation("CustStatGeneratedBy", fields: [generatedById], references: [id])
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@index([companyId, customerId, status])
   @@map("customer_statement_runs")
@@ -15943,7 +15975,7 @@ model SupplierStatementRun {
   id                 String                  @id @default(uuid())
   statementRunNumber String                  @unique
   companyId          String
-  supplierId         String
+  supplierId         String?
   periodStart        DateTime
   periodEnd          DateTime
   openingBalance     Decimal                 @default(0) @db.Decimal(18, 4)
@@ -15960,6 +15992,7 @@ model SupplierStatementRun {
 
   company     Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   generatedBy User    @relation("SuppStatGeneratedBy", fields: [generatedById], references: [id])
+  supplier    Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([companyId, supplierId, status])
   @@map("supplier_statement_runs")
@@ -17404,6 +17437,22 @@ model CashDeskLoan {
 }
 
 // Independent registers: no accounting, cash, stock or party links.
+/// Rows whose soft supplierId / customerId pointed at a missing master when the
+/// party_relations migration added real foreign keys. Nullable references were set to
+/// NULL and profile rows were deleted; both are copied here first for review.
+model PartyOrphanArchive {
+  id          String   @id @default(dbgenerated("gen_random_uuid()"))
+  tableName   String
+  columnName  String
+  rowId       String
+  orphanValue String
+  action      String
+  row         Json
+  archivedAt  DateTime @default(now())
+
+  @@index([tableName, columnName])
+  @@map("archive_party_orphans")
+}
 model RecordEntry {
   id            String   @id @default(uuid())
   requestId     String   @unique

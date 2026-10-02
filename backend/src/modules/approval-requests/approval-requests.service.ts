@@ -13,6 +13,7 @@ import {
   DelegationStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateApprovalRequestDto } from './dto/create-approval-request.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
@@ -40,6 +41,7 @@ export class ApprovalRequestsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly partyExists: PartyExistsService,
   ) {}
 
   async findAll(user: AuthUser, query: any) {
@@ -444,6 +446,8 @@ export class ApprovalRequestsService {
     // it against the caller's access before stamping it on the new request
     // (a null companyId is a group-level request and requires group scope).
     await this.companyScope.assertCanAccessCompany(user, dto.companyId ?? null, AccessLevel.WRITE);
+    // An approval about a SUPPLIER / CUSTOMER must point at a live master.
+    await this.partyExists.assertParty(dto.entityType, dto.entityId, dto.companyId ?? null);
     const approvalRequestNumber = `REQ-${Date.now()}`;
     // Whitelist explicit fields — never spread the raw DTO into prisma.create.
     const record = await this.prisma.approvalRequest.create({

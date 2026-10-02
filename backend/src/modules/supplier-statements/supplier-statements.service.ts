@@ -17,10 +17,7 @@ const ZERO = new Prisma.Decimal(0);
  * Including either makes the closing balance un-reconcilable against the AP
  * subledger's true outstanding.
  */
-const EXCLUDED_STATUSES: PayableStatus[] = [
-  PayableStatus.WRITTEN_OFF,
-  PayableStatus.CANCELLED,
-];
+const EXCLUDED_STATUSES: PayableStatus[] = [PayableStatus.WRITTEN_OFF, PayableStatus.CANCELLED];
 
 @Injectable()
 export class SupplierStatementsService {
@@ -137,7 +134,8 @@ export class SupplierStatementsService {
       data: {
         statementRunNumber: `SSTAT-${Date.now()}`,
         companyId: dto.companyId,
-        supplierId: dto.supplierId ?? 'ALL',
+        // NULL = whole-company run (the former "ALL" sentinel is gone; supplierId is a real FK).
+        supplierId: dto.supplierId ?? null,
         periodStart,
         periodEnd,
         openingBalance,

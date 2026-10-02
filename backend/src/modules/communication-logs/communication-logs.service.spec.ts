@@ -34,7 +34,9 @@ function makeService(opts: { existing?: any } = {}) {
   const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
   const codes = { next: jest.fn().mockResolvedValue('COMMUN-2026-00001') } as any;
 
-  const service = new CommunicationLogsService(prisma, auditLogs, codes);
+  const service = new CommunicationLogsService(prisma, auditLogs, codes, {
+    assertParty: jest.fn(),
+  } as any);
   return { service, prisma, auditLogs, codes, createdRows, updatedRows };
 }
 

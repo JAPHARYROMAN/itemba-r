@@ -37,7 +37,12 @@ function makePrisma(overrides: Partial<Record<string, unknown>> = {}) {
 describe('ApprovalRequestsService readiness', () => {
   it('applies the selected company to checks, actions, attachments and status counts', async () => {
     const prisma = makePrisma();
-    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any, {} as any);
+    const service = new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      {} as any,
+      { assertParty: jest.fn() } as any,
+    );
     await service.getReadiness({ id: 'user', companyId: 'company-1' }, { companyId: 'company-1' });
     for (const model of [
       prisma.approvalWorkflow,
@@ -64,7 +69,12 @@ describe('ApprovalRequestsService readiness', () => {
 
   it('denies an inaccessible selected company before any readiness read', async () => {
     const prisma = makePrisma();
-    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any, {} as any);
+    const service = new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      {} as any,
+      { assertParty: jest.fn() } as any,
+    );
     await expect(
       service.getReadiness({ id: 'user', companyId: 'company-1' }, { companyId: 'outside' }),
     ).rejects.toThrow('You do not have access');
@@ -79,6 +89,7 @@ describe('ApprovalRequestsService readiness', () => {
       prisma,
       { log: jest.fn() } as any,
       { assertCanAccessCompany: jest.fn() } as any,
+      { assertParty: jest.fn() } as any,
     );
 
     const readiness = await service.getReadiness(
@@ -104,6 +115,7 @@ describe('ApprovalRequestsService readiness', () => {
       prisma,
       { log: jest.fn() } as any,
       { assertCanAccessCompany: jest.fn() } as any,
+      { assertParty: jest.fn() } as any,
     );
 
     const readiness = await service.getReadiness(

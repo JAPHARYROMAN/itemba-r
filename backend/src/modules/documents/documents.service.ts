@@ -11,7 +11,7 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, PartyExistsService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { QueryDocumentDto } from './dto/query-document.dto';
@@ -65,6 +65,7 @@ export class DocumentsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly partyExists: PartyExistsService,
   ) {}
 
   /** Upload a file and create the Document record. */
@@ -86,6 +87,9 @@ export class DocumentsService {
       const uploadsDir = documentsStorageDir();
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
       moveUploadedFile(file.path, destPath);
+
+      // A document owned by a SUPPLIER / CUSTOMER must point at a live master.
+      await this.partyExists.assertParty(dto.ownerType, dto.ownerId, dto.companyId);
 
       const doc = await this.prisma.document.create({
         data: {
@@ -168,6 +172,8 @@ export class DocumentsService {
     const uploadsDir = documentsStorageDir();
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
     fs.writeFileSync(destPath, input.buffer);
+
+    await this.partyExists.assertParty(input.ownerType, input.ownerId, input.companyId);
 
     const doc = await this.prisma.document.create({
       data: {

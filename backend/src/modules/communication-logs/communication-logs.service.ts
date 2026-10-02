@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { PartyExistsService, applyCompanyScopeWhere } from '../../common/services';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateCommunicationLogDto } from './dto/create-communication-log.dto';
 import { UpdateCommunicationLogDto } from './dto/update-communication-log.dto';
@@ -13,6 +13,7 @@ export class CommunicationLogsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly partyExists: PartyExistsService,
   ) {}
 
   async findAll(query: any, user?: any) {
@@ -23,7 +24,12 @@ export class CommunicationLogsService {
     if (entityType) where.entityType = entityType;
     if (entityId) where.entityId = entityId;
     const [data, total] = await Promise.all([
-      this.prisma.communicationLog.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.communicationLog.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.communicationLog.count({ where }),
     ]);
     // Standard pagination envelope: the rest of the codebase (customers,
@@ -48,6 +54,8 @@ export class CommunicationLogsService {
     // transaction so the counter advance commits atomically with the row, and a
     // rare unique collision (concurrent create) retries with a fresh number
     // instead of surfacing a 500.
+    // A SUPPLIER / CUSTOMER log must point at a live master in this company.
+    await this.partyExists.assertParty(dto.entityType, dto.entityId, dto.companyId);
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
@@ -69,7 +77,9 @@ export class CommunicationLogsService {
               ...(dto.communicationDate !== undefined
                 ? { communicationDate: new Date(dto.communicationDate) }
                 : {}),
-              ...(dto.followUpRequired !== undefined ? { followUpRequired: dto.followUpRequired } : {}),
+              ...(dto.followUpRequired !== undefined
+                ? { followUpRequired: dto.followUpRequired }
+                : {}),
               ...(dto.followUpDate !== undefined
                 ? { followUpDate: dto.followUpDate ? new Date(dto.followUpDate) : null }
                 : {}),
@@ -79,14 +89,22 @@ export class CommunicationLogsService {
             },
           });
         });
-        await this.auditLogs.log({ action: 'CREATE', entityType: 'CommunicationLog', entityId: item.id, userId: user.id, companyId: item.companyId });
+        await this.auditLogs.log({
+          action: 'CREATE',
+          entityType: 'CommunicationLog',
+          entityId: item.id,
+          userId: user.id,
+          companyId: item.companyId,
+        });
         return item;
       } catch (err) {
         // P2002 = unique constraint violation on communicationNumber. Retry with
         // a fresh number; only give up (400) after exhausting the attempts.
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           if (attempt < maxAttempts) continue;
-          throw new BadRequestException('Failed to generate a unique communication number, please retry');
+          throw new BadRequestException(
+            'Failed to generate a unique communication number, please retry',
+          );
         }
         throw err;
       }
@@ -102,15 +120,26 @@ export class CommunicationLogsService {
     if (dto.direction !== undefined) data.direction = dto.direction;
     if (dto.subject !== undefined) data.subject = dto.subject;
     if (dto.summary !== undefined) data.summary = dto.summary;
-    if (dto.communicationDate !== undefined) data.communicationDate = new Date(dto.communicationDate);
+    if (dto.communicationDate !== undefined)
+      data.communicationDate = new Date(dto.communicationDate);
     if (dto.followUpRequired !== undefined) data.followUpRequired = dto.followUpRequired;
-    if (dto.followUpDate !== undefined) data.followUpDate = dto.followUpDate ? new Date(dto.followUpDate) : null;
+    if (dto.followUpDate !== undefined)
+      data.followUpDate = dto.followUpDate ? new Date(dto.followUpDate) : null;
     if (dto.assignedToId !== undefined) {
-      data.assignedTo = dto.assignedToId ? { connect: { id: dto.assignedToId } } : { disconnect: true };
+      data.assignedTo = dto.assignedToId
+        ? { connect: { id: dto.assignedToId } }
+        : { disconnect: true };
     }
     if (dto.status !== undefined) data.status = dto.status;
     const updated = await this.prisma.communicationLog.update({ where: { id }, data });
-    await this.auditLogs.log({ action: 'UPDATE', entityType: 'CommunicationLog', entityId: id, userId: user.id, oldValue: existing, newValue: updated });
+    await this.auditLogs.log({
+      action: 'UPDATE',
+      entityType: 'CommunicationLog',
+      entityId: id,
+      userId: user.id,
+      oldValue: existing,
+      newValue: updated,
+    });
     return updated;
   }
 
@@ -119,8 +148,16 @@ export class CommunicationLogsService {
     if (existing.status === 'CLOSED') {
       throw new BadRequestException('Log is already closed');
     }
-    const updated = await this.prisma.communicationLog.update({ where: { id }, data: { status: 'CLOSED' as any } });
-    await this.auditLogs.log({ action: 'CLOSE', entityType: 'CommunicationLog', entityId: id, userId: user.id });
+    const updated = await this.prisma.communicationLog.update({
+      where: { id },
+      data: { status: 'CLOSED' as any },
+    });
+    await this.auditLogs.log({
+      action: 'CLOSE',
+      entityType: 'CommunicationLog',
+      entityId: id,
+      userId: user.id,
+    });
     return updated;
   }
 }

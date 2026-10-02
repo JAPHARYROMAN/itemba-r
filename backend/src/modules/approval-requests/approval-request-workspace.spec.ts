@@ -49,6 +49,7 @@ function setup() {
     prisma as any,
     { log: jest.fn() } as any,
     new CompanyScopeService(prisma as any),
+    { assertParty: jest.fn() } as any,
   );
   return { service, prisma };
 }

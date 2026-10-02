@@ -80,7 +80,7 @@ export default function SupplierStatementsPage() {
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs">{row.statementRunNumber}</td>
                   <td className="px-4 py-3">{row.companyId}</td>
-                  <td className="px-4 py-3 font-medium">{row.supplierId}</td>
+                  <td className="px-4 py-3 font-medium">{row.supplierId ?? 'All suppliers'}</td>
                   <td className="px-4 py-3 text-gray-400">{row.periodStart ? new Date(row.periodStart).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3 text-gray-400">{row.periodEnd ? new Date(row.periodEnd).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3">{row.openingBalance}</td>

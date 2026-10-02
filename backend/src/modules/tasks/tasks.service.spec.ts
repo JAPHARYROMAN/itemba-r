@@ -17,7 +17,7 @@ function makeService(overrides: { status?: string } = {}) {
     },
   } as any;
   const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new TasksService(prisma, audit);
+  const service = new TasksService(prisma, audit, { assertParty: jest.fn() } as any);
   return { service, prisma, audit, task };
 }
 
