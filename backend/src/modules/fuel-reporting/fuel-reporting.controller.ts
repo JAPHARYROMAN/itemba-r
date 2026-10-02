@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -11,6 +21,9 @@ import {
   ReportingStationDetailsDto,
   ReopenFuelReportDto,
   SaveFuelReportDto,
+  ReportingConfigurationRevisionDto,
+  UpdateReportingPumpDto,
+  UpdateReportingTankDto,
 } from './fuel-reporting.dto';
 
 /**
@@ -106,5 +119,65 @@ export class FuelReportingController {
   @RequirePermissions('fuel_reporting.admin')
   createTank(@CurrentUser() user: AuthUser, @Body() dto: CreateReportingTankDto) {
     return this.service.createTank(user, dto);
+  }
+
+  @Patch('tanks/:id')
+  @RequirePermissions('fuel_reporting.admin')
+  updateTank(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateReportingTankDto,
+  ) {
+    return this.service.updateTank(user, id, dto);
+  }
+
+  @Delete('tanks/:id')
+  @RequirePermissions('fuel_reporting.admin')
+  deleteTank(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportingConfigurationRevisionDto,
+  ) {
+    return this.service.deleteTank(user, id, dto);
+  }
+
+  @Post('tanks/:id/restore')
+  @RequirePermissions('fuel_reporting.admin')
+  restoreTank(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportingConfigurationRevisionDto,
+  ) {
+    return this.service.restoreTank(user, id, dto);
+  }
+
+  @Patch('pumps/:id')
+  @RequirePermissions('fuel_reporting.admin')
+  updatePump(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateReportingPumpDto,
+  ) {
+    return this.service.updatePump(user, id, dto);
+  }
+
+  @Delete('pumps/:id')
+  @RequirePermissions('fuel_reporting.admin')
+  deletePump(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportingConfigurationRevisionDto,
+  ) {
+    return this.service.deactivatePump(user, id, dto);
+  }
+
+  @Post('pumps/:id/restore')
+  @RequirePermissions('fuel_reporting.admin')
+  restorePump(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportingConfigurationRevisionDto,
+  ) {
+    return this.service.restorePump(user, id, dto);
   }
 }

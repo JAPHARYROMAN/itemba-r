@@ -24,6 +24,7 @@ describe('PetroDollar company pin', () => {
     branch: { findFirst: jest.fn() },
     division: { findFirst: jest.fn() },
     fuelPump: { findUnique: jest.fn() },
+    fuelTank: { findUnique: jest.fn() },
     fuelReport: { findUnique: jest.fn() },
   };
   const fuel = {
@@ -40,6 +41,11 @@ describe('PetroDollar company pin', () => {
     createPump: jest.fn(),
     deactivatePump: jest.fn(),
     createTank: jest.fn(),
+    updateTank: jest.fn(),
+    deleteTank: jest.fn(),
+    restoreTank: jest.fn(),
+    updatePump: jest.fn(),
+    restorePump: jest.fn(),
   };
   let service: PetroDollarService;
   const companyOf = { [ownBranch]: mwanjalisi, [foreignBranch]: other } as Record<string, string>;
@@ -246,5 +252,36 @@ describe('PetroDollar company pin', () => {
     expect(fuel.deactivatePump).toHaveBeenCalledWith(user, report);
     fuel.stations.mockRejectedValue(new ForbiddenException('Administrator required'));
     await expect(service.stations(user)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects all new tank and pump actions for a foreign company before delegation', async () => {
+    prisma.fuelTank.findUnique.mockResolvedValue({ branchId: foreignBranch });
+    prisma.fuelPump.findUnique.mockResolvedValue({ branchId: foreignBranch });
+    const revision = { expectedUpdatedAt: new Date().toISOString() };
+    await expect(service.deleteTank(user, report, revision)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.restoreTank(user, report, revision)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.updateTank(user, report, {
+        ...revision,
+        code: 'T',
+        name: 'T',
+        productId: report,
+        capacityLitres: 500,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deletePump(user, report, revision)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.restorePump(user, report, revision)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.updatePump(user, report, { ...revision, code: 'P', name: 'P', nozzles: [] }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    for (const call of Object.values(fuel)) expect(call).not.toHaveBeenCalled();
   });
 });

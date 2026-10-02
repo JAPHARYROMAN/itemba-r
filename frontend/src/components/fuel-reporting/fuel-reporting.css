@@ -16,6 +16,24 @@
 .fuel-reporting * {
   box-sizing: border-box;
 }
+.fr-equipment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+.fr-equipment-actions button {
+  min-height: 40px;
+}
+.fr-equipment-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.fuel-reporting .fr-text-button.fr-equipment-delete {
+  color: var(--aurora-danger-text);
+}
 .fuel-reporting .fr-signout {
   color: #fff;
   border: 1px solid #66808a;

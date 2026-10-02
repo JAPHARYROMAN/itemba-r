@@ -1403,6 +1403,9 @@ export class PurchaseOrdersService {
     tankId: string;
     tx: Prisma.TransactionClient;
   }): Promise<FuelTankReceiptTarget> {
+    // Station configuration uses this same row lock: a receipt must recheck
+    // the tank after any concurrent deletion or product change has committed.
+    await input.tx.$queryRaw`SELECT "id" FROM "fuel_tanks" WHERE "id" = ${input.tankId} FOR UPDATE`;
     const tank = await input.tx.fuelTank.findFirst({
       where: {
         id: input.tankId,
@@ -1455,7 +1458,7 @@ export class PurchaseOrdersService {
         'This fuel product has multiple active tanks at the receiving branch. Select the destination tank in the Operations receive modal or receive it through Petroleum > Fuel Deliveries.',
       );
     }
-    return tanks[0];
+    return this.resolveAllocatedFuelTankForReceipt({ ...input, tankId: tanks[0].id });
   }
 
   private async postOperationsFuelReceipts(input: {

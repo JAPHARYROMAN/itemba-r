@@ -103,13 +103,35 @@ export interface Bootstrap {
   canManage: boolean;
   canAdmin: boolean;
 }
+export interface StationTank {
+  id: string;
+  tankCode: string;
+  tankName: string;
+  productId: string;
+  productName: string;
+  capacityLitres: number;
+  currentBookBalance?: number;
+  status: string;
+  deletedAt: string | null;
+  updatedAt: string;
+}
+export interface StationPump {
+  id: string;
+  pumpCode: string;
+  pumpName: string;
+  status: string;
+  updatedAt?: string;
+  nozzles?: { id: string; nozzleCode: string; tankId: string; productId: string; status: string }[];
+}
 export interface Workspace {
   catalog: Catalog;
   report: Report | null;
   previous: Report | null;
   daily: Report[];
   products: { id: string; name: string }[];
-  pumps: { id: string; pumpCode: string; pumpName: string; status: string }[];
+  pumps: StationPump[];
+  tanks?: StationTank[];
+  canConfigure?: boolean;
 }
 export interface Revision {
   id: string;
