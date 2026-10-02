@@ -3,9 +3,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnsavedWorkProvider, useUnsavedWork } from '@/components/workspace/unsaved-work-provider';
 import { ApiError } from '@/lib/api-client';
 import { PetroDollarApp, petrodollarView } from './petrodollar-app';
+import { WorkspaceNavigationProvider } from '@/components/workspace/workspace-navigation';
+import { preservesPetroDollarEditor } from '@/lib/petrodollar-navigation';
+import type { ReactNode } from 'react';
+
+function Window({ children }: { children: ReactNode }) {
+  return (
+    <WorkspaceNavigationProvider
+      appId="petrodollar"
+      initialHref={`/petrodollar${state.search.size ? `?${state.search}` : ''}`}
+      ownsPath={(path) => path === '/petrodollar'}
+      onHrefChange={state.push}
+      preservesContent={preservesPetroDollarEditor}
+    >
+      {children}
+    </WorkspaceNavigationProvider>
+  );
+}
+const renderApp = () => render(<PetroDollarApp />, { wrapper: Window });
 
 const state = vi.hoisted(() => ({
   get: vi.fn(),
+  post: vi.fn(),
   push: vi.fn(),
   permissions: new Set<string>(),
   search: new URLSearchParams(),
@@ -25,6 +44,7 @@ vi.mock('@/hooks/use-auth', () => ({
 vi.mock('@/lib/api-client', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   backendGet: state.get,
+  backendPost: state.post,
 }));
 // The editor and summary are Fuel Reporting's own, covered by its tests. Here they are probes.
 vi.mock('@/components/fuel-reporting/report-editor', () => ({
@@ -108,6 +128,19 @@ const serve = (overrides: Record<string, unknown> = {}) =>
     if (path === '/petrodollar/bootstrap') return bootstrap();
     if (path === '/petrodollar/workspace') return workspace();
     if (path === '/petrodollar/history') return [];
+    if (path === '/petrodollar/stations')
+      return {
+        divisions: [
+          {
+            id: 'division',
+            name: 'Fuel',
+            companyId: 'mwanjalisi',
+            companyName: 'Mwanjalisi Oil',
+            companyCode: 'MWANJALISI',
+          },
+        ],
+        stations: [],
+      };
     throw new Error(`Unexpected request ${path}`);
   });
 
@@ -120,9 +153,109 @@ beforeEach(() => {
     .fn()
     .mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
   serve();
+  state.post.mockResolvedValue({});
 });
 
 describe('PetroDollar', () => {
+  it('restores a bookmarked station, business date and shift', async () => {
+    state.search = new URLSearchParams(
+      `branchId=${uzunguni.id}&date=2026-09-28&shift=NIGHT&view=receive`,
+    );
+    serve({ '/petrodollar/bootstrap': bootstrap([mpemba, uzunguni]) });
+    renderApp();
+    expect(await screen.findByText('receive editor for Uzunguni')).toBeVisible();
+    expect(state.get).toHaveBeenCalledWith('/petrodollar/workspace', {
+      query: { branchId: uzunguni.id, businessDate: '2026-09-28', shift: 'NIGHT' },
+    });
+  });
+
+  it('keeps two app windows’ station and shift choices independent', async () => {
+    serve({ '/petrodollar/bootstrap': bootstrap([mpemba, uzunguni]) });
+    render(
+      <>
+        <section aria-label="First window">
+          <Window>
+            <PetroDollarApp />
+          </Window>
+        </section>
+        <section aria-label="Second window">
+          <Window>
+            <PetroDollarApp />
+          </Window>
+        </section>
+      </>,
+    );
+    const first = screen.getByRole('region', { name: 'First window' });
+    const second = screen.getByRole('region', { name: 'Second window' });
+    const select = await within(first).findByRole('combobox', { name: 'Station' });
+    await within(second).findByRole('region', { name: 'Report editor' });
+    fireEvent.change(select, { target: { value: uzunguni.id } });
+    expect(await within(first).findByText('report editor for Uzunguni')).toBeVisible();
+    fireEvent.click(within(first).getByRole('button', { name: 'Night' }));
+    expect(within(first).getByRole('button', { name: 'Night' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(second).getByRole('button', { name: 'Day' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(second).getByRole('region', { name: 'Report editor' })).toHaveTextContent(
+      'Mpemba',
+    );
+  });
+
+  it('keeps station management inside PetroDollar and guards unfinished station details', async () => {
+    state.search = new URLSearchParams('view=stations');
+    serve({ '/petrodollar/bootstrap': bootstrap([mpemba], true) });
+    renderApp();
+    const input = await screen.findByRole('textbox', { name: 'Station name' });
+    fireEvent.change(input, { target: { value: 'Unsaved station' } });
+    expect(screen.getByRole('button', { name: 'Shift report' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Refresh PetroDollar' })).toBeDisabled();
+    fireEvent.change(input, { target: { value: '' } });
+    expect(screen.getByRole('button', { name: 'Shift report' })).toBeEnabled();
+    expect(state.get).toHaveBeenCalledWith('/petrodollar/stations');
+    expect(screen.queryByText(/Open Itemba/)).toBeNull();
+  });
+
+  it('uses PetroDollar endpoints to configure tanks without leaving the app', async () => {
+    state.search = new URLSearchParams('view=setup');
+    serve({
+      '/petrodollar/bootstrap': bootstrap([mpemba], true),
+      '/petrodollar/workspace': { ...workspace(), products: [{ id: 'p', name: 'Petrol' }] },
+    });
+    renderApp();
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Tank code' }), {
+      target: { value: 'T2' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Tank name' }), {
+      target: { value: 'Tank 2' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Tank capacity' }), {
+      target: { value: '5000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add tank' }));
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith('/petrodollar/tanks', {
+        branchId: mpemba.id,
+        productId: 'p',
+        code: 'T2',
+        name: 'Tank 2',
+        capacityLitres: 5000,
+      }),
+    );
+    expect(await screen.findByText('Tank added for manual dipping.')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Station tanks' })).toHaveTextContent('Tank 1');
+  });
+
+  it('does not expose station administration through a manager deep link', async () => {
+    state.search = new URLSearchParams('view=stations');
+    renderApp();
+    expect(await screen.findByRole('alert')).toHaveTextContent('authorised group administrators');
+    expect(state.get).not.toHaveBeenCalledWith('/petrodollar/stations');
+    expect(screen.queryByRole('button', { name: 'Stations' })).toBeNull();
+  });
   it('opens only on a known view', () => {
     expect(petrodollarView('daily')).toBe('daily');
     expect(petrodollarView('history')).toBe('history');
@@ -132,13 +265,13 @@ describe('PetroDollar', () => {
 
   it('asks for access without fetching anything', () => {
     state.permissions = new Set();
-    render(<PetroDollarApp />);
+    renderApp();
     expect(screen.getByText(/Ask your administrator for station reporting access/)).toBeVisible();
     expect(state.get).not.toHaveBeenCalled();
   });
 
   it('shows Mwanjalisi only, with no company choice and only PetroDollar requests', async () => {
-    render(<PetroDollarApp />);
+    renderApp();
     expect(await screen.findByRole('region', { name: 'Report editor' })).toHaveTextContent(
       'report editor for Mpemba',
     );
@@ -163,7 +296,7 @@ describe('PetroDollar', () => {
 
   it('offers a station choice only when there is more than one', async () => {
     serve({ '/petrodollar/bootstrap': bootstrap([mpemba, uzunguni]) });
-    render(<PetroDollarApp />);
+    renderApp();
     const station = await screen.findByRole('combobox', { name: 'Station' });
     fireEvent.change(station, { target: { value: uzunguni.id } });
     expect(await screen.findByText('report editor for Uzunguni')).toBeVisible();
@@ -175,7 +308,7 @@ describe('PetroDollar', () => {
 
   it('explains a missing company as a set-up problem and retries', async () => {
     serve({ '/petrodollar/bootstrap': new ApiError('not set up', 503, {}) });
-    render(<PetroDollarApp />);
+    renderApp();
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'PetroDollar isn’t set up for Mwanjalisi Oil yet',
     );
@@ -187,37 +320,37 @@ describe('PetroDollar', () => {
 
   it('does not offer Mwanjalisi’s absence as a permissions problem on other failures', async () => {
     serve({ '/petrodollar/bootstrap': new Error('Network down') });
-    render(<PetroDollarApp />);
+    renderApp();
     expect(await screen.findByRole('alert')).toHaveTextContent('Network down');
     expect(screen.queryByText(/isn’t set up/)).toBeNull();
   });
 
   it('points an administrator to station set-up and everyone else to an administrator', async () => {
     serve({ '/petrodollar/bootstrap': bootstrap([], true) });
-    const { unmount } = render(<PetroDollarApp />);
+    const { unmount } = renderApp();
     expect(await screen.findByText('No station assigned')).toBeVisible();
     expect(screen.getByText(/No Mwanjalisi station is available to you/)).toBeVisible();
     expect(state.get).not.toHaveBeenCalledWith('/petrodollar/workspace', expect.anything());
     unmount();
     serve({ '/petrodollar/bootstrap': bootstrap([], false) });
-    render(<PetroDollarApp />);
+    renderApp();
     expect(await screen.findByText(/needs to assign you an active Mwanjalisi/)).toBeVisible();
   });
 
   it('does not open an editor for a station without tanks and pumps', async () => {
     serve({ '/petrodollar/workspace': workspace(false) });
-    render(<PetroDollarApp />);
+    renderApp();
     expect(await screen.findByText(/must set up this station’s tanks and pumps/)).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Report editor' })).toBeNull();
   });
 
   it('keeps Day and Night and the sections inside the same window history', async () => {
-    render(<PetroDollarApp />);
+    renderApp();
     await screen.findByRole('region', { name: 'Report editor' });
     fireEvent.click(screen.getByRole('button', { name: 'Daily summary' }));
-    expect(state.push).toHaveBeenCalledWith('/petrodollar?view=daily');
+    expect(state.push).toHaveBeenCalledWith(expect.stringContaining('view=daily'));
     fireEvent.click(screen.getByRole('button', { name: 'Shift report' }));
-    expect(state.push).toHaveBeenCalledWith('/petrodollar');
+    expect(state.push).toHaveBeenCalledWith(expect.stringMatching(/^\/petrodollar\?branchId=/));
     fireEvent.click(screen.getByRole('button', { name: 'Night' }));
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
@@ -229,7 +362,7 @@ describe('PetroDollar', () => {
 
   it('shows the daily summary view', async () => {
     state.search = new URLSearchParams('view=daily');
-    render(<PetroDollarApp />);
+    renderApp();
     expect(await screen.findByText('Daily for Mpemba')).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Report editor' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Shift' })).toBeNull();
@@ -238,7 +371,7 @@ describe('PetroDollar', () => {
   it('lists report history for the station and pages older reports', async () => {
     state.search = new URLSearchParams('view=history');
     serve({ '/petrodollar/history': history(50) });
-    render(<PetroDollarApp />);
+    renderApp();
     const table = await screen.findByRole('table');
     expect(await within(table).findAllByText('Open report →')).toHaveLength(50);
     expect(within(table).getAllByText('1,500,000.00')[0]).toBeVisible();
@@ -255,7 +388,7 @@ describe('PetroDollar', () => {
   });
 
   it('holds the window steady while a report has unsaved work or is saving', async () => {
-    render(<PetroDollarApp />);
+    renderApp();
     await screen.findByRole('region', { name: 'Report editor' });
     act(() => state.lock!(true));
     expect(screen.getByRole('button', { name: 'Daily summary' })).toBeDisabled();

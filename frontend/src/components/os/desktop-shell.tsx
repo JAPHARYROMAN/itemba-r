@@ -539,6 +539,12 @@ export function DesktopShell({
   const desktopCovered =
     !showDesktop &&
     visibleWindows.some((item) => !item.minimized && (narrow || item.mode === 'maximized'));
+  const dockSpace = appearance.autoHide ? 18 : Math.max(100, appearance.iconSize + 48);
+  const floatingInsets = {
+    left: appearance.dock === 'left' ? dockSpace : 12,
+    right: appearance.dock === 'right' ? dockSpace : 12,
+    bottom: appearance.dock === 'bottom' ? dockSpace : 14,
+  };
   const dockApps = allowedApps.filter(
     (app) =>
       workspace.pinnedApps.includes(app.id) ||
@@ -585,6 +591,7 @@ export function DesktopShell({
           data-transparency={appearance.transparency}
           data-dock={appearance.dock}
           data-auto-hide={appearance.autoHide}
+          data-workspace-covered={desktopCovered}
           data-reduced-motion={reduced}
           data-wallpaper-tone={builtInWallpaper?.tone}
         >
@@ -614,6 +621,18 @@ export function DesktopShell({
                 ITEMBA <span>OS</span>
               </strong>
             </button>
+            {desktopCovered && (
+              <button
+                className="desktop-menubar-apps"
+                aria-label="Open Apps"
+                aria-expanded={launcher}
+                title="Apps (Ctrl / ⌘ Shift L)"
+                onClick={() => setLauncher(true)}
+              >
+                <LayoutGrid size={17} />
+                <span>Apps</span>
+              </button>
+            )}
             <span className="desktop-bar-divider" aria-hidden="true" />
             <span className="desktop-current-app">
               {showDesktop ? 'Desktop' : (getApp(active?.appId ?? '')?.label ?? 'Desktop')}
@@ -836,6 +855,7 @@ export function DesktopShell({
                     concealed={concealed}
                     zIndex={10 + index}
                     area={area}
+                    floatingInsets={floatingInsets}
                     narrow={narrow}
                     reduced={reduced}
                     intensity={appearance.intensity}

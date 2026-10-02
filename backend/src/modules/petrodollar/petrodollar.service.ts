@@ -1,7 +1,14 @@
 import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ReopenFuelReportDto, SaveFuelReportDto } from '../fuel-reporting/fuel-reporting.dto';
+import {
+  CreateReportingStationDto,
+  ReportingStationDetailsDto,
+  CreateReportingPumpDto,
+  CreateReportingTankDto,
+  ReopenFuelReportDto,
+  SaveFuelReportDto,
+} from '../fuel-reporting/fuel-reporting.dto';
 import { FuelReportingService } from '../fuel-reporting/fuel-reporting.service';
 
 /** PetroDollar belongs to the group's fuel trading arm. Resolve it by code: names drift and ids differ per environment. */
@@ -75,6 +82,54 @@ export class PetroDollarService {
   async workspace(user: AuthUser, branchId: string, businessDate: string, shift: string) {
     await this.assertPinnedBranch(branchId);
     return this.fuel.workspace(user, branchId, businessDate, shift);
+  }
+
+  async stations(user: AuthUser) {
+    const pinned = await this.pinned();
+    const data = await this.fuel.stations(user);
+    const divisions = data.divisions.filter((division) => division.companyId === pinned.id);
+    const ids = new Set(divisions.map((division) => division.id));
+    return { divisions, stations: data.stations.filter((station) => ids.has(station.divisionId)) };
+  }
+
+  async createStation(user: AuthUser, dto: CreateReportingStationDto) {
+    const pinned = await this.pinned();
+    const division = await this.prisma.division.findFirst({
+      where: { id: dto.divisionId },
+      select: { companyId: true },
+    });
+    if (division && division.companyId !== pinned.id)
+      throw new NotFoundException('Division not found.');
+    return this.fuel.createStation(user, dto);
+  }
+
+  async updateStation(user: AuthUser, id: string, dto: ReportingStationDetailsDto) {
+    await this.assertPinnedBranch(id);
+    return this.fuel.updateStation(user, id, dto);
+  }
+
+  async setStationActive(user: AuthUser, id: string, active: boolean) {
+    await this.assertPinnedBranch(id);
+    return this.fuel.setStationActive(user, id, active);
+  }
+
+  async createPump(user: AuthUser, dto: CreateReportingPumpDto) {
+    await this.assertPinnedBranch(dto.branchId);
+    return this.fuel.createPump(user, dto);
+  }
+
+  async deactivatePump(user: AuthUser, id: string) {
+    const pump = await this.prisma.fuelPump.findUnique({
+      where: { id },
+      select: { branchId: true },
+    });
+    if (pump) await this.assertPinnedBranch(pump.branchId);
+    return this.fuel.deactivatePump(user, id);
+  }
+
+  async createTank(user: AuthUser, dto: CreateReportingTankDto) {
+    await this.assertPinnedBranch(dto.branchId);
+    return this.fuel.createTank(user, dto);
   }
 
   async history(user: AuthUser, branchId: string, before?: string) {

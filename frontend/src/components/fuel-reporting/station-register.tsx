@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { backendGet, backendPost } from '@/lib/api-client';
 import { Field, Section } from './report-fields';
 import { defaultFuelDivision, fuelCompanyName, DEFAULT_FUEL_COMPANY_NAME } from './default-company';
@@ -29,9 +29,13 @@ const empty = { code: '', name: '', location: '' };
 export function StationRegister({
   onChanged,
   onConfigure,
+  apiBase = '/fuel-reporting',
+  onLock,
 }: {
   onChanged: (preferredId?: string) => Promise<void>;
   onConfigure: (id: string) => void;
+  apiBase?: string;
+  onLock?: (locked: boolean) => void;
 }) {
   const [register, setRegister] = useState<Register | null>(null);
   const [divisionId, setDivisionId] = useState('');
@@ -42,9 +46,21 @@ export function StationRegister({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [reload, setReload] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
+  const original = register?.stations.find((station) => station.id === editing);
+  const dirty = editing
+    ? !!original &&
+      (form.code !== original.code ||
+        form.name !== original.name ||
+        form.location !== (original.location ?? ''))
+    : !!(form.code || form.name || form.location);
+  useEffect(() => {
+    onLock?.(dirty || busy);
+  }, [dirty, busy, onLock]);
+  useEffect(() => () => onLock?.(false), [onLock]);
   useEffect(() => {
     let cancelled = false;
-    backendGet<Register>('/fuel-reporting/stations')
+    backendGet<Register>(`${apiBase}/stations`)
       .then((data) => {
         if (cancelled) return;
         setRegister(data);
@@ -59,7 +75,7 @@ export function StationRegister({
     return () => {
       cancelled = true;
     };
-  }, [reload]);
+  }, [reload, apiBase]);
   async function run(action: () => Promise<string | undefined>, message: string) {
     if (busy) return;
     setBusy(true);
@@ -69,7 +85,7 @@ export function StationRegister({
       const preferred = await action();
       setForm(empty);
       setEditing(null);
-      const updated = await backendGet<Register>('/fuel-reporting/stations');
+      const updated = await backendGet<Register>(`${apiBase}/stations`);
       setRegister(updated);
       resetNewStation(updated);
       await onChanged(preferred);
@@ -95,7 +111,7 @@ export function StationRegister({
       <div className="fr-day-heading">
         <div>
           <h2>Station management</h2>
-          <p>Add and maintain the stations available in Fuel Reporting.</p>
+          <p>Add and maintain the stations available in PetroDollar.</p>
         </div>
       </div>
       <p className="fr-notice">
@@ -121,14 +137,13 @@ export function StationRegister({
       {register && (
         <>
           <form
+            ref={formRef}
             onSubmit={(e) => {
               e.preventDefault();
               void run(
                 async () => {
                   const station = await backendPost<Station>(
-                    editing
-                      ? `/fuel-reporting/stations/${editing}/update`
-                      : '/fuel-reporting/stations',
+                    editing ? `${apiBase}/stations/${editing}/update` : `${apiBase}/stations`,
                     editing ? form : { ...form, divisionId },
                   );
                   return station.isActive ? station.id : undefined;
@@ -144,7 +159,7 @@ export function StationRegister({
                 {!editing && !defaultFuelDivision(register.divisions) && (
                   <p className="fr-notice">
                     {DEFAULT_FUEL_COMPANY_NAME} has no available division for your account. Ask an
-                    administrator to check company access, or select another company explicitly.
+                    administrator to check company access and division setup.
                   </p>
                 )}
                 <div className="fr-grid">
@@ -244,7 +259,12 @@ export function StationRegister({
             {!register.stations.length ? (
               <p>No stations yet. Add the first station above.</p>
             ) : (
-              <div className="fr-table-scroll">
+              <div
+                className="fr-table-scroll"
+                role="region"
+                aria-label="Station register"
+                tabIndex={0}
+              >
                 <table>
                   <thead>
                     <tr>
@@ -278,7 +298,7 @@ export function StationRegister({
                                 <button
                                   type="button"
                                   className="fr-text-button"
-                                  disabled={busy}
+                                  disabled={busy || dirty}
                                   onClick={() => onConfigure(station.id)}
                                 >
                                   Configure
@@ -287,7 +307,7 @@ export function StationRegister({
                               <button
                                 type="button"
                                 className="fr-text-button"
-                                disabled={busy}
+                                disabled={busy || dirty}
                                 onClick={() => {
                                   setEditing(station.id);
                                   setForm({
@@ -298,9 +318,7 @@ export function StationRegister({
                                   setDivisionId(station.divisionId);
                                   setCompanyId(division?.companyId ?? '');
                                   setNotice('');
-                                  window.document
-                                    .querySelector('.fr-content')
-                                    ?.scrollIntoView({ behavior: 'smooth' });
+                                  formRef.current?.scrollIntoView({ block: 'start' });
                                 }}
                               >
                                 Edit station
@@ -308,19 +326,19 @@ export function StationRegister({
                               <button
                                 type="button"
                                 className="fr-text-button"
-                                disabled={busy}
+                                disabled={busy || dirty}
                                 onClick={() => {
                                   if (
                                     station.isActive &&
                                     !window.confirm(
-                                      `Remove ${station.name} from active stations in Fuel Reporting and Itemba? Its records will be retained. Close draft reports first.`,
+                                      `Remove ${station.name} from active stations in PetroDollar and Itemba? Its records will be retained. Close draft reports first.`,
                                     )
                                   )
                                     return;
                                   void run(
                                     async () => {
                                       await backendPost(
-                                        `/fuel-reporting/stations/${station.id}/${station.isActive ? 'deactivate' : 'restore'}`,
+                                        `${apiBase}/stations/${station.id}/${station.isActive ? 'deactivate' : 'restore'}`,
                                       );
                                       return station.isActive ? undefined : station.id;
                                     },

@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { getApp } from '@/lib/apps';
 import { DesktopWindowFrame } from './desktop-window';
+import type { DesktopWindow } from '@/lib/desktop';
 
 it('closes or minimises an inactive window without first navigating to it', () => {
   const focus = vi.fn(),
@@ -103,4 +104,63 @@ it('does not offer unusable arrangement commands on compact displays', async () 
   await user.click(screen.getByRole('button', { name: 'Records window actions' }));
   expect(screen.queryByRole('menuitem', { name: 'Left half' })).not.toBeInTheDocument();
   expect(screen.getByRole('menuitem', { name: 'New Records window' })).toHaveFocus();
+});
+
+it('keeps text untransformed and preserves focused inputs through resize, maximise and restore', async () => {
+  const window: DesktopWindow = {
+    id: 'clear-window',
+    appId: 'records',
+    href: '/records',
+    minimized: false,
+    mode: 'floating',
+    bounds: { x: 70.4, y: 28.6, width: 900.6, height: 600.3 },
+  };
+  const frame = (item: DesktopWindow) => (
+    <DesktopWindowFrame
+      window={item}
+      app={getApp('records')!}
+      active
+      concealed={false}
+      zIndex={1}
+      area={{ width: 1440, height: 900 }}
+      narrow={false}
+      reduced
+      intensity={1}
+      onFocus={() => undefined}
+      onChange={() => undefined}
+      onClose={() => undefined}
+    >
+      <input aria-label="Work in progress" />
+    </DesktopWindowFrame>
+  );
+  const { rerender } = render(frame(window));
+  const surface = screen.getByRole('region', { name: 'Records window' });
+  expect(surface).toHaveStyle({
+    left: '70px',
+    top: '29px',
+    width: '901px',
+    height: '600px',
+    transform: 'none',
+    willChange: 'auto',
+  });
+  const input = screen.getByLabelText('Work in progress');
+  await userEvent.setup().type(input, 'Unfinished supplier note');
+  rerender(frame({ ...window, mode: 'maximized' }));
+  await waitFor(() =>
+    expect(surface).toHaveStyle({
+      left: '0px',
+      top: '0px',
+      width: '1440px',
+      height: '900px',
+      transform: 'none',
+    }),
+  );
+  expect(surface).toHaveAttribute('data-window-mode', 'maximized');
+  rerender(frame({ ...window, bounds: { ...window.bounds, width: 642.4, height: 510.8 } }));
+  await waitFor(() =>
+    expect(surface).toHaveStyle({ width: '642px', height: '511px', transform: 'none' }),
+  );
+  expect(surface).toHaveAttribute('data-window-mode', 'floating');
+  expect(input).toHaveValue('Unfinished supplier note');
+  expect(input).toHaveFocus();
 });

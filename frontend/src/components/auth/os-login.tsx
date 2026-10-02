@@ -41,9 +41,9 @@ export function OsLogin() {
       </div>
       <footer>
         <span>ITEMBA GROUP</span>
-        <nav aria-label="Other workspaces">
-          <Link href="/fuel-reporting">
-            <Fuel size={14} /> Fuel Reporting <ArrowUpRight size={12} />
+        <nav aria-label="Workspace apps">
+          <Link href="/petrodollar">
+            <Fuel size={14} /> PetroDollar <ArrowUpRight size={12} />
           </Link>
           <Link href="/westsides/mobile-pos/install">
             <Smartphone size={14} /> Install mobile POS <ArrowUpRight size={12} />

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { legacyFuelReportingHref } from './lib/petrodollar-navigation';
 
 /** Public routes that do not require authentication. */
 // /api/backend/* is excluded: the proxy route handler validates auth via the
@@ -19,9 +20,14 @@ const PUBLIC_PATHS = [
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  if (pathname === '/fuel-reporting' || pathname.startsWith('/fuel-reporting/')) {
+    return NextResponse.redirect(
+      new URL(legacyFuelReportingHref(pathname, req.nextUrl.searchParams), req.url),
+    );
+  }
+
   // Allow all public routes and static files
   if (
-    pathname === '/fuel-reporting/login' ||
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
@@ -35,10 +41,7 @@ export function proxy(req: NextRequest) {
 
   if (!isAuthenticated) {
     const loginUrl = req.nextUrl.clone();
-    loginUrl.pathname =
-      pathname === '/fuel-reporting' || pathname.startsWith('/fuel-reporting/')
-        ? '/fuel-reporting/login'
-        : '/login';
+    loginUrl.pathname = '/login';
     // Keep the query string inside `from` so deep links survive login — e.g.
     // the POS activation QR (?terminal=…&code=…) must not force reps to
     // retype codes after signing in.

@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { backendPost } from '@/lib/api-client';
 import type { Workspace } from './types';
 import { Field, Numeric, Section } from './report-fields';
@@ -8,10 +8,14 @@ export function StationSetup({
   branchId,
   workspace,
   refresh,
+  apiBase = '/fuel-reporting',
+  onLock,
 }: {
   branchId: string;
   workspace: Workspace;
   refresh: () => Promise<void>;
+  apiBase?: string;
+  onLock?: (locked: boolean) => void;
 }) {
   const [pump, setPump] = useState({
     code: '',
@@ -27,7 +31,21 @@ export function StationSetup({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const dirty = !!(
+    pump.code ||
+    pump.name ||
+    pump.nozzles.some((n) => n.code) ||
+    pump.nozzles.length > 1 ||
+    tank.code ||
+    tank.name ||
+    tank.capacityLitres
+  );
+  useEffect(() => {
+    onLock?.(dirty || busy);
+  }, [dirty, busy, onLock]);
+  useEffect(() => () => onLock?.(false), [onLock]);
   async function run(action: () => Promise<unknown>, message: string) {
+    if (busy) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -58,12 +76,13 @@ export function StationSetup({
         </p>
       ) : null}
       <Section title="Branch pumps">
-        <div className="fr-table-scroll">
+        <div className="fr-table-scroll" role="region" aria-label="Station pumps" tabIndex={0}>
           <table>
             <thead>
               <tr>
                 <th>Code</th>
                 <th>Pump</th>
+                <th>Nozzle connections</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
@@ -73,12 +92,21 @@ export function StationSetup({
                 <tr key={p.id}>
                   <td>{p.pumpCode}</td>
                   <td>{p.pumpName}</td>
+                  <td>
+                    {workspace.catalog.nozzles
+                      .filter((n) => n.pumpId === p.id)
+                      .map((n) => (
+                        <div key={n.id}>
+                          {n.nozzleCode} · {n.productName}
+                        </div>
+                      ))}
+                  </td>
                   <td>{p.status === 'ACTIVE' ? 'Active' : 'Inactive'}</td>
                   <td>
                     {p.status === 'ACTIVE' ? (
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || dirty}
                         className="fr-text-button"
                         onClick={() => {
                           if (
@@ -87,7 +115,7 @@ export function StationSetup({
                             )
                           )
                             void run(
-                              () => backendPost(`/fuel-reporting/pumps/${p.id}/deactivate`),
+                              () => backendPost(`${apiBase}/pumps/${p.id}/deactivate`),
                               'Pump removed from future shifts.',
                             );
                         }}
@@ -108,7 +136,7 @@ export function StationSetup({
         onSubmit={(e) => {
           e.preventDefault();
           void run(async () => {
-            await backendPost('/fuel-reporting/pumps', { ...pump, branchId });
+            await backendPost(`${apiBase}/pumps`, { ...pump, branchId });
             setPump({
               code: '',
               name: '',
@@ -216,18 +244,43 @@ export function StationSetup({
           </Section>
         </fieldset>
       </form>
+      <Section title="Station tanks" detail="Current tank capacities and fuel connections.">
+        <div className="fr-table-scroll" role="region" aria-label="Station tanks" tabIndex={0}>
+          <table>
+            <thead>
+              <tr>
+                <th>Tank</th>
+                <th>Fuel product</th>
+                <th>Capacity · litres</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workspace.catalog.tanks.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.tankName}</td>
+                  <td>{t.productName}</td>
+                  <td>{t.capacityLitres.toLocaleString('en-TZ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!workspace.catalog.tanks.length && (
+          <p>No tanks yet. Add the first tank below, then connect its pump nozzles.</p>
+        )}
+      </Section>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void run(async () => {
-            await backendPost('/fuel-reporting/tanks', { ...tank, branchId });
+            await backendPost(`${apiBase}/tanks`, { ...tank, branchId });
             setTank({ ...tank, code: '', name: '', capacityLitres: 0 });
           }, 'Tank added for manual dipping.');
         }}
       >
         <fieldset disabled={busy}>
           <Section
-            title="Tank register"
+            title="Add tank"
             detail="Tanks are used for mandatory shift dipping. Fuel deliveries remain recorded by fuel type."
           >
             <div className="fr-grid">

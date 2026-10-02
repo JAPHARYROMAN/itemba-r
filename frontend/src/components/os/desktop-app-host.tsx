@@ -9,6 +9,7 @@ import {
   useWorkspacePathname,
 } from '@/components/workspace/workspace-navigation';
 import { appForPath } from '@/lib/apps';
+import { preservesPetroDollarEditor } from '@/lib/petrodollar-navigation';
 import { AppNavigation } from './app-navigation';
 import {
   AppSurface,
@@ -143,7 +144,13 @@ export const DesktopAppHost = memo(function DesktopAppHost({
         initialHref={href}
         ownsPath={(path) => desktopAppForPath(path) === appId}
         onHrefChange={onHrefChange}
-        preservesContent={appId === 'pos' ? preservesPosCounter : undefined}
+        preservesContent={
+          appId === 'pos'
+            ? preservesPosCounter
+            : appId === 'petrodollar'
+              ? preservesPetroDollarEditor
+              : undefined
+        }
       >
         <Surface appId={appId} />
       </WorkspaceNavigationProvider>

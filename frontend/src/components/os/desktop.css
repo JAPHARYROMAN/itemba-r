@@ -67,6 +67,8 @@
   position: relative;
   height: 100dvh;
   overflow: hidden;
+  /* Off-screen animation/focus targets must not scroll the desktop itself. */
+  overflow: clip;
   color: var(--desktop-ink);
   isolation: isolate;
   background: #8a8bc0;
@@ -214,6 +216,20 @@
   font-size: 13px;
   font-weight: 600;
 }
+.desktop-menubar-apps {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 6px;
+  border-radius: 8px;
+}
+.desktop-menubar-apps:hover {
+  background: var(--desktop-control-hover, #78839a1f);
+}
 .desktop-bar-divider {
   flex: none;
   width: 1px;
@@ -307,17 +323,9 @@
 }
 .desktop-workspace {
   position: relative;
-  height: calc(100dvh - 142px);
-  margin: 0 12px;
+  height: calc(100dvh - 42px);
+  margin: 0;
   outline: none;
-}
-.itemba-desktop[data-dock='left'] .desktop-workspace {
-  margin-left: 108px;
-  height: calc(100dvh - 56px);
-}
-.itemba-desktop[data-dock='right'] .desktop-workspace {
-  margin-right: 108px;
-  height: calc(100dvh - 56px);
 }
 .desktop-home {
   height: 100%;
@@ -512,6 +520,7 @@
     0 12px 40px #17243b28,
     0 2px 8px #17243b18;
   overflow: hidden;
+  overflow: clip;
   outline: none;
   transform-origin: 50% 100%;
   container-type: inline-size;
@@ -522,6 +531,11 @@
     0 28px 80px #17243b40,
     0 4px 16px #17243b2e;
   border-color: #ffffffa6;
+}
+.desktop-window[data-window-mode='maximized'] {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .dark .desktop-window {
   border-color: #ffffff24;
@@ -702,6 +716,9 @@
   border-radius: 14px;
   padding: 16px;
   width: min(320px, 95%);
+  max-height: calc(100% - 57px);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .desktop-window-menu p {
   font-size: 11px;
@@ -1113,6 +1130,9 @@
   max-width: 100%;
 }
 @media (max-width: 550px) {
+  .desktop-menubar-apps span {
+    display: none;
+  }
   .desktop-window-context {
     display: none;
   }
@@ -1687,7 +1707,7 @@
   .itemba-desktop[data-dock='left'] .desktop-workspace,
   .itemba-desktop[data-dock='right'] .desktop-workspace {
     margin: 0;
-    height: calc(100dvh - 130px);
+    height: calc(100dvh - 42px);
   }
   .desktop-window {
     border-radius: 12px;
@@ -1800,6 +1820,43 @@
   }
   [role='dialog']:has(.desktop-launcher) {
     --launcher-gap: max(88px, env(safe-area-inset-bottom));
+  }
+}
+/* Maximised apps use the full workspace. Keep the dock available at the edge
+   and by keyboard without reserving an empty strip around the app. */
+.itemba-desktop[data-workspace-covered='true'][data-dock='bottom'] .desktop-dock {
+  bottom: 0;
+  transform: translate(-50%, calc(100% - 6px));
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.itemba-desktop[data-workspace-covered='true'][data-dock='left'] .desktop-dock {
+  left: 0;
+  transform: translate(calc(-100% + 6px), -50%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.itemba-desktop[data-workspace-covered='true'][data-dock='right'] .desktop-dock {
+  right: 0;
+  transform: translate(calc(100% - 6px), -50%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.itemba-desktop[data-workspace-covered='true'][data-dock='bottom']
+  .desktop-dock:is(:hover, :focus-within) {
+  transform: translate(-50%, 0);
+}
+.itemba-desktop[data-workspace-covered='true']:not([data-dock='bottom'])
+  .desktop-dock:is(:hover, :focus-within) {
+  transform: translate(0, -50%);
+}
+@media (max-width: 999px) {
+  .itemba-desktop[data-workspace-covered='true'][data-dock] .desktop-dock {
+    bottom: 0;
+    left: 50%;
+    right: auto;
+    transform: translate(-50%, calc(100% - 6px));
+  }
+  .itemba-desktop[data-workspace-covered='true'][data-dock]
+    .desktop-dock:is(:hover, :focus-within) {
+    transform: translate(-50%, 0);
   }
 }
 @media (max-width: 550px) {

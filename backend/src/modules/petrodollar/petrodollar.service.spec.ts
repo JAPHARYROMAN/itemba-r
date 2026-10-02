@@ -1,7 +1,13 @@
-import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ReopenFuelReportDto, SaveFuelReportDto } from '../fuel-reporting/fuel-reporting.dto';
+import {
+  CreateReportingStationDto,
+  CreateReportingPumpDto,
+  CreateReportingTankDto,
+  ReopenFuelReportDto,
+  SaveFuelReportDto,
+} from '../fuel-reporting/fuel-reporting.dto';
 import { FuelReportingService } from '../fuel-reporting/fuel-reporting.service';
 import { PETRODOLLAR_COMPANY_CODE, PetroDollarService } from './petrodollar.service';
 
@@ -16,6 +22,8 @@ describe('PetroDollar company pin', () => {
   const prisma = {
     company: { findFirst: jest.fn() },
     branch: { findFirst: jest.fn() },
+    division: { findFirst: jest.fn() },
+    fuelPump: { findUnique: jest.fn() },
     fuelReport: { findUnique: jest.fn() },
   };
   const fuel = {
@@ -25,6 +33,13 @@ describe('PetroDollar company pin', () => {
     revisions: jest.fn(),
     save: jest.fn(),
     reopen: jest.fn(),
+    stations: jest.fn(),
+    createStation: jest.fn(),
+    updateStation: jest.fn(),
+    setStationActive: jest.fn(),
+    createPump: jest.fn(),
+    deactivatePump: jest.fn(),
+    createTank: jest.fn(),
   };
   let service: PetroDollarService;
   const companyOf = { [ownBranch]: mwanjalisi, [foreignBranch]: other } as Record<string, string>;
@@ -143,5 +158,69 @@ describe('PetroDollar company pin', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('filters station administration to Mwanjalisi divisions, including inactive stations', async () => {
+    fuel.stations.mockResolvedValue({
+      divisions: [
+        { id: 'own', companyId: mwanjalisi },
+        { id: 'foreign', companyId: other },
+      ],
+      stations: [
+        { id: ownBranch, divisionId: 'own', isActive: false },
+        { id: foreignBranch, divisionId: 'foreign' },
+      ],
+    });
+    const data = await service.stations(user);
+    expect(data.divisions).toEqual([{ id: 'own', companyId: mwanjalisi }]);
+    expect(data.stations).toEqual([{ id: ownBranch, divisionId: 'own', isActive: false }]);
+  });
+
+  it('rejects foreign station and hardware mutations before delegation', async () => {
+    prisma.division.findFirst.mockResolvedValue({ companyId: other });
+    prisma.fuelPump.findUnique.mockResolvedValue({ branchId: foreignBranch });
+    await expect(
+      service.createStation(user, { divisionId: report } as CreateReportingStationDto),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.updateStation(user, foreignBranch, { code: 'x', name: 'x', location: '' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.setStationActive(user, foreignBranch, false)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.setStationActive(user, foreignBranch, true)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.createPump(user, { branchId: foreignBranch } as CreateReportingPumpDto),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deactivatePump(user, report)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.createTank(user, { branchId: foreignBranch } as CreateReportingTankDto),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    for (const call of Object.values(fuel)) expect(call).not.toHaveBeenCalled();
+  });
+
+  it('retains the engine’s administrator and organisation access enforcement', async () => {
+    prisma.division.findFirst.mockResolvedValue({ companyId: mwanjalisi });
+    prisma.fuelPump.findUnique.mockResolvedValue({ branchId: ownBranch });
+    const station = { divisionId: report, code: 'new', name: 'New station', location: '' };
+    await service.createStation(user, station);
+    await service.updateStation(user, ownBranch, {
+      code: 'updated',
+      name: 'Updated station',
+      location: '',
+    });
+    await service.setStationActive(user, ownBranch, false);
+    await service.setStationActive(user, ownBranch, true);
+    await service.createPump(user, { branchId: ownBranch } as CreateReportingPumpDto);
+    await service.deactivatePump(user, report);
+    await service.createTank(user, { branchId: ownBranch } as CreateReportingTankDto);
+    expect(fuel.createStation).toHaveBeenCalledWith(user, station);
+    expect(fuel.setStationActive).toHaveBeenCalledWith(user, ownBranch, false);
+    expect(fuel.setStationActive).toHaveBeenCalledWith(user, ownBranch, true);
+    expect(fuel.deactivatePump).toHaveBeenCalledWith(user, report);
+    fuel.stations.mockRejectedValue(new ForbiddenException('Administrator required'));
+    await expect(service.stations(user)).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
