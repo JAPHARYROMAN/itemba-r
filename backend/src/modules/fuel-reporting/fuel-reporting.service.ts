@@ -89,8 +89,18 @@ export class FuelReportingService {
     return branch;
   }
 
-  async bootstrap(user: AuthUser) {
-    const companyIds = await this.scope.accessibleCompanyIds(user);
+  private async reportingCompanyIds(user: AuthUser, companyId?: string) {
+    if (companyId) {
+      // A pinned app is an explicit company request, not an unfiltered group list.
+      // Group READ access must not imply permission to create or change stations.
+      await this.scope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
+      return [companyId];
+    }
+    return this.scope.accessibleCompanyIds(user);
+  }
+
+  async bootstrap(user: AuthUser, companyId?: string) {
+    const companyIds = await this.reportingCompanyIds(user, companyId);
     const restricted =
       !this.isAdmin(user) &&
       (user.roles.includes('BRANCH_MANAGER') || user.roleScopes?.every((s) => s === 'BRANCH'));
@@ -424,9 +434,27 @@ export class FuelReportingService {
     });
   }
 
-  async stations(user: AuthUser) {
+  async stations(user: AuthUser, companyId?: string) {
     this.assertAdmin(user);
-    const companyIds = await this.scope.accessibleCompanyIds(user);
+    const requestedIds = await this.reportingCompanyIds(user, companyId);
+    const companies = await this.prisma.company.findMany({
+      where: { id: { in: requestedIds }, deletedAt: null, status: 'ACTIVE' },
+      select: { id: true, code: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    const companyIds = companies.map((company) => company.id);
+    const access = await Promise.all(
+      companies.map(async (company) => {
+        let canManageStations = true;
+        try {
+          await this.scope.assertCanAccessCompany(user, company.id, AccessLevel.WRITE);
+        } catch (error) {
+          if (!(error instanceof ForbiddenException)) throw error;
+          canManageStations = false;
+        }
+        return { ...company, canManageStations };
+      }),
+    );
     const divisions = await this.prisma.division.findMany({
       where: {
         deletedAt: null,
@@ -454,6 +482,7 @@ export class FuelReportingService {
       },
     });
     return {
+      companies: access,
       divisions: divisions.map((d) => ({
         id: d.id,
         name: d.name,

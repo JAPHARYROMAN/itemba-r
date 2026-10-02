@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { backendGet, backendPost } from '@/lib/api-client';
 import { Field, Section } from './report-fields';
-import { defaultFuelDivision, fuelCompanyName, DEFAULT_FUEL_COMPANY_NAME } from './default-company';
+import { fuelCompanyName, DEFAULT_FUEL_COMPANY_CODE } from './default-company';
+
+interface Company {
+  id: string;
+  name: string;
+  code: string;
+  canManageStations: boolean;
+}
 
 interface Division {
   id: string;
@@ -21,10 +28,33 @@ interface Station {
   isActive: boolean;
 }
 interface Register {
+  companies?: Company[];
   divisions: Division[];
   stations: Station[];
 }
 const empty = { code: '', name: '', location: '' };
+
+function stationCompanies(data: Register): Company[] {
+  // Accept the previous response shape while frontend and API releases roll out.
+  return (
+    data.companies ??
+    [...new Map(data.divisions.map((d) => [d.companyId, d])).values()].map((d) => ({
+      id: d.companyId,
+      name: fuelCompanyName(d),
+      code: d.companyCode,
+      canManageStations: true,
+    }))
+  );
+}
+
+function defaultStationScope(data: Register) {
+  const companies = stationCompanies(data);
+  const company = companies.find((c) => c.code === DEFAULT_FUEL_COMPANY_CODE) ?? companies[0];
+  return {
+    companyId: company?.id ?? '',
+    divisionId: data.divisions.find((d) => d.companyId === company?.id)?.id ?? '',
+  };
+}
 
 export function StationRegister({
   onChanged,
@@ -64,9 +94,9 @@ export function StationRegister({
       .then((data) => {
         if (cancelled) return;
         setRegister(data);
-        const first = defaultFuelDivision(data.divisions);
-        setDivisionId(first?.id ?? '');
-        setCompanyId(first?.companyId ?? '');
+        const initial = defaultStationScope(data);
+        setDivisionId(initial.divisionId);
+        setCompanyId(initial.companyId);
         setError('');
       })
       .catch((e) => {
@@ -97,15 +127,19 @@ export function StationRegister({
     }
   }
   function resetNewStation(data: Register) {
-    const defaultDivision = defaultFuelDivision(data.divisions);
+    const initial = defaultStationScope(data);
     setEditing(null);
     setForm(empty);
-    setCompanyId(defaultDivision?.companyId ?? '');
-    setDivisionId(defaultDivision?.id ?? '');
+    setCompanyId(initial.companyId);
+    setDivisionId(initial.divisionId);
   }
-  const companies = [
-    ...new Map(register?.divisions.map((d) => [d.companyId, fuelCompanyName(d)]) ?? []).entries(),
-  ];
+  const companies = register ? stationCompanies(register) : [];
+  const selectedCompany = companies.find((company) => company.id === companyId);
+  const canManage = selectedCompany?.canManageStations ?? false;
+  const availableDivisions = register?.divisions.filter((d) => d.companyId === companyId) ?? [];
+  const companyName = selectedCompany
+    ? fuelCompanyName({ companyCode: selectedCompany.code, companyName: selectedCompany.name })
+    : '';
   return (
     <div>
       <div className="fr-day-heading">
@@ -140,6 +174,7 @@ export function StationRegister({
             ref={formRef}
             onSubmit={(e) => {
               e.preventDefault();
+              if (!canManage || !divisionId) return;
               void run(
                 async () => {
                   const station = await backendPost<Station>(
@@ -156,12 +191,18 @@ export function StationRegister({
           >
             <fieldset disabled={busy}>
               <Section title={editing ? 'Edit station' : 'Add station'}>
-                {!editing && !defaultFuelDivision(register.divisions) && (
-                  <p className="fr-notice">
-                    {DEFAULT_FUEL_COMPANY_NAME} has no available division for your account. Ask an
-                    administrator to check company access and division setup.
+                {!canManage ? (
+                  <p className="fr-notice" role="status">
+                    {selectedCompany
+                      ? `You have read-only access to ${companyName}. Company write access is required to add, edit or configure stations. Ask an administrator to update your company access.`
+                      : 'No company is available for your account. Ask an administrator to check your company access.'}
                   </p>
-                )}
+                ) : !availableDivisions.length ? (
+                  <p className="fr-notice" role="status">
+                    No active division is available for {companyName}. Add or activate a division in
+                    organisation settings before adding a station.
+                  </p>
+                ) : null}
                 <div className="fr-grid">
                   <Field label="Station company">
                     <select
@@ -176,9 +217,12 @@ export function StationRegister({
                       }}
                     >
                       <option value="">Select company</option>
-                      {companies.map(([id, name]) => (
-                        <option key={id} value={id}>
-                          {name}
+                      {companies.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {fuelCompanyName({
+                            companyCode: company.code,
+                            companyName: company.name,
+                          })}
                         </option>
                       ))}
                     </select>
@@ -186,23 +230,22 @@ export function StationRegister({
                   <Field label="Station division">
                     <select
                       required
-                      disabled={!!editing}
+                      disabled={!!editing || !availableDivisions.length}
                       value={divisionId}
                       onChange={(e) => setDivisionId(e.target.value)}
                     >
                       <option value="">Select division</option>
-                      {register.divisions
-                        .filter((d) => d.companyId === companyId)
-                        .map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name}
-                          </option>
-                        ))}
+                      {availableDivisions.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Station code">
                     <input
                       required
+                      disabled={!canManage || !divisionId}
                       maxLength={60}
                       value={form.code}
                       onChange={(e) => setForm({ ...form, code: e.target.value })}
@@ -212,6 +255,7 @@ export function StationRegister({
                   <Field label="Station name">
                     <input
                       required
+                      disabled={!canManage || !divisionId}
                       maxLength={160}
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -220,6 +264,7 @@ export function StationRegister({
                   </Field>
                   <Field label="Station location">
                     <input
+                      disabled={!canManage || !divisionId}
                       maxLength={300}
                       value={form.location}
                       onChange={(e) => setForm({ ...form, location: e.target.value })}
@@ -227,14 +272,8 @@ export function StationRegister({
                     />
                   </Field>
                 </div>
-                {!register.divisions.length && (
-                  <p className="fr-notice">
-                    No active company division is available. Create a company division in Itemba
-                    before adding its stations.
-                  </p>
-                )}
                 <div className="fr-actions">
-                  <button type="submit" className="fr-primary" disabled={!divisionId}>
+                  <button type="submit" className="fr-primary" disabled={!divisionId || !canManage}>
                     {busy ? 'Saving…' : editing ? 'Save station' : 'Add station'}
                   </button>
                   {editing && (
@@ -257,7 +296,11 @@ export function StationRegister({
             detail={`${register.stations.filter((s) => s.isActive).length} active · ${register.stations.filter((s) => !s.isActive).length} removed`}
           >
             {!register.stations.length ? (
-              <p>No stations yet. Add the first station above.</p>
+              <p>
+                {canManage && divisionId
+                  ? 'No stations yet. Add the first station above.'
+                  : 'No stations to display.'}
+              </p>
             ) : (
               <div
                 className="fr-table-scroll"
@@ -278,6 +321,9 @@ export function StationRegister({
                   <tbody>
                     {register.stations.map((station) => {
                       const division = register.divisions.find((d) => d.id === station.divisionId);
+                      const canChangeStation =
+                        companies.find((company) => company.id === division?.companyId)
+                          ?.canManageStations ?? false;
                       return (
                         <tr key={station.id}>
                           <td>
@@ -298,7 +344,7 @@ export function StationRegister({
                                 <button
                                   type="button"
                                   className="fr-text-button"
-                                  disabled={busy || dirty}
+                                  disabled={busy || dirty || !canChangeStation}
                                   onClick={() => onConfigure(station.id)}
                                 >
                                   Configure
@@ -307,7 +353,7 @@ export function StationRegister({
                               <button
                                 type="button"
                                 className="fr-text-button"
-                                disabled={busy || dirty}
+                                disabled={busy || dirty || !canChangeStation}
                                 onClick={() => {
                                   setEditing(station.id);
                                   setForm({
@@ -326,7 +372,7 @@ export function StationRegister({
                               <button
                                 type="button"
                                 className="fr-text-button"
-                                disabled={busy || dirty}
+                                disabled={busy || dirty || !canChangeStation}
                                 onClick={() => {
                                   if (
                                     station.isActive &&
