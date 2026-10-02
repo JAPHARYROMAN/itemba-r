@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PayablesService } from './payables.service';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
 
 const user = { id: 'user-1' } as any;
 
@@ -39,7 +40,26 @@ function makeService(
       }),
       groupBy: jest.fn().mockResolvedValue([]),
     },
-    supplier: { updateMany: jest.fn() },
+    supplier: {
+      updateMany: jest.fn(),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'supplier-1', name: 'Acme', divisionId: null, branchId: null }),
+    },
+    supplierPayment: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn(async ({ data }: any) => ({
+        id: 'spay-1',
+        paymentNumber: 'SPAY-1',
+        ...data,
+      })),
+      update: jest.fn(async ({ data }: any) => ({
+        id: 'spay-1',
+        paymentNumber: 'SPAY-1',
+        ...data,
+      })),
+    },
+    supplierInvoice: { findMany: jest.fn().mockResolvedValue([]) },
     cashAccount: {
       // Default: an active CASH_ON_HAND till in the same company and currency.
       // Individual tests override for BANK / cross-company / cross-currency
@@ -82,13 +102,23 @@ function makeService(
     log: jest.fn().mockResolvedValue(undefined),
     logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
   } as any;
+  const codes = { next: jest.fn() } as any;
+  const supplierPayments = new SupplierPaymentsService(
+    prisma,
+    auditLogs,
+    companyScope,
+    { resolve } as any,
+    postingEngine,
+    codes,
+  );
   const service = new PayablesService(
     prisma,
     auditLogs,
     companyScope,
     { resolve } as any,
     postingEngine,
-    { next: jest.fn() } as any,
+    codes,
+    supplierPayments,
   );
   // Stub findOne (used by writeOff to load the payable before the tx).
   jest

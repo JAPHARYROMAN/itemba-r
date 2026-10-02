@@ -132,6 +132,10 @@ export const ALL_PERMISSIONS: PermDef[] = [
   // 'customer-payments.view'/'customer-payments.manage') — granted wherever
   // receivables view/manage is granted (via FINANCE_MODULES).
   ...perms('customer-payments', ['view', 'manage']),
+  // Codes enforced by supplier-payments.controller.ts (@RequirePermissions
+  // 'supplier-payments.view'/'supplier-payments.manage') — granted wherever
+  // payables view/manage is granted (via FINANCE_MODULES).
+  ...perms('supplier-payments', ['view', 'manage']),
   ...perms('payables', ['view', 'manage']),
   ...perms('intercompany', ['view', 'manage', 'approve', 'post']),
 
@@ -853,6 +857,7 @@ const FINANCE_MODULES = [
   'receivables',
   'customer-payments',
   'payables',
+  'supplier-payments',
   'intercompany',
 ];
 

@@ -322,7 +322,9 @@ export class CashDeskService {
           'Sales Desk receipts already cover this account and date. Record the remaining sales in Sales Desk to avoid counting receipts twice.',
         );
       let loanId = d.loanId,
-        invoicePaymentId: string | undefined;
+        invoicePaymentId: string | undefined,
+        supplierPaymentId: string | null = null,
+        movementSupplierId: string | null = null;
       let loanAllocation: ReturnType<typeof allocateLoanPayment> | undefined;
       if (d.kind === 'LOAN') {
         const loan = await tx.cashDeskLoan.create({
@@ -389,6 +391,7 @@ export class CashDeskService {
           if (await tx.cashDeskMovement.findUnique({ where: { invoicePaymentId: payment.id } }))
             throw new ConflictException('This payment is already linked to Cash Desk.');
           invoicePaymentId = payment.id;
+          supplierPaymentId = payment.supplierPaymentId ?? null;
         } else {
           if (!d.invoiceVersion)
             throw new BadRequestException('Refresh the invoice before recording payment.');
@@ -408,7 +411,15 @@ export class CashDeskService {
             reference: d.reference,
           });
           invoicePaymentId = payment.id;
+          supplierPaymentId = payment.supplierPaymentId ?? null;
         }
+      }
+      if (supplierPaymentId) {
+        const supplierPayment = await tx.supplierPayment.findUnique({
+          where: { id: supplierPaymentId },
+          select: { supplierId: true },
+        });
+        movementSupplierId = supplierPayment?.supplierId ?? null;
       }
       const movement = await tx.cashDeskMovement.create({
         data: {
@@ -430,9 +441,17 @@ export class CashDeskService {
           loanInterest: loanAllocation?.interest,
           loanFees: loanAllocation?.fees,
           invoicePaymentId,
+          supplierPaymentId,
+          supplierId: movementSupplierId,
+          partyType: movementSupplierId ? 'SUPPLIER' : 'NONE',
           dailySalesKey: d.kind === 'DAILY_SALES' ? `${account.id}:${d.businessDate}` : null,
         },
       });
+      if (supplierPaymentId)
+        await tx.supplierPayment.update({
+          where: { id: supplierPaymentId },
+          data: { cashDeskMovementId: movement.id },
+        });
       const incoming = ['DAILY_SALES', 'OTHER_IN'].includes(d.kind);
       await this.entries(tx, movement.id, date, [
         { account, amount: incoming ? amount : amount.negated() },
@@ -867,6 +886,14 @@ export class CashDeskService {
       throw new ConflictException(
         'A manual daily sales total covers this account and date. Reverse that total before posting the shift.',
       );
+    const fuelSupplierPayment = input.invoicePaymentId
+      ? await tx.invoiceDeskPayment
+          .findUnique({
+            where: { id: input.invoicePaymentId },
+            select: { supplierPayment: { select: { id: true, supplierId: true } } },
+          })
+          .then((p) => p?.supplierPayment ?? null)
+      : null;
     const movement = await tx.cashDeskMovement.create({
       data: {
         fuelReportPostingId: input.postingId,
@@ -880,6 +907,9 @@ export class CashDeskService {
         reference: input.reference.slice(0, 160),
         salesPaymentId: input.salesPaymentId,
         invoicePaymentId: input.invoicePaymentId,
+        supplierPaymentId: fuelSupplierPayment?.id ?? null,
+        supplierId: fuelSupplierPayment?.supplierId ?? null,
+        partyType: fuelSupplierPayment ? 'SUPPLIER' : 'NONE',
         expenseCategory: input.expenseCategory,
         expenseNotes: input.expenseNotes,
         createdBy: user.id,
@@ -889,6 +919,11 @@ export class CashDeskService {
     await this.entries(tx, movement.id, input.date, [
       { account, amount: input.kind === 'SALE_RECEIPT' ? input.amount : input.amount.negated() },
     ]);
+    if (fuelSupplierPayment)
+      await tx.supplierPayment.update({
+        where: { id: fuelSupplierPayment.id },
+        data: { cashDeskMovementId: movement.id },
+      });
     await this.auditMovement(tx, user, movement.id, [account], input.kind);
     return movement;
   }

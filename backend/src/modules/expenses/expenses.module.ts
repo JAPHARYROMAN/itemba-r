@@ -6,9 +6,16 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AccountingControlService, CompanyScopeService } from '../../common/services';
 import { AccountingEngineModule } from '../accounting-engine/accounting-engine.module';
 import { TaxAutoApplyModule } from '../tax-auto-apply/tax-auto-apply.module';
+import { SupplierPaymentsModule } from '../supplier-payments/supplier-payments.module';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule, AccountingEngineModule, TaxAutoApplyModule],
+  imports: [
+    PrismaModule,
+    AuditLogsModule,
+    AccountingEngineModule,
+    TaxAutoApplyModule,
+    SupplierPaymentsModule,
+  ],
   controllers: [ExpensesController],
   providers: [ExpensesService, AccountingControlService, CompanyScopeService],
   exports: [ExpensesService],

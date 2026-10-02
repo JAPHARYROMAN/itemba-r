@@ -23,7 +23,7 @@ describe('Financial workspace search', () => {
         kind === 'receivable'
           ? new ReceivablesService(prisma, unused, scope, unused, unused, unused, unused)
           : kind === 'payable'
-            ? new PayablesService(prisma, unused, scope, unused, unused, unused)
+            ? new PayablesService(prisma, unused, scope, unused, unused, unused, unused)
             : new ExpensesService(prisma, unused, unused, unused, scope, unused, unused, unused);
       const user = { id: 'reader' } as any;
       const result = await service.findAll({ search: '  Acme  ', page: 2, limit: 20 }, user);

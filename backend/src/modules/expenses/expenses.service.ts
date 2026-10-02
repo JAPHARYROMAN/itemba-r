@@ -18,6 +18,8 @@ import { PostingEngineService, PostingLine } from '../accounting-engine/posting-
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { PayExpenseDto } from './dto/pay-expense.dto';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import { toPaymentMethodGeneral } from '../supplier-payments/payment-method';
 
 @Injectable()
 export class ExpensesService {
@@ -32,6 +34,7 @@ export class ExpensesService {
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
     private readonly taxAutoApply: TaxAutoApplyService,
+    private readonly supplierPayments?: SupplierPaymentsService,
   ) {}
 
   private async resolveCashLedgerAccountId(
@@ -207,7 +210,17 @@ export class ExpensesService {
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
     const search = query.search?.trim();
-    if (search) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ expenseNumber: { contains: search, mode: 'insensitive' } }, { vendorName: { contains: search, mode: 'insensitive' } }, { description: { contains: search, mode: 'insensitive' } }] }];
+    if (search)
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { expenseNumber: { contains: search, mode: 'insensitive' } },
+            { vendorName: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      ];
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
     if (expenseCategoryId) where.expenseCategoryId = expenseCategoryId;
@@ -925,6 +938,30 @@ export class ExpensesService {
             outstandingAmount: 0,
             status: 'PAID',
           },
+        });
+      }
+
+      // Party linkage (W2): one SupplierPayment row per supplier payment. Only when the
+      // expense names a supplier; a one-off vendor has nothing to attach the payment to
+      // until it is matched (Unmatched parties, W7). Record-only: this method already
+      // posted the settlement journal, relieved cash and closed the payable above.
+      if (existing.supplierId && this.supplierPayments) {
+        await this.supplierPayments.recordInTransaction(tx, user, {
+          companyId: existing.companyId,
+          divisionId: existing.divisionId,
+          branchId: existing.branchId,
+          supplierId: existing.supplierId,
+          amount: existing.amount,
+          method: toPaymentMethodGeneral(dto.paymentMethod?.trim() || existing.paymentMethod),
+          paymentDate,
+          cashAccountId: cashAccount.id,
+          reference: existing.expenseNumber,
+          currency: existing.currency,
+          source: { type: 'Expense', id: existing.id },
+          allocations: payable
+            ? [{ payableId: payable.id, amount: payable.outstandingAmount }]
+            : [],
+          journalEntryId: je.id,
         });
       }
 
