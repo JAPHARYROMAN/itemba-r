@@ -3257,6 +3257,7 @@ model Loan {
   /// "Bank", "SACCO", "Individual", "Microfinance", "Director", etc.
   lenderType               String?
   lenderContact            String?
+  supplierId               String?
   principalAmount          Decimal              @db.Decimal(18, 2)
   currency                 CurrencyCode         @default(TZS)
   /// Annual interest rate stored as a decimal fraction: 0.18 = 18%
@@ -3292,6 +3293,7 @@ model Loan {
   group      Group?          @relation(fields: [groupId], references: [id], onDelete: Restrict)
   repayments LoanRepayment[]
   documents  Document[]      @relation("LoanDocuments")
+  supplier   Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([divisionId])
@@ -3303,6 +3305,7 @@ model Loan {
   @@index([maturityDate])
   @@index([companyId, status, maturityDate])
   @@index([companyId, createdAt])
+  @@index([supplierId])
   @@map("loans")
 }
 
@@ -3342,6 +3345,7 @@ model Debt {
   companyId       String
   creditorName    String
   creditorContact String?
+  supplierId      String?
   amount          Decimal      @db.Decimal(18, 2)
   /// Amount already paid (for partial payments).
   amountPaid      Decimal      @default(0) @db.Decimal(18, 2)
@@ -3359,6 +3363,7 @@ model Debt {
 
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
   documents Document[] @relation("DebtDocuments")
+  supplier  Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([status])
@@ -3366,6 +3371,7 @@ model Debt {
   @@index([riskLevel])
   @@index([companyId, status, dueDate])
   @@index([companyId, createdAt])
+  @@index([supplierId])
   @@map("debts")
 }
 
@@ -3387,6 +3393,8 @@ model Contract {
   counterpartyName    String
   counterpartyContact String?
   counterpartyAddress String?
+  supplierId          String?
+  customerId          String?
   startDate           DateTime
   endDate             DateTime?
   renewalDate         DateTime?
@@ -3411,6 +3419,8 @@ model Contract {
   company   Company?   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   group     Group?     @relation(fields: [groupId], references: [id], onDelete: Restrict)
   documents Document[] @relation("ContractDocuments")
+  supplier  Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  customer  Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([groupId])
@@ -3419,6 +3429,8 @@ model Contract {
   @@index([endDate])
   @@index([riskLevel])
   @@index([owningLevel])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("contracts")
 }
 
@@ -3882,6 +3894,7 @@ model AccountingPeriod {
 
 model JournalEntry {
   payrollCashMovement CashDeskMovement?   @relation("PayrollCashJournal")
+  cashDeskMovements   CashDeskMovement[]  @relation("CashDeskMovementJournal")
   loanFinancialEvent  LoanFinancialEvent?
   id                  String              @id @default(uuid())
   journalNumber       String
@@ -4035,6 +4048,7 @@ model Expense {
   expenseCategoryId String
   cashAccountId     String?
   vendorName        String?
+  supplierId        String?
   amount            Decimal       @db.Decimal(18, 2)
   currency          CurrencyCode  @default(TZS)
   expenseDate       DateTime
@@ -4066,6 +4080,9 @@ model Expense {
   paidBy          User?           @relation("ExpensePaidBy", fields: [paidById], references: [id], onDelete: SetNull)
   journalEntry    JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
 
+  supplier        Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  cashDeskMovements CashDeskMovement[]
+
   @@unique([companyId, expenseNumber])
   @@index([companyId])
   @@index([status])
@@ -4076,6 +4093,7 @@ model Expense {
   @@index([createdById])
   @@index([approvedById])
   @@index([paidById])
+  @@index([supplierId])
   @@map("expenses")
 }
 
@@ -4177,6 +4195,7 @@ model RecordBookExpense {
   amount            Decimal                 @db.Decimal(18, 2)
   description       String
   paidTo            String?
+  supplierId        String?
   paymentMethod     RecordBookPaymentMethod @default(CASH)
   paymentLabel      String?
   reference         String?
@@ -4205,6 +4224,7 @@ model RecordBookExpense {
   finalizedBy     User?                     @relation("RecordBookExpenseFinalizedBy", fields: [finalizedById], references: [id], onDelete: SetNull)
   voidedBy        User?                     @relation("RecordBookExpenseVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
   reopenedBy      User?                     @relation("RecordBookExpenseReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
+  supplier        Supplier?                 @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([divisionId])
@@ -4214,6 +4234,7 @@ model RecordBookExpense {
   @@index([status])
   @@index([reopenedAt])
   @@index([companyId, recordDate, status])
+  @@index([supplierId])
   @@map("record_book_expenses")
 }
 
@@ -4260,6 +4281,7 @@ model Receivable {
   creditNotes        CreditNote[]
   refunds            Refund[]
   paymentAllocations PaymentAllocation[]
+  cashDeskMovements  CashDeskMovement[]
 
   @@unique([companyId, receivableNumber])
   @@index([companyId])
@@ -4302,6 +4324,8 @@ model Payable {
   journalEntry   JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
   fuelDeliveries FuelDelivery[]
+
+  cashDeskMovements CashDeskMovement[]
 
   @@unique([companyId, payableNumber])
   @@index([companyId])
@@ -4473,6 +4497,8 @@ model Refund {
   journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   createdBy    User?         @relation("RefundCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
+  cashDeskMovements CashDeskMovement[]
+
   @@unique([companyId, refundNumber])
   @@index([companyId])
   @@index([divisionId])
@@ -4530,6 +4556,7 @@ model CustomerPayment {
   reversedBy           User?         @relation("CustomerPaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
 
   allocations PaymentAllocation[]
+  cashDeskMovement CashDeskMovement?
 
   @@unique([companyId, paymentNumber])
   @@index([companyId])
@@ -4840,6 +4867,11 @@ model Customer {
   creditNotes               CreditNote[]
   refunds                   Refund[]
   customerPayments          CustomerPayment[]
+
+  // Party linkage (Phase 1)
+  cashDeskMovements CashDeskMovement[]
+  recordEntries     RecordEntry[]
+  contracts         Contract[]
   mobilePosGeneralTerminals MobilePosTerminal[] @relation("MobilePosTerminalGeneralCustomer")
 
   // Westsides (Milestone 6)
@@ -4906,6 +4938,15 @@ model Supplier {
   fuelDeliveries      FuelDelivery[]
   payables            Payable[]
   productCategories   SupplierProductCategory[]
+
+  // Party linkage (Phase 1)
+  cashDeskMovements  CashDeskMovement[]
+  expenses           Expense[]
+  recordEntries      RecordEntry[]
+  recordBookExpenses RecordBookExpense[]
+  debts              Debt[]
+  contracts          Contract[]
+  loans              Loan[]
 
   // Westsides (Milestone 6)
   productBatches   ProductBatch[]
@@ -17265,6 +17306,28 @@ model CashDeskMovement {
   expenseCategory       String?             @db.VarChar(40)
   payee                 String?             @db.VarChar(160)
   expenseNotes          String?             @db.VarChar(2000)
+  // Party linkage (Phase 1). partyType is NONE | SUPPLIER | CUSTOMER | EMPLOYEE | COMPANY;
+  // the matching id must be set for SUPPLIER / CUSTOMER (database CHECK). Document
+  // references say what the movement settled; journalEntryId says which ERP journal
+  // already explains it, so Accounting connections never offers it for posting again.
+  partyType             String              @default("NONE") @db.VarChar(10)
+  supplierId            String?
+  supplier              Supplier?           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customerId            String?
+  customer              Customer?           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  payableId             String?
+  payable               Payable?            @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  receivableId          String?
+  receivable            Receivable?         @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  expenseId             String?
+  expense               Expense?            @relation(fields: [expenseId], references: [id], onDelete: Restrict)
+  refundId              String?
+  refund                Refund?             @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  customerPaymentId     String?             @unique
+  customerPayment       CustomerPayment?    @relation(fields: [customerPaymentId], references: [id], onDelete: Restrict)
+  journalEntryId        String?
+  journalEntry          JournalEntry?       @relation("CashDeskMovementJournal", fields: [journalEntryId], references: [id], onDelete: Restrict)
+  journalReferenceType  String?             @db.VarChar(40)
   id                    String              @id @default(uuid())
   requestId             String              @unique
   payloadKey            String
@@ -17292,6 +17355,13 @@ model CashDeskMovement {
   @@index([businessDate, createdAt])
   @@index([payrollRunId])
   @@index([fuelReportPostingId])
+  @@index([supplierId, businessDate])
+  @@index([customerId, businessDate])
+  @@index([payableId])
+  @@index([receivableId])
+  @@index([expenseId])
+  @@index([refundId])
+  @@index([journalEntryId])
   @@map("cash_desk_movements")
 }
 
@@ -17367,9 +17437,17 @@ model RecordEntry {
   events        RecordEvent[]
   statementStartsOn DateTime? @db.Date
   postings      RecordPosting[]
+  // Party linkage (Phase 1): identity only. DEBTOR may set customerId, CREDITOR may set
+  // supplierId, SALE/PURCHASE/EXPENSE may set either, NOTE neither (database CHECK).
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([ownerId, recordDate])
   @@index([companyId, divisionId, branchId, kind, recordDate])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("record_entries")
 }
 
