@@ -5,9 +5,10 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { CompanyScopeService } from '../../common/services';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
+import { CustomerPaymentsModule } from '../customer-payments/customer-payments.module';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule],
+  imports: [PrismaModule, AuditLogsModule, CustomerPaymentsModule],
   controllers: [ReceivablesController],
   providers: [ReceivablesService, CompanyScopeService, OrganizationScopeService],
   exports: [ReceivablesService],

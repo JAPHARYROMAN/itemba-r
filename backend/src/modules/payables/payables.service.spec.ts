@@ -149,6 +149,26 @@ describe('PayablesService.recordPayment status guard', () => {
   });
 });
 
+describe('PayablesService.recordPayment party linkage (W2)', () => {
+  it('settles a linked payable through a SupplierPayment with a SupplierPayment-referenced journal', async () => {
+    const { service, tx, postingEngine } = makeService(lockedPayable());
+    await service.recordPayment('pay-1', { amount: 100 } as any, user);
+    expect(tx.supplierPayment.create).toHaveBeenCalledTimes(1);
+    expect(postingEngine.postLines.mock.calls[0][0].referenceType).toBe('SupplierPayment');
+  });
+  it('settles an unlinked payable directly (legacy path) with a Payable-referenced journal and no payment row', async () => {
+    const { service, tx, postingEngine } = makeService(lockedPayable({ supplierId: null }));
+    await service.recordPayment('pay-1', { amount: 100 } as any, user);
+    expect(tx.supplierPayment.create).not.toHaveBeenCalled();
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    expect(postingInput.referenceType).toBe('Payable');
+    expect(postingInput.referenceId).toBe('pay-1');
+    expect(tx.payable.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'PARTIALLY_PAID' }) }),
+    );
+  });
+});
+
 describe('PayablesService.recordPayment cash subledger + role (cashAccountId)', () => {
   // Role-aware resolver so we can assert which GL cash account the CR leg hit.
   function cashRoleResolver() {

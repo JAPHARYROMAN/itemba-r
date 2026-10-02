@@ -4,7 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AccessLevel, CashAccountType, CurrencyCode, Prisma } from '@prisma/client';
+import {
+  AccessLevel,
+  CashAccountType,
+  CurrencyCode,
+  PaymentMethodGeneral,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService, assertCashAccountForScope } from '../../common/services';
@@ -21,6 +27,25 @@ import { CreateCustomerPaymentDto } from './dto/create-customer-payment.dto';
 import { QueryCustomerPaymentDto } from './dto/query-customer-payment.dto';
 import { ReverseCustomerPaymentDto } from './dto/reverse-customer-payment.dto';
 import { CustomerPaymentStatus } from './dto/customer-payment-status.enum';
+
+/** Everything a caller supplies to record one customer payment inside its own transaction. */
+export interface CustomerPaymentInput {
+  companyId: string;
+  divisionId?: string | null;
+  branchId?: string | null;
+  customerId: string;
+  amount: Prisma.Decimal | number | string;
+  method?: PaymentMethodGeneral | null;
+  paymentDate: Date;
+  /** ERP cash / bank account the money lands in. Optional for legacy callers (role account only). */
+  cashAccountId?: string | null;
+  reference?: string | null;
+  currency?: CurrencyCode | string | null;
+  notes?: string | null;
+  allocations: Array<{ receivableId: string; amount: Prisma.Decimal | number | string }>;
+}
+
+type UpdatedReceivable = Prisma.ReceivableGetPayload<Record<string, never>>;
 
 /**
  * Receivable statuses that still carry an outstanding balance and therefore
@@ -125,12 +150,71 @@ export class CustomerPaymentsService {
 
   async create(dto: CreateCustomerPaymentDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    if (!dto.allocations || dto.allocations.length === 0) {
+      throw new BadRequestException('At least one allocation is required');
+    }
+    // Fail fast before opening a transaction (customer and cash-account scope), as before;
+    // createInTransaction re-validates both inside the transaction.
+    const owner = await this.prisma.customer.findFirst({
+      where: { id: dto.customerId, deletedAt: null },
+      select: { companyId: true },
+    });
+    if (!owner || owner.companyId !== dto.companyId) {
+      throw new BadRequestException('Customer does not belong to this company');
+    }
+    await this.resolveCashAccount(this.prisma, dto.companyId, dto.cashAccountId, {
+      divisionId: dto.divisionId ?? null,
+      branchId: dto.branchId ?? null,
+    });
+    const { payment } = await this.prisma.$transaction((tx) =>
+      this.createInTransaction(tx, user, {
+        companyId: dto.companyId,
+        divisionId: dto.divisionId ?? null,
+        branchId: dto.branchId ?? null,
+        customerId: dto.customerId,
+        amount: dto.amount,
+        method: dto.method ?? null,
+        paymentDate: new Date(dto.paymentDate),
+        cashAccountId: dto.cashAccountId,
+        reference: dto.reference ?? null,
+        currency: dto.currency ?? null,
+        notes: dto.notes ?? null,
+        allocations: dto.allocations,
+      }),
+    );
+
+    await this.auditLogs.log({
+      action: 'CUSTOMER_PAYMENT_CREATE',
+      entityType: 'CustomerPayment',
+      entityId: payment.id,
+      userId: user.id,
+      companyId: payment.companyId,
+      newValue: payment as unknown as Record<string, unknown>,
+    });
+
+    return payment;
+  }
+
+  /**
+   * Record one customer payment and allocate it across open receivables inside the
+   * caller's transaction. Receivable record-payment (Cash Desk "Collect payment", the
+   * Receivables page) goes through here too (party linkage, W3), so every collection is
+   * a CustomerPayment row and shows on the customer's statement. Without a cashAccountId
+   * the cash leg debits the CASH_ON_HAND role account and no CashAccount balance is
+   * touched (legacy callers); with one, the account's mapped ledger account is debited
+   * when it has one. Returns the payment and the updated receivable rows.
+   */
+  async createInTransaction(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    input: CustomerPaymentInput,
+  ) {
     const userId = user.id;
 
-    const amount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2);
+    const amount = new Prisma.Decimal(input.amount).toDecimalPlaces(2);
     if (amount.lte(0)) throw new BadRequestException('Payment amount must be greater than zero');
 
-    if (!dto.allocations || dto.allocations.length === 0) {
+    if (!input.allocations || input.allocations.length === 0) {
       throw new BadRequestException('At least one allocation is required');
     }
 
@@ -138,7 +222,7 @@ export class CustomerPaymentsService {
     // or duplicate-receivable allocations (a receivable can only be locked +
     // decremented once per payment).
     const seen = new Set<string>();
-    const allocations = dto.allocations.map((a) => {
+    const allocations = input.allocations.map((a) => {
       const allocAmount = new Prisma.Decimal(a.amount).toDecimalPlaces(2);
       if (allocAmount.lte(0)) {
         throw new BadRequestException('Each allocation amount must be greater than zero');
@@ -164,190 +248,177 @@ export class CustomerPaymentsService {
     const unapplied = amount.minus(allocatedTotal).toDecimalPlaces(2);
 
     // Validate customer belongs to the company (scope defaults for division/branch).
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: dto.customerId, deletedAt: null },
+    const customer = await tx.customer.findFirst({
+      where: { id: input.customerId, deletedAt: null },
       select: { companyId: true, divisionId: true, branchId: true, name: true },
     });
-    if (!customer || customer.companyId !== dto.companyId) {
+    if (!customer || customer.companyId !== input.companyId) {
       throw new BadRequestException('Customer does not belong to this company');
     }
 
     // Cash/bank account belongs to the company (and to the payment's
-    // division/branch when the dto names one); type drives the GL debit role.
-    const cashAccount = await this.resolveCashAccount(
-      this.prisma,
-      dto.companyId,
-      dto.cashAccountId,
-      {
-        divisionId: dto.divisionId ?? null,
-        branchId: dto.branchId ?? null,
-      },
-    );
+    // division/branch when the caller names one); type drives the GL debit role.
+    const cashAccount = input.cashAccountId
+      ? await this.resolveCashAccount(tx, input.companyId, input.cashAccountId, {
+          divisionId: input.divisionId ?? null,
+          branchId: input.branchId ?? null,
+        })
+      : null;
 
     // Guard against mixing currencies on the cash ledger: we increment the cash
     // account's running balance by the payment amount below, so the receipt
     // currency MUST match the cash account currency (mirrors sales-orders).
-    const paymentCurrency = dto.currency ?? CurrencyCode.TZS;
-    if (cashAccount.currency && cashAccount.currency !== paymentCurrency) {
+    const paymentCurrency = (input.currency as CurrencyCode | null) ?? CurrencyCode.TZS;
+    if (cashAccount?.currency && cashAccount.currency !== paymentCurrency) {
       throw new BadRequestException(
         `Receipt account currency (${cashAccount.currency}) does not match the payment currency ` +
           `(${paymentCurrency}). Choose a ${paymentCurrency} cash/bank account.`,
       );
     }
 
-    const paymentDate = new Date(dto.paymentDate);
-    const divisionId = dto.divisionId ?? cashAccount.divisionId ?? customer.divisionId ?? null;
-    const branchId = dto.branchId ?? cashAccount.branchId ?? customer.branchId ?? null;
+    const paymentDate = input.paymentDate;
+    const divisionId = input.divisionId ?? cashAccount?.divisionId ?? customer.divisionId ?? null;
+    const branchId = input.branchId ?? cashAccount?.branchId ?? customer.branchId ?? null;
 
-    const record = await this.prisma.$transaction(async (tx) => {
-      // Lock + validate + decrement each target receivable. Locking ordered by
-      // id keeps concurrent multi-receivable payments from deadlocking.
-      const orderedAllocations = [...allocations].sort((a, b) =>
-        a.receivableId < b.receivableId ? -1 : a.receivableId > b.receivableId ? 1 : 0,
-      );
+    // Lock + validate + decrement each target receivable. Locking ordered by
+    // id keeps concurrent multi-receivable payments from deadlocking.
+    const orderedAllocations = [...allocations].sort((a, b) =>
+      a.receivableId < b.receivableId ? -1 : a.receivableId > b.receivableId ? 1 : 0,
+    );
 
-      const touchedCustomerIds = new Set<string>();
-      for (const alloc of orderedAllocations) {
-        const locked = await this.lockReceivable(tx, alloc.receivableId);
-        if (!locked) throw new NotFoundException(`Receivable ${alloc.receivableId} not found`);
+    const touchedCustomerIds = new Set<string>();
+    const receivables: UpdatedReceivable[] = [];
+    for (const alloc of orderedAllocations) {
+      const locked = await this.lockReceivable(tx, alloc.receivableId);
+      if (!locked) throw new NotFoundException(`Receivable ${alloc.receivableId} not found`);
 
-        // Company + customer scope on EVERY allocated receivable.
-        if (locked.companyId !== dto.companyId) {
-          throw new BadRequestException(
-            `Receivable ${alloc.receivableId} does not belong to this company`,
-          );
-        }
-        if (locked.customerId !== dto.customerId) {
-          throw new BadRequestException(
-            `Receivable ${alloc.receivableId} does not belong to customer ${dto.customerId}`,
-          );
-        }
-        if (!(OPEN_RECEIVABLE_STATUSES as readonly string[]).includes(locked.status)) {
-          throw new BadRequestException(
-            `Receivable ${alloc.receivableId} is ${locked.status} and cannot receive a payment`,
-          );
-        }
-
-        const outstanding = new Prisma.Decimal(locked.outstandingAmount);
-        if (alloc.amount.gt(outstanding)) {
-          throw new BadRequestException(
-            `Allocation (${alloc.amount.toString()}) exceeds outstanding amount ` +
-              `(${outstanding.toString()}) on receivable ${alloc.receivableId}`,
-          );
-        }
-
-        const nextOutstanding = outstanding.minus(alloc.amount).toDecimalPlaces(2);
-        const nextPaid = new Prisma.Decimal(locked.paidAmount)
-          .plus(alloc.amount)
-          .toDecimalPlaces(2);
-        const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
-
-        const updated = await tx.receivable.update({
-          where: { id: alloc.receivableId },
-          data: {
-            outstandingAmount: nextOutstanding,
-            paidAmount: nextPaid,
-            status: nextStatus,
-          },
-        });
-        await this.syncSalesOrderPaymentFromReceivable(tx, updated);
-        if (updated.customerId) touchedCustomerIds.add(updated.customerId);
+      // Company + customer scope on EVERY allocated receivable.
+      if (locked.companyId !== input.companyId) {
+        throw new BadRequestException(
+          `Receivable ${alloc.receivableId} does not belong to this company`,
+        );
+      }
+      if (locked.customerId !== input.customerId) {
+        throw new BadRequestException(
+          `Receivable ${alloc.receivableId} does not belong to customer ${input.customerId}`,
+        );
+      }
+      if (!(OPEN_RECEIVABLE_STATUSES as readonly string[]).includes(locked.status)) {
+        throw new BadRequestException(
+          `Receivable ${alloc.receivableId} is ${locked.status} and cannot receive a payment`,
+        );
       }
 
-      const created = await tx.customerPayment.create({
+      const outstanding = new Prisma.Decimal(locked.outstandingAmount);
+      if (alloc.amount.gt(outstanding)) {
+        throw new BadRequestException(
+          `Allocation (${alloc.amount.toString()}) exceeds outstanding amount ` +
+            `(${outstanding.toString()}) on receivable ${alloc.receivableId}`,
+        );
+      }
+
+      const nextOutstanding = outstanding.minus(alloc.amount).toDecimalPlaces(2);
+      const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(alloc.amount).toDecimalPlaces(2);
+      const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
+
+      const updated = await tx.receivable.update({
+        where: { id: alloc.receivableId },
         data: {
-          paymentNumber: await this.codes.next({
-            entityType: 'CustomerPayment',
-            companyId: dto.companyId,
-            tx,
-          }),
-          companyId: dto.companyId,
-          divisionId,
-          branchId,
-          customerId: dto.customerId,
-          amount,
-          method: dto.method ?? undefined,
-          reference: dto.reference ?? null,
-          paymentDate,
-          appliedAmount: allocatedTotal,
-          unappliedAmount: unapplied,
-          currency: dto.currency ?? CurrencyCode.TZS,
-          status: CustomerPaymentStatus.COMPLETED,
-          cashAccountId: dto.cashAccountId,
-          notes: dto.notes ?? null,
-          createdById: userId,
-          allocations: {
-            create: allocations.map((a) => ({
-              companyId: dto.companyId,
-              receivableId: a.receivableId,
-              amount: a.amount,
-            })),
-          },
+          outstandingAmount: nextOutstanding,
+          paidAmount: nextPaid,
+          status: nextStatus,
         },
       });
+      await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+      if (updated.customerId) touchedCustomerIds.add(updated.customerId);
+      receivables.push(updated);
+    }
 
-      // ── GL: DR Cash|Bank (full amount) / CR AR (applied) / CR Advances (unapplied)
-      const lines = await this.buildPaymentLines(tx, {
-        companyId: dto.companyId,
-        cashAccountType: cashAccount.accountType,
-        cashAccountName: cashAccount.accountName,
-        customerLabel: customer.name ?? dto.customerId,
-        fullAmount: amount,
+    const created = await tx.customerPayment.create({
+      data: {
+        paymentNumber: await this.codes.next({
+          entityType: 'CustomerPayment',
+          companyId: input.companyId,
+          tx,
+        }),
+        companyId: input.companyId,
+        divisionId,
+        branchId,
+        customerId: input.customerId,
+        amount,
+        method: input.method ?? undefined,
+        reference: input.reference ?? null,
+        paymentDate,
         appliedAmount: allocatedTotal,
         unappliedAmount: unapplied,
-      });
-
-      const journalEntry = await this.postingEngine.postLines(
-        {
-          companyId: dto.companyId,
-          divisionId,
-          branchId,
-          transactionDate: paymentDate,
-          description: `Customer payment ${created.paymentNumber}`,
-          referenceType: 'CustomerPayment',
-          referenceId: created.id,
-          moduleName: 'customer-payments',
-          userId,
-          lines,
+        currency: paymentCurrency,
+        status: CustomerPaymentStatus.COMPLETED,
+        cashAccountId: input.cashAccountId ?? null,
+        notes: input.notes ?? null,
+        createdById: userId,
+        allocations: {
+          create: allocations.map((a) => ({
+            companyId: input.companyId,
+            receivableId: a.receivableId,
+            amount: a.amount,
+          })),
         },
-        tx,
-      );
+      },
+    });
 
-      const withJournal = await tx.customerPayment.update({
-        where: { id: created.id },
-        data: { journalEntryId: journalEntry.id },
-        include: this.includeScope(),
-      });
+    // ── GL: DR Cash|Bank (full amount) / CR AR (applied) / CR Advances (unapplied)
+    const lines = await this.buildPaymentLines(tx, {
+      companyId: input.companyId,
+      cashAccountId: input.cashAccountId ?? null,
+      cashAccountType: cashAccount?.accountType ?? null,
+      cashAccountName: cashAccount?.accountName ?? 'cash',
+      customerLabel: customer.name ?? input.customerId,
+      fullAmount: amount,
+      appliedAmount: allocatedTotal,
+      unappliedAmount: unapplied,
+    });
 
-      // Keep the denormalised CashAccount.currentBalance (a subledger cache of
-      // the GL cash position, read by finance/dashboards) consistent with the
-      // DR Cash/Bank leg we just posted. Increment by the FULL receipt amount in
-      // the SAME transaction — mirrors sales-orders (increment on cash receipt)
-      // and is unwound on reverse below. Scoped by companyId to be safe.
+    const journalEntry = await this.postingEngine.postLines(
+      {
+        companyId: input.companyId,
+        divisionId,
+        branchId,
+        transactionDate: paymentDate,
+        description: `Customer payment ${created.paymentNumber}`,
+        referenceType: 'CustomerPayment',
+        referenceId: created.id,
+        moduleName: 'customer-payments',
+        userId,
+        lines,
+      },
+      tx,
+    );
+
+    const withJournal = await tx.customerPayment.update({
+      where: { id: created.id },
+      data: { journalEntryId: journalEntry.id },
+      include: this.includeScope(),
+    });
+
+    // Keep the denormalised CashAccount.currentBalance (a subledger cache of
+    // the GL cash position, read by finance/dashboards) consistent with the
+    // DR Cash/Bank leg we just posted. Increment by the FULL receipt amount in
+    // the SAME transaction — mirrors sales-orders (increment on cash receipt)
+    // and is unwound on reverse below. Scoped by companyId to be safe.
+    if (input.cashAccountId) {
       await tx.cashAccount.updateMany({
-        where: { id: dto.cashAccountId, companyId: dto.companyId, deletedAt: null },
+        where: { id: input.cashAccountId, companyId: input.companyId, deletedAt: null },
         data: { currentBalance: { increment: amount } },
       });
+    }
 
-      // Sync balances for every customer whose receivables changed (all == this
-      // payment's customer, but sync defensively per touched customer).
-      for (const cid of touchedCustomerIds) {
-        await this.syncCustomerBalance(tx, dto.companyId, cid);
-      }
+    // Sync balances for every customer whose receivables changed (all == this
+    // payment's customer, but sync defensively per touched customer).
+    for (const cid of touchedCustomerIds) {
+      await this.syncCustomerBalance(tx, input.companyId, cid);
+    }
 
-      return withJournal;
-    });
-
-    await this.auditLogs.log({
-      action: 'CUSTOMER_PAYMENT_CREATE',
-      entityType: 'CustomerPayment',
-      entityId: record.id,
-      userId,
-      companyId: record.companyId,
-      newValue: record as unknown as Record<string, unknown>,
-    });
-
-    return record;
+    return { payment: withJournal, receivables };
   }
 
   // ── reverse (COMPLETED -> REVERSED) ─────────────────────────────────────────
@@ -512,6 +583,7 @@ export class CustomerPaymentsService {
     tx: Prisma.TransactionClient,
     input: {
       companyId: string;
+      cashAccountId?: string | null;
       cashAccountType: CashAccountType | null;
       cashAccountName: string;
       customerLabel: string;
@@ -521,10 +593,19 @@ export class CustomerPaymentsService {
     },
   ) {
     const cashRole = this.cashAccountRole(input.cashAccountType);
-    const [cashAcct, arAcct] = await Promise.all([
+    const [roleAcct, arAcct] = await Promise.all([
       this.accountResolver.resolve(input.companyId, cashRole, tx),
       this.accountResolver.resolve(input.companyId, 'AR_CONTROL', tx),
     ]);
+    // Debit the cash account's mapped ledger account when it has one; the role account
+    // (CASH_ON_HAND / BANK) is the fallback for unmapped and legacy callers.
+    const mapped = input.cashAccountId
+      ? await tx.cashAccount.findFirst({
+          where: { id: input.cashAccountId },
+          select: { ledgerAccountId: true },
+        })
+      : null;
+    const cashAcct = { id: mapped?.ledgerAccountId ?? roleAcct.id };
 
     const lines: Array<{
       accountId: string;

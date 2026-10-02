@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { AccessLevel, CashAccountType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
@@ -14,7 +14,10 @@ import { WriteOffPayableDto } from './dto/write-off-payable.dto';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { pagination } from '../../common/utils/pagination';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
-import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import {
+  LockedPayable,
+  SupplierPaymentsService,
+} from '../supplier-payments/supplier-payments.service';
 
 @Injectable()
 export class PayablesService {
@@ -404,9 +407,12 @@ export class PayablesService {
         throw new BadRequestException(`Cannot record a payment against a ${locked.status} payable`);
       }
       if (!locked.supplierId) {
-        throw new BadRequestException(
-          'Match this payable to its supplier before recording payment (Unmatched parties).',
-        );
+        // No shared supplier to attach a payment to (free-text supplierName only): settle
+        // directly, exactly as before, with the journal referenced to the payable. The
+        // Unmatched parties queue (W7) surfaces these for matching; once matched, payments
+        // take the SupplierPayment path below.
+        const updated = await this.settleUnlinkedPayable(tx, locked, dto, paymentAmount, userId);
+        return { existing: locked, record: updated };
       }
 
       const { payables } = await this.supplierPayments.createInTransaction(tx, user, {
@@ -442,6 +448,112 @@ export class PayablesService {
     });
 
     return record;
+  }
+
+  /**
+   * Legacy direct settlement for a payable with no linked supplier: reduce the payable,
+   * post DR AP control / CR cash (role account) referenced to the payable and relieve
+   * the chosen CashAccount. No SupplierPayment row exists for these; they are listed in
+   * the Unmatched parties queue until matched.
+   */
+  private async settleUnlinkedPayable(
+    tx: Prisma.TransactionClient,
+    locked: LockedPayable,
+    dto: RecordPayablePaymentDto,
+    paymentAmount: Prisma.Decimal,
+    userId: string,
+  ) {
+    const outstanding = new Prisma.Decimal(locked.outstandingAmount);
+    if (paymentAmount.gt(outstanding)) {
+      throw new BadRequestException(
+        `Payment amount (${paymentAmount.toString()}) exceeds outstanding amount (${outstanding.toString()})`,
+      );
+    }
+    const nextOutstanding = outstanding.minus(paymentAmount);
+    const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(paymentAmount);
+    const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
+    const updated = await tx.payable.update({
+      where: { id: locked.id },
+      data: { outstandingAmount: nextOutstanding, paidAmount: nextPaid, status: nextStatus },
+    });
+
+    const cashRole = await this.resolvePaymentCashRole(
+      tx,
+      locked.companyId,
+      dto.cashAccountId,
+      locked.currency,
+    );
+    const [apAccount, cashAccount] = await Promise.all([
+      this.accountResolver.resolve(locked.companyId, 'AP_CONTROL', tx),
+      this.accountResolver.resolve(locked.companyId, cashRole, tx),
+    ]);
+    const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+    await this.postingEngine.postLines(
+      {
+        companyId: locked.companyId,
+        divisionId: locked.divisionId,
+        branchId: locked.branchId,
+        transactionDate: settlementDate,
+        description: `Payable settlement ${locked.payableNumber}`,
+        referenceType: 'Payable',
+        referenceId: locked.id,
+        moduleName: 'payables',
+        userId,
+        lines: [
+          {
+            accountId: apAccount!.id,
+            description: `Accounts payable settlement: ${locked.supplierName}`,
+            debit: paymentAmount,
+            credit: 0,
+          },
+          {
+            accountId: cashAccount!.id,
+            description: `Payment to supplier: ${locked.supplierName}`,
+            debit: 0,
+            credit: paymentAmount,
+          },
+        ],
+      },
+      tx,
+    );
+    if (dto.cashAccountId) {
+      await tx.cashAccount.updateMany({
+        where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
+        data: { currentBalance: { decrement: paymentAmount } },
+      });
+    }
+    await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
+    return updated;
+  }
+
+  /**
+   * GL cash/bank role for a legacy (unlinked) supplier settlement. A supplied
+   * cashAccountId must belong to the company, be active and match the payable
+   * currency; its accountType selects BANK vs CASH_ON_HAND. Legacy callers that omit
+   * it fall back to CASH_ON_HAND so the entry still balances.
+   */
+  private async resolvePaymentCashRole(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    cashAccountId?: string | null,
+    payableCurrency?: string | null,
+  ): Promise<AccountRole> {
+    if (!cashAccountId) return 'CASH_ON_HAND';
+    const cashAccount = await tx.cashAccount.findFirst({
+      where: { id: cashAccountId, deletedAt: null, isActive: true },
+      select: { companyId: true, accountType: true, currency: true },
+    });
+    if (!cashAccount || cashAccount.companyId !== companyId) {
+      throw new BadRequestException('Cash account does not belong to this company');
+    }
+    const expectedCurrency = payableCurrency ?? 'TZS';
+    if (cashAccount.currency && cashAccount.currency !== expectedCurrency) {
+      throw new BadRequestException(
+        `Cash account currency (${cashAccount.currency}) does not match the payable currency ` +
+          `(${expectedCurrency}). Choose a ${expectedCurrency} cash/bank account.`,
+      );
+    }
+    return cashAccount.accountType === CashAccountType.BANK ? 'BANK' : 'CASH_ON_HAND';
   }
 
   async writeOff(id: string, dto: WriteOffPayableDto, user: AuthUser) {

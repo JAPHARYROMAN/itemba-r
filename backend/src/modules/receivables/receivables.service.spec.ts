@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ReceivablesService } from './receivables.service';
+import { CustomerPaymentsService } from '../customer-payments/customer-payments.service';
 
 const user = { id: 'user-1' } as any;
 
@@ -35,7 +36,27 @@ function makeService(
       }),
       aggregate: jest.fn().mockResolvedValue({ _sum: { outstandingAmount: '0' } }),
     },
-    customer: { updateMany: jest.fn() },
+    customer: {
+      updateMany: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue({
+        companyId: 'company-1',
+        divisionId: null,
+        branchId: null,
+        name: 'Acme Ltd',
+      }),
+    },
+    customerPayment: {
+      create: jest.fn(async ({ data }: any) => ({
+        id: 'cpay-1',
+        paymentNumber: 'CPAY-1',
+        ...data,
+      })),
+      update: jest.fn(async ({ data }: any) => ({
+        id: 'cpay-1',
+        paymentNumber: 'CPAY-1',
+        ...data,
+      })),
+    },
     salesOrder: { updateMany: jest.fn() },
     cashAccount: {
       findFirst: jest
@@ -91,6 +112,9 @@ function makeService(
     postingEngine,
     { next: jest.fn() } as any,
     { assertCanAccessScope: jest.fn().mockResolvedValue(undefined) } as any,
+    new CustomerPaymentsService(prisma, auditLogs, companyScope, accountResolver, postingEngine, {
+      next: jest.fn(),
+    } as any),
   );
 
   // Stub findOne (used by writeOff to load the receivable before the tx).
@@ -105,6 +129,25 @@ function makeService(
     readCommitted: () => ({ ...committedRow }),
   };
 }
+
+describe('ReceivablesService.recordPayment party linkage (W3)', () => {
+  it('collects a linked receivable through a CustomerPayment', async () => {
+    const { service, tx } = makeService(lockedReceivable());
+    await service.recordPayment('rec-1', { amount: 100 } as any, user);
+    expect(tx.customerPayment.create).toHaveBeenCalledTimes(1);
+    expect(tx.customerPayment.create.mock.calls[0][0].data.allocations.create).toEqual([
+      expect.objectContaining({ receivableId: 'rec-1' }),
+    ]);
+  });
+  it('collects an unlinked receivable directly (legacy path) with a Receivable-referenced journal and no payment row', async () => {
+    const { service, tx, postingEngine } = makeService(lockedReceivable({ customerId: null }));
+    await service.recordPayment('rec-1', { amount: 100 } as any, user);
+    expect(tx.customerPayment.create).not.toHaveBeenCalled();
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    expect(postingInput.referenceType).toBe('Receivable');
+    expect(postingInput.referenceId).toBe('rec-1');
+  });
+});
 
 describe('ReceivablesService.recordPayment GL settlement', () => {
   it('rejects a receiving account in another currency before changing the balance', async () => {
@@ -148,8 +191,9 @@ describe('ReceivablesService.recordPayment GL settlement', () => {
     const totalCredit = lines.reduce((s: number, l: any) => s + Number(l.credit), 0);
     expect(totalDebit).toBe(totalCredit);
     expect(totalDebit).toBe(500);
-    expect(postingInput.referenceType).toBe('Receivable');
-    expect(postingInput.referenceId).toBe('rec-1');
+    // The collection is the event: the journal references the CustomerPayment (W3).
+    expect(postingInput.referenceType).toBe('CustomerPayment');
+    expect(postingInput.referenceId).toBe('cpay-1');
   });
 
   it('uses the BANK cash role when a bank cashAccountId is supplied', async () => {

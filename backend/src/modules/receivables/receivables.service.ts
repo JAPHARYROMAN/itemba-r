@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccessLevel, CashAccountType, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -11,6 +16,8 @@ import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { QueryReceivableDto } from './dto/query-receivable.dto';
 import { RecordReceivablePaymentDto } from './dto/record-receivable-payment.dto';
 import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
+import { LinkReceivableCustomerDto } from './dto/link-receivable-customer.dto';
+import { CustomerPaymentsService } from '../customer-payments/customer-payments.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { pagination } from '../../common/utils/pagination';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -36,6 +43,7 @@ export class ReceivablesService {
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly org: OrganizationScopeService,
+    private readonly customerPayments: CustomerPaymentsService,
   ) {}
 
   async findAll(query: QueryReceivableDto, user: AuthUser) {
@@ -378,156 +386,70 @@ export class ReceivablesService {
     if (paymentAmount.lte(0))
       throw new BadRequestException('Payment amount must be greater than zero');
 
-    // ITMB-036: make the read-modify-write atomic by locking the receivable row
-    // FOR UPDATE inside the transaction, then running the checks and Decimal
-    // arithmetic on the locked row before updating and syncing the sales order.
-    const { existing, record, newOutstanding, newPaid, newStatus } = await this.prisma.$transaction(
-      async (tx) => {
-        const [locked] = await tx.$queryRaw<
-          Array<{
-            id: string;
-            companyId: string;
-            divisionId: string | null;
-            branchId: string | null;
-            customerId: string | null;
-            customerName: string | null;
-            receivableNumber: string;
-            outstandingAmount: Prisma.Decimal;
-            paidAmount: Prisma.Decimal;
-            status: string;
-            currency: string;
-          }>
-        >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName", "receivableNumber", "outstandingAmount", "paidAmount", "status", "currency"
-          FROM "receivables"
-          WHERE "id" = ${id} AND "deletedAt" IS NULL
-          FOR UPDATE`;
+    // Party linkage (W3): every collection is one CustomerPayment row with an allocation,
+    // so it shows on the customer's statement. The payment service locks the receivable,
+    // reduces it, posts DR cash / CR AR control and keeps CashAccount.currentBalance and
+    // the customer's cached balance in step, all in this transaction.
+    const { existing, record } = await this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<
+        Array<{
+          id: string;
+          companyId: string;
+          divisionId: string | null;
+          branchId: string | null;
+          customerId: string | null;
+          customerName: string | null;
+          receivableNumber: string;
+          outstandingAmount: Prisma.Decimal;
+          paidAmount: Prisma.Decimal;
+          status: string;
+          currency: string;
+        }>
+      >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName", "receivableNumber", "outstandingAmount", "paidAmount", "status", "currency"
+        FROM "receivables"
+        WHERE "id" = ${id} AND "deletedAt" IS NULL
+        FOR UPDATE`;
 
-        if (!locked) throw new NotFoundException('Receivable not found');
-        await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
-        await this.org.assertCanAccessScope(
-          user,
-          locked.divisionId,
-          locked.branchId,
-          AccessLevel.WRITE,
+      if (!locked) throw new NotFoundException('Receivable not found');
+      await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+      await this.org.assertCanAccessScope(
+        user,
+        locked.divisionId,
+        locked.branchId,
+        AccessLevel.WRITE,
+      );
+      if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
+        throw new BadRequestException(
+          `Cannot record a payment against a ${locked.status} receivable`,
         );
-        if (dto.cashAccountId) {
-          const account = await assertCashAccountForScope(tx, {
-            cashAccountId: dto.cashAccountId,
-            companyId: locked.companyId,
-            divisionId: locked.divisionId,
-            branchId: locked.branchId,
-          });
-          if (account.currency !== locked.currency)
-            throw new BadRequestException(
-              'Receipt account currency must match the receivable currency.',
-            );
-        }
+      }
+      if (!locked.customerId) {
+        // No shared customer to attach a payment to (free-text customerName only): settle
+        // directly, exactly as before, with the journal referenced to the receivable. The
+        // Unmatched parties queue (W7) surfaces these for matching; once matched (see
+        // linkCustomer), collections take the CustomerPayment path below and show on the
+        // customer's statement.
+        const updated = await this.settleUnlinkedReceivable(tx, locked, dto, paymentAmount, userId);
+        return { existing: locked, record: updated };
+      }
 
-        // A settled receivable (WRITTEN_OFF / PAID / CANCELLED) must not accept a
-        // payment. writeOff leaves outstandingAmount non-zero, so the amount check
-        // below does not catch this on its own; without this guard a payment would
-        // flip the status back to PARTIALLY_PAID and silently un-write-off the debt
-        // (re-adding it to the customer's currentBalance via syncCustomerBalance).
-        if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
-          throw new BadRequestException(
-            `Cannot record a payment against a ${locked.status} receivable`,
-          );
-        }
-
-        const outstanding = new Prisma.Decimal(locked.outstandingAmount);
-        if (paymentAmount.gt(outstanding)) {
-          throw new BadRequestException(
-            `Payment amount (${paymentAmount.toString()}) exceeds outstanding amount (${outstanding.toString()})`,
-          );
-        }
-
-        const nextOutstanding = outstanding.minus(paymentAmount);
-        const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(paymentAmount);
-        const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
-
-        const updated = await tx.receivable.update({
-          where: { id },
-          data: {
-            outstandingAmount: nextOutstanding,
-            paidAmount: nextPaid,
-            status: nextStatus,
-          },
-        });
-
-        // GL: post the balanced settlement entry so the AR control account is
-        // relieved in step with the subledger. Mirrors the sibling settlement
-        // posters (payables.recordPayment DR AP / CR Cash; customer-payments
-        // DR Cash / CR AR). Here the receivable's creation entry debited
-        // AR_CONTROL, so collecting cash must:
-        //   DR Cash on hand | Bank  (asset up)
-        //   CR AR control          (asset/subledger down)
-        // The cash side is resolved from the optional cashAccountId (its
-        // accountType selects CASH_ON_HAND vs BANK); legacy callers that omit it
-        // default to CASH_ON_HAND. Posting inside the same tx also routes this
-        // path through the period-close guard in the posting engine.
-        const cashRole = await this.resolvePaymentCashRole(tx, locked.companyId, dto.cashAccountId);
-        const [cashAccount, arAccount] = await Promise.all([
-          this.accountResolver.resolve(locked.companyId, cashRole, tx),
-          this.accountResolver.resolve(locked.companyId, 'AR_CONTROL', tx),
-        ]);
-        const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
-        await this.postingEngine.postLines(
-          {
-            companyId: locked.companyId,
-            divisionId: locked.divisionId,
-            branchId: locked.branchId,
-            transactionDate: settlementDate,
-            description: `Receivable settlement ${locked.receivableNumber}`,
-            referenceType: 'Receivable',
-            referenceId: locked.id,
-            moduleName: 'receivables',
-            userId,
-            lines: [
-              {
-                accountId: cashAccount.id,
-                description: `Payment received: ${locked.customerName ?? 'customer'}`,
-                debit: paymentAmount,
-                credit: 0,
-              },
-              {
-                accountId: arAccount.id,
-                description: `Accounts receivable settlement: ${locked.customerName ?? 'customer'}`,
-                debit: 0,
-                credit: paymentAmount,
-              },
-            ],
-          },
-          tx,
-        );
-
-        // Keep the denormalised CashAccount.currentBalance (a subledger cache of
-        // the GL cash position, read by finance/dashboards) consistent with the
-        // DR Cash|Bank leg we just posted. Increment by the payment amount in the
-        // SAME transaction — mirrors customer-payments.create (increment on cash
-        // receipt). Only when a company-scoped cashAccountId is supplied;
-        // resolvePaymentCashRole has already validated it belongs to this company
-        // (throws otherwise), and the updateMany is re-scoped by companyId +
-        // deletedAt to stay safe. Legacy callers that omit cashAccountId post the
-        // cash leg to CASH_ON_HAND but have no CashAccount row to cache.
-        if (dto.cashAccountId) {
-          await tx.cashAccount.updateMany({
-            where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
-            data: { currentBalance: { increment: paymentAmount } },
-          });
-        }
-
-        await this.syncSalesOrderPaymentFromReceivable(tx, updated);
-        await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
-
-        return {
-          existing: locked,
-          record: updated,
-          newOutstanding: nextOutstanding,
-          newPaid: nextPaid,
-          newStatus: nextStatus,
-        };
-      },
-    );
+      const { receivables } = await this.customerPayments.createInTransaction(tx, user, {
+        companyId: locked.companyId,
+        divisionId: locked.divisionId,
+        branchId: locked.branchId,
+        customerId: locked.customerId,
+        amount: paymentAmount,
+        paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : new Date(),
+        cashAccountId: dto.cashAccountId ?? null,
+        currency: locked.currency,
+        notes: dto.notes ?? null,
+        allocations: [{ receivableId: locked.id, amount: paymentAmount }],
+      });
+      const updated =
+        receivables[0] ??
+        (await tx.receivable.findFirstOrThrow({ where: { id, deletedAt: null } }));
+      return { existing: locked, record: updated };
+    });
 
     await this.auditLogs.log({
       action: 'RECEIVABLE_PAYMENT',
@@ -537,12 +459,166 @@ export class ReceivablesService {
       companyId: record.companyId,
       oldValue: { outstandingAmount: existing.outstandingAmount, status: existing.status } as any,
       newValue: {
-        outstandingAmount: newOutstanding,
-        paidAmount: newPaid,
-        status: newStatus,
+        outstandingAmount: record.outstandingAmount,
+        paidAmount: record.paidAmount,
+        status: record.status,
       } as any,
     });
 
+    return record;
+  }
+
+  /**
+   * Legacy direct settlement for a receivable with no linked customer: reduce the
+   * receivable, post DR cash (role account) / CR AR control referenced to the receivable,
+   * increment the chosen CashAccount and keep the source sales order in step.
+   */
+  private async settleUnlinkedReceivable(
+    tx: Prisma.TransactionClient,
+    locked: {
+      id: string;
+      companyId: string;
+      divisionId: string | null;
+      branchId: string | null;
+      customerName: string | null;
+      receivableNumber: string;
+      outstandingAmount: Prisma.Decimal;
+      paidAmount: Prisma.Decimal;
+      currency: string;
+    },
+    dto: RecordReceivablePaymentDto,
+    paymentAmount: Prisma.Decimal,
+    userId: string,
+  ) {
+    if (dto.cashAccountId) {
+      const account = await assertCashAccountForScope(tx, {
+        cashAccountId: dto.cashAccountId,
+        companyId: locked.companyId,
+        divisionId: locked.divisionId,
+        branchId: locked.branchId,
+      });
+      if (account.currency !== locked.currency)
+        throw new BadRequestException(
+          'Receipt account currency must match the receivable currency.',
+        );
+    }
+    const outstanding = new Prisma.Decimal(locked.outstandingAmount);
+    if (paymentAmount.gt(outstanding)) {
+      throw new BadRequestException(
+        `Payment amount (${paymentAmount.toString()}) exceeds outstanding amount (${outstanding.toString()})`,
+      );
+    }
+    const nextOutstanding = outstanding.minus(paymentAmount);
+    const nextPaid = new Prisma.Decimal(locked.paidAmount).plus(paymentAmount);
+    const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
+    const updated = await tx.receivable.update({
+      where: { id: locked.id },
+      data: { outstandingAmount: nextOutstanding, paidAmount: nextPaid, status: nextStatus },
+    });
+    const cashRole = await this.resolvePaymentCashRole(tx, locked.companyId, dto.cashAccountId);
+    const [cashAccount, arAccount] = await Promise.all([
+      this.accountResolver.resolve(locked.companyId, cashRole, tx),
+      this.accountResolver.resolve(locked.companyId, 'AR_CONTROL', tx),
+    ]);
+    const settlementDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+    await this.postingEngine.postLines(
+      {
+        companyId: locked.companyId,
+        divisionId: locked.divisionId,
+        branchId: locked.branchId,
+        transactionDate: settlementDate,
+        description: `Receivable settlement ${locked.receivableNumber}`,
+        referenceType: 'Receivable',
+        referenceId: locked.id,
+        moduleName: 'receivables',
+        userId,
+        lines: [
+          {
+            accountId: cashAccount.id,
+            description: `Payment received: ${locked.customerName ?? 'customer'}`,
+            debit: paymentAmount,
+            credit: 0,
+          },
+          {
+            accountId: arAccount.id,
+            description: `Accounts receivable settlement: ${locked.customerName ?? 'customer'}`,
+            debit: 0,
+            credit: paymentAmount,
+          },
+        ],
+      },
+      tx,
+    );
+    if (dto.cashAccountId) {
+      await tx.cashAccount.updateMany({
+        where: { id: dto.cashAccountId, companyId: locked.companyId, deletedAt: null },
+        data: { currentBalance: { increment: paymentAmount } },
+      });
+    }
+    await this.syncSalesOrderPaymentFromReceivable(tx, updated);
+    await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+    return updated;
+  }
+
+  /**
+   * Match an unlinked receivable (free-text customerName only) to a shared customer.
+   * Names are never proof of identity: the caller chooses the customer. The name stays
+   * as a display snapshot; amounts, status and journals are untouched. Idempotent for
+   * the same customer; a different customer on an already linked receivable conflicts.
+   */
+  async linkCustomer(id: string, dto: LinkReceivableCustomerDto, user: AuthUser) {
+    const { before, record } = await this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<
+        Array<{
+          id: string;
+          companyId: string;
+          divisionId: string | null;
+          branchId: string | null;
+          customerId: string | null;
+          customerName: string;
+        }>
+      >`SELECT "id", "companyId", "divisionId", "branchId", "customerId", "customerName"
+        FROM "receivables"
+        WHERE "id" = ${id} AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Receivable not found');
+      await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+      await this.org.assertCanAccessScope(
+        user,
+        locked.divisionId,
+        locked.branchId,
+        AccessLevel.WRITE,
+      );
+      if (locked.customerId === dto.customerId) return { before: locked, record: null };
+      if (locked.customerId)
+        throw new ConflictException('This receivable is already linked to a customer.');
+      const customer = await tx.customer.findFirst({
+        where: {
+          id: dto.customerId,
+          companyId: locked.companyId,
+          deletedAt: null,
+          status: 'ACTIVE',
+        },
+        select: { id: true },
+      });
+      if (!customer) throw new BadRequestException('Choose an active customer in this company.');
+      const updated = await tx.receivable.update({
+        where: { id },
+        data: { customerId: customer.id },
+      });
+      await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
+      return { before: locked, record: updated };
+    });
+    if (!record) return this.findOne(id);
+    await this.auditLogs.log({
+      action: 'RECEIVABLE_LINK_CUSTOMER',
+      entityType: 'Receivable',
+      entityId: id,
+      userId: user.id,
+      companyId: record.companyId,
+      oldValue: { customerId: before.customerId, customerName: before.customerName } as any,
+      newValue: { customerId: record.customerId, requestId: dto.requestId ?? null } as any,
+    });
     return record;
   }
 
