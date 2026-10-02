@@ -3,6 +3,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 function makeService() {
   const prisma = {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $queryRaw: jest.fn().mockResolvedValue([]),
     purchaseOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data, lines: [] })),
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
@@ -393,6 +394,11 @@ describe('PurchaseOrdersService payment state', () => {
     prisma.fuelTank.findMany.mockResolvedValue([
       { id: 'tank-1', tankCode: 'DIESEL-1', tankName: 'Diesel Tank 1' },
     ]);
+    prisma.fuelTank.findFirst.mockResolvedValue({
+      id: 'tank-1',
+      tankCode: 'DIESEL-1',
+      tankName: 'Diesel Tank 1',
+    });
     prisma.purchaseOrder.findFirst.mockResolvedValue({
       id: 'po-1',
       purchaseOrderNumber: 'PO-2026-000001',

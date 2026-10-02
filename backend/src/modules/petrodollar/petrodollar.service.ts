@@ -8,6 +8,9 @@ import {
   CreateReportingTankDto,
   ReopenFuelReportDto,
   SaveFuelReportDto,
+  ReportingConfigurationRevisionDto,
+  UpdateReportingTankDto,
+  UpdateReportingPumpDto,
 } from '../fuel-reporting/fuel-reporting.dto';
 import { FuelReportingService } from '../fuel-reporting/fuel-reporting.service';
 
@@ -134,6 +137,54 @@ export class PetroDollarService {
   async createTank(user: AuthUser, dto: CreateReportingTankDto) {
     await this.assertPinnedBranch(dto.branchId);
     return this.fuel.createTank(user, dto);
+  }
+
+  private async assertPinnedTank(id: string) {
+    const tank = await this.prisma.fuelTank.findUnique({
+      where: { id },
+      select: { branchId: true },
+    });
+    if (!tank) throw new NotFoundException('Tank not found.');
+    await this.assertPinnedBranch(tank.branchId);
+  }
+
+  private async assertPinnedPump(id: string) {
+    const pump = await this.prisma.fuelPump.findUnique({
+      where: { id },
+      select: { branchId: true },
+    });
+    if (!pump) throw new NotFoundException('Pump not found.');
+    await this.assertPinnedBranch(pump.branchId);
+  }
+
+  async updateTank(user: AuthUser, id: string, dto: UpdateReportingTankDto) {
+    await this.assertPinnedTank(id);
+    return this.fuel.updateTank(user, id, dto);
+  }
+
+  async deleteTank(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    await this.assertPinnedTank(id);
+    return this.fuel.deleteTank(user, id, dto);
+  }
+
+  async restoreTank(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    await this.assertPinnedTank(id);
+    return this.fuel.restoreTank(user, id, dto);
+  }
+
+  async updatePump(user: AuthUser, id: string, dto: UpdateReportingPumpDto) {
+    await this.assertPinnedPump(id);
+    return this.fuel.updatePump(user, id, dto);
+  }
+
+  async deletePump(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    await this.assertPinnedPump(id);
+    return this.fuel.deactivatePump(user, id, dto);
+  }
+
+  async restorePump(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    await this.assertPinnedPump(id);
+    return this.fuel.restorePump(user, id, dto);
   }
 
   async history(user: AuthUser, branchId: string, before?: string) {

@@ -19,6 +19,9 @@ import {
   ReopenFuelReportDto,
   ReportPayloadDto,
   SaveFuelReportDto,
+  ReportingConfigurationRevisionDto,
+  UpdateReportingTankDto,
+  UpdateReportingPumpDto,
 } from './fuel-reporting.dto';
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -197,7 +200,7 @@ export class FuelReportingService {
     const branch = await this.branch(user, branchId);
     const date = this.date(businessDate);
     if (!['DAY', 'NIGHT'].includes(shift)) throw new BadRequestException('Select Day or Night.');
-    const [catalog, report, previous, daily, products, pumps] = await Promise.all([
+    const [catalog, report, previous, daily, products, pumps, tanks] = await Promise.all([
       this.catalog(this.prisma, branchId),
       this.prisma.fuelReport.findUnique({
         where: { branchId_businessDate_shift: { branchId, businessDate: date, shift } },
@@ -214,11 +217,68 @@ export class FuelReportingService {
       }),
       this.prisma.fuelPump.findMany({
         where: { branchId, deletedAt: null },
-        select: { id: true, pumpCode: true, pumpName: true, status: true },
+        select: {
+          id: true,
+          pumpCode: true,
+          pumpName: true,
+          status: true,
+          updatedAt: true,
+          ...(this.isAdmin(user)
+            ? {
+                nozzles: {
+                  where: { deletedAt: null },
+                  select: {
+                    id: true,
+                    nozzleCode: true,
+                    tankId: true,
+                    productId: true,
+                    status: true,
+                  },
+                  orderBy: { nozzleCode: 'asc' as const },
+                },
+              }
+            : {}),
+        },
         orderBy: { pumpCode: 'asc' },
       }),
+      this.isAdmin(user)
+        ? this.prisma.fuelTank.findMany({
+            where: { branchId },
+            include: { product: { select: { name: true } } },
+            orderBy: { tankCode: 'asc' },
+          })
+        : Promise.resolve([]),
     ]);
-    return { catalog, report, previous, daily, products, pumps };
+    let canConfigure = false;
+    if (this.isAdmin(user)) {
+      try {
+        await this.scope.assertCanAccessCompany(user, branch.division.companyId, AccessLevel.WRITE);
+        canConfigure = true;
+      } catch (error) {
+        if (!(error instanceof ForbiddenException)) throw error;
+      }
+    }
+    return {
+      catalog,
+      report,
+      previous,
+      daily,
+      products,
+      pumps,
+      canConfigure,
+      tanks: tanks.map((t) => ({
+        id: t.id,
+        tankCode: t.tankCode,
+        tankName: t.tankName,
+        productId: t.productId,
+        productName: t.product.name,
+        capacityLitres: Number(t.capacityLitres),
+        status: t.status,
+        deletedAt: t.deletedAt,
+        updatedAt: t.updatedAt,
+        currentBookBalance: Number(t.currentBookBalance),
+      })),
+    };
   }
 
   private previous(db: Database, branchId: string, date: Date, shift: string) {
@@ -273,7 +333,9 @@ export class FuelReportingService {
   private async lock(db: Database, branchId: string, allowInactive = false) {
     const rows = await db.$queryRaw<
       { isActive: boolean; deletedAt: Date | null }[]
-    >`SELECT "isActive", "deletedAt" FROM "branches" WHERE "id" = ${branchId} FOR UPDATE`;
+    >`SELECT "isActive", "deletedAt" FROM "branches" WHERE "id" = ${branchId} FOR NO KEY UPDATE`;
+    // Serialize station changes without blocking foreign-key checks on fuel
+    // receipts. We never change this branch's primary key under the lock.
     if (!rows.length || rows[0].deletedAt || (!allowInactive && !rows[0].isActive))
       throw new ConflictException('This station is no longer active. Reload the station list.');
   }
@@ -660,29 +722,467 @@ export class FuelReportingService {
     return pump;
   }
 
-  async deactivatePump(user: AuthUser, id: string) {
+  async deactivatePump(user: AuthUser, id: string, revision?: ReportingConfigurationRevisionDto) {
     this.assertAdmin(user);
     const pump = await this.prisma.fuelPump.findFirst({ where: { id, deletedAt: null } });
     if (!pump) throw new NotFoundException('Pump not found.');
     const branch = await this.branch(user, pump.branchId, true);
     const updated = await this.prisma.$transaction(async (db) => {
       await this.lock(db, branch.id);
-      const drafts = await db.fuelReport.count({ where: { branchId: branch.id, status: 'DRAFT' } });
-      if (drafts)
-        throw new ConflictException('Close the branch draft reports before removing a pump.');
-      await db.fuelNozzle.updateMany({ where: { pumpId: id }, data: { status: 'INACTIVE' } });
-      return db.fuelPump.update({ where: { id }, data: { status: 'INACTIVE' } });
-    });
-    await this.audit.log({
-      action: 'FUEL_REPORTING_PUMP_DEACTIVATE',
-      entityType: 'FuelPump',
-      entityId: id,
-      userId: user.id,
-      companyId: branch.division.companyId,
-      oldValue: json(pump) as Record<string, unknown>,
-      newValue: json(updated) as Record<string, unknown>,
+      const current = await db.fuelPump.findUniqueOrThrow({ where: { id } });
+      if (revision) this.configurationRevision(current.updatedAt, revision);
+      await this.assertConfigurationIdle(db, branch.id);
+      await db.fuelNozzle.updateMany({
+        where: { pumpId: id, deletedAt: null },
+        data: { status: 'INACTIVE' },
+      });
+      const result = await db.fuelPump.update({
+        where: { id },
+        data: { status: 'INACTIVE', updatedAt: this.configurationTime(current.updatedAt) },
+      });
+      await this.configurationAudit(
+        db,
+        user,
+        branch.division.companyId,
+        'FuelPump',
+        'DEACTIVATE',
+        current,
+        result,
+      );
+      return result;
     });
     return updated;
+  }
+
+  private configurationRevision(updatedAt: Date, dto: ReportingConfigurationRevisionDto) {
+    if (updatedAt.getTime() !== new Date(dto.expectedUpdatedAt).getTime())
+      throw new ConflictException(
+        'This equipment changed in another window. Reload station setup before trying again.',
+      );
+  }
+
+  private configurationTime(previous: Date) {
+    // Every successful change must invalidate the client revision, including
+    // consecutive writes within the same millisecond.
+    return new Date(Math.max(Date.now(), previous.getTime() + 1));
+  }
+
+  private async assertConfigurationIdle(db: Database, branchId: string) {
+    if (await db.fuelReport.count({ where: { branchId, status: 'DRAFT' } }))
+      throw new ConflictException(
+        'Close the station’s draft reports before changing its equipment.',
+      );
+    if (
+      await db.fuelShift.count({
+        where: { branchId, deletedAt: null, status: { notIn: ['CLOSED', 'VOIDED'] } },
+      })
+    )
+      throw new ConflictException(
+        'Close the station’s operational fuel shifts before changing its equipment.',
+      );
+  }
+
+  private async configurationAudit(
+    db: Database,
+    user: AuthUser,
+    companyId: string,
+    entityType: 'FuelTank' | 'FuelPump',
+    action: string,
+    before: { id: string },
+    after: unknown,
+  ) {
+    await this.audit.logStrictInTransaction(db, {
+      action: `FUEL_REPORTING_${entityType === 'FuelTank' ? 'TANK' : 'PUMP'}_${action}`,
+      entityType,
+      entityId: before.id,
+      userId: user.id,
+      companyId,
+      oldValue: json(before) as Record<string, unknown>,
+      newValue: json(after) as Record<string, unknown>,
+    });
+  }
+
+  private async tankForAdmin(user: AuthUser, id: string) {
+    this.assertAdmin(user);
+    const tank = await this.prisma.fuelTank.findUnique({ where: { id } });
+    if (!tank) throw new NotFoundException('Tank not found.');
+    return this.branch(user, tank.branchId, true);
+  }
+
+  private async lockedTank(db: Database, id: string, revision: ReportingConfigurationRevisionDto) {
+    // Purchase receipts take the same tank lock before checking its active state.
+    await db.$queryRaw`SELECT "id" FROM "fuel_tanks" WHERE "id" = ${id} FOR UPDATE`;
+    const tank = await db.fuelTank.findUnique({ where: { id } });
+    if (!tank) throw new NotFoundException('Tank not found.');
+    this.configurationRevision(tank.updatedAt, revision);
+    return tank;
+  }
+
+  private latestTankReport(db: Database, branchId: string, id: string) {
+    return db.fuelReport.findFirst({
+      where: { branchId, payload: { path: ['catalog', 'tanks'], array_contains: [{ id }] } },
+      orderBy: [{ businessDate: 'desc' }, { shift: 'desc' }],
+    });
+  }
+
+  private reportedTankBalance(report: { payload: Prisma.JsonValue } | null, id: string) {
+    const payload = report?.payload as unknown as
+      | { dips?: { tankId: string; closing: number | null }[] }
+      | undefined;
+    return payload?.dips?.find((d) => d.tankId === id)?.closing ?? 0;
+  }
+
+  async updateTank(user: AuthUser, id: string, dto: UpdateReportingTankDto) {
+    const branch = await this.tankForAdmin(user, id);
+    return this.prisma.$transaction(async (db) => {
+      await this.lock(db, branch.id);
+      const tank = await this.lockedTank(db, id, dto);
+      if (tank.deletedAt) throw new ConflictException('Restore this tank before editing it.');
+      await this.assertConfigurationIdle(db, branch.id);
+      const [product, duplicate, report] = await Promise.all([
+        db.product.findFirst({
+          where: {
+            id: dto.productId,
+            companyId: branch.division.companyId,
+            deletedAt: null,
+            status: 'ACTIVE',
+          },
+        }),
+        db.fuelTank.findFirst({
+          where: {
+            branchId: branch.id,
+            id: { not: id },
+            tankCode: { equals: dto.code.trim(), mode: 'insensitive' },
+          },
+        }),
+        this.latestTankReport(db, branch.id, id),
+      ]);
+      if (!product) throw new BadRequestException('Select a fuel product from this company.');
+      if (duplicate)
+        throw new ConflictException(
+          'This tank code already exists, including deleted tanks. Restore that tank or use another code.',
+        );
+      const balances = [
+        Number(tank.currentBookBalance),
+        Number(tank.lastDipBalance ?? 0),
+        this.reportedTankBalance(report, id),
+      ];
+      const recorded = Math.max(...balances);
+      if (dto.capacityLitres < recorded)
+        throw new ConflictException(
+          'Tank capacity cannot be smaller than its recorded fuel balance.',
+        );
+      if (dto.productId !== tank.productId) {
+        const references = await db.fuelTank.findUniqueOrThrow({
+          where: { id },
+          select: {
+            _count: {
+              select: {
+                nozzles: true,
+                pumps: true,
+                deliveries: true,
+                tankDips: true,
+                nozzleReadings: true,
+              },
+            },
+          },
+        });
+        if (
+          balances.some((balance) => balance !== 0) ||
+          report ||
+          Object.values(references._count).some((count) => count > 0)
+        )
+          throw new ConflictException(
+            'A tank with fuel history or equipment connections cannot change fuel product. Add a separate tank for the new product.',
+          );
+      }
+      const result = await db.fuelTank.update({
+        where: { id },
+        data: {
+          tankCode: dto.code.trim(),
+          tankName: dto.name.trim(),
+          productId: product.id,
+          capacityLitres: dto.capacityLitres,
+          updatedAt: this.configurationTime(tank.updatedAt),
+        },
+      });
+      await this.configurationAudit(
+        db,
+        user,
+        branch.division.companyId,
+        'FuelTank',
+        'UPDATE',
+        tank,
+        result,
+      );
+      return result;
+    });
+  }
+
+  async deleteTank(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    const branch = await this.tankForAdmin(user, id);
+    return this.prisma.$transaction(async (db) => {
+      await this.lock(db, branch.id);
+      const tank = await this.lockedTank(db, id, dto);
+      if (tank.deletedAt)
+        throw new ConflictException('This tank is already deleted. Reload station setup.');
+      await this.assertConfigurationIdle(db, branch.id);
+      const [nozzles, pumps, deliveries, report] = await Promise.all([
+        db.fuelNozzle.count({
+          where: {
+            tankId: id,
+            deletedAt: null,
+            status: 'ACTIVE',
+            pump: { deletedAt: null, status: 'ACTIVE' },
+          },
+        }),
+        db.fuelPump.count({ where: { tankId: id, deletedAt: null, status: 'ACTIVE' } }),
+        db.fuelDelivery.count({
+          where: { tankId: id, deletedAt: null, status: { in: ['DRAFT', 'RECEIVED', 'APPROVED'] } },
+        }),
+        this.latestTankReport(db, branch.id, id),
+      ]);
+      if (nozzles || pumps)
+        throw new ConflictException(
+          'Disconnect this tank’s active pump nozzles before deleting it.',
+        );
+      if (deliveries)
+        throw new ConflictException(
+          'Complete or cancel this tank’s pending fuel deliveries before deleting it.',
+        );
+      if (
+        [
+          Number(tank.currentBookBalance),
+          Number(tank.lastDipBalance ?? 0),
+          this.reportedTankBalance(report, id),
+        ].some((balance) => balance !== 0)
+      )
+        throw new ConflictException(
+          'This tank has a recorded fuel balance. Reconcile or move the remaining fuel before deleting it.',
+        );
+      const result = await db.fuelTank.update({
+        where: { id },
+        data: {
+          status: 'INACTIVE',
+          deletedAt: new Date(),
+          updatedAt: this.configurationTime(tank.updatedAt),
+        },
+      });
+      await this.configurationAudit(
+        db,
+        user,
+        branch.division.companyId,
+        'FuelTank',
+        'DELETE',
+        tank,
+        result,
+      );
+      return result;
+    });
+  }
+
+  async restoreTank(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    const branch = await this.tankForAdmin(user, id);
+    return this.prisma.$transaction(async (db) => {
+      await this.lock(db, branch.id);
+      const tank = await this.lockedTank(db, id, dto);
+      if (!tank.deletedAt && tank.status !== 'INACTIVE')
+        throw new ConflictException('This tank is not deleted or inactive. Reload station setup.');
+      await this.assertConfigurationIdle(db, branch.id);
+      if (
+        !(await db.product.findFirst({
+          where: {
+            id: tank.productId,
+            companyId: branch.division.companyId,
+            deletedAt: null,
+            status: 'ACTIVE',
+          },
+        }))
+      )
+        throw new ConflictException('Activate this tank’s fuel product before restoring the tank.');
+      const result = await db.fuelTank.update({
+        where: { id },
+        data: {
+          deletedAt: null,
+          status: 'ACTIVE',
+          updatedAt: this.configurationTime(tank.updatedAt),
+        },
+      });
+      await this.configurationAudit(
+        db,
+        user,
+        branch.division.companyId,
+        'FuelTank',
+        'RESTORE',
+        tank,
+        result,
+      );
+      return result;
+    });
+  }
+
+  async updatePump(user: AuthUser, id: string, dto: UpdateReportingPumpDto) {
+    this.assertAdmin(user);
+    const existing = await this.prisma.fuelPump.findFirst({ where: { id, deletedAt: null } });
+    if (!existing) throw new NotFoundException('Pump not found.');
+    const branch = await this.branch(user, existing.branchId, true);
+    return this.prisma.$transaction(async (db) => {
+      await this.lock(db, branch.id);
+      const pump = await db.fuelPump.findUniqueOrThrow({
+        where: { id },
+        include: { nozzles: true },
+      });
+      if (pump.deletedAt) throw new NotFoundException('Pump not found.');
+      this.configurationRevision(pump.updatedAt, dto);
+      await this.assertConfigurationIdle(db, branch.id);
+      if (!dto.nozzles.length || dto.nozzles.some((n) => !n.code.trim()))
+        throw new BadRequestException('Keep at least one named nozzle on the pump.');
+      if (
+        new Set(dto.nozzles.map((n) => n.code.trim().toLowerCase())).size !== dto.nozzles.length ||
+        new Set(dto.nozzles.flatMap((n) => (n.id ? [n.id] : []))).size !==
+          dto.nozzles.filter((n) => n.id).length
+      )
+        throw new BadRequestException('Each nozzle and nozzle code must appear only once.');
+      if (
+        await db.fuelPump.findFirst({
+          where: {
+            branchId: branch.id,
+            id: { not: id },
+            pumpCode: { equals: dto.code.trim(), mode: 'insensitive' },
+          },
+        })
+      )
+        throw new ConflictException('A pump with this code already exists.');
+      const tanks = await db.fuelTank.findMany({
+        where: {
+          branchId: branch.id,
+          deletedAt: null,
+          status: 'ACTIVE',
+          id: { in: dto.nozzles.map((n) => n.tankId) },
+        },
+      });
+      for (const n of dto.nozzles) {
+        const tank = tanks.find((t) => t.id === n.tankId);
+        const previous = n.id ? pump.nozzles.find((x) => x.id === n.id && !x.deletedAt) : null;
+        if (!tank) throw new BadRequestException('Select an active station tank for each nozzle.');
+        if (n.id && !previous)
+          throw new BadRequestException(
+            'This nozzle does not belong to the pump. Reload station setup.',
+          );
+        if (previous && previous.productId !== tank.productId)
+          throw new ConflictException(
+            'A nozzle cannot switch fuel product. Remove it and add a new nozzle with a new code to keep meter history separate.',
+          );
+        if (
+          pump.nozzles.some(
+            (x) => x.id !== n.id && x.nozzleCode.toLowerCase() === n.code.trim().toLowerCase(),
+          )
+        )
+          throw new ConflictException(
+            'A nozzle with this code already exists, including removed nozzles. Use another code.',
+          );
+      }
+      await db.fuelNozzle.updateMany({
+        where: {
+          pumpId: id,
+          deletedAt: null,
+          id: { notIn: dto.nozzles.flatMap((n) => (n.id ? [n.id] : [])) },
+        },
+        data: { status: 'INACTIVE', deletedAt: new Date() },
+      });
+      for (const n of dto.nozzles) {
+        const data = {
+          nozzleCode: n.code.trim(),
+          tankId: n.tankId,
+          productId: tanks.find((t) => t.id === n.tankId)!.productId,
+        };
+        if (n.id) await db.fuelNozzle.update({ where: { id: n.id }, data });
+        else
+          await db.fuelNozzle.create({
+            data: {
+              ...data,
+              pumpId: id,
+              branchId: branch.id,
+              companyId: branch.division.companyId,
+              divisionId: branch.divisionId,
+              status: pump.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
+            },
+          });
+      }
+      const result = await db.fuelPump.update({
+        where: { id },
+        data: {
+          pumpCode: dto.code.trim(),
+          pumpName: dto.name.trim(),
+          updatedAt: this.configurationTime(pump.updatedAt),
+        },
+        include: { nozzles: true },
+      });
+      await this.configurationAudit(
+        db,
+        user,
+        branch.division.companyId,
+        'FuelPump',
+        'UPDATE',
+        pump,
+        result,
+      );
+      return result;
+    });
+  }
+
+  async restorePump(user: AuthUser, id: string, dto: ReportingConfigurationRevisionDto) {
+    this.assertAdmin(user);
+    const existing = await this.prisma.fuelPump.findFirst({ where: { id, deletedAt: null } });
+    if (!existing) throw new NotFoundException('Pump not found.');
+    const branch = await this.branch(user, existing.branchId, true);
+    return this.prisma.$transaction(async (db) => {
+      await this.lock(db, branch.id);
+      const pump = await db.fuelPump.findUniqueOrThrow({
+        where: { id },
+        include: { nozzles: { where: { deletedAt: null } } },
+      });
+      if (pump.deletedAt) throw new NotFoundException('Pump not found.');
+      this.configurationRevision(pump.updatedAt, dto);
+      if (pump.status !== 'INACTIVE')
+        throw new ConflictException('This pump is not removed. Reload station setup.');
+      await this.assertConfigurationIdle(db, branch.id);
+      const tanks = await db.fuelTank.findMany({
+        where: {
+          branchId: branch.id,
+          deletedAt: null,
+          status: 'ACTIVE',
+          id: { in: pump.nozzles.map((n) => n.tankId) },
+        },
+      });
+      if (
+        !pump.nozzles.length ||
+        pump.nozzles.some(
+          (n) => !tanks.some((t) => t.id === n.tankId && t.productId === n.productId),
+        )
+      )
+        throw new ConflictException(
+          'Restore or reconnect this pump’s tanks before restoring the pump.',
+        );
+      await db.fuelNozzle.updateMany({
+        where: { pumpId: id, deletedAt: null, status: 'INACTIVE' },
+        data: { status: 'ACTIVE' },
+      });
+      const result = await db.fuelPump.update({
+        where: { id },
+        data: { status: 'ACTIVE', updatedAt: this.configurationTime(pump.updatedAt) },
+      });
+      await this.configurationAudit(
+        db,
+        user,
+        branch.division.companyId,
+        'FuelPump',
+        'RESTORE',
+        pump,
+        result,
+      );
+      return result;
+    });
   }
 
   async createTank(user: AuthUser, dto: CreateReportingTankDto) {

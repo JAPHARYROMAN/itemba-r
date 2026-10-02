@@ -6,6 +6,7 @@ import {
   IsDefined,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsObject,
   IsOptional,
@@ -128,6 +129,27 @@ export class CreateReportingTankDto {
   @IsString() @MaxLength(60) code!: string;
   @IsString() @MaxLength(160) name!: string;
   @IsNumber({ maxDecimalPlaces: 3 }) @Min(1) @Max(1e10) capacityLitres!: number;
+}
+export class ReportingConfigurationRevisionDto {
+  @IsISO8601({ strict: true }) expectedUpdatedAt!: string;
+}
+export class UpdateReportingTankDto extends ReportingConfigurationRevisionDto {
+  @IsUUID() productId!: string;
+  @IsString() @MaxLength(60) @Matches(/\S/) code!: string;
+  @IsString() @MaxLength(160) @Matches(/\S/) name!: string;
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(1) @Max(1e10) capacityLitres!: number;
+}
+class UpdateNozzleSetupDto extends NozzleSetupDto {
+  @IsOptional() @IsUUID() id?: string;
+}
+export class UpdateReportingPumpDto extends ReportingConfigurationRevisionDto {
+  @IsString() @MaxLength(60) @Matches(/\S/) code!: string;
+  @IsString() @MaxLength(160) @Matches(/\S/) name!: string;
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => UpdateNozzleSetupDto)
+  nozzles!: UpdateNozzleSetupDto[];
 }
 export class ReportingStationDetailsDto {
   @IsString() @MaxLength(60) @Matches(/\S/) code!: string;
