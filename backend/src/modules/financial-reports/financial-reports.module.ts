@@ -6,10 +6,16 @@ import { CompanyScopeService } from '../../common/services';
 
 import { PartyBalanceModule } from '../party-balance/party-balance.module';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PartyCloseCheckService } from './party-close-check.service';
 @Module({
   imports: [PrismaModule, PartyBalanceModule],
   controllers: [FinancialReportsController],
-  providers: [FinancialReportsService, CompanyScopeService, AccountResolverService],
-  exports: [FinancialReportsService],
+  providers: [
+    FinancialReportsService,
+    CompanyScopeService,
+    AccountResolverService,
+    PartyCloseCheckService,
+  ],
+  exports: [FinancialReportsService, PartyCloseCheckService],
 })
 export class FinancialReportsModule {}

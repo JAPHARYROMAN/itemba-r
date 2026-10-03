@@ -5,6 +5,8 @@ import { UpdateAccountingPeriodDto } from './dto/update-accounting-period.dto';
 import { QueryAccountingPeriodDto } from './dto/query-accounting-period.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
+import { AcknowledgeDifferencesDto } from './dto/acknowledge-differences.dto';
 
 @Controller('accounting-periods')
 export class AccountingPeriodsController {
@@ -42,6 +44,32 @@ export class AccountingPeriodsController {
   @RequirePermissions('accounting_periods.manage')
   close(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.close(id, user);
+  }
+
+  // Party linkage (Phase 3): agent-excluded until their Msaidizi evidence fixtures are authored.
+  @Get(':id/party-check')
+  @AgentExcluded()
+  @RequirePermissions('accounting_periods.view')
+  partyCheck(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.partyCheck(id, user);
+  }
+
+  @Get(':id/party-snapshots')
+  @AgentExcluded()
+  @RequirePermissions('accounting_periods.view')
+  partySnapshots(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.partySnapshots(id, user);
+  }
+
+  @Patch(':id/close-acknowledged')
+  @AgentExcluded()
+  @RequirePermissions('accounting_periods.manage')
+  closeAcknowledged(
+    @Param('id') id: string,
+    @Body() dto: AcknowledgeDifferencesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.close(id, user, { reason: dto.reason });
   }
 
   @Patch(':id/lock')

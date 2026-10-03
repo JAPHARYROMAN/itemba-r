@@ -148,3 +148,86 @@ describe('PeriodCloseService GL controls', () => {
     ).rejects.toThrow('Accounting period must belong to the requested company and fiscal year');
   });
 });
+
+/** Party linkage, Phase 3 PR-3: the control-by-party gate and snapshot on the formal close. */
+describe('PeriodCloseService party control gate', () => {
+  function closeCheck(overrides: Record<string, any> = {}) {
+    return {
+      checkOrRefuse: jest.fn(async () => ({ rows: [], differences: [], hasDifferences: false })),
+      snapshot: jest.fn(async () => 2),
+      auditMetadata: jest.fn(() => ({ partyControl: { acknowledged: true } })),
+      check: jest.fn(async () => ({ hasDifferences: false })),
+      snapshots: jest.fn(async () => ({ rows: [] })),
+      ...overrides,
+    };
+  }
+  function closeRecord(prisma: any) {
+    prisma.accountingPeriodClose.findFirst.mockResolvedValue({
+      id: 'close-1',
+      companyId: 'company-1',
+      fiscalYearId: 'fy-1',
+      accountingPeriodId: 'period-1',
+      status: 'REVIEWING',
+    });
+    prisma.accountingPeriod.findFirst.mockResolvedValue({ endDate: new Date('2026-09-30T00:00:00.000Z') });
+  }
+
+  it('refuses the close before any write when the gate refuses', async () => {
+    const prisma = makePrisma();
+    closeRecord(prisma);
+    const gate = closeCheck({
+      checkOrRefuse: jest.fn(async () => {
+        throw new BadRequestException({ code: 'PARTY_CONTROL_DIFFERENCES' });
+      }),
+    });
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const service = new PeriodCloseService(prisma, audit as any, new CompanyScopeService(prisma), gate as any);
+    await expect(service.close('close-1', authUser())).rejects.toBeInstanceOf(BadRequestException);
+    expect(gate.checkOrRefuse).toHaveBeenCalledWith(
+      'company-1',
+      new Date('2026-09-30T00:00:00.000Z'),
+      expect.objectContaining({ id: 'closer-user' }),
+      undefined,
+    );
+    expect(prisma.accountingPeriodClose.update).not.toHaveBeenCalled();
+    expect(prisma.accountingPeriod.update).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('passes the acknowledgement through, snapshots inside the close and audits the reason', async () => {
+    const prisma = makePrisma();
+    closeRecord(prisma);
+    const gate = closeCheck();
+    const audit = { log: jest.fn().mockResolvedValue(undefined) };
+    const service = new PeriodCloseService(prisma, audit as any, new CompanyScopeService(prisma), gate as any);
+    await service.close('close-1', authUser(), { reason: 'Legacy lines await the backfill' });
+    expect((gate.checkOrRefuse as jest.Mock).mock.calls[0][3]).toEqual({ reason: 'Legacy lines await the backfill' });
+    expect(gate.snapshot).toHaveBeenCalledWith(
+      prisma,
+      { companyId: 'company-1', accountingPeriodId: 'period-1', periodCloseId: 'close-1', userId: 'closer-user' },
+      expect.objectContaining({ hasDifferences: false }),
+    );
+    expect((gate.auditMetadata as jest.Mock).mock.calls[0][1]).toEqual({ reason: 'Legacy lines await the backfill' });
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'CLOSE',
+        companyId: 'company-1',
+        metadata: { partyControl: { acknowledged: true } },
+      }),
+    );
+    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({ where: { id: 'period-1' }, data: { status: 'CLOSED' } });
+  });
+
+  it('reads the check and the snapshots for the close record', async () => {
+    const prisma = makePrisma();
+    closeRecord(prisma);
+    const gate = closeCheck();
+    const service = new PeriodCloseService(prisma, { log: jest.fn() } as any, new CompanyScopeService(prisma), gate as any);
+    await service.partyCheck('close-1', authUser());
+    expect(gate.check).toHaveBeenCalledWith('company-1', new Date('2026-09-30T00:00:00.000Z'), expect.anything());
+    await service.partySnapshots('close-1', authUser());
+    expect(gate.snapshots).toHaveBeenCalledWith('period-1');
+    const bare = makeService(prisma);
+    await expect(bare.partyCheck('close-1', authUser())).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

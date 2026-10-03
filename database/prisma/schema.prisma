@@ -2134,6 +2134,7 @@ model Company {
   chartOfAccounts             ChartOfAccount[]
   fiscalYears                 FiscalYear[]
   accountingPeriods           AccountingPeriod[]
+  partyBalanceSnapshots       PartyBalanceSnapshot[]
   journalEntries              JournalEntry[]
   journalEntryLines           JournalEntryLine[]
   cashAccounts                CashAccount[]
@@ -3889,6 +3890,7 @@ model AccountingPeriod {
   periodCloses     AccountingPeriodClose[]
   accountingLocks  AccountingLock[]
   auditAdjustments AuditAdjustment[]
+  partyBalanceSnapshots PartyBalanceSnapshot[]
 
   @@unique([fiscalYearId, name])
   @@index([companyId])
@@ -15193,9 +15195,38 @@ model AccountingPeriodClose {
   createdBy        User             @relation("PeriodCloseCreatedBy", fields: [createdById], references: [id])
   closedBy         User?            @relation("PeriodCloseClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
   reopenedBy       User?            @relation("PeriodCloseReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
+  partyBalanceSnapshots PartyBalanceSnapshot[]
 
   @@index([companyId, fiscalYearId, accountingPeriodId, status])
   @@map("accounting_period_closes")
+}
+
+/// Party linkage (Phase 3): what the control account and the sub-ledger said for a party at
+/// period close, in the company base currency. 'NONE' rows hold the control balance without a
+/// party. Written only by a period close; never read back as a balance.
+model PartyBalanceSnapshot {
+  id                 String   @id @default(uuid())
+  companyId          String
+  accountingPeriodId String
+  periodCloseId      String?
+  role               String   @db.VarChar(2)
+  partyType          String   @default("NONE") @db.VarChar(10)
+  partyId            String?
+  partyName          String?
+  currency           String
+  subLedger          Decimal  @db.Decimal(18, 2)
+  control            Decimal  @db.Decimal(18, 2)
+  difference         Decimal  @db.Decimal(18, 2)
+  snapshotAt         DateTime @default(now())
+  createdById        String?
+
+  company          Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  accountingPeriod AccountingPeriod       @relation(fields: [accountingPeriodId], references: [id], onDelete: Restrict)
+  periodClose      AccountingPeriodClose? @relation(fields: [periodCloseId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, accountingPeriodId])
+  @@index([partyType, partyId])
+  @@map("party_balance_snapshots")
 }
 
 model AccountingLock {

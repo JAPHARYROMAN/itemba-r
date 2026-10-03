@@ -15,6 +15,7 @@ const money = (value: string, currency: string) => {
 };
 import { useAccountingEditor, useAccountingRefresh } from './accounting-drafts';
 import { useControlChoices } from './accounting-control-choices';
+import { PartySnapshotsPanel } from '@/features/party/party-snapshots-panel';
 import {
   controlActions,
   controlDefinitions,
@@ -167,6 +168,9 @@ export function ControlDetail({
             Retry reference names
           </Btn>
         </div>
+      )}
+      {kind === 'period-close' && row.status === 'CLOSED' && (
+        <PartySnapshotsPanel path={`/period-close/${encodeURIComponent(row.id)}/party-snapshots`} />
       )}
       {row.reviewNotes && (
         <section>
