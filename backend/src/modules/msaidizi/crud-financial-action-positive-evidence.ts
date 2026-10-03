@@ -237,7 +237,7 @@ function journalLineEffect(spec: JournalLineSpec): CrudMutationCompoundNamedEffe
       branchId: spec.branchId ?? literal(null),
     },
     generatedFields: {},
-    allowedFields: ['id', 'createdAt', 'updatedAt'],
+    allowedFields: ['id', 'createdAt', 'updatedAt', 'partyType', 'supplierId', 'customerId'],
     recovery: 'restore-scope',
     recoveryOrder: spec.recoveryOrder,
   };
