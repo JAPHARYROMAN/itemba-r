@@ -17,6 +17,7 @@ import '@/components/workspace/partner-profile.css';
 import { SupplierFormModal, type Company } from './SupplierFormModal';
 import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
 import { PartyBalancePanel } from '@/features/party/party-balance-panel';
+import { SupplierAgingPanel } from '@/features/party/supplier-aging-panel';
 import type { PartyBalance } from '@/features/party/party-balance';
 
 interface SupplierCategory {
@@ -467,6 +468,13 @@ export function SupplierProfile({
           className="partner-profile-content"
         >
           <PartyBalancePanel kind="supplier" balance={data?.balance} />
+          {tab === 'Overview' && hasPermission('finance.reports.view') && (
+            <SupplierAgingPanel
+              companyId={supplier.companyId}
+              supplierId={supplierId}
+              currency={data?.balance?.baseCurrency ?? 'TZS'}
+            />
+          )}
           {tab === 'Overview' && (
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">

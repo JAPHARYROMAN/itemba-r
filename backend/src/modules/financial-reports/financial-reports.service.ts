@@ -3,6 +3,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PartyBalanceService } from '../party-balance/party-balance.service';
+import { baseCurrencyFor } from '../party-balance/party-balance.helper';
 
 type ReportScope = {
   divisionId?: string | null;
@@ -43,7 +46,223 @@ export class FinancialReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyScope: CompanyScopeService,
+    // Party linkage (Phase 3): the resolver's sub-ledger list and the control account
+    // resolver, optional so smaller testing modules keep constructing the service.
+    private readonly partyBalance?: PartyBalanceService,
+    private readonly accountResolver?: AccountResolverService,
   ) {}
+
+  /**
+   * Party linkage (Phase 3 PR-2): the control account balance per party beside the open
+   * sub-ledger outstanding, with the difference, and the control balance without a party as
+   * its own row. Ledger lines are read up to `asOf`; the sub-ledger is the resolver's current
+   * open outstanding (documents keep no history), so for a past `asOf` the difference is
+   * informational. Base currency only: journal lines carry no currency. Read-only.
+   */
+  async getControlByParty(
+    companyId: string,
+    role: 'AP' | 'AR',
+    asOf: string | undefined,
+    user: AuthUser,
+  ) {
+    await this.companyScope.assertCanAccessCompany(user, companyId);
+    if (!this.partyBalance || !this.accountResolver)
+      throw new BadRequestException('Control reconciliation is unavailable in this deployment.');
+    const asOfDate = asOf ? new Date(asOf) : new Date();
+    if (isNaN(asOfDate.getTime())) throw new BadRequestException('Invalid asOf date');
+    const kind = role === 'AP' ? 'supplier' : 'customer';
+    let control: { id: string; accountCode: string; accountName: string } | null = null;
+    try {
+      control = await this.accountResolver.resolve(
+        companyId,
+        role === 'AP' ? 'AP_CONTROL' : 'AR_CONTROL',
+      );
+    } catch {
+      control = null;
+    }
+    const baseCurrency = await baseCurrencyFor(this.prisma, companyId);
+    const zero = new Prisma.Decimal(0);
+    const decimal = (v: Prisma.Decimal | number | string | null | undefined) =>
+      new Prisma.Decimal(v ?? 0);
+    const money = (v: Prisma.Decimal) => v.toFixed(2);
+    // A liability control carries its balance as a credit; an asset control as a debit.
+    const signed = (debit: Prisma.Decimal, credit: Prisma.Decimal) =>
+      role === 'AP' ? credit.minus(debit) : debit.minus(credit);
+    const grouped = control
+      ? await this.prisma.journalEntryLine.groupBy({
+          by: ['partyType', 'supplierId', 'customerId'],
+          where: {
+            companyId,
+            accountId: control.id,
+            journalEntry: { status: 'POSTED', transactionDate: { lte: asOfDate } },
+          },
+          _sum: { debit: true, credit: true },
+        })
+      : [];
+    const controlBy = new Map<string, Prisma.Decimal>();
+    let untagged = zero;
+    for (const g of grouped) {
+      const amount = signed(decimal(g._sum.debit), decimal(g._sum.credit));
+      const partyId = kind === 'supplier' ? g.supplierId : g.customerId;
+      if (g.partyType === 'NONE' || !partyId) untagged = untagged.plus(amount);
+      else controlBy.set(partyId, (controlBy.get(partyId) ?? zero).plus(amount));
+    }
+    const subLedger =
+      kind === 'supplier'
+        ? await this.partyBalance.suppliers(user, companyId, asOfDate)
+        : await this.partyBalance.customers(user, companyId, asOfDate);
+    const names = new Map<string, { name: string; code: string | null }>(
+      subLedger.map((s) => [s.partyId, { name: s.name, code: s.code }]),
+    );
+    const missing = [...controlBy.keys()].filter((id) => !names.has(id));
+    if (missing.length) {
+      const found =
+        kind === 'supplier'
+          ? (
+              await this.prisma.supplier.findMany({
+                where: { id: { in: missing } },
+                select: { id: true, name: true, supplierCode: true },
+              })
+            ).map((r) => ({ id: r.id, name: r.name, code: r.supplierCode }))
+          : (
+              await this.prisma.customer.findMany({
+                where: { id: { in: missing } },
+                select: { id: true, name: true, customerCode: true },
+              })
+            ).map((r) => ({ id: r.id, name: r.name, code: r.customerCode }));
+      for (const r of found) names.set(r.id, { name: r.name, code: r.code });
+    }
+    const subBy = new Map(
+      subLedger.map((s) => {
+        const erp = s.erp.find((b) => b.currency === baseCurrency);
+        return [s.partyId, { open: decimal(erp?.open), documents: erp?.documents ?? 0 }] as const;
+      }),
+    );
+    const rows = [...new Set([...controlBy.keys(), ...subBy.keys()])]
+      .map((partyId) => {
+        const controlAmount = controlBy.get(partyId) ?? zero;
+        const sub = subBy.get(partyId);
+        const open = sub?.open ?? zero;
+        return {
+          partyId,
+          name: names.get(partyId)?.name ?? partyId,
+          code: names.get(partyId)?.code ?? null,
+          control: money(controlAmount),
+          subLedger: money(open),
+          difference: money(controlAmount.minus(open)),
+          documents: sub?.documents ?? 0,
+        };
+      })
+      .filter((r) => r.control !== '0.00' || r.subLedger !== '0.00')
+      .sort(
+        (a, b) =>
+          Math.abs(Number(b.difference)) - Math.abs(Number(a.difference)) ||
+          a.name.localeCompare(b.name),
+      );
+    const controlTotal = rows
+      .reduce((sum, r) => sum.plus(r.control), zero)
+      .plus(untagged);
+    const subTotal = rows.reduce((sum, r) => sum.plus(r.subLedger), zero);
+    return {
+      companyId,
+      role,
+      kind,
+      asOf: asOfDate,
+      baseCurrency,
+      controlAccount: control
+        ? { id: control.id, accountCode: control.accountCode, accountName: control.accountName }
+        : null,
+      rows,
+      untaggedControl: money(untagged),
+      totals: {
+        control: money(controlTotal),
+        subLedger: money(subTotal),
+        difference: money(controlTotal.minus(subTotal)),
+      },
+      partiesWithDifference: rows.filter((r) => r.difference !== '0.00').length,
+    };
+  }
+
+  /** Party linkage (Phase 3 PR-2): per-supplier payables aging, mirroring the customer one. */
+  async getSupplierAgingDetail(
+    companyId: string,
+    supplierId: string,
+    asOf?: string,
+    user?: AuthUser,
+  ) {
+    if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
+    const asOfDate = asOf ? new Date(asOf) : new Date();
+    if (isNaN(asOfDate.getTime())) {
+      throw new BadRequestException('Invalid asOf date');
+    }
+    const payables = await this.prisma.payable.findMany({
+      where: {
+        companyId,
+        supplierId,
+        deletedAt: null,
+        status: OPEN_SUBLEDGER_STATUS_FILTER,
+      },
+      select: {
+        id: true,
+        payableNumber: true,
+        supplierId: true,
+        supplierName: true,
+        amount: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        currency: true,
+        issueDate: true,
+        dueDate: true,
+        status: true,
+        journalEntryId: true,
+      },
+      orderBy: [{ dueDate: 'asc' }, { issueDate: 'asc' }],
+    });
+    const buckets = { current: 0, days1_30: 0, days31_60: 0, days61_90: 0, over90: 0, total: 0 };
+    let oldestDaysOverdue = 0;
+    let supplierName: string | null = null;
+    const payablesOut = payables.map((p) => {
+      if (supplierName === null) supplierName = p.supplierName;
+      const amount = Number(p.outstandingAmount);
+      const days = p.dueDate
+        ? Math.floor((asOfDate.getTime() - p.dueDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+      let bucket: keyof typeof buckets;
+      if (days <= 0) bucket = 'current';
+      else if (days <= 30) bucket = 'days1_30';
+      else if (days <= 60) bucket = 'days31_60';
+      else if (days <= 90) bucket = 'days61_90';
+      else bucket = 'over90';
+      buckets[bucket] += amount;
+      buckets.total += amount;
+      const daysOverdue = Math.max(0, days);
+      oldestDaysOverdue = Math.max(oldestDaysOverdue, daysOverdue);
+      return {
+        id: p.id,
+        payableNumber: p.payableNumber,
+        amount: Number(p.amount),
+        paidAmount: Number(p.paidAmount),
+        outstandingAmount: amount,
+        currency: p.currency,
+        issueDate: p.issueDate,
+        dueDate: p.dueDate,
+        status: p.status,
+        journalEntryId: p.journalEntryId,
+        daysOverdue,
+        bucket,
+      };
+    });
+    return {
+      companyId,
+      supplierId,
+      supplierName,
+      asOf: asOfDate,
+      ...buckets,
+      oldestDaysOverdue,
+      payableCount: payablesOut.length,
+      payables: payablesOut,
+    };
+  }
 
   async getCompanySummary(companyId: string, user?: AuthUser) {
     if (user) await this.companyScope.assertCanAccessCompany(user, companyId);
