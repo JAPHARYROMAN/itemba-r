@@ -9,6 +9,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ScheduledReportsService } from '../scheduled-reports/scheduled-reports.service';
 import { computeNextBackupRunAt } from './backup-schedule';
 import { JobContext, JobHandlerRegistry, JobLeaseEndedError } from './job-handler.registry';
+import {
+  computePartyBalanceList,
+  type PartyBalanceSummary,
+  type PartyKind,
+} from '../party-balance/party-balance.helper';
+import { partyProfileHref } from '../party-balance/party-links';
 
 const POLL_INTERVAL_MS = 2_000; // baseline poll cadence
 const POLL_BATCH = 5; // jobs leased per tick
@@ -24,6 +30,14 @@ const DEFAULT_OVERDUE_REMINDER_INTERVAL_HOURS = 72;
 // How recently a LOW_STOCK AlertEvent must have fired for the same product to
 // suppress a duplicate. Prevents alert spam on every tick.
 const DEFAULT_LOW_STOCK_ALERT_INTERVAL_HOURS = 24;
+// Party linkage (Phase 3): how recently a party alert of the same type must have fired for
+// the same supplier / customer to suppress a duplicate (idempotent per party per day).
+const DEFAULT_PARTY_ALERT_INTERVAL_HOURS = 24;
+// The party pass computes every party's balance set-wise, so a worker scans at most this
+// often; the per-party window above is what keeps repeated scans from re-raising.
+const PARTY_ALERT_SCAN_INTERVAL_MS = 60 * 60_000;
+const PARTY_ALERT_TYPES = ['OVERDUE_PAYABLE', 'OVERDUE_RECEIVABLE', 'CREDIT_LIMIT_BREACH'] as const;
+type PartyAlertType = (typeof PARTY_ALERT_TYPES)[number];
 // Max rows any single automation pass will touch per tick. Hard ceiling so a
 // large backlog never fans out unbounded email/notification traffic.
 const DEFAULT_AUTOMATION_BATCH = 25;
@@ -58,6 +72,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private enabled = false;
   private automationEnabled = false;
+  private lastPartyAlertScanAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -779,7 +794,10 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     const scheduledReports = await this.runAutomationPass('scheduledReports', () =>
       this.enqueueDueScheduledReports(batch),
     );
-    return { reminders, lowStock, scheduledReports };
+    const partyAlerts = this.partyAlertScanDue()
+      ? await this.runAutomationPass('partyAlerts', () => this.enqueueDuePartyAlerts(batch))
+      : { processed: 0, scanned: 0, note: 'not due' };
+    return { reminders, lowStock, scheduledReports, partyAlerts };
   }
 
   private async runAutomationPass(
@@ -1021,6 +1039,172 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * (4) Party alerts (party linkage, Phase 3 PR-4).
+   *
+   * From the resolver's set-wise balance list, the only balance any surface shows:
+   * OVERDUE_PAYABLE per supplier with overdue outstanding, OVERDUE_RECEIVABLE per customer
+   * with overdue outstanding, and CREDIT_LIMIT_BREACH per customer whose base-currency total
+   * exceeds its credit limit. One AlertEvent per party per type per window, guarded like low
+   * stock (recent-event check plus the in-transaction re-check), each carrying the party's
+   * profile href in its metadata, plus a company notification whose actionUrl opens it.
+   */
+  async enqueueDuePartyAlerts(batch: number): Promise<AutomationPassResult> {
+    const now = new Date();
+    const alertedSince = new Date(now.getTime() - this.partyAlertIntervalHours() * 60 * 60_000);
+    const [suppliers, customers] = await Promise.all([
+      this.partyBalances('supplier', now),
+      this.partyBalances('customer', now),
+    ]);
+    type Candidate = {
+      party: PartyBalanceSummary;
+      kind: PartyKind;
+      alertType: PartyAlertType;
+      priority: 'HIGH' | 'CRITICAL';
+      title: string;
+      message: string;
+      metadata: Record<string, unknown>;
+    };
+    const overdueOf = (party: PartyBalanceSummary) =>
+      party.overdue.filter((bucket) => Number(bucket.amount) > 0);
+    const amounts = (rows: Array<{ currency: string; amount: string }>) =>
+      rows.map((row) => `${row.currency} ${row.amount}`).join(', ');
+    const candidates: Candidate[] = [];
+    for (const party of suppliers) {
+      const overdue = overdueOf(party);
+      if (!overdue.length) continue;
+      candidates.push({
+        party,
+        kind: 'supplier',
+        alertType: 'OVERDUE_PAYABLE',
+        priority: 'HIGH',
+        title: `Overdue payable: ${party.name}`,
+        message: `${party.name} (${party.code}) has overdue outstanding of ${amounts(overdue)}.`,
+        metadata: { overdue, total: party.total },
+      });
+    }
+    for (const party of customers) {
+      const overdue = overdueOf(party);
+      if (overdue.length)
+        candidates.push({
+          party,
+          kind: 'customer',
+          alertType: 'OVERDUE_RECEIVABLE',
+          priority: 'HIGH',
+          title: `Overdue receivable: ${party.name}`,
+          message: `${party.name} (${party.code}) has overdue outstanding of ${amounts(overdue)}.`,
+          metadata: { overdue, total: party.total },
+        });
+      const limit = new Prisma.Decimal(party.creditLimit || 0);
+      const baseTotal = new Prisma.Decimal(
+        party.total.find((row) => row.currency === party.baseCurrency)?.amount ?? 0,
+      );
+      if (limit.gt(0) && baseTotal.gt(limit))
+        candidates.push({
+          party,
+          kind: 'customer',
+          alertType: 'CREDIT_LIMIT_BREACH',
+          priority: 'CRITICAL',
+          title: `Credit limit exceeded: ${party.name}`,
+          message:
+            `${party.name} (${party.code}) owes ${party.baseCurrency} ${baseTotal.toFixed(2)} ` +
+            `against a credit limit of ${party.baseCurrency} ${limit.toFixed(2)}.`,
+          metadata: {
+            total: party.total,
+            creditLimit: party.creditLimit,
+            exceededBy: baseTotal.minus(limit).toFixed(2),
+          },
+        });
+    }
+    const scanned = suppliers.length + customers.length;
+    if (!candidates.length) return { processed: 0, scanned };
+
+    const key = (alertType: string, partyId: string | null) => `${alertType}:${partyId}`;
+    const recent = await this.prisma.alertEvent.findMany({
+      where: {
+        alertType: { in: [...PARTY_ALERT_TYPES] },
+        linkedEntityType: { in: ['Supplier', 'Customer'] },
+        linkedEntityId: { in: [...new Set(candidates.map((c) => c.party.partyId))] },
+        triggeredAt: { gte: alertedSince },
+      },
+      select: { alertType: true, linkedEntityId: true },
+    });
+    const recentlyAlerted = new Set(recent.map((e) => key(e.alertType, e.linkedEntityId)));
+
+    let processed = 0;
+    for (const c of candidates) {
+      if (processed >= batch) break;
+      const k = key(c.alertType, c.party.partyId);
+      if (recentlyAlerted.has(k)) continue;
+      const linkedEntityType = c.kind === 'supplier' ? 'Supplier' : 'Customer';
+      const href = partyProfileHref(c.kind, c.party.partyId);
+      const created = await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.alertEvent.findFirst({
+          where: {
+            alertType: c.alertType,
+            linkedEntityType,
+            linkedEntityId: c.party.partyId,
+            triggeredAt: { gte: alertedSince },
+          },
+          select: { id: true },
+        });
+        if (existing) return false;
+        await tx.alertEvent.create({
+          data: {
+            alertEventNumber: this.makeRunNumber('ALRT-PT'),
+            companyId: c.party.companyId,
+            alertType: c.alertType,
+            title: c.title,
+            message: c.message,
+            linkedEntityType,
+            linkedEntityId: c.party.partyId,
+            priority: c.priority,
+            status: 'OPEN',
+            triggeredAt: now,
+            metadata: {
+              ...c.metadata,
+              partyKind: c.kind,
+              partyCode: c.party.code,
+              baseCurrency: c.party.baseCurrency,
+              href,
+              source: 'automation-dispatch',
+            },
+          },
+        });
+        return true;
+      });
+      if (!created) continue;
+      recentlyAlerted.add(k);
+      processed += 1;
+
+      await this.notifyCompanyRecipients({
+        companyId: c.party.companyId,
+        title: c.title,
+        message: c.message,
+        notificationType: 'PAYMENT_DUE',
+        priority: c.priority,
+        linkedEntityType,
+        linkedEntityId: c.party.partyId,
+        actionUrl: href,
+      });
+    }
+
+    return { processed, scanned };
+  }
+
+  /** The resolver's set-wise list across every company; a seam so tests supply balances. */
+  async partyBalances(kind: PartyKind, asOf: Date): Promise<PartyBalanceSummary[]> {
+    return computePartyBalanceList(this.prisma, kind, {}, asOf);
+  }
+
+  /** A worker scans parties at most once per {@link PARTY_ALERT_SCAN_INTERVAL_MS}. */
+  private partyAlertScanDue(): boolean {
+    const now = Date.now();
+    if (now - this.lastPartyAlertScanAt < PARTY_ALERT_SCAN_INTERVAL_MS) return false;
+    this.lastPartyAlertScanAt = now;
+    return true;
+  }
+
+  /**
    * (3) Scheduled report runs.
    *
    * Selects active scheduled reports whose nextRunAt is due, atomically claims
@@ -1212,6 +1396,8 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL';
     linkedEntityType?: string;
     linkedEntityId?: string;
+    /** Party linkage (Phase 3): where the notification opens, never a guessed path. */
+    actionUrl?: string;
   }): Promise<void> {
     if (!this.notifications || !input.companyId) return;
     const recipients = await this.prisma.userCompanyAccess.findMany({
@@ -1232,6 +1418,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
         priority: (input.priority ?? 'NORMAL') as any,
         linkedEntityType: input.linkedEntityType,
         linkedEntityId: input.linkedEntityId,
+        actionUrl: input.actionUrl,
       });
     }
   }
@@ -1367,6 +1554,13 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  private partyAlertIntervalHours(): number {
+    return this.positiveIntConfig(
+      'AUTOMATION_PARTY_ALERT_INTERVAL_HOURS',
+      DEFAULT_PARTY_ALERT_INTERVAL_HOURS,
+    );
+  }
+
   private automationBatch(): number {
     return this.positiveIntConfig('AUTOMATION_DISPATCH_BATCH', DEFAULT_AUTOMATION_BATCH);
   }
@@ -1466,4 +1660,6 @@ export type AutomationDispatchResult = {
   reminders: AutomationPassResult;
   lowStock: AutomationPassResult;
   scheduledReports: AutomationPassResult;
+  /** Party linkage (Phase 3): overdue payable / receivable and credit limit breach per party. */
+  partyAlerts: AutomationPassResult;
 };

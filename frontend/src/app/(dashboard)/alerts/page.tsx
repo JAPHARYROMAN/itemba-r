@@ -5,6 +5,7 @@ import { Btn, ConfirmDialog, PageSpinner, showToast } from '@/components/ui';
 import { backendPatch, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
+import { openPartyIn } from '@/features/party/party-links';
 
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-700',
@@ -14,6 +15,12 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 type Tab = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
+
+// Party linkage (Phase 3): an alert about a supplier or customer opens the party's profile.
+const partyHref = (ev: any): string | null =>
+  ev?.linkedEntityId && (ev.linkedEntityType === 'Supplier' || ev.linkedEntityType === 'Customer')
+    ? openPartyIn('profile', ev.linkedEntityType === 'Supplier' ? 'supplier' : 'customer', String(ev.linkedEntityId))
+    : null;
 type AlertAction = 'acknowledge' | 'resolve' | 'dismiss';
 
 const ACTIONS: Record<string, { action: AlertAction; label: string; variant: 'primary' | 'success' | 'secondary' }[]> = {
@@ -153,7 +160,7 @@ export default function AlertEventsPage() {
                 <tr key={ev.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-mono text-gray-700">{ev.alertEventNumber || ev.id}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{ev.alertRule?.alertType || ev.alertType}</td>
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{ev.title || ev.alertRule?.name}</td>
+                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{ev.title || ev.alertRule?.name}{partyHref(ev) && <a className="ml-2 text-xs font-normal underline" href={partyHref(ev) as string}>Open profile</a>}</td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[ev.priority] || 'bg-gray-100 text-gray-500'}`}>
                       {ev.priority}
