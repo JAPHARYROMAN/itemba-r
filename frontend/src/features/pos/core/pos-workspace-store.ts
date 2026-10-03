@@ -18,6 +18,7 @@ export type PosCartDraft = {
   paymentMethod: string;
   paymentReference: string;
   receivedValue: string;
+  payments?: import('./pos-types').PosPayment[];
 };
 
 const prefix = 'pos-cart-v1:';

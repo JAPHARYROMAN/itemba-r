@@ -1,3 +1,4 @@
+import { readPosTenders, tenderTotal } from '../sales-orders/pos-tenders';
 import {
   BadRequestException,
   ConflictException,
@@ -722,7 +723,7 @@ function receiptDateTime(value: Date) {
 
 /** Bilingual sw/en payment method label, with the terminal's custom label (e.g. a till number) appended. */
 function bilingualPaymentMethod(
-  paymentMethod: SalesPaymentMethod | null | undefined,
+  paymentMethod: string | null | undefined,
   configuredLabel?: string | null,
 ) {
   const base = (() => {
@@ -2054,12 +2055,15 @@ export class MobilePosLiteService {
         id: true,
         salesOrderNumber: true,
         totalAmount: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        posTenders: true,
         status: true,
         deletedAt: true,
       },
     });
     if (!sale) return { state: 'not_found' as const };
-    if (sale.deletedAt || !['CONFIRMED', 'PAID'].includes(sale.status)) {
+    if (sale.deletedAt || !['CONFIRMED', 'PARTIALLY_PAID', 'PAID'].includes(sale.status)) {
       return { state: 'needs_attention' as const, reference: sale.salesOrderNumber };
     }
     return {
@@ -2068,6 +2072,17 @@ export class MobilePosLiteService {
         id: sale.id,
         salesOrderNumber: sale.salesOrderNumber,
         totalAmount: Number(sale.totalAmount),
+        ...(sale.posTenders
+          ? {
+              paidAmount: Number(sale.paidAmount),
+              outstandingAmount: Number(sale.outstandingAmount),
+              posTenders: readPosTenders(sale.posTenders)!.map(({ method, amount, reference }) => ({
+                method,
+                amount,
+                reference,
+              })),
+            }
+          : {}),
       },
     };
   }
@@ -2080,6 +2095,7 @@ export class MobilePosLiteService {
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
     const paymentMethod = dto.paymentMethod;
+    const allocated = dto.payments !== undefined;
     const isCredit = paymentMethod === SalesPaymentMethod.CREDIT;
     if (isCredit && !terminal.creditEnabled) {
       throw new ForbiddenException('Credit is not enabled on this Mobile POS terminal');
@@ -2115,41 +2131,81 @@ export class MobilePosLiteService {
       : terminal.paymentMethods.find(
           (configured) => configured.isEnabled && configured.paymentMethod === paymentMethod,
         );
-    if (!isCredit && !payment) {
+    if (!isCredit && !allocated && !payment) {
       throw new ForbiddenException(
         'This payment method is not enabled on this Mobile POS terminal',
       );
     }
 
     const { lines, overrides } = await this.resolveSaleLines(terminal, dto.lines, user);
+    const tenders = allocated
+      ? readPosTenders(
+          dto.payments!.map((v) => ({
+            method: v.method,
+            amount: v.amount,
+            reference: v.reference?.trim() || null,
+            cashAccountId:
+              terminal.paymentMethods.find(
+                (p) => p.isEnabled && p.paymentMethod === v.method && p.cashAccount.isActive,
+              )?.cashAccountId ?? '',
+          })),
+        )!
+      : undefined;
+    if (allocated && paymentMethod !== SalesPaymentMethod.MIXED)
+      throw new BadRequestException('Allocated payments require MIXED payment method');
+    if (!allocated && paymentMethod === SalesPaymentMethod.MIXED)
+      throw new BadRequestException('Split payments require allocations');
+    if (tenders) {
+      const total = new Prisma.Decimal(
+        lines.reduce((n, l) => n + l.unitPrice * l.quantity, 0),
+      ).toDecimalPlaces(2);
+      const paid = tenderTotal(tenders);
+      if (dto.expectedTotal == null || !new Prisma.Decimal(dto.expectedTotal).equals(total))
+        throw new ConflictException(
+          'The sale total changed. Review prices and payment allocations before submitting.',
+        );
+      if (paid.gt(total)) throw new BadRequestException('Payments exceed the sale total');
+      if (paid.lt(total) && (!terminal.creditEnabled || !dto.customerId))
+        throw new ForbiddenException(
+          'Partial payment needs a named customer and credit enabled on the till',
+        );
+    }
     let sale: Awaited<ReturnType<SalesOrdersService['mobilePosLiteQuickSale']>>;
     try {
-      sale = await this.salesOrders.mobilePosLiteQuickSale(
-        {
-          companyId: terminal.companyId,
-          divisionId: terminal.divisionId,
-          branchId: terminal.branchId,
-          // Credit always carries dto.customerId (validated above); cash/mobile
-          // money sales record an attached customer when one was chosen and fall
-          // back to the terminal's general customer otherwise.
-          customerId: dto.customerId ?? terminal.generalCustomerId,
-          salesType: isCredit ? SalesType.CREDIT_SALE : SalesType.CASH_SALE,
-          orderDate: new Date().toISOString(),
-          currency: CurrencyCode.TZS,
-          paymentMethod,
-          cashAccountId: payment?.cashAccountId,
-          paymentReference: dto.paymentReference?.trim() || undefined,
-          salespersonId: terminal.salespersonId,
-          idempotencyKey: dto.idempotencyKey,
-          lines,
-        },
-        user,
-        terminal.id,
-        terminal.terminalCode,
-        // Passed only when a price was changed, so an ordinary sale takes
-        // exactly the path it took before price editing existed.
-        ...(overrides.length ? ([overrides] as const) : ([] as const)),
-      );
+      const saleInput = {
+        companyId: terminal.companyId,
+        divisionId: terminal.divisionId,
+        branchId: terminal.branchId,
+        // Credit always carries dto.customerId (validated above); cash/mobile
+        // money sales record an attached customer when one was chosen and fall
+        // back to the terminal's general customer otherwise.
+        customerId: dto.customerId ?? terminal.generalCustomerId,
+        salesType: isCredit ? SalesType.CREDIT_SALE : SalesType.CASH_SALE,
+        orderDate: new Date().toISOString(),
+        currency: CurrencyCode.TZS,
+        paymentMethod,
+        cashAccountId: tenders?.[0].cashAccountId ?? payment?.cashAccountId,
+        paymentReference: dto.paymentReference?.trim() || undefined,
+        salespersonId: terminal.salespersonId,
+        idempotencyKey: dto.idempotencyKey,
+        lines,
+      };
+      sale = tenders
+        ? await this.salesOrders.mobilePosLiteQuickSale(
+            saleInput,
+            user,
+            terminal.id,
+            terminal.terminalCode,
+            overrides,
+            tenders,
+          )
+        : await this.salesOrders.mobilePosLiteQuickSale(
+            saleInput,
+            user,
+            terminal.id,
+            terminal.terminalCode,
+            ...(overrides.length ? ([overrides] as const) : ([] as const)),
+          );
     } catch (error) {
       // The profit guard's own message names the cost. On the till it is
       // replaced, whatever the price's origin (list or edited), by the one
@@ -2686,6 +2742,9 @@ export class MobilePosLiteService {
         orderDate: true,
         createdAt: true,
         totalAmount: true,
+        posTenders: true,
+        outstandingAmount: true,
+        receivableId: true,
         paymentMethod: true,
         paymentReference: true,
         customerName: true,
@@ -2761,6 +2820,78 @@ export class MobilePosLiteService {
       },
     ];
 
+    const payments = readPosTenders(sale.posTenders);
+    const collections = sale.receivableId
+      ? await this.prisma.customerPayment.findMany({
+          where: {
+            companyId: terminal.companyId,
+            divisionId: terminal.divisionId,
+            branchId: terminal.branchId,
+            status: 'COMPLETED',
+            deletedAt: null,
+            allocations: { some: { receivableId: sale.receivableId } },
+          },
+          select: {
+            paymentNumber: true,
+            method: true,
+            reference: true,
+            allocations: { where: { receivableId: sale.receivableId }, select: { amount: true } },
+          },
+          orderBy: { paymentDate: 'asc' },
+        })
+      : [];
+    if (payments || collections.length || sale.paymentMethod === 'CREDIT')
+      sections.splice(2, 0, {
+        title: 'Malipo / Payments',
+        table: {
+          headers: ['Njia / Method', 'Kumbukumbu / Reference', 'Kiasi / Amount'],
+          rows: [
+            ...(payments ?? []).map((p) => [
+              bilingualPaymentMethod(p.method, null),
+              p.reference ?? '—',
+              tzsWhole(p.amount),
+            ]),
+            ...collections.map((p) => [
+              bilingualPaymentMethod(p.method, null),
+              [p.paymentNumber, p.reference].filter(Boolean).join(' · '),
+              tzsWhole(p.allocations.reduce((n, a) => n + Number(a.amount), 0)),
+            ]),
+          ],
+          numericColumns: [2],
+        },
+        totals: [{ label: 'Salio / Balance owed', value: tzsWhole(sale.outstandingAmount) }],
+      });
+    const credits = await this.prisma.creditNote.findMany({
+      where: {
+        salesOrderId: saleId,
+        companyId: terminal.companyId,
+        status: 'ISSUED',
+        deletedAt: null,
+      },
+      select: {
+        creditNoteNumber: true,
+        totalAmount: true,
+        appliedAmount: true,
+        refunds: {
+          where: { status: 'PAID', deletedAt: null },
+          select: { refundNumber: true, amount: true },
+        },
+      },
+    });
+    if (credits.length)
+      sections.splice(-1, 0, {
+        title: 'Marejesho / Returns',
+        table: {
+          headers: ['Hati / Document', 'Jumla / Credit', 'Deni / Debt reduced', 'Fedha / Refund'],
+          numericColumns: [1, 2, 3],
+          rows: credits.map((c) => [
+            c.creditNoteNumber,
+            tzsWhole(c.totalAmount),
+            tzsWhole(c.appliedAmount),
+            tzsWhole(c.refunds.reduce((n, p) => n + Number(p.amount), 0)),
+          ]),
+        },
+      });
     const buffer = await this.generatedDocuments.renderLetterheadPdf(
       { companyId: terminal.companyId, branchId: terminal.branchId },
       {
@@ -3179,7 +3310,7 @@ export class MobilePosLiteService {
     // predicate, so the two can never drift.
     const lineWhere: Prisma.SalesOrderLineWhereInput = { salesOrder: where };
 
-    const [totals, methods, lineTotals, priceChanges] = await Promise.all([
+    const [totals, methods, lineTotals, priceChanges, allocatedSales] = await Promise.all([
       // Unbounded and exact.
       this.prisma.salesOrder.aggregate({
         where,
@@ -3209,6 +3340,10 @@ export class MobilePosLiteService {
         where: { salesOrder: where },
         select: { listUnitPrice: true, chargedUnitPrice: true, quantity: true },
       }),
+      this.prisma.salesOrder.findMany({
+        where: { ...where, paymentMethod: 'MIXED' },
+        select: { posTenders: true, totalAmount: true },
+      }),
     ]);
 
     let priceDropTotal = 0;
@@ -3230,6 +3365,35 @@ export class MobilePosLiteService {
       count: method._count._all,
       amount: round2(Number(method._sum.totalAmount ?? 0)),
     }));
+
+    for (const sale of allocatedSales) {
+      const tenders = readPosTenders(sale.posTenders);
+      if (!tenders) continue;
+      const mixed = byMethod.find((p) => p.paymentMethod === SalesPaymentMethod.MIXED);
+      if (mixed) {
+        mixed.count -= 1;
+        mixed.amount = round2(mixed.amount - Number(sale.totalAmount));
+      }
+      const remaining = new Prisma.Decimal(sale.totalAmount).minus(tenderTotal(tenders)).toNumber();
+      const allocations = [
+        ...tenders.map((p) => ({ method: p.method, amount: p.amount })),
+        ...(remaining > 0 ? [{ method: SalesPaymentMethod.CREDIT, amount: remaining }] : []),
+      ];
+      for (const p of allocations) {
+        const existing = byMethod.find((v) => v.paymentMethod === p.method);
+        if (existing) {
+          existing.count += 1;
+          existing.amount = round2(existing.amount + p.amount);
+        } else
+          byMethod.push({
+            paymentMethod: p.method,
+            label: terminal.paymentMethods.find((v) => v.paymentMethod === p.method)?.label ?? null,
+            count: 1,
+            amount: p.amount,
+          });
+      }
+    }
+    const visibleByMethod = byMethod.filter((p) => p.count > 0 || p.amount > 0);
 
     const ranked = lineTotals
       .map((line) => ({
@@ -3263,7 +3427,7 @@ export class MobilePosLiteService {
       salesCount: totals._count._all,
       grossTotal: round2(Number(totals._sum.totalAmount ?? 0)),
       itemsSoldQuantity: round4(itemsSoldQuantity),
-      byMethod,
+      byMethod: visibleByMethod,
       items,
       // The one bound left, and it is a DISPLAY cap: the smallest rows are
       // dropped from the printed list after the whole day has been ranked, so
@@ -4691,6 +4855,14 @@ export class MobilePosLiteService {
       }
     }
     return this.codes.next({ entityType: 'GoodsReceivedNote', companyId });
+  }
+
+  async transactionContext(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    user: AuthUser,
+  ) {
+    return this.requireTerminal(terminalCode, deviceSecret, user);
   }
 
   private async requireTerminal(

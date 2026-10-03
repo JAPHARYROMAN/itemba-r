@@ -5337,6 +5337,8 @@ model SalesOrder {
   idempotencyKey      String?
   /// The locked Mobile POS Lite terminal that recorded this sale, when applicable.
   mobilePosTerminalId String?
+  /// Server-validated original tender allocations for POS split/partial sales.
+  posTenders          Json?
   receivableId        String?
   journalEntryId      String?
   deletedAt           DateTime?
@@ -17590,4 +17592,24 @@ model MobilePosPriceOverride {
   @@index([companyId, createdAt])
   @@index([terminalId, createdAt])
   @@map("mobile_pos_price_overrides")
+}
+
+/// Idempotent, atomic POS collections and returns. The result contains canonical
+/// document identities; it is never a second financial register.
+model PosTransactionAction {
+  id String @id @default(uuid())
+  companyId String
+  divisionId String
+  branchId String
+  terminalId String
+  userId String
+  saleId String
+  requestId String
+  kind String
+  payload Json
+  result Json
+  createdAt DateTime @default(now())
+  @@unique([companyId, requestId])
+  @@index([companyId, terminalId, saleId])
+  @@map("pos_transaction_actions")
 }

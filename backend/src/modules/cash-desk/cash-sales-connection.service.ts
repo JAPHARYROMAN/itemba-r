@@ -1,3 +1,4 @@
+import { readPosTenders } from '../sales-orders/pos-tenders';
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -78,6 +79,8 @@ export class CashSalesConnectionService {
         paymentMethod: true,
         cashAccountId: true,
         paidAmount: true,
+        totalAmount: true,
+        posTenders: true,
         journalEntryId: true,
       },
       take: MAX_SOURCES + 1,
@@ -226,6 +229,22 @@ export class CashSalesConnectionService {
               ? saleFor(r)
               : undefined;
         if (!s || (r && r.companyId !== s.companyId)) continue;
+        const tenders = j.referenceType === 'SalesOrder' ? readPosTenders(s.posTenders) : null;
+        if (tenders) {
+          for (const p of tenders)
+            receipts.push({
+              id: `${j.id}:${p.method}`,
+              date: j.transactionDate,
+              reference: j.journalNumber,
+              customer: s.customerName ?? 'Customer',
+              amount: new Prisma.Decimal(p.amount).toFixed(2),
+              currency: s.currency,
+              saleId: s.id,
+              account: accountById.get(p.cashAccountId)?.accountName ?? null,
+              kind: `POS ${p.method}`,
+            });
+          continue;
+        }
         receipts.push({
           id: j.id,
           date: j.transactionDate,

@@ -148,6 +148,21 @@ beforeEach(() => {
         branch: { id: 'b1', name: 'Kisimani Main' },
         items: [],
       };
+    if (path.startsWith('/mobile-pos-lite/transactions/'))
+      return {
+        id: path.split('/').pop(),
+        number: 'SO-PAID',
+        total: 1200,
+        outstanding: 0,
+        tenders: [{ method: 'CASH', amount: 1200, reference: null }],
+        collections: [],
+        returns: [],
+        actions: [],
+        lines: [],
+        canCollect: false,
+        canReturn: false,
+        canRefund: false,
+      };
     if (path === '/mobile-pos-lite/customers')
       return [{ id: 'cu-1', name: 'Asha Duka', customerCode: 'C-01' }];
     return [];
@@ -192,6 +207,30 @@ describe('uiVersion 3 mounts the new POS', () => {
 });
 
 describe('selling on the new POS', () => {
+  it('requires a named customer for partial payment and submits the reviewed split allocations', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.click(screen.getByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Gawanya malipo / lipa sehemu' }));
+    fireEvent.change(screen.getByLabelText('Taslimu'), { target: { value: '500' } });
+    fireEvent.change(screen.getByLabelText('M-Pesa'), { target: { value: '400' } });
+    await user.type(screen.getByLabelText('Kumbukumbu · M-Pesa'), 'MP-SPLIT');
+    expect(screen.getByRole('button', { name: /Maliza Mauzo/ })).toBeDisabled();
+    await user.type(screen.getByLabelText('Jina, simu au namba ya mteja'), 'as');
+    await user.click(await screen.findByRole('button', { name: /Asha Duka/ }));
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    expect(salesPosts()[0][1]).toMatchObject({
+      paymentMethod: 'MIXED',
+      expectedTotal: 1200,
+      customerId: 'cu-1',
+      payments: [
+        { method: 'CASH', amount: 500 },
+        { method: 'MOBILE_MONEY', amount: 400, reference: 'MP-SPLIT' },
+      ],
+    });
+  });
   it('requires enough received cash and a configured payment reference before completing', async () => {
     const user = userEvent.setup();
     await boot();

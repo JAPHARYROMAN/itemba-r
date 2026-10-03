@@ -1,5 +1,6 @@
 'use client';
 
+import { SplitPayments } from './SplitPayments';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Clock3, ReceiptText, ShoppingBag, RefreshCw, Search } from 'lucide-react';
 import { usePosHost } from '../core/pos-host-context';
@@ -37,12 +38,15 @@ import './pos-app.css';
  * loses nothing.
  */
 export type PosShellProps = KauntaShellProps & {
+  payments?: import('../core/pos-types').PosPayment[];
+  setPayments?: (payments: import('../core/pos-types').PosPayment[]) => void;
   heldCarts?: HeldCartActions;
   control?: { owned: boolean; request: () => void; release: () => void };
   onHold?: (name: string, note: string) => Promise<void>;
 };
 
 const LOW_STOCK = 5;
+const EMPTY_PAYMENTS: import('../core/pos-types').PosPayment[] = [];
 
 function stockState(product: MobilePosLiteProduct): 'out' | 'low' | 'ok' | 'none' {
   if (product.availableStock === null || !product.trackInventory) return 'none';
@@ -265,7 +269,29 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   }, [beginSale, go, screen, step]);
 
   const cashOnly = !online;
-  const shortCash = paymentMethod === 'CASH' && receivedAmount !== null && receivedAmount < total;
+  const payments = props.payments ?? EMPTY_PAYMENTS;
+  const split = paymentMethod === 'MIXED';
+  const allocated = payments.reduce((n, p) => n + p.amount, 0);
+  const invalidSplit =
+    split &&
+    (!online ||
+      allocated <= 0 ||
+      allocated > total ||
+      payments.some(
+        (p) =>
+          p.amount < 0 ||
+          !Number.isFinite(p.amount) ||
+          (p.amount > 0 && p.method !== 'CASH' && !p.reference?.trim()),
+      ) ||
+      (allocated < total &&
+        (!customer || !session.paymentMethods.some((m) => m.code === 'CREDIT'))));
+  const cashAllocated = split
+    ? payments.filter((p) => p.method === 'CASH').reduce((n, p) => n + p.amount, 0)
+    : total;
+  const shortCash =
+    (paymentMethod === 'CASH' || (split && cashAllocated > 0)) &&
+    receivedAmount !== null &&
+    receivedAmount < cashAllocated;
   const missingReference = !!selectedPayment?.requiresReference && !paymentReference.trim();
   const canPay =
     cart.length > 0 &&
@@ -273,12 +299,14 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
     !holding &&
     !clearing &&
     !shortCash &&
+    !invalidSplit &&
     !missingReference &&
     (control?.owned ?? true) &&
     (heldCarts?.ready ?? true) &&
     !heldCarts?.restored &&
     heldCarts?.status !== 'attention';
-  const creditNeedsCustomer = paymentMethod === 'CREDIT' && !customer;
+  const creditNeedsCustomer =
+    (paymentMethod === 'CREDIT' || (split && allocated < total)) && !customer;
   const held = saleResult?.pending ?? (Boolean(notice) && screen === 'success');
 
   // The receipt describes the finished sale: its cart survives into done.
@@ -293,6 +321,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           paymentLabel: selectedPayment?.label ?? paymentMethod,
           paymentMethod,
           receivedAmount,
+          payments: split ? payments.filter((p) => p.amount > 0) : undefined,
           customer,
           issuedAt: doneAt,
         })
@@ -309,12 +338,20 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   // phone, so the drawer opens once per finished cash sale, and only through
   // a directly connected printer the rep switched the drawer on for.
   useEffect(() => {
-    if (step !== 'done' || paymentMethod !== 'CASH' || !saleResult) return;
+    if (
+      step !== 'done' ||
+      (paymentMethod !== 'CASH' &&
+        !(
+          paymentMethod === 'MIXED' && payments.some((p) => p.method === 'CASH' && p.amount > 0)
+        )) ||
+      !saleResult
+    )
+      return;
     if (!printer.settings.drawer || !printer.connection) return;
     if (kickedFor.current === saleResult.id) return;
     kickedFor.current = saleResult.id;
     void printer.kickDrawer();
-  }, [paymentMethod, printer, saleResult, step]);
+  }, [paymentMethod, payments, printer, saleResult, step]);
 
   function openPay() {
     if (!cart.length) return;
@@ -598,6 +635,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           online={online}
           pending={pendingSales}
           t={t}
+          owned={control?.owned ?? true}
           openSync={() => go('queue')}
         />
       )}
@@ -642,6 +680,23 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
               <span>{t('payment')}</span>
               <strong>{selectedPayment?.label ?? paymentMethod}</strong>
             </div>
+            {receipt?.payments?.map((p) => (
+              <div className="pos-receipt-line" key={p.method}>
+                <span>
+                  {session.paymentMethods.find((m) => m.code === p.method)?.label ?? p.method}
+                </span>
+                <strong>
+                  {money(p.amount)}
+                  {p.reference ? ` · ${p.reference}` : ''}
+                </strong>
+              </div>
+            ))}
+            {receipt?.outstanding != null && (
+              <div className="pos-receipt-line">
+                <span>{t('stillOwed')}</span>
+                <strong>{money(receipt.outstanding)}</strong>
+              </div>
+            )}
             {paymentReference && (
               <div className="pos-receipt-line">
                 <span>{t('reference')}</span>
@@ -1065,10 +1120,42 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 ))}
               </div>
 
+              {online && props.setPayments && (
+                <button
+                  type="button"
+                  className="pos-btn"
+                  aria-pressed={split}
+                  onClick={() => {
+                    setPaymentMethod('MIXED');
+                    if (!payments.length)
+                      props.setPayments!([
+                        {
+                          method:
+                            session.paymentMethods.find((m) => m.code !== 'CREDIT')?.code ?? 'CASH',
+                          amount: total,
+                        },
+                      ]);
+                  }}
+                >
+                  {t('posSplitPayments')}
+                </button>
+              )}
+              {split && props.setPayments && (
+                <SplitPayments
+                  session={session}
+                  payments={payments}
+                  onChange={props.setPayments}
+                  total={total}
+                  t={t}
+                />
+              )}
+
               {(paymentMethod === 'CREDIT' || online) && (
                 <div className="pos-field">
                   <span className="pos-field-label">
-                    {paymentMethod === 'CREDIT' ? t('customer') : t('customerOptional')}
+                    {paymentMethod === 'CREDIT' || (split && allocated < total)
+                      ? t('customer')
+                      : t('customerOptional')}
                   </span>
                   {customer ? (
                     <button
@@ -1124,7 +1211,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 </div>
               )}
 
-              {paymentMethod === 'CASH' && (
+              {(paymentMethod === 'CASH' || (split && cashAllocated > 0)) && (
                 <div className="pos-field">
                   <label htmlFor={instanceId + '-pos-received'}>
                     {t('received')} {t('optional')}
@@ -1143,9 +1230,9 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                   />
                   <div className="pos-quick">
                     {[
-                      { label: t('exactAmount'), amount: Math.ceil(total) },
+                      { label: t('exactAmount'), amount: Math.ceil(cashAllocated) },
                       ...[5000, 10000, 20000, 50000]
-                        .filter((amount) => amount >= total)
+                        .filter((amount) => amount >= cashAllocated)
                         .slice(0, 3)
                         .map((amount) => ({ label: money(amount), amount })),
                     ].map((option) => (
@@ -1160,14 +1247,16 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                     ))}
                   </div>
                   {receivedAmount !== null &&
-                    (receivedAmount >= total ? (
+                    (receivedAmount >= cashAllocated ? (
                       <p className="pos-note pos-num" data-tone="ok">
                         {t('changeDue')}:{' '}
-                        <span className="pos-note-strong">{money(receivedAmount - total)}</span>
+                        <span className="pos-note-strong">
+                          {money(receivedAmount - cashAllocated)}
+                        </span>
                       </p>
                     ) : (
                       <p className="pos-note pos-num" data-tone="warn">
-                        {t('stillOwed')}: {money(total - receivedAmount)}
+                        {t('stillOwed')}: {money(cashAllocated - receivedAmount)}
                       </p>
                     ))}
                 </div>

@@ -20,6 +20,8 @@ export type ReceiptModel = {
   issuedAt: Date;
   lines: ReceiptLine[];
   total: number;
+  payments?: Array<{ method: string; amount: number; reference?: string }>;
+  outstanding?: number;
   paymentLabel: string;
   received: number | null;
   change: number | null;
@@ -35,6 +37,7 @@ export function buildReceipt({
   paymentLabel,
   paymentMethod,
   receivedAmount,
+  payments,
   customer,
   issuedAt,
 }: {
@@ -46,11 +49,18 @@ export function buildReceipt({
   paymentLabel: string;
   paymentMethod: string;
   receivedAmount: number | null;
+  payments?: import('../core/pos-types').PosPayment[];
   customer: Customer | null;
   issuedAt: Date;
 }): ReceiptModel {
   const grand = Number(saleResult?.totalAmount ?? total);
-  const cash = paymentMethod === 'CASH' && receivedAmount !== null && receivedAmount >= grand;
+  const cashTotal = payments
+    ? payments.filter((p) => p.method === 'CASH').reduce((n, p) => n + p.amount, 0)
+    : grand;
+  const cash =
+    (paymentMethod === 'CASH' || (paymentMethod === 'MIXED' && cashTotal > 0)) &&
+    receivedAmount !== null &&
+    receivedAmount >= cashTotal;
   return {
     company: session.company.name,
     branch: session.branch.name,
@@ -69,9 +79,19 @@ export function buildReceipt({
       };
     }),
     total: grand,
+    ...(payments
+      ? {
+          payments,
+          outstanding: Number(
+            saleResult?.outstandingAmount ??
+              Math.max(0, grand - payments.reduce((n, p) => n + p.amount, 0)),
+          ),
+        }
+      : {}),
+    ...(paymentMethod === 'CREDIT' ? { outstanding: grand } : {}),
     paymentLabel,
     received: cash ? receivedAmount : null,
-    change: cash && receivedAmount !== null ? receivedAmount - grand : null,
+    change: cash && receivedAmount !== null ? receivedAmount - cashTotal : null,
     customer: customer?.name ?? null,
   };
 }

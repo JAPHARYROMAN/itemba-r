@@ -1,4 +1,6 @@
 'use client';
+
+import { TransactionActions, type TransactionDetail } from './TransactionActions';
 import { useEffect, useId, useState } from 'react';
 import type { MobilePosLiteBinding, PendingMobilePosLiteSale } from '@/lib/mobile-pos-lite-store';
 import { usePosSalesHistory } from '../core/hooks/use-pos-history';
@@ -16,6 +18,7 @@ export function Transactions({
   pending,
   t,
   openSync,
+  owned = true,
 }: {
   binding: MobilePosLiteBinding;
   session: Session;
@@ -23,11 +26,13 @@ export function Transactions({
   pending: PendingMobilePosLiteSale[];
   t: PosTranslate;
   openSync: () => void;
+  owned?: boolean;
 }) {
   const id = useId();
   const history = usePosSalesHistory({ binding, active: true });
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
+  const [detail, setDetail] = useState<TransactionDetail | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [printJob, setPrintJob] = useState<ReceiptModel | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -79,6 +84,19 @@ export function Transactions({
           unitPrice: line.unitPrice,
           total: line.lineTotal,
         })),
+        ...(detail?.id === selectedSale.id
+          ? {
+              payments: [
+                ...detail.tenders.map((p) => ({ ...p, reference: p.reference ?? undefined })),
+                ...detail.collections.map((p) => ({
+                  method: p.method,
+                  amount: p.amount,
+                  reference: p.number,
+                })),
+              ],
+              outstanding: detail.outstanding,
+            }
+          : {}),
         paymentLabel:
           session.paymentMethods.find((m) => m.code === selectedSale.paymentMethod)?.label ??
           selectedSale.paymentMethod,
@@ -223,7 +241,7 @@ export function Transactions({
                 <button
                   type="button"
                   className="pos-btn"
-                  disabled={printer.busy}
+                  disabled={printer.busy || detail?.id !== selectedSale.id}
                   onClick={() => setPrintJob(receipt)}
                 >
                   {printer.busy ? t('posPrinting') : t('posReprint')}
@@ -264,6 +282,16 @@ export function Transactions({
           )}
         </section>
       </div>
+      <TransactionActions
+        binding={binding}
+        session={session}
+        saleId={selected}
+        online={online}
+        owned={owned}
+        t={t}
+        onChanged={refresh}
+        onDetail={setDetail}
+      />
       {printJob && <ReceiptPrint model={printJob} paper={printer.settings.paper} t={t} />}
     </main>
   );

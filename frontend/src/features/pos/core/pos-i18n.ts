@@ -15,6 +15,37 @@ const DEFAULT_LANG: PosLang = 'sw';
 
 const STRINGS = {
   en: {
+    posSplitPayments: 'Split / partial payment',
+    posSplitHint:
+      'Enter the amount received through each method. References record payments you have already received.',
+    posAllocated: 'Payment allocated',
+    posOverallocated: 'Above sale total',
+    posPartialHint:
+      'A remaining balance requires a named customer and credit enabled on this till.',
+    posPaymentsReturns: 'Payments & returns',
+    posRecorded: 'Recorded',
+    posCollectPayment: 'Collect payment',
+    posReturnRefund: 'Return / refund',
+    posCollectionAmount: 'Amount received',
+    posReturnable: 'Available to return',
+    posDisposition: 'Returned stock',
+    posRestock: 'Saleable — return to stock',
+    posDamaged: 'Damaged — do not restock',
+    posReturnReason: 'Reason for return',
+    posDebtReduced: 'Debt reduced',
+    posRefundAmount: 'Refund payable',
+    posRefundMethod: 'Refund method',
+    posActionReview:
+      'Review before confirming. This records money received or issues the return and its refund. Estimates are checked again by the server.',
+    posConfirmTransaction: 'Confirm transaction',
+    posActionRecovery:
+      'An earlier transaction needs reconciliation. Check its outcome or retry its original request before recording another.',
+    posCheckOutcome: 'Check outcome',
+    posRetryOriginal: 'Retry original request',
+    posActionRejected:
+      'The server refused this request and confirms it was not recorded. Review the inputs before trying again.',
+    posActionNotFound:
+      'No acknowledged transaction found. Retry the original request; do not collect or refund money again.',
     posHeldCarts: 'Held carts',
     posHold: 'Hold cart',
     posResume: 'Resume',
@@ -468,6 +499,36 @@ const STRINGS = {
     errOnePricePerProduct: 'A product can have only one price in a sale.',
   },
   sw: {
+    posSplitPayments: 'Gawanya malipo / lipa sehemu',
+    posSplitHint:
+      'Weka kiasi kilichopokelewa kwa kila njia. Kumbukumbu ni za malipo uliyopokea tayari.',
+    posAllocated: 'Malipo yaliyogawanywa',
+    posOverallocated: 'Zaidi ya jumla ya mauzo',
+    posPartialHint: 'Salio linahitaji mteja aliyetajwa na ruhusa ya mkopo kwenye kaunta.',
+    posPaymentsReturns: 'Malipo na marejesho',
+    posRecorded: 'Imerekodiwa',
+    posCollectPayment: 'Pokea malipo',
+    posReturnRefund: 'Rudisha bidhaa / fedha',
+    posCollectionAmount: 'Kiasi kilichopokelewa',
+    posReturnable: 'Idadi inayoweza kurudishwa',
+    posDisposition: 'Bidhaa zilizorudishwa',
+    posRestock: 'Inaweza kuuzwa — rudisha stoo',
+    posDamaged: 'Imeharibika — usirudishe kwenye stock',
+    posReturnReason: 'Sababu ya kurejesha',
+    posDebtReduced: 'Deni lililopunguzwa',
+    posRefundAmount: 'Fedha za kurejesha',
+    posRefundMethod: 'Njia ya kurejesha fedha',
+    posActionReview:
+      'Kagua kabla ya kuthibitisha. Hatua hii inarekodi fedha zilizopokelewa au marejesho ya bidhaa na fedha. Mfumo utahakiki kiasi tena.',
+    posConfirmTransaction: 'Thibitisha muamala',
+    posActionRecovery:
+      'Muamala wa awali unahitaji uhakiki. Kagua matokeo au jaribu ombi lilelile kabla ya kurekodi mwingine.',
+    posCheckOutcome: 'Kagua matokeo',
+    posRetryOriginal: 'Jaribu ombi lilelile',
+    posActionRejected:
+      'Mfumo ulikataa ombi na umethibitisha halikurekodiwa. Kagua taarifa kabla ya kujaribu tena.',
+    posActionNotFound:
+      'Hakuna muamala uliothibitishwa. Jaribu ombi lilelile; usipokee wala kurejesha fedha tena.',
     posHeldCarts: 'Vikapu vilivyohifadhiwa',
     posHold: 'Hifadhi kikapu',
     posResume: 'Endelea',

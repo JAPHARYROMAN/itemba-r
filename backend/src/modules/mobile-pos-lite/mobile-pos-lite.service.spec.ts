@@ -118,6 +118,7 @@ function countAdjustment(overrides: Record<string, unknown> = {}) {
 
 function makeService() {
   const prisma: any = {
+    creditNote: { findMany: jest.fn().mockResolvedValue([]) },
     mobilePosTerminal: {
       findFirst: jest.fn().mockResolvedValue(terminalRow()),
       update: jest.fn().mockResolvedValue({}),
@@ -3890,7 +3891,7 @@ describe('MobilePosLiteController stock-counts route', () => {
 
   it('passes the terminal headers straight through to the service', () => {
     const service: any = { createStockCount: jest.fn().mockResolvedValue({ id: 'sa-1' }) };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const dto = countDto();
     const user = managerUser();
 
@@ -4964,8 +4965,11 @@ describe('MobilePosLiteService createDayReport', () => {
     // The line scope IS the headline scope — the two can never drift.
     const [aggregateCall] = prisma.salesOrder.aggregate.mock.calls[0];
     expect(call.where.salesOrder).toEqual(aggregateCall.where);
-    // Nothing reads whole orders for this any more.
-    expect(prisma.salesOrder.findMany).not.toHaveBeenCalled();
+    // Split allocations read only original tenders; item counts still come from the unbounded aggregate.
+    expect(prisma.salesOrder.findMany).toHaveBeenCalledWith({
+      where: { ...aggregateCall.where, paymentMethod: 'MIXED' },
+      select: { posTenders: true, totalAmount: true },
+    });
   });
 
   /**
@@ -5201,7 +5205,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
       purchaseHistory: jest.fn().mockResolvedValue({}),
       createDayReport: jest.fn().mockResolvedValue({}),
     };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const user = repUser();
     const dto = dayReportDto();
 
@@ -5220,7 +5224,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
         .fn()
         .mockResolvedValue({ buffer: Buffer.from('%PDF-1.4'), fileName: 'RIPOTI-X-1842.pdf' }),
     };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const res: any = { setHeader: jest.fn(), send: jest.fn() };
 
     await controller.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser(), res);
@@ -5253,7 +5257,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
   // CD-22, the route is a desktop call and carries nothing a client chose.
   it('passes only the query and the caller to the backfill — no terminal headers, no body', () => {
     const service: any = { counterDeliveryBackfill: jest.fn().mockResolvedValue({}) };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const user = repUser();
 
     controller.counterDeliveryBackfill({}, 'company-1', user);
@@ -5547,6 +5551,9 @@ describe('checkout outcome reconciliation', () => {
         id: true,
         salesOrderNumber: true,
         totalAmount: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        posTenders: true,
         status: true,
         deletedAt: true,
       },

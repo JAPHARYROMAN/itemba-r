@@ -125,8 +125,8 @@ export class CreditNotesService {
     };
   }
 
-  async findOne(id: string, user?: AuthUser) {
-    const record = await creditNoteDb(this.prisma).creditNote.findFirst({
+  async findOne(id: string, user?: AuthUser, transaction?: Prisma.TransactionClient) {
+    const record = await creditNoteDb(transaction ?? this.prisma).creditNote.findFirst({
       where: { id, deletedAt: null },
       include: this.includeDetailScope(),
     });
@@ -139,7 +139,13 @@ export class CreditNotesService {
 
   // ─── Create (DRAFT) ──────────────────────────────────────────────────────────
 
-  async create(dto: CreateCreditNoteDto, user: AuthUser) {
+  async create(
+    dto: CreateCreditNoteDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+    source?: { netAmounts: Prisma.Decimal[] },
+  ) {
+    const client = transaction ?? this.prisma;
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
 
@@ -152,7 +158,7 @@ export class CreditNotesService {
     let divisionId = dto.divisionId || null;
     let branchId = dto.branchId || null;
     if (dto.customerId) {
-      const customer = await this.prisma.customer.findFirst({
+      const customer = await client.customer.findFirst({
         where: { id: dto.customerId, deletedAt: null },
         select: { companyId: true, divisionId: true, branchId: true, name: true },
       });
@@ -169,7 +175,7 @@ export class CreditNotesService {
 
     // Validate the optional sales-order link belongs to the same company.
     if (dto.salesOrderId) {
-      const so = await this.prisma.salesOrder.findFirst({
+      const so = await client.salesOrder.findFirst({
         where: { id: dto.salesOrderId, deletedAt: null },
         select: { companyId: true, customerId: true },
       });
@@ -180,7 +186,7 @@ export class CreditNotesService {
 
     // Validate the optional receivable link belongs to the same company.
     if (dto.receivableId) {
-      const receivable = await this.prisma.receivable.findFirst({
+      const receivable = await client.receivable.findFirst({
         where: { id: dto.receivableId, deletedAt: null },
         select: { companyId: true },
       });
@@ -190,10 +196,12 @@ export class CreditNotesService {
     }
 
     // Compute per-line + document totals with Decimal (never float).
-    const computedLines = dto.lines.map((line) => {
+    const computedLines = dto.lines.map((line, index) => {
       const quantity = new Prisma.Decimal(line.quantity ?? 0);
       const unitPrice = new Prisma.Decimal(line.unitPrice ?? 0).toDecimalPlaces(2);
-      const net = quantity.mul(unitPrice).toDecimalPlaces(2);
+      // POS returns allocate the original net to cents cumulatively. This server-only
+      // context preserves the final penny when a discounted or fractional line returns in parts.
+      const net = source?.netAmounts[index] ?? quantity.mul(unitPrice).toDecimalPlaces(2);
       const tax = new Prisma.Decimal(line.taxAmount ?? 0).toDecimalPlaces(2);
       if (net.lt(0) || tax.lt(0)) {
         throw new BadRequestException('Credit note line amounts cannot be negative');
@@ -252,7 +260,7 @@ export class CreditNotesService {
       throw new BadRequestException('Credit note total must be greater than zero');
     }
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const record = await this.runWithTransaction(transaction, async (tx) => {
       const db = creditNoteDb(tx);
       const created: CreditNoteRow = await db.creditNote.create({
         data: {
@@ -301,7 +309,7 @@ export class CreditNotesService {
       return created;
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'CREDIT_NOTE_CREATE',
       entityType: 'CreditNote',
       entityId: record.id,
@@ -310,13 +318,14 @@ export class CreditNotesService {
       newValue: record as unknown as Record<string, unknown>,
     });
 
-    return this.findOne(record.id);
+    return this.findOne(record.id, undefined, transaction);
   }
 
   // ─── Issue (DRAFT -> ISSUED, post reversing JE) ───────────────────────────────
 
-  async issue(id: string, user: AuthUser) {
-    const existing = await this.findOne(id);
+  async issue(id: string, user: AuthUser, transaction?: Prisma.TransactionClient) {
+    const client = transaction ?? this.prisma;
+    const existing = await this.findOne(id, undefined, transaction);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
 
@@ -342,7 +351,7 @@ export class CreditNotesService {
     // divergence). We resolve the SO's receivable the SAME way sales-orders does
     // (SalesOrder.receivableId first, then Receivable.sourceType='SalesOrder').
     const effectiveReceivableId = await this.resolveLinkedReceivableId(
-      this.prisma,
+      client,
       existing.receivableId,
       existing.salesOrderId,
       existing.companyId,
@@ -353,7 +362,7 @@ export class CreditNotesService {
     // CANCELLED/WRITTEN_OFF receivable would double-relieve AR and re-inflate the
     // customer's credit position against a debt that no longer carries value.
     if (effectiveReceivableId) {
-      const linked = await this.prisma.receivable.findFirst({
+      const linked = await client.receivable.findFirst({
         where: { id: effectiveReceivableId, companyId: existing.companyId, deletedAt: null },
         select: { status: true },
       });
@@ -364,7 +373,7 @@ export class CreditNotesService {
       }
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.runWithTransaction(transaction, async (tx) => {
       const db = creditNoteDb(tx);
 
       // Atomic claim: DRAFT -> ISSUED, guarded on the row still being DRAFT.
@@ -475,7 +484,7 @@ export class CreditNotesService {
       return { updated, journalEntry, appliedAmount };
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'CREDIT_NOTE_ISSUE',
       entityType: 'CreditNote',
       entityId: id,
@@ -489,7 +498,7 @@ export class CreditNotesService {
       },
     });
 
-    return this.findOne(id);
+    return this.findOne(id, undefined, transaction);
   }
 
   // ─── Void (ISSUED -> VOID, reverse the issue JE) ──────────────────────────────
@@ -629,6 +638,21 @@ export class CreditNotesService {
     });
 
     return this.findOne(id);
+  }
+
+  private runWithTransaction<T>(
+    transaction: Prisma.TransactionClient | undefined,
+    run: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return transaction ? run(transaction) : this.prisma.$transaction(run);
+  }
+  private logInContext(
+    transaction: Prisma.TransactionClient | undefined,
+    entry: Parameters<AuditLogsService['log']>[0],
+  ) {
+    return transaction
+      ? this.auditLogs.logStrictInTransaction(transaction, entry)
+      : this.auditLogs.log(entry);
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────────
@@ -1092,10 +1116,11 @@ export class CreditNotesService {
     const nextOutstanding = outstanding.minus(applied).toDecimalPlaces(2);
     const nextStatus = nextOutstanding.isZero() ? 'PAID' : 'PARTIALLY_PAID';
 
-    await tx.receivable.update({
+    const updated = await tx.receivable.update({
       where: { id: receivableId },
       data: { outstandingAmount: nextOutstanding, status: nextStatus as never },
     });
+    await this.syncSalesOrderBalance(tx, updated);
     await this.syncCustomerBalance(tx, companyId, locked.customerId);
     return applied;
   }
@@ -1167,11 +1192,44 @@ export class CreditNotesService {
       nextStatus = 'OPEN';
     }
 
-    await tx.receivable.update({
+    const updated = await tx.receivable.update({
       where: { id: receivableId },
       data: { outstandingAmount: nextOutstanding, status: nextStatus as never },
     });
+    await this.syncSalesOrderBalance(tx, updated);
     await this.syncCustomerBalance(tx, companyId, locked.customerId);
+  }
+
+  private async syncSalesOrderBalance(
+    tx: Prisma.TransactionClient,
+    receivable: {
+      sourceType?: string | null;
+      sourceId?: string | null;
+      companyId?: string;
+      paidAmount?: Prisma.Decimal;
+      outstandingAmount?: Prisma.Decimal;
+    },
+  ) {
+    if (
+      receivable.sourceType !== 'SalesOrder' ||
+      !receivable.sourceId ||
+      !receivable.outstandingAmount
+    )
+      return;
+    const outstanding = new Prisma.Decimal(receivable.outstandingAmount);
+    const paid = new Prisma.Decimal(receivable.paidAmount ?? 0);
+    await tx.salesOrder.updateMany({
+      where: {
+        id: receivable.sourceId,
+        companyId: receivable.companyId,
+        deletedAt: null,
+        status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
+      },
+      data: {
+        outstandingAmount: outstanding,
+        status: outstanding.lte(0) ? 'PAID' : paid.gt(0) ? 'PARTIALLY_PAID' : 'CONFIRMED',
+      },
+    });
   }
 
   private async syncCustomerBalance(

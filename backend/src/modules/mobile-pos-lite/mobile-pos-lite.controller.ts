@@ -1,4 +1,17 @@
-import { Body, Controller, Get, Header, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { PosTransactionsService } from './pos-transactions.service';
+import { PosCollectionDto, PosReturnDto } from './dto/mobile-pos-transaction.dto';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Headers,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
@@ -26,7 +39,10 @@ import { MobilePosLiteService } from './mobile-pos-lite.service';
 
 @Controller('mobile-pos-lite')
 export class MobilePosLiteController {
-  constructor(private readonly service: MobilePosLiteService) {}
+  constructor(
+    private readonly service: MobilePosLiteService,
+    private readonly transactions: PosTransactionsService,
+  ) {}
 
   @Get('terminals')
   @RequirePermissions('mobile_pos_lite.manage')
@@ -169,6 +185,72 @@ export class MobilePosLiteController {
    * Non-passthrough @Res() so the PDF bytes bypass the TransformInterceptor's
    * { data } envelope, same as generated-documents table-pdf.
    */
+  @Get('transactions/requests/:requestId')
+  @Header('Cache-Control', 'private, no-store')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.use')
+  transactionOutcome(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.transactions.outcome(code, secret, requestId, user);
+  }
+  @Get('transactions/requests/:requestId/receipt')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.use')
+  async actionReceipt(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const receipt = await this.transactions.receipt(code, secret, requestId, user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${receipt.fileName}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(receipt.buffer);
+  }
+  @Get('transactions/:id')
+  @Header('Cache-Control', 'private, no-store')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.use')
+  transactionDetail(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.transactions.detail(code, secret, id, user);
+  }
+  @Post('transactions/:id/collections')
+  @AgentExcluded()
+  @RequirePermissions('mobile_pos_lite.use', 'customer-payments.create')
+  collection(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Param('id') id: string,
+    @Body() dto: PosCollectionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.transactions.collect(code, secret, id, dto, user);
+  }
+  @Post('transactions/:id/returns')
+  @AgentExcluded()
+  @RequirePermissions('mobile_pos_lite.use', 'credit-notes.create', 'credit-notes.issue')
+  returnSale(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Param('id') id: string,
+    @Body() dto: PosReturnDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.transactions.returnSale(code, secret, id, dto, user);
+  }
+
   @Get('sales/:id/receipt')
   @AgentExcluded('device_headers_not_represented')
   @RequirePermissions('mobile_pos_lite.use')

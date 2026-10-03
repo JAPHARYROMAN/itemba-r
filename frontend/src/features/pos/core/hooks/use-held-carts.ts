@@ -13,7 +13,7 @@ import {
 
 export type CartInputs = Pick<
   PosCartDraft,
-  'cart' | 'customer' | 'paymentMethod' | 'paymentReference' | 'receivedValue'
+  'cart' | 'customer' | 'paymentMethod' | 'paymentReference' | 'receivedValue' | 'payments'
 >;
 export function useHeldCarts({
   scope,

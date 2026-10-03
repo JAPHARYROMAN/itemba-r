@@ -23,6 +23,8 @@ export type PendingMobilePosLiteSale = {
   terminalCode: string;
   payload: {
     paymentMethod: string;
+    payments?: Array<{ method: string; amount: number; reference?: string }>;
+    expectedTotal?: number;
     customerId?: string;
     paymentReference?: string;
     idempotencyKey: string;

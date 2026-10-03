@@ -72,6 +72,9 @@ export function MobilePosLite() {
   const { lang, setLang, t } = usePosLang();
   const [screen, setScreen] = useState<PosScreen>('home');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [payments, setPayments] = useState<import('@/features/pos/core/pos-types').PosPayment[]>(
+    [],
+  );
   const [paymentReference, setPaymentReference] = useState('');
   const [customerQuery, setCustomerQuery] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -145,8 +148,8 @@ export function MobilePosLite() {
     }
   });
   const cartInputs = useMemo(
-    () => ({ cart, customer, paymentMethod, paymentReference, receivedValue }),
-    [cart, customer, paymentMethod, paymentReference, receivedValue],
+    () => ({ cart, customer, paymentMethod, paymentReference, receivedValue, payments }),
+    [cart, customer, paymentMethod, paymentReference, receivedValue, payments],
   );
   const cartScope = session
     ? JSON.stringify([
@@ -170,6 +173,7 @@ export function MobilePosLite() {
     restore: async (saved) => {
       // Rehydrate unpaid lines against current authorised references. Price
       // overrides remain explicit; default prices follow the refreshed product.
+      setPayments(saved.payments ?? []);
       if (!saved.cart.length) {
         setCart([]);
         setCustomer(null);
@@ -261,6 +265,7 @@ export function MobilePosLite() {
     setCustomerQuery('');
     setPaymentReference('');
     setReceivedValue('');
+    setPayments([]);
     setPaymentMethod(session?.paymentMethods[0]?.code ?? 'CASH');
     setScreen('sale');
   }
@@ -304,6 +309,7 @@ export function MobilePosLite() {
       setCustomer(attempt.snapshot.customer);
       setReceivedValue(attempt.snapshot.receivedValue);
     }
+    setPayments(attempt.payload.payments ?? []);
     setPaymentMethod(attempt.payload.paymentMethod);
     setPaymentReference(attempt.payload.paymentReference ?? '');
     setSaleResult({ ...result, pending: queued });
@@ -332,7 +338,11 @@ export function MobilePosLite() {
       return;
     }
     if (pendingSales.some((item) => item.requiresReview && !acknowledged.has(item.id))) return;
-    if (paymentMethod === 'CREDIT' && !customer) {
+    if (
+      (paymentMethod === 'CREDIT' ||
+        (paymentMethod === 'MIXED' && payments.reduce((n, p) => n + p.amount, 0) < total)) &&
+      !customer
+    ) {
       setNotice(t('selectCreditCustomer'));
       return;
     }
@@ -366,6 +376,9 @@ export function MobilePosLite() {
       snapshot: { cart: structuredClone(cart), customer, receivedValue },
       payload: {
         paymentMethod,
+        ...(paymentMethod === 'MIXED'
+          ? { payments: payments.filter((p) => p.amount > 0), expectedTotal: total }
+          : {}),
         ...(customer ? { customerId: customer.id } : {}),
         ...(paymentReference.trim() ? { paymentReference: paymentReference.trim() } : {}),
         idempotencyKey: requestId,
@@ -960,6 +973,8 @@ export function MobilePosLite() {
         cartCount={cartCount}
         total={total}
         beginSale={beginSale}
+        payments={payments}
+        setPayments={setPayments}
         paymentMethod={paymentMethod}
         setPaymentMethod={setPaymentMethod}
         customer={customer}

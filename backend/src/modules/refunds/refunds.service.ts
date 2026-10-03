@@ -169,7 +169,12 @@ export class RefundsService {
 
   // ── create (DRAFT) ──────────────────────────────────────────────────────────
 
-  async create(dto: CreateRefundDto, user: AuthUser): Promise<RefundRow> {
+  async create(
+    dto: CreateRefundDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ): Promise<RefundRow> {
+    const client = transaction ?? this.prisma;
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
 
@@ -193,7 +198,7 @@ export class RefundsService {
     // If a customer is supplied, it must belong to the same company (mirror
     // credit-notes.service.create's customer-company check).
     if (dto.customerId) {
-      const customer = await this.prisma.customer.findFirst({
+      const customer = await client.customer.findFirst({
         where: { id: dto.customerId, deletedAt: null },
         select: { companyId: true },
       });
@@ -204,13 +209,9 @@ export class RefundsService {
 
     // Validate the cash/bank account belongs to the company (also gives us the
     // account type used to resolve the GL account at pay() time).
-    const cashAccount = await this.resolveCashAccount(
-      this.prisma,
-      dto.companyId,
-      dto.cashAccountId,
-    );
+    const cashAccount = await this.resolveCashAccount(client, dto.companyId, dto.cashAccountId);
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const record = await this.runWithTransaction(transaction, async (tx) => {
       // Credit-note-backed refund: validate + guard double-refund atomically.
       await this.assertCreditNoteRefundable(tx, {
         companyId: dto.companyId,
@@ -245,7 +246,7 @@ export class RefundsService {
       return created;
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'REFUND_CREATE',
       entityType: 'Refund',
       entityId: record.id,
@@ -259,10 +260,15 @@ export class RefundsService {
 
   // ── pay / post (DRAFT -> PAID) ────────────────────────────────────────────
 
-  async pay(id: string, dto: PayRefundDto, user: AuthUser): Promise<RefundRow> {
+  async pay(
+    id: string,
+    dto: PayRefundDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ): Promise<RefundRow> {
     const userId = user.id;
 
-    const { before, record, journal } = await this.prisma.$transaction(async (tx) => {
+    const { before, record, journal } = await this.runWithTransaction(transaction, async (tx) => {
       // Atomic claim: flip DRAFT -> PAID guarded on the current status so two
       // concurrent pays race here and exactly one wins. The loser sees count 0.
       const claim = await this.refunds(tx).updateMany({
@@ -360,7 +366,7 @@ export class RefundsService {
       return { before: current, record: updated, journal: journalEntry };
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'REFUND_PAY',
       entityType: 'Refund',
       entityId: id,
@@ -375,6 +381,21 @@ export class RefundsService {
     });
 
     return record;
+  }
+
+  private runWithTransaction<T>(
+    transaction: Prisma.TransactionClient | undefined,
+    run: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return transaction ? run(transaction) : this.prisma.$transaction(run);
+  }
+  private logInContext(
+    transaction: Prisma.TransactionClient | undefined,
+    entry: Parameters<AuditLogsService['log']>[0],
+  ) {
+    return transaction
+      ? this.auditLogs.logStrictInTransaction(transaction, entry)
+      : this.auditLogs.log(entry);
   }
 
   // ── void (PAID -> VOID) ───────────────────────────────────────────────────

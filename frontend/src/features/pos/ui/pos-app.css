@@ -1451,3 +1451,27 @@ html.dark .pos-shell[data-pos-skin='os'] {
     max-width: 48rem;
   }
 }
+
+.pos-split {
+  border: 1px solid var(--pos-line);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 12px 0;
+}
+.pos-split .pos-field,
+.pos-action-form .pos-field {
+  margin: 12px 0;
+}
+.pos-lifecycle {
+  background: var(--pos-card);
+  border: 1px solid var(--pos-line);
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 16px;
+}
+.pos-lifecycle h3 {
+  margin: 0 0 12px;
+}
+.pos-action-form {
+  max-width: 680px;
+}

@@ -99,7 +99,14 @@ export function receiptTextLines(
     bold: true,
     big: true,
   });
-  out.push({ text: twoColumns(model.paymentLabel, receiptAmount(model.total), columns) });
+  if (model.payments)
+    for (const p of model.payments) {
+      out.push({ text: twoColumns(p.method, receiptAmount(p.amount), columns) });
+      if (p.reference) out.push(...wrap(p.reference, columns).map((text) => ({ text })));
+    }
+  else out.push({ text: twoColumns(model.paymentLabel, receiptAmount(model.total), columns) });
+  if (model.outstanding != null)
+    out.push({ text: twoColumns('Salio / Balance', receiptAmount(model.outstanding), columns) });
   if (model.received !== null) {
     out.push({ text: twoColumns(labels.received, receiptAmount(model.received), columns) });
     out.push({ text: twoColumns(labels.change, receiptAmount(model.change ?? 0), columns) });

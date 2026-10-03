@@ -123,7 +123,12 @@ export class CustomerPaymentsService {
 
   // ── create (records payment + allocations atomically) ───────────────────────
 
-  async create(dto: CreateCustomerPaymentDto, user: AuthUser) {
+  async create(
+    dto: CreateCustomerPaymentDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const client = transaction ?? this.prisma;
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
 
@@ -164,7 +169,7 @@ export class CustomerPaymentsService {
     const unapplied = amount.minus(allocatedTotal).toDecimalPlaces(2);
 
     // Validate customer belongs to the company (scope defaults for division/branch).
-    const customer = await this.prisma.customer.findFirst({
+    const customer = await client.customer.findFirst({
       where: { id: dto.customerId, deletedAt: null },
       select: { companyId: true, divisionId: true, branchId: true, name: true },
     });
@@ -174,15 +179,10 @@ export class CustomerPaymentsService {
 
     // Cash/bank account belongs to the company (and to the payment's
     // division/branch when the dto names one); type drives the GL debit role.
-    const cashAccount = await this.resolveCashAccount(
-      this.prisma,
-      dto.companyId,
-      dto.cashAccountId,
-      {
-        divisionId: dto.divisionId ?? null,
-        branchId: dto.branchId ?? null,
-      },
-    );
+    const cashAccount = await this.resolveCashAccount(client, dto.companyId, dto.cashAccountId, {
+      divisionId: dto.divisionId ?? null,
+      branchId: dto.branchId ?? null,
+    });
 
     // Guard against mixing currencies on the cash ledger: we increment the cash
     // account's running balance by the payment amount below, so the receipt
@@ -199,7 +199,7 @@ export class CustomerPaymentsService {
     const divisionId = dto.divisionId ?? cashAccount.divisionId ?? customer.divisionId ?? null;
     const branchId = dto.branchId ?? cashAccount.branchId ?? customer.branchId ?? null;
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const record = await this.runWithTransaction(transaction, async (tx) => {
       // Lock + validate + decrement each target receivable. Locking ordered by
       // id keeps concurrent multi-receivable payments from deadlocking.
       const orderedAllocations = [...allocations].sort((a, b) =>
@@ -338,7 +338,7 @@ export class CustomerPaymentsService {
       return withJournal;
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'CUSTOMER_PAYMENT_CREATE',
       entityType: 'CustomerPayment',
       entityId: record.id,
@@ -348,6 +348,21 @@ export class CustomerPaymentsService {
     });
 
     return record;
+  }
+
+  private runWithTransaction<T>(
+    transaction: Prisma.TransactionClient | undefined,
+    run: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return transaction ? run(transaction) : this.prisma.$transaction(run);
+  }
+  private logInContext(
+    transaction: Prisma.TransactionClient | undefined,
+    entry: Parameters<AuditLogsService['log']>[0],
+  ) {
+    return transaction
+      ? this.auditLogs.logStrictInTransaction(transaction, entry)
+      : this.auditLogs.log(entry);
   }
 
   // ── reverse (COMPLETED -> REVERSED) ─────────────────────────────────────────
