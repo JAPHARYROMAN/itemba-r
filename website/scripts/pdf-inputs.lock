@@ -1,0 +1,74 @@
+{
+  "$comment": "PDF drift guard (architecture §5.6). The profile PDFs in public/downloads/ are generated from these inputs: the roots, plus every module under src/ that the entry points import, directly or not. After changing any of them run `npm run pdf` (build and regenerate), then `npm run pdf:lock` to record the new inputs and PDFs. Checked by tests/unit/pdf-inputs-lock.test.ts. Text inputs are hashed with CRLF folded to LF, binary ones (the font) raw; `inputs.sha256` is the SHA-256 of the `<sha>  <path>` lines, sorted by path.",
+  "algorithm": "sha256",
+  "inputs": {
+    "roots": [
+      "src/content/profile",
+      "src/print",
+      "src/styles/print.css",
+      "src/design/fonts.ts",
+      "src/assets/fonts/InterVariable-latin.woff2"
+    ],
+    "entryPoints": [
+      "src/print/ProfileDocuments.tsx",
+      "src/content/profile/index.ts"
+    ],
+    "sha256": "ef7ed348171c68d58a5a06533e6733cd7b94d2c417658d29bd7fed764e598404",
+    "files": {
+      "src/assets/fonts/InterVariable-latin.woff2": "94753cba6cd3f5417ffe2e1c3401803b976bc41e58b51ad785dddd4790c4e709",
+      "src/content/companies.ts": "2b688c40436db0f7e989adea594793aa1c3a1f102014e29a33f40661be5af0ff",
+      "src/content/contact.ts": "bad594331cd34dbba69b1b74870176b8c4b2f08bb8930c99b1300b0b41f1e8e1",
+      "src/content/flags.ts": "5b4d91879c0094c1c4dd38f429f65963d996560245545c2e875ccaa83657e2b3",
+      "src/content/media.generated.ts": "a8156518340a3b8cd9830ada58ef4e4027716f9f7a82d1b73ab1c8596df8e32c",
+      "src/content/media.ts": "aad263e708232a7b98e869839a56680cbf6aaf0043a2b1d0cb93adee391b3443",
+      "src/content/profile/activities.ts": "767661529a37918014fff18f801c6e914645bcbe7ecf50c9136af65577bd2b5f",
+      "src/content/profile/assets.ts": "45cb48d3909106cbfbc133e91cd44955a1969fbce124656a3a3d44ac40c324b5",
+      "src/content/profile/attachments.ts": "3c4bd800e8c036333ef6926df0619d9d7e99f9bdff036fcad370fd6735785872",
+      "src/content/profile/banking.ts": "712dc0b618ad8c05be7f5f0e651170242931ed57de048d4b5d205cb7d57f2942",
+      "src/content/profile/branches.ts": "9a06352be2c4154a887c68bee2d4139b620b3196dfb7d185156d78626d687f37",
+      "src/content/profile/compliance.ts": "3f2f1e71f8c2c6a85f2b5aa1455dc68d3876bae22a861111921e8a0db0ffbd76",
+      "src/content/profile/cover.ts": "d6b1aa215abb134deb4a1d1a8f68b42732a6ec3afbd0719fcb634ae7d48a43b7",
+      "src/content/profile/financial.ts": "b4bc38d0a4676f7f31a38b13cb77e36a5e0c67623431f29cab3bae7f605b2057",
+      "src/content/profile/futurePlans.ts": "20fa281baa0ee9384820b1e448e834858aae036d58f756d9a4ebab40d90afcbb",
+      "src/content/profile/history.ts": "4524e48ba3eec33f875509efe76d93d7e6baf396606742bcabb42cf50850dd06",
+      "src/content/profile/index.ts": "b1e49ded31bcc92072692145e538368c51e49f61e819bf689eeb23f5c1abc55f",
+      "src/content/profile/leadership.ts": "0f7eef38e904be9f30c868fc35c8193eaa0c6f88b42da9d62bc13e5fadbca89f",
+      "src/content/profile/legal.ts": "b041cca8e86f830683971a364841bf1590038248e5f49a33637a60c258074848",
+      "src/content/profile/markets.ts": "7fa9ad5b2b7d583ec11bcfa57ec4267291bcbdd9fb478a422619354883caeebf",
+      "src/content/profile/operations.ts": "e0154399d13dd1d9c2cfc19f00fd9c551e28ee3645a3cf3f2d7d321354f4ca34",
+      "src/content/profile/outline.ts": "a59b2231dd7e9ec5d1db15cc105854badaf280a90e854d39b87ce1530d477fde",
+      "src/content/profile/overview.ts": "1337f9c3465d7898dedbe1ff69946e62785ffa2ac2b39f97dbb348bf3a3c7a97",
+      "src/content/profile/ownership.ts": "036ba125daa748b11d9c9b38e8f9142de5a6b88653d19eda4add1f49a47a6cec",
+      "src/content/profile/print.ts": "f6ac05743844c3b37e7062d1035a6a6d3bb757a294dfa49126ca40dd54aeaef2",
+      "src/content/profile/products.ts": "92a9ee6e9411084041baeb634ceb010f97db15dba5bfefffa7d60bc1dc8f107b",
+      "src/content/profile/screen.ts": "1a449457954876a77cdc4946f1480c459f1f22aad3af96d1ffd9b4f8d6a7ac5c",
+      "src/content/profile/strengths.ts": "6757b085b28c4283c42f7e940fc05d29592912aedbe76e478e88dd51a9df0a60",
+      "src/content/profile/vision.ts": "43009c90cbcfd8912d3959d689adf8603220b9eb2807778833200bb02af45a1b",
+      "src/content/site.ts": "8c7672b812629414a5f8386f79b9e42af2f58f07edfb4842e2b71c4bcc177654",
+      "src/content/types.ts": "12ce765bde4167b9959393b9058bf0b4d9c4557b72c3ec3c03f6b4fe0a81d7b3",
+      "src/design/fonts.ts": "0f41dd3d98d2c4a89e33a2dfe368b46da8a5e3597392e1e3c154cfbcfc71351e",
+      "src/islands/PrintAssetLoader.tsx": "8c3d42b99f7c88fd61323eb2104dd9f93d8ffeb2e86b37ec408b9f2399f75fb8",
+      "src/lib/print-assets.ts": "eebdb7cbb2e18cf381f0f4e7e935cb41e68835df49976fe88ba76179887ac7e2",
+      "src/print/ProfileDocuments.tsx": "aa6c3645c3d3ec1edb344dae1c4807b96920f797b1420f4c287b880eb782f7f0",
+      "src/styles/print.css": "0b3761ca36f9fa8dc4e91ca2e232c8270c53ab2f9f9b9a5c2be540a4c4104eaa"
+    }
+  },
+  "outputs": {
+    "public/downloads/itemba-group-profile.pdf": {
+      "sha256": "dfdd6a0fa94449485895901fcd31da60f40d7cdf8aff4ed04fbb953bd0d2b12a",
+      "bytes": 4115485
+    },
+    "public/downloads/itemba-westsides-profile.pdf": {
+      "sha256": "f7cdb86a4ac2b7195a47e10c4ff336ee0dea82f98a5ff4ee77f697aa4a84aefb",
+      "bytes": 6086571
+    },
+    "public/downloads/itemba-mwanjalisi-profile.pdf": {
+      "sha256": "712b147b55a83aae56a6110b4692e5ab8947431f778ad101cd89da3f78d4efbf",
+      "bytes": 2776748
+    },
+    "public/downloads/itemba-enterprises-profile.pdf": {
+      "sha256": "01417f1e30801da486edf0e494f48fdfa0e366aa956783bb6ec3f7e00f7fbdfa",
+      "bytes": 3755656
+    }
+  }
+}

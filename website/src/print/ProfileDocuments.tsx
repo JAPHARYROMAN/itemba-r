@@ -1,0 +1,189 @@
+/* eslint-disable @next/next/no-img-element -- the PDF script needs plain <img src="/images/…"> in these documents. */
+import { contact } from '@/content/contact';
+import { flags } from '@/content/flags';
+import { legalCompanyProfiles, printableProfiles, printCopy, type PrintSection } from '@/content/profile';
+import { site } from '@/content/site';
+import PrintAssetLoader from '@/islands/PrintAssetLoader';
+
+/**
+ * The four print documents (group + one per company) rendered, hidden on
+ * screen, at the end of /company-profile. Print CSS shows the selected one
+ * (body[data-print-profile]); scripts/generate-profile-pdfs.mjs prints each to
+ * public/downloads.
+ *
+ * Contract with the frozen PDF script and print.css: the class names, the
+ * `article.print-profile-document[data-profile=<id>]` elements and plain
+ * <img src="/images/..."> photos are load-bearing. Keep them. The cover
+ * title is a styled <p> (.print-cover-title), so the hidden documents add no
+ * h1 to the page.
+ *
+ * The legal identifiers (TINs, incorporation, directors) render only while
+ * flags.publishLegalIdentifiers is on, here as on the screen view: the flag
+ * covers the page source, Ctrl+P and, once regenerated (npm run pdf; the
+ * input lock forces it), the PDFs. Off, the group document lists the
+ * companies by registered name only.
+ *
+ * Every image is `loading="lazy"`: the documents are display:none on screen,
+ * so a screen visitor downloads none of the ~11 MB of print photos.
+ * PrintAssetLoader switches the chosen document's images to eager when a
+ * profile is picked for printing (by the print button or the PDF script),
+ * and PrintProfileButton waits for them before it prints.
+ */
+export default function ProfileDocuments() {
+  return (
+    <div className="print-document-root" aria-hidden="true">
+      <PrintAssetLoader />
+      {printableProfiles.map((profile) => (
+        <article key={profile.id} className="print-profile-document" data-profile={profile.id}>
+          <header className="print-letterhead">
+            <div className="print-letterhead-brand">
+              <div className="print-logo-mark">
+                <img loading="lazy" src="/logo-print.png" alt={printCopy.logoAlt} />
+                <span>{printCopy.established}</span>
+              </div>
+              <div>
+                <p className="print-letterhead-title">{printCopy.letterheadTitle}</p>
+                <p className="print-letterhead-subtitle">{printCopy.letterheadSubtitle}</p>
+              </div>
+            </div>
+            <div className="print-letterhead-contact">
+              <p>{contact.headOffice}</p>
+              <p>{contact.postal}</p>
+              <p>{contact.primaryPhoneDisplay} / {contact.secondaryPhoneDisplay}</p>
+              <p>{contact.email} | {site.domain}</p>
+            </div>
+          </header>
+
+          <section className="print-cover-panel">
+            <div>
+              <div className="print-cover-identity">
+                <div className="print-cover-logo">
+                  <img loading="lazy" src="/logo-print.png" alt={printCopy.logoAlt} />
+                  <span>{printCopy.established}</span>
+                </div>
+                <span>{site.domain}</span>
+              </div>
+              <p className="print-kicker">{printCopy.kicker}</p>
+              <p className="print-cover-title">{profile.title}</p>
+              <p className="print-subtitle">{profile.subtitle}</p>
+            </div>
+            <img loading="lazy" src={profile.coverImage.src} alt={profile.coverImage.alt} />
+          </section>
+
+          <section className="print-section print-section-tight">
+            <h2>{printCopy.factsHeading}</h2>
+            <dl className="print-fact-grid">
+              {profile.facts.map((fact) => (
+                <div key={fact.label}>
+                  <dt>{fact.label}</dt>
+                  <dd>{fact.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          {profile.id === 'group' && !flags.publishLegalIdentifiers ? (
+            <section className="print-section">
+              <h2>{printCopy.legalCompaniesHeading}</h2>
+              <ul className="print-list">
+                {legalCompanyProfiles.map((company) => (
+                  <li key={company.id}>{company.name}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {profile.id === 'group' && flags.publishLegalIdentifiers ? (
+            <section className="print-section">
+              <h2>{printCopy.legalCompaniesHeading}</h2>
+              <table className="print-table">
+                <thead>
+                  <tr>
+                    {printCopy.legalTableHeads.map((head) => (
+                      <th key={head}>{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {legalCompanyProfiles.map((company) => (
+                    <tr key={company.id}>
+                      <td>{company.name}</td>
+                      <td>{company.tin}</td>
+                      <td>{company.incorporationDate}; {printCopy.numberPrefix} {company.incorporationNumber}</td>
+                      <td>{company.directors.join('; ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+
+          {profile.directors && flags.publishLegalIdentifiers ? (
+            <section className="print-section print-section-tight">
+              <h2>{printCopy.directorsHeading}</h2>
+              <ul className="print-list print-list-columns">
+                {profile.directors.map((director) => (
+                  <li key={director}>{director}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className="print-section print-section-tight">
+            <h2>{printCopy.imagesHeading}</h2>
+            <div className="print-image-grid">
+              {profile.images.map((image) => (
+                <figure key={image.src}>
+                  <img loading="lazy" src={image.src} alt={image.alt} />
+                  <figcaption>{image.caption}</figcaption>
+                </figure>
+              ))}
+            </div>
+          </section>
+
+          {profile.sections.map((section) => (
+            <PrintSectionBlock key={section.title} section={section} />
+          ))}
+
+          <footer className="print-document-footer">
+            <span>{profile.subject}</span>
+            <span>{site.domain}</span>
+          </footer>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function PrintSectionBlock({ section }: { section: PrintSection }) {
+  return (
+    <section className={`print-section${section.pageBreakBefore ? ' print-section-page' : ''}`}>
+      <h2>{section.title}</h2>
+      {section.body ? <p>{section.body}</p> : null}
+      {section.points ? (
+        <ul className="print-list">
+          {section.points.map((point) => (
+            <li key={point}>{point}</li>
+          ))}
+        </ul>
+      ) : null}
+      {section.columns ? (
+        <div className="print-column-grid">
+          {section.columns.map((column) => (
+            <div key={column.title} className="print-mini-card">
+              <h3>{column.title}</h3>
+              {column.body ? <p>{column.body}</p> : null}
+              {column.points ? (
+                <ul className="print-list">
+                  {column.points.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}

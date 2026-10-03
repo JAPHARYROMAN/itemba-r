@@ -1,0 +1,19 @@
+/*
+ * Design tokens as CSS variables.
+ *
+ * This file emits Tailwind's base layer: preflight, then the variables that
+ * the plugin in tailwind.config.ts generates from src/design/tokens.ts.
+ * - :root holds the light tone, the group-gold accent and the layout values
+ *   (gutter, containers, section spacing, radii, chrome heights, motion).
+ * - [data-tone="light|alt|cinema"] re-maps the semantic colours: --surface,
+ *   --surface-alt, --fg, --fg-muted, --fg-subtle, --line, --line-strong,
+ *   --focus, --danger, --success, --btn*, --accent-fg.
+ * - [data-accent="group|mwanjalisi|westsides|enterprises"] swaps in the
+ *   accent swatch that --accent and --accent-fg read.
+ *
+ * Do not hand-write token values here or anywhere else. Edit tokens.ts; the
+ * contrast test (tests/unit/design-tokens.test.ts) guards every pairing.
+ *
+ * Import order (src/app/layout.tsx): tokens, base, utilities, print.
+ */
+@tailwind base;

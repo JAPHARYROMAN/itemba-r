@@ -1,0 +1,408 @@
+{
+  "routes": {
+    "/": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/about": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/locations": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/companies": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/capabilities": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/insights": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/company-profile": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/partnerships": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/faq": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/contact": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services/fuel-and-lubricants": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services/trade-and-distribution": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services/logistics-and-cross-border-transit": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services/construction-supplies-and-hardware": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services/hospitality-and-lodging": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/services/real-estate-and-property": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/locations/songwe-tunduma": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/companies/mwanjalisi-oil": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/companies/westsides-company": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/companies/itemba-enterprises": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/insights/route-business-enquiry-itemba-group": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/insights/tunduma-corridor-fuel-trade-logistics": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/insights/choose-right-itemba-company": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    },
+    "/insights/supplier-bulk-purchase-enquiries": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "x-powered-by": "Next.js",
+      "cache-control": "s-maxage=31536000",
+      "content-type": "text/html; charset=utf-8",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+    }
+  },
+  "assets": {
+    "/logo.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-type": "image/png"
+    },
+    "/logo-print.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/favicon.ico": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/x-icon",
+      "vary": "Accept-Encoding"
+    },
+    "/favicon-16x16.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/favicon-32x32.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/favicon-48x48.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/favicon-64x64.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/apple-touch-icon.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/site-icon-192.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/site-icon-512.png": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=0",
+      "content-type": "image/png"
+    },
+    "/downloads/itemba-group-profile.pdf": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+      "content-type": "application/pdf"
+    },
+    "/downloads/itemba-westsides-profile.pdf": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+      "content-type": "application/pdf"
+    },
+    "/downloads/itemba-mwanjalisi-profile.pdf": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+      "content-type": "application/pdf"
+    },
+    "/downloads/itemba-enterprises-profile.pdf": {
+      "x-dns-prefetch-control": "on",
+      "x-frame-options": "SAMEORIGIN",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+      "content-type": "application/pdf"
+    }
+  }
+}

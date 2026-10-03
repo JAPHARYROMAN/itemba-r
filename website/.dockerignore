@@ -18,7 +18,25 @@ Dockerfile
 .vscode
 .idea
 
+# Image masters (about 26 MB). The runtime only needs the graded webps in
+# public/images, which `npm run images` produces and git tracks.
+# Never ignore public/downloads: the profile PDFs ship with the image.
+images
+scripts/images/sources
+
+# Test artefacts
+test-results
+playwright-report
+blob-report
+coverage
+.lighthouseci
+
+# Local platform links and TypeScript's incremental cache
+.vercel
+*.tsbuildinfo
+
 # Logs and OS cruft
+*.log
 npm-debug.log*
 yarn-error.log*
 .DS_Store

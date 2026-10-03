@@ -1,0 +1,242 @@
+name: Website
+
+# Gates for the public website (website/, a standalone Next.js app). The shared
+# ci.yml still owns the production `npm audit` for website/ (its dependency
+# matrix); this workflow adds the website's own checks and never edits it.
+#
+#   checks          typecheck, lint, unit                                  blocking
+#   build-contract  build, budgets, e2e @contract + @quality (standalone)  blocking
+#   docker-smoke    website/Dockerfile image, /api/health, POST            blocking
+#   quality         Lighthouse CI (mobile)                                 non-blocking for now
+#
+# Budgets (`npm run budget`: bundle and HTML budgets, no inline opacity:0 in
+# server HTML, 'use client' only in the allowlist) are blocking.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  NEXT_TELEMETRY_DISABLED: '1'
+  E2E_PORT: '3191'
+
+defaults:
+  run:
+    working-directory: website
+
+jobs:
+  checks:
+    name: Website — typecheck, lint, unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test:unit
+
+  build-contract:
+    name: Website — build, budgets, e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - name: Build (standalone output)
+        run: npm run build
+      - name: Build-output checks (budgets, inline opacity:0, 'use client' allowlist)
+        run: npm run budget
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: E2E @contract and @quality against .next/standalone/server.js on 3191
+        # scripts/run-e2e.mjs copies public/ and .next/static/ beside
+        # .next/standalone/server.js exactly as the Dockerfile runner stage
+        # does, starts `node server.js` with NODE_ENV=production on E2E_PORT
+        # (3191) and a throwaway ENQUIRY_STORAGE_DIR, waits for /api/health,
+        # then runs Playwright in both projects (phone 360x800, desktop
+        # 1280x800): the contracts (URLs, metadata, JSON-LD, links, analytics,
+        # print) and the quality gates (axe, no-JS) on all 25 URLs.
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: website-e2e
+          path: |
+            website/playwright-report/
+            website/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  docker-smoke:
+    name: Website — Docker smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      IMAGE: itemba-website:ci
+      CONTAINER: itemba-website-ci
+      VOLUME: itemba-website-ci-data
+      BASE: http://127.0.0.1:3191
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image from website/Dockerfile
+        working-directory: .
+        run: docker build -f website/Dockerfile -t "$IMAGE" website
+      - name: Run it with a data volume on /app/data
+        run: |
+          docker volume create "$VOLUME"
+          docker run -d --name "$CONTAINER" -p 3191:3001 -v "$VOLUME:/app/data" "$IMAGE"
+      - name: /api/health answers with its contract
+        run: |
+          body=""
+          for _ in $(seq 1 60); do
+            if body=$(curl -fsS "$BASE/api/health" 2>/dev/null); then break; fi
+            body=""
+            sleep 1
+          done
+          if [ -z "$body" ]; then
+            echo "::error::/api/health did not answer within 60 s"
+            docker logs "$CONTAINER"
+            exit 1
+          fi
+          echo "$body"
+          echo "$body" | node -e '
+            let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+              const b = JSON.parse(s);
+              const ok = b.status === "ok" && b.service === "itemba-group-website" && typeof b.timestamp === "string";
+              if (!ok) { console.error("unexpected /api/health body"); process.exit(1); }
+            });'
+      - name: Core routes and assets return 200
+        run: |
+          fail=0
+          for p in / /about /companies/mwanjalisi-oil /services/fuel-and-lubricants /company-profile /contact \
+                   /sitemap.xml /robots.txt /manifest.webmanifest /opengraph-image \
+                   /downloads/itemba-group-profile.pdf /logo.png; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$p")
+            echo "$code $p"
+            [ "$code" = "200" ] || fail=1
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/enquiries")
+          echo "$code GET /api/enquiries (expect 405)"
+          [ "$code" = "405" ] || fail=1
+          exit $fail
+      - name: An enquiry POST is stored on the volume
+        run: |
+          payload='{"intentId":"general","name":"CI smoke","contactMethod":"ci-smoke@example.invalid","message":"Docker smoke test from the website workflow.","sourcePath":"/contact"}'
+          code=$(curl -s -o "$RUNNER_TEMP/enquiry.json" -w '%{http_code}' \
+            -H 'content-type: application/json' -d "$payload" "$BASE/api/enquiries")
+          cat "$RUNNER_TEMP/enquiry.json"; echo
+          [ "$code" = "200" ] || { echo "::error::POST /api/enquiries returned $code"; exit 1; }
+          node -e '
+            const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            if (b.ok !== true || b.storageStatus !== "stored" || b.emailStatus !== "not_configured") {
+              console.error("unexpected enquiry response"); process.exit(1);
+            }' "$RUNNER_TEMP/enquiry.json"
+          docker exec "$CONTAINER" test -s /app/data/enquiries.jsonl
+      - name: The image HEALTHCHECK reports healthy
+        run: |
+          for _ in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER")
+            [ "$status" = "healthy" ] && { echo "healthy"; exit 0; }
+            sleep 3
+          done
+          echo "::error::container health is '$status' after 90 s"
+          exit 1
+      - name: Container logs
+        if: always()
+        run: docker logs "$CONTAINER" || true
+      - name: Clean up
+        if: always()
+        run: |
+          docker rm -f "$CONTAINER" || true
+          docker volume rm "$VOLUME" || true
+
+  quality:
+    name: Website — Lighthouse (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Non-blocking until the budgets are met or the owner signs off a changed
+    # budget: a miss fails this job (a red job on the run, with a warning per
+    # miss and a table in the job summary) but not the workflow. The mobile
+    # LCP budget (2.5 s) is not met yet on the photo-led pages: the Next 15
+    # framework script (about 110 kB of the 120 kB shared JS) sits in the LCP
+    # window on the simulated 1.6 Mbps connection. Do not add
+    # continue-on-error to the Lighthouse step: that hides the miss.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - name: Build (standalone output)
+        run: npm run build
+      - name: Serve the standalone build on 3191 for Lighthouse
+        run: |
+          cp -R public .next/standalone/
+          mkdir -p .next/standalone/.next
+          cp -R .next/static .next/standalone/.next/
+          mkdir -p "$RUNNER_TEMP/enquiries"
+          cd .next/standalone
+          NODE_ENV=production PORT="$E2E_PORT" HOSTNAME=127.0.0.1 ENQUIRY_STORAGE_DIR="$RUNNER_TEMP/enquiries" \
+            nohup node server.js > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for _ in $(seq 1 60); do
+            curl -fsS "http://127.0.0.1:$E2E_PORT/api/health" > /dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/server.log"
+          exit 1
+      - name: Lighthouse CI (mobile preset, median of 3 runs)
+        run: npx --yes @lhci/cli@0.15.1 autorun --config=./lighthouserc.json
+      - name: Lighthouse summary (job summary and a warning per budget miss)
+        if: always()
+        run: node scripts/lighthouse-summary.mjs
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then kill "$(cat "$RUNNER_TEMP/server.pid")" || true; fi
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: website-quality
+          path: |
+            website/playwright-report/
+            website/test-results/
+            website/.lighthouseci/
+          retention-days: 14
+          if-no-files-found: ignore

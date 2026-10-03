@@ -7,23 +7,49 @@
     "build": "next build",
     "start": "next start -p 3001",
     "pdf:generate": "node scripts/generate-profile-pdfs.mjs",
-    "pdf": "npm run build && npm run pdf:generate"
+    "pdf": "npm run build && npm run pdf:generate",
+    "pdf:lock": "node scripts/pdf-lock.mjs --write",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "vitest run",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:contract": "node scripts/run-e2e.mjs --grep @contract",
+    "test:e2e:quality": "node scripts/run-e2e.mjs --grep @quality",
+    "budget": "node scripts/check-budgets.mjs && node scripts/check-html.mjs && node scripts/check-client-allowlist.mjs",
+    "images": "node scripts/images/build-images.mjs",
+    "media:manifest": "node scripts/images/media-manifest.mjs",
+    "snapshot:baseline": "node scripts/snapshot-routes.mjs --out tests/baseline --baseline",
+    "snapshot": "node scripts/snapshot-routes.mjs --out test-results/snapshot",
+    "pdf:facts": "node scripts/pdf-facts.mjs --out test-results/pdf-facts",
+    "content:report": "node scripts/content-report.mjs",
+    "verify": "npm run typecheck && npm run lint && npm run test:unit && npm run build && npm run budget && npm run test:e2e"
   },
   "dependencies": {
-    "framer-motion": "^11.0.0",
     "next": "^15.5.24",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@eslint/eslintrc": "^3.3.7",
+    "@playwright/test": "~1.61.1",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "~15.5.26",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-tailwindcss": "^3.18.3",
+    "pdf-lib": "^1.17.1",
     "playwright": "^1.49.0",
     "postcss": "^8.5.28",
+    "schema-dts": "^2.0.0",
+    "sharp": "^0.35.4",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.2"
   },
   "overrides": {
     "postcss": "^8.5.28"
