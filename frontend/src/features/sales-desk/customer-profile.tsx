@@ -17,6 +17,9 @@ import { PartnerAction } from '@/components/workspace/trading-partner-workspace'
 import '@/components/workspace/workspace.css';
 import '@/components/workspace/partner-profile.css';
 import { TradingPartnerEditor } from '@/components/workspace/trading-partner-editor';
+import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
+import { PartyBalancePanel } from '@/features/party/party-balance-panel';
+import type { PartyBalance } from '@/features/party/party-balance';
 
 type Tab =
   | 'Overview'
@@ -27,7 +30,8 @@ type Tab =
   | 'Pricing'
   | 'Credit'
   | 'Audit'
-  | 'Direct history';
+  | 'Direct history'
+  | 'Related';
 
 interface CustomerDetail {
   id: string;
@@ -161,6 +165,8 @@ interface LedgerEvent {
 }
 
 interface CustomerControlCenter {
+  /** Party linkage (W5): the resolver's balance, carried by the control centre. */
+  balance?: PartyBalance | null;
   customer: CustomerDetail;
   summary: {
     lifetimeSalesTotal: number;
@@ -234,6 +240,7 @@ const TABS: Tab[] = [
   'Credit',
   'Audit',
   'Direct history',
+  'Related',
 ];
 
 function money(value: number | string | null | undefined, currency = 'TZS') {
@@ -628,6 +635,7 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
           aria-label={`${tab} section`}
           className="partner-profile-content"
         >
+          <PartyBalancePanel kind="customer" balance={data?.balance} />
           {tab === 'Direct history' && <CustomerDirectHistory customerId={customerId} />}
           {tab === 'Overview' &&
             (() => {
@@ -1139,6 +1147,7 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
               </div>
             </div>
           )}
+          {tab === 'Related' && <PartyRelatedTabs kind="customer" partyId={customerId} />}
         </section>
       </Card>
     </div>

@@ -15,6 +15,9 @@ import '@/components/workspace/workspace.css';
 import '@/components/workspace/partner-profile.css';
 
 import { SupplierFormModal, type Company } from './SupplierFormModal';
+import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
+import { PartyBalancePanel } from '@/features/party/party-balance-panel';
+import type { PartyBalance } from '@/features/party/party-balance';
 
 interface SupplierCategory {
   productCategory: { id: string; name: string; categoryType: string };
@@ -152,6 +155,8 @@ interface LedgerEvent {
 }
 
 interface SupplierControlCenter {
+  /** Party linkage (W5): the resolver's balance, carried by the control centre. */
+  balance?: PartyBalance | null;
   supplier: SupplierDetail;
   summary: {
     lifetimePurchaseTotal: number;
@@ -206,6 +211,7 @@ const TABS = [
   'Performance',
   'Audit',
   'Invoice Desk',
+  'Related',
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -460,6 +466,7 @@ export function SupplierProfile({
           aria-label={`${tab} section`}
           className="partner-profile-content"
         >
+          <PartyBalancePanel kind="supplier" balance={data?.balance} />
           {tab === 'Overview' && (
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -958,6 +965,7 @@ export function SupplierProfile({
               </div>
             </div>
           )}
+          {tab === 'Related' && <PartyRelatedTabs kind="supplier" partyId={supplierId} />}
         </section>
       </Card>
     </div>

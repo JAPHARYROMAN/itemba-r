@@ -259,3 +259,60 @@
     font-size: 20px;
   }
 }
+
+/* Party linkage (Phase 2 PR-4): the resolver balance panel and the Related sections. */
+.party-balance-panel {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 12px;
+  background: var(--aurora-card);
+}
+.party-balance-panel header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.party-balance-panel header small {
+  color: var(--aurora-text-muted);
+  font-size: 11px;
+}
+.party-balance-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.party-balance-chips em {
+  font-style: normal;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aurora-text) 6%, transparent);
+  color: var(--aurora-text-muted);
+}
+.party-balance-chips em.is-total {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--aurora-text);
+  background: color-mix(in srgb, #67ad99 14%, transparent);
+}
+.party-related-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.party-related-nav button {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--aurora-border);
+  background: var(--aurora-card);
+  color: var(--aurora-text-muted);
+}
+.party-related-nav button[aria-pressed='true'] {
+  color: var(--aurora-text);
+  border-color: color-mix(in srgb, #67ad99 60%, var(--aurora-border));
+  background: color-mix(in srgb, #67ad99 12%, transparent);
+}
