@@ -58,6 +58,7 @@ function setup(delegation = grant) {
       prisma as any,
       audit as any,
       new CompanyScopeService(prisma as any),
+      { assertParty: jest.fn() } as any,
     ),
   };
 }

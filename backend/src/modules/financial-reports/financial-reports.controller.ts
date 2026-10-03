@@ -2,7 +2,14 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { FinancialReportsService } from './financial-reports.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
+
+/** Party linkage (Phase 3): which control account the reconciliation reads. */
+class ControlByPartyQueryDto {
+  @IsOptional() @IsIn(['AP', 'AR']) role?: 'AP' | 'AR';
+  @IsOptional() @IsString() asOf?: string;
+}
 
 class ReportQueryDto {
   @IsOptional() @IsString() periodId?: string;
@@ -151,6 +158,33 @@ export class FinancialReportsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.getCustomerAgingDetail(companyId, customerId, q.asOf, user);
+  }
+
+  @Get('control-by-party/:companyId')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (query read).
+  @AgentExcluded()
+  @RequirePermissions('finance.reports.view')
+  getControlByParty(
+    @Param('companyId') companyId: string,
+    @Query() q: ControlByPartyQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getControlByParty(companyId, q.role ?? 'AP', q.asOf, user);
+  }
+
+  @Get('supplier-aging-detail/:companyId/:supplierId')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (path read).
+  @AgentExcluded()
+  @RequirePermissions('finance.reports.view')
+  getSupplierAgingDetail(
+    @Param('companyId') companyId: string,
+    @Param('supplierId') supplierId: string,
+    @Query() q: ReportQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getSupplierAgingDetail(companyId, supplierId, q.asOf, user);
   }
 
   @Get('supplier-aging/:companyId')

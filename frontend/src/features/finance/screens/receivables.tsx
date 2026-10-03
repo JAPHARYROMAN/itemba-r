@@ -1,6 +1,7 @@
 'use client';
 import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useWorkspaceSearchReader } from '@/components/workspace/workspace-navigation';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -38,7 +39,7 @@ import {
   fmtDateOnly as fmtDetailDate,
   fmtDateTime,
   fmtQty,
-} from '@/app/(dashboard)/finance/_components/ar-ap-detail-ui';
+} from '../_components/ar-ap-detail-ui';
 
 interface Company {
   id: string;
@@ -1294,10 +1295,18 @@ export default function ReceivablesPage() {
   const [writingOff, setWritingOff] = useState<Receivable | null>(null);
 
   const [scopeReady, setScopeReady] = useState(false);
+  // Party linkage (Phase 2): /finance/receivables?customerId= opens the register for one customer.
+  const [customerId, setCustomerId] = useState('');
+  const readSearch = useWorkspaceSearchReader();
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    // Read the window-local URL inside an OS window, the page URL elsewhere. A URL that
+    // names a document (?search=RCV-7) opens the register filtered to it.
+    const params = readSearch();
     setCompanyId(params.get('companyId') ?? '');
     setStatus(params.get('status') ?? '');
+    setCustomerId(params.get('customerId') ?? '');
+    const requested = params.get('search');
+    if (requested) setSearch(requested);
     setScopeReady(true);
   }, []);
 
@@ -1331,6 +1340,7 @@ export default function ReceivablesPage() {
       if (query.trim()) params.set('search', query.trim());
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
+      if (customerId) params.set('customerId', customerId);
       const endpoint =
         viewMode === 'accounts' ? '/api/backend/receivables/accounts' : '/api/backend/receivables';
       const res = await fetch(`${endpoint}?${params}`, { signal: request.signal });
@@ -1350,7 +1360,18 @@ export default function ReceivablesPage() {
     } finally {
       if (request.current()) setLoading(false);
     }
-  }, [authLoading, beginRequest, canView, scopeReady, query, page, companyId, status, viewMode]);
+  }, [
+    authLoading,
+    beginRequest,
+    canView,
+    scopeReady,
+    query,
+    page,
+    companyId,
+    status,
+    customerId,
+    viewMode,
+  ]);
 
   useEffect(() => {
     load();
@@ -1508,6 +1529,21 @@ export default function ReceivablesPage() {
       )}
 
       <PageHeader title="Receivables" subtitle="Accounts receivable management (AR)" />
+      {customerId && (
+        <p className="mb-3 text-sm">
+          Showing one customer&apos;s receivables.{' '}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              setCustomerId('');
+              setPage(1);
+            }}
+          >
+            Show all customers
+          </button>
+        </p>
+      )}
 
       <div className="workspace-metrics grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard

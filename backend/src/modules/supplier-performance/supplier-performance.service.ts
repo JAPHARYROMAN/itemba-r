@@ -31,6 +31,8 @@ export class SupplierPerformanceService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
+          // Party linkage (Phase 2): the profile names its supplier so the list can link it.
+          supplier: { select: { id: true, name: true, supplierCode: true } },
           reviewedBy: { select: { id: true, fullName: true, email: true } },
         },
         orderBy: { updatedAt: 'desc' },
@@ -48,6 +50,7 @@ export class SupplierPerformanceService {
       where: { id, deletedAt: null },
       include: {
         company: { select: { id: true, name: true, code: true } },
+        supplier: { select: { id: true, name: true, supplierCode: true } },
         reviewedBy: { select: { id: true, fullName: true, email: true } },
       },
     });
@@ -118,7 +121,11 @@ export class SupplierPerformanceService {
     return updated;
   }
 
-  private async assertSupplierBelongsToCompany(companyId: string, supplierId: string, user: AuthUser) {
+  private async assertSupplierBelongsToCompany(
+    companyId: string,
+    supplierId: string,
+    user: AuthUser,
+  ) {
     await this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.WRITE);
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: supplierId, companyId, deletedAt: null },

@@ -21,6 +21,7 @@ import {
   CashReverseDto,
 } from './cash-desk.dto';
 import { cashDate, checkDailyBalances, payloadKey } from './cash-desk.domain';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { CashConnectionsService } from '../desk-reports/cash-connections.service';
 import { IntercompanyLoanLedgerService } from '../loans/intercompany-loan-ledger.service';
 import { allocateLoanPayment } from '../loans/loan-allocation';
@@ -37,6 +38,36 @@ const party = {
   currency: true,
   company: { select: { name: true } },
 } as const;
+/**
+ * Party linkage (Phase 2). Every movement the register returns says who the money went to
+ * or came from and which document it settled, so Cash Desk can show and link them. The
+ * names are display snapshots; the ids are the links.
+ */
+const linkage = {
+  supplier: { select: { id: true, name: true } },
+  customer: { select: { id: true, name: true } },
+  payable: { select: { id: true, payableNumber: true } },
+  receivable: { select: { id: true, receivableNumber: true } },
+  expense: { select: { id: true, expenseNumber: true } },
+  refund: { select: { id: true, refundNumber: true } },
+  supplierPayment: { select: { id: true, paymentNumber: true } },
+  customerPayment: { select: { id: true, paymentNumber: true } },
+  invoicePayment: {
+    select: { id: true, invoiceId: true, invoice: { select: { invoiceNumber: true } } },
+  },
+  salesPayment: { select: { id: true, saleId: true, sale: { select: { saleNumber: true } } } },
+} as const;
+/** Register filters by party; an undefined value leaves that dimension unfiltered. */
+const partyFilter = (q: CashQuery): Prisma.CashDeskMovementWhereInput => ({
+  supplierId: q.supplierId,
+  customerId: q.customerId,
+  partyType: q.partyType,
+});
+/** Search also matches the linked party's name, so a supplier's name finds its payments. */
+const partyNameSearch = (search: string): Prisma.CashDeskMovementWhereInput[] => [
+  { supplier: { name: { contains: search, mode: 'insensitive' } } },
+  { customer: { name: { contains: search, mode: 'insensitive' } } },
+];
 
 @Injectable()
 export class CashDeskService {
@@ -48,6 +79,7 @@ export class CashDeskService {
     private readonly invoices: InvoiceDeskService,
     private readonly connections?: CashConnectionsService,
     private readonly intercompany?: IntercompanyLoanLedgerService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   async directory(user: AuthUser, companyId?: string) {
@@ -79,9 +111,16 @@ export class CashDeskService {
     };
   }
   async accounts(user: AuthUser, q: CashQuery) {
+    // Party linkage (Phase 3 PR-8): each desk account carries its connected ERP cash account
+    // and that account's stored mirror, so Accounts can show the connection and any difference.
     return this.db.cashDeskAccount.findMany({
       where: await this.scope(user, q),
-      include: names,
+      include: {
+        ...names,
+        erpCashAccount: {
+          select: { id: true, accountName: true, currentBalance: true, currency: true },
+        },
+      },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });
   }
@@ -322,7 +361,9 @@ export class CashDeskService {
           'Sales Desk receipts already cover this account and date. Record the remaining sales in Sales Desk to avoid counting receipts twice.',
         );
       let loanId = d.loanId,
-        invoicePaymentId: string | undefined;
+        invoicePaymentId: string | undefined,
+        supplierPaymentId: string | null = null,
+        movementSupplierId: string | null = null;
       let loanAllocation: ReturnType<typeof allocateLoanPayment> | undefined;
       if (d.kind === 'LOAN') {
         const loan = await tx.cashDeskLoan.create({
@@ -389,6 +430,7 @@ export class CashDeskService {
           if (await tx.cashDeskMovement.findUnique({ where: { invoicePaymentId: payment.id } }))
             throw new ConflictException('This payment is already linked to Cash Desk.');
           invoicePaymentId = payment.id;
+          supplierPaymentId = payment.supplierPaymentId ?? null;
         } else {
           if (!d.invoiceVersion)
             throw new BadRequestException('Refresh the invoice before recording payment.');
@@ -408,7 +450,40 @@ export class CashDeskService {
             reference: d.reference,
           });
           invoicePaymentId = payment.id;
+          supplierPaymentId = payment.supplierPaymentId ?? null;
         }
+      }
+      if (supplierPaymentId) {
+        const supplierPayment = await tx.supplierPayment.findUnique({
+          where: { id: supplierPaymentId },
+          select: { supplierId: true },
+        });
+        movementSupplierId = supplierPayment?.supplierId ?? null;
+      }
+      // Party linkage (Phase 2): an expense may name its supplier and other money in its
+      // customer, picked from the directory of the account's company. The id is the link;
+      // the payee stays the display snapshot and defaults to the supplier's name.
+      let movementCustomerId: string | null = null,
+        payee = d.kind === 'EXPENSE' ? d.payee?.trim() || null : null;
+      if (d.supplierId || d.customerId) {
+        if (d.kind === 'EXPENSE' && d.supplierId && !d.customerId) {
+          await this.parties?.assertSupplier(account.companyId, d.supplierId, tx);
+          movementSupplierId = d.supplierId;
+          if (!payee)
+            payee =
+              (
+                await tx.supplier.findUnique({
+                  where: { id: d.supplierId },
+                  select: { name: true },
+                })
+              )?.name.slice(0, 160) ?? null;
+        } else if (d.kind === 'OTHER_IN' && d.customerId && !d.supplierId) {
+          await this.parties?.assertCustomer(account.companyId, d.customerId, tx);
+          movementCustomerId = d.customerId;
+        } else
+          throw new BadRequestException(
+            'Link a supplier to an expense or a customer to other money in: one party per movement.',
+          );
       }
       const movement = await tx.cashDeskMovement.create({
         data: {
@@ -416,7 +491,7 @@ export class CashDeskService {
           payloadKey: key,
           kind: d.kind,
           expenseCategory: d.kind === 'EXPENSE' ? d.expenseCategory || 'OTHER' : null,
-          payee: d.kind === 'EXPENSE' ? d.payee?.trim() || null : null,
+          payee,
           expenseNotes: d.kind === 'EXPENSE' ? d.expenseNotes?.trim() || null : null,
           amount,
           currency: account.currency,
@@ -430,9 +505,18 @@ export class CashDeskService {
           loanInterest: loanAllocation?.interest,
           loanFees: loanAllocation?.fees,
           invoicePaymentId,
+          supplierPaymentId,
+          supplierId: movementSupplierId,
+          customerId: movementCustomerId,
+          partyType: movementSupplierId ? 'SUPPLIER' : movementCustomerId ? 'CUSTOMER' : 'NONE',
           dailySalesKey: d.kind === 'DAILY_SALES' ? `${account.id}:${d.businessDate}` : null,
         },
       });
+      if (supplierPaymentId)
+        await tx.supplierPayment.update({
+          where: { id: supplierPaymentId },
+          data: { cashDeskMovementId: movement.id },
+        });
       const incoming = ['DAILY_SALES', 'OTHER_IN'].includes(d.kind);
       await this.entries(tx, movement.id, date, [
         { account, amount: incoming ? amount : amount.negated() },
@@ -461,9 +545,12 @@ export class CashDeskService {
                 OR: [
                   { description: { contains: q.search, mode: 'insensitive' } },
                   { reference: { contains: q.search, mode: 'insensitive' } },
+                  { payee: { contains: q.search, mode: 'insensitive' } },
+                  ...partyNameSearch(q.search),
                 ],
               }
             : {},
+          partyFilter(q),
         ],
       };
     const [rows, total] = await this.db.$transaction(
@@ -473,6 +560,7 @@ export class CashDeskService {
           include: {
             entries: { where: { account: scope }, include: { account: { select: party } } },
             loanFinancialEvent: { select: { loanId: true, id: true } },
+            ...linkage,
           },
           orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
           take: 25,
@@ -491,6 +579,7 @@ export class CashDeskService {
       include: {
         entries: { where: { account: scope }, include: { account: { select: party } } },
         loanFinancialEvent: { select: { loanId: true, id: true } },
+        ...linkage,
       },
     });
     if (!row) throw new NotFoundException('Cash movement not found.');
@@ -508,7 +597,8 @@ export class CashDeskService {
   async expenses(user: AuthUser, q: CashExpenseQuery) {
     if (q.from && q.to && q.from > q.to)
       throw new BadRequestException('The start date must be on or before the end date.');
-    const scope = await this.scope(user, q);
+    const scope = await this.scope(user, q),
+      search = q.search?.trim();
     const where: Prisma.CashDeskMovementWhereInput = {
       AND: [
         { kind: 'EXPENSE', entries: { some: { account: scope } } },
@@ -524,13 +614,19 @@ export class CashDeskService {
               ? { reversedAt: { not: null } }
               : {}),
         },
-        q.search?.trim()
+        search
           ? {
-              OR: ['description', 'reference', 'payee', 'expenseNotes'].map((field) => ({
-                [field]: { contains: q.search!.trim(), mode: 'insensitive' },
-              })),
+              OR: [
+                ...['description', 'reference', 'payee', 'expenseNotes'].map(
+                  (field): Prisma.CashDeskMovementWhereInput => ({
+                    [field]: { contains: search, mode: 'insensitive' },
+                  }),
+                ),
+                ...partyNameSearch(search),
+              ],
             }
           : {},
+        partyFilter(q),
       ],
     };
     const groupedExpenses = this.db.cashDeskMovement.groupBy({
@@ -545,6 +641,7 @@ export class CashDeskService {
           where,
           include: {
             entries: { where: { account: scope }, include: { account: { select: party } } },
+            ...linkage,
           },
           orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
           take: 25,
@@ -663,6 +760,10 @@ export class CashDeskService {
     if (original.loanFinancialEvent)
       throw new BadRequestException(
         'Reverse this payment from the loan financial history so principal, schedules, cash and accounting stay together.',
+      );
+    if (original.journalEntryId)
+      throw new BadRequestException(
+        'This movement was written by its payment. Reverse the payment in Payables, Receivables, Expenses or Refunds so cash and accounting stay together.',
       );
     if (original.kind === 'REVERSAL')
       throw new BadRequestException(
@@ -867,6 +968,14 @@ export class CashDeskService {
       throw new ConflictException(
         'A manual daily sales total covers this account and date. Reverse that total before posting the shift.',
       );
+    const fuelSupplierPayment = input.invoicePaymentId
+      ? await tx.invoiceDeskPayment
+          .findUnique({
+            where: { id: input.invoicePaymentId },
+            select: { supplierPayment: { select: { id: true, supplierId: true } } },
+          })
+          .then((p) => p?.supplierPayment ?? null)
+      : null;
     const movement = await tx.cashDeskMovement.create({
       data: {
         fuelReportPostingId: input.postingId,
@@ -880,6 +989,9 @@ export class CashDeskService {
         reference: input.reference.slice(0, 160),
         salesPaymentId: input.salesPaymentId,
         invoicePaymentId: input.invoicePaymentId,
+        supplierPaymentId: fuelSupplierPayment?.id ?? null,
+        supplierId: fuelSupplierPayment?.supplierId ?? null,
+        partyType: fuelSupplierPayment ? 'SUPPLIER' : 'NONE',
         expenseCategory: input.expenseCategory,
         expenseNotes: input.expenseNotes,
         createdBy: user.id,
@@ -889,6 +1001,11 @@ export class CashDeskService {
     await this.entries(tx, movement.id, input.date, [
       { account, amount: input.kind === 'SALE_RECEIPT' ? input.amount : input.amount.negated() },
     ]);
+    if (fuelSupplierPayment)
+      await tx.supplierPayment.update({
+        where: { id: fuelSupplierPayment.id },
+        data: { cashDeskMovementId: movement.id },
+      });
     await this.auditMovement(tx, user, movement.id, [account], input.kind);
     return movement;
   }

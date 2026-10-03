@@ -13,8 +13,13 @@ import {
   AccountRole,
 } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -85,6 +90,7 @@ export class RefundsService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   // ── delegate accessors (see RefundRow note above) ─────────────────────────
@@ -326,6 +332,7 @@ export class RefundsService {
           lines: [
             {
               accountId: arAcct.id,
+              ...partyOf('customer', current.customerId),
               description: `Release customer credit: ${current.customerName ?? current.customerId ?? 'customer'}`,
               debit: amount,
               credit: 0,
@@ -350,6 +357,25 @@ export class RefundsService {
       await (tx as PrismaService).cashAccount.update({
         where: { id: cashAccount.id },
         data: { currentBalance: { decrement: amount } },
+      });
+
+      // Cash book (W4): the refund is one Cash Desk movement carrying the customer,
+      // the refund and the journal that already explains it.
+      await this.cashBook?.recordInTransaction(tx, user, {
+        kind: 'REFUND',
+        companyId: current.companyId,
+        cashAccountId: cashAccount.id,
+        amount,
+        currency: current.currency,
+        businessDate: postingDate,
+        description: `Customer refund ${current.refundNumber} · ${current.customerName ?? current.customerId ?? 'customer'}`,
+        reference: current.refundNumber,
+        requestId: `Refund:${current.id}`,
+        partyType: current.customerId ? 'CUSTOMER' : 'NONE',
+        customerId: current.customerId ?? null,
+        refundId: current.id,
+        journalEntryId: journalEntry.id,
+        journalReferenceType: 'Refund',
       });
 
       const updated = await this.refunds(tx).update({
@@ -615,6 +641,7 @@ export class RefundsService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
       credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
       description: `Reversal: ${line.description ?? ''}`.trim(),

@@ -13,7 +13,51 @@ export type Account = {
   company: { name: string };
   division: { name: string };
   branch: { name: string };
+  // Party linkage (Phase 3 PR-8): the connected ERP cash account and its stored mirror.
+  erpCashAccountId?: string | null;
+  erpCashAccount?: {
+    id: string;
+    accountName: string;
+    currentBalance: string | number;
+    currency: string;
+  } | null;
 };
+/** Exact cents from a decimal string of any length (no thousands separators). */
+function cents(value: string | number): bigint {
+  const text = String(value).trim();
+  const match = /^(-?)(\d+)(?:\.(\d{1,2})\d*)?$/.exec(text);
+  if (!match) throw new Error(`Not a decimal amount: ${text}`);
+  const [, sign, whole, fraction = ''] = match;
+  const units = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'));
+  return sign ? -units : units;
+}
+function fromCents(units: bigint): string {
+  const absolute = units < 0n ? -units : units;
+  const text = `${absolute / 100n}.${(absolute % 100n).toString().padStart(2, '0')}`;
+  return units < 0n ? `-${text}` : text;
+}
+/** The ERP mirror beside a desk balance, exact to the cent: a difference is a finding. */
+export function erpMirror(account: Account) {
+  const erp = account.erpCashAccount;
+  if (!erp) return null;
+  try {
+    const mirror = cents(erp.currentBalance ?? '0');
+    const difference = mirror - cents(account.balance);
+    return {
+      name: erp.accountName,
+      mirror: fromCents(mirror),
+      difference: fromCents(difference),
+      inStep: difference === 0n,
+    };
+  } catch {
+    return {
+      name: erp.accountName,
+      mirror: String(erp.currentBalance),
+      difference: '?',
+      inStep: false,
+    };
+  }
+}
 export type Movement = {
   fuelReportPostingId?: string | null;
   payrollRunId?: string | null;
@@ -35,6 +79,20 @@ export type Movement = {
   reversalReason: string | null;
   reversalOfId: string | null;
   invoicePaymentId: string | null;
+  // Party linkage (Phase 2): who the money went to or came from, and what it settled.
+  partyType?: string | null;
+  supplierId?: string | null;
+  customerId?: string | null;
+  supplier?: { id: string; name: string } | null;
+  customer?: { id: string; name: string } | null;
+  payable?: { id: string; payableNumber: string } | null;
+  receivable?: { id: string; receivableNumber: string } | null;
+  expense?: { id: string; expenseNumber: string } | null;
+  refund?: { id: string; refundNumber: string } | null;
+  supplierPayment?: { id: string; paymentNumber: string } | null;
+  customerPayment?: { id: string; paymentNumber: string } | null;
+  invoicePayment?: { id: string; invoiceId: string; invoice: { invoiceNumber: string } } | null;
+  salesPayment?: { id: string; saleId: string; sale: { saleNumber: string } } | null;
   entries: {
     id: string;
     amount: string;
@@ -90,10 +148,19 @@ export const movementLabels: Record<string, string> = {
   LOAN: 'Intercompany loan',
   LOAN_REPAYMENT: 'Loan repayment',
   SUPPLIER_PAYMENT: 'Supplier payment',
+  CUSTOMER_RECEIPT: 'Customer collection',
+  REFUND: 'Customer refund',
   OPENING: 'Opening balance',
   REVERSAL: 'Reversal',
   BORROWING: 'Borrowing received',
   DEBT_REPAYMENT: 'External loan repayment',
+};
+export const partyTypeLabels: Record<string, string> = {
+  SUPPLIER: 'Suppliers',
+  CUSTOMER: 'Customers',
+  EMPLOYEE: 'Employees',
+  COMPANY: 'Group companies',
+  NONE: 'No counterparty',
 };
 export type Editor = {
   draftId?: string;

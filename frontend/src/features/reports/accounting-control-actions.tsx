@@ -28,6 +28,7 @@ import { ControlFacts } from './accounting-control-detail';
 import './accounting-controls.css';
 
 import { readControl, type ControlReview } from './accounting-control-read';
+import { PartyCloseCheckPanel, usePartyCloseCheck } from '@/features/party/party-close-check-panel';
 type Props = {
   target: ControlTarget;
   source?: WorkspaceDraft;
@@ -94,6 +95,13 @@ function ControlActionEditor({
     values = form.draft.form;
   const choices = useControlChoices(kind, data?.record.companyId || '', form.readAllowed && !!data);
   const entry = data?.entries.find((r) => r.id === target.entryId);
+  // Party linkage (Phase 3): a period close shows the control-by-party check and, when the
+  // sides differ, closes through the acknowledged route with a reason.
+  const closingPeriod = kind === 'period-close' && target.action === 'close';
+  const partyCheck = usePartyCloseCheck(
+    closingPeriod && data ? `/period-close/${encodeURIComponent(target.id)}/party-check` : null,
+  );
+  const mustAcknowledge = closingPeriod && !!partyCheck.data?.hasDifferences;
   const eligible =
     !!action &&
     !!data &&
@@ -108,6 +116,10 @@ function ControlActionEditor({
       throw new Error('This action is no longer available for the current status.');
     if (kind === 'audit-adjustments' && target.action === 'reverse' && !values.reason.trim())
       throw new Error('Enter a reason for the reversal.');
+    if (mustAcknowledge && values.reason.trim().length < 5)
+      throw new Error(
+        'Enter why the period closes with control differences (at least 5 characters).',
+      );
     if (kind !== 'depreciation') return;
     if (
       target.action === 'post-entry' &&
@@ -175,6 +187,8 @@ function ControlActionEditor({
                 'Accumulated depreciation after',
               ),
             });
+          else if (mustAcknowledge)
+            await backendPost(`${base}/close-acknowledged`, { reason: values.reason.trim() });
           else
             await backendPost(
               `${base}/${target.action}`,
@@ -195,6 +209,7 @@ function ControlActionEditor({
             row={data.record}
             names={[...choices.companies, ...choices.years, ...choices.periods, ...choices.assets]}
           />
+          {closingPeriod && <PartyCloseCheckPanel {...partyCheck} />}
           {kind === 'audit-adjustments' && data.record.lines?.length ? (
             <div className="accounting-control-lines">
               {data.record.lines.map((line, i) => (
@@ -219,6 +234,14 @@ function ControlActionEditor({
             {kind === 'audit-adjustments' && target.action === 'reverse' && (
               <FormTextarea
                 label="Reason for reversal"
+                required
+                value={values.reason}
+                onChange={(e) => set('reason', e.target.value)}
+              />
+            )}
+            {mustAcknowledge && (
+              <FormTextarea
+                label="Reason for closing with differences"
                 required
                 value={values.reason}
                 onChange={(e) => set('reason', e.target.value)}

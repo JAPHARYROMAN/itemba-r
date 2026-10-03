@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
@@ -26,6 +27,7 @@ export class LoansService {
     private readonly codes: EntityCodeGeneratorService,
     private readonly lifecycle: LoanLifecycleService,
     private readonly ledger: LoanLedgerService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
@@ -234,7 +236,11 @@ export class LoansService {
         (!rate.isFinite() || rate.lt(0) || rate.gt('99.9999') || rate.decimalPlaces() > 4)
       )
         throw new BadRequestException('Invalid annual interest rate.');
+      // Party linkage (Phase 2): the lender's supplier profile may be set, changed or cleared.
+      if (dto.supplierId) await this.parties?.assertSupplier(existing.companyId, dto.supplierId);
       const data: Prisma.LoanUpdateInput = {};
+      if (dto.supplierId !== undefined)
+        data.supplier = dto.supplierId ? { connect: { id: dto.supplierId } } : { disconnect: true };
       for (const key of [
         'lenderName',
         'loanReference',

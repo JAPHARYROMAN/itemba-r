@@ -437,7 +437,12 @@ export class WestsidesDashboardService {
         where: {
           companyId,
           ...branchFilter,
-          status: ReceivableStatus.OVERDUE,
+          // Overdue is derived from the due date; nothing writes an OVERDUE status.
+          status: {
+            in: [ReceivableStatus.OPEN, ReceivableStatus.PARTIALLY_PAID, ReceivableStatus.OVERDUE],
+          },
+          dueDate: { lt: new Date() },
+          outstandingAmount: { gt: 0 },
           deletedAt: null,
         },
         _sum: { outstandingAmount: true },
@@ -894,7 +899,12 @@ export class WestsidesDashboardService {
         where: {
           companyId,
           ...branchFilter,
-          status: ReceivableStatus.OVERDUE,
+          // Overdue is derived from the due date; nothing writes an OVERDUE status.
+          status: {
+            in: [ReceivableStatus.OPEN, ReceivableStatus.PARTIALLY_PAID, ReceivableStatus.OVERDUE],
+          },
+          dueDate: { lt: new Date() },
+          outstandingAmount: { gt: 0 },
           deletedAt: null,
         },
         _sum: { outstandingAmount: true },

@@ -1,5 +1,5 @@
 'use client';
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AppGlyph } from '@/components/os/app-glyph';
 import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
@@ -7,6 +7,7 @@ import { getApp } from '@/lib/apps';
 import { useDeskRecordSelection } from '@/components/workspace/desk-record-selection';
 import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
 import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
 import {
   ArrowDownLeft,
@@ -46,7 +47,14 @@ import {
   money,
   movementLabels,
   expenseCategories,
+  partyTypeLabels,
+  erpMirror,
 } from './types';
+import { movementDocuments, movementParty, type MovementLink } from './movement-links';
+import { SupplierPaymentDialog } from './supplier-payment-dialog';
+import { partyProfileHref, type PartyBalanceSummary } from '@/features/party/party-balance';
+import { PartyCard } from '@/features/party/party-card';
+import type { PartyKind } from '@/features/party/party-links';
 import '../invoice-desk/invoice-desk.css';
 import './cash-desk.css';
 
@@ -64,7 +72,11 @@ const sections = [
 type Section = (typeof sections)[number]['id'];
 const emptyDirectory: Directory = { companies: [], divisions: [], branches: [] };
 
-export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
+export function CashDesk({
+  targetRecordId,
+  targetSupplierId,
+  targetCustomerId,
+}: { targetRecordId?: string; targetSupplierId?: string; targetCustomerId?: string } = {}) {
   const { hasPermission } = useAuth(),
     allowed = hasPermission('cash_desk.view'),
     manage = hasPermission('cash_desk.manage'),
@@ -86,7 +98,24 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
     [search, setSearch] = useWorkspaceState('cash-desk.search', ''),
     [kind, setKind] = useWorkspaceState('cash-desk.kind', ''),
     [accountId, setAccountId] = useWorkspaceState('cash-desk.accountId', ''),
-    [page, setPage] = useWorkspaceState('cash-desk.page', 1);
+    [page, setPage] = useWorkspaceState('cash-desk.page', 1),
+    [partyType, setPartyType] = useWorkspaceState('cash-desk.partyType', '');
+  const router = useWorkspaceRouter();
+  // A URL that names a party (/cash-desk?supplierId= or ?customerId=) opens the register
+  // filtered to that party until the reader clears it. The section is forced to Movements
+  // once per target so the reader sees the filtered register, not the overview.
+  const partyTarget: Record<string, string> | null = targetSupplierId
+      ? { supplierId: targetSupplierId }
+      : targetCustomerId
+        ? { customerId: targetCustomerId }
+        : null,
+    partyTargetKey = targetSupplierId || targetCustomerId || '';
+  const forcedTarget = useRef('');
+  useEffect(() => {
+    if (forcedTarget.current === partyTargetKey) return;
+    forcedTarget.current = partyTargetKey;
+    if (partyTargetKey) setSection('movements');
+  }, [partyTargetKey, setSection]);
   const [editor, setEditor] = useState<Editor | null>(null),
     [notice, setNotice] = useState('');
   const [selectedId, selectRecord] = useDeskRecordSelection('cash-desk', targetRecordId);
@@ -120,11 +149,22 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
       ...(section === 'sales'
         ? { kind: 'SALES_INCOME', date }
         : section === 'movements'
-          ? { ...(kind ? { kind } : {}), ...(accountId ? { accountId } : {}), search: deferred }
+          ? {
+              ...(kind ? { kind } : {}),
+              ...(accountId ? { accountId } : {}),
+              ...(partyType ? { partyType } : {}),
+              ...(partyTarget ?? {}),
+              search: deferred,
+            }
           : {}),
     },
     allowed && ['overview', 'sales', 'movements'].includes(section),
   );
+  const partyTargetName = partyTarget
+    ? ((movements.data?.rows ?? [])
+        .map((m) => m.supplier?.name ?? m.customer?.name)
+        .find(Boolean) ?? null)
+    : null;
   const loans = useWorkspaceResource<Page<Loan>>(
     '/cash-desk/loans',
     { ...query, page },
@@ -140,6 +180,22 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
     { ...query, page, search: deferred, status: 'all' },
     allowed && invoiceAccess && section === 'suppliers',
   );
+  // Party linkage (Phase 2): Supplier balances come from the resolver, never from a desk-only
+  // sum. One number per supplier with its ERP / Invoice Desk / NoteBook split.
+  const supplierAccess = hasPermission('suppliers.view'),
+    canPaySupplier = hasPermission(
+      'supplier-payments.manage',
+      'payables.view',
+      'cash_accounts.view',
+    );
+  const supplierBalances = useWorkspaceResource<PartyBalanceSummary[]>(
+    '/party-balance/suppliers',
+    scope.companyId ? { companyId: scope.companyId } : {},
+    allowed && supplierAccess && section === 'suppliers',
+  );
+  const [payingSupplier, setPayingSupplier] = useState<PartyBalanceSummary | null>(null);
+  // Party linkage (Phase 2): the same peek at a party from every app.
+  const [peek, setPeek] = useState<{ kind: PartyKind; id: string } | null>(null);
   const dir = directory.data ?? emptyDirectory;
   const currencies = overview.data?.currencies ?? [],
     current = currencies.find((c) => c.currency === currency) ?? currencies[0];
@@ -152,6 +208,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
     loans.error,
     supplierOverview.error,
     invoices.error,
+    supplierBalances.error,
   ].filter(Boolean);
   function reload() {
     setExpenseRevision((r) => r + 1);
@@ -164,8 +221,9 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
     loans.reload();
     supplierOverview.reload();
     invoices.reload();
+    supplierBalances.reload();
   }
-  useLinkedDeskChanges('cash-desk', !!editor, reload);
+  useLinkedDeskChanges('cash-desk', !!editor || !!payingSupplier, reload);
   function go(next: Section) {
     setSection(next);
     setPage(1);
@@ -542,7 +600,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                   <Search size={16} />
                   <input
                     aria-label="Search movements"
-                    placeholder="Search description or reference"
+                    placeholder="Search description, reference or counterparty"
                     value={search}
                     onChange={(e) => {
                       setSearch(e.target.value);
@@ -580,6 +638,33 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                     </option>
                   ))}
                 </select>
+                <select
+                  aria-label="Counterparty type"
+                  value={partyType}
+                  onChange={(e) => {
+                    setPartyType(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All counterparties</option>
+                  {Object.entries(partyTypeLabels).map(([k, l]) => (
+                    <option key={k} value={k}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+                {partyTarget && (
+                  <span className="cash-party-chip">
+                    Showing {targetSupplierId ? 'supplier' : 'customer'}{' '}
+                    <strong>{partyTargetName ?? 'movements'}</strong>
+                    <button
+                      type="button"
+                      onClick={() => router.replace('/cash-desk?view=movements', { scroll: false })}
+                    >
+                      Show all
+                    </button>
+                  </span>
+                )}
               </div>
             )}
             {section === 'sales' && (
@@ -634,6 +719,20 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                     {a.company.name} / {a.division.name} / {a.branch.name}
                   </p>
                   <strong>{money(a.balance, a.currency)}</strong>
+                  {(() => {
+                    // Party linkage (Phase 3 PR-8): the ERP mirror and any difference.
+                    const mirror = erpMirror(a);
+                    return (
+                      <small data-testid="cash-account-mirror">
+                        {mirror
+                          ? `ERP ${mirror.name} · mirror ${money(mirror.mirror, a.currency)}` +
+                            (mirror.inStep
+                              ? ' · in step'
+                              : ` · difference ${money(mirror.difference, a.currency)}`)
+                          : 'Not connected to an ERP cash account'}
+                      </small>
+                    );
+                  })()}
                   <small>
                     View movements <ChevronRight size={13} />
                   </small>
@@ -720,24 +819,29 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                   Open Invoice Desk <ChevronRight size={14} />
                 </Link>
               </div>
-              <div className="cash-supplier-balances">
-                {supplierOverview.data?.suppliers.map((s) => (
-                  <div key={`${s.id}:${s.currency}`}>
-                    <span>
-                      {s.name}
-                      <small>
-                        {s.count} open invoice{s.count === 1 ? '' : 's'}
-                      </small>
-                    </span>
-                    <strong>{money(s.outstanding, s.currency)}</strong>
+              {!supplierAccess ? (
+                <p className="desk-muted">
+                  Supplier profile access is needed to show balances by supplier.
+                </p>
+              ) : supplierBalances.loading ? (
+                <Loading />
+              ) : (
+                <>
+                  <div className="cash-supplier-balances">
+                    {supplierBalances.data?.map((s) => (
+                      <SupplierBalanceRow
+                        key={s.partyId}
+                        balance={s}
+                        onPay={canPaySupplier ? () => setPayingSupplier(s) : undefined}
+                        onPeek={() => setPeek({ kind: 'supplier', id: s.partyId })}
+                      />
+                    ))}
                   </div>
-                ))}
-              </div>
-              {!supplierOverview.loading &&
-                !supplierOverview.error &&
-                !supplierOverview.data?.suppliers.length && (
-                  <p className="desk-muted">No outstanding supplier balances in this scope.</p>
-                )}
+                  {!supplierBalances.error && !supplierBalances.data?.length && (
+                    <p className="desk-muted">No outstanding supplier balances in this scope.</p>
+                  )}
+                </>
+              )}
               <div className="cash-toolbar">
                 <label className="cash-search">
                   <Search size={16} />
@@ -833,6 +937,11 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 {dateLabel(selected.businessDate)} · {money(selected.amount, selected.currency)}
               </p>
               <p className="desk-muted">{selected.reference || 'No reference'}</p>
+              <MovementLinks
+                movement={selected}
+                can={hasPermission}
+                onPeek={(kind, id) => setPeek({ kind, id })}
+              />
               {selected.fuelReportPostingId && (
                 <p className="desk-muted">
                   Posted from PetroDollar. Reverse the entire shift posting there to keep cash,
@@ -906,6 +1015,18 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
             </div>
           )}
         </Modal>
+      )}
+      {peek && <PartyCard kind={peek.kind} partyId={peek.id} onClose={() => setPeek(null)} />}
+      {payingSupplier && (
+        <SupplierPaymentDialog
+          supplier={payingSupplier}
+          onClose={() => setPayingSupplier(null)}
+          onSaved={() => {
+            setPayingSupplier(null);
+            notifyDeskSaved('cash-desk');
+            reload();
+          }}
+        />
       )}
       {editor &&
         (allAccounts.loading ? (
@@ -984,31 +1105,163 @@ function MovementList({
     );
   return (
     <div className="cash-movements">
-      {rows.map((m) => (
-        <button key={m.id} onClick={() => onSelect(m)}>
-          <span className={`cash-movement-icon ${m.reversedAt ? 'is-reversed' : ''}`}>
-            {['DAILY_SALES', 'SALE_RECEIPT', 'OTHER_IN', 'OPENING', 'BORROWING'].includes(
-              m.kind,
-            ) ? (
-              <ArrowDownLeft size={18} />
-            ) : ['LOAN', 'TRANSFER', 'LOAN_REPAYMENT'].includes(m.kind) ? (
-              <ArrowLeftRight size={18} />
-            ) : (
-              <ArrowUpRight size={18} />
+      {rows.map((m) => {
+        const party = movementParty(m),
+          documents = movementDocuments(m);
+        return (
+          <button key={m.id} onClick={() => onSelect(m)}>
+            <span className={`cash-movement-icon ${m.reversedAt ? 'is-reversed' : ''}`}>
+              {[
+                'DAILY_SALES',
+                'SALE_RECEIPT',
+                'CUSTOMER_RECEIPT',
+                'OTHER_IN',
+                'OPENING',
+                'BORROWING',
+              ].includes(m.kind) ? (
+                <ArrowDownLeft size={18} />
+              ) : ['LOAN', 'TRANSFER', 'LOAN_REPAYMENT'].includes(m.kind) ? (
+                <ArrowLeftRight size={18} />
+              ) : (
+                <ArrowUpRight size={18} />
+              )}
+            </span>
+            <span className="cash-movement-name">
+              <strong>{m.description}</strong>
+              <small>
+                {movementLabels[m.kind]} · {m.entries.map((e) => e.account.name).join(' → ')}
+                {m.reversedAt ? ' · Reversed' : ''}
+              </small>
+            </span>
+            {(party || documents.length > 0) && (
+              <span className="cash-movement-party">
+                {party?.text}
+                {documents.length > 0 && <small>{documents.map((d) => d.text).join(' · ')}</small>}
+              </span>
             )}
-          </span>
-          <span className="cash-movement-name">
-            <strong>{m.description}</strong>
-            <small>
-              {movementLabels[m.kind]} · {m.entries.map((e) => e.account.name).join(' → ')}
-              {m.reversedAt ? ' · Reversed' : ''}
-            </small>
-          </span>
-          <span className="cash-movement-date">{dateLabel(m.businessDate)}</span>
-          <strong className="cash-movement-amount">{money(m.amount, m.currency)}</strong>
-          <ChevronRight size={14} />
-        </button>
+            <span className="cash-movement-date">{dateLabel(m.businessDate)}</span>
+            <strong className="cash-movement-amount">{money(m.amount, m.currency)}</strong>
+            <ChevronRight size={14} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+/**
+ * Who the money went to or came from and what it settled, each a link when the reader may
+ * open the profile or the document, plain text otherwise (a name is never a guessed link).
+ */
+function MovementLinks({
+  movement,
+  can,
+  onPeek,
+}: {
+  movement: Movement;
+  can: (...permissions: string[]) => boolean;
+  onPeek?: (kind: PartyKind, id: string) => void;
+}) {
+  const party = movementParty(movement, can),
+    documents = movementDocuments(movement, can);
+  const peekTarget = movement.supplier
+    ? { kind: 'supplier' as const, id: movement.supplier.id }
+    : movement.customer
+      ? { kind: 'customer' as const, id: movement.customer.id }
+      : null;
+  if (!party && !documents.length) return null;
+  const render = (link: MovementLink) =>
+    link.href ? (
+      <Link href={link.href} className="text-blue-600">
+        {link.text} →
+      </Link>
+    ) : (
+      link.text
+    );
+  return (
+    <div className="cash-expense-detail cash-movement-links">
+      {party && (
+        <p>
+          <span>Counterparty · {party.label}</span>
+          <strong>
+            {render(party)}
+            {onPeek && peekTarget && (
+              <button
+                type="button"
+                className="cash-peek"
+                onClick={() => onPeek(peekTarget.kind, peekTarget.id)}
+              >
+                Peek
+              </button>
+            )}
+          </strong>
+        </p>
+      )}
+      {documents.map((d) => (
+        <p key={`${d.label}:${d.text}`}>
+          <span>Settles · {d.label}</span>
+          <strong>{render(d)}</strong>
+        </p>
       ))}
+    </div>
+  );
+}
+/**
+ * One supplier's balance from the resolver: the name opens the profile, the chips show the
+ * ERP / Invoice Desk / NoteBook split (NoteBook is informal and outside the total), and the
+ * total is the resolver's, per currency. The cached balance is never shown.
+ */
+function SupplierBalanceRow({
+  balance,
+  onPay,
+  onPeek,
+}: {
+  balance: PartyBalanceSummary;
+  onPay?: () => void;
+  onPeek?: () => void;
+}) {
+  const erpOpen = balance.erp.some((b) => Number(b.open) > 0);
+  return (
+    <div className="cash-party-balance">
+      <span>
+        <Link href={partyProfileHref('supplier', balance.partyId)}>{balance.name}</Link>
+        {onPeek && (
+          <button type="button" className="cash-peek" onClick={onPeek}>
+            Peek
+          </button>
+        )}
+        <small>
+          {balance.code}
+          {balance.lastPaymentAt
+            ? ` · Last paid ${dateLabel(balance.lastPaymentAt.slice(0, 10))}`
+            : ' · No payment recorded'}
+        </small>
+        <span className="cash-balance-chips">
+          {balance.erp.map((b) => (
+            <em key={`erp:${b.currency}`}>
+              Payables {money(b.open, b.currency)}
+              {Number(b.overdue) > 0 ? ` · ${money(b.overdue, b.currency)} overdue` : ''}
+            </em>
+          ))}
+          {balance.desk.map((b) => (
+            <em key={`desk:${b.currency}`}>Invoice Desk {money(b.outstanding, b.currency)}</em>
+          ))}
+          {balance.notebook.map((b) => (
+            <em key={`notebook:${b.currency}`}>
+              NoteBook {money(b.outstanding, b.currency)} · not in total
+            </em>
+          ))}
+        </span>
+      </span>
+      <span className="cash-party-balance-total">
+        {balance.total.map((t) => (
+          <strong key={t.currency}>{money(t.amount, t.currency)}</strong>
+        ))}
+        {onPay && erpOpen && (
+          <Btn variant="secondary" onClick={onPay}>
+            Record payment
+          </Btn>
+        )}
+      </span>
     </div>
   );
 }

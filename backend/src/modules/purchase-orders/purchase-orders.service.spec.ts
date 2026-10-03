@@ -2,6 +2,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 
 function makeService() {
   const prisma = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     $queryRaw: jest.fn().mockResolvedValue([]),
     purchaseOrder: {

@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { DeskReportQuery } from './desk-reports.dto';
 import { reportPeriod } from './desk-reports.domain';
@@ -227,6 +227,25 @@ export class DeskPostingService {
           throw new BadRequestException(
             'Sales require a receivable asset and revenue account; purchases require an expense/asset and payable liability account.',
           );
+        // Party linkage (Phase 3): the receivable (sales) or payable (purchases) side of a
+        // desk posting carries the canonical party when the desk document has one, so the
+        // ledger reconciles per party. A desk party without a shared profile leaves it untagged.
+        const canonical =
+          kind === 'sales'
+            ? (
+                await tx.salesDeskSale.findUnique({
+                  where: { id },
+                  select: { customer: { select: { canonicalCustomerId: true } } },
+                })
+              )?.customer.canonicalCustomerId
+            : (
+                await tx.invoiceDeskInvoice.findUnique({
+                  where: { id },
+                  select: { supplier: { select: { canonicalSupplierId: true } } },
+                })
+              )?.supplier.canonicalSupplierId;
+        const party =
+          kind === 'sales' ? partyOf('customer', canonical) : partyOf('supplier', canonical);
         const result = await this.engine.postLines(
           {
             ...source,
@@ -238,8 +257,16 @@ export class DeskPostingService {
             userId: user.id,
             moduleName: 'DeskPosting',
             lines: [
-              { accountId: debit.id, debit: new Prisma.Decimal(source.amount) },
-              { accountId: credit.id, credit: new Prisma.Decimal(source.amount) },
+              {
+                accountId: debit.id,
+                debit: new Prisma.Decimal(source.amount),
+                ...(kind === 'sales' ? party : {}),
+              },
+              {
+                accountId: credit.id,
+                credit: new Prisma.Decimal(source.amount),
+                ...(kind === 'sales' ? {} : party),
+              },
             ],
           },
           tx,

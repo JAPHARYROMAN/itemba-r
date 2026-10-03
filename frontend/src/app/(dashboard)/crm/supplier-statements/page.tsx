@@ -2,6 +2,7 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { ErrorState, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -80,7 +81,13 @@ export default function SupplierStatementsPage() {
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs">{row.statementRunNumber}</td>
                   <td className="px-4 py-3">{row.companyId}</td>
-                  <td className="px-4 py-3 font-medium">{row.supplierId}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {row.supplierId ? (
+                      <Link href={`/invoice-desk/suppliers/${encodeURIComponent(row.supplierId)}`} className="text-brand-600 hover:underline" title="Open supplier profile">
+                        {row.supplier?.name ?? row.supplierId}
+                      </Link>
+                    ) : 'All suppliers'}
+                  </td>
                   <td className="px-4 py-3 text-gray-400">{row.periodStart ? new Date(row.periodStart).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3 text-gray-400">{row.periodEnd ? new Date(row.periodEnd).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3">{row.openingBalance}</td>

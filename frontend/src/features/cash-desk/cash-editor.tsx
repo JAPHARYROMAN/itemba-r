@@ -1,6 +1,16 @@
 'use client';
 import { useId, useRef, useState } from 'react';
-import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal } from '@/components/ui';
+import {
+  Btn,
+  CustomerPicker,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  SupplierPicker,
+} from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 import { DraftFormNotice, useWorkspaceDraftForm } from '@/components/workspace/workspace-drafts';
 import { useLoanOptions, LoanLedgerChoice } from '@/features/loans/loan-finance';
 import { backendPost } from '@/lib/api-client';
@@ -32,6 +42,7 @@ export function CashEditor({
 }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const { hasPermission } = useAuth();
   const draft = useWorkspaceDraftForm(
     {
       ...scope,
@@ -58,6 +69,8 @@ export function CashEditor({
       expenseCategory: '',
       payee: '',
       expenseNotes: '',
+      supplierId: '',
+      customerId: '',
       reason: '',
       principal: '',
       interest: '0',
@@ -231,6 +244,10 @@ export function CashEditor({
                 expenseNotes: form.expenseNotes,
               }
             : {}),
+          // Party linkage (Phase 2): the picked party rides with the movement; the payee
+          // and description stay the typed snapshot.
+          ...(form.kind === 'EXPENSE' && form.supplierId ? { supplierId: form.supplierId } : {}),
+          ...(form.kind === 'OTHER_IN' && form.customerId ? { customerId: form.customerId } : {}),
         });
       }
       draft.markSaved();
@@ -414,6 +431,8 @@ export function CashEditor({
                     kind: e.target.value,
                     targetAccountId: '',
                     dueDate: '',
+                    supplierId: '',
+                    customerId: '',
                   }));
                 }}
                 options={['DAILY_SALES', 'OTHER_IN', 'EXPENSE', 'TRANSFER', 'LOAN'].map(
@@ -558,6 +577,26 @@ export function CashEditor({
                     })),
                   ]}
                 />
+                {hasPermission('suppliers.view') && (
+                  <SupplierPicker
+                    label="Supplier (optional)"
+                    value={form.supplierId}
+                    onChange={(supplierId, party) =>
+                      setForm((f) => ({
+                        ...f,
+                        supplierId,
+                        payee: party && !f.payee.trim() ? party.name : f.payee,
+                      }))
+                    }
+                    companyId={account?.companyId || scope.companyId || undefined}
+                    placeholder={
+                      account
+                        ? 'Link this expense to a supplier profile'
+                        : 'Choose the account first'
+                    }
+                    disabled={!account}
+                  />
+                )}
                 <FormInput
                   label="Paid to"
                   placeholder="Person or business paid"
@@ -567,6 +606,18 @@ export function CashEditor({
                   onChange={(e) => set('payee', e.target.value)}
                 />
               </>
+            )}
+            {form.kind === 'OTHER_IN' && hasPermission('customers.view') && (
+              <CustomerPicker
+                label="Customer (optional)"
+                value={form.customerId}
+                onChange={(customerId) => set('customerId', customerId)}
+                companyId={account?.companyId || scope.companyId || undefined}
+                placeholder={
+                  account ? 'Link this money to a customer profile' : 'Choose the account first'
+                }
+                disabled={!account}
+              />
             )}
             <FormInput
               label="Description"

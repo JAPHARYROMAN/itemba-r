@@ -297,6 +297,8 @@ export class DashboardService {
           title: true,
           endDate: true,
           counterpartyName: true,
+          supplierId: true,
+          customerId: true,
           contractType: true,
         },
         orderBy: { endDate: 'asc' },
@@ -373,6 +375,7 @@ export class DashboardService {
           id: true,
           receivableNumber: true,
           customerName: true,
+          customerId: true,
           outstandingAmount: true,
           dueDate: true,
           status: true,
@@ -410,6 +413,7 @@ export class DashboardService {
           id: true,
           payableNumber: true,
           supplierName: true,
+          supplierId: true,
           outstandingAmount: true,
           dueDate: true,
           status: true,
@@ -427,7 +431,9 @@ export class DashboardService {
       this.prisma.expense.count({
         where: scopedWhere(scope, {
           deletedAt: null,
-          status: { in: [ExpenseStatus.DRAFT, ExpenseStatus.PENDING_APPROVAL, ExpenseStatus.APPROVED] },
+          status: {
+            in: [ExpenseStatus.DRAFT, ExpenseStatus.PENDING_APPROVAL, ExpenseStatus.APPROVED],
+          },
         }),
       }),
       this.prisma.expense.aggregate({
@@ -483,6 +489,7 @@ export class DashboardService {
           id: true,
           salesOrderNumber: true,
           customerName: true,
+          customerId: true,
           totalAmount: true,
           outstandingAmount: true,
           status: true,
@@ -527,6 +534,7 @@ export class DashboardService {
           id: true,
           purchaseOrderNumber: true,
           supplierName: true,
+          supplierId: true,
           totalAmount: true,
           outstandingAmount: true,
           status: true,
@@ -566,7 +574,10 @@ export class DashboardService {
         where: scopedWhere(scope, { deletedAt: null, status: StockAdjustmentStatus.DRAFT }),
       }),
       this.prisma.stockAdjustment.count({
-        where: scopedWhere(scope, { deletedAt: null, status: StockAdjustmentStatus.PENDING_APPROVAL }),
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          status: StockAdjustmentStatus.PENDING_APPROVAL,
+        }),
       }),
       this.prisma.stockAdjustment.count({
         where: scopedWhere(scope, { deletedAt: null, status: StockAdjustmentStatus.APPROVED }),
@@ -627,7 +638,10 @@ export class DashboardService {
         where: scopedWhere(scope, { deletedAt: null, employmentStatus: EmploymentStatus.ON_LEAVE }),
       }),
       this.prisma.employee.count({
-        where: scopedWhere(scope, { deletedAt: null, employmentStatus: EmploymentStatus.SUSPENDED }),
+        where: scopedWhere(scope, {
+          deletedAt: null,
+          employmentStatus: EmploymentStatus.SUSPENDED,
+        }),
       }),
       this.prisma.purchaseRequisition.count({
         where: scopedWhere(scope, {
@@ -647,7 +661,13 @@ export class DashboardService {
       this.prisma.supplierInvoice.count({
         where: scopedWhere(scope, {
           deletedAt: null,
-          status: { in: [SupplierInvoiceStatus.RECEIVED, SupplierInvoiceStatus.MATCHED, SupplierInvoiceStatus.APPROVED] },
+          status: {
+            in: [
+              SupplierInvoiceStatus.RECEIVED,
+              SupplierInvoiceStatus.MATCHED,
+              SupplierInvoiceStatus.APPROVED,
+            ],
+          },
         }),
       }),
       this.prisma.supplierInvoice.count({
@@ -699,7 +719,9 @@ export class DashboardService {
       this.prisma.taxReturn.aggregate({
         where: scopedWhere(scope, {
           deletedAt: null,
-          status: { notIn: [TaxReturnStatus.PAID, TaxReturnStatus.CLOSED, TaxReturnStatus.CANCELLED] },
+          status: {
+            notIn: [TaxReturnStatus.PAID, TaxReturnStatus.CLOSED, TaxReturnStatus.CANCELLED],
+          },
           outstandingAmount: { gt: 0 },
         }),
         _sum: { outstandingAmount: true },
@@ -827,8 +849,7 @@ export class DashboardService {
       litresSoldToday: sum(fuelExpectedToday, 'litresSold'),
       expectedCollectionsToday: sum(fuelExpectedToday, 'expectedAmount'),
       recordedCollectionsToday: sum(fuelCollectionsToday, 'amount'),
-      varianceToday:
-        sum(fuelCollectionsToday, 'amount') - sum(fuelExpectedToday, 'expectedAmount'),
+      varianceToday: sum(fuelCollectionsToday, 'amount') - sum(fuelExpectedToday, 'expectedAmount'),
     };
 
     return {
@@ -854,6 +875,8 @@ export class DashboardService {
           title: `${r.customerName} is overdue`,
           description: `${r.receivableNumber} has TZS ${money(r.outstandingAmount)} outstanding`,
           dueDate: r.dueDate,
+          // Party linkage (Phase 2): the exception names its party so the row can open the profile.
+          party: r.customerId ? { kind: 'customer', id: r.customerId, name: r.customerName } : null,
           href: `/finance/receivables?search=${encodeURIComponent(r.receivableNumber)}`,
         })),
         ...payableExceptions.map((p) => ({
@@ -863,6 +886,7 @@ export class DashboardService {
           title: `${p.supplierName} is overdue`,
           description: `${p.payableNumber} has TZS ${money(p.outstandingAmount)} outstanding`,
           dueDate: p.dueDate,
+          party: p.supplierId ? { kind: 'supplier', id: p.supplierId, name: p.supplierName } : null,
           href: `/finance/payables?search=${encodeURIComponent(p.payableNumber)}`,
         })),
         ...negativeStockItems.map((b) => ({

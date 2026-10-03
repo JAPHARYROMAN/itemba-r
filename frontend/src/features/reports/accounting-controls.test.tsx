@@ -730,3 +730,136 @@ describe('Current accounting action review', () => {
     );
   });
 });
+
+/** Party linkage, Phase 3 PR-3: the close dialog shows the control check and asks for a reason. */
+describe('Period close party control gate', () => {
+  const check = {
+    asOf: '2026-09-30T00:00:00.000Z',
+    baseCurrency: 'TZS',
+    hasDifferences: true,
+    untagged: { ap: '0.00', ar: '0.00' },
+    differences: [
+      {
+        role: 'AP',
+        kind: 'supplier',
+        partyId: 'sup-1',
+        name: 'Mwanjalisi',
+        code: 'SUP-1',
+        control: '100.00',
+        subLedger: '80.00',
+        difference: '20.00',
+      },
+    ],
+  };
+  it('asks for a reason and closes through the acknowledged route when the sides differ', async () => {
+    state.get.mockImplementation(async (path: string) =>
+      path.endsWith('/party-check')
+        ? structuredClone(check)
+        : path.endsWith('/entries')
+          ? structuredClone(state.entries)
+          : structuredClone(state.record),
+    );
+    render(<App kind="period-close" />);
+    const label = await action('period-close', 'close');
+    expect(
+      await within(screen.getByRole('dialog')).findByRole('link', { name: 'Mwanjalisi' }),
+    ).toHaveAttribute('href', '/invoice-desk/suppliers/sup-1');
+    await ack();
+    submit(label);
+    await within(screen.getByRole('dialog')).findByText(
+      'Enter why the period closes with control differences (at least 5 characters).',
+    );
+    expect(state.post).not.toHaveBeenCalled();
+    change('Reason for closing with differences', 'Legacy lines await the backfill');
+    // Changing the input always needs a fresh acknowledgement (useAccountingReview).
+    await ack();
+    submit(label);
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith('/period-close/record/close-acknowledged', {
+        reason: 'Legacy lines await the backfill',
+      }),
+    );
+  });
+  it('closes plainly when the sides agree and shows the recorded balances once closed', async () => {
+    state.get.mockImplementation(async (path: string) =>
+      path.endsWith('/party-check')
+        ? { ...structuredClone(check), hasDifferences: false, differences: [] }
+        : path.endsWith('/party-snapshots')
+          ? {
+              snapshotAt: '2026-10-01T10:00:00.000Z',
+              closes: 1,
+              currency: 'TZS',
+              differences: 0,
+              rows: [
+                {
+                  id: 'a',
+                  role: 'AP',
+                  partyType: 'SUPPLIER',
+                  kind: 'supplier',
+                  partyId: 'sup-1',
+                  partyName: 'Mwanjalisi',
+                  currency: 'TZS',
+                  subLedger: '80.00',
+                  control: '80.00',
+                  difference: '0.00',
+                },
+              ],
+            }
+          : path.endsWith('/entries')
+            ? structuredClone(state.entries)
+            : structuredClone(state.record),
+    );
+    render(<App kind="period-close" />);
+    const label = await action('period-close', 'close');
+    await within(screen.getByRole('dialog')).findByText(
+      'Control accounts agree with the sub-ledger as of 2026-09-30.',
+    );
+    expect(
+      within(screen.getByRole('dialog')).queryByLabelText(/Reason for closing with differences/),
+    ).not.toBeInTheDocument();
+    await ack();
+    submit(label);
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith('/period-close/record/close', undefined),
+    );
+  });
+  it('shows the recorded party balances on a closed record', async () => {
+    state.record.status = 'CLOSED';
+    state.get.mockImplementation(async (path: string) =>
+      path.endsWith('/party-snapshots')
+        ? {
+            snapshotAt: '2026-10-01T10:00:00.000Z',
+            closes: 1,
+            currency: 'TZS',
+            differences: 0,
+            rows: [
+              {
+                id: 'a',
+                role: 'AP',
+                partyType: 'SUPPLIER',
+                kind: 'supplier',
+                partyId: 'sup-1',
+                partyName: 'Mwanjalisi',
+                currency: 'TZS',
+                subLedger: '80.00',
+                control: '80.00',
+                difference: '0.00',
+              },
+            ],
+          }
+        : path.endsWith('/entries')
+          ? structuredClone(state.entries)
+          : structuredClone(state.record),
+    );
+    render(<App kind="period-close" />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: `Review ${state.record.closeNumber}` }),
+    );
+    expect(await screen.findByText('Party balances at close')).toBeInTheDocument();
+    expect(screen.getAllByTestId('party-snapshot-row')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Mwanjalisi' })).toHaveAttribute(
+      'href',
+      '/invoice-desk/suppliers/sup-1',
+    );
+  });
+});

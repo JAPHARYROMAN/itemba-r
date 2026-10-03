@@ -1,6 +1,6 @@
 # Records
 
-Records brings the existing Records Book and independent notebook into one desktop app. Daily sales, receipt breakdowns, money out, categories, reports and trash use the original Records Book tables and permissions. Notebook debtors, creditors, sales, purchases, expenses and notes retain their independent entries, settlements and history. Neither register creates ERP customers, suppliers, stock movements, cash movements or journals.
+Records brings the existing Records Book and independent notebook into one desktop app. Daily sales, receipt breakdowns, money out, categories, reports and trash use the original Records Book tables and permissions. Notebook debtors, creditors, sales, purchases, expenses and notes retain their independent entries, settlements and history. Neither register creates ERP customers, suppliers, stock movements, cash movements or journals. Since party linkage phase 1 (2 October 2026) a debtor record may carry the shared customer’s identity and a creditor record the shared supplier’s (`customerId` / `supplierId`), set only through the Unmatched parties queue and recorded in the record’s own history; this is identity only, so settlements still write nothing to Cash Desk, receivables, payables or journals, and `npm run test:records` continues to assert zero ERP writes.
 
 ## Records Book unification — 26 September 2026
 
@@ -52,6 +52,13 @@ Use **Receive payment** for a debtor and **Pay creditor** for a creditor. Enter 
 Migration `20260925160000_record_statements` adds `record_postings` and `statementStartsOn`. New debt creation, payments, reversals, amount corrections and voids append immutable movements within the same transaction/version lock as the balance and audit event. A reversal remains visible on its reversal date. Amount corrections appear as today's adjustment; debt dates are fixed. Payment dates cannot precede the latest statement movement, avoiding historical overpayments. Idempotent settlement retries never append a second movement.
 
 Existing debt records receive an explicitly labelled opening-balance snapshot at migration. Earlier mutable history cannot establish trustworthy historical debt amounts, so statements cannot predate this cutover. The existing payment and activity history is preserved. Previously fully paid or voided records start at zero. New records retain complete statement history from creation.
+
+## Party linkage phase 2 — 3 October 2026
+
+- A debtor or sale may be linked to a shared customer and a creditor, purchase or expense to a shared supplier at entry, through a directory picker in the editor (shown only to readers with `customers.view` / `suppliers.view`). The rules are in `records.domain.ts`: one party, matching the register, never on a note. The typed name stays the display snapshot and defaults to the party's name when blank. Identity only: no settlement or amount changes, and `npm run test:records` still asserts zero ERP writes.
+- `GET /records?supplierId=|customerId=` lists one party's records; the notebook reads the same parameters from the URL and shows a "Show all" chip. Register rows link a linked counterparty to its profile.
+- `GET /records/party-statement?supplierId=|customerId=&currency=&from=&to=` combines every debtor record of a customer or creditor record of a supplier into one statement in one currency (the response lists the currencies present), in posting order with each record's title on its line, using the single-record debit / credit rules. `GET /records/party-statement/export?format=pdf|csv` exports it under `records.view` + `records.export` with the same CSV and letterhead PDF renderer and the independent-of-the-ledger basis. Both party profiles offer it from their NoteBook section.
+- Migration `20261003100000_records_party_permissions` grants `records.view` to every role that holds `record_book.view` (D6). Reading only; `records.manage` and `records.export` stay explicit grants.
 
 ## Verification commands
 

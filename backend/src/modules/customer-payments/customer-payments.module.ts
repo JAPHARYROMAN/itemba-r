@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { CashBookModule } from '../cash-book/cash-book.module';
 import { CustomerPaymentsController } from './customer-payments.controller';
 import { CustomerPaymentsService } from './customer-payments.service';
 import { CompanyScopeService } from '../../common/services';
@@ -12,7 +13,7 @@ import { CompanyScopeService } from '../../common/services';
  * refunds).
  */
 @Module({
-  imports: [PrismaModule, AuditLogsModule],
+  imports: [PrismaModule, AuditLogsModule, CashBookModule],
   controllers: [CustomerPaymentsController],
   providers: [CustomerPaymentsService, CompanyScopeService],
   exports: [CustomerPaymentsService],

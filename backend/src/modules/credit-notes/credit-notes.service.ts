@@ -6,10 +6,15 @@ import {
 } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { ProfitService } from '../profit/profit.service';
@@ -419,6 +424,7 @@ export class CreditNotesService {
           : []),
         {
           accountId: accounts.AR_CONTROL.id,
+          ...partyOf('customer', existing.customerId),
           description: `Accounts receivable credit: ${existing.customerName}`,
           debit: ZERO,
           credit: totalAmount,
@@ -1046,6 +1052,7 @@ export class CreditNotesService {
     // magnitude and vice-versa, at the STORED amounts (no recompute).
     const reversedLines = restockJe.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
       credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
       description: `Reversal: ${line.description ?? ''}`.trim(),
@@ -1237,20 +1244,8 @@ export class CreditNotesService {
     companyId: string,
     customerId?: string | null,
   ) {
-    if (!customerId) return;
-    const summary = await tx.receivable.aggregate({
-      where: {
-        companyId,
-        customerId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as never },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.customer.updateMany({
-      where: { id: customerId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'customer', companyId, customerId);
   }
 
   /**
@@ -1296,6 +1291,7 @@ export class CreditNotesService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
       credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
       description: `Reversal: ${line.description ?? ''}`.trim(),

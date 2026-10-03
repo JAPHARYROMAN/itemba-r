@@ -14,6 +14,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateExternalPaymentDto } from './dto/create-external-payment.dto';
 import { QueryExternalPaymentDto } from './dto/query-external-payment.dto';
@@ -27,7 +28,11 @@ import {
   AccountResolverService,
   AccountRole,
 } from '../../common/services/account-resolver.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 
 /**
  * Receivable statuses that still carry an outstanding balance and therefore can
@@ -522,6 +527,9 @@ export class ExternalPaymentsService {
       debit: Prisma.Decimal;
       credit: Prisma.Decimal;
       description: string;
+      partyType?: 'NONE' | 'SUPPLIER' | 'CUSTOMER';
+      supplierId?: string | null;
+      customerId?: string | null;
     }> = [
       {
         accountId: cashAcct.id,
@@ -534,6 +542,7 @@ export class ExternalPaymentsService {
     if (appliedToAr.gt(0)) {
       lines.push({
         accountId: arAcct.id,
+        ...partyOf('customer', relief?.customerId),
         debit: new Prisma.Decimal(0),
         credit: appliedToAr,
         description: `Settle receivable: ${customerLabel}`,
@@ -563,6 +572,7 @@ export class ExternalPaymentsService {
       } else {
         lines.push({
           accountId: arAcct.id,
+          ...partyOf('customer', relief?.customerId),
           debit: new Prisma.Decimal(0),
           credit: advanceAmount,
           description:
@@ -687,6 +697,7 @@ export class ExternalPaymentsService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
       credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
       description: `Reversal: ${line.description ?? ''}`.trim(),
@@ -1086,21 +1097,9 @@ export class ExternalPaymentsService {
     tx: Prisma.TransactionClient,
     companyId: string,
     customerId?: string | null,
-  ): Promise<void> {
-    if (!customerId) return;
-    const summary = await tx.receivable.aggregate({
-      where: {
-        companyId,
-        customerId,
-        deletedAt: null,
-        status: { in: OPEN_RECEIVABLE_STATUSES as unknown as string[] } as any,
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.customer.updateMany({
-      where: { id: customerId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+  ) {
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'customer', companyId, customerId);
   }
 
   /**

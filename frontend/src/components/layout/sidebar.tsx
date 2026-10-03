@@ -391,6 +391,12 @@ export const NAV: NavItem[] = [
         permission: 'customer-payments.view',
       },
       {
+        href: '/finance/unmatched-parties',
+        label: 'Unmatched Parties',
+        iconKey: 'scale',
+        permission: 'party_links.view',
+      },
+      {
         href: '/finance/credit-notes',
         label: 'Credit Notes',
         iconKey: 'fileText',

@@ -32,4 +32,6 @@ export { EphemeralSecretFingerprintRegistry } from './ephemeral-secret-fingerpri
 export type { EphemeralSecretRedaction } from './ephemeral-secret-fingerprint-registry.service';
 export { PersistenceSecretGuard } from './persistence-secret-guard.service';
 export type { SanitizedValue } from './persistence-secret-guard.service';
+export { PartyExistsService } from './party-exists.service';
+export type { PartyKind } from './party-exists.service';
 export { PersistenceSafeLoggerService } from './persistence-safe-logger.service';

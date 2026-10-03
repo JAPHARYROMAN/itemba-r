@@ -116,6 +116,7 @@ function makeService(
   ];
 
   const tx: any = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $queryRaw: jest.fn(async (_strings: any, id: string) => {
       const row = receivablesById[id];
       return row ? [row] : [];
@@ -610,6 +611,53 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
     expect(tx.journalEntry.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'REVERSED' }) }),
     );
+  });
+
+  it('keeps the customer on the reversing AR line (party linkage, Phase 3)', async () => {
+    const { service, postLines } = makeService({
+      paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
+      receivablesById: {
+        'rec-1': receivable({
+          id: 'rec-1',
+          outstandingAmount: new Prisma.Decimal(0),
+          paidAmount: new Prisma.Decimal(150),
+          status: 'PAID',
+        }),
+      },
+      originalJournalLines: [
+        {
+          accountId: 'acc-cash',
+          debit: new Prisma.Decimal(150),
+          credit: new Prisma.Decimal(0),
+          description: 'Payment received',
+          divisionId: null,
+          branchId: null,
+          partyType: 'NONE',
+          supplierId: null,
+          customerId: null,
+        },
+        {
+          accountId: 'acc-ar',
+          debit: new Prisma.Decimal(0),
+          credit: new Prisma.Decimal(150),
+          description: 'Settle receivables',
+          divisionId: null,
+          branchId: null,
+          partyType: 'CUSTOMER',
+          supplierId: null,
+          customerId: 'cust-1',
+        },
+      ],
+    });
+
+    await service.reverse('pay-1', { reason: 'bounced cheque' } as any, user);
+
+    const posting = postLines.mock.calls[0][0];
+    const cashLine = posting.lines.find((l: any) => l.accountId === 'acc-cash');
+    const arLine = posting.lines.find((l: any) => l.accountId === 'acc-ar');
+    expect(arLine).toMatchObject({ partyType: 'CUSTOMER', customerId: 'cust-1' });
+    expect(cashLine.partyType).toBeUndefined();
+    expect(cashLine.customerId).toBeUndefined();
   });
 
   it('does NOT resurrect the balance of a WRITTEN_OFF receivable', async () => {

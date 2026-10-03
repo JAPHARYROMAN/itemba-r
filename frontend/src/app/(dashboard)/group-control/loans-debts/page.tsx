@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
-import { Btn, EmptyState, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, PermissionDeniedState, showToast, StatusBadge } from '@/components/ui';
+import { Btn, EmptyState, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, PermissionDeniedState, showToast, StatusBadge, SupplierPicker } from '@/components/ui';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
 import '@/components/workspace/workspace.css';
@@ -25,6 +25,7 @@ interface Loan {
   notes?: string;
   purpose?: string;
   lenderType?: string;
+  supplierId?: string | null;
   lenderContact?: string;
   disbursementDate?: string;
   repaymentAmount?: string;
@@ -48,6 +49,7 @@ interface Loan {
 interface Debt {
   id: string;
   creditorName: string;
+  supplierId?: string | null;
   description: string;
   invoiceNumber?: string | null;
   amount: string;
@@ -155,9 +157,12 @@ function LoanModal({
   companies,
   onClose,
   onSaved,
+  canLinkSupplier = false,
 }: {
   mode: 'create' | 'edit';
   initial?: Loan;
+  /** Party linkage (Phase 2): whether the reader may pick a supplier profile for the lender. */
+  canLinkSupplier?: boolean;
   companies: Company[];
   onClose: () => void;
   onSaved: () => void;
@@ -165,6 +170,7 @@ function LoanModal({
   const [form, setForm] = useState({
     lenderName: initial?.lenderName ?? '',
     lenderType: initial?.lenderType ?? '',
+    supplierId: initial?.supplierId ?? '',
     lenderContact: initial?.lenderContact ?? '',
     loanReference: initial?.loanReference ?? '',
     obligationType: initial?.obligationType ?? 'BANK_LOAN',
@@ -236,6 +242,7 @@ function LoanModal({
     try {
       const body: Record<string, unknown> = {
         lenderName: form.lenderName.trim(),
+        supplierId: form.supplierId || null,
         obligationType: form.obligationType,
         borrowerLevel: form.borrowerLevel,
         currency: form.currency,
@@ -368,6 +375,23 @@ function LoanModal({
           value={form.lenderType}
           onChange={(e) => setField('lenderType', e.target.value)}
         />
+        {canLinkSupplier && (
+          <SupplierPicker
+            label="Supplier profile (supplier credit)"
+            value={form.supplierId}
+            onChange={(supplierId, party) =>
+              setForm((f) => ({
+                ...f,
+                supplierId,
+                lenderName: party && !f.lenderName.trim() ? party.name : f.lenderName,
+                lenderType: party && !f.lenderType ? 'Supplier' : f.lenderType,
+              }))
+            }
+            companyId={form.companyId || undefined}
+            placeholder={form.companyId ? 'Link to a supplier profile' : 'Pick a company first'}
+            disabled={!form.companyId}
+          />
+        )}
         <FormInput
           label="Lender Contact"
           value={form.lenderContact}
@@ -580,9 +604,12 @@ function DebtModal({
   companies,
   onClose,
   onSaved,
+  canLinkSupplier = false,
 }: {
   mode: 'create' | 'edit';
   initial?: Debt;
+  /** Party linkage (Phase 2): whether the reader may pick a supplier profile for the creditor. */
+  canLinkSupplier?: boolean;
   companies: Company[];
   onClose: () => void;
   onSaved: () => void;
@@ -590,6 +617,7 @@ function DebtModal({
   const [form, setForm] = useState({
     companyId: (initial as any)?.companyId ?? '',
     creditorName: initial?.creditorName ?? '',
+    supplierId: initial?.supplierId ?? '',
     creditorContact: '',
     description: initial?.description ?? '',
     invoiceNumber: initial?.invoiceNumber ?? '',
@@ -627,6 +655,7 @@ function DebtModal({
     try {
       const body: Record<string, unknown> = {
         creditorName: form.creditorName.trim(),
+        supplierId: form.supplierId || null,
         description: form.description.trim(),
         currency: form.currency,
         status: form.status,
@@ -725,6 +754,22 @@ function DebtModal({
           value={form.creditorName}
           onChange={(e) => setField('creditorName', e.target.value)}
         />
+        {canLinkSupplier && (
+          <SupplierPicker
+            label="Supplier profile"
+            value={form.supplierId}
+            onChange={(supplierId, party) =>
+              setForm((f) => ({
+                ...f,
+                supplierId,
+                creditorName: party && !f.creditorName.trim() ? party.name : f.creditorName,
+              }))
+            }
+            companyId={form.companyId || undefined}
+            placeholder={form.companyId ? 'Link to a supplier profile' : 'Pick a company first'}
+            disabled={!form.companyId}
+          />
+        )}
         <FormInput
           label="Creditor Contact"
           value={form.creditorContact}
@@ -1401,6 +1446,7 @@ export default function LoansDebtsPage() {
       {creatingLoan && (
         <LoanModal
           mode="create"
+          canLinkSupplier={hasPermission('suppliers.view')}
           companies={companies.rows}
           onClose={() => setCreatingLoan(false)}
           onSaved={() => {
@@ -1412,6 +1458,7 @@ export default function LoansDebtsPage() {
       {editingLoan && (
         <LoanModal
           mode="edit"
+          canLinkSupplier={hasPermission('suppliers.view')}
           initial={editingLoan}
           companies={companies.rows}
           onClose={() => setEditingLoan(null)}
@@ -1438,6 +1485,7 @@ export default function LoansDebtsPage() {
       {creatingDebt && (
         <DebtModal
           mode="create"
+          canLinkSupplier={hasPermission('suppliers.view')}
           companies={companies.rows}
           onClose={() => setCreatingDebt(false)}
           onSaved={() => {
@@ -1449,6 +1497,7 @@ export default function LoansDebtsPage() {
       {editingDebt && (
         <DebtModal
           mode="edit"
+          canLinkSupplier={hasPermission('suppliers.view')}
           initial={editingDebt}
           companies={companies.rows}
           onClose={() => setEditingDebt(null)}

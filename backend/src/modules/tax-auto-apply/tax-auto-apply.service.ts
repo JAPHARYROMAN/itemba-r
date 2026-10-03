@@ -53,6 +53,29 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
  *      prefer company-scoped over the global one.
  *   3. If no default exists, skip the line and log once.
  */
+/** Party linkage (Phase 3): the party columns a tax row snapshots from its source. */
+interface TaxParty {
+  partyType: 'NONE' | 'SUPPLIER' | 'CUSTOMER';
+  supplierId: string | null;
+  customerId: string | null;
+  partyTin: string | null;
+  partyVrn: string | null;
+}
+function taxParty(
+  kind: 'supplier' | 'customer',
+  id: string | null | undefined,
+  master: { tin?: string | null; vrn?: string | null } | null | undefined,
+): TaxParty {
+  if (!id) return { partyType: 'NONE', supplierId: null, customerId: null, partyTin: null, partyVrn: null };
+  return {
+    partyType: kind === 'supplier' ? 'SUPPLIER' : 'CUSTOMER',
+    supplierId: kind === 'supplier' ? id : null,
+    customerId: kind === 'customer' ? id : null,
+    partyTin: master?.tin ?? null,
+    partyVrn: master?.vrn ?? null,
+  };
+}
+
 @Injectable()
 export class TaxAutoApplyService {
   private readonly logger = new Logger(TaxAutoApplyService.name);
@@ -227,6 +250,8 @@ export class TaxAutoApplyService {
       transactionDate?: Date;
       currency?: string | null;
       lines: Array<{ id: string; taxAmount: any; lineTotal: any }>;
+      /** Party linkage (Phase 3): the party behind the source, snapshotted onto each row. */
+      party: TaxParty;
     } | null = null;
     try {
       if (input.sourceType === 'SALES_ORDER') {
@@ -237,13 +262,20 @@ export class TaxAutoApplyService {
             divisionId: true,
             branchId: true,
             orderDate: true,
+            customerId: true,
+            customer: { select: { tin: true, vrn: true } },
             lines: { select: { id: true, taxAmount: true, lineTotal: true } },
           },
         });
         if (!o) throw new NotFoundException(`SalesOrder ${input.sourceId} not found`);
         // Orders carry no explicit currency column here — keep the historical
         // TZS labelling for SO/PO ledger rows.
-        order = { ...o, transactionDate: o.orderDate, currency: 'TZS' };
+        order = {
+          ...o,
+          transactionDate: o.orderDate,
+          currency: 'TZS',
+          party: taxParty('customer', o.customerId, o.customer),
+        };
       } else if (input.sourceType === 'PURCHASE_ORDER') {
         const o = await client.purchaseOrder.findUnique({
           where: { id: input.sourceId },
@@ -252,11 +284,18 @@ export class TaxAutoApplyService {
             divisionId: true,
             branchId: true,
             orderDate: true,
+            supplierId: true,
+            supplier: { select: { tin: true, vrn: true } },
             lines: { select: { id: true, taxAmount: true, lineTotal: true } },
           },
         });
         if (!o) throw new NotFoundException(`PurchaseOrder ${input.sourceId} not found`);
-        order = { ...o, transactionDate: o.orderDate, currency: 'TZS' };
+        order = {
+          ...o,
+          transactionDate: o.orderDate,
+          currency: 'TZS',
+          party: taxParty('supplier', o.supplierId, o.supplier),
+        };
       } else {
         // EXPENSE: no lines — synthesize ONE line from the expense header so
         // the shared per-line pass (zero-tax skip, idempotency key, booking)
@@ -273,6 +312,8 @@ export class TaxAutoApplyService {
             currency: true,
             isTaxable: true,
             taxAmount: true,
+            supplierId: true,
+            supplier: { select: { tin: true, vrn: true } },
           },
         });
         if (!e) throw new NotFoundException(`Expense ${input.sourceId} not found`);
@@ -280,6 +321,7 @@ export class TaxAutoApplyService {
           companyId: e.companyId,
           divisionId: e.divisionId,
           branchId: e.branchId,
+          party: taxParty('supplier', e.supplierId, e.supplier),
           transactionDate: e.expenseDate,
           // Expenses are explicitly multi-currency (TZS/USD/EUR/...): the
           // compliance row must carry the expense's own currency, or a USD
@@ -463,6 +505,7 @@ export class TaxAutoApplyService {
               status: 'DRAFT',
               createdById: input.userId,
               notes: `Auto-captured from line ${line.id}`,
+              ...order.party,
             },
           ],
           skipDuplicates: true,

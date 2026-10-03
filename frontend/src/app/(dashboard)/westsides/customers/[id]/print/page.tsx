@@ -194,7 +194,7 @@ export default function CustomerPrintPage() {
       ]}
       actions={
         <DocumentActions
-          backHref={`/westsides/customers/${customer.id}`}
+          backHref={`/sales-desk/customers/${encodeURIComponent(customer.id)}`}
           backLabel="Back to Profile"
           label="Customer document preview"
           entityType="CUSTOMER_PROFILE"

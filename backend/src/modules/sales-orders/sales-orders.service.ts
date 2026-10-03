@@ -8,10 +8,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  liveCustomerExposure,
+  refreshCachedPartyBalance,
+} from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
   AccountResolverService,
@@ -2051,7 +2059,10 @@ export class SalesOrdersService {
     const creditLimit = Number(customer.creditLimit ?? 0);
     if (creditLimit <= 0) return;
 
-    const projectedBalance = Number(customer.currentBalance ?? 0) + input.totalAmount;
+    // Party linkage (W5): live exposure (open receivables plus unpromoted Sales Desk sales)
+    // instead of the cached balance alone, so desk credit counts against the limit.
+    const exposure = await liveCustomerExposure(tx, input.companyId, input.customerId);
+    const projectedBalance = exposure + input.totalAmount;
     if (projectedBalance > creditLimit) {
       throw new BadRequestException(
         `Credit sale exceeds ${customer.name}'s credit limit. Limit: ${creditLimit.toFixed(
@@ -2466,6 +2477,8 @@ export class SalesOrdersService {
       orderDate: Date;
       totalAmount: Prisma.Decimal | number | string;
       taxAmount: Prisma.Decimal | number | string;
+      /** Party linkage (Phase 3): the AR control line names the customer. */
+      customerId?: string | null;
     };
     paymentMethod: SalesPaymentMethod | string;
     payments?: Array<{ role: AccountRole; amount: number }>;
@@ -2512,6 +2525,7 @@ export class SalesOrdersService {
               ? [
                   {
                     accountId: accounts.AR_CONTROL.id,
+                    ...partyOf('customer', input.order.customerId),
                     description: 'Customer balance',
                     debit: input.outstandingAmount!,
                     credit: 0,
@@ -2522,6 +2536,7 @@ export class SalesOrdersService {
         : [
             {
               accountId: accounts[receivableOrCashRole].id,
+              ...(input.paymentMethod === SalesPaymentMethod.CREDIT ? partyOf('customer', input.order.customerId) : {}),
               description:
                 input.paymentMethod === SalesPaymentMethod.CREDIT
                   ? 'Customer receivable'
@@ -2641,6 +2656,7 @@ export class SalesOrdersService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       // Swap each side: a debit becomes a credit of the same magnitude and
       // vice-versa. A zero stays zero.
       debit: roundMoney(Number(line.credit ?? 0)),
@@ -3070,19 +3086,7 @@ export class SalesOrdersService {
     companyId: string,
     customerId?: string | null,
   ) {
-    if (!customerId) return;
-    const summary = await tx.receivable.aggregate({
-      where: {
-        companyId,
-        customerId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.customer.updateMany({
-      where: { id: customerId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'customer', companyId, customerId);
   }
 }

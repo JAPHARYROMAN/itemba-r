@@ -4,10 +4,18 @@ import { FinancialReportsController } from './financial-reports.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CompanyScopeService } from '../../common/services';
 
+import { PartyBalanceModule } from '../party-balance/party-balance.module';
+import { AccountResolverService } from '../../common/services/account-resolver.service';
+import { PartyCloseCheckService } from './party-close-check.service';
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, PartyBalanceModule],
   controllers: [FinancialReportsController],
-  providers: [FinancialReportsService, CompanyScopeService],
-  exports: [FinancialReportsService],
+  providers: [
+    FinancialReportsService,
+    CompanyScopeService,
+    AccountResolverService,
+    PartyCloseCheckService,
+  ],
+  exports: [FinancialReportsService, PartyCloseCheckService],
 })
 export class FinancialReportsModule {}

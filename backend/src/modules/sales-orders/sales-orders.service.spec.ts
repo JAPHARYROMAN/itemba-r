@@ -46,6 +46,7 @@ function persistedOrder(overrides: Record<string, unknown> = {}) {
 
 function makeService() {
   const prisma = {
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     salesOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'so-1', ...data })),

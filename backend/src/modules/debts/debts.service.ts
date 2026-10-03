@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -14,6 +15,7 @@ export class DebtsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   /**
@@ -110,10 +112,13 @@ export class DebtsService {
       throw new BadRequestException('amountPaid cannot exceed amount');
     }
     const status = this.deriveStatus(amount, amountPaid, dto.status);
+    // Party linkage (Phase 2): a linked supplier must exist in the debt's company.
+    if (dto.supplierId) await this.parties?.assertSupplier(dto.companyId, dto.supplierId);
     const record = await this.prisma.debt.create({
       data: {
         companyId: dto.companyId,
         creditorName: dto.creditorName,
+        supplierId: dto.supplierId || null,
         creditorContact: dto.creditorContact,
         amount,
         amountPaid,
@@ -146,7 +151,9 @@ export class DebtsService {
     // Validate the resulting amount / amountPaid server-side so a client cannot
     // set amountPaid above the debt amount (or negative).
     const nextAmount =
-      dto.amount !== undefined ? new Prisma.Decimal(dto.amount) : new Prisma.Decimal(existing.amount);
+      dto.amount !== undefined
+        ? new Prisma.Decimal(dto.amount)
+        : new Prisma.Decimal(existing.amount);
     const nextAmountPaid =
       dto.amountPaid !== undefined
         ? dto.amountPaid
@@ -173,10 +180,12 @@ export class DebtsService {
         ? this.deriveStatus(nextAmount, nextAmountPaid, dto.status ?? existing.status)
         : undefined;
 
+    if (dto.supplierId) await this.parties?.assertSupplier(existing.companyId, dto.supplierId);
     const record = await this.prisma.debt.update({
       where: { id },
       data: {
         ...(dto.creditorName && { creditorName: dto.creditorName }),
+        ...(dto.supplierId !== undefined && { supplierId: dto.supplierId || null }),
         ...(dto.creditorContact !== undefined && { creditorContact: dto.creditorContact }),
         ...(dto.amount && { amount: new Prisma.Decimal(dto.amount) }),
         ...(dto.amountPaid !== undefined && {

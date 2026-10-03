@@ -37,6 +37,8 @@ export class CreateLoanDto {
   @IsNotEmpty() @IsString() lenderName!: string;
   @IsOptional() @IsString() lenderType?: string;
   @IsOptional() @IsString() lenderContact?: string;
+  /** Party linkage (Phase 2): the supplier profile when the lender is a supplier (supplier credit). */
+  @IsOptional() @IsString() supplierId?: string;
   @IsNotEmpty()
   @IsNumberString()
   @Matches(/^\d+(\.\d+)?$/, { message: 'principalAmount must be a non-negative number' })

@@ -61,6 +61,9 @@ export type Entry = {
   kind: RecordKind;
   title: string;
   counterparty: string | null;
+  /** Party linkage (Phase 2, D2): identity only; the NoteBook's money stays its own. */
+  supplierId?: string | null;
+  customerId?: string | null;
   contact: string | null;
   reference: string | null;
   category: string | null;

@@ -8,9 +8,16 @@ import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { useAuth } from '@/hooks/use-auth';
 import { RecordSalesOrderPaymentModal } from '@/app/(dashboard)/operations/_components/record-sales-order-payment-modal';
 import { money, dateLabel, type Scope } from './types';
+import { PartyCard } from '@/features/party/party-card';
 
 type OutstandingSale = {
   id: string;
+  /** Party linkage (Phase 2): a receivable (default), a Sales Desk sale or a NoteBook debtor. */
+  source?: 'RECEIVABLE' | 'SALES_DESK' | 'NOTEBOOK';
+  customerId?: string | null;
+  deskSaleId?: string | null;
+  recordId?: string | null;
+  saleNumber?: string | null;
   companyId: string;
   divisionId: string | null;
   branchId: string | null;
@@ -35,6 +42,8 @@ export type SalesConnection = {
     balance: string | null;
     outstanding: string;
     received: string | null;
+    /** NoteBook debtors linked to a customer; informal, never part of `outstanding`. */
+    notebook?: string | null;
   }[];
   accounts: {
     id: string;
@@ -63,6 +72,8 @@ export type SalesConnection = {
   };
 };
 
+const sourceLabels = { RECEIVABLE: 'Receivable', SALES_DESK: 'Sales Desk', NOTEBOOK: 'NoteBook' };
+
 export function CashSalesConnection({
   scope,
   date,
@@ -85,6 +96,7 @@ export function CashSalesConnection({
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [paying, setPaying] = useState<OutstandingSale | null>(null);
+  const [peek, setPeek] = useState<string | null>(null);
   const query = Object.fromEntries(Object.entries(scope).filter(([, value]) => value));
   const data = useWorkspaceResource<SalesConnection>(
     '/cash-desk/sales-connection',
@@ -157,6 +169,12 @@ export function CashSalesConnection({
                     <dt>Customers still owe</dt>
                     <dd>{money(c.outstanding, c.currency)}</dd>
                   </div>
+                  {c.notebook != null && (
+                    <div>
+                      <dt>NoteBook debtors (informal)</dt>
+                      <dd>{money(c.notebook, c.currency)}</dd>
+                    </div>
+                  )}
                 </dl>
               </div>
             ))}
@@ -214,11 +232,32 @@ export function CashSalesConnection({
               {tab === 'outstanding' && (
                 <div className="cash-collection-list">
                   {info.outstanding.rows.map((r) => (
-                    <article key={r.id}>
+                    <article key={`${r.source ?? 'RECEIVABLE'}:${r.id}`}>
                       <div>
-                        <strong>{r.customerName}</strong>
+                        <strong>
+                          {r.customerId && hasPermission('customers.view') ? (
+                            <Link
+                              href={`/sales-desk/customers/${encodeURIComponent(r.customerId)}`}
+                            >
+                              {r.customerName}
+                            </Link>
+                          ) : (
+                            r.customerName
+                          )}
+                        </strong>
+                        {r.customerId && hasPermission('customers.view') && (
+                          <button
+                            type="button"
+                            className="cash-peek"
+                            onClick={() => setPeek(r.customerId ?? null)}
+                          >
+                            Peek
+                          </button>
+                        )}
                         <p>
-                          {r.salesOrderNumber ?? r.receivableNumber} · {r.branch?.name ?? 'Company'}
+                          {sourceLabels[r.source ?? 'RECEIVABLE']} ·{' '}
+                          {r.salesOrderNumber ?? r.saleNumber ?? r.receivableNumber} ·{' '}
+                          {r.branch?.name ?? 'Company'}
                           {r.dueDate ? ` · Due ${dateLabel(r.dueDate)}` : ''}
                         </p>
                       </div>
@@ -227,22 +266,31 @@ export function CashSalesConnection({
                         <p>{money(r.paidAmount, r.currency)} received</p>
                       </div>
                       <div className="cash-collection-actions">
-                        {r.saleId && (
+                        {(r.saleId || r.deskSaleId) && (
                           <Link
                             className="desk-text-button"
-                            href={`/sales-desk/sales/${encodeURIComponent(r.saleId)}`}
+                            href={`/sales-desk/sales/${encodeURIComponent(r.saleId ?? r.deskSaleId ?? '')}`}
                           >
                             View sale
                           </Link>
                         )}
-                        {hasPermission('receivables.manage') && (
-                          <Btn
-                            onClick={() => setPaying(r)}
-                            aria-label={`Collect payment for ${r.salesOrderNumber ?? r.receivableNumber}`}
+                        {r.recordId && (
+                          <Link
+                            className="desk-text-button"
+                            href={`/records?record=${encodeURIComponent(r.recordId)}`}
                           >
-                            Collect payment
-                          </Btn>
+                            Open NoteBook
+                          </Link>
                         )}
+                        {(r.source ?? 'RECEIVABLE') === 'RECEIVABLE' &&
+                          hasPermission('receivables.manage') && (
+                            <Btn
+                              onClick={() => setPaying(r)}
+                              aria-label={`Collect payment for ${r.salesOrderNumber ?? r.receivableNumber}`}
+                            >
+                              Collect payment
+                            </Btn>
+                          )}
                       </div>
                     </article>
                   ))}
@@ -346,6 +394,7 @@ export function CashSalesConnection({
           }}
         />
       )}
+      {peek && <PartyCard kind="customer" partyId={peek} onClose={() => setPeek(null)} />}
     </section>
   );
 }

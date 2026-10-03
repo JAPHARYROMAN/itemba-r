@@ -37,7 +37,12 @@ function makePrisma(overrides: Partial<Record<string, unknown>> = {}) {
 describe('ApprovalRequestsService readiness', () => {
   it('applies the selected company to checks, actions, attachments and status counts', async () => {
     const prisma = makePrisma();
-    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any, {} as any);
+    const service = new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      {} as any,
+      { assertParty: jest.fn() } as any,
+    );
     await service.getReadiness({ id: 'user', companyId: 'company-1' }, { companyId: 'company-1' });
     for (const model of [
       prisma.approvalWorkflow,
@@ -64,7 +69,12 @@ describe('ApprovalRequestsService readiness', () => {
 
   it('denies an inaccessible selected company before any readiness read', async () => {
     const prisma = makePrisma();
-    const service = new ApprovalRequestsService(prisma, { log: jest.fn() } as any, {} as any);
+    const service = new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      {} as any,
+      { assertParty: jest.fn() } as any,
+    );
     await expect(
       service.getReadiness({ id: 'user', companyId: 'company-1' }, { companyId: 'outside' }),
     ).rejects.toThrow('You do not have access');
@@ -79,6 +89,7 @@ describe('ApprovalRequestsService readiness', () => {
       prisma,
       { log: jest.fn() } as any,
       { assertCanAccessCompany: jest.fn() } as any,
+      { assertParty: jest.fn() } as any,
     );
 
     const readiness = await service.getReadiness(
@@ -104,6 +115,7 @@ describe('ApprovalRequestsService readiness', () => {
       prisma,
       { log: jest.fn() } as any,
       { assertCanAccessCompany: jest.fn() } as any,
+      { assertParty: jest.fn() } as any,
     );
 
     const readiness = await service.getReadiness(
@@ -115,5 +127,67 @@ describe('ApprovalRequestsService readiness', () => {
     expect(readiness.checks.find((check) => check.key === 'workflow-coverage')?.status).toBe(
       'CRITICAL',
     );
+  });
+});
+
+/** Party linkage, Phase 3 PR-5: approvals carry the party and every read includes it. */
+describe('ApprovalRequestsService party', () => {
+  const partyExists = {
+    assertParty: jest.fn(),
+    partyOfEntity: jest.fn(async () => ({
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      customerId: null,
+    })),
+  };
+  function partyService(prisma: any) {
+    return new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      { assertCanAccessCompany: jest.fn() } as any,
+      partyExists as any,
+    );
+  }
+
+  it('stores the party derived from the document on create', async () => {
+    const prisma: any = {
+      approvalRequest: { create: jest.fn(async ({ data }: any) => ({ id: 'req-1', ...data })) },
+    };
+    const service = partyService(prisma);
+    const created = await service.create(
+      { entityType: 'Payable', entityId: 'pay-1', requestTitle: 'Pay it', companyId: 'c1' } as any,
+      { id: 'u1' },
+    );
+    expect(partyExists.partyOfEntity).toHaveBeenCalledWith('Payable', 'pay-1');
+    expect(prisma.approvalRequest.create.mock.calls[0][0].data).toMatchObject({
+      entityType: 'Payable',
+      entityId: 'pay-1',
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      customerId: null,
+    });
+    expect(created).toMatchObject({ partyType: 'SUPPLIER', supplierId: 'sup-1' });
+  });
+
+  it('includes the supplier and customer on the detail read', async () => {
+    const prisma: any = {
+      approvalRequest: {
+        findFirst: jest.fn(async () => ({
+          id: 'req-1',
+          companyId: 'c1',
+          partyType: 'SUPPLIER',
+          supplierId: 'sup-1',
+          supplier: { id: 'sup-1', name: 'Mwanjalisi', supplierCode: 'SUP-1' },
+          customer: null,
+        })),
+      },
+    };
+    const service = partyService(prisma);
+    const record = await service.findOne('req-1', { id: 'u1' } as any);
+    expect(prisma.approvalRequest.findFirst.mock.calls[0][0].include).toMatchObject({
+      supplier: { select: { id: true, name: true, supplierCode: true } },
+      customer: { select: { id: true, name: true, customerCode: true } },
+    });
+    expect(record.supplier).toEqual({ id: 'sup-1', name: 'Mwanjalisi', supplierCode: 'SUP-1' });
   });
 });

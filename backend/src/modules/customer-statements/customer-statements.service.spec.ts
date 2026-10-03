@@ -432,7 +432,7 @@ describe('CustomerStatementsService.generate (persisted summary run)', () => {
       { companyId: COMPANY, periodStart: '2026-02-01', periodEnd: '2026-02-28' } as any,
       USER,
     );
-    expect(run.customerId).toBe('ALL');
+    expect(run.customerId).toBeNull();
     const where = prisma.receivable.findMany.mock.calls[0][0].where;
     expect(where.customerId).toBeUndefined();
     expect(prisma.customer.findFirst).not.toHaveBeenCalled();

@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PayablesService } from './payables.service';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
 
 const user = { id: 'user-1' } as any;
 
@@ -38,8 +39,28 @@ function makeService(
         return { ...stagedRow };
       }),
       groupBy: jest.fn().mockResolvedValue([]),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { outstandingAmount: '0' } }),
     },
-    supplier: { updateMany: jest.fn() },
+    supplier: {
+      updateMany: jest.fn(),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'supplier-1', name: 'Acme', divisionId: null, branchId: null }),
+    },
+    supplierPayment: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn(async ({ data }: any) => ({
+        id: 'spay-1',
+        paymentNumber: 'SPAY-1',
+        ...data,
+      })),
+      update: jest.fn(async ({ data }: any) => ({
+        id: 'spay-1',
+        paymentNumber: 'SPAY-1',
+        ...data,
+      })),
+    },
+    supplierInvoice: { findMany: jest.fn().mockResolvedValue([]) },
     cashAccount: {
       // Default: an active CASH_ON_HAND till in the same company and currency.
       // Individual tests override for BANK / cross-company / cross-currency
@@ -82,13 +103,23 @@ function makeService(
     log: jest.fn().mockResolvedValue(undefined),
     logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
   } as any;
+  const codes = { next: jest.fn() } as any;
+  const supplierPayments = new SupplierPaymentsService(
+    prisma,
+    auditLogs,
+    companyScope,
+    { resolve } as any,
+    postingEngine,
+    codes,
+  );
   const service = new PayablesService(
     prisma,
     auditLogs,
     companyScope,
     { resolve } as any,
     postingEngine,
-    { next: jest.fn() } as any,
+    codes,
+    supplierPayments,
   );
   // Stub findOne (used by writeOff to load the payable before the tx).
   jest
@@ -116,6 +147,26 @@ describe('PayablesService.recordPayment status guard', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.payable.update).not.toHaveBeenCalled();
     expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+});
+
+describe('PayablesService.recordPayment party linkage (W2)', () => {
+  it('settles a linked payable through a SupplierPayment with a SupplierPayment-referenced journal', async () => {
+    const { service, tx, postingEngine } = makeService(lockedPayable());
+    await service.recordPayment('pay-1', { amount: 100 } as any, user);
+    expect(tx.supplierPayment.create).toHaveBeenCalledTimes(1);
+    expect(postingEngine.postLines.mock.calls[0][0].referenceType).toBe('SupplierPayment');
+  });
+  it('settles an unlinked payable directly (legacy path) with a Payable-referenced journal and no payment row', async () => {
+    const { service, tx, postingEngine } = makeService(lockedPayable({ supplierId: null }));
+    await service.recordPayment('pay-1', { amount: 100 } as any, user);
+    expect(tx.supplierPayment.create).not.toHaveBeenCalled();
+    const [postingInput] = postingEngine.postLines.mock.calls[0];
+    expect(postingInput.referenceType).toBe('Payable');
+    expect(postingInput.referenceId).toBe('pay-1');
+    expect(tx.payable.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'PARTIALLY_PAID' }) }),
+    );
   });
 });
 
@@ -369,12 +420,13 @@ describe('PayablesService.update supplier balance projection', () => {
 
     await service.update('pay-1', { notes: 'Updated note' } as any, user);
 
-    expect(tx.payable.groupBy).not.toHaveBeenCalled();
+    expect(tx.payable.aggregate).not.toHaveBeenCalled();
     expect(tx.supplier.updateMany).not.toHaveBeenCalled();
   });
 
   it('refreshes the old and new supplier exactly once when reassigned', async () => {
-    const existing = lockedPayable();
+    // Party linkage (Phase 3): only an unposted, unpaid payable may be re-pointed.
+    const existing = lockedPayable({ journalEntryId: null, paidAmount: '0' });
     const { service, tx } = makeService(existing);
     jest.spyOn(service as any, 'resolvePayableScope').mockResolvedValue({
       divisionId: null,
@@ -389,12 +441,20 @@ describe('PayablesService.update supplier balance projection', () => {
 
     await service.update('pay-1', { supplierId: 'supplier-2' } as any, user);
 
-    expect(tx.payable.groupBy).toHaveBeenCalledTimes(2);
+    expect(tx.payable.aggregate).toHaveBeenCalledTimes(2);
     expect(tx.supplier.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.supplier.updateMany.mock.calls.map(([args]: [any]) => args.where.id)).toEqual([
       'supplier-1',
       'supplier-2',
     ]);
+  });
+
+  it('refuses to re-point a posted or partly paid payable to another supplier (Phase 3)', async () => {
+    const { service, tx } = makeService(lockedPayable());
+    await expect(
+      service.update('pay-1', { supplierId: 'supplier-2' } as any, user),
+    ).rejects.toThrow('cannot be changed');
+    expect(tx.payable.update).not.toHaveBeenCalled();
   });
 });
 
@@ -565,14 +625,20 @@ describe('PayablesService.syncSupplierBalance mixed-currency (#22)', () => {
   it('writes only the base-currency outstanding, not a cross-currency sum', async () => {
     const { service, tx } = makeService(lockedPayable());
 
-    // Supplier has 1,000,000 TZS and 1,000 USD open. Base currency is TZS.
-    tx.payable.groupBy.mockResolvedValue([
-      { currency: 'TZS', _sum: { outstandingAmount: new Prisma.Decimal('1000000') } },
-      { currency: 'USD', _sum: { outstandingAmount: new Prisma.Decimal('1000') } },
-    ]);
+    // Supplier has 1,000,000 TZS and 1,000 USD open. Base currency is TZS. The shared
+    // writer (party-balance.helper) asks the database for the base currency only.
+    tx.payable.aggregate.mockImplementation(async ({ where }: any) => ({
+      _sum: {
+        outstandingAmount:
+          where.currency === 'TZS' ? new Prisma.Decimal('1000000') : new Prisma.Decimal('1000'),
+      },
+    }));
 
     await (service as any).syncSupplierBalance(tx, 'company-1', 'supplier-1');
 
+    expect(tx.payable.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ currency: 'TZS' }) }),
+    );
     expect(tx.supplier.updateMany).toHaveBeenCalledWith({
       where: { id: 'supplier-1', companyId: 'company-1', deletedAt: null },
       data: { currentBalance: new Prisma.Decimal('1000000') },
@@ -582,9 +648,7 @@ describe('PayablesService.syncSupplierBalance mixed-currency (#22)', () => {
   it('writes zero when no payable matches the base currency', async () => {
     const { service, tx } = makeService(lockedPayable());
     tx.companyProfile.findUnique.mockResolvedValue({ currency: 'TZS' });
-    tx.payable.groupBy.mockResolvedValue([
-      { currency: 'USD', _sum: { outstandingAmount: new Prisma.Decimal('1000') } },
-    ]);
+    tx.payable.aggregate.mockResolvedValue({ _sum: { outstandingAmount: null } });
 
     await (service as any).syncSupplierBalance(tx, 'company-1', 'supplier-1');
 

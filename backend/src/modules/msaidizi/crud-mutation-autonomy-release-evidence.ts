@@ -230,6 +230,23 @@ function journalEffect(spec: JournalSpec): CrudMutationCompoundNamedEffect {
   };
 }
 
+/** Party linkage (Phase 3): the party columns a journal line carries. */
+type JournalLineParty = {
+  partyType: CrudMutationEffectValue;
+  supplierId: CrudMutationEffectValue;
+  customerId: CrudMutationEffectValue;
+};
+const NO_PARTY: JournalLineParty = {
+  partyType: literal('NONE'),
+  supplierId: literal(null),
+  customerId: literal(null),
+};
+const supplierParty = (id: CrudMutationEffectValue): JournalLineParty => ({
+  partyType: literal('SUPPLIER'),
+  supplierId: id,
+  customerId: literal(null),
+});
+
 function journalLine(
   effectId: string,
   journalEffectId: string,
@@ -240,6 +257,7 @@ function journalLine(
   recoveryOrder: number,
   divisionId: CrudMutationEffectValue = literal(null),
   branchId: CrudMutationEffectValue = literal(null),
+  party: JournalLineParty = NO_PARTY,
 ): CrudMutationCompoundNamedEffect {
   return {
     effectId,
@@ -258,6 +276,7 @@ function journalLine(
       companyId: companyA,
       divisionId,
       branchId,
+      ...party,
     },
     generatedFields: {},
     allowedFields: ['id', 'createdAt', 'updatedAt'],
@@ -1163,6 +1182,8 @@ const definitions: readonly FixtureDefinition[] = [
           divisionId: divisionA,
           branchId: branchA,
           orderDate: literal(FIXED_DATE),
+          // Party linkage (Phase 3): no customer, so the booked tax row is partyless.
+          customerId: literal(null),
           deletedAt: literal(null),
         },
       },
@@ -1223,6 +1244,12 @@ const definitions: readonly FixtureDefinition[] = [
             postedById: userA,
             journalEntryId: literal(null),
             deletedAt: literal(null),
+            // Party linkage (Phase 3): the fixture source carries no party, so the row books NONE.
+            partyType: literal('NONE'),
+            supplierId: literal(null),
+            customerId: literal(null),
+            partyTin: literal(null),
+            partyVrn: literal(null),
           },
           generatedFields: {
             taxTransactionNumber: {
@@ -1264,6 +1291,8 @@ const definitions: readonly FixtureDefinition[] = [
           divisionId: divisionA,
           branchId: branchA,
           orderDate: literal(FIXED_DATE),
+          // Party linkage (Phase 3): no supplier, so the booked tax row is partyless.
+          supplierId: literal(null),
           deletedAt: literal(null),
         },
       },
@@ -1324,6 +1353,12 @@ const definitions: readonly FixtureDefinition[] = [
             postedById: userA,
             journalEntryId: literal(null),
             deletedAt: literal(null),
+            // Party linkage (Phase 3): the fixture source carries no party, so the row books NONE.
+            partyType: literal('NONE'),
+            supplierId: literal(null),
+            customerId: literal(null),
+            partyTin: literal(null),
+            partyVrn: literal(null),
           },
           generatedFields: {
             taxTransactionNumber: {
@@ -1374,6 +1409,8 @@ const definitions: readonly FixtureDefinition[] = [
           isTaxable: literal(true),
           taxAmount: literal(2),
           status: literal('APPROVED'),
+          // Party linkage (Phase 3): no supplier, so the booked tax row is partyless.
+          supplierId: literal(null),
           deletedAt: literal(null),
         },
       },
@@ -1423,6 +1460,12 @@ const definitions: readonly FixtureDefinition[] = [
             postedById: userA,
             journalEntryId: literal(null),
             deletedAt: literal(null),
+            // Party linkage (Phase 3): the fixture source carries no party, so the row books NONE.
+            partyType: literal('NONE'),
+            supplierId: literal(null),
+            customerId: literal(null),
+            partyTin: literal(null),
+            partyVrn: literal(null),
           },
           generatedFields: {
             // Expense idempotency keys carry the FULL source UUID
@@ -2782,6 +2825,7 @@ const definitions: readonly FixtureDefinition[] = [
           12,
           divisionA,
           branchA,
+          supplierParty(supplier),
         ),
         {
           effectId: 'payable',

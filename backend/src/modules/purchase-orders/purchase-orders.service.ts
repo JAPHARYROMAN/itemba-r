@@ -6,10 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -1705,6 +1706,7 @@ export class PurchaseOrdersService {
           },
           {
             accountId: accounts.AP_CONTROL.id,
+            ...partyOf('supplier', input.order.supplierId),
             description: `Accounts payable: ${supplierName}`,
             debit: 0,
             credit: amount,
@@ -1794,19 +1796,7 @@ export class PurchaseOrdersService {
     companyId: string,
     supplierId?: string | null,
   ) {
-    if (!supplierId) return;
-    const summary = await tx.payable.aggregate({
-      where: {
-        companyId,
-        supplierId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.supplier.updateMany({
-      where: { id: supplierId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'supplier', companyId, supplierId);
   }
 }
