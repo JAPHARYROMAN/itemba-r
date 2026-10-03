@@ -74,3 +74,46 @@ describe('PartyExistsService', () => {
     expect(prisma.supplier.findFirst).not.toHaveBeenCalled();
   });
 });
+
+/** Party linkage, Phase 3 PR-5: the party behind a polymorphic document reference. */
+describe('PartyExistsService.partyOfEntity', () => {
+  const prisma: any = {
+    payable: { findFirst: jest.fn(async () => ({ supplierId: 'sup-1' })) },
+    salesOrder: { findFirst: jest.fn(async () => ({ customerId: 'cus-1' })) },
+    expense: { findFirst: jest.fn(async () => ({ supplierId: null })) },
+    refund: { findFirst: jest.fn(async () => null) },
+  };
+  const service = new PartyExistsService(prisma);
+
+  it('reads the party from the document, whatever the spelling of the entity type', async () => {
+    await expect(service.partyOfEntity('Payable', 'pay-1')).resolves.toEqual({
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      customerId: null,
+    });
+    expect(prisma.payable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'pay-1' },
+      select: { supplierId: true },
+    });
+    await expect(service.partyOfEntity('SALES_ORDER', ' so-1 ')).resolves.toEqual({
+      partyType: 'CUSTOMER',
+      supplierId: null,
+      customerId: 'cus-1',
+    });
+    expect(prisma.salesOrder.findFirst.mock.calls[0][0].where).toEqual({ id: 'so-1' });
+    await expect(service.partyOfEntity('customer', 'cus-9')).resolves.toEqual({
+      partyType: 'CUSTOMER',
+      supplierId: null,
+      customerId: 'cus-9',
+    });
+  });
+
+  it('derives NONE for unknown types, blank ids and documents without a party, never throwing', async () => {
+    const none = { partyType: 'NONE', supplierId: null, customerId: null };
+    await expect(service.partyOfEntity('FixedAsset', 'fa-1')).resolves.toEqual(none);
+    await expect(service.partyOfEntity('Payable', '  ')).resolves.toEqual(none);
+    await expect(service.partyOfEntity(null, 'x')).resolves.toEqual(none);
+    await expect(service.partyOfEntity('Expense', 'exp-1')).resolves.toEqual(none);
+    await expect(service.partyOfEntity('Refund', 'missing')).resolves.toEqual(none);
+  });
+});

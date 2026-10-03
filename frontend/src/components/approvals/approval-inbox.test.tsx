@@ -35,6 +35,9 @@ const request: ApprovalRequest = {
   company: { id: 'company', name: 'Example Company' },
   entityType: 'SupplierInvoice',
   entityId: 'INV-42',
+  partyType: 'SUPPLIER',
+  supplierId: 'sup-1',
+  supplier: { id: 'sup-1', name: 'Mwanjalisi Station', supplierCode: 'SUP-1' },
   actionType: 'PAY',
   requestedById: 'maker',
   requestedBy: { fullName: 'Test requester' },
@@ -145,6 +148,12 @@ describe('Request register and assigned inbox', () => {
       'Verify invoice reference.',
     ])
       expect(within(detail).getAllByText(text).length).toBeGreaterThan(0);
+    // Party linkage (Phase 3): the row names the party; the inspector links to its profile.
+    expect(screen.getAllByText(/PAY-0142 · Mwanjalisi Station/).length).toBeGreaterThan(0);
+    expect(within(detail).getByRole('link', { name: 'Mwanjalisi Station' })).toHaveAttribute(
+      'href',
+      '/invoice-desk/suppliers/sup-1',
+    );
     await userEvent.click(within(detail).getByText('Recorded changes'));
     expect(within(detail).getByText(/4000000/)).toBeInTheDocument();
     capture('approval-pending');

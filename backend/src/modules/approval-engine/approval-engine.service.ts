@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 
 @Injectable()
 export class ApprovalEngineService {
@@ -9,6 +10,8 @@ export class ApprovalEngineService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogsService,
     private readonly notifications: NotificationsService,
+    // Party linkage (Phase 3): optional so the existing specs keep constructing the service.
+    private readonly partyExists?: PartyExistsService,
   ) {}
 
   async findApplicableWorkflow(entityType: string, actionType: string, companyId?: string) {
@@ -35,12 +38,19 @@ export class ApprovalEngineService {
     requestSummary?: string;
   }) {
     const approvalRequestNumber = `REQ-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    // Party linkage (Phase 3): the request remembers the party behind its document.
+    const party = this.partyExists
+      ? await this.partyExists.partyOfEntity(data.entityType, data.entityId)
+      : null;
     const request = await this.prisma.approvalRequest.create({
       data: {
         approvalRequestNumber,
         workflowId: data.workflowId,
         entityType: data.entityType,
         entityId: data.entityId,
+        ...(party
+          ? { partyType: party.partyType, supplierId: party.supplierId, customerId: party.customerId }
+          : {}),
         actionType: data.actionType as any,
         companyId: data.companyId,
         requestedById: data.requestedById,

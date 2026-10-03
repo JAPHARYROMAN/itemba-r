@@ -19,6 +19,7 @@ import {
   requestPath,
   requestStatuses,
   requestTitle,
+  requestParty,
   requestPerson,
   requestAmount,
 } from './approval-request-types';
@@ -251,6 +252,7 @@ export function ApprovalInbox({ mode = 'pending' }: { mode?: 'pending' | 'all' }
                       <strong>{requestTitle(row)}</strong>
                       <small>
                         {row.approvalRequestNumber || 'No reference'}
+                        {requestParty(row) ? ` · ${requestParty(row)?.name}` : ''}
                         {mode === 'all'
                           ? ` · ${row.status?.toLowerCase() || 'Unknown status'}`
                           : ''}

@@ -1,3 +1,5 @@
+import { openPartyIn } from '@/features/party/party-links';
+
 export type RequestAction = 'approve' | 'reject' | 'cancel';
 export interface ApprovalRequest {
   id: string;
@@ -6,6 +8,12 @@ export interface ApprovalRequest {
   requestSummary?: string | null;
   entityType?: string;
   entityId?: string;
+  // Party linkage (Phase 3): the supplier or customer behind the request.
+  partyType?: string | null;
+  supplierId?: string | null;
+  customerId?: string | null;
+  supplier?: { id: string; name: string; supplierCode?: string | null } | null;
+  customer?: { id: string; name: string; customerCode?: string | null } | null;
   actionType?: string;
   status?: string;
   companyId?: string | null;
@@ -51,6 +59,28 @@ export const requestStatuses = [
   'ESCALATED',
   'EXPIRED',
 ];
+/** Party linkage (Phase 3): the party behind the request and where it opens, or null. */
+export const requestParty = (
+  row: ApprovalRequest,
+): { kind: 'supplier' | 'customer'; id: string; name: string; href: string } | null => {
+  const supplierId = row.supplier?.id || (row.partyType === 'SUPPLIER' ? row.supplierId : null);
+  if (supplierId)
+    return {
+      kind: 'supplier',
+      id: supplierId,
+      name: row.supplier?.name || 'Supplier',
+      href: openPartyIn('profile', 'supplier', supplierId),
+    };
+  const customerId = row.customer?.id || (row.partyType === 'CUSTOMER' ? row.customerId : null);
+  if (customerId)
+    return {
+      kind: 'customer',
+      id: customerId,
+      name: row.customer?.name || 'Customer',
+      href: openPartyIn('profile', 'customer', customerId),
+    };
+  return null;
+};
 export const requestTitle = (row: ApprovalRequest) =>
   row.requestTitle || row.entityType?.replaceAll('_', ' ') || 'Approval request';
 export const requestPerson = (row: ApprovalRequest) =>

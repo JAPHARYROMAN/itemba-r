@@ -129,3 +129,65 @@ describe('ApprovalRequestsService readiness', () => {
     );
   });
 });
+
+/** Party linkage, Phase 3 PR-5: approvals carry the party and every read includes it. */
+describe('ApprovalRequestsService party', () => {
+  const partyExists = {
+    assertParty: jest.fn(),
+    partyOfEntity: jest.fn(async () => ({
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      customerId: null,
+    })),
+  };
+  function partyService(prisma: any) {
+    return new ApprovalRequestsService(
+      prisma,
+      { log: jest.fn() } as any,
+      { assertCanAccessCompany: jest.fn() } as any,
+      partyExists as any,
+    );
+  }
+
+  it('stores the party derived from the document on create', async () => {
+    const prisma: any = {
+      approvalRequest: { create: jest.fn(async ({ data }: any) => ({ id: 'req-1', ...data })) },
+    };
+    const service = partyService(prisma);
+    const created = await service.create(
+      { entityType: 'Payable', entityId: 'pay-1', requestTitle: 'Pay it', companyId: 'c1' } as any,
+      { id: 'u1' },
+    );
+    expect(partyExists.partyOfEntity).toHaveBeenCalledWith('Payable', 'pay-1');
+    expect(prisma.approvalRequest.create.mock.calls[0][0].data).toMatchObject({
+      entityType: 'Payable',
+      entityId: 'pay-1',
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      customerId: null,
+    });
+    expect(created).toMatchObject({ partyType: 'SUPPLIER', supplierId: 'sup-1' });
+  });
+
+  it('includes the supplier and customer on the detail read', async () => {
+    const prisma: any = {
+      approvalRequest: {
+        findFirst: jest.fn(async () => ({
+          id: 'req-1',
+          companyId: 'c1',
+          partyType: 'SUPPLIER',
+          supplierId: 'sup-1',
+          supplier: { id: 'sup-1', name: 'Mwanjalisi', supplierCode: 'SUP-1' },
+          customer: null,
+        })),
+      },
+    };
+    const service = partyService(prisma);
+    const record = await service.findOne('req-1', { id: 'u1' } as any);
+    expect(prisma.approvalRequest.findFirst.mock.calls[0][0].include).toMatchObject({
+      supplier: { select: { id: true, name: true, supplierCode: true } },
+      customer: { select: { id: true, name: true, customerCode: true } },
+    });
+    expect(record.supplier).toEqual({ id: 'sup-1', name: 'Mwanjalisi', supplierCode: 'SUP-1' });
+  });
+});

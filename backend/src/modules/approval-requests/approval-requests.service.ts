@@ -35,6 +35,12 @@ export interface ApprovalWorkflowReadinessCheck {
   details: Record<string, number | string>;
 }
 
+/** Party linkage (Phase 3): every read carries the party behind the request. */
+const PARTY_INCLUDE = {
+  supplier: { select: { id: true, name: true, supplierCode: true } },
+  customer: { select: { id: true, name: true, customerCode: true } },
+} as const;
+
 @Injectable()
 export class ApprovalRequestsService {
   constructor(
@@ -63,6 +69,7 @@ export class ApprovalRequestsService {
           company: { select: { id: true, name: true } },
           requestedBy: { select: { id: true, fullName: true, email: true } },
           workflow: { select: { id: true, name: true } },
+          ...PARTY_INCLUDE,
         },
       }),
       this.prisma.approvalRequest.count({ where }),
@@ -291,6 +298,7 @@ export class ApprovalRequestsService {
           orderBy: { createdAt: 'asc' },
           include: { actionBy: { select: { id: true, fullName: true, email: true } } },
         },
+        ...PARTY_INCLUDE,
       },
     });
     if (!record) throw new NotFoundException('Approval request not found');
@@ -382,6 +390,7 @@ export class ApprovalRequestsService {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
+        ...PARTY_INCLUDE,
         company: { select: { id: true, name: true } },
         requestedBy: { select: { id: true, fullName: true, email: true } },
         workflow: {
@@ -434,7 +443,7 @@ export class ApprovalRequestsService {
         skip,
         take: Number(limit),
         orderBy: { createdAt: 'desc' },
-        include: { workflow: { select: { id: true, name: true } } },
+        include: { workflow: { select: { id: true, name: true } }, ...PARTY_INCLUDE },
       }),
       this.prisma.approvalRequest.count({ where }),
     ]);
@@ -448,6 +457,8 @@ export class ApprovalRequestsService {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId ?? null, AccessLevel.WRITE);
     // An approval about a SUPPLIER / CUSTOMER must point at a live master.
     await this.partyExists.assertParty(dto.entityType, dto.entityId, dto.companyId ?? null);
+    // Party linkage (Phase 3): the request remembers the party behind its document.
+    const party = await this.partyExists.partyOfEntity(dto.entityType, dto.entityId);
     const approvalRequestNumber = `REQ-${Date.now()}`;
     // Whitelist explicit fields — never spread the raw DTO into prisma.create.
     const record = await this.prisma.approvalRequest.create({
@@ -463,6 +474,9 @@ export class ApprovalRequestsService {
         notes: dto.notes,
         status: 'DRAFT',
         requestedById: user.id,
+        partyType: party.partyType,
+        supplierId: party.supplierId,
+        customerId: party.customerId,
       },
     });
     await this.audit.log({

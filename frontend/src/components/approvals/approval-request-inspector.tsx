@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { FileText, X, ArrowLeft } from 'lucide-react';
 import { Btn, StatusBadge } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
@@ -13,6 +13,7 @@ import {
   requestAmount,
   requestDate,
   requestPerson,
+  requestParty,
 } from './approval-request-types';
 
 export function ApprovalRequestInspector({
@@ -33,8 +34,12 @@ export function ApprovalRequestInspector({
   const ready = detail.data?.id === row.id && !detail.loading && !detail.error;
   const own = user?.id === (record.requestedById || record.requestedBy?.id);
   const decisionAllowed = ready && record.status === 'PENDING' && !own;
-  const primaryFields = [
+  // Party linkage (Phase 3): the party behind the request opens its profile from here
+  // (rows are buttons, so the link lives in the inspector).
+  const party = requestParty(record);
+  const primaryFields: Array<[string, ReactNode]> = [
     ['Company', record.company?.name || record.companyId || 'Group-level'],
+    ['Party', party ? <a href={party.href}>{party.name}</a> : '—'],
     ['Amount', requestAmount(record)],
     ['Requested by', requestPerson(record)],
     ['Submitted', requestDate(record.submittedAt)],
