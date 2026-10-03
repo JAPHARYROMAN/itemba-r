@@ -5,6 +5,7 @@ import { CashBookModule } from '../cash-book/cash-book.module';
 import { SupplierPaymentsController } from './supplier-payments.controller';
 import { SupplierPaymentsService } from './supplier-payments.service';
 import { CompanyScopeService } from '../../common/services';
+import { GeneratedDocumentsModule } from '../generated-documents/generated-documents.module';
 
 /**
  * PostingEngineService, AccountResolverService (AccountingEngineModule) and
@@ -14,7 +15,7 @@ import { CompanyScopeService } from '../../common/services';
  * SupplierPayment row.
  */
 @Module({
-  imports: [PrismaModule, AuditLogsModule, CashBookModule],
+  imports: [PrismaModule, AuditLogsModule, CashBookModule, GeneratedDocumentsModule],
   controllers: [SupplierPaymentsController],
   providers: [SupplierPaymentsService, CompanyScopeService],
   exports: [SupplierPaymentsService],

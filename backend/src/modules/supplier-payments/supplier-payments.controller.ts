@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
+import { ExportRemittanceDto } from './dto/export-remittance.dto';
 import { SupplierPaymentsService } from './supplier-payments.service';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { QuerySupplierPaymentDto } from './dto/query-supplier-payment.dto';
@@ -27,6 +29,26 @@ export class SupplierPaymentsController {
   @RequirePermissions('supplier-payments.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
+  }
+
+  @Get(':id/remittance')
+  // Party linkage (Phase 3): agent-excluded until its Msaidizi evidence fixture is authored.
+  @AgentExcluded()
+  @RequirePermissions('supplier-payments.view')
+  async remittance(
+    @Param('id') id: string,
+    @Query() _q: ExportRemittanceDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const result = await this.service.remittance(id, user);
+    res.set({
+      'Content-Type': result.mimeType,
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(result.buffer);
   }
 
   @Post()

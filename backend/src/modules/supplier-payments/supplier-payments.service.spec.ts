@@ -323,3 +323,63 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
+
+/** Party linkage, Phase 3 PR-6: a payment with its allocations as a remittance advice. */
+describe('SupplierPaymentsService.remittance', () => {
+  const payment = {
+    id: 'spay-1',
+    paymentNumber: 'SPAY-2026-000001',
+    companyId: 'company-1',
+    branchId: 'branch-1',
+    paymentDate: new Date('2026-09-20T00:00:00.000Z'),
+    amount: new Prisma.Decimal('500'),
+    appliedAmount: new Prisma.Decimal('500'),
+    unappliedAmount: new Prisma.Decimal('0'),
+    currency: 'TZS',
+    method: 'CASH',
+    reference: null,
+    notes: null,
+    status: 'COMPLETED',
+    reversedAt: null,
+    supplier: { id: 'sup-1', name: 'Fuel Co', supplierCode: 'SUP-1', currentBalance: new Prisma.Decimal('0') },
+    allocations: [
+      { id: 'a1', payableId: 'pay-1', amount: new Prisma.Decimal('500'), payable: { id: 'pay-1', payableNumber: 'PAY-1', amount: new Prisma.Decimal('500'), paidAmount: new Prisma.Decimal('500'), outstandingAmount: new Prisma.Decimal('0'), status: 'PAID' } },
+    ],
+  };
+  function remittanceService(documents?: any) {
+    const prisma: any = { supplierPayment: { findFirst: jest.fn(async () => payment) } };
+    const companyScope = { assertCanAccessCompany: jest.fn() } as any;
+    const service = new SupplierPaymentsService(
+      prisma,
+      { log: jest.fn() } as any,
+      companyScope,
+      { resolve: jest.fn() } as any,
+      { postLines: jest.fn() } as any,
+      { next: jest.fn() } as any,
+      undefined,
+      documents,
+    );
+    return { service, prisma, companyScope };
+  }
+
+  it('renders the payment through the letterhead renderer for its company and branch', async () => {
+    const documents = { renderLetterheadPdf: jest.fn().mockResolvedValue(Buffer.from('%PDF')) };
+    const { service, companyScope } = remittanceService(documents);
+    const user = { id: 'u1', companyAccess: [] } as any;
+    const result = await service.remittance('spay-1', user);
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1');
+    expect(documents.renderLetterheadPdf).toHaveBeenCalledWith(
+      { companyId: 'company-1', branchId: 'branch-1' },
+      expect.objectContaining({ title: 'Remittance advice', reference: 'SPAY-2026-000001', subtitle: 'Fuel Co' }),
+      user,
+    );
+    expect(result).toMatchObject({ filename: 'remittance-SPAY-2026-000001.pdf', mimeType: 'application/pdf' });
+  });
+
+  it('refuses without the renderer and for an unknown payment', async () => {
+    const { service, prisma } = remittanceService();
+    await expect(service.remittance('spay-1', { id: 'u1' } as any)).rejects.toBeInstanceOf(BadRequestException);
+    prisma.supplierPayment.findFirst.mockResolvedValue(null);
+    await expect(service.remittance('missing', { id: 'u1' } as any)).rejects.toThrow('Supplier payment not found');
+  });
+});

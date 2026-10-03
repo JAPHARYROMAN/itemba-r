@@ -105,6 +105,22 @@ describe('PartyRelatedTabs', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Download started.');
   });
 
+  it('downloads a remittance advice for a supplier payment (party linkage, Phase 3)', async () => {
+    download.get.mockResolvedValue(undefined);
+    render(<PartyRelatedTabs kind="supplier" partyId="sup-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remittance PDF' }));
+    await waitFor(() =>
+      expect(download.get).toHaveBeenCalledWith(
+        '/supplier-payments/p1/remittance?format=pdf',
+        'remittance-SPY-3.pdf',
+      ),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Download started.');
+    fireEvent.click(screen.getByRole('button', { name: 'Cash Desk' }));
+    await screen.findByRole('link', { name: 'Fuel delivery' });
+    expect(screen.queryByRole('button', { name: 'Remittance PDF' })).not.toBeInTheDocument();
+  });
+
   it('tells readers without any register permission that nothing is available', () => {
     api.permissions.clear();
     render(<PartyRelatedTabs kind="customer" partyId="cus-1" />);

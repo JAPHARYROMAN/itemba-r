@@ -23,6 +23,8 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
+import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
+import { remittancePdf } from './remittance-advice';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
@@ -122,6 +124,8 @@ export class SupplierPaymentsService {
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly cashBook?: CashBookService,
+    // Party linkage (Phase 3): the shared letterhead renderer for the remittance advice.
+    private readonly documents?: GeneratedDocumentsService,
   ) {}
 
   // ── queries ─────────────────────────────────────────────────────────────────
@@ -188,6 +192,23 @@ export class SupplierPaymentsService {
     if (!record) throw new NotFoundException('Supplier payment not found');
     if (user) await this.companyScope.assertCanAccessCompany(user, record.companyId);
     return record;
+  }
+
+  /** Party linkage (Phase 3 PR-6): the payment and its allocations as a remittance advice. */
+  async remittance(id: string, user: AuthUser) {
+    const payment = await this.findOne(id, user);
+    if (!this.documents)
+      throw new BadRequestException('PDF export is unavailable in this deployment.');
+    const buffer = await this.documents.renderLetterheadPdf(
+      { companyId: payment.companyId, branchId: payment.branchId },
+      remittancePdf(payment),
+      user,
+    );
+    return {
+      buffer,
+      filename: `remittance-${payment.paymentNumber}.pdf`,
+      mimeType: 'application/pdf',
+    };
   }
 
   // ── create ──────────────────────────────────────────────────────────────────

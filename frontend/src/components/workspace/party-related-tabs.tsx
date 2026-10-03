@@ -272,6 +272,19 @@ export function PartyRelatedTabs({ kind, partyId }: { kind: Kind; partyId: strin
       setExportNote(error instanceof Error ? error.message : 'Unable to export the statement.');
     }
   }
+  // Party linkage (Phase 3 PR-6): a supplier payment downloads as a remittance advice.
+  async function remittance(row: RelatedRow) {
+    setExportNote('');
+    try {
+      await downloadBinaryGet(
+        `/supplier-payments/${encodeURIComponent(row.id)}/remittance?format=pdf`,
+        `remittance-${row.number}.pdf`,
+      );
+      setExportNote('Download started.');
+    } catch (error) {
+      setExportNote(error instanceof Error ? error.message : 'Unable to export the remittance.');
+    }
+  }
   const result = useWorkspaceResource<RelatedSection>(
     `/party-profile/${kind}s/${encodeURIComponent(partyId)}/${current?.id ?? ''}`,
     {},
@@ -360,10 +373,22 @@ export function PartyRelatedTabs({ kind, partyId }: { kind: Kind; partyId: strin
                       <StatusBadge status={row.status} />
                     </div>
                   )}
+                  {kind === 'supplier' && current?.id === 'payments' && (
+                    <div className="mt-1 flex justify-end">
+                      <Btn size="xs" variant="secondary" onClick={() => void remittance(row)}>
+                        Remittance PDF
+                      </Btn>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
+          {exportNote && current?.id !== 'notebook' && (
+            <p role="status" className="partner-profile-history-note">
+              {exportNote}
+            </p>
+          )}
         </>
       )}
     </div>

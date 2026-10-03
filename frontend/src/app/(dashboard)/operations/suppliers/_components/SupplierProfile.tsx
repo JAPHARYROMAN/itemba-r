@@ -18,6 +18,7 @@ import { SupplierFormModal, type Company } from './SupplierFormModal';
 import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
 import { PartyBalancePanel } from '@/features/party/party-balance-panel';
 import { SupplierAgingPanel } from '@/features/party/supplier-aging-panel';
+import { downloadBinaryGet } from '@/lib/export-download';
 import type { PartyBalance } from '@/features/party/party-balance';
 
 interface SupplierCategory {
@@ -280,6 +281,19 @@ export function SupplierProfile({
   const { request } = useUnsavedWork();
   const { hasPermission, loading: authLoading } = useAuth();
   const [notice, setNotice] = useState('');
+  // Party linkage (Phase 3): a statement run downloads as a letterhead PDF or a CSV.
+  async function exportStatementRun(id: string, number: string, format: 'pdf' | 'csv') {
+    setNotice('');
+    try {
+      await downloadBinaryGet(
+        `/supplier-statements/${encodeURIComponent(id)}/export?format=${format}`,
+        `supplier-statement-${number}.${format}`,
+      );
+      setNotice('Download started.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to export the statement.');
+    }
+  }
   const [tab, setTab] = useState<Tab>('Overview');
   const [invoicePage, setInvoicePage] = useState(1);
   const [editing, setEditing] = useState(false);
@@ -729,9 +743,41 @@ export function SupplierProfile({
                         {shortDate(statement.periodStart)} - {shortDate(statement.periodEnd)}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold">{money(statement.closingBalance)}</p>
-                      <StatusBadge status={statement.status} />
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="font-semibold">{money(statement.closingBalance)}</p>
+                        <StatusBadge status={statement.status} />
+                      </div>
+                      {hasPermission('supplier_statements.view') && (
+                        <div className="flex gap-1">
+                          <Btn
+                            size="xs"
+                            variant="secondary"
+                            onClick={() =>
+                              void exportStatementRun(
+                                statement.id,
+                                statement.statementRunNumber,
+                                'pdf',
+                              )
+                            }
+                          >
+                            PDF
+                          </Btn>
+                          <Btn
+                            size="xs"
+                            variant="secondary"
+                            onClick={() =>
+                              void exportStatementRun(
+                                statement.id,
+                                statement.statementRunNumber,
+                                'csv',
+                              )
+                            }
+                          >
+                            CSV
+                          </Btn>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))

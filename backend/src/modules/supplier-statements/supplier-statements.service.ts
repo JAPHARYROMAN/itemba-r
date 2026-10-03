@@ -6,6 +6,12 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
 import { GenerateSupplierStatementDto } from './dto/generate-supplier-statement.dto';
 import { QuerySupplierStatementDto } from './dto/query-supplier-statement.dto';
+import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
+import {
+  buildSupplierStatement,
+  supplierStatementCsv,
+  supplierStatementPdf,
+} from './supplier-statement-export';
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -25,7 +31,74 @@ export class SupplierStatementsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    // Party linkage (Phase 3): the shared letterhead renderer, optional so the existing
+    // specs keep constructing the service; CSV export never needs it.
+    private readonly documents?: GeneratedDocumentsService,
   ) {}
+
+  /**
+   * Party linkage (Phase 3 PR-6): a statement run's period as a document, with the run's
+   * recorded balances and the period's payables (by issue date) and payments (by payment
+   * date). Read-only.
+   */
+  async export(id: string, format: 'pdf' | 'csv', user: AuthUser) {
+    const run = await this.findOne(id, user);
+    const supplier = run.supplierId
+      ? await this.prisma.supplier.findFirst({
+          where: { id: run.supplierId },
+          select: { id: true, name: true, supplierCode: true },
+        })
+      : null;
+    const scope = {
+      companyId: run.companyId,
+      deletedAt: null,
+      currency: run.currency as CurrencyCode,
+      ...(run.supplierId ? { supplierId: run.supplierId } : {}),
+    };
+    const period = { gte: run.periodStart, lte: run.periodEnd };
+    const [payables, payments] = await Promise.all([
+      this.prisma.payable.findMany({
+        where: { ...scope, status: { notIn: EXCLUDED_STATUSES }, issueDate: period },
+        select: { id: true, payableNumber: true, issueDate: true, amount: true, supplierName: true },
+        orderBy: { issueDate: 'asc' },
+        take: 10001,
+      }),
+      this.prisma.supplierPayment.findMany({
+        where: { ...scope, reversedAt: null, paymentDate: period },
+        select: {
+          id: true,
+          paymentNumber: true,
+          paymentDate: true,
+          amount: true,
+          method: true,
+          reference: true,
+          supplier: { select: { name: true } },
+        },
+        orderBy: { paymentDate: 'asc' },
+        take: 10001,
+      }),
+    ]);
+    if (payables.length > 10000 || payments.length > 10000)
+      throw new BadRequestException(
+        'This statement period has more than 10,000 lines; generate a shorter period to export it.',
+      );
+    const statement = buildSupplierStatement(run, supplier, payables, payments);
+    const base = `supplier-statement-${run.statementRunNumber}`;
+    if (format === 'csv')
+      return {
+        buffer: Buffer.from(supplierStatementCsv(statement), 'utf8'),
+        filename: `${base}.csv`,
+        mimeType: 'text/csv; charset=utf-8',
+      };
+    if (!this.documents)
+      throw new BadRequestException('PDF export is unavailable in this deployment.');
+    const buffer = await this.documents.renderLetterheadPdf(
+      { companyId: run.companyId },
+      supplierStatementPdf(statement),
+      user,
+    );
+    return { buffer, filename: `${base}.pdf`, mimeType: 'application/pdf' };
+  }
 
   async findAll(query: QuerySupplierStatementDto, user: AuthUser) {
     const { companyId, supplierId, page = 1, limit = 20 } = query;
