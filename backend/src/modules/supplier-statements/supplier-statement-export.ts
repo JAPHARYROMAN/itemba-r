@@ -130,8 +130,7 @@ export function buildSupplierStatement(
 }
 
 export function supplierStatementCsv(s: SupplierStatementExport): string {
-  const cell = (value: string) =>
-    /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  const cell = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
   const rows: string[][] = [
     ['Date', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance'],
     [
@@ -143,7 +142,15 @@ export function supplierStatementCsv(s: SupplierStatementExport): string {
       '',
       money(s.run.openingBalance),
     ],
-    ...s.lines.map((l) => [l.date, l.type, l.reference, l.description, l.debit, l.credit, l.balance]),
+    ...s.lines.map((l) => [
+      l.date,
+      l.type,
+      l.reference,
+      l.description,
+      l.debit,
+      l.credit,
+      l.balance,
+    ]),
     [
       day(s.run.periodEnd),
       'CLOSING',
@@ -157,7 +164,9 @@ export function supplierStatementCsv(s: SupplierStatementExport): string {
   return rows.map((r) => r.map(cell).join(',')).join('\n') + '\n';
 }
 
-export function supplierStatementPdf(s: SupplierStatementExport): Omit<BusinessPdfModel, 'organization'> {
+export function supplierStatementPdf(
+  s: SupplierStatementExport,
+): Omit<BusinessPdfModel, 'organization'> {
   const partyName = s.supplier?.name ?? 'All suppliers';
   const period = `${day(s.run.periodStart)} to ${day(s.run.periodEnd)}`;
   const fmt = (value: Decimalish | null | undefined) => `${s.run.currency} ${money(value)}`;

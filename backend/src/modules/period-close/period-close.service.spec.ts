@@ -169,7 +169,9 @@ describe('PeriodCloseService party control gate', () => {
       accountingPeriodId: 'period-1',
       status: 'REVIEWING',
     });
-    prisma.accountingPeriod.findFirst.mockResolvedValue({ endDate: new Date('2026-09-30T00:00:00.000Z') });
+    prisma.accountingPeriod.findFirst.mockResolvedValue({
+      endDate: new Date('2026-09-30T00:00:00.000Z'),
+    });
   }
 
   it('refuses the close before any write when the gate refuses', async () => {
@@ -181,7 +183,12 @@ describe('PeriodCloseService party control gate', () => {
       }),
     });
     const audit = { log: jest.fn().mockResolvedValue(undefined) };
-    const service = new PeriodCloseService(prisma, audit as any, new CompanyScopeService(prisma), gate as any);
+    const service = new PeriodCloseService(
+      prisma,
+      audit as any,
+      new CompanyScopeService(prisma),
+      gate as any,
+    );
     await expect(service.close('close-1', authUser())).rejects.toBeInstanceOf(BadRequestException);
     expect(gate.checkOrRefuse).toHaveBeenCalledWith(
       'company-1',
@@ -199,15 +206,29 @@ describe('PeriodCloseService party control gate', () => {
     closeRecord(prisma);
     const gate = closeCheck();
     const audit = { log: jest.fn().mockResolvedValue(undefined) };
-    const service = new PeriodCloseService(prisma, audit as any, new CompanyScopeService(prisma), gate as any);
+    const service = new PeriodCloseService(
+      prisma,
+      audit as any,
+      new CompanyScopeService(prisma),
+      gate as any,
+    );
     await service.close('close-1', authUser(), { reason: 'Legacy lines await the backfill' });
-    expect((gate.checkOrRefuse as jest.Mock).mock.calls[0][3]).toEqual({ reason: 'Legacy lines await the backfill' });
+    expect((gate.checkOrRefuse as jest.Mock).mock.calls[0][3]).toEqual({
+      reason: 'Legacy lines await the backfill',
+    });
     expect(gate.snapshot).toHaveBeenCalledWith(
       prisma,
-      { companyId: 'company-1', accountingPeriodId: 'period-1', periodCloseId: 'close-1', userId: 'closer-user' },
+      {
+        companyId: 'company-1',
+        accountingPeriodId: 'period-1',
+        periodCloseId: 'close-1',
+        userId: 'closer-user',
+      },
       expect.objectContaining({ hasDifferences: false }),
     );
-    expect((gate.auditMetadata as jest.Mock).mock.calls[0][1]).toEqual({ reason: 'Legacy lines await the backfill' });
+    expect((gate.auditMetadata as jest.Mock).mock.calls[0][1]).toEqual({
+      reason: 'Legacy lines await the backfill',
+    });
     expect(audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'CLOSE',
@@ -215,19 +236,33 @@ describe('PeriodCloseService party control gate', () => {
         metadata: { partyControl: { acknowledged: true } },
       }),
     );
-    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({ where: { id: 'period-1' }, data: { status: 'CLOSED' } });
+    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({
+      where: { id: 'period-1' },
+      data: { status: 'CLOSED' },
+    });
   });
 
   it('reads the check and the snapshots for the close record', async () => {
     const prisma = makePrisma();
     closeRecord(prisma);
     const gate = closeCheck();
-    const service = new PeriodCloseService(prisma, { log: jest.fn() } as any, new CompanyScopeService(prisma), gate as any);
+    const service = new PeriodCloseService(
+      prisma,
+      { log: jest.fn() } as any,
+      new CompanyScopeService(prisma),
+      gate as any,
+    );
     await service.partyCheck('close-1', authUser());
-    expect(gate.check).toHaveBeenCalledWith('company-1', new Date('2026-09-30T00:00:00.000Z'), expect.anything());
+    expect(gate.check).toHaveBeenCalledWith(
+      'company-1',
+      new Date('2026-09-30T00:00:00.000Z'),
+      expect.anything(),
+    );
     await service.partySnapshots('close-1', authUser());
     expect(gate.snapshots).toHaveBeenCalledWith('period-1');
     const bare = makeService(prisma);
-    await expect(bare.partyCheck('close-1', authUser())).rejects.toBeInstanceOf(BadRequestException);
+    await expect(bare.partyCheck('close-1', authUser())).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 });

@@ -20,8 +20,28 @@ const payment = {
   company: { name: 'Mwanjalisi Ltd' },
   cashAccount: { accountName: 'Main bank' },
   allocations: [
-    { id: 'a1', amount: d('300'), payable: { payableNumber: 'PAY-1', amount: d('300'), paidAmount: d('300'), outstandingAmount: d('0'), status: 'PAID' } },
-    { id: 'a2', amount: d('150'), payable: { payableNumber: 'PAY-2', amount: d('400'), paidAmount: d('150'), outstandingAmount: d('250'), status: 'PARTIALLY_PAID' } },
+    {
+      id: 'a1',
+      amount: d('300'),
+      payable: {
+        payableNumber: 'PAY-1',
+        amount: d('300'),
+        paidAmount: d('300'),
+        outstandingAmount: d('0'),
+        status: 'PAID',
+      },
+    },
+    {
+      id: 'a2',
+      amount: d('150'),
+      payable: {
+        payableNumber: 'PAY-2',
+        amount: d('400'),
+        paidAmount: d('150'),
+        outstandingAmount: d('250'),
+        status: 'PARTIALLY_PAID',
+      },
+    },
   ],
 };
 
@@ -56,10 +76,17 @@ describe('remittance advice', () => {
   });
 
   it('says when a payment is on account and marks a reversed payment', () => {
-    const pdf = remittancePdf({ ...payment, allocations: [], notes: null, reversedAt: new Date('2026-09-21T00:00:00.000Z') });
+    const pdf = remittancePdf({
+      ...payment,
+      allocations: [],
+      notes: null,
+      reversedAt: new Date('2026-09-21T00:00:00.000Z'),
+    });
     expect(pdf.status).toBe('REVERSED');
     expect(pdf.sections).toHaveLength(1);
     expect(pdf.sections[0].table).toBeUndefined();
-    expect(pdf.sections[0].paragraphs).toEqual(['Payment held on account: no payables were allocated.']);
+    expect(pdf.sections[0].paragraphs).toEqual([
+      'Payment held on account: no payables were allocated.',
+    ]);
   });
 });

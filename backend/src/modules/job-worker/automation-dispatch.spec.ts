@@ -650,7 +650,9 @@ describe('enqueueDuePartyAlerts', () => {
 
     expect(result).toEqual({ processed: 3, scanned: 2 });
     const created = tx.alertEvent.create.mock.calls.map((c: any[]) => c[0].data);
-    expect(created.map((d: any) => [d.alertType, d.linkedEntityType, d.linkedEntityId, d.priority])).toEqual([
+    expect(
+      created.map((d: any) => [d.alertType, d.linkedEntityType, d.linkedEntityId, d.priority]),
+    ).toEqual([
       ['OVERDUE_PAYABLE', 'Supplier', 'sup-1', 'HIGH'],
       ['OVERDUE_RECEIVABLE', 'Customer', 'cus-1', 'HIGH'],
       ['CREDIT_LIMIT_BREACH', 'Customer', 'cus-1', 'CRITICAL'],
@@ -669,7 +671,10 @@ describe('enqueueDuePartyAlerts', () => {
     });
     expect(created[2]).toMatchObject({
       message: 'Westsides (CUS-1) owes TZS 900.00 against a credit limit of TZS 500.00.',
-      metadata: expect.objectContaining({ href: '/sales-desk/customers/cus-1', exceededBy: '400.00' }),
+      metadata: expect.objectContaining({
+        href: '/sales-desk/customers/cus-1',
+        exceededBy: '400.00',
+      }),
     });
     expect(notifications.sendNotification).toHaveBeenCalledTimes(3);
     expect(notifications.sendNotification).toHaveBeenLastCalledWith(
@@ -713,7 +718,19 @@ describe('enqueueDuePartyAlerts', () => {
   it('raises nothing when no party is overdue or over its limit', async () => {
     const { prisma, tx } = prismaWith();
     const notifications = { sendNotification: jest.fn() };
-    const service = serviceWith(prisma, notifications, [summary({})], [summary({ kind: 'customer', partyId: 'cus-2', creditLimit: '1000.00', creditAvailable: '500.00' })]);
+    const service = serviceWith(
+      prisma,
+      notifications,
+      [summary({})],
+      [
+        summary({
+          kind: 'customer',
+          partyId: 'cus-2',
+          creditLimit: '1000.00',
+          creditAvailable: '500.00',
+        }),
+      ],
+    );
 
     expect(await service.enqueueDuePartyAlerts(25)).toEqual({ processed: 0, scanned: 2 });
     expect(prisma.alertEvent.findMany).not.toHaveBeenCalled();

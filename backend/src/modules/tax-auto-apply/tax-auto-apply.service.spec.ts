@@ -460,7 +460,15 @@ describe('TaxAutoApplyService party snapshot', () => {
       expense: { findUnique: jest.fn().mockResolvedValue(sources.expense ?? null) },
       taxCode: {
         findMany: jest.fn().mockResolvedValue([
-          { id: 'code-1', taxTypeId: 'type-1', taxRateId: null, taxCode: 'VAT18', isDefault: true, companyId: 'company-a', taxType: { taxCategory: 'VAT', taxTypeCode: 'VAT' } },
+          {
+            id: 'code-1',
+            taxTypeId: 'type-1',
+            taxRateId: null,
+            taxCode: 'VAT18',
+            isDefault: true,
+            companyId: 'company-a',
+            taxType: { taxCategory: 'VAT', taxTypeCode: 'VAT' },
+          },
         ]),
       },
       taxTransaction: {
@@ -473,7 +481,11 @@ describe('TaxAutoApplyService party snapshot', () => {
     } as any;
   }
   const service = (prisma: any) =>
-    new TaxAutoApplyService(prisma, { assertCanAccessCompany: jest.fn() } as any, { logStrict: jest.fn() } as any);
+    new TaxAutoApplyService(
+      prisma,
+      { assertCanAccessCompany: jest.fn() } as any,
+      { logStrict: jest.fn() } as any,
+    );
 
   it('stamps the customer with its TIN and VRN on a sales order row, and the supplier on a purchase order row', async () => {
     process.env.TAX_AUTO_APPLY = 'true';
@@ -504,9 +516,25 @@ describe('TaxAutoApplyService party snapshot', () => {
       customerId: true,
       customer: { select: { tin: true, vrn: true } },
     });
-    const [sale, purchase] = prisma.taxTransaction.createMany.mock.calls.map((c: any[]) => c[0].data[0]);
-    expect(sale).toMatchObject({ partyType: 'CUSTOMER', customerId: 'cus-1', supplierId: null, partyTin: '123-456', partyVrn: '40-001', direction: 'OUTPUT' });
-    expect(purchase).toMatchObject({ partyType: 'SUPPLIER', supplierId: 'sup-1', customerId: null, partyTin: '999', partyVrn: null, direction: 'INPUT' });
+    const [sale, purchase] = prisma.taxTransaction.createMany.mock.calls.map(
+      (c: any[]) => c[0].data[0],
+    );
+    expect(sale).toMatchObject({
+      partyType: 'CUSTOMER',
+      customerId: 'cus-1',
+      supplierId: null,
+      partyTin: '123-456',
+      partyVrn: '40-001',
+      direction: 'OUTPUT',
+    });
+    expect(purchase).toMatchObject({
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      customerId: null,
+      partyTin: '999',
+      partyVrn: null,
+      direction: 'INPUT',
+    });
   });
 
   it('books NONE for an expense without a supplier and the supplier when one is set', async () => {
@@ -532,7 +560,9 @@ describe('TaxAutoApplyService party snapshot', () => {
       partyTin: null,
       partyVrn: null,
     });
-    const withSupplier = partyPrisma({ expense: { ...expense, supplierId: 'sup-1', supplier: { tin: '999', vrn: '40-9' } } });
+    const withSupplier = partyPrisma({
+      expense: { ...expense, supplierId: 'sup-1', supplier: { tin: '999', vrn: '40-9' } },
+    });
     await service(withSupplier).applyForExpense('expense-a', 'user-a');
     expect(withSupplier.taxTransaction.createMany.mock.calls[0][0].data[0]).toMatchObject({
       partyType: 'SUPPLIER',

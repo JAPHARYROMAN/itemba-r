@@ -341,9 +341,26 @@ describe('SupplierPaymentsService.remittance', () => {
     notes: null,
     status: 'COMPLETED',
     reversedAt: null,
-    supplier: { id: 'sup-1', name: 'Fuel Co', supplierCode: 'SUP-1', currentBalance: new Prisma.Decimal('0') },
+    supplier: {
+      id: 'sup-1',
+      name: 'Fuel Co',
+      supplierCode: 'SUP-1',
+      currentBalance: new Prisma.Decimal('0'),
+    },
     allocations: [
-      { id: 'a1', payableId: 'pay-1', amount: new Prisma.Decimal('500'), payable: { id: 'pay-1', payableNumber: 'PAY-1', amount: new Prisma.Decimal('500'), paidAmount: new Prisma.Decimal('500'), outstandingAmount: new Prisma.Decimal('0'), status: 'PAID' } },
+      {
+        id: 'a1',
+        payableId: 'pay-1',
+        amount: new Prisma.Decimal('500'),
+        payable: {
+          id: 'pay-1',
+          payableNumber: 'PAY-1',
+          amount: new Prisma.Decimal('500'),
+          paidAmount: new Prisma.Decimal('500'),
+          outstandingAmount: new Prisma.Decimal('0'),
+          status: 'PAID',
+        },
+      },
     ],
   };
   function remittanceService(documents?: any) {
@@ -370,16 +387,27 @@ describe('SupplierPaymentsService.remittance', () => {
     expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'company-1');
     expect(documents.renderLetterheadPdf).toHaveBeenCalledWith(
       { companyId: 'company-1', branchId: 'branch-1' },
-      expect.objectContaining({ title: 'Remittance advice', reference: 'SPAY-2026-000001', subtitle: 'Fuel Co' }),
+      expect.objectContaining({
+        title: 'Remittance advice',
+        reference: 'SPAY-2026-000001',
+        subtitle: 'Fuel Co',
+      }),
       user,
     );
-    expect(result).toMatchObject({ filename: 'remittance-SPAY-2026-000001.pdf', mimeType: 'application/pdf' });
+    expect(result).toMatchObject({
+      filename: 'remittance-SPAY-2026-000001.pdf',
+      mimeType: 'application/pdf',
+    });
   });
 
   it('refuses without the renderer and for an unknown payment', async () => {
     const { service, prisma } = remittanceService();
-    await expect(service.remittance('spay-1', { id: 'u1' } as any)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.remittance('spay-1', { id: 'u1' } as any)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     prisma.supplierPayment.findFirst.mockResolvedValue(null);
-    await expect(service.remittance('missing', { id: 'u1' } as any)).rejects.toThrow('Supplier payment not found');
+    await expect(service.remittance('missing', { id: 'u1' } as any)).rejects.toThrow(
+      'Supplier payment not found',
+    );
   });
 });

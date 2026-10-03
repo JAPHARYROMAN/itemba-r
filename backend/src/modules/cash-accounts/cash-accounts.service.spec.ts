@@ -9,7 +9,12 @@ const row = (over: Record<string, unknown> = {}) => ({
   accountName: 'Main bank',
   currency: 'TZS',
   currentBalance: new Prisma.Decimal('90'),
-  deskAccount: { id: 'desk-1', name: 'Main till', balance: new Prisma.Decimal('100'), currency: 'TZS' },
+  deskAccount: {
+    id: 'desk-1',
+    name: 'Main till',
+    balance: new Prisma.Decimal('100'),
+    currency: 'TZS',
+  },
   ...over,
 });
 function setup(flag: string | undefined, rows: any[]) {
@@ -45,21 +50,26 @@ describe('CashAccountsService one cash balance', () => {
     });
     expect(list.data[0]).not.toHaveProperty('deskAccount');
     const one = await service.findOne('bank-1', user);
-    expect(one).toMatchObject({ currentBalance: new Prisma.Decimal('100'), balanceSource: 'cash-desk' });
+    expect(one).toMatchObject({
+      currentBalance: new Prisma.Decimal('100'),
+      balanceSource: 'cash-desk',
+    });
     const byCompany = await service.findByCompany('c1', user);
     expect(byCompany[0]).toMatchObject({ balanceSource: 'cash-desk' });
   });
 
   it('keeps the stored balance while the flag is off or the account has no Cash Desk connection', async () => {
     const off = setup('false', [row()]);
-    expect((await off.service.findAll({ page: 1, limit: 20 } as any, off.user)).data[0]).toMatchObject({
+    expect(
+      (await off.service.findAll({ page: 1, limit: 20 } as any, off.user)).data[0],
+    ).toMatchObject({
       currentBalance: new Prisma.Decimal('90'),
       mirrorBalance: new Prisma.Decimal('90'),
       balanceSource: 'stored',
       cashDeskAccount: { id: 'desk-1' },
     });
     const unconnected = setup('true', [row({ deskAccount: null })]);
-    expect((await unconnected.service.findOne('bank-1', unconnected.user))).toMatchObject({
+    expect(await unconnected.service.findOne('bank-1', unconnected.user)).toMatchObject({
       currentBalance: new Prisma.Decimal('90'),
       balanceSource: 'stored',
       cashDeskAccount: null,

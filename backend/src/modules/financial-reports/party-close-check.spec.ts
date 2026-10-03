@@ -9,7 +9,11 @@ const report = (role: 'AP' | 'AR', rows: any[], untaggedControl = '0.00') => ({
   kind: role === 'AP' ? 'supplier' : 'customer',
   asOf: new Date('2026-09-30T00:00:00.000Z'),
   baseCurrency: 'TZS',
-  controlAccount: { id: role.toLowerCase(), accountCode: role === 'AP' ? '2000' : '1100', accountName: role },
+  controlAccount: {
+    id: role.toLowerCase(),
+    accountCode: role === 'AP' ? '2000' : '1100',
+    accountName: role,
+  },
   rows,
   untaggedControl,
   totals: { control: '0.00', subLedger: '0.00', difference: '0.00' },
@@ -54,7 +58,9 @@ describe('PartyCloseCheckService', () => {
     const check = await service.check('c1', new Date(), user);
     expect(check.hasDifferences).toBe(false);
     expect(check.differences).toEqual([]);
-    await expect(service.checkOrRefuse('c1', new Date(), user)).resolves.toMatchObject({ hasDifferences: false });
+    await expect(service.checkOrRefuse('c1', new Date(), user)).resolves.toMatchObject({
+      hasDifferences: false,
+    });
   });
 
   it('refuses a close with differences unless acknowledged, naming them', async () => {
@@ -68,8 +74,12 @@ describe('PartyCloseCheckService', () => {
         untagged: { ap: '0.00', ar: '5.00' },
       },
     });
-    await expect(service.checkOrRefuse('c1', asOf, user)).rejects.toBeInstanceOf(BadRequestException);
-    const check = await service.checkOrRefuse('c1', asOf, user, { reason: 'Legacy lines await the backfill' });
+    await expect(service.checkOrRefuse('c1', asOf, user)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    const check = await service.checkOrRefuse('c1', asOf, user, {
+      reason: 'Legacy lines await the backfill',
+    });
     expect(service.auditMetadata(check, { reason: 'Legacy lines await the backfill' })).toEqual({
       partyControl: expect.objectContaining({
         asOf: '2026-09-30T00:00:00.000Z',
@@ -84,23 +94,61 @@ describe('PartyCloseCheckService', () => {
   it('snapshots every party row plus a NONE row per untagged role, sharing one snapshotAt', async () => {
     const { service, user } = setup(
       [supplierRow('20.00')],
-      [{ partyId: 'cus-1', name: 'Westsides', code: null, control: '50.00', subLedger: '50.00', difference: '0.00', documents: 2 }],
+      [
+        {
+          partyId: 'cus-1',
+          name: 'Westsides',
+          code: null,
+          control: '50.00',
+          subLedger: '50.00',
+          difference: '0.00',
+          documents: 2,
+        },
+      ],
       { ap: '7.00' },
     );
     const check = await service.check('c1', new Date(), user);
-    const tx: any = { partyBalanceSnapshot: { createMany: jest.fn(async ({ data }: any) => ({ count: data.length })) } };
-    const count = await service.snapshot(tx, { companyId: 'c1', accountingPeriodId: 'p1', periodCloseId: 'pc1', userId: 'u' }, check);
+    const tx: any = {
+      partyBalanceSnapshot: {
+        createMany: jest.fn(async ({ data }: any) => ({ count: data.length })),
+      },
+    };
+    const count = await service.snapshot(
+      tx,
+      { companyId: 'c1', accountingPeriodId: 'p1', periodCloseId: 'pc1', userId: 'u' },
+      check,
+    );
     expect(count).toBe(3);
     const { data } = tx.partyBalanceSnapshot.createMany.mock.calls[0][0];
-    expect(data.map((r: any) => [r.role, r.partyType, r.partyId, r.partyName, r.control, r.subLedger, r.difference])).toEqual([
+    expect(
+      data.map((r: any) => [
+        r.role,
+        r.partyType,
+        r.partyId,
+        r.partyName,
+        r.control,
+        r.subLedger,
+        r.difference,
+      ]),
+    ).toEqual([
       ['AP', 'SUPPLIER', 'sup-1', 'Mwanjalisi', '100.00', '80.00', '20.00'],
       ['AR', 'CUSTOMER', 'cus-1', 'Westsides', '50.00', '50.00', '0.00'],
       ['AP', 'NONE', null, null, '7.00', '0.00', '7.00'],
     ]);
     expect(new Set(data.map((r: any) => r.snapshotAt.getTime())).size).toBe(1);
-    expect(data[0]).toMatchObject({ companyId: 'c1', accountingPeriodId: 'p1', periodCloseId: 'pc1', currency: 'TZS', createdById: 'u' });
+    expect(data[0]).toMatchObject({
+      companyId: 'c1',
+      accountingPeriodId: 'p1',
+      periodCloseId: 'pc1',
+      currency: 'TZS',
+      createdById: 'u',
+    });
     expect(
-      await service.snapshot(tx, { companyId: 'c1', accountingPeriodId: 'p1', userId: 'u' }, { ...check, rows: [], untagged: { ap: '0.00', ar: '0.00' } }),
+      await service.snapshot(
+        tx,
+        { companyId: 'c1', accountingPeriodId: 'p1', userId: 'u' },
+        { ...check, rows: [], untagged: { ap: '0.00', ar: '0.00' } },
+      ),
     ).toBe(0);
   });
 
@@ -108,7 +156,13 @@ describe('PartyCloseCheckService', () => {
     const { service, prisma } = setup();
     const t1 = new Date('2026-10-01T10:00:00.000Z');
     const t0 = new Date('2026-09-30T10:00:00.000Z');
-    const row = (id: string, snapshotAt: Date, partyType: string, partyId: string | null, difference: string) => ({
+    const row = (
+      id: string,
+      snapshotAt: Date,
+      partyType: string,
+      partyId: string | null,
+      difference: string,
+    ) => ({
       id,
       role: 'AP',
       partyType,
@@ -126,12 +180,30 @@ describe('PartyCloseCheckService', () => {
       row('c', t0, 'SUPPLIER', 'sup-1', '0'),
     ]);
     const result = await service.snapshots('p1');
-    expect(result).toMatchObject({ accountingPeriodId: 'p1', snapshotAt: t1, closes: 2, currency: 'TZS', differences: 2 });
+    expect(result).toMatchObject({
+      accountingPeriodId: 'p1',
+      snapshotAt: t1,
+      closes: 2,
+      currency: 'TZS',
+      differences: 2,
+    });
     expect(result.rows).toEqual([
-      expect.objectContaining({ id: 'a', kind: 'supplier', partyId: 'sup-1', subLedger: '80.00', control: '100.00', difference: '20.00' }),
+      expect.objectContaining({
+        id: 'a',
+        kind: 'supplier',
+        partyId: 'sup-1',
+        subLedger: '80.00',
+        control: '100.00',
+        difference: '20.00',
+      }),
       expect.objectContaining({ id: 'b', kind: null, partyType: 'NONE', difference: '7.00' }),
     ]);
     prisma.partyBalanceSnapshot.findMany.mockResolvedValue([]);
-    expect(await service.snapshots('p2')).toMatchObject({ snapshotAt: null, closes: 0, rows: [], differences: 0 });
+    expect(await service.snapshots('p2')).toMatchObject({
+      snapshotAt: null,
+      closes: 0,
+      rows: [],
+      differences: 0,
+    });
   });
 });

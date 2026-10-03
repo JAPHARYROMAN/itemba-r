@@ -147,7 +147,12 @@ export class AccountingPeriodsService {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     // Party linkage (Phase 3): the same gate and snapshot as the formal period close.
     const check = this.closeCheck
-      ? await this.closeCheck.checkOrRefuse(existing.companyId, existing.endDate, user, acknowledged)
+      ? await this.closeCheck.checkOrRefuse(
+          existing.companyId,
+          existing.endDate,
+          user,
+          acknowledged,
+        )
       : null;
     const record = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.accountingPeriod.update({

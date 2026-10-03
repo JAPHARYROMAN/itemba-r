@@ -136,7 +136,12 @@ export class PartyCloseCheckService {
    */
   async snapshot(
     tx: Prisma.TransactionClient,
-    ctx: { companyId: string; accountingPeriodId: string; periodCloseId?: string | null; userId: string },
+    ctx: {
+      companyId: string;
+      accountingPeriodId: string;
+      periodCloseId?: string | null;
+      userId: string;
+    },
     check: PartyCloseCheck,
   ): Promise<number> {
     const base = {
@@ -197,7 +202,11 @@ export class PartyCloseCheckService {
         role: row.role,
         partyType: row.partyType,
         kind:
-          row.partyType === 'SUPPLIER' ? 'supplier' : row.partyType === 'CUSTOMER' ? 'customer' : null,
+          row.partyType === 'SUPPLIER'
+            ? 'supplier'
+            : row.partyType === 'CUSTOMER'
+              ? 'customer'
+              : null,
         partyId: row.partyId,
         partyName: row.partyName,
         currency: row.currency,

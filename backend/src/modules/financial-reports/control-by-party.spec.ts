@@ -10,13 +10,30 @@ function setup(overrides: Record<string, unknown> = {}) {
   const prisma: any = {
     journalEntryLine: {
       groupBy: jest.fn(async () => [
-        { partyType: 'SUPPLIER', supplierId: 'sup-1', customerId: null, _sum: { debit: d('300'), credit: d('1300') } },
-        { partyType: 'SUPPLIER', supplierId: 'sup-2', customerId: null, _sum: { debit: d('0'), credit: d('250') } },
-        { partyType: 'NONE', supplierId: null, customerId: null, _sum: { debit: d('10'), credit: d('60') } },
+        {
+          partyType: 'SUPPLIER',
+          supplierId: 'sup-1',
+          customerId: null,
+          _sum: { debit: d('300'), credit: d('1300') },
+        },
+        {
+          partyType: 'SUPPLIER',
+          supplierId: 'sup-2',
+          customerId: null,
+          _sum: { debit: d('0'), credit: d('250') },
+        },
+        {
+          partyType: 'NONE',
+          supplierId: null,
+          customerId: null,
+          _sum: { debit: d('10'), credit: d('60') },
+        },
       ]),
     },
     supplier: {
-      findMany: jest.fn(async () => [{ id: 'sup-2', name: 'Quiet Supplier', supplierCode: 'SUP-002' }]),
+      findMany: jest.fn(async () => [
+        { id: 'sup-2', name: 'Quiet Supplier', supplierCode: 'SUP-002' },
+      ]),
     },
     customer: { findMany: jest.fn(async () => []) },
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
@@ -63,15 +80,47 @@ describe('Control by party', () => {
     const { where } = prisma.journalEntryLine.groupBy.mock.calls[0][0];
     expect(where).toMatchObject({ companyId: 'c1', accountId: 'ap' });
     expect(where.journalEntry.status).toBe('POSTED');
-    expect(report.controlAccount).toEqual({ id: 'ap', accountCode: '2000', accountName: 'Accounts Payable' });
+    expect(report.controlAccount).toEqual({
+      id: 'ap',
+      accountCode: '2000',
+      accountName: 'Accounts Payable',
+    });
     expect(report.baseCurrency).toBe('TZS');
     expect(report.rows).toEqual([
-      { partyId: 'sup-2', name: 'Quiet Supplier', code: 'SUP-002', control: '250.00', subLedger: '0.00', difference: '250.00', documents: 0 },
-      { partyId: 'sup-3', name: 'Desk Only', code: 'SUP-003', control: '0.00', subLedger: '80.00', difference: '-80.00', documents: 1 },
-      { partyId: 'sup-1', name: 'Mwanjalisi Station', code: 'SUP-001', control: '1000.00', subLedger: '1000.00', difference: '0.00', documents: 3 },
+      {
+        partyId: 'sup-2',
+        name: 'Quiet Supplier',
+        code: 'SUP-002',
+        control: '250.00',
+        subLedger: '0.00',
+        difference: '250.00',
+        documents: 0,
+      },
+      {
+        partyId: 'sup-3',
+        name: 'Desk Only',
+        code: 'SUP-003',
+        control: '0.00',
+        subLedger: '80.00',
+        difference: '-80.00',
+        documents: 1,
+      },
+      {
+        partyId: 'sup-1',
+        name: 'Mwanjalisi Station',
+        code: 'SUP-001',
+        control: '1000.00',
+        subLedger: '1000.00',
+        difference: '0.00',
+        documents: 3,
+      },
     ]);
     expect(report.untaggedControl).toBe('50.00');
-    expect(report.totals).toEqual({ control: '1300.00', subLedger: '1080.00', difference: '220.00' });
+    expect(report.totals).toEqual({
+      control: '1300.00',
+      subLedger: '1080.00',
+      difference: '220.00',
+    });
     expect(report.partiesWithDifference).toBe(2);
     expect(prisma.supplier.findMany.mock.calls[0][0].where).toEqual({ id: { in: ['sup-2'] } });
   });
@@ -80,15 +129,30 @@ describe('Control by party', () => {
     const { service, user, prisma, partyBalance, accountResolver } = setup({
       journalEntryLine: {
         groupBy: jest.fn(async () => [
-          { partyType: 'CUSTOMER', supplierId: null, customerId: 'cus-1', _sum: { debit: d('400'), credit: d('100') } },
+          {
+            partyType: 'CUSTOMER',
+            supplierId: null,
+            customerId: 'cus-1',
+            _sum: { debit: d('400'), credit: d('100') },
+          },
         ]),
       },
     });
     partyBalance.customers.mockResolvedValue([
-      { partyId: 'cus-1', name: 'Westsides', code: 'CUS-001', erp: [{ currency: 'TZS', open: '300.00', overdue: '0.00', documents: 2 }] },
+      {
+        partyId: 'cus-1',
+        name: 'Westsides',
+        code: 'CUS-001',
+        erp: [{ currency: 'TZS', open: '300.00', overdue: '0.00', documents: 2 }],
+      },
     ]);
     const ar = await service.getControlByParty('c1', 'AR', undefined, user);
-    expect(ar.rows[0]).toMatchObject({ partyId: 'cus-1', control: '300.00', subLedger: '300.00', difference: '0.00' });
+    expect(ar.rows[0]).toMatchObject({
+      partyId: 'cus-1',
+      control: '300.00',
+      subLedger: '300.00',
+      difference: '0.00',
+    });
     expect(ar.partiesWithDifference).toBe(0);
     accountResolver.resolve.mockRejectedValue(new Error('no account'));
     const none = await service.getControlByParty('c1', 'AR', undefined, user);
@@ -103,8 +167,34 @@ describe('Control by party', () => {
     const { service, user } = setup({
       payable: {
         findMany: jest.fn(async () => [
-          { id: 'p1', payableNumber: 'PAY-1', supplierId: 'sup-1', supplierName: 'Mwanjalisi', amount: d('100'), paidAmount: d('0'), outstandingAmount: d('100'), currency: 'TZS', issueDate: daysAgo(40), dueDate: daysAgo(-5), status: 'OPEN', journalEntryId: 'je' },
-          { id: 'p2', payableNumber: 'PAY-2', supplierId: 'sup-1', supplierName: 'Mwanjalisi', amount: d('200'), paidAmount: d('50'), outstandingAmount: d('150'), currency: 'TZS', issueDate: daysAgo(70), dueDate: daysAgo(45), status: 'PARTIALLY_PAID', journalEntryId: null },
+          {
+            id: 'p1',
+            payableNumber: 'PAY-1',
+            supplierId: 'sup-1',
+            supplierName: 'Mwanjalisi',
+            amount: d('100'),
+            paidAmount: d('0'),
+            outstandingAmount: d('100'),
+            currency: 'TZS',
+            issueDate: daysAgo(40),
+            dueDate: daysAgo(-5),
+            status: 'OPEN',
+            journalEntryId: 'je',
+          },
+          {
+            id: 'p2',
+            payableNumber: 'PAY-2',
+            supplierId: 'sup-1',
+            supplierName: 'Mwanjalisi',
+            amount: d('200'),
+            paidAmount: d('50'),
+            outstandingAmount: d('150'),
+            currency: 'TZS',
+            issueDate: daysAgo(70),
+            dueDate: daysAgo(45),
+            status: 'PARTIALLY_PAID',
+            journalEntryId: null,
+          },
         ]),
       },
     });
@@ -117,6 +207,10 @@ describe('Control by party', () => {
       oldestDaysOverdue: 45,
       payableCount: 2,
     });
-    expect(detail.payables[1]).toMatchObject({ payableNumber: 'PAY-2', bucket: 'days31_60', daysOverdue: 45 });
+    expect(detail.payables[1]).toMatchObject({
+      payableNumber: 'PAY-2',
+      bucket: 'days31_60',
+      daysOverdue: 45,
+    });
   });
 });

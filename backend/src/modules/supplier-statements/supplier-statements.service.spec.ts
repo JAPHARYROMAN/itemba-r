@@ -173,7 +173,7 @@ describe('SupplierStatementsService.generate reconciliation', () => {
 
 /** Party linkage, Phase 3 PR-6: a statement run exported as CSV or letterhead PDF. */
 describe('SupplierStatementsService.export', () => {
-  const exportUser = () => ({ id: 'user-1', companyId: COMPANY } as any);
+  const exportUser = () => ({ id: 'user-1', companyId: COMPANY }) as any;
   const run = {
     id: 'run-1',
     statementRunNumber: 'SSTAT-1',
@@ -194,21 +194,42 @@ describe('SupplierStatementsService.export', () => {
     const prisma: any = {
       supplierStatementRun: { findFirst: jest.fn().mockResolvedValue(run) },
       supplier: {
-        findFirst: jest.fn().mockResolvedValue({ id: SUPPLIER, name: 'Fuel Co', supplierCode: 'SUP-1' }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: SUPPLIER, name: 'Fuel Co', supplierCode: 'SUP-1' }),
       },
       payable: {
         findMany: jest.fn().mockResolvedValue([
-          { id: 'p1', payableNumber: 'PAY-1', issueDate: new Date('2026-09-05T00:00:00.000Z'), amount: new Prisma.Decimal('100'), supplierName: 'Fuel Co' },
+          {
+            id: 'p1',
+            payableNumber: 'PAY-1',
+            issueDate: new Date('2026-09-05T00:00:00.000Z'),
+            amount: new Prisma.Decimal('100'),
+            supplierName: 'Fuel Co',
+          },
         ]),
       },
       supplierPayment: {
         findMany: jest.fn().mockResolvedValue([
-          { id: 's1', paymentNumber: 'SPAY-1', paymentDate: new Date('2026-09-20T00:00:00.000Z'), amount: new Prisma.Decimal('40'), method: 'CASH', reference: null, supplier: { name: 'Fuel Co' } },
+          {
+            id: 's1',
+            paymentNumber: 'SPAY-1',
+            paymentDate: new Date('2026-09-20T00:00:00.000Z'),
+            amount: new Prisma.Decimal('40'),
+            method: 'CASH',
+            reference: null,
+            supplier: { name: 'Fuel Co' },
+          },
         ]),
       },
     };
     const companyScope: any = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
-    const service = new SupplierStatementsService(prisma, { log: jest.fn() } as any, companyScope, documents);
+    const service = new SupplierStatementsService(
+      prisma,
+      { log: jest.fn() } as any,
+      companyScope,
+      documents,
+    );
     return { service, prisma, companyScope };
   }
 
@@ -242,10 +263,19 @@ describe('SupplierStatementsService.export', () => {
     const result = await service.export('run-1', 'pdf', exportUser());
     expect(documents.renderLetterheadPdf).toHaveBeenCalledWith(
       { companyId: COMPANY },
-      expect.objectContaining({ title: 'Supplier statement', subtitle: 'Fuel Co', reference: 'SSTAT-1' }),
+      expect.objectContaining({
+        title: 'Supplier statement',
+        subtitle: 'Fuel Co',
+        reference: 'SSTAT-1',
+      }),
       expect.objectContaining({ id: exportUser().id }),
     );
-    expect(result).toMatchObject({ filename: 'supplier-statement-SSTAT-1.pdf', mimeType: 'application/pdf' });
-    await expect(exportService().service.export('run-1', 'pdf', exportUser())).rejects.toBeInstanceOf(BadRequestException);
+    expect(result).toMatchObject({
+      filename: 'supplier-statement-SSTAT-1.pdf',
+      mimeType: 'application/pdf',
+    });
+    await expect(
+      exportService().service.export('run-1', 'pdf', exportUser()),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

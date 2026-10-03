@@ -38,14 +38,12 @@ function fixture() {
         { paymentMethod: 'CASH', _count: { _all: 1 }, _sum: { totalAmount: '1000' } },
         { paymentMethod: 'MIXED', _count: { _all: 1 }, _sum: { totalAmount: '800' } },
       ]),
-      findMany: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            totalAmount: '800',
-            posTenders: [{ method: 'CASH', amount: 300, cashAccountId: 'cash', reference: null }],
-          },
-        ]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          totalAmount: '800',
+          posTenders: [{ method: 'CASH', amount: 300, cashAccountId: 'cash', reference: null }],
+        },
+      ]),
     },
     salesOrderLine: { groupBy: jest.fn().mockResolvedValue([]) },
     mobilePosPriceOverride: { findMany: jest.fn().mockResolvedValue([]) },
@@ -60,19 +58,17 @@ function fixture() {
     },
     stockAdjustment: {
       count: jest.fn().mockResolvedValue(105),
-      findMany: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            id: 'sa',
-            adjustmentNumber: 'SA-1',
-            status: 'PENDING_APPROVAL',
-            createdAt: new Date(),
-            lines: [
-              { productId: 'p', countedQuantity: '0', systemQuantity: '3', varianceQuantity: '-3' },
-            ],
-          },
-        ]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'sa',
+          adjustmentNumber: 'SA-1',
+          status: 'PENDING_APPROVAL',
+          createdAt: new Date(),
+          lines: [
+            { productId: 'p', countedQuantity: '0', systemQuantity: '3', varianceQuantity: '-3' },
+          ],
+        },
+      ]),
     },
   };
   db.$transaction = jest.fn(async (work: (tx: any) => Promise<unknown>) => work(db));

@@ -74,7 +74,13 @@ export function remittancePdf(p: RemittancePayment): Omit<BusinessPdfModel, 'org
         ...(allocations.length
           ? {
               table: {
-                headers: ['Payable', 'Payable amount', 'Paid to date', 'This payment', 'Outstanding now'],
+                headers: [
+                  'Payable',
+                  'Payable amount',
+                  'Paid to date',
+                  'This payment',
+                  'Outstanding now',
+                ],
                 numericColumns: [1, 2, 3, 4],
                 columnWeights: [24, 19, 19, 19, 19],
                 rows: allocations.map((a) => [

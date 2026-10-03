@@ -140,7 +140,12 @@ describe('AccountingPeriodsService party control gate', () => {
     const prisma = periodPrisma();
     const audit = { log: jest.fn().mockResolvedValue(undefined) };
     const g = gate();
-    const service = new AccountingPeriodsService(prisma, audit as any, new CompanyScopeService(prisma), g as any);
+    const service = new AccountingPeriodsService(
+      prisma,
+      audit as any,
+      new CompanyScopeService(prisma),
+      g as any,
+    );
     await service.close('period-1', authUser(), { reason: 'Legacy lines await the backfill' });
     expect(g.checkOrRefuse).toHaveBeenCalledWith(
       'company-1',
@@ -153,7 +158,10 @@ describe('AccountingPeriodsService party control gate', () => {
       { companyId: 'company-1', accountingPeriodId: 'period-1', userId: 'period-user' },
       expect.objectContaining({ hasDifferences: true }),
     );
-    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({ where: { id: 'period-1' }, data: { status: 'CLOSED' } });
+    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({
+      where: { id: 'period-1' },
+      data: { status: 'CLOSED' },
+    });
     expect(audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'ACCOUNTING_PERIOD_CLOSE',
@@ -166,12 +174,20 @@ describe('AccountingPeriodsService party control gate', () => {
     const prisma = periodPrisma();
     const g = gate();
     g.checkOrRefuse.mockRejectedValue(new BadRequestException('differences'));
-    const service = new AccountingPeriodsService(prisma, { log: jest.fn() } as any, new CompanyScopeService(prisma), g as any);
+    const service = new AccountingPeriodsService(
+      prisma,
+      { log: jest.fn() } as any,
+      new CompanyScopeService(prisma),
+      g as any,
+    );
     await expect(service.close('period-1', authUser())).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.accountingPeriod.update).not.toHaveBeenCalled();
     const bare = makeService(prisma);
     await bare.close('period-1', authUser());
-    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({ where: { id: 'period-1' }, data: { status: 'CLOSED' } });
+    expect(prisma.accountingPeriod.update).toHaveBeenCalledWith({
+      where: { id: 'period-1' },
+      data: { status: 'CLOSED' },
+    });
     await service.partySnapshots('period-1', authUser());
     expect(g.snapshots).toHaveBeenCalledWith('period-1');
   });

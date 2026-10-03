@@ -24,7 +24,9 @@ const ENTITY_PARTY: Record<string, PartyLookup> = {
   CUSTOMER: async (_db, id) => ({ kind: 'customer', id }),
   PAYABLE: async (db, id) => ({
     kind: 'supplier',
-    id: (await db.payable.findFirst({ where: { id }, select: { supplierId: true } }))?.supplierId ?? null,
+    id:
+      (await db.payable.findFirst({ where: { id }, select: { supplierId: true } }))?.supplierId ??
+      null,
   }),
   SUPPLIERINVOICE: async (db, id) => ({
     kind: 'supplier',
@@ -46,13 +48,15 @@ const ENTITY_PARTY: Record<string, PartyLookup> = {
   }),
   EXPENSE: async (db, id) => ({
     kind: 'supplier',
-    id: (await db.expense.findFirst({ where: { id }, select: { supplierId: true } }))?.supplierId ?? null,
+    id:
+      (await db.expense.findFirst({ where: { id }, select: { supplierId: true } }))?.supplierId ??
+      null,
   }),
   RECEIVABLE: async (db, id) => ({
     kind: 'customer',
     id:
-      (await db.receivable.findFirst({ where: { id }, select: { customerId: true } }))?.customerId ??
-      null,
+      (await db.receivable.findFirst({ where: { id }, select: { customerId: true } }))
+        ?.customerId ?? null,
   }),
   CUSTOMERPAYMENT: async (db, id) => ({
     kind: 'customer',
@@ -63,18 +67,20 @@ const ENTITY_PARTY: Record<string, PartyLookup> = {
   SALESORDER: async (db, id) => ({
     kind: 'customer',
     id:
-      (await db.salesOrder.findFirst({ where: { id }, select: { customerId: true } }))?.customerId ??
-      null,
+      (await db.salesOrder.findFirst({ where: { id }, select: { customerId: true } }))
+        ?.customerId ?? null,
   }),
   CREDITNOTE: async (db, id) => ({
     kind: 'customer',
     id:
-      (await db.creditNote.findFirst({ where: { id }, select: { customerId: true } }))?.customerId ??
-      null,
+      (await db.creditNote.findFirst({ where: { id }, select: { customerId: true } }))
+        ?.customerId ?? null,
   }),
   REFUND: async (db, id) => ({
     kind: 'customer',
-    id: (await db.refund.findFirst({ where: { id }, select: { customerId: true } }))?.customerId ?? null,
+    id:
+      (await db.refund.findFirst({ where: { id }, select: { customerId: true } }))?.customerId ??
+      null,
   }),
 };
 

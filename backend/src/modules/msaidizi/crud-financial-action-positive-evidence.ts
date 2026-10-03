@@ -64,7 +64,11 @@ interface JournalLineSpec {
   divisionId?: CrudMutationEffectValue;
   branchId?: CrudMutationEffectValue;
   /** Party linkage (Phase 3): the party the line names; NONE unless the fixture binds one. */
-  party?: { partyType: CrudMutationEffectValue; supplierId: CrudMutationEffectValue; customerId: CrudMutationEffectValue };
+  party?: {
+    partyType: CrudMutationEffectValue;
+    supplierId: CrudMutationEffectValue;
+    customerId: CrudMutationEffectValue;
+  };
   recoveryOrder: number;
 }
 
@@ -216,7 +220,11 @@ function journalEffect(spec: JournalSpec): CrudMutationCompoundNamedEffect {
 }
 
 /** Party linkage (Phase 3): the party a journal line names; NONE unless the fixture binds one. */
-const NO_PARTY = { partyType: literal('NONE'), supplierId: literal(null), customerId: literal(null) };
+const NO_PARTY = {
+  partyType: literal('NONE'),
+  supplierId: literal(null),
+  customerId: literal(null),
+};
 const customerParty = (id: CrudMutationEffectValue) => ({
   partyType: literal('CUSTOMER'),
   supplierId: literal(null),
@@ -2733,7 +2741,9 @@ const definitions: readonly FixtureDefinition[] = [
           description: literal('Settle receivables: Fixture Customer'),
           debit: literal(0),
           credit: literal(AMOUNT),
-          party: customerParty(binding('financialPositiveCustomerPaymentCreate', ['customer', 'id'])),
+          party: customerParty(
+            binding('financialPositiveCustomerPaymentCreate', ['customer', 'id']),
+          ),
           recoveryOrder: 51,
         }),
         {
@@ -3009,7 +3019,9 @@ const definitions: readonly FixtureDefinition[] = [
           description: literal('Reversal: Settle receivables: Fixture Customer'),
           debit: literal(AMOUNT),
           credit: literal(0),
-          party: customerParty(binding('financialPositiveCustomerPaymentReverse', ['customer', 'id'])),
+          party: customerParty(
+            binding('financialPositiveCustomerPaymentReverse', ['customer', 'id']),
+          ),
           recoveryOrder: 61,
         }),
         {

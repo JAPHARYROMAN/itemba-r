@@ -1,9 +1,4 @@
-import {
-  PostingEngineService,
-  partyColumns,
-  partyOf,
-  partyOfLine,
-} from './posting-engine.service';
+import { PostingEngineService, partyColumns, partyOf, partyOfLine } from './posting-engine.service';
 
 /**
  * Party linkage, Phase 3 PR-1: the general ledger knows the party. A control line tagged
@@ -129,8 +124,17 @@ describe('Journal lines know the party', () => {
     });
     expect(partyOfLine({ partyType: 'NONE', supplierId: null, customerId: null })).toEqual({});
     // A corrupt pair (type without its id) never becomes a tagged reversal.
-    expect(partyOfLine({ partyType: 'SUPPLIER', supplierId: null, customerId: 'cus-1' })).toEqual({});
-    expect(partyColumns({ accountId: 'ap', debit: 0, credit: 1, ...partyOfLine({ partyType: 'SUPPLIER', supplierId: 'sup-1' }) } as any)).toEqual({
+    expect(partyOfLine({ partyType: 'SUPPLIER', supplierId: null, customerId: 'cus-1' })).toEqual(
+      {},
+    );
+    expect(
+      partyColumns({
+        accountId: 'ap',
+        debit: 0,
+        credit: 1,
+        ...partyOfLine({ partyType: 'SUPPLIER', supplierId: 'sup-1' }),
+      } as any),
+    ).toEqual({
       partyType: 'SUPPLIER',
       supplierId: 'sup-1',
       customerId: null,
