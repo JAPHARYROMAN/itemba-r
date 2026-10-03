@@ -18,6 +18,8 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 import { TaxTransactionsService } from './tax-transactions.service';
 import { CreateTaxTransactionDto } from './dto/create-tax-transaction.dto';
 import { UpdateTaxTransactionDto } from './dto/update-tax-transaction.dto';
+import { TaxByPartyQueryDto } from './dto/tax-by-party-query.dto';
+import { AgentExcluded } from '../../../common/decorators/agent-excluded.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('tax/transactions')
@@ -28,6 +30,15 @@ export class TaxTransactionsController {
   @RequirePermissions('tax_transactions.view')
   findAll(@CurrentUser() user: AuthUser, @Query() query: TaxTransactionsQueryDto) {
     return this.service.findAll(user, query);
+  }
+
+  // Party linkage (Phase 3): declared before ':id' so the literal path wins; agent-excluded
+  // until its Msaidizi evidence fixture is authored.
+  @Get('by-party')
+  @AgentExcluded()
+  @RequirePermissions('tax_transactions.view')
+  byParty(@Query() query: TaxByPartyQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.byParty(user, query);
   }
 
   @Get(':id')

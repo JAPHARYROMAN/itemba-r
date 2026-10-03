@@ -4987,6 +4987,7 @@ model Customer {
   recordEntries     RecordEntry[]
   journalEntryLines JournalEntryLine[]
   approvalRequests  ApprovalRequest[]
+  taxTransactions   TaxTransaction[]
   contracts         Contract[]
   creditProfiles     CustomerCreditProfile[]
   segmentMemberships CustomerSegmentMembership[]
@@ -5062,6 +5063,7 @@ model Supplier {
   cashDeskMovements  CashDeskMovement[]
   journalEntryLines  JournalEntryLine[]
   approvalRequests   ApprovalRequest[]
+  taxTransactions    TaxTransaction[]
   expenses           Expense[]
   recordEntries      RecordEntry[]
   recordBookExpenses RecordBookExpense[]
@@ -11590,8 +11592,18 @@ model TaxTransaction {
   taxRate   TaxRate? @relation(fields: [taxRateId], references: [id], onDelete: SetNull)
   createdBy User     @relation("TaxTransactionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   postedBy  User?    @relation("TaxTransactionPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  // Party linkage (Phase 3): the party behind the row and its tax identifiers as booked.
+  partyType  String    @default("NONE") @db.VarChar(10)
+  supplierId String?
+  customerId String?
+  partyTin   String?
+  partyVrn   String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@unique([companyId, taxTransactionNumber])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("tax_transactions")
 }
 
