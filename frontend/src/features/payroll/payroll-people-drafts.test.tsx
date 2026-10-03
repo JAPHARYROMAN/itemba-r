@@ -17,6 +17,12 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { PayrollDraftWorkspace } from './payroll-drafts';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -219,15 +225,19 @@ async function openAttendance(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Edit attendance' }));
   return within(await screen.findByRole('dialog', { name: 'Edit attendance' }));
 }
-async function choosePerson(
-  user: ReturnType<typeof userEvent.setup>,
-  form: ReturnType<typeof within>,
-) {
-  await waitFor(() => expect(form.getByLabelText(/^Company/)).toBeEnabled());
-  await user.selectOptions(form.getByLabelText(/^Company/), 'company');
-  await form.findByRole('option', { name: /Alex Example/ });
-  await waitFor(() => expect(form.getByLabelText(/^Employee/)).toBeEnabled());
-  await user.selectOptions(form.getByLabelText(/^Employee/), 'employee');
+// The select-field helpers scope by element; the tests hold the one open editor
+// dialog as `within` queries, so they reach it here.
+const openDialog = () => screen.getByRole('dialog');
+async function choosePerson(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() => expect(getSelectField('Company', openDialog())).toBeEnabled());
+  await chooseSelectOption('Company', 'company', user, openDialog());
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Employee', openDialog()))).toContainEqual(
+      expect.stringMatching(/Alex Example/),
+    ),
+  );
+  await waitFor(() => expect(getSelectField('Employee', openDialog())).toBeEnabled());
+  await chooseSelectOption('Employee', 'employee', user, openDialog());
 }
 
 describe('Payroll people workflow continuity', () => {
@@ -236,7 +246,7 @@ describe('Payroll people workflow continuity', () => {
     render(<App />);
     await user.click(screen.getByRole('button', { name: 'New contract' }));
     let form = within(await screen.findByRole('dialog', { name: 'New employment contract' }));
-    await choosePerson(user, form);
+    await choosePerson(user);
     await setDateField(/^Start date/, '2026-09-01', user, form);
     fireEvent.change(form.getByLabelText(/^Salary amount/), { target: { value: '500000' } });
     await user.type(form.getByLabelText('Additional terms'), 'Agreement to finish later');
@@ -363,8 +373,8 @@ describe('Payroll people workflow continuity', () => {
     render(<App initial="/hr/leave-requests" />);
     await user.click(screen.getByRole('button', { name: 'New request' }));
     let form = within(await screen.findByRole('dialog', { name: 'New leave request' }));
-    await choosePerson(user, form);
-    await user.selectOptions(form.getByLabelText(/^Leave type/), 'type');
+    await choosePerson(user);
+    await chooseSelectOption('Leave type', 'type', user, openDialog());
     await setDateField(/^Start date/, '2026-10-01', user, form);
     await setDateField(/^End date/, '2026-10-06', user, form);
     await user.type(form.getByLabelText('Reason'), 'Planned time away');
@@ -421,9 +431,9 @@ describe('Payroll people workflow continuity', () => {
       render(<App initial={'/hr/' + route} />);
       await user.click(screen.getByRole('button', { name: /^Filters/ }));
       await waitFor(() =>
-        expect(screen.getByRole('option', { name: 'Company A (A)' })).toBeInTheDocument(),
+        expect(selectFieldOptions(getSelectField('Company filter'))).toContain('Company A (A)'),
       );
-      await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+      await chooseSelectOption('Company filter', 'company', user);
       await user.click(await screen.findByRole('button', { name: 'Next', exact: true }));
       await waitFor(() =>
         expect(state.page).toHaveBeenCalledWith(
@@ -456,7 +466,7 @@ describe('Payroll people workflow continuity', () => {
       expect(calls.at(-1)?.[1].query.page).toBe(2);
       expect(calls.at(-1)?.[1].query.companyId).toBe('company');
       await user.click(screen.getByRole('button', { name: /^Filters/ }));
-      expect(screen.getByLabelText('Company filter')).toHaveValue('company');
+      expect(selectFieldValue(getSelectField('Company filter'))).toBe('company');
       state.emptyPage = true;
       await user.click(screen.getByRole('button', { name: 'Reload' }));
       await waitFor(() => {
@@ -472,9 +482,9 @@ describe('Payroll people workflow continuity', () => {
     render(<App initial="/hr/attendance" />);
     await user.click(screen.getByRole('button', { name: 'Log attendance' }));
     let form = within(await screen.findByRole('dialog', { name: 'Log attendance' }));
-    await choosePerson(user, form);
+    await choosePerson(user);
     await setDateField(/^Attendance date/, '2026-09-17', user, form);
-    await user.selectOptions(form.getByLabelText('Attendance status'), 'ABSENT');
+    await chooseSelectOption('Attendance status', 'ABSENT', user, openDialog());
     await user.type(form.getByLabelText('Notes'), 'Reported absence');
     await keep(user);
     await user.click(screen.getByRole('link', { name: 'Open home' }));
@@ -483,8 +493,8 @@ describe('Payroll people workflow continuity', () => {
     await waitFor(() =>
       expect(form.getByRole('button', { name: 'Save attendance' })).toBeEnabled(),
     );
-    expect(form.getByLabelText(/^Employee/)).toHaveValue('employee');
-    expect(form.getByLabelText('Attendance status')).toHaveValue('ABSENT');
+    expect(selectFieldValue(getSelectField('Employee', openDialog()))).toBe('employee');
+    expect(selectFieldValue(getSelectField('Attendance status', openDialog()))).toBe('ABSENT');
     expect(form.getByLabelText('Notes')).toHaveValue('Reported absence');
     expect(state.post).not.toHaveBeenCalled();
     await user.click(form.getByRole('button', { name: 'Save attendance' }));

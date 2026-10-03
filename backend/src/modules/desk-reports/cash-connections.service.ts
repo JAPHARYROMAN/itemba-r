@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOfLine } from '../accounting-engine/posting-engine.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { DeskReportQuery } from './desk-reports.dto';
 import { reportPeriod } from './desk-reports.domain';
@@ -20,6 +20,7 @@ import { DeskPostingSource, postingStatus } from './desk-posting.domain';
 
 const include = {
   payrollJournalEntry: { include: { lines: true } },
+  journalEntry: { include: { lines: true } },
   loanFinancialEvent: { include: { journalEntry: true } },
   entries: {
     orderBy: { accountId: 'asc' as const },
@@ -415,6 +416,20 @@ export class CashConnectionsService {
                 ? 'Posted'
                 : 'Needs review'
             : 'Needs review';
+      } else if (row.journalEntryId && !row.loanId) {
+        // Written by the cash book for an ERP payment, collection, expense or refund: the
+        // payment's own journal already explains it, so it is never offered for posting.
+        const j = row.journalEntry;
+        status =
+          j &&
+          !j.deletedAt &&
+          j.status === (row.reversedAt ? 'REVERSED' : 'POSTED') &&
+          j.totalDebit.eq(j.totalCredit) &&
+          j.totalDebit.gte(row.amount)
+            ? row.reversedAt
+              ? 'Reversed'
+              : 'Posted (ERP)'
+            : 'Needs review';
       } else if (linked.some((j) => j.referenceType === 'DeskIntercompany')) {
         const expected = row.reversedAt ? 'REVERSED' : 'POSTED';
         status =
@@ -467,6 +482,30 @@ export class CashConnectionsService {
       issues: string[] = [];
     const first = row.entries[0]?.account;
     if (!first) throw new BadRequestException('Movement has no cash entries.');
+    if (row.journalEntryId && !row.payrollRunId && !row.loanFinancialEvent)
+      return {
+        source,
+        fingerprint: cashFingerprint(source),
+        journals: row.journalEntry
+          ? [
+              {
+                id: row.journalEntry.id,
+                number: row.journalEntry.journalNumber,
+                status: row.journalEntry.status,
+              },
+            ]
+          : [],
+        issues: [
+          'This movement was posted by its payment. Nothing to post here; reverse the payment to undo it.',
+        ],
+        offsetId: null,
+        accounts: [],
+        cashAccounts: row.entries.map((e) => ({
+          id: e.account.erpCashAccount?.ledgerAccountId,
+          name: e.account.name,
+          amount: e.amount.toFixed(2),
+        })),
+      };
     if (
       row.payrollRunId ||
       row.loanFinancialEvent ||
@@ -769,6 +808,7 @@ export class CashConnectionsService {
         moduleName: 'CashDesk',
         lines: original.lines.map((l) => ({
           accountId: l.accountId,
+          ...partyOfLine(l),
           debit: l.credit,
           credit: l.debit,
         })),

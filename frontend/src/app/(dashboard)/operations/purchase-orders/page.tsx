@@ -443,8 +443,10 @@ function PurchaseOrderModal({
       setError('Branch/location is required');
       return;
     }
-    if (!form.supplierId && !form.supplierName.trim()) {
-      setError('Supplier or name required');
+    // Party linkage (Phase 2): a purchase order names a supplier from the directory, never a
+    // free-text name, so the order reaches the supplier's profile, balance and statement.
+    if (!form.supplierId) {
+      setError('Choose a supplier from the directory');
       return;
     }
     if (!form.lines.length) {
@@ -480,7 +482,6 @@ function PurchaseOrderModal({
         }),
       };
       if (form.supplierId) body.supplierId = form.supplierId;
-      if (form.supplierName) body.supplierName = form.supplierName;
       if (form.expectedDate) body.expectedDate = form.expectedDate;
       if (form.supplierInvoiceNumber.trim()) {
         body.supplierInvoiceNumber = form.supplierInvoiceNumber.trim();
@@ -640,6 +641,7 @@ function PurchaseOrderModal({
           <h3 className="workspace-form-heading">Supplier and delivery</h3>
           <SupplierPicker
             label="Supplier"
+            required
             value={form.supplierId}
             onChange={(supplierId) => setField('supplierId', supplierId)}
             companyId={form.companyId || undefined}
@@ -650,12 +652,6 @@ function PurchaseOrderModal({
                 : 'Select division first'
             }
             disabled={!form.divisionId}
-          />
-          <FormInput
-            label="Supplier Name"
-            value={form.supplierName}
-            onChange={(e) => setField('supplierName', e.target.value)}
-            placeholder="If no supplier selected"
           />
           <FormDateField
             label="Order Date"

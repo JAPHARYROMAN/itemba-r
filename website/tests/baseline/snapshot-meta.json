@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-09-26T20:35:55.219Z",
+  "baseUrl": "http://127.0.0.1:3190",
+  "label": "origin/main 6bbaf66e",
+  "note": "Built with next build in the pinned baseline worktree; standalone server started as in the Dockerfile runner stage (public + .next/static copied beside .next/standalone/server.js, NODE_ENV=production, PORT=3190, HOSTNAME=127.0.0.1). Standalone node_modules tracing could not recreate the node_modules junction (EPERM symlink), so server.js resolved modules from the parent website/node_modules (same install, next 15.5.26).",
+  "routeCount": 25,
+  "problems": []
+}

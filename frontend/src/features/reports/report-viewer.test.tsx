@@ -17,6 +17,13 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import type { CatalogEntry, SavedReportView } from './report-viewer-types';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import { DEFAULT_VALUATION, VALUATION_PRESETS } from '@/features/inventory/stock-valuation-format';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -31,6 +38,9 @@ const state = vi.hoisted(() => ({
   entries: [] as CatalogEntry[],
   views: [] as SavedReportView[],
   data: {} as unknown,
+}));
+vi.mock('@/hooks/use-document-letterhead', () => ({
+  useDocumentLetterhead: () => ({ groupName: 'ITEMBA GROUP' }),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -232,7 +242,7 @@ beforeEach(() => {
 });
 async function ready() {
   await screen.findByRole('button', { name: 'Run report' });
-  await screen.findByRole('option', { name: 'Company A' });
+  await waitFor(() => expect(selectFieldOptions(getSelectField('Company'))).toContain('Company A'));
 }
 async function run() {
   await ready();
@@ -252,6 +262,121 @@ async function newView() {
 }
 
 describe('Report library and viewer workspace', () => {
+  it('retains the chosen export format without refetching history on each stock filter change and cancels old exports', async () => {
+    state.entries = [makeEntry('ops.stock-valuation')];
+    state.data = [{ product: 'Water', category: 'Drinks', quantityOnHand: 12, totalValue: 100 }];
+    render(<App initial="/reports/run?reportId=ops.stock-valuation" />);
+    await run();
+    let resolve!: () => void;
+    state.binary.mockImplementationOnce(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    changeSelectField('Export format', 'xlsx');
+    fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
+    await waitFor(() => expect(state.binary).toHaveBeenCalled());
+    const signal = state.binary.mock.calls[0][3] as AbortSignal;
+    const reads = state.get.mock.calls.filter(([path]) => path.includes('/export-audit/')).length;
+    changeSelectField('Column layout', 'compact');
+    fireEvent.change(screen.getByLabelText('Find product'), { target: { value: 'Water' } });
+    expect(signal.aborted).toBe(true);
+    expect(selectFieldValue(getSelectField('Export format'))).toBe('xlsx');
+    await act(async () => resolve());
+    expect(state.get.mock.calls.filter(([path]) => path.includes('/export-audit/'))).toHaveLength(
+      reads,
+    );
+    expect(state.post.mock.calls.some(([path]) => path === '/reports/export-audit')).toBe(false);
+  });
+  it('uses a saved stock format for the preview, every export and the audit without altering the source run', async () => {
+    state.entries = [{ ...makeEntry('ops.stock-valuation'), category: 'Inventory' }];
+    state.data = Array.from({ length: 24 }, (_, index) => ({
+      productCode: `P-${index}`,
+      product: `Stock ${index}`,
+      category: index === 23 ? 'Food' : 'Drinks',
+      branch: 'Main',
+      quantityOnHand: 12.0001,
+      totalValue: 1200.25,
+      averageCost: 100,
+      stockStatus: 'OK',
+      unit: 'btl',
+    }));
+    state.views = [
+      {
+        ...makeView(),
+        name: 'Compact drinks',
+        reportDefinitionId: 'ops.stock-valuation',
+        chartConfig: {
+          stockValuation: {
+            ...DEFAULT_VALUATION,
+            columns: VALUATION_PRESETS.compact,
+            category: 'Drinks',
+          },
+        },
+      },
+    ];
+    render(<App initial="/reports/run?reportId=ops.stock-valuation&dateFrom=2026-01-01" />);
+    await ready();
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply Compact drinks' }));
+    expect(screen.queryByLabelText('Date from')).toBeNull();
+    await run();
+    expect(selectFieldValue(getSelectField('Category filter'))).toBe('Drinks');
+    expect(screen.queryByRole('columnheader', { name: 'Category' })).toBeNull();
+    expect(screen.queryByRole('cell', { name: 'Stock 23', exact: true })).toBeNull();
+    expect(screen.queryByRole('cell', { name: 'Stock 22', exact: true })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
+    await waitFor(() => expect(state.pdf).toHaveBeenCalled());
+    expect(state.pdf.mock.calls[0][0].rows).toHaveLength(23);
+    expect(state.pdf.mock.calls[0][0].columns).not.toContain('Category');
+    await screen.findByText('Report export prepared. Export activity recorded.');
+    const audit = state.post.mock.calls.find(([path]) => path === '/reports/export-audit')![1];
+    expect(audit.rowCount).toBe(23);
+    expect(audit.dataHash).not.toBe('manifest');
+    expect(audit.parameters.sourceManifestHash).toBe('manifest');
+    expect(audit.parameters.stockValuation.columns).not.toContain('category');
+    for (const format of ['xlsx', 'docx', 'txt', 'csv', 'json']) {
+      state.post.mockClear();
+      changeSelectField('Export format', format);
+      fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
+      await waitFor(() =>
+        expect(state.post).toHaveBeenCalledWith(
+          '/reports/export-audit',
+          expect.anything(),
+          expect.anything(),
+        ),
+      );
+    }
+    for (const [, body] of state.binary.mock.calls) {
+      expect(body.columns).not.toContain('Category');
+      expect(body.rows).toHaveLength(23);
+    }
+    expect(state.download.mock.calls.find(([name]) => name.endsWith('.csv'))![2]).toContain(
+      'Stock 22',
+    );
+    const json = JSON.parse(state.download.mock.calls.find(([name]) => name.endsWith('.json'))![2]);
+    expect(json).toHaveLength(23);
+    expect(json[0]).not.toHaveProperty('Category');
+    expect(state.data).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Print stock valuation' }));
+    await waitFor(() => expect(state.print).toHaveBeenCalled());
+    await newView();
+    await acknowledge();
+    fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith(
+        '/bi/saved-report-views',
+        expect.objectContaining({
+          chartConfig: expect.objectContaining({
+            stockValuation: expect.objectContaining({
+              category: 'Drinks',
+              columns: VALUATION_PRESETS.compact,
+            }),
+          }),
+        }),
+      ),
+    );
+  });
   it('retains library search and selection through local report navigation', async () => {
     render(<App initial="/reports/library" />);
     fireEvent.change(await screen.findByRole('textbox', { name: 'Find a report' }), {
@@ -300,9 +425,7 @@ describe('Report library and viewer workspace', () => {
     render(<App />);
     await ready();
     await setDateField('Date from', '2026-09-01');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Division' }), {
-      target: { value: 'division' },
-    });
+    changeSelectField('Division', 'division');
     await run();
     expect(state.get).toHaveBeenCalledWith(
       '/source/company',
@@ -332,9 +455,7 @@ describe('Report library and viewer workspace', () => {
   it('invalidates results and exports immediately when scope changes', async () => {
     render(<App />);
     await run();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Company' }), {
-      target: { value: 'second' },
-    });
+    changeSelectField('Company', 'second');
     expect(screen.queryByText('Customer 1')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export report' })).not.toBeInTheDocument();
     expect(screen.getByText(/Filters changed/)).toBeInTheDocument();
@@ -357,9 +478,7 @@ describe('Report library and viewer workspace', () => {
     fireEvent.click(button);
     fireEvent.click(button);
     expect(state.get.mock.calls.filter(([path]) => path.startsWith('/source/'))).toHaveLength(1);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Company' }), {
-      target: { value: 'second' },
-    });
+    changeSelectField('Company', 'second');
     expect(signal.aborted).toBe(true);
     await act(async () => resolve({ rows: [{ customer: 'Old scope response' }] }));
     expect(screen.queryByText('Old scope response')).not.toBeInTheDocument();
@@ -426,9 +545,7 @@ describe('Report library and viewer workspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Search result rows' }), {
       target: { value: 'Customer 75' },
     });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Export format' }), {
-      target: { value: 'csv' },
-    });
+    changeSelectField('Export format', 'csv');
     fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
     await screen.findByText('Report export prepared. Export activity recorded.');
     expect(state.download).toHaveBeenCalledWith(
@@ -453,9 +570,7 @@ describe('Report library and viewer workspace', () => {
     async (format) => {
       render(<App />);
       await run();
-      fireEvent.change(screen.getByRole('combobox', { name: 'Export format' }), {
-        target: { value: format },
-      });
+      changeSelectField('Export format', format);
       fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
       await screen.findByText('Report export prepared. Export activity recorded.');
       if (format === 'pdf')
@@ -634,10 +749,12 @@ describe('Report library and viewer workspace', () => {
     });
     render(<App />);
     await screen.findByText(/Directory page unavailable/);
-    expect(screen.queryByRole('option', { name: 'Company 199' })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Company'))).not.toContain('Company 199');
     fail = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry organisation choices' }));
-    await screen.findByRole('option', { name: 'Last company' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Last company'),
+    );
   });
   it('applies a default only when there are no supplied or retained choices', async () => {
     state.views = [{ ...makeView(), isDefault: true }];
@@ -685,9 +802,7 @@ describe('Report library and viewer workspace', () => {
     await screen.findByText(/Document exports support up to 5,000 rows/);
     expect(state.pdf).not.toHaveBeenCalled();
     expect(state.post).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Export format' }), {
-      target: { value: 'csv' },
-    });
+    changeSelectField('Export format', 'csv');
     fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
     await screen.findByText('Report export prepared. Export activity recorded.');
     expect(state.download.mock.calls[0][2]).toContain('Row 5000,5000');
@@ -698,9 +813,7 @@ describe('Report library and viewer workspace', () => {
     };
     render(<App />);
     await run();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Result presentation' }), {
-      target: { value: 'chart' },
-    });
+    changeSelectField('Result presentation', 'chart');
     await screen.findByText(
       'Chart samples 200 of 251 matching values, including the first and last.',
     );

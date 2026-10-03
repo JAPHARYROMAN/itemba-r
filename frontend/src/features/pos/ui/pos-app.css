@@ -11,17 +11,17 @@
  * a person. Money is tabular and the largest type on screen.
  */
 .pos-app {
-  --pos-bg: #f6f7fa;
-  --pos-bg-subtle: #f1f3f7;
-  --pos-card: #ffffff;
-  --pos-line: #e4e8ee;
-  --pos-line-strong: #cbd3df;
-  --pos-ink: #263143;
-  --pos-ink-2: #657185;
-  --pos-primary: #3268ca;
-  --pos-primary-ink: #ffffff;
-  --pos-primary-subtle: #edf3ff;
-  --pos-primary-text: #2556a8;
+  --pos-bg: var(--aurora-bg, #f6f7fa);
+  --pos-bg-subtle: var(--aurora-bg-subtle, #f1f3f7);
+  --pos-card: var(--aurora-card, #ffffff);
+  --pos-line: var(--aurora-border, #e4e8ee);
+  --pos-line-strong: var(--aurora-border-strong, #cbd3df);
+  --pos-ink: var(--aurora-text, #263143);
+  --pos-ink-2: var(--aurora-text-secondary, #657185);
+  --pos-primary: var(--aurora-primary, #3268ca);
+  --pos-primary-ink: var(--desktop-accent-ink, #ffffff);
+  --pos-primary-subtle: var(--aurora-primary-subtle, #edf3ff);
+  --pos-primary-text: var(--aurora-primary-text, #2556a8);
   --pos-ok-bg: #d1fae5;
   --pos-ok-dot: #10b981;
   --pos-ok-text: #064e3b;
@@ -42,18 +42,278 @@
   font-family: Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* OS identity stays on chrome; business content remains opaque and crisp. */
+.pos-app-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--pos-primary-ink);
+  background: var(--pos-primary);
+  border-radius: 13px;
+}
+.pos-workspace-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--pos-line);
+  background: var(--pos-card);
+  overflow-x: auto;
+  max-width: 100%;
+}
+.pos-workspace-tabs button,
+.pos-tab-current {
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--pos-ink-2);
+  font-weight: 600;
+  font-size: 13px;
+}
+.pos-workspace-tabs button {
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.pos-workspace-tabs [aria-current='page'] {
+  color: var(--pos-primary-text);
+  background: var(--pos-primary-subtle);
+}
+.pos-terminal-label {
+  margin-left: auto;
+  color: var(--pos-ink-2);
+  font-size: 12px;
+}
+.pos-tab-count {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--pos-warn-bg);
+  color: var(--pos-warn-text);
+}
+.pos-control-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--pos-line);
+  color: var(--pos-ink-2);
+  background: var(--pos-card);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.pos-control-strip > span:first-child {
+  flex: 1;
+  min-width: 120px;
+}
+.pos-control-strip .pos-btn {
+  min-height: 36px;
+}
+.pos-full.pos-records {
+  width: 100%;
+  max-width: 1300px;
+  margin-inline: auto;
+}
+.pos-record-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 220px);
+  gap: 14px;
+}
+.pos-record-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.pos-record-grid > .pos-panel {
+  overflow: hidden;
+}
+.pos-record-row {
+  width: 100%;
+  min-height: 76px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--pos-line);
+  background: var(--pos-card);
+  color: var(--pos-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.pos-record-row[aria-pressed='true'] {
+  background: var(--pos-primary-subtle);
+  box-shadow: inset 3px 0 var(--pos-primary);
+}
+.pos-record-row span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pos-record-row span:last-child {
+  text-align: right;
+  flex-shrink: 0;
+}
+.pos-record-row small {
+  color: var(--pos-ink-2);
+  overflow-wrap: anywhere;
+}
+.pos-record-detail {
+  padding: 20px;
+  align-self: start;
+}
+.pos-record-detail h3,
+.pos-held-card h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.pos-held-card {
+  padding: 18px;
+  gap: 12px;
+}
+.pos-held-card .pos-panel-head {
+  padding: 0 0 12px;
+  justify-content: space-between;
+}
+.pos-hold-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: var(--pos-bg-subtle);
+  border-bottom: 1px solid var(--pos-line);
+}
+.pos-hold-form textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+@container pos (min-width: 900px) {
+  .pos-record-grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  }
+}
+@container pos (max-width: 500px) {
+  .pos-terminal-label {
+    display: none;
+  }
+  .pos-record-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pos-records > .pos-panel-head {
+    padding-inline: 0;
+    flex-wrap: wrap;
+  }
+}
+.pos-receipt-preview {
+  width: min(100%, 620px);
+  margin: 0 auto;
+  padding: 20px;
+  border: 1px solid var(--pos-line);
+  border-radius: 20px;
+  background: var(--pos-card);
+}
+.pos-receipt-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 12px;
+}
+.pos-receipt-preview .pos-receipt-line,
+.pos-record-detail .pos-receipt-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-top: 1px solid var(--pos-line);
+  font-size: 14px;
+}
+.pos-receipt-preview .pos-receipt-line strong,
+.pos-record-detail .pos-receipt-line strong {
+  flex-shrink: 0;
+}
+.pos-recovery {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.pos-recovery-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  width: min(100%, 600px);
+  padding: clamp(24px, 4vw, 48px);
+  background: var(--pos-card);
+  border: 1px solid var(--pos-line);
+  border-radius: 24px;
+  box-shadow: 0 12px 40px rgb(20 35 55 / 5%);
+}
+.pos-recovery-card h1 {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.2;
+}
+.pos-recovery-card p {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--pos-ink-2);
+}
+.pos-recovery-total {
+  font-size: 32px;
+}
+.pos-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--pos-ink-2);
+}
+@container pos (max-width: 639px) {
+  .pos-terminal-label {
+    display: none;
+  }
+  .pos-workspace-tabs {
+    padding: 6px 12px;
+  }
+  .pos-workspace-tabs button {
+    min-height: 48px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pos-app *,
+  .pos-app *::before,
+  .pos-app *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+html[data-motion='reduced'] .pos-app * {
+  animation: none !important;
+  transition: none !important;
+}
 .dark .pos-app {
-  --pos-bg: #19202c;
-  --pos-bg-subtle: #242d3c;
-  --pos-card: #202837;
-  --pos-line: #354054;
-  --pos-line-strong: #536079;
-  --pos-ink: #ecf0f8;
-  --pos-ink-2: #b0bdd2;
-  --pos-primary: #8bb6ff;
-  --pos-primary-ink: #0f1a2e;
-  --pos-primary-subtle: #2b3c58;
-  --pos-primary-text: #b4ceff;
+  --pos-bg: var(--aurora-bg, #19202c);
+  --pos-bg-subtle: var(--aurora-bg-subtle, #242d3c);
+  --pos-card: var(--aurora-card, #202837);
+  --pos-line: var(--aurora-border, #354054);
+  --pos-line-strong: var(--aurora-border-strong, #536079);
+  --pos-ink: var(--aurora-text, #ecf0f8);
+  --pos-ink-2: var(--aurora-text-secondary, #b0bdd2);
+  --pos-primary: var(--aurora-primary, #8bb6ff);
+  --pos-primary-ink: var(--desktop-accent-ink, #ffffff);
+  --pos-primary-subtle: var(--aurora-primary-subtle, #2b3c58);
+  --pos-primary-text: var(--aurora-primary-text, #b4ceff);
   --pos-ok-bg: #064e3b;
   --pos-ok-text: #6ee7b7;
   --pos-warn-bg: #451a03;
@@ -648,6 +908,175 @@ button.pos-chip {
   margin: 0 auto;
   padding: 16px;
 }
+
+/* Native stock workflows use opaque business surfaces and window width. */
+.pos-operations[hidden],
+.pos-operations [hidden] {
+  display: none !important;
+}
+.pos-operation-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--pos-line);
+  background: var(--pos-card);
+}
+.pos-operation-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  color: var(--pos-ink-2);
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pos-operation-tabs [aria-current='page'] {
+  background: var(--pos-primary-subtle);
+  color: var(--pos-primary-text);
+}
+.pos-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pos-section-head h1 {
+  margin: 0;
+  font-size: clamp(23px, 2vw, 30px);
+  letter-spacing: -0.035em;
+}
+.pos-operation-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.pos-operation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.pos-operation-grid > * {
+  min-width: 0;
+}
+.pos-operation-actions {
+  padding: 16px 0;
+}
+.pos-product-results {
+  max-height: 380px;
+  overflow-y: auto;
+}
+.pos-delivery-line {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--pos-line);
+}
+.pos-count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  gap: 12px;
+  border-bottom: 1px solid var(--pos-line);
+}
+.pos-count-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pos-count-row small {
+  color: var(--pos-ink-2);
+}
+.pos-count-row .pos-field {
+  width: 140px;
+  flex-shrink: 0;
+}
+.pos-definition {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pos-definition > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--pos-line);
+  padding-bottom: 12px;
+}
+.pos-definition dt {
+  color: var(--pos-ink-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pos-definition dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pos-report-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.pos-report-metrics > div {
+  padding: 20px;
+  border: 1px solid var(--pos-line);
+  border-radius: 16px;
+  background: var(--pos-card);
+}
+.pos-report-metrics dt,
+.pos-report-metrics small {
+  color: var(--pos-ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pos-report-metrics dd {
+  margin: 10px 0;
+  font-size: 26px;
+  letter-spacing: -0.04em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.pos-operation-dialog {
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  width: 100%;
+  padding: 24px;
+  border: 1px solid var(--pos-line);
+  border-radius: 20px;
+  background: var(--pos-card);
+  color: var(--pos-ink);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 25%);
+  overflow: auto;
+}
+.pos-operation-dialog::backdrop {
+  background: var(--pos-scrim);
+}
+.pos-operation-dialog h2 {
+  margin-top: 0;
+  letter-spacing: -0.025em;
+}
+.pos-operation-dialog ul {
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.pos-operation-dialog .pos-actions {
+  margin-top: 20px;
+}
+@container pos (min-width:760px) {
+  .pos-operation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .pos-done {
   display: flex;
   flex-direction: column;
@@ -1190,4 +1619,28 @@ html.dark .pos-shell[data-pos-skin='os'] {
   html .pos-shell[data-pos-skin='os'] .max-w-md {
     max-width: 48rem;
   }
+}
+
+.pos-split {
+  border: 1px solid var(--pos-line);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 12px 0;
+}
+.pos-split .pos-field,
+.pos-action-form .pos-field {
+  margin: 12px 0;
+}
+.pos-lifecycle {
+  background: var(--pos-card);
+  border: 1px solid var(--pos-line);
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 16px;
+}
+.pos-lifecycle h3 {
+  margin: 0 0 12px;
+}
+.pos-action-form {
+  max-width: 680px;
 }

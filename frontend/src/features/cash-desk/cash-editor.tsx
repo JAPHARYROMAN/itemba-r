@@ -1,6 +1,17 @@
 'use client';
 import { useId, useRef, useState } from 'react';
-import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal } from '@/components/ui';
+import {
+  Btn,
+  CustomerPicker,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  SelectField,
+  FormTextarea,
+  Modal,
+  SupplierPicker,
+} from '@/components/ui';
+import { useAuth } from '@/hooks/use-auth';
 import { DraftFormNotice, useWorkspaceDraftForm } from '@/components/workspace/workspace-drafts';
 import { useLoanOptions, LoanLedgerChoice } from '@/features/loans/loan-finance';
 import { backendPost } from '@/lib/api-client';
@@ -32,6 +43,7 @@ export function CashEditor({
 }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const { hasPermission } = useAuth();
   const draft = useWorkspaceDraftForm(
     {
       ...scope,
@@ -58,6 +70,8 @@ export function CashEditor({
       expenseCategory: '',
       payee: '',
       expenseNotes: '',
+      supplierId: '',
+      customerId: '',
       reason: '',
       principal: '',
       interest: '0',
@@ -231,6 +245,10 @@ export function CashEditor({
                 expenseNotes: form.expenseNotes,
               }
             : {}),
+          // Party linkage (Phase 2): the picked party rides with the movement; the payee
+          // and description stay the typed snapshot.
+          ...(form.kind === 'EXPENSE' && form.supplierId ? { supplierId: form.supplierId } : {}),
+          ...(form.kind === 'OTHER_IN' && form.customerId ? { customerId: form.customerId } : {}),
         });
       }
       draft.markSaved();
@@ -304,31 +322,31 @@ export function CashEditor({
         )}
         {editor.kind === 'account' ? (
           <>
-            <FormSelect
+            <SelectField
               label="Company"
               required
               value={form.companyId}
-              onChange={(e) => set('companyId', e.target.value)}
+              onChange={(value) => set('companyId', value)}
               options={choices(directory.companies, 'Choose company')}
             />
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Division"
                 required
                 disabled={!form.companyId}
                 value={form.divisionId}
-                onChange={(e) => set('divisionId', e.target.value)}
+                onChange={(value) => set('divisionId', value)}
                 options={choices(
                   directory.divisions.filter((d) => d.companyId === form.companyId),
                   'Choose division',
                 )}
               />
-              <FormSelect
+              <SelectField
                 label="Branch"
                 required
                 disabled={!form.divisionId}
                 value={form.branchId}
-                onChange={(e) => set('branchId', e.target.value)}
+                onChange={(value) => set('branchId', value)}
                 options={choices(
                   directory.branches.filter((b) => b.divisionId === form.divisionId),
                   'Choose branch',
@@ -344,20 +362,20 @@ export function CashEditor({
               onChange={(e) => set('name', e.target.value)}
             />
             <div className="desk-form-pair">
-              <FormSelect
+              <SelectField
                 label="Account type"
                 value={form.accountKind}
-                onChange={(e) => set('accountKind', e.target.value)}
+                onChange={(value) => set('accountKind', value)}
                 options={[
                   { value: 'CASH', label: 'Cash' },
                   { value: 'BANK', label: 'Bank' },
                   { value: 'MOBILE_MONEY', label: 'Mobile money' },
                 ]}
               />
-              <FormSelect
+              <SelectField
                 label="Currency"
                 value={form.currency}
-                onChange={(e) => set('currency', e.target.value)}
+                onChange={(value) => set('currency', value)}
                 options={['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP'].map((value) => ({
                   value,
                   label: value,
@@ -405,15 +423,17 @@ export function CashEditor({
               </p>
             )}
             {!editor.loan && !editor.invoice && (
-              <FormSelect
+              <SelectField
                 label="Movement type"
                 value={form.kind}
-                onChange={(e) => {
+                onChange={(value) => {
                   setForm((f) => ({
                     ...f,
-                    kind: e.target.value,
+                    kind: value,
                     targetAccountId: '',
                     dueDate: '',
+                    supplierId: '',
+                    customerId: '',
                   }));
                 }}
                 options={['DAILY_SALES', 'OTHER_IN', 'EXPENSE', 'TRANSFER', 'LOAN'].map(
@@ -421,7 +441,7 @@ export function CashEditor({
                 )}
               />
             )}
-            <FormSelect
+            <SelectField
               label={
                 ['DAILY_SALES', 'OTHER_IN'].includes(form.kind)
                   ? 'Receiving account'
@@ -430,16 +450,16 @@ export function CashEditor({
               required
               disabled={!!editor.loan}
               value={form.accountId}
-              onChange={(e) => set('accountId', e.target.value)}
+              onChange={(value) => set('accountId', value)}
               options={accountChoices(eligible)}
             />
             {two && (
-              <FormSelect
+              <SelectField
                 label={form.kind === 'LOAN' ? 'Borrower account' : 'Receiving account'}
                 required
                 disabled={!!editor.loan || !account}
                 value={form.targetAccountId}
-                onChange={(e) => set('targetAccountId', e.target.value)}
+                onChange={(value) => set('targetAccountId', value)}
                 options={accountChoices(targets)}
               />
             )}
@@ -545,11 +565,11 @@ export function CashEditor({
             )}
             {form.kind === 'EXPENSE' && (
               <>
-                <FormSelect
+                <SelectField
                   label="Expense category"
                   required
                   value={form.expenseCategory}
-                  onChange={(e) => set('expenseCategory', e.target.value)}
+                  onChange={(value) => set('expenseCategory', value)}
                   options={[
                     { value: '', label: 'Choose category' },
                     ...Object.entries(expenseCategories).map(([value, label]) => ({
@@ -558,6 +578,26 @@ export function CashEditor({
                     })),
                   ]}
                 />
+                {hasPermission('suppliers.view') && (
+                  <SupplierPicker
+                    label="Supplier (optional)"
+                    value={form.supplierId}
+                    onChange={(supplierId, party) =>
+                      setForm((f) => ({
+                        ...f,
+                        supplierId,
+                        payee: party && !f.payee.trim() ? party.name : f.payee,
+                      }))
+                    }
+                    companyId={account?.companyId || scope.companyId || undefined}
+                    placeholder={
+                      account
+                        ? 'Link this expense to a supplier profile'
+                        : 'Choose the account first'
+                    }
+                    disabled={!account}
+                  />
+                )}
                 <FormInput
                   label="Paid to"
                   placeholder="Person or business paid"
@@ -567,6 +607,18 @@ export function CashEditor({
                   onChange={(e) => set('payee', e.target.value)}
                 />
               </>
+            )}
+            {form.kind === 'OTHER_IN' && hasPermission('customers.view') && (
+              <CustomerPicker
+                label="Customer (optional)"
+                value={form.customerId}
+                onChange={(customerId) => set('customerId', customerId)}
+                companyId={account?.companyId || scope.companyId || undefined}
+                placeholder={
+                  account ? 'Link this money to a customer profile' : 'Choose the account first'
+                }
+                disabled={!account}
+              />
             )}
             <FormInput
               label="Description"

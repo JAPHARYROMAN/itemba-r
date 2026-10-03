@@ -8,6 +8,12 @@ import { DisputeDetailWorkspace } from './dispute-detail';
 import type { DisputeRecord } from './dispute-types';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   page: vi.fn(),
@@ -165,8 +171,10 @@ describe('Dispute workspaces', () => {
         expect.objectContaining({ query: expect.objectContaining({ page: 2 }) }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await userEvent.selectOptions(screen.getByLabelText('Status filter'), 'CMA_REFERRED');
+    // The filters sit in the collapsed Filters panel; role queries only reach them once shown.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    await chooseSelectOption('Company filter', 'company');
+    await chooseSelectOption('Status filter', 'CMA_REFERRED');
     await userEvent.type(
       screen.getByPlaceholderText('Search dispute, employee or summary…'),
       ' Alex ',
@@ -191,23 +199,19 @@ describe('Dispute workspaces', () => {
     await userEvent.click(screen.getByRole('button', { name: 'New dispute' }));
     const dialog = screen.getByRole('dialog', { name: 'New dispute' });
     await waitFor(() =>
-      expect(
-        within(dialog)
-          .getByLabelText(/Company/)
-          .querySelector('option[value="company"]'),
-      ).toBeTruthy(),
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
     );
     state.failEmployees = true;
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Company/), 'company');
+    await chooseSelectOption('Company', 'company', userEvent, dialog);
     expect(await screen.findByText('Employees unavailable')).toBeInTheDocument();
     state.failEmployees = false;
     await userEvent.click(screen.getByRole('button', { name: 'Retry employees' }));
-    await waitFor(() => expect(within(dialog).getByLabelText(/Employee/)).toBeEnabled());
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee/), 'employee');
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Company/), 'other');
-    expect(within(dialog).getByLabelText(/Employee/)).toHaveValue('');
-    await waitFor(() => expect(within(dialog).getByLabelText(/Employee/)).toBeEnabled());
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee/), 'employee');
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
+    await chooseSelectOption('Company', 'other', userEvent, dialog);
+    expect(selectFieldValue(getSelectField('Employee', dialog))).toBe('');
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
     await setDateField(/Raised on/, '2026-09-01', userEvent, dialog);
     await userEvent.type(within(dialog).getByLabelText('Summary *'), ' Synthetic issue ');
     state.post.mockRejectedValueOnce(new Error('Save unavailable'));

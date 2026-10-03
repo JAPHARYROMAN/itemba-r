@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DepartmentsPage from '@/app/(dashboard)/hr/departments/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
+import { chooseSelectOption } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -76,7 +77,7 @@ describe('Departments workspace', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: /Filters/ }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company-a');
+    await chooseSelectOption('Company filter', 'company-a', user);
     await user.type(screen.getByRole('searchbox'), 'Ops');
     await waitFor(() =>
       expect(state.page).toHaveBeenLastCalledWith(
@@ -104,10 +105,11 @@ describe('Departments workspace', () => {
     mount();
     await user.click(await screen.findByRole('button', { name: 'Inspect Operations' }));
     await user.click(screen.getByRole('button', { name: 'Edit department' }));
-    const editor = within(await screen.findByRole('dialog', { name: 'Edit department' }));
+    const editorDialog = await screen.findByRole('dialog', { name: 'Edit department' });
+    const editor = within(editorDialog);
     await user.clear(editor.getByLabelText(/Name/));
     await user.type(editor.getByLabelText(/Name/), 'Operations draft');
-    await user.selectOptions(editor.getByLabelText('Division'), '');
+    await chooseSelectOption('Division', '', user, editorDialog);
     state.put.mockRejectedValueOnce(new Error('Save unavailable'));
     await user.click(editor.getByRole('button', { name: 'Save department' }));
     expect(await editor.findByRole('alert')).toHaveTextContent('Save unavailable');

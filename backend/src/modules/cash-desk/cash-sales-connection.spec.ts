@@ -106,7 +106,13 @@ describe('Sales Desk → Cash Desk live projection', () => {
     const { service } = fixture();
     const result = await service.read(user, { page: 1, date: '2026-09-26' });
     expect(result.currencies).toEqual([
-      { currency: 'TZS', balance: '500.00', outstanding: '170.00', received: '130.00' },
+      {
+        currency: 'TZS',
+        balance: '500.00',
+        outstanding: '170.00',
+        received: '130.00',
+        notebook: null,
+      },
     ]);
     expect(result.outstanding.rows[0]).toMatchObject({
       saleId: 'credit',
@@ -181,5 +187,88 @@ describe('Sales Desk → Cash Desk live projection', () => {
     const result = await service.read(user, { page: 1, search: 'no match' });
     expect(result.outstanding).toEqual({ rows: [], total: 0 });
     expect(result.currencies[0].outstanding).toBe('170.00');
+  });
+  it('lists Sales Desk direct sales and linked NoteBook debtors by source, counting only the sale in what customers owe', async () => {
+    const { db, service } = fixture();
+    (db as any).salesDeskSale = {
+      fields: { totalAmount: { name: 'totalAmount' } },
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'desk-sale',
+          saleNumber: 'SD-1',
+          companyId: 'c',
+          divisionId: 'd',
+          branchId: 'b',
+          currency: 'TZS',
+          totalAmount: D(40),
+          paidAmount: D(10),
+          dueDate: new Date('2026-09-20'),
+          customer: { name: 'Desk customer', canonicalCustomerId: 'cus-1' },
+          branch: { name: 'Branch' },
+        },
+      ]),
+    };
+    (db as any).recordEntry = {
+      fields: { amount: { name: 'amount' } },
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'note',
+          title: 'Credit lunch',
+          counterparty: 'Walk-in',
+          reference: 'NB-1',
+          companyId: 'c',
+          divisionId: 'd',
+          branchId: 'b',
+          currency: 'TZS',
+          amount: D(25),
+          settledAmount: D(5),
+          dueDate: null,
+          customerId: 'cus-1',
+          customer: { name: 'Desk customer' },
+          branch: { name: 'Branch' },
+        },
+      ]),
+    };
+    const result = await service.read(
+      { ...user, permissions: [...permissions, 'sales_desk.view', 'records.view'] },
+      { page: 1 },
+    );
+    expect(result.outstanding.rows.map((r) => [r.source, r.id, r.customerId])).toEqual([
+      ['SALES_DESK', 'desk-sale', 'cus-1'],
+      ['NOTEBOOK', 'note', 'cus-1'],
+      ['RECEIVABLE', 'r', null],
+    ]);
+    expect(result.outstanding.rows[0]).toMatchObject({
+      deskSaleId: 'desk-sale',
+      saleNumber: 'SD-1',
+    });
+    expect(result.outstanding.rows[0].outstandingAmount.toFixed(2)).toBe('30.00');
+    expect(result.outstanding.rows[1]).toMatchObject({
+      recordId: 'note',
+      receivableNumber: 'NB-1',
+    });
+    expect(result.currencies[0]).toMatchObject({ outstanding: '200.00', notebook: '20.00' });
+    const deskWhere = (db as any).salesDeskSale.findMany.mock.calls[0][0].where;
+    expect(deskWhere).toMatchObject({
+      voidedAt: null,
+      canonicalSalesOrderId: null,
+      customer: { canonicalCustomerId: { not: null } },
+    });
+    expect(deskWhere.AND).toContainEqual({ companyId: 'c' });
+    expect((db as any).recordEntry.findMany.mock.calls[0][0].where).toMatchObject({
+      kind: 'DEBTOR',
+      voidedAt: null,
+      customerId: { not: null },
+    });
+  });
+  it('does not read Sales Desk sales or NoteBook records without their own permissions', async () => {
+    const { db, service } = fixture();
+    (db as any).salesDeskSale = { findMany: jest.fn() };
+    (db as any).recordEntry = { findMany: jest.fn() };
+    const result = await service.read(user, { page: 1 });
+    expect((db as any).salesDeskSale.findMany).not.toHaveBeenCalled();
+    expect((db as any).recordEntry.findMany).not.toHaveBeenCalled();
+    expect(result.outstanding.rows.map((r) => r.source)).toEqual(['RECEIVABLE']);
+    expect(result.currencies[0].notebook).toBeNull();
   });
 });

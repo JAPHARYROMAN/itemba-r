@@ -6,6 +6,12 @@ import LeaveTypesPage from '@/app/(dashboard)/hr/leave-types/page';
 import LeaveBalancesPage from '@/app/(dashboard)/hr/leave-balances/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -184,17 +190,17 @@ describe('Leave workspaces', () => {
     const user = mount(LeaveRequestsPage);
     await user.click(screen.getByRole('button', { name: 'New request' }));
     await screen.findByRole('dialog', { name: 'New leave request' });
-    await user.selectOptions(screen.getByLabelText(/Company\*/), 'company');
+    await chooseSelectOption('Company', 'company', user);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
-    expect(screen.queryByRole('option', { name: 'Retired leave' })).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText(/Employee\*/), 'employee');
-    await user.selectOptions(screen.getByLabelText(/Leave type\*/), 'type');
-    await user.selectOptions(screen.getByLabelText(/Company\*/), 'other');
-    expect(screen.getByLabelText(/Employee\*/)).toHaveValue('');
-    expect(screen.getByLabelText(/Leave type\*/)).toHaveValue('');
+    expect(selectFieldOptions(getSelectField('Leave type'))).not.toContain('Retired leave');
+    await chooseSelectOption('Employee', 'employee', user);
+    await chooseSelectOption('Leave type', 'type', user);
+    await chooseSelectOption('Company', 'other', user);
+    expect(selectFieldValue(getSelectField('Employee'))).toBe('');
+    expect(selectFieldValue(getSelectField('Leave type'))).toBe('');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
-    await user.selectOptions(screen.getByLabelText(/Employee\*/), 'employee');
-    await user.selectOptions(screen.getByLabelText(/Leave type\*/), 'type');
+    await chooseSelectOption('Employee', 'employee', user);
+    await chooseSelectOption('Leave type', 'type', user);
     await setDateField(/Start date/, '2026-09-17', user);
     await setDateField(/End date/, '2026-09-22', user);
     expect(screen.getByText(/6 calendar days/)).toBeInTheDocument();
@@ -212,10 +218,10 @@ describe('Leave workspaces', () => {
     const user = mount(LeaveRequestsPage);
     await user.click(screen.getByRole('button', { name: 'New request' }));
     await screen.findByRole('dialog', { name: 'New leave request' });
-    await user.selectOptions(screen.getByLabelText(/Company\*/), 'company');
+    await chooseSelectOption('Company', 'company', user);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
-    await user.selectOptions(screen.getByLabelText(/Employee\*/), 'employee');
-    await user.selectOptions(screen.getByLabelText(/Leave type\*/), 'type');
+    await chooseSelectOption('Employee', 'employee', user);
+    await chooseSelectOption('Leave type', 'type', user);
     await setDateField(/Start date/, '2026-09-17', user);
     await setDateField(/End date/, '2026-09-17', user);
     await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Preview reason');
@@ -223,7 +229,7 @@ describe('Leave workspaces', () => {
     expect(await screen.findByText('Save unavailable')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Reason' })).toHaveValue('Preview reason');
     state.page.mockRejectedValue(new Error('Leave types unavailable'));
-    await user.selectOptions(screen.getByLabelText(/Company\*/), 'other');
+    await chooseSelectOption('Company', 'other', user);
     expect(await screen.findByText('Leave types unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Retry choices' })).toBeInTheDocument();
@@ -301,8 +307,8 @@ describe('Leave workspaces', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters' }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await user.selectOptions(screen.getByLabelText('Year filter'), '2026');
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption('Year filter', '2026', user);
     await user.type(screen.getByRole('searchbox'), 'Alex');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AccessLevel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, PartyExistsService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateContactPersonDto } from './dto/create-contact-person.dto';
 import { UpdateContactPersonDto } from './dto/update-contact-person.dto';
@@ -14,6 +14,7 @@ export class ContactPersonsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly partyExists: PartyExistsService,
   ) {}
 
   async findAll(query: QueryContactPersonDto, user: AuthUser) {
@@ -26,7 +27,12 @@ export class ContactPersonsService {
     if (entityType) where.entityType = entityType;
     if (entityId) where.entityId = entityId;
     const [items, total] = await Promise.all([
-      this.prisma.contactPerson.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.contactPerson.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.contactPerson.count({ where }),
     ]);
     return { items, total, page: Number(page), limit: Number(limit) };
@@ -41,6 +47,9 @@ export class ContactPersonsService {
     // against the caller's access before writing.
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
 
+    // A SUPPLIER / CUSTOMER contact must point at a live master in this company.
+    await this.partyExists.assertParty(dto.entityType, dto.entityId, dto.companyId);
+
     const item = await this.prisma.contactPerson.create({
       data: {
         companyId: dto.companyId,
@@ -54,7 +63,13 @@ export class ContactPersonsService {
         notes: dto.notes,
       },
     });
-    await this.auditLogs.log({ action: 'CREATE', entityType: 'ContactPerson', entityId: item.id, userId: user.id, companyId: item.companyId });
+    await this.auditLogs.log({
+      action: 'CREATE',
+      entityType: 'ContactPerson',
+      entityId: item.id,
+      userId: user.id,
+      companyId: item.companyId,
+    });
     return item;
   }
 
@@ -66,6 +81,13 @@ export class ContactPersonsService {
     if (dto.companyId !== undefined && dto.companyId !== existing.companyId) {
       throw new BadRequestException('Contact person companyId is immutable after creation');
     }
+
+    if (dto.entityType !== undefined || dto.entityId !== undefined)
+      await this.partyExists.assertParty(
+        dto.entityType ?? existing.entityType,
+        dto.entityId ?? existing.entityId,
+        existing.companyId,
+      );
 
     const updated = await this.prisma.contactPerson.update({
       where: { id },
@@ -80,14 +102,26 @@ export class ContactPersonsService {
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
     });
-    await this.auditLogs.log({ action: 'UPDATE', entityType: 'ContactPerson', entityId: id, userId: user.id, oldValue: existing, newValue: updated });
+    await this.auditLogs.log({
+      action: 'UPDATE',
+      entityType: 'ContactPerson',
+      entityId: id,
+      userId: user.id,
+      oldValue: existing,
+      newValue: updated,
+    });
     return updated;
   }
 
   async remove(id: string, user: AuthUser) {
     await this.findOneScoped(id, user, AccessLevel.WRITE);
     await this.prisma.contactPerson.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.auditLogs.log({ action: 'DELETE', entityType: 'ContactPerson', entityId: id, userId: user.id });
+    await this.auditLogs.log({
+      action: 'DELETE',
+      entityType: 'ContactPerson',
+      entityId: id,
+      userId: user.id,
+    });
     return { success: true };
   }
 

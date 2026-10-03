@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
@@ -14,10 +15,17 @@ import {
   assertCashAccountScopeCompatible,
 } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService, PostingLine } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  PostingLine,
+  partyOf,
+} from '../accounting-engine/posting-engine.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { PayExpenseDto } from './dto/pay-expense.dto';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import { toPaymentMethodGeneral } from '../supplier-payments/payment-method';
+import { CashBookService } from '../cash-book/cash-book.service';
 
 @Injectable()
 export class ExpensesService {
@@ -32,6 +40,9 @@ export class ExpensesService {
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
     private readonly taxAutoApply: TaxAutoApplyService,
+    private readonly supplierPayments?: SupplierPaymentsService,
+    private readonly cashBook?: CashBookService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   private async resolveCashLedgerAccountId(
@@ -207,7 +218,17 @@ export class ExpensesService {
       ...(await this.companyScope.companyWhereFor(user, companyId)),
     };
     const search = query.search?.trim();
-    if (search) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ expenseNumber: { contains: search, mode: 'insensitive' } }, { vendorName: { contains: search, mode: 'insensitive' } }, { description: { contains: search, mode: 'insensitive' } }] }];
+    if (search)
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { expenseNumber: { contains: search, mode: 'insensitive' } },
+            { vendorName: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      ];
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
     if (expenseCategoryId) where.expenseCategoryId = expenseCategoryId;
@@ -309,6 +330,8 @@ export class ExpensesService {
 
   async create(dto: CreateExpenseDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    // Party linkage (Phase 2): a linked supplier must exist in the expense's company.
+    if (dto.supplierId) await this.parties?.assertSupplier(dto.companyId, dto.supplierId);
     // Cross-field pairing (defense in depth behind the DTO validator, for
     // direct service callers): flagging recoverable VAT without assessing it
     // would otherwise approve as an unsplittable gross posting.
@@ -334,6 +357,7 @@ export class ExpensesService {
         expenseCategoryId: dto.expenseCategoryId,
         cashAccountId: dto.cashAccountId,
         vendorName: dto.vendorName,
+        supplierId: dto.supplierId || null,
         amount: dto.amount,
         currency: dto.currency,
         expenseDate: new Date(dto.expenseDate),
@@ -362,6 +386,7 @@ export class ExpensesService {
   async update(id: string, dto: UpdateExpenseDto, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (dto.supplierId) await this.parties?.assertSupplier(existing.companyId, dto.supplierId);
     if (!['DRAFT', 'PENDING_APPROVAL'].includes(existing.status)) {
       throw new BadRequestException(
         'Expense can only be updated in DRAFT or PENDING_APPROVAL status',
@@ -395,6 +420,7 @@ export class ExpensesService {
       where: { id, status: { in: ['DRAFT', 'PENDING_APPROVAL'] }, deletedAt: null },
       data: {
         ...(dto.vendorName !== undefined && { vendorName: dto.vendorName }),
+        ...(dto.supplierId !== undefined && { supplierId: dto.supplierId || null }),
         ...(dto.amount !== undefined && { amount: dto.amount }),
         ...(dto.currency && { currency: dto.currency }),
         ...(dto.expenseDate && { expenseDate: new Date(dto.expenseDate) }),
@@ -558,6 +584,7 @@ export class ExpensesService {
             : []),
           {
             accountId: apAccountId,
+            ...partyOf('supplier', existing.supplierId),
             description: `Accrued payable for expense ${existing.expenseNumber}`,
             debit: 0,
             credit: this.fromCents(grossCents),
@@ -847,6 +874,7 @@ export class ExpensesService {
         const apAccount = await this.accountResolver.resolve(existing.companyId, 'AP_CONTROL', tx);
         debitLine = {
           accountId: apAccount.id,
+          ...partyOf('supplier', existing.supplierId),
           description: `Settle accrued payable for expense ${existing.expenseNumber}`,
           debit: Number(existing.amount),
           credit: 0,
@@ -927,6 +955,57 @@ export class ExpensesService {
           },
         });
       }
+
+      // Party linkage (W2): one SupplierPayment row per supplier payment. Only when the
+      // expense names a supplier; a one-off vendor has nothing to attach the payment to
+      // until it is matched (Unmatched parties, W7). Record-only: this method already
+      // posted the settlement journal, relieved cash and closed the payable above.
+      let supplierPaymentId: string | null = null;
+      if (existing.supplierId && this.supplierPayments) {
+        const supplierPayment = await this.supplierPayments.recordInTransaction(tx, user, {
+          companyId: existing.companyId,
+          divisionId: existing.divisionId,
+          branchId: existing.branchId,
+          supplierId: existing.supplierId,
+          amount: existing.amount,
+          method: toPaymentMethodGeneral(dto.paymentMethod?.trim() || existing.paymentMethod),
+          paymentDate,
+          cashAccountId: cashAccount.id,
+          reference: existing.expenseNumber,
+          currency: existing.currency,
+          source: { type: 'Expense', id: existing.id },
+          allocations: payable
+            ? [{ payableId: payable.id, amount: payable.outstandingAmount }]
+            : [],
+          journalEntryId: je.id,
+        });
+        supplierPaymentId = supplierPayment.id;
+      }
+
+      // Cash book (W4): the expense payment is one Cash Desk movement carrying the
+      // supplier (when known), the expense and the settlement journal.
+      const movement = await this.cashBook?.recordInTransaction(tx, user, {
+        kind: 'EXPENSE',
+        companyId: existing.companyId,
+        cashAccountId: cashAccount.id,
+        amount: existing.amount,
+        currency: existing.currency,
+        businessDate: paymentDate,
+        description: `Expense ${existing.expenseNumber} · ${existing.description}`,
+        reference: existing.expenseNumber,
+        requestId: `Expense:${existing.id}`,
+        partyType: existing.supplierId ? 'SUPPLIER' : 'NONE',
+        supplierId: existing.supplierId ?? null,
+        expenseId: existing.id,
+        supplierPaymentId,
+        journalEntryId: je.id,
+        journalReferenceType: 'Expense',
+      });
+      if (movement && supplierPaymentId)
+        await tx.supplierPayment.update({
+          where: { id: supplierPaymentId },
+          data: { cashDeskMovementId: movement.id },
+        });
 
       return tx.expense.update({
         where: { id },

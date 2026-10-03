@@ -366,6 +366,7 @@ function buildHarness(options: HarnessOptions = {}) {
   const sessionGet = options.sessionGet ?? (async () => session);
 
   h.backendGet.mockImplementation(async (path: string) => {
+    if (path.startsWith('/mobile-pos-lite/sales/requests/')) return { state: 'not_found' };
     if (path === '/mobile-pos-lite/session') return sessionGet();
     if (path === '/mobile-pos-lite/catalog') return [...(h.state.catalogs.get(TERMINAL) ?? [])];
     if (path === '/mobile-pos-lite/products') return [];
@@ -912,11 +913,8 @@ describe('RITUAL-8: a refused live sale speaks Swahili on Malipo', () => {
   });
 
   it('never invites a second tap when nothing refused the sale', async () => {
-    // A 502 over a sale that may well have committed. The sale path is the one
-    // send surface with NO frozen key — completeSale mints a fresh
-    // idempotencyKey per attempt — so "jaribu tena" here would be an
-    // instruction that books the sale twice, and "haikukubaliwa" would state a
-    // refusal that did not happen.
+    // A gateway failure can arrive after commitment. Preserve the original
+    // request and require a status check before offering the same-key retry.
     const harness = buildHarness();
     harness.behavior.salesPost = async () => {
       throw refused('Request failed: 502', 502);
@@ -929,11 +927,16 @@ describe('RITUAL-8: a refused live sale speaks Swahili on Malipo', () => {
     await screen.findByRole('heading', { name: 'Malipo' });
     await user.click(screen.getByRole('button', { name: 'KAMILISHA MAUZO' }));
 
+    expect(await screen.findByRole('button', { name: 'Kagua matokeo' })).toBeInTheDocument();
+    expect(h.state.outbox).toHaveLength(1);
+    expect(h.state.outbox[0].requiresReview).toBe(true);
+    expect(h.state.outbox[0].payload.idempotencyKey).toBe(
+      h.backendPost.mock.calls.find(([path]) => path === '/mobile-pos-lite/sales')?.[1]
+        .idempotencyKey,
+    );
     expect(
-      await screen.findByText(
-        'Haikukamilika — hatujui kama mauzo yameingia. Usitume tena; mwite msimamizi ahakiki.',
-      ),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Jaribu mauzo yaliyohifadhiwa' }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Request failed: 502')).not.toBeInTheDocument();
     expect(screen.queryByText('Haikukubaliwa — mwite msimamizi')).not.toBeInTheDocument();
   });

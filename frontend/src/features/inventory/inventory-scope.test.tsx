@@ -3,6 +3,12 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InventoryScope } from './inventory-scope';
 import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
+import {
   UnsavedWorkProvider,
   useFormGuard,
   useUnsavedWork,
@@ -41,6 +47,7 @@ function Harness({ start = initial }: { start?: ScopeValue }) {
     </>
   );
 }
+const companyOptions = () => selectFieldOptions(getSelectField('Company'));
 const mount = (start?: ScopeValue) =>
   render(
     <UnsavedWorkProvider>
@@ -90,7 +97,7 @@ describe('Inventory scope controls', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Scope')).toHaveTextContent('"divisionId":"division"'),
     );
-    expect(screen.getByLabelText('Branch')).toHaveValue('branch');
+    expect(selectFieldValue(getSelectField('Branch'))).toBe('branch');
     expect(state.page).toHaveBeenCalledWith(
       '/branches',
       expect.objectContaining({ query: expect.objectContaining({ page: 2 }) }),
@@ -104,8 +111,8 @@ describe('Inventory scope controls', () => {
       expect(screen.getByLabelText('Scope')).toHaveTextContent('"companyId":"company"'),
     );
     expect(state.page).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Company')).toBeDisabled();
-    expect(screen.getByRole('option', { name: 'company' })).toBeInTheDocument();
+    expect(getSelectField('Company')).toBeDisabled();
+    expect(companyOptions()).toContain('company');
   });
   it('exposes failed later directory pages and retries without partial choices', async () => {
     let failed = true;
@@ -126,22 +133,22 @@ describe('Inventory scope controls', () => {
     });
     mount({ companyId: '', divisionId: '', branchId: '' });
     await screen.findByText(/Company page unavailable/);
-    expect(screen.queryByRole('option', { name: 'First company' })).not.toBeInTheDocument();
+    expect(companyOptions()).not.toContain('First company');
     failed = false;
     fireEvent.click(screen.getByRole('button', { name: /Retry company choices/i }));
-    await screen.findByRole('option', { name: 'Second company' });
-    expect(screen.getByLabelText('Company')).toHaveValue('');
+    await waitFor(() => expect(companyOptions()).toContain('Second company'));
+    expect(selectFieldValue(getSelectField('Company'))).toBe('');
   });
   it('protects draft scope changes and clears descendants only after discard', async () => {
     mount();
-    await screen.findByRole('option', { name: 'Second company' });
+    await waitFor(() => expect(companyOptions()).toContain('Second company'));
     fireEvent.change(screen.getByLabelText('Draft note'), { target: { value: 'Unsaved count' } });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'second' } });
+    changeSelectField('Company', 'second');
     await screen.findByRole('dialog');
     expect(screen.getByLabelText('Scope')).toHaveTextContent('"companyId":"company"');
     fireEvent.click(screen.getByRole('button', { name: 'Stay here' }));
     expect(screen.getByLabelText('Draft note')).toHaveValue('Unsaved count');
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'second' } });
+    changeSelectField('Company', 'second');
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.getByLabelText('Scope')).toHaveTextContent(
       '{"companyId":"second","divisionId":"","branchId":""}',
@@ -172,12 +179,12 @@ describe('Inventory scope controls', () => {
       },
     );
     mount();
-    await screen.findByRole('option', { name: 'Second company' });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'second' } });
+    await waitFor(() => expect(companyOptions()).toContain('Second company'));
+    changeSelectField('Company', 'second');
     await waitFor(() => expect(signal.aborted).toBe(true));
     await act(async () =>
       resolve({ data: [{ id: 'stale', name: 'Obsolete warehouse' }], total: 1 }),
     );
-    expect(screen.queryByRole('option', { name: 'Obsolete warehouse' })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Branch'))).not.toContain('Obsolete warehouse');
   });
 });

@@ -366,6 +366,9 @@ services:
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: 1
+      ENQUIRY_STORAGE_DIR: /app/data
+    volumes:
+      - website_staging_data:/app/data
     expose:
       - '3001'
     networks:
@@ -388,6 +391,7 @@ volumes:
   backend_staging_storage:
   backend_staging_backups:
   backend_staging_exports:
+  website_staging_data:
 
 networks:
   itemba_staging_network:

@@ -28,3 +28,35 @@ describe('CreateMobilePosLiteSaleDto quantity precision', () => {
     );
   });
 });
+
+describe('POS payment allocations', () => {
+  const dto = (payments: unknown, expectedTotal: number = 100) =>
+    plainToInstance(CreateMobilePosLiteSaleDto, {
+      paymentMethod: 'MIXED',
+      idempotencyKey: 'pos-original-request',
+      expectedTotal,
+      payments,
+      lines: [{ productId: PRODUCT_ID, quantity: 1 }],
+    });
+  it('accepts split allocations with references and a price review total', async () => {
+    expect(
+      await validate(
+        dto([
+          { method: 'CASH', amount: 60 },
+          { method: 'MOBILE_MONEY', amount: 40, reference: 'REF' },
+        ]),
+        { whitelist: true, forbidNonWhitelisted: true },
+      ),
+    ).toHaveLength(0);
+  });
+  it.each(
+    [
+      [],
+      [{ method: 'CARD', amount: 100 }],
+      [{ method: 'CASH', amount: 100.001 }],
+      [{ method: 'CASH', amount: 0 }],
+    ].map((v) => [v]),
+  )('rejects invalid allocation input %j', async (payments) => {
+    expect((await validate(dto(payments))).length).toBeGreaterThan(0);
+  });
+});

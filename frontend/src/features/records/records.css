@@ -1020,14 +1020,15 @@
   }
   .records-register-switcher {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 12px;
   }
-  .records-register-switcher > label {
+  .records-register-switcher > .ui-select-label {
     margin: 0;
     font-size: 12px;
   }
-  .records-register-switcher > select {
+  .records-register-switcher .ui-select-trigger {
     max-width: 260px;
     min-height: 38px;
   }
@@ -1038,15 +1039,36 @@
   }
   .records-register-switcher {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 12px;
   }
-  .records-register-switcher > label {
+  .records-register-switcher > .ui-select-label {
     margin: 0;
     font-size: 12px;
   }
-  .records-register-switcher > select {
+  .records-register-switcher .ui-select-trigger {
     max-width: 260px;
     min-height: 38px;
   }
+}
+
+/* Party linkage (Phase 2 PR-6): the one-party chip and party links in the register. */
+.records-party-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: color-mix(in srgb, #67ad99 12%, transparent);
+}
+.records-party-chip button {
+  color: #529681;
+  font-weight: 600;
+}
+.records-row-title + span a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
 }

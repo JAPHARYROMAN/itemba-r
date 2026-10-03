@@ -1,16 +1,24 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { StatutoryReturnWorkspace } from './statutory-return-workspace';
 import type { ReturnKind, StatutoryReturn } from './statutory-return-types';
+import {
+  chooseSelectOption,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   companyId: null as string | null,
   get: vi.fn(),
   page: vi.fn(),
+  pdf: vi.fn(),
 }));
+vi.mock('@/lib/export-download', () => ({ downloadTablePdf: state.pdf }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     user: { companyId: state.companyId },
@@ -99,6 +107,7 @@ function fixture(kind: ReturnKind): StatutoryReturn {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  state.pdf.mockResolvedValue(undefined);
   state.companyId = null;
   state.permissions = new Set(['payroll.view', 'companies.read']);
   state.get.mockImplementation(async (path: string) =>
@@ -114,10 +123,12 @@ beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
 });
 async function choose() {
-  await screen.findByRole('option', { name: 'Example Company' });
-  await userEvent.selectOptions(screen.getByLabelText('Company'), 'company');
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Company'))).toContain('Example Company'),
+  );
+  await chooseSelectOption('Company', 'company');
   fireEvent.change(screen.getByRole('spinbutton', { name: /Year/ }), { target: { value: '2026' } });
-  await userEvent.selectOptions(screen.getByLabelText('Month'), '9');
+  await chooseSelectOption('Month', '9');
 }
 async function generate() {
   await userEvent.click(screen.getByRole('button', { name: 'Generate return' }));
@@ -138,6 +149,47 @@ function capture(name: string) {
   }
 }
 describe('Statutory return workspace', () => {
+  it.each(['paye', 'nssf', 'psssf', 'wcf', 'sdl', 'nhif', 'heslb'] as const)(
+    'exports all %s employees on the selected company letterhead, independently of pagination',
+    async (kind) => {
+      render(<StatutoryReturnWorkspace />);
+      await choose();
+      await userEvent.click(screen.getByRole('button', { name: kind.toUpperCase(), exact: true }));
+      await generate();
+      await userEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+      await waitFor(() => expect(state.pdf).toHaveBeenCalled());
+      const [request, signal] = state.pdf.mock.calls[0];
+      expect(request.companyId).toBe('company');
+      expect(request.rows).toHaveLength(21);
+      expect(request.columns.slice(0, 2)).toEqual(['Employee code', 'Employee']);
+      expect(request.rows[0].slice(0, 2)).toEqual(['EXAMPLE-1', 'Alex Example']);
+      expect(request.rows[20][1]).toBe('Example Person 21');
+      expect(request.meta).toContainEqual({ label: 'Period', value: 'September 2026' });
+      expect(signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+  it('cancels a stale PDF when the company changes and reports an export failure', async () => {
+    render(<StatutoryReturnWorkspace />);
+    await choose();
+    await generate();
+    let reject!: (error: Error) => void;
+    state.pdf.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    const signal = state.pdf.mock.calls[0][1];
+    await chooseSelectOption('Company', 'other');
+    expect(signal.aborted).toBe(true);
+    await act(async () => reject(new Error('Cancelled')));
+    expect(screen.queryByText('Cancelled')).not.toBeInTheDocument();
+    await generate();
+    state.pdf.mockRejectedValueOnce(new Error('PDF service unavailable'));
+    await userEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('PDF service unavailable');
+  });
   it('gates reads and supports the assigned company without requesting company-directory permission', async () => {
     state.permissions.clear();
     const denied = render(<StatutoryReturnWorkspace />);
@@ -149,7 +201,7 @@ describe('Statutory return workspace', () => {
     state.companyId = 'assigned';
     render(<StatutoryReturnWorkspace />);
     await generate();
-    expect(screen.queryByLabelText('Company')).not.toBeInTheDocument();
+    expect(querySelectField('Company')).not.toBeInTheDocument();
     expect(state.page).not.toHaveBeenCalled();
     expect(state.get).toHaveBeenCalledWith(
       '/hr/statutory-returns/paye',
@@ -203,7 +255,7 @@ describe('Statutory return workspace', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('button', { name: 'Inspect Example Person 21' })).toBeInTheDocument();
     expect(state.get).toHaveBeenCalledTimes(1);
-    await userEvent.selectOptions(screen.getByLabelText('Month'), '8');
+    await chooseSelectOption('Month', '8');
     expect(screen.queryByRole('button', { name: /Download CSV/ })).not.toBeInTheDocument();
     expect(
       screen.queryByRole('region', { name: 'Complete return totals' }),
@@ -282,8 +334,10 @@ describe('Statutory return workspace', () => {
     state.page.mockResolvedValueOnce({ data: [{ id: 'other', name: 'Other Company' }], total: 2 });
     render(<StatutoryReturnWorkspace />);
     await userEvent.click(await screen.findByRole('button', { name: 'Retry companies' }));
-    await screen.findByRole('option', { name: 'Other Company' });
-    expect(within(screen.getByLabelText('Company')).getAllByRole('option')).toHaveLength(3);
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Other Company'),
+    );
+    expect(selectFieldOptions(getSelectField('Company'))).toHaveLength(3);
   });
   it('rejects invalid years and makes an empty return explicit while retaining its downloadable file', async () => {
     render(<StatutoryReturnWorkspace />);

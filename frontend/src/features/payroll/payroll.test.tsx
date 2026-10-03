@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PayrollHome, PayrollInputs } from './payroll-home';
 import { PayrollWorkspace } from './payroll-workspace';
 import { activePayrollTab } from '@/lib/payroll-app';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -62,8 +63,10 @@ describe('Payroll app', () => {
     ).toHaveAttribute('href', '/hr/employees');
     expect(state.get.mock.calls.every(([path]) => path === '/hr/employees')).toBe(true);
     expect(screen.queryByRole('link', { name: 'Payroll runs' })).not.toBeInTheDocument();
-    await screen.findByRole('option', { name: 'Company A' });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'company' } });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Company A'),
+    );
+    changeSelectField('Company', 'company');
     await waitFor(() =>
       expect(state.get).toHaveBeenCalledWith(
         '/hr/employees',
@@ -113,8 +116,10 @@ describe('Payroll app', () => {
       'href',
       '/hr/payroll-entries?payrollRunId=run',
     );
-    await screen.findByRole('option', { name: 'Company A' });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'company' } });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Company A'),
+    );
+    changeSelectField('Company', 'company');
     await waitFor(() =>
       expect(state.get).toHaveBeenCalledWith(
         '/hr/payroll-runs',

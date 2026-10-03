@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { changeSelectField } from '@/test/select-field';
 
 /**
  * Credit-note create modal — per-line "Return to stock" opt-in.
@@ -31,7 +32,7 @@ vi.mock('@/lib/api-client', () => ({
   backendPatch: (...args: unknown[]) => backendPatch(...args),
 }));
 
-import { CreateModal } from './page';
+import { CreateModal } from '@/features/finance/screens/credit-notes';
 
 const COMPANY = { id: 'co-1', name: 'Itemba Ltd' };
 
@@ -61,7 +62,7 @@ beforeEach(() => {
 
 /** Fill the minimum valid form: company, customer name, line 1 qty 5 @ 100. */
 function fillBaseForm() {
-  fireEvent.change(screen.getByLabelText(/Company/), { target: { value: 'co-1' } });
+  changeSelectField('Company', 'co-1');
   fireEvent.change(screen.getByLabelText(/Customer Name/), { target: { value: 'Walk-in' } });
   fireEvent.change(screen.getByLabelText('Line 1 description'), {
     target: { value: 'Returned goods' },

@@ -13,8 +13,13 @@ import {
   AccountRole,
 } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -85,6 +90,7 @@ export class RefundsService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly cashBook?: CashBookService,
   ) {}
 
   // ── delegate accessors (see RefundRow note above) ─────────────────────────
@@ -169,7 +175,12 @@ export class RefundsService {
 
   // ── create (DRAFT) ──────────────────────────────────────────────────────────
 
-  async create(dto: CreateRefundDto, user: AuthUser): Promise<RefundRow> {
+  async create(
+    dto: CreateRefundDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ): Promise<RefundRow> {
+    const client = transaction ?? this.prisma;
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const userId = user.id;
 
@@ -193,7 +204,7 @@ export class RefundsService {
     // If a customer is supplied, it must belong to the same company (mirror
     // credit-notes.service.create's customer-company check).
     if (dto.customerId) {
-      const customer = await this.prisma.customer.findFirst({
+      const customer = await client.customer.findFirst({
         where: { id: dto.customerId, deletedAt: null },
         select: { companyId: true },
       });
@@ -204,13 +215,9 @@ export class RefundsService {
 
     // Validate the cash/bank account belongs to the company (also gives us the
     // account type used to resolve the GL account at pay() time).
-    const cashAccount = await this.resolveCashAccount(
-      this.prisma,
-      dto.companyId,
-      dto.cashAccountId,
-    );
+    const cashAccount = await this.resolveCashAccount(client, dto.companyId, dto.cashAccountId);
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const record = await this.runWithTransaction(transaction, async (tx) => {
       // Credit-note-backed refund: validate + guard double-refund atomically.
       await this.assertCreditNoteRefundable(tx, {
         companyId: dto.companyId,
@@ -245,7 +252,7 @@ export class RefundsService {
       return created;
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'REFUND_CREATE',
       entityType: 'Refund',
       entityId: record.id,
@@ -259,10 +266,15 @@ export class RefundsService {
 
   // ── pay / post (DRAFT -> PAID) ────────────────────────────────────────────
 
-  async pay(id: string, dto: PayRefundDto, user: AuthUser): Promise<RefundRow> {
+  async pay(
+    id: string,
+    dto: PayRefundDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ): Promise<RefundRow> {
     const userId = user.id;
 
-    const { before, record, journal } = await this.prisma.$transaction(async (tx) => {
+    const { before, record, journal } = await this.runWithTransaction(transaction, async (tx) => {
       // Atomic claim: flip DRAFT -> PAID guarded on the current status so two
       // concurrent pays race here and exactly one wins. The loser sees count 0.
       const claim = await this.refunds(tx).updateMany({
@@ -320,6 +332,7 @@ export class RefundsService {
           lines: [
             {
               accountId: arAcct.id,
+              ...partyOf('customer', current.customerId),
               description: `Release customer credit: ${current.customerName ?? current.customerId ?? 'customer'}`,
               debit: amount,
               credit: 0,
@@ -346,6 +359,25 @@ export class RefundsService {
         data: { currentBalance: { decrement: amount } },
       });
 
+      // Cash book (W4): the refund is one Cash Desk movement carrying the customer,
+      // the refund and the journal that already explains it.
+      await this.cashBook?.recordInTransaction(tx, user, {
+        kind: 'REFUND',
+        companyId: current.companyId,
+        cashAccountId: cashAccount.id,
+        amount,
+        currency: current.currency,
+        businessDate: postingDate,
+        description: `Customer refund ${current.refundNumber} · ${current.customerName ?? current.customerId ?? 'customer'}`,
+        reference: current.refundNumber,
+        requestId: `Refund:${current.id}`,
+        partyType: current.customerId ? 'CUSTOMER' : 'NONE',
+        customerId: current.customerId ?? null,
+        refundId: current.id,
+        journalEntryId: journalEntry.id,
+        journalReferenceType: 'Refund',
+      });
+
       const updated = await this.refunds(tx).update({
         where: { id: current.id },
         data: {
@@ -360,7 +392,7 @@ export class RefundsService {
       return { before: current, record: updated, journal: journalEntry };
     });
 
-    await this.auditLogs.log({
+    await this.logInContext(transaction, {
       action: 'REFUND_PAY',
       entityType: 'Refund',
       entityId: id,
@@ -375,6 +407,21 @@ export class RefundsService {
     });
 
     return record;
+  }
+
+  private runWithTransaction<T>(
+    transaction: Prisma.TransactionClient | undefined,
+    run: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return transaction ? run(transaction) : this.prisma.$transaction(run);
+  }
+  private logInContext(
+    transaction: Prisma.TransactionClient | undefined,
+    entry: Parameters<AuditLogsService['log']>[0],
+  ) {
+    return transaction
+      ? this.auditLogs.logStrictInTransaction(transaction, entry)
+      : this.auditLogs.log(entry);
   }
 
   // ── void (PAID -> VOID) ───────────────────────────────────────────────────
@@ -594,6 +641,7 @@ export class RefundsService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
       credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
       description: `Reversal: ${line.description ?? ''}`.trim(),

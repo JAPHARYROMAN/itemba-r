@@ -22,6 +22,12 @@ import {
   WorkspaceLink,
   useWorkspaceSearchParams,
 } from '@/components/workspace/workspace-navigation';
+import {
+  changeSelectField,
+  findSelectField,
+  getSelectField,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   get: vi.fn(),
@@ -186,11 +192,10 @@ const primary = [cases[0], cases[2], cases[3], cases[5]];
 async function open(c: Case) {
   fireEvent.click(await screen.findByRole('button', { name: c.opener }));
   for (const [label, value] of c.fields) {
-    const field = await screen.findByRole('combobox', { name: label });
-    await waitFor(() =>
-      expect([...field.querySelectorAll('option')].some((o) => o.value === value)).toBe(true),
-    );
-    fireEvent.change(field, { target: { value } });
+    const field = await findSelectField(label);
+    // `changeSelectField` throws until the field offers `value`, so this waits
+    // for that option and then chooses it.
+    await waitFor(() => changeSelectField(field, value));
   }
   return screen.getByRole('dialog');
 }
@@ -341,9 +346,7 @@ describe('Reports accounting continuity', () => {
     fireEvent.click(screen.getByRole('link', { name: 'All reports' }));
     await screen.findByRole('heading', { name: 'A clearer view of your business.' });
     fireEvent.click(screen.getByRole('button', { name: 'Resume Invoice journal review' }));
-    expect(
-      await screen.findByRole('combobox', { name: 'Debit · Customer receivables' }),
-    ).toHaveValue('asset');
+    expect(selectFieldValue(await findSelectField('Debit · Customer receivables'))).toBe('asset');
     expect(state.post).not.toHaveBeenCalled();
   });
   it.each(cases)(
@@ -358,7 +361,7 @@ describe('Reports accounting continuity', () => {
       expect(state.post).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole('button', { name: `Resume ${c.title}` }));
       for (const [label, value] of c.fields)
-        expect(await screen.findByRole('combobox', { name: label })).toHaveValue(value);
+        expect(selectFieldValue(await findSelectField(label))).toBe(value);
       expect(screen.getByRole('button', { name: c.action })).toBeDisabled();
       ack();
       fireEvent.click(screen.getByRole('button', { name: c.action }));
@@ -420,10 +423,9 @@ describe('Reports accounting continuity', () => {
       const original = state.post.mock.calls[0][1];
       fireEvent.click(screen.getByRole('button', { name: 'Keep draft' }));
       fireEvent.click(screen.getByRole('button', { name: `Resume ${c.title}` }));
-      await screen.findByRole('combobox', { name: c.fields[0][0] });
+      await findSelectField(c.fields[0][0]);
       ack();
-      if (c.name === 'supplier payment')
-        expect(screen.getByRole('combobox', { name: 'Account that paid' })).toBeDisabled();
+      if (c.name === 'supplier payment') expect(getSelectField('Account that paid')).toBeDisabled();
       fireEvent.click(screen.getByRole('button', { name: c.action }));
       await waitFor(() => expect(state.post).toHaveBeenCalledTimes(2));
       expect(state.post.mock.calls[1][1]).toEqual(original);
@@ -507,9 +509,7 @@ describe('Reports accounting continuity', () => {
     await screen.findByText('Review unavailable');
     expect(screen.getByRole('button', { name: 'Keep draft' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry review' }));
-    expect(
-      await screen.findByRole('combobox', { name: 'Debit · Customer receivables' }),
-    ).toHaveValue('asset');
+    expect(selectFieldValue(await findSelectField('Debit · Customer receivables'))).toBe('asset');
     expect(state.post).not.toHaveBeenCalled();
   });
   it('blocks unavailable ledger choices and completed connections after resume', async () => {
@@ -583,10 +583,7 @@ describe('Reports accounting continuity', () => {
     fireEvent.change(left.getByLabelText('Find document'), { target: { value: 'INV-01' } });
     expect(right.getByLabelText('Find document')).toHaveValue('');
     fireEvent.click(await left.findByRole('button', { name: 'Review' }));
-    fireEvent.change(
-      await screen.findByRole('combobox', { name: 'Debit · Customer receivables' }),
-      { target: { value: 'asset' } },
-    );
+    changeSelectField(await findSelectField('Debit · Customer receivables'), 'asset');
     fireEvent.click(screen.getByRole('button', { name: 'Keep draft' }));
     fireEvent.click(left.getByRole('button', { name: 'Resume Invoice journal review' }));
     await screen.findByRole('dialog');
@@ -603,20 +600,12 @@ describe('Reports accounting continuity', () => {
     const left = within(screen.getByRole('region', { name: 'left window' })),
       right = within(screen.getByRole('region', { name: 'right window' }));
     fireEvent.click(await left.findByRole('button', { name: 'Review' }));
-    fireEvent.change(
-      await screen.findByRole('combobox', { name: 'Debit · Customer receivables' }),
-      { target: { value: 'asset' } },
-    );
+    changeSelectField(await findSelectField('Debit · Customer receivables'), 'asset');
     fireEvent.click(screen.getByRole('button', { name: 'Keep draft' }));
     fireEvent.change(right.getByLabelText('Find document'), { target: { value: 'INV-01' } });
     fireEvent.click(right.getByRole('button', { name: 'Review' }));
-    fireEvent.change(
-      await screen.findByRole('combobox', { name: 'Debit · Customer receivables' }),
-      { target: { value: 'asset' } },
-    );
-    fireEvent.change(screen.getByRole('combobox', { name: 'Credit · Sales income' }), {
-      target: { value: 'income' },
-    });
+    changeSelectField(await findSelectField('Debit · Customer receivables'), 'asset');
+    changeSelectField('Credit · Sales income', 'income');
     ack();
     const reads = state.get.mock.calls.filter(([path]) => path === '/desk-posting/sales').length;
     state.post.mockImplementationOnce(async () => {
@@ -634,9 +623,7 @@ describe('Reports accounting continuity', () => {
     expect(await right.findByRole('cell', { name: 'Posted' })).toBeVisible();
     expect(right.getByLabelText('Find document')).toHaveValue('INV-01');
     fireEvent.click(left.getByRole('button', { name: 'Resume Invoice journal review' }));
-    expect(
-      await screen.findByRole('combobox', { name: 'Debit · Customer receivables' }),
-    ).toHaveValue('asset');
+    expect(selectFieldValue(await findSelectField('Debit · Customer receivables'))).toBe('asset');
     expect(screen.getByRole('button', { name: 'Post balanced journal' })).toBeDisabled();
     expect(state.post).toHaveBeenCalledTimes(1);
   });

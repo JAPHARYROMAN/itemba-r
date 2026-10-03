@@ -1,6 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { SplitPayments } from './SplitPayments';
+import { useEffect, useId, useRef, useState } from 'react';
+import {
+  Check,
+  Clock3,
+  ReceiptText,
+  ShoppingBag,
+  RefreshCw,
+  Search,
+  Package,
+  BarChart3,
+} from 'lucide-react';
 import { usePosHost } from '../core/pos-host-context';
 import type { MobilePosLiteProduct, PendingMobilePosLiteSale } from '@/lib/mobile-pos-lite-store';
 import {
@@ -19,6 +30,9 @@ import { PriceSheet } from './PriceSheet';
 import { PrinterPanel } from './PrinterPanel';
 import { ReceiptPrint } from './ReceiptPrint';
 import { usePosStep } from './use-pos-step';
+import { HeldCarts, type HeldCartActions } from './HeldCarts';
+import { Transactions } from './Transactions';
+import { OperationsWorkspace } from './OperationsWorkspace';
 import './pos-app.css';
 
 /**
@@ -29,13 +43,19 @@ import './pos-app.css';
  * search, receipts) is the same proven code; this file only draws it. The
  * layout is chosen by container width in pos-app.css, not here.
  *
- * Day book, stock, counts, purchases, history and day close are ported in
- * phase 5. Until then "More" opens them in the Kaunta shell, so a v3 terminal
- * loses nothing.
+ * Stock, receiving, counts and daily reports have native interiors. Settings
+ * retains its compatible Kaunta host until hardware acceptance is complete.
  */
-export type PosShellProps = KauntaShellProps;
+export type PosShellProps = KauntaShellProps & {
+  payments?: import('../core/pos-types').PosPayment[];
+  setPayments?: (payments: import('../core/pos-types').PosPayment[]) => void;
+  heldCarts?: HeldCartActions;
+  control?: { owned: boolean; request: () => void; release: () => void };
+  onHold?: (name: string, note: string) => Promise<void>;
+};
 
 const LOW_STOCK = 5;
+const EMPTY_PAYMENTS: import('../core/pos-types').PosPayment[] = [];
 
 function stockState(product: MobilePosLiteProduct): 'out' | 'low' | 'ok' | 'none' {
   if (product.availableStock === null || !product.trackInventory) return 'none';
@@ -66,13 +86,8 @@ function stockLabel(product: MobilePosLiteProduct, t: PosTranslate): string {
 /** A Kaunta module the new POS opens in the OS skin, by its deep-link hash. */
 export type PosModule = 'leo' | 'stoo' | 'manunuzi' | 'mipangilio';
 
-/**
- * Kaunta routes that belong to a module (not the sale flow Kaunta shares with
- * the new POS). A link to one, on boot or typed into the address bar, opens
- * the module; Kaunta's router then lands on the exact screen or normalises it
- * to its parent (`#hesabu` → `#stoo`), as KAUNTA-7 already does.
- */
-const MODULE_LINK = /^#(leo|stoo|hesabu|manunuzi|historia|funga|ripoti|mipangilio)(\/|$)/;
+/** Only Settings retains the compatibility host; business routes use native screens. */
+const MODULE_LINK = /^#mipangilio(\/|$)/;
 
 function isModuleLink(hash: string): boolean {
   return MODULE_LINK.test(hash);
@@ -89,7 +104,7 @@ export function PosShell(props: PosShellProps) {
 
   useEffect(() => {
     const onHashChange = () => {
-      if (isModuleLink(host?.history.hash() ?? window.location.hash)) setModule(true);
+      setModule(isModuleLink(host?.history.hash() ?? window.location.hash));
     };
     if (host) return host.history.listen(onHashChange);
     window.addEventListener('hashchange', onHashChange);
@@ -97,9 +112,8 @@ export function PosShell(props: PosShellProps) {
   }, [host]);
 
   if (module) {
-    // The day book, stock, counts, deliveries, history, close and settings are
-    // Kaunta's own screens, hooks and slab in the OS skin (phase 5), so every
-    // behaviour their tests pin carries over. Reaching Mauzo returns here.
+    // Existing terminal settings remain compatible while business workflows
+    // use the native OS workspace. Reaching Sell returns here.
     return <KauntaShell {...props} skin="os" onReturnToSale={() => setModule(false)} />;
   }
 
@@ -117,6 +131,7 @@ export function PosShell(props: PosShellProps) {
 }
 
 function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void }) {
+  const instanceId = useId();
   const host = usePosHost();
   const {
     session,
@@ -169,13 +184,34 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
     confirmRemoveId,
     setConfirmRemoveId,
     openModule,
+    heldCarts,
+    control,
+    onHold,
   } = props;
   const { step, go } = usePosStep();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const [holdName, setHoldName] = useState('');
+  const [holdNote, setHoldNote] = useState('');
+  const [holdBusy, setHoldBusy] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [operationsBusy, setOperationsBusy] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    function dismiss(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    }
+    window.addEventListener('pointerdown', dismiss);
+    return () => window.removeEventListener('pointerdown', dismiss);
+  }, [menuOpen]);
   const [priceFor, setPriceFor] = useState<string | null>(null);
   const canEditPrice = Boolean(session.priceEditEnabled && setLinePrice);
   const pricedLine = priceFor ? cart.find((line) => line.product.id === priceFor) : undefined;
   const [scanMiss, setScanMiss] = useState<string | null>(null);
+  const completionHeading = useRef<HTMLHeadingElement>(null);
   const printer = usePosPrinter(t);
   const [printerOpen, setPrinterOpen] = useState(false);
   const [doneAt, setDoneAt] = useState<Date>(() => new Date());
@@ -193,7 +229,15 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   // what the server finds, with a plain note instead of a silent miss.
   useScanner(
     (code) => {
-      if (priceFor || (step !== 'sale' && step !== 'pay')) return;
+      if (
+        priceFor ||
+        holding ||
+        clearing ||
+        menuOpen ||
+        printerOpen ||
+        (step !== 'sale' && step !== 'pay')
+      )
+        return;
       const product = productForCode(catalog ?? [], code);
       if (product) {
         setScanMiss(null);
@@ -208,28 +252,66 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   );
   const searchRef = useRef<HTMLInputElement>(null);
   const customerRef = useRef<HTMLInputElement>(null);
-  const previousScreen = useRef(screen);
+  // Recovery may mount this shell already at success; treat that as a new
+  // completion so a stale #pos/pay route cannot reopen a paid cart.
+  const previousScreen = useRef<typeof screen | null>(null);
 
   // The orchestrator moves to 'success' when a sale is sent or held; done
   // replaces pay in history so back cannot return to a paid sale.
   useEffect(() => {
-    if (screen === 'success' && previousScreen.current !== 'success') go('done', { replace: true });
+    const newCompletion = screen === 'success' && previousScreen.current !== 'success';
     previousScreen.current = screen;
-  }, [go, screen]);
-
-  // A finished sale's cart survives into done (the receipt is built from it)
-  // and must never reach the sale step again, whatever the route back (button,
-  // hardware back, or done -> queue -> sale): charging it again would be a
-  // second sale under a new key. Landing on sale while the orchestrator still
-  // says 'success' therefore always starts a fresh sale.
-  useEffect(() => {
+    // On a recovered completion the shell can mount at the default sale step.
+    // Move to done before considering a return to Sell; otherwise the same
+    // commit would clear the restored receipt cart and payment method.
+    if (newCompletion) {
+      go('done', { replace: true });
+      return;
+    }
+    // A later return to Sell must start a fresh cart, never charge the paid one.
     if (step === 'sale' && screen === 'success') beginSale();
-  }, [beginSale, screen, step]);
+  }, [beginSale, go, screen, step]);
 
   const cashOnly = !online;
-  const canPay = cart.length > 0 && !busy;
-  const creditNeedsCustomer = paymentMethod === 'CREDIT' && !customer;
-  const held = Boolean(notice) && screen === 'success';
+  const payments = props.payments ?? EMPTY_PAYMENTS;
+  const split = paymentMethod === 'MIXED';
+  const allocated = payments.reduce((n, p) => n + p.amount, 0);
+  const invalidSplit =
+    split &&
+    (!online ||
+      allocated <= 0 ||
+      allocated > total ||
+      payments.some(
+        (p) =>
+          p.amount < 0 ||
+          !Number.isFinite(p.amount) ||
+          (p.amount > 0 && p.method !== 'CASH' && !p.reference?.trim()),
+      ) ||
+      (allocated < total &&
+        (!customer || !session.paymentMethods.some((m) => m.code === 'CREDIT'))));
+  const cashAllocated = split
+    ? payments.filter((p) => p.method === 'CASH').reduce((n, p) => n + p.amount, 0)
+    : total;
+  const shortCash =
+    (paymentMethod === 'CASH' || (split && cashAllocated > 0)) &&
+    receivedAmount !== null &&
+    receivedAmount < cashAllocated;
+  const missingReference = !!selectedPayment?.requiresReference && !paymentReference.trim();
+  const canPay =
+    cart.length > 0 &&
+    !busy &&
+    !holding &&
+    !clearing &&
+    !shortCash &&
+    !invalidSplit &&
+    !missingReference &&
+    (control?.owned ?? true) &&
+    (heldCarts?.ready ?? true) &&
+    !heldCarts?.restored &&
+    heldCarts?.status !== 'attention';
+  const creditNeedsCustomer =
+    (paymentMethod === 'CREDIT' || (split && allocated < total)) && !customer;
+  const held = saleResult?.pending ?? (Boolean(notice) && screen === 'success');
 
   // The receipt describes the finished sale: its cart survives into done.
   const receipt =
@@ -243,25 +325,37 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           paymentLabel: selectedPayment?.label ?? paymentMethod,
           paymentMethod,
           receivedAmount,
+          payments: split ? payments.filter((p) => p.amount > 0) : undefined,
           customer,
           issuedAt: doneAt,
         })
       : null;
 
   useEffect(() => {
-    if (step === 'done') setDoneAt(new Date());
-  }, [step]);
+    if (step === 'done') {
+      setDoneAt(new Date());
+      if (!host || host.ownsInput(completionHeading.current)) completionHeading.current?.focus();
+    }
+  }, [step, host]);
 
   // Cash was taken, whether the office has the sale yet or it is held on the
   // phone, so the drawer opens once per finished cash sale, and only through
   // a directly connected printer the rep switched the drawer on for.
   useEffect(() => {
-    if (step !== 'done' || paymentMethod !== 'CASH' || !saleResult) return;
+    if (
+      step !== 'done' ||
+      (paymentMethod !== 'CASH' &&
+        !(
+          paymentMethod === 'MIXED' && payments.some((p) => p.method === 'CASH' && p.amount > 0)
+        )) ||
+      !saleResult
+    )
+      return;
     if (!printer.settings.drawer || !printer.connection) return;
     if (kickedFor.current === saleResult.id) return;
     kickedFor.current = saleResult.id;
     void printer.kickDrawer();
-  }, [paymentMethod, printer, saleResult, step]);
+  }, [paymentMethod, payments, printer, saleResult, step]);
 
   function openPay() {
     if (!cart.length) return;
@@ -276,6 +370,14 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   }
 
   function newSale() {
+    if (cart.length && screen !== 'success') {
+      setClearing(true);
+      return;
+    }
+    clearSale();
+  }
+  function clearSale() {
+    setClearing(false);
     beginSale();
     go('sale', { replace: true });
     searchRef.current?.focus();
@@ -287,7 +389,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (host && !host.ownsInput(event.target)) return;
-      if (priceFor) return;
+      if (priceFor || holding || clearing || menuOpen || printerOpen) return;
       if (event.key === 'F4') {
         event.preventDefault();
         const last = cart[cart.length - 1];
@@ -307,12 +409,26 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
 
   const products = query.trim().length >= 2 ? matches : quickPicks;
   const mode = query.trim().length >= 2 ? 'results' : 'picks';
+  const restoredNotice = heldCarts?.restored && (
+    <div className="pos-field">
+      <p className="pos-note" data-tone="warn">
+        {t('posRestoredCart')}
+        {!online && ` ${t('posRestoredOffline')}`}
+      </p>
+      <button type="button" className="pos-btn" onClick={heldCarts.review}>
+        {t('posReviewCart')}
+      </button>
+    </div>
+  );
 
   return (
     <div className="pos-app" data-step={step} lang={lang}>
       <header className="pos-header">
+        <div className="pos-app-mark">
+          <ShoppingBag size={23} aria-hidden="true" />
+        </div>
         <div className="pos-brand">
-          <strong>Kaunta</strong>
+          <strong>Itemba POS</strong>
           <span>
             {session.branch.name} · {session.rep.name}
           </span>
@@ -327,38 +443,68 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           {online ? t('online') : t('offline')}
           {pendingCount > 0 ? ` · ${t('waitingCount', { count: pendingCount })}` : ''}
         </button>
-        <div className="pos-menu">
+        <div
+          className="pos-menu"
+          ref={menuRef}
+          onKeyDown={(event) => {
+            if (!menuOpen) return;
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              setMenuOpen(false);
+              menuTrigger.current?.focus();
+            } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+              event.preventDefault();
+              const items = Array.from(
+                menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+              );
+              const current = items.indexOf(document.activeElement as HTMLButtonElement);
+              const index =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? items.length - 1
+                    : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) %
+                      items.length;
+              items[index]?.focus();
+            } else if (event.key === 'Tab') setMenuOpen(false);
+          }}
+        >
           <button
+            ref={menuTrigger}
             type="button"
             className="pos-btn"
             aria-expanded={menuOpen}
             aria-haspopup="menu"
+            aria-controls={menuOpen ? instanceId + '-pos-menu' : undefined}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setMenuOpen(true);
+              }
+            }}
             onClick={() => setMenuOpen((open) => !open)}
           >
             {t('posMenu')}
           </button>
           {menuOpen && (
-            <div className="pos-menu-list" role="menu">
-              {(
-                [
-                  ['leo', 'posModuleLeo'],
-                  ['stoo', 'posModuleStoo'],
-                  ...(session.purchasesEnabled ? [['manunuzi', 'posModuleManunuzi']] : []),
-                  ['mipangilio', 'posModuleMipangilio'],
-                ] as Array<[PosModule, PosStringKey]>
-              ).map(([module, label]) => (
-                <button
-                  key={module}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    openModule(module);
-                  }}
-                >
-                  {t(label)}
-                </button>
-              ))}
+            <div className="pos-menu-list" id={instanceId + '-pos-menu'} role="menu">
+              {([['mipangilio', 'posModuleMipangilio']] as Array<[PosModule, PosStringKey]>).map(
+                ([module, label]) => (
+                  <button
+                    key={module}
+                    type="button"
+                    role="menuitem"
+                    disabled={operationsBusy}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      openModule(module);
+                    }}
+                  >
+                    {t(label)}
+                  </button>
+                ),
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -394,36 +540,200 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
         </div>
       </header>
 
+      <nav className="pos-workspace-tabs" aria-label={t('posWorkspace')}>
+        <button
+          type="button"
+          aria-current={step === 'sale' || step === 'pay' ? 'page' : undefined}
+          onClick={() => (step === 'done' ? newSale() : go('sale'))}
+        >
+          <ShoppingBag size={17} aria-hidden="true" />
+          {t('posSellTab')}
+        </button>
+        {step === 'done' && (
+          <span className="pos-tab-current" aria-current="page">
+            <ReceiptText size={17} aria-hidden="true" />
+            {t('posReceiptTab')}
+          </span>
+        )}
+        <button
+          type="button"
+          aria-current={step === 'queue' ? 'page' : undefined}
+          onClick={() => go('queue')}
+        >
+          <RefreshCw size={17} aria-hidden="true" />
+          {t('posSyncTab')}
+          {pendingCount > 0 && <span className="pos-tab-count">{pendingCount}</span>}
+        </button>
+        <button
+          type="button"
+          aria-current={step === 'transactions' ? 'page' : undefined}
+          onClick={() => go('transactions')}
+        >
+          <ReceiptText size={17} aria-hidden="true" />
+          {t('posTransactions')}
+        </button>
+        {heldCarts && (
+          <button
+            type="button"
+            aria-current={step === 'held' ? 'page' : undefined}
+            onClick={() => go('held')}
+          >
+            <ShoppingBag size={17} aria-hidden="true" />
+            {t('posHeldCarts')}
+            {heldCarts.held.length > 0 && (
+              <span className="pos-tab-count">{heldCarts.held.length}</span>
+            )}
+          </button>
+        )}
+        <button
+          type="button"
+          aria-current={
+            ['stock', 'counts', 'receiving', 'deliveries'].includes(step) ? 'page' : undefined
+          }
+          onClick={() => go('stock')}
+        >
+          <Package size={17} aria-hidden="true" />
+          {t('posStockTab')}
+        </button>
+        <button
+          type="button"
+          aria-current={step === 'reports' ? 'page' : undefined}
+          onClick={() => go('reports')}
+        >
+          <BarChart3 size={17} aria-hidden="true" />
+          {t('posReportsTab')}
+        </button>
+        <span className="pos-terminal-label">{session.terminal.name}</span>
+      </nav>
+
+      {control && (
+        <div className="pos-control-strip" role="status">
+          <span>{control.owned ? t('posControlOwned') : t('posControlOther')}</span>
+          <button
+            type="button"
+            className="pos-btn"
+            disabled={busy || holdBusy || operationsBusy}
+            onClick={control.owned ? control.release : control.request}
+          >
+            {t(control.owned ? 'posReleaseControl' : 'posTakeControl')}
+          </button>
+          {heldCarts && (
+            <span>
+              {t(
+                heldCarts.status === 'saving'
+                  ? 'posSavingCart'
+                  : heldCarts.status === 'saved'
+                    ? 'posSavedCart'
+                    : 'posNeedsAttention',
+              )}
+            </span>
+          )}
+        </div>
+      )}
+      <OperationsWorkspace props={props} step={step} go={go} onBusy={setOperationsBusy} />
+      {heldCarts && !heldCarts.ready && (
+        <p className="pos-note" data-tone="warn" role="status">
+          {t(heldCarts.status === 'attention' ? 'posCartAttention' : 'posCartOpening')}
+        </p>
+      )}
+      {heldCarts?.status === 'attention' && (
+        <div className="pos-actions">
+          <button
+            type="button"
+            className="pos-btn"
+            onClick={() => void heldCarts.retry().catch(() => setNotice(t('posCartAttention')))}
+          >
+            {t('posRetryCart')}
+          </button>
+        </div>
+      )}
+      {step === 'transactions' && (
+        <Transactions
+          binding={binding}
+          session={session}
+          online={online}
+          pending={pendingSales}
+          t={t}
+          owned={control?.owned ?? true}
+          openSync={() => go('queue')}
+        />
+      )}
+      {step === 'held' && heldCarts && (
+        <HeldCarts
+          actions={heldCarts}
+          empty={cart.length === 0}
+          t={t}
+          onResume={() => go('sale')}
+        />
+      )}
+
       {step === 'done' && (
         <main className="pos-full">
           <section className="pos-done" data-held={held} aria-live="polite">
             <div className="pos-done-mark" aria-hidden="true">
-              <svg
-                width="30"
-                height="30"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                {held ? (
-                  <>
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 8v4l3 2" />
-                  </>
-                ) : (
-                  <path d="m5 12 5 5 9-10" />
-                )}
-              </svg>
+              {held ? <Clock3 size={30} /> : <Check size={30} />}
             </div>
-            <h2>{held ? t('posHeldTitle') : t('saleComplete')}</h2>
+            <h2 ref={completionHeading} tabIndex={-1}>
+              {held ? t('posHeldTitle') : t('saleComplete')}
+            </h2>
             {held && <p>{t('custodyNote')}</p>}
             <span className="pos-done-total pos-num">
               {money(Number(saleResult?.totalAmount ?? total))}
             </span>
             {saleResult?.salesOrderNumber && <p>{saleResult.salesOrderNumber}</p>}
+          </section>
+          <section className="pos-receipt-preview" aria-label={t('posReceiptDetails')}>
+            <div className="pos-receipt-heading">
+              <ReceiptText size={19} aria-hidden="true" />
+              <strong>{t('posReceiptDetails')}</strong>
+            </div>
+            {cart.map((line) => (
+              <div className="pos-receipt-line" key={line.product.id}>
+                <span>
+                  {line.quantity} × {line.product.name}
+                </span>
+                <strong className="pos-num">{money(line.quantity * lineUnitPrice(line))}</strong>
+              </div>
+            ))}
+            <div className="pos-receipt-line">
+              <span>{t('payment')}</span>
+              <strong>{selectedPayment?.label ?? paymentMethod}</strong>
+            </div>
+            {receipt?.payments?.map((p) => (
+              <div className="pos-receipt-line" key={p.method}>
+                <span>
+                  {session.paymentMethods.find((m) => m.code === p.method)?.label ?? p.method}
+                </span>
+                <strong>
+                  {money(p.amount)}
+                  {p.reference ? ` · ${p.reference}` : ''}
+                </strong>
+              </div>
+            ))}
+            {receipt?.outstanding != null && (
+              <div className="pos-receipt-line">
+                <span>{t('stillOwed')}</span>
+                <strong>{money(receipt.outstanding)}</strong>
+              </div>
+            )}
+            {paymentReference && (
+              <div className="pos-receipt-line">
+                <span>{t('reference')}</span>
+                <strong>{paymentReference}</strong>
+              </div>
+            )}
+            {customer && (
+              <div className="pos-receipt-line">
+                <span>{t('customer')}</span>
+                <strong>{customer.name}</strong>
+              </div>
+            )}
+            {paymentMethod === 'CASH' && receivedAmount !== null && receivedAmount >= total && (
+              <div className="pos-receipt-line">
+                <span>{t('changeDue')}</span>
+                <strong className="pos-num">{money(receivedAmount - total)}</strong>
+              </div>
+            )}
           </section>
           <div className="pos-actions">
             <button
@@ -488,9 +798,9 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           <button type="button" className="pos-back" onClick={() => go('sale')}>
             ← {t('backToSale')}
           </button>
-          <section className="pos-panel" aria-labelledby="pos-queue-title">
+          <section className="pos-panel" aria-labelledby={instanceId + '-pos-queue-title'}>
             <div className="pos-panel-head">
-              <h2 id="pos-queue-title">{t('queueTitle')}</h2>
+              <h2 id={instanceId + '-pos-queue-title'}>{t('queueTitle')}</h2>
               <div className="pos-spacer" />
               <button
                 type="button"
@@ -501,6 +811,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 {syncing ? t('sending') : t('sendNow')}
               </button>
             </div>
+            <p className="pos-hint">{t('posSyncExplanation')}</p>
             {pendingSales.length === 0 ? (
               <p className="pos-empty">{t('queueEmpty')}</p>
             ) : (
@@ -523,11 +834,11 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
         </main>
       )}
 
-      {(step === 'sale' || step === 'pay') && (
+      {(step === 'sale' || step === 'pay') && (heldCarts?.ready ?? true) && (
         <>
           <div className="pos-body" data-step={step}>
             <section className="pos-panel pos-find" aria-label={t('addProducts')}>
-              <label htmlFor="pos-search" className="pos-sr">
+              <label htmlFor={instanceId + '-pos-search'} className="pos-sr">
                 {t('productSearchPlaceholder')}
               </label>
               <div className="pos-search">
@@ -545,7 +856,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                   <path d="m20 20-3.5-3.5" />
                 </svg>
                 <input
-                  id="pos-search"
+                  id={instanceId + '-pos-search'}
                   ref={searchRef}
                   value={query}
                   autoComplete="off"
@@ -610,17 +921,103 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
               </p>
             </section>
 
-            <section className="pos-panel pos-cart" aria-labelledby="pos-cart-title">
+            <section
+              className="pos-panel pos-cart"
+              aria-labelledby={instanceId + '-pos-cart-title'}
+            >
               <div className="pos-panel-head">
-                <h2 id="pos-cart-title">{t('saleItems')}</h2>
+                <h2 id={instanceId + '-pos-cart-title'}>{t('saleItems')}</h2>
                 <span>{t('items', { count: cartCount })}</span>
                 <div className="pos-spacer" />
+                {onHold && (
+                  <button
+                    type="button"
+                    className="pos-btn"
+                    disabled={!cart.length || busy || holdBusy}
+                    onClick={() => {
+                      setHolding(true);
+                      setHoldName(customer?.name ?? '');
+                      setHoldNote('');
+                    }}
+                  >
+                    {t('posHold')}
+                  </button>
+                )}
                 {cart.length > 0 && (
                   <button type="button" className="pos-btn" onClick={newSale}>
                     {t('posClearCart')}
                   </button>
                 )}
               </div>
+              {step !== 'pay' && restoredNotice}
+              {holding && (
+                <form
+                  className="pos-hold-form"
+                  aria-label={t('posHold')}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!onHold || holdBusy) return;
+                    setHoldBusy(true);
+                    setNotice('');
+                    void onHold(holdName, holdNote)
+                      .then(() => {
+                        setHolding(false);
+                        go('sale');
+                      })
+                      .catch(() => setNotice(t('posCartAttention')))
+                      .finally(() => setHoldBusy(false));
+                  }}
+                >
+                  <label className="pos-field">
+                    {t('posCartName')}
+                    <input
+                      autoFocus
+                      className="pos-input"
+                      maxLength={80}
+                      value={holdName}
+                      onChange={(e) => setHoldName(e.target.value)}
+                    />
+                  </label>
+                  <label className="pos-field">
+                    {t('posCartNote')}
+                    <textarea
+                      className="pos-input"
+                      maxLength={500}
+                      value={holdNote}
+                      onChange={(e) => setHoldNote(e.target.value)}
+                    />
+                  </label>
+                  <p className="pos-hint">{t('posHoldNote')}</p>
+                  <div className="pos-actions">
+                    <button type="submit" className="pos-btn pos-btn-primary" disabled={holdBusy}>
+                      {t('posHold')}
+                    </button>
+                    <button
+                      type="button"
+                      className="pos-btn"
+                      disabled={holdBusy}
+                      onClick={() => setHolding(false)}
+                    >
+                      {t('posCancel')}
+                    </button>
+                  </div>
+                </form>
+              )}
+              {clearing && (
+                <div role="group" aria-label={t('posDiscardCart')}>
+                  <p className="pos-note" data-tone="warn">
+                    {t('posDiscardConfirm')}
+                  </p>
+                  <div className="pos-actions">
+                    <button type="button" className="pos-btn" onClick={() => setClearing(false)}>
+                      {t('keepIt')}
+                    </button>
+                    <button type="button" className="pos-btn" onClick={clearSale}>
+                      {t('posDiscardCart')}
+                    </button>
+                  </div>
+                </div>
+              )}
               {cart.length === 0 ? (
                 <p className="pos-empty">{t('posCartEmpty')}</p>
               ) : (
@@ -704,7 +1101,8 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
               </div>
             </section>
 
-            <section className="pos-panel pos-pay" aria-labelledby="pos-pay-title">
+            <section className="pos-panel pos-pay" aria-labelledby={instanceId + '-pos-pay-title'}>
+              {step === 'pay' && restoredNotice}
               <button
                 type="button"
                 className="pos-back"
@@ -713,7 +1111,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 ← {t('backToSale')}
               </button>
               <div className="pos-pay-total">
-                <span id="pos-pay-title">{t('posTotalDue')}</span>
+                <span id={instanceId + '-pos-pay-title'}>{t('posTotalDue')}</span>
                 <strong className="pos-num">{money(total)}</strong>
                 <span>{t('posVatIncluded')}</span>
               </div>
@@ -741,10 +1139,42 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 ))}
               </div>
 
+              {online && props.setPayments && (
+                <button
+                  type="button"
+                  className="pos-btn"
+                  aria-pressed={split}
+                  onClick={() => {
+                    setPaymentMethod('MIXED');
+                    if (!payments.length)
+                      props.setPayments!([
+                        {
+                          method:
+                            session.paymentMethods.find((m) => m.code !== 'CREDIT')?.code ?? 'CASH',
+                          amount: total,
+                        },
+                      ]);
+                  }}
+                >
+                  {t('posSplitPayments')}
+                </button>
+              )}
+              {split && props.setPayments && (
+                <SplitPayments
+                  session={session}
+                  payments={payments}
+                  onChange={props.setPayments}
+                  total={total}
+                  t={t}
+                />
+              )}
+
               {(paymentMethod === 'CREDIT' || online) && (
                 <div className="pos-field">
                   <span className="pos-field-label">
-                    {paymentMethod === 'CREDIT' ? t('customer') : t('customerOptional')}
+                    {paymentMethod === 'CREDIT' || (split && allocated < total)
+                      ? t('customer')
+                      : t('customerOptional')}
                   </span>
                   {customer ? (
                     <button
@@ -761,11 +1191,11 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                     </button>
                   ) : (
                     <>
-                      <label htmlFor="pos-customer" className="pos-sr">
+                      <label htmlFor={instanceId + '-pos-customer'} className="pos-sr">
                         {t('customerSearchPlaceholder')}
                       </label>
                       <input
-                        id="pos-customer"
+                        id={instanceId + '-pos-customer'}
                         ref={customerRef}
                         className="pos-input"
                         value={customerQuery}
@@ -800,13 +1230,13 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 </div>
               )}
 
-              {paymentMethod === 'CASH' && (
+              {(paymentMethod === 'CASH' || (split && cashAllocated > 0)) && (
                 <div className="pos-field">
-                  <label htmlFor="pos-received">
+                  <label htmlFor={instanceId + '-pos-received'}>
                     {t('received')} {t('optional')}
                   </label>
                   <input
-                    id="pos-received"
+                    id={instanceId + '-pos-received'}
                     className="pos-input pos-input-money pos-num"
                     type="text"
                     inputMode="numeric"
@@ -819,9 +1249,9 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                   />
                   <div className="pos-quick">
                     {[
-                      { label: t('exactAmount'), amount: Math.ceil(total) },
+                      { label: t('exactAmount'), amount: Math.ceil(cashAllocated) },
                       ...[5000, 10000, 20000, 50000]
-                        .filter((amount) => amount >= total)
+                        .filter((amount) => amount >= cashAllocated)
                         .slice(0, 3)
                         .map((amount) => ({ label: money(amount), amount })),
                     ].map((option) => (
@@ -836,14 +1266,16 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                     ))}
                   </div>
                   {receivedAmount !== null &&
-                    (receivedAmount >= total ? (
+                    (receivedAmount >= cashAllocated ? (
                       <p className="pos-note pos-num" data-tone="ok">
                         {t('changeDue')}:{' '}
-                        <span className="pos-note-strong">{money(receivedAmount - total)}</span>
+                        <span className="pos-note-strong">
+                          {money(receivedAmount - cashAllocated)}
+                        </span>
                       </p>
                     ) : (
                       <p className="pos-note pos-num" data-tone="warn">
-                        {t('stillOwed')}: {money(total - receivedAmount)}
+                        {t('stillOwed')}: {money(cashAllocated - receivedAmount)}
                       </p>
                     ))}
                 </div>
@@ -851,16 +1283,23 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
 
               {selectedPayment?.requiresReference && (
                 <div className="pos-field">
-                  <label htmlFor="pos-reference">
-                    {t('reference')} {t('optional')}
-                  </label>
+                  <label htmlFor={instanceId + '-pos-reference'}>{t('reference')}</label>
                   <input
-                    id="pos-reference"
+                    id={instanceId + '-pos-reference'}
                     className="pos-input"
+                    required
+                    aria-describedby={
+                      missingReference ? instanceId + '-pos-reference-note' : undefined
+                    }
                     value={paymentReference}
                     placeholder={t('referencePlaceholder')}
                     onChange={(event) => setPaymentReference(event.target.value)}
                   />
+                  {missingReference && (
+                    <p className="pos-hint" id={instanceId + '-pos-reference-note'}>
+                      {t('posReferenceRequired')}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -960,6 +1399,10 @@ function QueueItem({
           <p className="pos-note" data-tone="bad">
             {posErrorMessage(item.lastError ?? '', t)}
           </p>
+          <p className="pos-hint">{t('posSyncRejectedNote')}</p>
+          {item.requiresReview !== undefined ? (
+            <p className="pos-hint">{t('posSyncRemoveBlocked')}</p>
+          ) : null}
           {confirming ? (
             <div className="pos-field">
               <strong>{t('removeConfirmTitle')}</strong>
@@ -990,13 +1433,19 @@ function QueueItem({
               >
                 {retrying ? t('sending') : t('retryThisSale')}
               </button>
-              <button type="button" className="pos-btn" onClick={() => setConfirmRemoveId(item.id)}>
+              <button
+                type="button"
+                className="pos-btn"
+                disabled={item.requiresReview !== undefined}
+                onClick={() => setConfirmRemoveId(item.id)}
+              >
                 {t('remove')}
               </button>
             </div>
           )}
         </>
       )}
+      {!failed && <p className="pos-hint">{t('posSyncWaitingNote')}</p>}
     </div>
   );
 }

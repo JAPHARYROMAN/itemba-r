@@ -20,6 +20,7 @@ import {
   PAYROLL_TABS,
 } from '@/lib/payroll-app';
 import { payslipFixture } from '@/test/payslip-fixture';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 import { PayrollCompanion } from './payroll-companion';
 import { payrollCompanionRoute } from './payroll-companion-routes';
 
@@ -160,8 +161,10 @@ describe('Payroll companion workflows', () => {
   it('opens company-filtered employees and the selected profile without reading the main route', async () => {
     const user = userEvent.setup();
     render(<Harness />);
-    await screen.findByRole('option', { name: 'Side Company' });
-    await user.selectOptions(screen.getByLabelText('Company'), 'side-company');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Side Company'),
+    );
+    await chooseSelectOption('Company', 'side-company', user);
     await user.click(await screen.findByRole('link', { name: /Active employees 1/ }));
     await user.click(await screen.findByRole('button', { name: 'Inspect Alex Example' }));
     await user.click(screen.getByRole('button', { name: 'Open employee' }));

@@ -45,6 +45,7 @@ describe('Desk posting transaction', () => {
     const db: any = {
       $queryRaw: jest.fn(),
       salesDeskSale: {
+        findUnique: jest.fn(async () => ({ customer: { canonicalCustomerId: null } })),
         findMany: jest.fn(async () => [
           {
             ...source,
@@ -57,6 +58,9 @@ describe('Desk posting transaction', () => {
         ]),
       },
       journalEntry: { findMany: jest.fn(async () => existing) },
+      invoiceDeskInvoice: {
+        findUnique: jest.fn(async () => ({ supplier: { canonicalSupplierId: null } })),
+      },
       companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
       chartOfAccount: {
         findMany: jest.fn(async () => [
@@ -93,6 +97,14 @@ describe('Desk posting transaction', () => {
     debitAccountId: 'a1',
     creditAccountId: 'a2',
   };
+  it('tags the receivable side with the canonical customer when the desk party has one (Phase 3)', async () => {
+    const { service, db, engine } = setup();
+    db.salesDeskSale.findUnique.mockResolvedValue({ customer: { canonicalCustomerId: 'cus-1' } });
+    await service.post(user, 'sales', source.id, input);
+    const lines = (engine.postLines as jest.Mock).mock.calls[0][0].lines;
+    expect(lines[0]).toMatchObject({ partyType: 'CUSTOMER', customerId: 'cus-1' });
+    expect(lines[1]).not.toHaveProperty('partyType');
+  });
   it('posts exact balanced values with source reference, write scope and transactional audit', async () => {
     const { service, db, engine, audit, companies, org } = setup();
     await expect(service.post(user, 'sales', source.id, input)).resolves.toEqual({

@@ -1,8 +1,14 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  chooseSelectOption,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+} from '@/test/select-field';
 import { ApprovalOverview } from './approval-overview';
 import {
   approvalDestinations,
@@ -135,7 +141,7 @@ describe('Approval overview', () => {
     state.permissions = new Set(['approvals.dashboard.view', 'approval_requests.view']);
     render(<ApprovalOverview />);
     await screen.findByRole('region', { name: 'Workflow readiness' });
-    expect(screen.queryByRole('combobox', { name: 'Company' })).not.toBeInTheDocument();
+    expect(querySelectField('Company')).not.toBeInTheDocument();
     expect(state.page).not.toHaveBeenCalled();
     expect(screen.getAllByRole('link')).toHaveLength(2);
     expect(state.get).toHaveBeenCalledWith(
@@ -166,11 +172,11 @@ describe('Approval overview', () => {
           finish = resolve;
         }),
     );
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company' }), 'company');
+    await chooseSelectOption('Company', 'company', user);
     expect(screen.queryByRole('region', { name: 'Workflow readiness' })).not.toBeInTheDocument();
     const signal = state.get.mock.calls.at(-1)![1].signal;
     state.get.mockResolvedValue({ ...fixture, score: 95 });
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company' }), 'other');
+    await chooseSelectOption('Company', 'other', user);
     expect(signal.aborted).toBe(true);
     await screen.findByText('95%');
     await act(async () => finish({ ...fixture, score: 1 }));
@@ -203,12 +209,14 @@ describe('Approval overview', () => {
     render(<ApprovalOverview />);
     await screen.findByText('No readiness checks were returned for this scope.');
     expect(screen.getByText('Last checked Unavailable')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Company' })).toBeDisabled();
+    expect(getSelectField('Company')).toBeDisabled();
     state.page
       .mockResolvedValueOnce({ data: [{ id: 'one', name: 'First company' }], total: 2 })
       .mockResolvedValueOnce({ data: [{ id: 'two', name: 'Last company' }], total: 2 });
     await user.click(screen.getByRole('button', { name: 'Retry companies' }));
-    await screen.findByRole('option', { name: 'Last company' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Last company'),
+    );
     expect(state.page.mock.calls.at(-1)![1].query.page).toBe(2);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });

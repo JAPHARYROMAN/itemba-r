@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -24,6 +25,7 @@ export class ContractsService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
@@ -123,6 +125,11 @@ export class ContractsService {
       throw new BadRequestException('groupId is required when owningLevel is GROUP');
     }
     await this.companyScope.assertCanAccessCompany(user, rest.companyId, AccessLevel.WRITE);
+    // Party linkage (Phase 2): one party, existing in the contract's company.
+    if (rest.supplierId && rest.customerId)
+      throw new BadRequestException('Link one party: a supplier or a customer, not both.');
+    if (rest.supplierId) await this.parties?.assertSupplier(rest.companyId, rest.supplierId);
+    if (rest.customerId) await this.parties?.assertCustomer(rest.companyId, rest.customerId);
     const userId = user.id;
 
     const record = await this.prisma.contract.create({
@@ -158,6 +165,12 @@ export class ContractsService {
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
     const userId = user.id;
     const { value, startDate, endDate, renewalDate, renewalNoticeDate, ...rest } = dto;
+    const supplierId = rest.supplierId === undefined ? existing.supplierId : rest.supplierId,
+      customerId = rest.customerId === undefined ? existing.customerId : rest.customerId;
+    if (supplierId && customerId)
+      throw new BadRequestException('Link one party: a supplier or a customer, not both.');
+    if (rest.supplierId) await this.parties?.assertSupplier(existing.companyId, rest.supplierId);
+    if (rest.customerId) await this.parties?.assertCustomer(existing.companyId, rest.customerId);
 
     const record = await this.prisma.contract.update({
       where: { id },

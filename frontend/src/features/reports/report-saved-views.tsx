@@ -21,6 +21,10 @@ import type {
   SavedViewTarget,
 } from './report-viewer-types';
 import { reportRequest } from './report-viewer-utils';
+import {
+  normalizeValuationOptions,
+  valuationFilterLabel,
+} from '@/features/inventory/stock-valuation-format';
 
 export function ReportSavedViews({
   entry,
@@ -233,7 +237,7 @@ function SavedViewCreate({
     <AccountingReviewShell
       form={form}
       title="Save report view"
-      subtitle="Keep a reusable set of filters and chart choices"
+      subtitle="Keep reusable filters and report presentation choices"
       action="Save view"
       onSubmit={() =>
         void form.submit(
@@ -274,9 +278,23 @@ function SavedViewCreate({
             : ''}
         </p>
         <p>
-          {values.filters.dateFrom || 'Any start date'} – {values.filters.dateTo || 'Any end date'}
+          {target.reportId === 'ops.stock-valuation' ? (
+            'Current stock balances'
+          ) : (
+            <>
+              {values.filters.dateFrom || 'Any start date'} –{' '}
+              {values.filters.dateTo || 'Any end date'}
+            </>
+          )}
           {values.filters.asOf ? ` · As of ${values.filters.asOf}` : ''}
         </p>
+        {target.reportId === 'ops.stock-valuation' && (
+          <p>
+            {normalizeValuationOptions(values.chartConfig.stockValuation).columns.length} selected
+            columns ·{' '}
+            {valuationFilterLabel(normalizeValuationOptions(values.chartConfig.stockValuation))}
+          </p>
+        )}
         <p>
           Presentation: {values.chartConfig.viewMode}. Applying this view restores these choices; it
           does not run or send a report.

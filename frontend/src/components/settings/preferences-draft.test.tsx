@@ -3,6 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import PreferencesPage from '@/app/(dashboard)/settings/preferences/page';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
+import {
+  chooseSelectOption,
+  findSelectField,
+  getSelectField,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   router: { push: vi.fn() },
@@ -49,13 +55,13 @@ it('keeps edited preferences after failure and removes the navigation guard only
       <PreferencesPage />
     </UnsavedWorkProvider>,
   );
-  await user.selectOptions(await screen.findByRole('combobox', { name: 'Timezone' }), 'UTC');
+  await chooseSelectOption(await findSelectField('Timezone'), 'UTC', user);
   await user.click(screen.getByRole('button', { name: 'Save settings' }));
   expect(await screen.findByText('Save interrupted')).toBeVisible();
   await user.click(screen.getByRole('link', { name: 'Settings', exact: true }));
   expect(screen.getByRole('dialog', { name: 'Keep your changes?' })).toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Stay here' }));
-  expect(screen.getByRole('combobox', { name: 'Timezone' })).toHaveValue('UTC');
+  expect(selectFieldValue(getSelectField('Timezone'))).toBe('UTC');
   await user.click(screen.getByRole('button', { name: 'Save settings' }));
   await screen.findByText('Preferences saved.');
   const event = new Event('beforeunload', { cancelable: true });

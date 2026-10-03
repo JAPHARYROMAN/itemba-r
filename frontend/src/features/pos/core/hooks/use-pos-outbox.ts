@@ -1,15 +1,18 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { backendPost } from '@/lib/api-client';
+import { backendGet, backendPost } from '@/lib/api-client';
 import {
   getPendingMobilePosLiteSales,
+  enqueueMobilePosLiteSale,
   removePendingMobilePosLiteSale,
   updatePendingMobilePosLiteSaleError,
   type MobilePosLiteBinding,
   type PendingMobilePosLiteSale,
 } from '@/lib/mobile-pos-lite-store';
 import { isConnectionProblem, terminalHeaders } from '../pos-utils';
+import type { CheckoutObservation } from '../checkout-recovery';
+import { terminalOperation } from '../terminal-control';
 
 /**
  * The offline-sale outbox: the pending list plus the sync engine.
@@ -23,19 +26,22 @@ import { isConnectionProblem, terminalHeaders } from '../pos-utils';
  * - drain order comes from the store read (primary-key/UUID order via the
  *   terminalCode index) — do not "fix" this to FIFO.
  */
-export function usePosOutbox(): {
+export function usePosOutbox(ownerId?: string): {
   pendingSales: PendingMobilePosLiteSale[];
   syncing: boolean;
+  outboxReady: boolean;
   refreshPendingSales: (current: MobilePosLiteBinding) => Promise<PendingMobilePosLiteSale[]>;
   syncPendingSales: (current: MobilePosLiteBinding) => Promise<void>;
 } {
   const [pendingSales, setPendingSales] = useState<PendingMobilePosLiteSale[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [outboxReady, setOutboxReady] = useState(false);
   const syncingRef = useRef(false);
 
   const refreshPendingSales = useCallback(async (current: MobilePosLiteBinding) => {
     const items = await getPendingMobilePosLiteSales(current.terminalCode);
     setPendingSales(items);
+    setOutboxReady(true);
     return items;
   }, []);
 
@@ -45,29 +51,48 @@ export function usePosOutbox(): {
       syncingRef.current = true;
       setSyncing(true);
       try {
-        const pending = await getPendingMobilePosLiteSales(current.terminalCode);
-        for (const item of pending) {
-          try {
-            await backendPost('/mobile-pos-lite/sales', item.payload, {
-              headers: terminalHeaders(current),
-            });
-            await removePendingMobilePosLiteSale(item.id);
-          } catch (error) {
-            if (isConnectionProblem(error)) break;
-            await updatePendingMobilePosLiteSaleError(
-              item.id,
-              error instanceof Error ? error.message : 'This sale still needs attention.',
-            );
+        await terminalOperation(current.terminalCode, async () => {
+          const pending = await getPendingMobilePosLiteSales(current.terminalCode);
+          for (const item of pending) {
+            if (item.requiresReview || (item.requiresReview === false && item.lastError)) continue;
+            if (item.ownerId && item.ownerId !== ownerId) continue;
+            try {
+              // New durable intents may have committed before the connection dropped.
+              // Legacy queues keep their established verbatim replay behaviour.
+              if (item.requiresReview === false) {
+                const result = await backendGet<CheckoutObservation>(
+                  `/mobile-pos-lite/sales/requests/${encodeURIComponent(item.payload.idempotencyKey)}`,
+                  { headers: terminalHeaders(current) },
+                );
+                if (result.state === 'confirmed') {
+                  await removePendingMobilePosLiteSale(item.id);
+                  continue;
+                }
+                if (result.state !== 'not_found') {
+                  await enqueueMobilePosLiteSale({ ...item, requiresReview: true });
+                  continue;
+                }
+              }
+              await backendPost('/mobile-pos-lite/sales', item.payload, {
+                headers: terminalHeaders(current),
+              });
+              await removePendingMobilePosLiteSale(item.id);
+            } catch (error) {
+              if (isConnectionProblem(error)) break;
+              const lastError =
+                error instanceof Error ? error.message : 'This sale still needs attention.';
+              await updatePendingMobilePosLiteSaleError(item.id, lastError);
+            }
           }
-        }
-        await refreshPendingSales(current);
+          await refreshPendingSales(current);
+        });
       } finally {
         syncingRef.current = false;
         setSyncing(false);
       }
     },
-    [refreshPendingSales],
+    [ownerId, refreshPendingSales],
   );
 
-  return { pendingSales, syncing, refreshPendingSales, syncPendingSales };
+  return { pendingSales, syncing, outboxReady, refreshPendingSales, syncPendingSales };
 }

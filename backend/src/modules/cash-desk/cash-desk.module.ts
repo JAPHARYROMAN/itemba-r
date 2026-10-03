@@ -9,6 +9,7 @@ import { CashDeskService } from './cash-desk.service';
 import { DeskReportsModule } from '../desk-reports/desk-reports.module';
 import { LoanLifecycleModule } from '../loans/loan-lifecycle.module';
 import { CashSalesConnectionService } from './cash-sales-connection.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 @Module({
   imports: [
     PrismaModule,
@@ -24,6 +25,7 @@ import { CashSalesConnectionService } from './cash-sales-connection.service';
     CashSalesConnectionService,
     CompanyScopeService,
     OrganizationScopeService,
+    PartyExistsService,
   ],
 })
 export class CashDeskModule {}

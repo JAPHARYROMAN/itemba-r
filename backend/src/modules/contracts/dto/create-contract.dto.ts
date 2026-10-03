@@ -1,5 +1,11 @@
 import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import { ContractStatus, ContractType, ContractOwnershipLevel, CurrencyCode, RiskLevel } from '@prisma/client';
+import {
+  ContractStatus,
+  ContractType,
+  ContractOwnershipLevel,
+  CurrencyCode,
+  RiskLevel,
+} from '@prisma/client';
 
 export class CreateContractDto {
   @IsNotEmpty() @IsEnum(ContractOwnershipLevel) owningLevel!: ContractOwnershipLevel;
@@ -11,6 +17,9 @@ export class CreateContractDto {
   @IsNotEmpty() @IsEnum(ContractType) contractType!: ContractType;
   @IsOptional() @IsString() contractNumber?: string;
   @IsNotEmpty() @IsString() counterpartyName!: string;
+  /** Party linkage (Phase 2): the supplier or customer profile behind the counterparty. */
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsString() customerId?: string;
   @IsOptional() @IsString() counterpartyContact?: string;
   @IsOptional() @IsString() counterpartyAddress?: string;
   @IsNotEmpty() @IsString() startDate!: string;

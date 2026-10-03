@@ -79,29 +79,38 @@ describe('the POS write path is excluded from the agent', () => {
     expect(permitted).toEqual(expect.arrayContaining(['findTerminals', 'dayReports']));
   });
 
-  it('excludes exactly the terminal-bound routes and the two explicit unsafe entry points', () => {
+  it('excludes exactly the terminal-bound routes and unsafe financial entry points', () => {
     // Keeps the boundary inventory visible. Any addition or removal must be an
     // explicit transport/security decision rather than manifest drift.
     const excluded = MANIFEST.filter((c) => c.agentExcluded)
       .map((c) => c.handler)
       .sort();
     expect(excluded).toEqual([
+      'actionReceipt',
       'activate',
       'catalog',
+      'checkoutOutcome',
+      'collection',
       'createDayReport',
       'createPurchase',
       'createSale',
       'createStockCount',
       'customers',
+      'dailySummary',
+      'dailySummaryPdf',
       'dayReportPdf',
       'mySalesToday',
       'products',
       'purchaseHistory',
+      'returnSale',
       'saleReceipt',
       'salesHistory',
       'session',
       'stock',
+      'stockCountHistory',
       'suppliers',
+      'transactionDetail',
+      'transactionOutcome',
     ]);
   });
 });

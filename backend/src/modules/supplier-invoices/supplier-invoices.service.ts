@@ -6,10 +6,15 @@ import {
 } from '@nestjs/common';
 import { AccessLevel, CurrencyCode, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import type { PostingLine } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
@@ -663,7 +668,13 @@ export class SupplierInvoicesService {
             orderBy: { createdAt: 'desc' },
           });
           if (incremental && incremental.lines.length > 0) {
-            await this.reverseSupplierInvoiceJournal(tx, existing, incremental, dto?.reason, user.id);
+            await this.reverseSupplierInvoiceJournal(
+              tx,
+              existing,
+              incremental,
+              dto?.reason,
+              user.id,
+            );
           }
 
           // Restore the payable to its pre-invoice, receipt-created state. The
@@ -792,6 +803,10 @@ export class SupplierInvoicesService {
         description: string | null;
         divisionId: string | null;
         branchId: string | null;
+        // Party linkage (Phase 3): stored on every line; the reversal keeps it.
+        partyType?: string | null;
+        supplierId?: string | null;
+        customerId?: string | null;
       }>;
     },
     reason: string | undefined,
@@ -817,6 +832,7 @@ export class SupplierInvoicesService {
 
     const reversedLines: PostingLine[] = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       // Swap each side: a debit becomes a credit of the same magnitude and
       // vice-versa. A zero stays zero.
       debit: this.fromCents(this.moneyToCents(line.credit ?? 0)),
@@ -1077,6 +1093,7 @@ export class SupplierInvoicesService {
     }
     lines.push({
       accountId: apAccount.id,
+      ...partyOf('supplier', invoice.supplierId),
       debit: 0,
       credit: this.fromCents(payableCents),
       description: `Accounts payable for supplier invoice ${invoice.supplierInvoiceNumber}`,
@@ -1570,19 +1587,7 @@ export class SupplierInvoicesService {
     companyId: string,
     supplierId?: string | null,
   ) {
-    if (!supplierId) return;
-    const summary = await tx.payable.aggregate({
-      where: {
-        companyId,
-        supplierId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.supplier.updateMany({
-      where: { id: supplierId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'supplier', companyId, supplierId);
   }
 }

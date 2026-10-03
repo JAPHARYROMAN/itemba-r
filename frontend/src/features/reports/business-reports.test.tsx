@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { changeSelectField } from '@/test/select-field';
 import { BusinessReports } from './business-reports';
 const api = vi.hoisted(() => ({ get: vi.fn(), download: vi.fn(), permissions: new Set<string>() }));
 vi.mock('@/hooks/use-auth', () => ({
@@ -54,7 +55,7 @@ describe('Connected business reports', () => {
     expect(api.download.mock.calls[0][1]).toContain("'=unsafe()");
     expect(api.download.mock.calls[0][1]).toContain("'+command");
     expect(api.get.mock.calls.every(([path]) => !path.startsWith('/sales-desk'))).toBe(true);
-    fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'suppliers' } });
+    changeSelectField('Report', 'suppliers');
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(
         '/desk-reports/business',

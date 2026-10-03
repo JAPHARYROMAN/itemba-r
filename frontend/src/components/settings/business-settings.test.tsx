@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import NumberSequencesPage from '@/app/(dashboard)/settings/number-sequences/page';
 import CompanyProfilePage from '@/app/(dashboard)/settings/company-profile/page';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -145,9 +146,10 @@ describe('Business settings workspaces', () => {
     numbers();
     await user.click(await screen.findByRole('button', { name: 'Inspect INV' }));
     await user.click(screen.getByRole('button', { name: 'Edit sequence' }));
-    const editor = within(screen.getByRole('dialog', { name: 'Edit Sequence' }));
+    const editorDialog = screen.getByRole('dialog', { name: 'Edit Sequence' });
+    const editor = within(editorDialog);
     expect(editor.getByLabelText(/Entity Type/)).toBeDisabled();
-    expect(editor.getByLabelText('Company')).toBeDisabled();
+    expect(getSelectField('Company', editorDialog)).toBeDisabled();
     await user.clear(editor.getByLabelText('Prefix'));
     await user.type(editor.getByLabelText('Prefix'), 'NEW-');
     await user.click(editor.getByRole('button', { name: 'Cancel' }));
@@ -173,21 +175,21 @@ describe('Business settings workspaces', () => {
     const user = userEvent.setup();
     identity();
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Alpha (A)' })).toBeInTheDocument(),
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Alpha (A)'),
     );
-    await user.selectOptions(screen.getByRole('combobox', { name: /^Company/ }), 'a');
+    await chooseSelectOption('Company', 'a', user);
     const name = await screen.findByLabelText(/Company Display Name/);
     await user.clear(name);
     await user.type(name, 'Alpha draft');
     await user.type(screen.getByLabelText('Branch Address'), ' edited');
-    await user.selectOptions(screen.getByLabelText('Branch', { exact: true }), 'branch-b');
+    await chooseSelectOption('Branch', 'branch-b', user);
     await user.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(name).toHaveValue('Alpha draft');
     expect(screen.getByLabelText('Branch Address')).toHaveValue('Office address');
-    await user.selectOptions(screen.getByRole('combobox', { name: /^Company/ }), 'b');
+    await chooseSelectOption('Company', 'b', user);
     await user.click(screen.getByRole('button', { name: 'Stay here' }));
     expect(name).toHaveValue('Alpha draft');
-    await user.selectOptions(screen.getByRole('combobox', { name: /^Company/ }), 'b');
+    await chooseSelectOption('Company', 'b', user);
     await user.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(await screen.findByLabelText(/Company Display Name/)).toHaveValue('Beta');
     expect(state.patch).not.toHaveBeenCalled();
@@ -196,9 +198,9 @@ describe('Business settings workspaces', () => {
     const user = userEvent.setup();
     identity();
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Alpha (A)' })).toBeInTheDocument(),
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Alpha (A)'),
     );
-    await user.selectOptions(screen.getByRole('combobox', { name: /^Company/ }), 'a');
+    await chooseSelectOption('Company', 'a', user);
     await user.type(await screen.findByLabelText(/Company Display Name/), ' draft');
     state.put.mockRejectedValueOnce(new Error('Profile save failed'));
     await user.click(screen.getByRole('button', { name: 'Save letterhead' }));
@@ -210,8 +212,10 @@ describe('Business settings workspaces', () => {
   it('shows saved feedback and clears protection only after all identity writes succeed', async () => {
     const user = userEvent.setup();
     identity();
-    await screen.findByRole('option', { name: 'Alpha (A)' });
-    await user.selectOptions(screen.getByRole('combobox', { name: /^Company/ }), 'a');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Alpha (A)'),
+    );
+    await chooseSelectOption('Company', 'a', user);
     await user.type(await screen.findByLabelText(/Company Display Name/), ' draft');
     await user.click(screen.getByRole('button', { name: 'Save letterhead' }));
     expect(await screen.findByText('Letterhead settings saved.')).toBeInTheDocument();

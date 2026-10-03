@@ -407,6 +407,10 @@ const definitions: readonly FixtureDefinition[] = [
             companyId: companyA,
             divisionId: literal(null),
             branchId: literal(null),
+            // Party linkage (Phase 3): a fixed asset carries no supplier, so its lines are partyless.
+            partyType: literal('NONE'),
+            supplierId: literal(null),
+            customerId: literal(null),
           },
           generatedFields: {},
           allowedFields: ['id', 'createdAt', 'updatedAt'],
@@ -433,6 +437,10 @@ const definitions: readonly FixtureDefinition[] = [
             companyId: companyA,
             divisionId: literal(null),
             branchId: literal(null),
+            // Party linkage (Phase 3): a fixed asset carries no supplier, so its lines are partyless.
+            partyType: literal('NONE'),
+            supplierId: literal(null),
+            customerId: literal(null),
           },
           generatedFields: {},
           allowedFields: ['id', 'createdAt', 'updatedAt'],

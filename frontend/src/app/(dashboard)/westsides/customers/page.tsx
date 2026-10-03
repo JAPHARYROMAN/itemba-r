@@ -306,7 +306,7 @@ export default function WestsidesCustomersPage() {
                     <td className={tdCls}>
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
-                          href={`/westsides/customers/${c.id}`}
+                          href={`/sales-desk/customers/${encodeURIComponent(c.id)}`}
                           className="text-brand-600 hover:underline text-sm font-medium"
                         >
                           Open 360° →

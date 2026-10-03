@@ -167,6 +167,16 @@ ensure_env_default FUELGRID_API_HOST "api.fuelgrid.${DOMAIN}"
 ensure_env_default FUELGRID_APP_URL "https://fuelgrid.${DOMAIN}"
 ensure_env_default FUELGRID_HEALTH_URL "https://api.fuelgrid.${DOMAIN}/readyz"
 
+# The previous website image created an anonymous /app/data volume. Adopt its
+# exact identity so existing enquiries survive both this upgrade and recreation.
+if ! grep -q '^WEBSITE_DATA_VOLUME=' "$ENV_FILE"; then
+  WEBSITE_DATA_VOLUME="$(docker inspect itemba_r_website_prod \
+    --format '{{range .Mounts}}{{if and (eq .Destination "/app/data") (eq .Type "volume")}}{{.Name}}{{end}}{{end}}' \
+    2>/dev/null || true)"
+  WEBSITE_DATA_VOLUME="${WEBSITE_DATA_VOLUME:-itemba-r-prod_website_data}"
+  ensure_env_default WEBSITE_DATA_VOLUME "$WEBSITE_DATA_VOLUME"
+fi
+
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
 
 # This deployment path is not the signed Msaidizi production-promotion path.

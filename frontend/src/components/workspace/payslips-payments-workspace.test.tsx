@@ -7,6 +7,7 @@ import RunPayslipsPage from '@/app/(dashboard)/hr/payroll-runs/[id]/payslips/pag
 import PayslipPage from '@/app/(dashboard)/hr/payslips/[id]/page';
 import SalaryPaymentsPage from '@/app/(dashboard)/hr/salary-payments/page';
 import { payslipFixture } from '@/test/payslip-fixture';
+import { chooseSelectOption } from '@/test/select-field';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -287,8 +288,8 @@ describe('Salary payments workspace', () => {
       ),
     );
     await userEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await userEvent.selectOptions(screen.getByLabelText('Status filter'), 'PAID');
+    await chooseSelectOption('Company filter', 'company');
+    await chooseSelectOption('Status filter', 'PAID');
     await userEvent.type(
       screen.getByPlaceholderText('Search payment, employee or reference…'),
       'Bank',

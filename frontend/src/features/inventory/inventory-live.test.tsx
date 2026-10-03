@@ -7,6 +7,7 @@ import InventoryLive, {
   type LiveStockItem,
   type LiveStockResponse,
 } from './inventory-live';
+import { changeSelectField, getSelectField, selectFieldValue } from '@/test/select-field';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -131,8 +132,7 @@ const embed = (companyId = 'company', q = '') => (
 );
 const loaded = () => screen.findByRole('button', { name: 'Inspect Twiga Cement 50kg' });
 const filters = () => fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-const choose = (value: string) =>
-  fireEvent.change(screen.getByLabelText('Show stock'), { target: { value } });
+const choose = (value: string) => changeSelectField('Show stock', value);
 function capture(name: string) {
   const dir = process.env.ITEMBA_PAYROLL_VISUAL_DIR;
   if (dir) {
@@ -284,9 +284,7 @@ describe('Live stock workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next locations' }));
     expect(screen.getByRole('button', { name: /Warehouse 7/ })).toBeVisible();
     filters();
-    fireEvent.change(screen.getByLabelText('Location in this view'), {
-      target: { value: 'location-7' },
-    });
+    changeSelectField('Location in this view', 'location-7');
     expect(screen.getByLabelText('Stock positions')).toHaveTextContent('3 records');
     expect(screen.getByRole('button', { name: 'Inspect Item 7-0' })).toBeVisible();
     expect(state.get).toHaveBeenCalledTimes(1);
@@ -391,7 +389,7 @@ describe('Live stock workspace', () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(state.get).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText('Show stock')).toHaveValue('reserved');
+    expect(selectFieldValue(getSelectField('Show stock'))).toBe('reserved');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh every 30s' }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60000);

@@ -3,13 +3,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
-import { applyCompanyScopeWhere } from '../../common/services';
+import { PartyExistsService, applyCompanyScopeWhere } from '../../common/services';
 
 const OPEN_TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'OVERDUE'];
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogsService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogsService,
+    private readonly partyExists: PartyExistsService,
+  ) {}
 
   async findAll(user: any, query: any) {
     const { page = 1, limit = 20, companyId, status, assignedToId, taskType, priority } = query;
@@ -21,7 +25,12 @@ export class TasksService {
     if (taskType) where.taskType = taskType;
     if (priority) where.priority = priority;
     const [data, total] = await Promise.all([
-      this.prisma.task.findMany({ where, skip, take: Number(limit), orderBy: { createdAt: 'desc' } }),
+      this.prisma.task.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.task.count({ where }),
     ]);
     return { data, total, page: Number(page), limit: Number(limit) };
@@ -49,6 +58,8 @@ export class TasksService {
 
   async create(dto: CreateTaskDto, user: any) {
     const taskNumber = `TASK-${Date.now()}`;
+    // A task linked to a SUPPLIER / CUSTOMER must point at a live master.
+    await this.partyExists.assertParty(dto.linkedEntityType, dto.linkedEntityId, dto.companyId);
     const record = await this.prisma.task.create({
       data: {
         taskNumber,
@@ -65,7 +76,13 @@ export class TasksService {
         linkedEntityId: dto.linkedEntityId,
       },
     });
-    await this.audit.log({ userId: user.id, action: 'CREATE', entityType: 'Task', entityId: record.id, newValue: dto as any });
+    await this.audit.log({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'Task',
+      entityId: record.id,
+      newValue: dto as any,
+    });
     return record;
   }
 
@@ -74,37 +91,65 @@ export class TasksService {
     const data: any = { ...dto };
     if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
     const record = await this.prisma.task.update({ where: { id }, data });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Task', entityId: id, newValue: dto as any });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'Task',
+      entityId: id,
+      newValue: dto as any,
+    });
     return record;
   }
 
   async complete(id: string, user: any) {
     const existing = await this.findOne(id, user);
     if (!OPEN_TASK_STATUSES.includes(existing.status)) {
-      throw new BadRequestException('Only open tasks (TODO, IN_PROGRESS, OVERDUE) can be completed');
+      throw new BadRequestException(
+        'Only open tasks (TODO, IN_PROGRESS, OVERDUE) can be completed',
+      );
     }
     const record = await this.prisma.task.update({
       where: { id },
       data: { status: 'COMPLETED', completedById: user.id, completedAt: new Date() },
     });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Task', entityId: id, newValue: { status: 'COMPLETED' } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'Task',
+      entityId: id,
+      newValue: { status: 'COMPLETED' },
+    });
     return record;
   }
 
   async cancel(id: string, user: any) {
     const existing = await this.findOne(id, user);
     if (!OPEN_TASK_STATUSES.includes(existing.status)) {
-      throw new BadRequestException('Only open tasks (TODO, IN_PROGRESS, OVERDUE) can be cancelled');
+      throw new BadRequestException(
+        'Only open tasks (TODO, IN_PROGRESS, OVERDUE) can be cancelled',
+      );
     }
     const record = await this.prisma.task.update({ where: { id }, data: { status: 'CANCELLED' } });
-    await this.audit.log({ userId: user.id, action: 'UPDATE', entityType: 'Task', entityId: id, newValue: { status: 'CANCELLED' } });
+    await this.audit.log({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'Task',
+      entityId: id,
+      newValue: { status: 'CANCELLED' },
+    });
     return record;
   }
 
   async remove(id: string, user: any) {
     await this.findOne(id, user);
     await this.prisma.task.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.audit.log({ userId: user.id, action: 'DELETE', entityType: 'Task', entityId: id, newValue: {} });
+    await this.audit.log({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'Task',
+      entityId: id,
+      newValue: {},
+    });
     return { message: 'Task deleted' };
   }
 }

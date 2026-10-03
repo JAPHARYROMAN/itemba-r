@@ -182,6 +182,7 @@ const definitions: readonly FixtureDefinition[] = [
             paymentMethod: literal('CREDIT'),
             paymentReference: literal(null),
             paymentStatus: literal('UNPAID'),
+            posTenders: literal(null),
             receivableId: literal(null),
             salespersonId: literal(null),
             salesType: literal('CREDIT_SALE'),

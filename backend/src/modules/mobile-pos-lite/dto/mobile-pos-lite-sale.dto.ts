@@ -1,5 +1,7 @@
+import { PosPaymentDto } from './mobile-pos-transaction.dto';
 import {
   ArrayMinSize,
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsNumber,
@@ -61,8 +63,17 @@ export class MobilePosLiteSaleLineDto {
 }
 
 export class CreateMobilePosLiteSaleDto {
-  @IsIn([...MOBILE_POS_LITE_RECEIPT_METHODS, SalesPaymentMethod.CREDIT])
+  @IsIn([...MOBILE_POS_LITE_RECEIPT_METHODS, SalesPaymentMethod.CREDIT, SalesPaymentMethod.MIXED])
   paymentMethod!: SalesPaymentMethod;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => PosPaymentDto)
+  payments?: PosPaymentDto[];
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) expectedTotal?: number;
 
   @IsOptional()
   @IsUUID()

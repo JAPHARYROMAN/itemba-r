@@ -23,6 +23,8 @@ import {
 } from './invoice-desk.dto';
 import { deskBalance, deskKey, positiveAmount, todayUtc } from './invoice-desk.domain';
 import { previewDocument } from '../documents/document-preview';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import { toPaymentMethodGeneral } from '../supplier-payments/payment-method';
 
 const names = {
   company: { select: { name: true } },
@@ -63,6 +65,7 @@ export class InvoiceDeskService {
     private readonly org: OrganizationScopeService,
     private readonly audit: AuditLogsService,
     private readonly parties?: DeskPartyLinksService,
+    private readonly supplierPayments?: SupplierPaymentsService,
   ) {}
 
   private async where(
@@ -651,6 +654,38 @@ export class InvoiceDeskService {
         createdBy: user.id,
       },
     });
+    // Party linkage (W2): one SupplierPayment per desk payment, attached to the shared
+    // supplier profile. Desk payments are posted later in Accounting connections, so this
+    // is record-only; the Cash Desk movement (when the payment is made there) links back.
+    let supplierPaymentId: string | null = null;
+    if (this.supplierPayments) {
+      const deskSupplier = await tx.invoiceDeskSupplier.findUnique({
+        where: { id: invoice.supplierId },
+        select: { canonicalSupplierId: true },
+      });
+      if (!deskSupplier?.canonicalSupplierId)
+        throw new BadRequestException(
+          'Match this older supplier to its shared profile before recording payment.',
+        );
+      const supplierPayment = await this.supplierPayments.recordInTransaction(tx, user, {
+        companyId: invoice.companyId,
+        divisionId: invoice.divisionId,
+        branchId: invoice.branchId,
+        supplierId: deskSupplier.canonicalSupplierId,
+        amount,
+        method: toPaymentMethodGeneral(dto.method),
+        paymentDate,
+        reference: dto.reference.trim() || null,
+        currency: invoice.currency,
+        requestId: dto.requestId,
+        source: { type: 'InvoiceDeskInvoice', id: invoice.id },
+      });
+      await tx.invoiceDeskPayment.update({
+        where: { id: payment.id },
+        data: { supplierPaymentId: supplierPayment.id },
+      });
+      supplierPaymentId = supplierPayment.id;
+    }
     await tx.invoiceDeskInvoice.update({
       where: { id },
       data: { paidAmount: { increment: amount } },
@@ -662,7 +697,10 @@ export class InvoiceDeskService {
       'PAYMENT_RECORDED',
       `${invoice.currency} ${amount.toFixed(2)} · ${dto.method} · ${dto.reference.trim() || 'No reference'}`,
     );
-    return payment;
+    return {
+      ...payment,
+      supplierPaymentId: supplierPaymentId ?? payment.supplierPaymentId ?? null,
+    };
   }
 
   async reverse(user: AuthUser, id: string, paymentId: string, dto: DeskReasonDto) {
@@ -696,6 +734,14 @@ export class InvoiceDeskService {
       where: { id: paymentId },
       data: { reversedAt: new Date(), reversalReason: dto.reason.trim() },
     });
+    if (payment.supplierPaymentId && this.supplierPayments)
+      await this.supplierPayments.reverseInTransaction(
+        tx,
+        user,
+        payment.supplierPaymentId,
+        dto.reason.trim(),
+        { fromDesk: true },
+      );
     await tx.invoiceDeskInvoice.update({
       where: { id },
       data: { paidAmount: { decrement: payment.amount } },

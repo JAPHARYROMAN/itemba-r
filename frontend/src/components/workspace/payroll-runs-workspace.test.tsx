@@ -4,6 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PayrollRunsPage from '@/app/(dashboard)/hr/payroll-runs/page';
 import PayrollEntriesPage from '@/app/(dashboard)/hr/payroll-entries/page';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   page: vi.fn(),
@@ -223,7 +229,7 @@ describe('Payroll run and entry workspaces', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: /Filters/ }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'other');
+    await chooseSelectOption('Company filter', 'other', user);
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
         '/hr/payroll-runs',
@@ -240,12 +246,16 @@ describe('Payroll run and entry workspaces', () => {
     await screen.findByRole('button', { name: 'Inspect PR-01' });
     await user.click(screen.getByRole('button', { name: 'New run' }));
     await screen.findByRole('dialog', { name: 'New payroll run' });
-    await within(screen.getByRole('dialog')).findByRole('option', { name: /PP-09/ });
-    await user.selectOptions(screen.getByRole('combobox', { name: /Payroll period/ }), 'period');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Run type' }), 'BONUS');
+    await waitFor(() =>
+      expect(
+        selectFieldOptions(getSelectField('Payroll period', screen.getByRole('dialog'))),
+      ).toEqual(expect.arrayContaining([expect.stringMatching(/PP-09/)])),
+    );
+    await chooseSelectOption('Payroll period', 'period', user);
+    await chooseSelectOption('Run type', 'BONUS', user);
     await user.click(screen.getByRole('button', { name: 'Cancel', exact: true }));
     await user.click(screen.getByRole('button', { name: 'Stay here' }));
-    expect(screen.getByRole('combobox', { name: 'Run type' })).toHaveValue('BONUS');
+    expect(selectFieldValue(getSelectField('Run type'))).toBe('BONUS');
     await user.click(screen.getByRole('button', { name: 'Create run' }));
     expect(await screen.findByText('Create unavailable')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Create run' }));
@@ -342,16 +352,22 @@ describe('Payroll run and entry workspaces', () => {
     await inspect(user);
     await user.click(screen.getByRole('button', { name: 'Record payment' }));
     const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByRole('option', { name: 'Bank account · TZS 1,000' });
-    expect(screen.queryByRole('option', { name: /Unconnected/ })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash Desk account', dialog))).toContain(
+        'Bank account · TZS 1,000',
+      ),
+    );
+    expect(selectFieldOptions(getSelectField('Cash Desk account', dialog))).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/Unconnected/)]),
+    );
     expect(state.page).toHaveBeenCalledWith(
       '/cash-desk/accounts',
       expect.objectContaining({ query: expect.objectContaining({ companyId: 'company' }) }),
     );
-    await user.selectOptions(within(dialog).getByRole('combobox'), 'bank');
+    await chooseSelectOption('Cash Desk account', 'bank', user, dialog);
     await user.click(within(dialog).getByRole('button', { name: 'Record payment' }));
     expect(await within(dialog).findByText('Posting unavailable')).toBeInTheDocument();
-    expect(within(dialog).getByRole('combobox')).toHaveValue('bank');
+    expect(selectFieldValue(getSelectField('Cash Desk account', dialog))).toBe('bank');
     await user.click(within(dialog).getByRole('button', { name: 'Record payment' }));
     expect(state.patch).toHaveBeenLastCalledWith('/hr/payroll-runs/run/pay', {
       cashDeskAccountId: 'bank',
@@ -368,7 +384,7 @@ describe('Payroll run and entry workspaces', () => {
     await user.click(screen.getByRole('button', { name: 'Record payment' }));
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(/Accounts unavailable/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('combobox')).toHaveValue('');
+    expect(selectFieldValue(getSelectField('Cash Desk account', dialog))).toBe('');
     await user.click(within(dialog).getByRole('button', { name: 'Record payment' }));
     expect(within(dialog).getByRole('button', { name: 'Record payment' })).toBeDisabled();
     expect(state.patch).not.toHaveBeenCalled();

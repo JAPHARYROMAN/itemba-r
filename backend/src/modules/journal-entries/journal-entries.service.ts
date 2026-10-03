@@ -651,6 +651,10 @@ export class JournalEntriesService {
           companyId: line.companyId,
           divisionId: line.divisionId,
           branchId: line.branchId,
+          // Party linkage (Phase 3): a reversal names the same party as the line it reverses.
+          partyType: line.partyType,
+          supplierId: line.supplierId,
+          customerId: line.customerId,
         })),
       });
 

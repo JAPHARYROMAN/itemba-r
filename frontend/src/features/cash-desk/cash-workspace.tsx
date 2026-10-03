@@ -40,7 +40,11 @@ export const cashWorkflows = [
     permission: 'expenses.view',
   },
 ] as const;
-export function CashWorkspace({ targetRecordId }: { targetRecordId?: string } = {}) {
+export function CashWorkspace({
+  targetRecordId,
+  targetSupplierId,
+  targetCustomerId,
+}: { targetRecordId?: string; targetSupplierId?: string; targetCustomerId?: string } = {}) {
   const { hasPermission, loading: authLoading } = useAuth();
   const path = useWorkspacePathname();
   const active =
@@ -88,7 +92,11 @@ export function CashWorkspace({ targetRecordId }: { targetRecordId?: string } = 
       ) : active?.key === 'expenses' ? (
         <Expenses />
       ) : (
-        <Cash targetRecordId={targetRecordId} />
+        <Cash
+          targetRecordId={targetRecordId}
+          targetSupplierId={targetSupplierId}
+          targetCustomerId={targetCustomerId}
+        />
       )}
     </div>
   );

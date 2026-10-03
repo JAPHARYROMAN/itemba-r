@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { RecordPaymentModal, Receivable } from './page';
+import { RecordPaymentModal, Receivable } from '@/features/finance/screens/receivables';
+import { getSelectField, selectFieldOptions } from '@/test/select-field';
 
 /**
  * Receivables record-payment modal regressions (mirror of the payables modal).
@@ -73,8 +74,14 @@ describe('Receivables RecordPaymentModal — cash-account handling', () => {
 
     render(<RecordPaymentModal receivable={RECEIVABLE_USD} onClose={() => {}} onDone={() => {}} />);
 
-    await screen.findByRole('option', { name: 'USD Bank · BANK · USD' });
-    expect(screen.queryByRole('option', { name: /Petty Cash/ })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).toContain(
+        'USD Bank · BANK · USD',
+      ),
+    );
+    expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).not.toContainEqual(
+      expect.stringMatching(/Petty Cash/),
+    );
 
     // With matching options present, a selection is still required.
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '100' } });
@@ -119,7 +126,11 @@ describe('Receivables RecordPaymentModal — cash-account handling', () => {
     // Retry recovers the list and clears the warning.
     failAccounts = false;
     fireEvent.click(screen.getByText('Retry'));
-    await screen.findByRole('option', { name: 'USD Bank · BANK · USD' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).toContain(
+        'USD Bank · BANK · USD',
+      ),
+    );
     expect(screen.queryByText(/Couldn't load the cash \/ bank accounts/)).not.toBeInTheDocument();
   });
 });

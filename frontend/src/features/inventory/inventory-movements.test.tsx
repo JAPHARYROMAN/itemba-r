@@ -8,6 +8,7 @@ import InventoryMovements, {
 } from './inventory-movements';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import { changeSelectField } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -214,9 +215,7 @@ describe('Stock movements workspace', () => {
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Filter by product' }), {
       key: 'Enter',
     });
-    fireEvent.change(screen.getByLabelText('Movement type'), {
-      target: { value: 'PURCHASE_RECEIPT' },
-    });
+    changeSelectField('Movement type', 'PURCHASE_RECEIPT');
     await setDateField('From date', '2026-09-01');
     await setDateField('To date', '2026-09-18');
     fireEvent.change(screen.getByLabelText('Source type'), {
@@ -335,7 +334,7 @@ describe('Stock movements workspace', () => {
             resolve = r;
           }),
     );
-    fireEvent.change(screen.getByLabelText('Movement type'), { target: { value: 'SALE_ISSUE' } });
+    changeSelectField('Movement type', 'SALE_ISSUE');
     const signal = state.get.mock.calls
       .filter(([path]) => path === '/inventory-movements')
       .at(-1)![1].signal;
@@ -397,7 +396,7 @@ describe('Stock movements workspace', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     const signal = state.page.mock.calls.at(-1)![1].signal;
-    fireEvent.change(screen.getByLabelText('Movement type'), { target: { value: 'OTHER' } });
+    changeSelectField('Movement type', 'OTHER');
     expect(signal.aborted).toBe(true);
     await act(async () => resolve({ data: [receipt], total: 1 }));
     expect(state.download).not.toHaveBeenCalled();

@@ -52,6 +52,12 @@ export type CartLine = {
   price?: CartLinePrice;
 };
 export type PurchaseLine = { product: MobilePosLiteProduct; quantity: number; unitCost: string };
+export type PurchaseResult = {
+  id: string;
+  purchaseOrderNumber: string;
+  grnNumber: string | null;
+  totalAmount: number;
+};
 export type DaySummary = {
   count: number;
   totalAmount: number;
@@ -64,11 +70,16 @@ export type DaySummary = {
     customerName?: string | null;
   }>;
 };
+export type PosPayment = { method: string; amount: number; reference?: string };
 export type SaleResult = {
+  paidAmount?: number;
+  outstandingAmount?: number;
+  posTenders?: PosPayment[];
   id: string;
   salesOrderNumber?: string;
   totalAmount?: number;
   receiptNumber?: string;
+  pending?: boolean;
 };
 
 /** The screen-state union of the POS orchestrator. */

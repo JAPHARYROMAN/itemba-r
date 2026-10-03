@@ -8,6 +8,7 @@ import { CategoryEditor, FamilyEditor } from './catalogue-editors';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { InventoryWorkspaceProvider } from '@/features/inventory/inventory-workspace-context';
 import type { ProductCategory, ProductFamily } from './catalogue-types';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -185,9 +186,9 @@ describe('catalogue workspace', () => {
     expect(screen.getByText('32')).toBeVisible();
     expect(screen.getByText('Interior and exterior finishes.')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await user.selectOptions(screen.getByLabelText('Type filter'), 'HARDWARE');
-    await user.selectOptions(screen.getByLabelText('Status filter'), 'false');
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption('Type filter', 'HARDWARE', user);
+    await chooseSelectOption('Status filter', 'false', user);
     await user.type(screen.getByPlaceholderText('Search categories…'), 'paint');
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
@@ -281,9 +282,9 @@ describe('catalogue workspace', () => {
     mount(
       <CategoryEditor record={category} companyId="company" onClose={vi.fn()} onSaved={saved} />,
     );
-    await waitFor(() => expect(screen.getByLabelText('Parent category')).toBeEnabled());
+    await waitFor(() => expect(getSelectField('Parent category')).toBeEnabled());
     await user.clear(screen.getByLabelText('Description'));
-    await user.selectOptions(screen.getByLabelText('Parent category'), '');
+    await chooseSelectOption('Parent category', '', user);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Stay here' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save category' }));
@@ -305,12 +306,12 @@ describe('catalogue workspace', () => {
       .mockResolvedValueOnce({});
     mount(<CategoryEditor companyId="company" onClose={vi.fn()} onSaved={saved} />);
     await user.type(screen.getByLabelText(/Category name/), ' Paints two ');
-    await waitFor(() => expect(screen.getByLabelText('Parent category')).toBeEnabled());
-    await user.selectOptions(screen.getByLabelText('Parent category'), '__new__');
+    await waitFor(() => expect(getSelectField('Parent category')).toBeEnabled());
+    await chooseSelectOption('Parent category', '__new__', user);
     await user.type(screen.getByLabelText(/New parent name/), 'Finishing materials');
     fireEvent.click(screen.getByRole('button', { name: 'Save category' }));
     await screen.findByText('Child failed');
-    expect(screen.getByLabelText(/^Company/)).toBeDisabled();
+    expect(getSelectField('Company')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Save category' }));
     await waitFor(() => expect(saved).toHaveBeenCalled());
     expect(state.post).toHaveBeenCalledTimes(3);
@@ -338,10 +339,12 @@ describe('catalogue workspace', () => {
     });
     mount(<CategoryEditor companyId="company" onClose={vi.fn()} onSaved={vi.fn()} />);
     await screen.findByText(/Second page failed/);
-    expect(screen.queryByRole('option', { name: 'Parent page 1' })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Parent category'))).not.toContain('Parent page 1');
     failed = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry parent category choices' }));
-    await screen.findByRole('option', { name: 'Parent page 2' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Parent category'))).toContain('Parent page 2'),
+    );
   });
   it('keeps named delete failures in the dialog and retries the same category', async () => {
     state.remove.mockRejectedValueOnce(new Error('Category is in use'));
@@ -383,7 +386,10 @@ describe('catalogue workspace', () => {
         query: expect.objectContaining({ companyId: 'company', search: 'paint' }),
       }),
     );
-    expect(screen.queryByLabelText('Company filter')).not.toBeInTheDocument();
+    // The filters sit in a collapsed (hidden) panel, so hidden fields count too.
+    expect(
+      screen.queryByRole('button', { name: /(^|\s)Company filter$/, hidden: true }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New category' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'View families' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect Coral · 4 litre' }));
@@ -535,14 +541,14 @@ describe('catalogue workspace', () => {
     await inspect();
     capture('catalogue-categories');
     fireEvent.click(screen.getByRole('button', { name: 'Edit category' }));
-    await waitFor(() => expect(screen.getByLabelText('Parent category')).toBeEnabled());
+    await waitFor(() => expect(getSelectField('Parent category')).toBeEnabled());
     capture('catalogue-category-editor');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'View families' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect Coral · 4 litre' }));
     capture('catalogue-families');
     fireEvent.click(screen.getByRole('button', { name: 'Edit family' }));
-    await waitFor(() => expect(screen.getByLabelText('Division')).toBeEnabled());
+    await waitFor(() => expect(getSelectField('Division')).toBeEnabled());
     capture('catalogue-family-editor');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Review product prices' }));

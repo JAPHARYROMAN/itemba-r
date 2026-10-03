@@ -1,54 +1,85 @@
-import Link from 'next/link';
+import type { Metadata } from 'next';
+import { companies, companiesPage } from '@/content/companies';
+import { notFoundPage } from '@/content/errors';
+import { homeCompanyTiles, homeSectors, homeTileActions } from '@/content/home';
+import { footerDirectory } from '@/content/nav';
+import { companyUrl } from '@/content/site';
+import { ButtonLink, CardLink, ChevronLink, Heading, HeadlineText, Lede, PageHero } from '@/ui';
 
-export const metadata = { title: 'Page Not Found | Itemba Group' };
+/**
+ * "Page Not Found": the root template adds " | Itemba Group" once
+ * (origin/main set a title that already carried the suffix, so it rendered
+ * twice). Not indexable, and no canonical: a missing page has no address
+ * of its own to point search engines at (the layout's canonical is home).
+ */
+export const metadata: Metadata = {
+  title: notFoundPage.metaTitle,
+  description: notFoundPage.body,
+  robots: { index: false, follow: true },
+  alternates: { canonical: null },
+};
 
+/**
+ * The 404: a calm light page, one screen of it. The message and two ways
+ * on (home, and the group office that routes every enquiry), then the
+ * three companies, since a mistyped company or service address is the
+ * likeliest way here. The footer's full directory follows.
+ *
+ * A server component. Unknown slugs land here too: every [slug] route
+ * sets `dynamicParams = false` or calls notFound().
+ */
 export default function NotFound() {
-  return (
-    <section className="relative min-h-screen flex items-center justify-center bg-ink-900 overflow-hidden px-5 sm:px-8">
-      <div className="hero-ambient">
-        <div className="hero-orb hero-orb-gold" />
-        <div className="hero-orb hero-orb-blue" />
-        <div className="grid-overlay" />
-      </div>
+  const tiles = homeCompanyTiles.flatMap((tile) => {
+    const company = companies.find((c) => c.slug === tile.companySlug);
+    return company ? [{ tile, company }] : [];
+  });
 
-      <div className="relative z-10 max-w-2xl mx-auto text-center">
-        <p className="text-gold-400 text-xs font-semibold uppercase tracking-widest mb-6">
-          Error 404
-        </p>
-        <h1
-          className="font-tight font-black text-white leading-none tracking-tightest mb-6"
-          style={{ fontSize: 'clamp(4rem, 14vw, 10rem)' }}
+  return (
+    <PageHero
+      titleId="page-title"
+      eyebrow={notFoundPage.eyebrow}
+      title={notFoundPage.heading}
+      lede={notFoundPage.body}
+      actions={
+        <>
+          <ButtonLink href={notFoundPage.home.href} size="lg">
+            {notFoundPage.home.label}
+          </ButtonLink>
+          <ChevronLink href={footerDirectory.contact.page.href} size="body-lg">
+            {footerDirectory.contact.page.label}
+          </ChevronLink>
+        </>
+      }
+    >
+      <section aria-labelledby="not-found-companies" className="mt-8 border-t border-line pt-14 md:mt-12 md:pt-20">
+        <Heading as="h2" id="not-found-companies" size="h2">
+          <HeadlineText headline={companiesPage.hero.headline} variant="muted" />
+        </Heading>
+        <Lede tone="muted" className="mx-auto mt-3 max-w-2xl max-md:text-body-lg">
+          {homeSectors.routing.body}
+        </Lede>
+        {/* Three across from `md`; on phones a row that snaps card by card, as home's insights row, so three stacked cards do not add two screens to a 404. */}
+        <ul
+          role="list"
+          className="-mx-gutter mt-10 flex snap-x snap-mandatory scroll-px-gutter gap-3 overflow-x-auto px-gutter pb-2 text-left md:mx-0 md:mt-12 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:px-0 md:pb-0"
         >
-          <span className="gradient-text">404</span>
-        </h1>
-        <h2 className="font-tight font-bold text-white text-3xl sm:text-4xl mb-5">
-          Page Not Found
-        </h2>
-        <p className="text-slate-400 text-base sm:text-lg leading-relaxed mb-10 max-w-md mx-auto">
-          The page you&apos;re looking for doesn&apos;t exist or may have been moved.
-          Let&apos;s get you back on track.
-        </p>
-        <div className="flex flex-wrap gap-3 sm:gap-4 justify-center">
-          <Link
-            href="/"
-            className="btn-primary bg-gold-500 hover:bg-gold-400 text-white font-semibold px-7 py-3.5 rounded-full text-sm hover:shadow-lg hover:shadow-gold-500/30"
-          >
-            Back to Home
-          </Link>
-          <Link
-            href="/companies"
-            className="btn-primary border border-slate-600 hover:border-slate-300 text-slate-300 hover:text-white font-semibold px-7 py-3.5 rounded-full text-sm"
-          >
-            Our Companies
-          </Link>
-          <Link
-            href="/services"
-            className="btn-primary border border-slate-600 hover:border-slate-300 text-slate-300 hover:text-white font-semibold px-7 py-3.5 rounded-full text-sm"
-          >
-            Services
-          </Link>
-        </div>
-      </div>
-    </section>
+          {tiles.map(({ tile, company }) => (
+            <li key={company.slug} className="flex w-[82%] max-w-sm shrink-0 snap-start md:w-auto md:max-w-none">
+              <CardLink
+                as="div"
+                href={companyUrl(company.slug)}
+                accent={company.accent}
+                eyebrow={tile.eyebrow}
+                eyebrowDot
+                title={tile.name}
+                description={tile.summary}
+                cta={homeTileActions.explore}
+                className="w-full"
+              />
+            </li>
+          ))}
+        </ul>
+      </section>
+    </PageHero>
   );
 }

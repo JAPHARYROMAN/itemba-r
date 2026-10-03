@@ -15,6 +15,7 @@ import {
   writeCachedStock,
   writeCountDraft,
   writeDaylogSent,
+  saveMobilePosLiteBinding,
   type PosCountDraft,
   type PosPurchaseDraft,
   type PosStockSnapshot,
@@ -100,6 +101,7 @@ function makeFactory(
     versionedError?: { name: string; message: string };
     /** `createObjectStore` silently creates nothing (storage genuinely broken). */
     brokenCreate?: boolean;
+    abortAfterRequest?: boolean;
   } = {},
 ) {
   let state = initial;
@@ -126,21 +128,30 @@ function makeFactory(
         if (!options.brokenCreate) current.stores.push(name);
         return { createIndex: vi.fn() };
       },
-      transaction: (name) => ({
-        objectStore: (storeName: string) => ({
-          get: (key: IDBValidKey) => makeRequest(() => tableFor(storeName).get(key)),
-          put: (value: unknown, key: IDBValidKey) =>
-            makeRequest(() => {
-              tableFor(storeName).set(key, value);
-              return key;
-            }),
-          delete: (key: IDBValidKey) =>
-            makeRequest(() => {
-              tableFor(storeName).delete(key);
-            }),
-          getAllKeys: () => makeRequest(() => [...tableFor(storeName).keys()]),
-        }),
-      }),
+      transaction: (name) => {
+        const tx = {
+          oncomplete: null as null | (() => void),
+          onabort: null as null | (() => void),
+          error: null,
+          objectStore: (storeName: string) => ({
+            get: (key: IDBValidKey) => makeRequest(() => tableFor(storeName).get(key)),
+            put: (value: unknown, key: IDBValidKey) =>
+              makeRequest(() => {
+                tableFor(storeName).set(key, value);
+                return key;
+              }),
+            delete: (key: IDBValidKey) =>
+              makeRequest(() => {
+                tableFor(storeName).delete(key);
+              }),
+            getAllKeys: () => makeRequest(() => [...tableFor(storeName).keys()]),
+          }),
+        };
+        queueMicrotask(() =>
+          queueMicrotask(() => (options.abortAfterRequest ? tx.onabort?.() : tx.oncomplete?.())),
+        );
+        return tx;
+      },
     };
     connections.push(connection);
     return connection;
@@ -717,5 +728,25 @@ describe('purchase drafts', () => {
     expect(await readPurchaseDraft('T-OLD')).toBeNull();
     // The active terminal's slip survives a binding reset by design.
     expect(await readPurchaseDraft('T-001')).not.toBeNull();
+  });
+});
+
+describe('durable POS storage writes', () => {
+  it('rejects a transaction abort after the individual request succeeded', async () => {
+    const harness = makeFactory(
+      { version: 4, stores: [...ALL_STORES] },
+      { abortAfterRequest: true },
+    );
+    vi.stubGlobal('indexedDB', harness.factory);
+    await expect(
+      saveMobilePosLiteBinding({
+        terminalCode: 'T-001',
+        deviceSecret: 'device-secret',
+        activatedAt: '2026-10-03',
+      }),
+    ).rejects.toThrow('transaction aborted');
+    expect(
+      harness.connections.every((connection) => connection.close.mock.calls.length === 1),
+    ).toBe(true);
   });
 });

@@ -579,3 +579,191 @@ describe('enqueueDueScheduledReports', () => {
     expect(prisma.scheduledReport.findMany).not.toHaveBeenCalled();
   });
 });
+
+/** Party linkage, Phase 3 PR-4: party alerts from the resolver's list, idempotent per party. */
+describe('enqueueDuePartyAlerts', () => {
+  const summary = (over: Record<string, any>) => ({
+    kind: 'supplier',
+    partyId: 'sup-1',
+    companyId: 'co-1',
+    name: 'Mwanjalisi',
+    code: 'SUP-1',
+    baseCurrency: 'TZS',
+    erp: [],
+    desk: [],
+    notebook: [],
+    total: [{ currency: 'TZS', amount: '500.00' }],
+    overdue: [{ currency: 'TZS', amount: '0.00' }],
+    creditLimit: '0.00',
+    creditAvailable: null,
+    cached: '0.00',
+    lastPaymentAt: null,
+    ...over,
+  });
+  const overdueSupplier = summary({ overdue: [{ currency: 'TZS', amount: '120.00' }] });
+  const overLimitCustomer = summary({
+    kind: 'customer',
+    partyId: 'cus-1',
+    name: 'Westsides',
+    code: 'CUS-1',
+    overdue: [{ currency: 'TZS', amount: '40.00' }],
+    total: [
+      { currency: 'TZS', amount: '900.00' },
+      { currency: 'USD', amount: '10.00' },
+    ],
+    creditLimit: '500.00',
+    creditAvailable: '0.00',
+  });
+
+  function prismaWith(opts: { recentAlerts?: any[]; txCreated?: boolean } = {}) {
+    const tx = {
+      alertEvent: {
+        findFirst: jest.fn().mockResolvedValue(opts.txCreated === false ? { id: 'a-x' } : null),
+        create: jest.fn().mockResolvedValue({ id: 'a-new' }),
+      },
+    };
+    return {
+      tx,
+      prisma: {
+        alertEvent: { findMany: jest.fn().mockResolvedValue(opts.recentAlerts ?? []) },
+        userCompanyAccess: { findMany: jest.fn().mockResolvedValue([{ userId: 'u-1' }]) },
+        $transaction: jest.fn((cb: any) => cb(tx)),
+      },
+    };
+  }
+  function serviceWith(prisma: any, notifications: any, suppliers: any[], customers: any[]) {
+    const service = makeService({ prisma, notifications });
+    jest
+      .spyOn(service, 'partyBalances')
+      .mockImplementation(async (...args: unknown[]) =>
+        args[0] === 'supplier' ? suppliers : customers,
+      );
+    return service;
+  }
+
+  it('raises overdue payable, overdue receivable and credit limit breach per party, each with the profile destination', async () => {
+    const { prisma, tx } = prismaWith();
+    const notifications = { sendNotification: jest.fn().mockResolvedValue(undefined) };
+    const service = serviceWith(prisma, notifications, [overdueSupplier], [overLimitCustomer]);
+
+    const result = await service.enqueueDuePartyAlerts(25);
+
+    expect(result).toEqual({ processed: 3, scanned: 2 });
+    const created = tx.alertEvent.create.mock.calls.map((c: any[]) => c[0].data);
+    expect(
+      created.map((d: any) => [d.alertType, d.linkedEntityType, d.linkedEntityId, d.priority]),
+    ).toEqual([
+      ['OVERDUE_PAYABLE', 'Supplier', 'sup-1', 'HIGH'],
+      ['OVERDUE_RECEIVABLE', 'Customer', 'cus-1', 'HIGH'],
+      ['CREDIT_LIMIT_BREACH', 'Customer', 'cus-1', 'CRITICAL'],
+    ]);
+    expect(created[0]).toMatchObject({
+      companyId: 'co-1',
+      status: 'OPEN',
+      title: 'Overdue payable: Mwanjalisi',
+      message: 'Mwanjalisi (SUP-1) has overdue outstanding of TZS 120.00.',
+      metadata: expect.objectContaining({
+        href: '/invoice-desk/suppliers/sup-1',
+        partyKind: 'supplier',
+        overdue: [{ currency: 'TZS', amount: '120.00' }],
+        source: 'automation-dispatch',
+      }),
+    });
+    expect(created[2]).toMatchObject({
+      message: 'Westsides (CUS-1) owes TZS 900.00 against a credit limit of TZS 500.00.',
+      metadata: expect.objectContaining({
+        href: '/sales-desk/customers/cus-1',
+        exceededBy: '400.00',
+      }),
+    });
+    expect(notifications.sendNotification).toHaveBeenCalledTimes(3);
+    expect(notifications.sendNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        notificationType: 'PAYMENT_DUE',
+        priority: 'CRITICAL',
+        linkedEntityType: 'Customer',
+        linkedEntityId: 'cus-1',
+        actionUrl: '/sales-desk/customers/cus-1',
+      }),
+    );
+    expect(prisma.alertEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          alertType: { in: ['OVERDUE_PAYABLE', 'OVERDUE_RECEIVABLE', 'CREDIT_LIMIT_BREACH'] },
+          linkedEntityId: { in: ['sup-1', 'cus-1'] },
+        }),
+      }),
+    );
+  });
+
+  it('is idempotent per party per type within the window and respects the batch', async () => {
+    const { prisma, tx } = prismaWith({
+      recentAlerts: [{ alertType: 'OVERDUE_RECEIVABLE', linkedEntityId: 'cus-1' }],
+    });
+    const notifications = { sendNotification: jest.fn().mockResolvedValue(undefined) };
+    const service = serviceWith(prisma, notifications, [overdueSupplier], [overLimitCustomer]);
+
+    expect(await service.enqueueDuePartyAlerts(25)).toEqual({ processed: 2, scanned: 2 });
+    expect(tx.alertEvent.create.mock.calls.map((c: any[]) => c[0].data.alertType)).toEqual([
+      'OVERDUE_PAYABLE',
+      'CREDIT_LIMIT_BREACH',
+    ]);
+
+    tx.alertEvent.create.mockClear();
+    prisma.alertEvent.findMany.mockResolvedValue([]);
+    expect(await service.enqueueDuePartyAlerts(1)).toEqual({ processed: 1, scanned: 2 });
+    expect(tx.alertEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('raises nothing when no party is overdue or over its limit', async () => {
+    const { prisma, tx } = prismaWith();
+    const notifications = { sendNotification: jest.fn() };
+    const service = serviceWith(
+      prisma,
+      notifications,
+      [summary({})],
+      [
+        summary({
+          kind: 'customer',
+          partyId: 'cus-2',
+          creditLimit: '1000.00',
+          creditAvailable: '500.00',
+        }),
+      ],
+    );
+
+    expect(await service.enqueueDuePartyAlerts(25)).toEqual({ processed: 0, scanned: 2 });
+    expect(prisma.alertEvent.findMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.alertEvent.create).not.toHaveBeenCalled();
+    expect(notifications.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('skips a party another worker alerted inside the window (transaction guard)', async () => {
+    const { prisma, tx } = prismaWith({ txCreated: false });
+    const notifications = { sendNotification: jest.fn() };
+    const service = serviceWith(prisma, notifications, [overdueSupplier], []);
+
+    expect(await service.enqueueDuePartyAlerts(25)).toEqual({ processed: 0, scanned: 1 });
+    expect(tx.alertEvent.create).not.toHaveBeenCalled();
+    expect(notifications.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('scans parties at most once per hour per worker from the dispatch loop', async () => {
+    const prisma = {
+      receivable: { findMany: jest.fn().mockResolvedValue([]) },
+      product: { findMany: jest.fn().mockResolvedValue([]) },
+      scheduledReport: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = makeService({ prisma });
+    const balances = jest.spyOn(service, 'partyBalances').mockResolvedValue([]);
+
+    const first = await service.runAutomationDispatch();
+    expect(first.partyAlerts).toEqual({ processed: 0, scanned: 0 });
+    expect(balances).toHaveBeenCalledTimes(2);
+
+    const second = await service.runAutomationDispatch();
+    expect(second.partyAlerts).toEqual({ processed: 0, scanned: 0, note: 'not due' });
+    expect(balances).toHaveBeenCalledTimes(2);
+  });
+});

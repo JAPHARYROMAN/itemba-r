@@ -12,11 +12,7 @@ import { QueryCustomerStatementDto } from './dto/query-customer-statement.dto';
 import { DetailStatementQueryDto } from './dto/detail-statement.dto';
 import { ExportStatementDto } from './dto/export-statement.dto';
 import { EmailStatementDto } from './dto/email-statement.dto';
-import {
-  CustomerStatement,
-  StatementAging,
-  StatementLine,
-} from './statement.types';
+import { CustomerStatement, StatementAging, StatementLine } from './statement.types';
 
 const ZERO = new Prisma.Decimal(0);
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -130,20 +126,20 @@ export class CustomerStatementsService {
     // balance from strictly-before-period activity. This replaces the legacy
     // receivable.paidAmount aggregate, which ignored credit notes/refunds and
     // counted cumulative (not period-scoped) payments.
-    const { openingBalance, totalDebits, totalCredits, closingBalance } =
-      await this.netMovements({
-        companyId: dto.companyId,
-        customerId: dto.customerId,
-        currency,
-        periodStart,
-        periodEnd,
-      });
+    const { openingBalance, totalDebits, totalCredits, closingBalance } = await this.netMovements({
+      companyId: dto.companyId,
+      customerId: dto.customerId,
+      currency,
+      periodStart,
+      periodEnd,
+    });
 
     const run = await this.prisma.customerStatementRun.create({
       data: {
         statementRunNumber: `CSTAT-${Date.now()}`,
         companyId: dto.companyId,
-        customerId: dto.customerId ?? 'ALL',
+        // NULL = whole-company run (the former "ALL" sentinel is gone; customerId is a real FK).
+        customerId: dto.customerId ?? null,
         periodStart,
         periodEnd,
         openingBalance,
@@ -177,7 +173,7 @@ export class CustomerStatementsService {
    * statement and the customer's real balance:
    *   closingBalance === openingBalance + totalDebits - totalCredits
    *
-   * `customerId` is optional (a whole-company "ALL" run nets across every
+   * `customerId` is optional (a whole-company run, stored with customerId NULL, nets across every
    * customer). Every source is scoped to `companyId` and a single `currency`
    * (statements never sum across currencies). Opening balance is the net of all
    * activity strictly BEFORE `periodStart`; debits/credits are the in-period
@@ -542,9 +538,7 @@ export class CustomerStatementsService {
       if (!OPEN_STATUSES.has(r.status)) continue;
       const amount = Number(r.outstandingAmount);
       if (amount === 0) continue;
-      const days = r.dueDate
-        ? Math.floor((asOf.getTime() - r.dueDate.getTime()) / DAY_MS)
-        : 0;
+      const days = r.dueDate ? Math.floor((asOf.getTime() - r.dueDate.getTime()) / DAY_MS) : 0;
       if (days <= 0) buckets.current += amount;
       else if (days <= 30) buckets.days1_30 += amount;
       else if (days <= 60) buckets.days31_60 += amount;
@@ -917,9 +911,9 @@ export class CustomerStatementsService {
       bold: true,
       size: 14,
     };
-    ws.addRow([
-      `${s.currency}   ${this.fmtDate(s.dateFrom)} to ${this.fmtDate(s.dateTo)}`,
-    ]).font = { italic: true };
+    ws.addRow([`${s.currency}   ${this.fmtDate(s.dateFrom)} to ${this.fmtDate(s.dateTo)}`]).font = {
+      italic: true,
+    };
     ws.addRow([]);
 
     const headers = ['Date', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance'];

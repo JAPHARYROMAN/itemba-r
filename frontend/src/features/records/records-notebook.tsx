@@ -18,9 +18,11 @@ import {
 import { AppGlyph } from '@/components/os/app-glyph';
 import { Btn, FormDateField, FormInput, FormSelect, Modal } from '@/components/ui';
 import {
+  WorkspaceLink as Link,
   useWorkspaceRouter,
   useWorkspaceSearchParams,
 } from '@/components/workspace/workspace-navigation';
+import { openPartyIn } from '@/features/party/party-links';
 import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { useAuth } from '@/hooks/use-auth';
@@ -78,7 +80,10 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
     [exportError, setExportError] = useState('');
   const router = useWorkspaceRouter(),
     params = useWorkspaceSearchParams(),
-    selected = params.get('record') ?? '';
+    selected = params.get('record') ?? '',
+    // Party linkage (Phase 2): /records?supplierId= or ?customerId= lists one party's records.
+    partySupplierId = params.get('supplierId') ?? '',
+    partyCustomerId = params.get('customerId') ?? '';
   const register = registers.find((r) => r.id === section),
     deferred = useDeferredValue(search);
   const invalidDates = !!from && !!to && from > to;
@@ -87,6 +92,8 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     ...(currency ? { currency } : {}),
+    ...(partySupplierId ? { supplierId: partySupplierId } : {}),
+    ...(partyCustomerId ? { customerId: partyCustomerId } : {}),
     scope: visibility,
     status,
     search: deferred,
@@ -323,6 +330,14 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
           </p>
         )}
         <div className="records-tools">
+          {(partySupplierId || partyCustomerId) && (
+            <p className="records-party-chip">
+              Showing one {partySupplierId ? 'supplier' : 'customer'}&apos;s records.{' '}
+              <button type="button" onClick={() => router.replace('/records', { scroll: false })}>
+                Show all
+              </button>
+            </p>
+          )}
           <div className="records-search">
             <FormInput
               label="Search records"
@@ -519,7 +534,17 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
                           {r.title}
                         </button>
                         <span>
-                          {r.counterparty || registers.find((k) => k.kind === r.kind)?.label}
+                          {r.supplierId && hasPermission('suppliers.view') ? (
+                            <Link href={openPartyIn('profile', 'supplier', r.supplierId)}>
+                              {r.counterparty || 'Supplier'}
+                            </Link>
+                          ) : r.customerId && hasPermission('customers.view') ? (
+                            <Link href={openPartyIn('profile', 'customer', r.customerId)}>
+                              {r.counterparty || 'Customer'}
+                            </Link>
+                          ) : (
+                            r.counterparty || registers.find((k) => k.kind === r.kind)?.label
+                          )}
                           {r.reference ? ` · ${r.reference}` : ''}
                         </span>
                       </td>
@@ -842,6 +867,10 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
           scope={visibility === 'personal' ? emptyScope : scope}
           directory={dir}
           returnFocusRef={editor.mode === 'create' ? createTrigger : undefined}
+          parties={{
+            supplier: hasPermission('suppliers.view'),
+            customer: hasPermission('customers.view'),
+          }}
           onClose={() => setEditor(null)}
           onSaved={saved}
         />

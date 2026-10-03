@@ -23,10 +23,39 @@ export type PendingMobilePosLiteSale = {
   terminalCode: string;
   payload: {
     paymentMethod: string;
+    payments?: Array<{ method: string; amount: number; reference?: string }>;
+    expectedTotal?: number;
     customerId?: string;
     paymentReference?: string;
     idempotencyKey: string;
-    lines: Array<{ productId: string; quantity: number }>;
+    lines: Array<{
+      productId: string;
+      quantity: number;
+      unitPrice?: number;
+      priceReason?: 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
+      priceNote?: string;
+    }>;
+  };
+  /** An online attempt must be reviewed, never replayed by the background outbox. */
+  requiresReview?: boolean;
+  ownerId?: string;
+  snapshot?: {
+    cart: Array<{
+      product: MobilePosLiteProduct;
+      quantity: number;
+      price?: {
+        unitPrice: number;
+        reason: 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
+        note?: string;
+      };
+    }>;
+    customer: {
+      id: string;
+      name: string;
+      customerCode?: string | null;
+      phone?: string | null;
+    } | null;
+    receivedValue: string;
   };
   createdAt: string;
   lastError?: string;
@@ -221,14 +250,6 @@ export async function openDatabase(
   );
 }
 
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onerror = () =>
-      reject(request.error ?? new Error('Mobile POS storage operation failed'));
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
 async function transaction<T>(
   storeName: string,
   mode: IDBTransactionMode,
@@ -246,8 +267,21 @@ async function transaction<T>(
           'this build expects a newer schema than the one on this device.',
       );
     }
-    const store = database.transaction(storeName, mode).objectStore(storeName);
-    return await requestResult(action(store));
+    const tx = database.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    // Request success is not a durable write: a transaction can still abort.
+    // Checkout may send money-changing requests only after commit is acknowledged.
+    return await new Promise<T>((resolve, reject) => {
+      let result: T;
+      const request = action(store);
+      request.onsuccess = () => {
+        result = request.result;
+      };
+      request.onerror = () => reject(request.error ?? new Error('POS storage request failed'));
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = () => reject(tx.error ?? new Error('POS storage transaction aborted'));
+      tx.onerror = () => reject(tx.error ?? new Error('POS storage transaction failed'));
+    });
   } finally {
     database.close();
   }
@@ -493,6 +527,8 @@ export type PosPurchaseDraft = {
   type: 'purchase';
   terminalCode: string;
   idempotencyKey: string;
+  /** Missing on older drafts: conservatively treat those as attempted. */
+  attempted?: boolean;
   supplierId: string | null;
   supplierName: string | null;
   lines: Array<{

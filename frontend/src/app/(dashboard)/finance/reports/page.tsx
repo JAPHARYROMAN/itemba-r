@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { downloadReportCsv } from '@/lib/report-export';
 import { downloadReportPdf } from '@/lib/export-download';
+import { openPartyIn } from '@/features/party/party-links';
 
 interface Company { id: string; name: string; code?: string | null }
 interface Division { id: string; name: string; code?: string | null }
@@ -32,6 +33,9 @@ type ReportTab =
   | 'scope-rollup'
   | 'ar-aging'
   | 'ap-aging'
+  | 'ap-control'
+  | 'ar-control'
+  | 'tax-by-party'
   | 'intercompany'
   | 'group-summary'
   | 'consolidated-pnl'
@@ -46,6 +50,10 @@ const TABS: { key: ReportTab; label: string; company: boolean; period: boolean; 
   { key: 'scope-rollup', label: 'Scope Rollup', company: true, period: true },
   { key: 'ar-aging', label: 'AR Aging', company: true, period: false },
   { key: 'ap-aging', label: 'AP Aging', company: true, period: false },
+  // Party linkage (Phase 3): the control account per party beside the open sub-ledger.
+  { key: 'ap-control', label: 'AP Control by Supplier', company: true, period: false, asOf: true },
+  { key: 'ar-control', label: 'AR Control by Customer', company: true, period: false, asOf: true },
+  { key: 'tax-by-party', label: 'Tax by Party', company: true, period: true },
   { key: 'intercompany', label: 'Intercompany', company: false, period: false },
   { key: 'group-summary', label: 'Group Summary', company: false, period: false },
   { key: 'consolidated-pnl', label: 'Consolidated P&L', company: false, period: true },
@@ -173,6 +181,9 @@ export default function FinanceReportsPage() {
         'scope-rollup': withQuery(`/api/backend/financial-reports/scope-rollup/${companyId}`),
         'ar-aging': `/api/backend/financial-reports/receivables-aging/${companyId}`,
         'ap-aging': `/api/backend/financial-reports/payables-aging/${companyId}`,
+        'ap-control': `${withQuery(`/api/backend/financial-reports/control-by-party/${companyId}`)}&role=AP`,
+        'ar-control': `${withQuery(`/api/backend/financial-reports/control-by-party/${companyId}`)}&role=AR`,
+        'tax-by-party': `${withQuery('/api/backend/tax/transactions/by-party')}&companyId=${encodeURIComponent(companyId)}`,
         intercompany: '/api/backend/financial-reports/intercompany-balances',
         'group-summary': '/api/backend/financial-reports/group-summary',
         'consolidated-pnl': withQuery('/api/backend/financial-reports/group/consolidated/profit-and-loss'),
@@ -326,6 +337,8 @@ export default function FinanceReportsPage() {
           {(activeTab === 'cash-flow' || activeTab === 'consolidated-cash-flow') && <CashFlowView data={report} />}
           {activeTab === 'scope-rollup' && <ScopeRollupView data={report} />}
           {(activeTab === 'ar-aging' || activeTab === 'ap-aging') && <AgingView data={report} title={currentTab.label} />}
+          {(activeTab === 'ap-control' || activeTab === 'ar-control') && <ControlByPartyView data={report} title={currentTab.label} />}
+          {activeTab === 'tax-by-party' && <TaxByPartyView data={report} title={currentTab.label} />}
           {activeTab === 'intercompany' && <IntercompanyView data={Array.isArray(report) ? report : []} />}
           {activeTab === 'group-summary' && <GroupSummaryView data={report} />}
           {report.eliminations && <EliminationPanel eliminations={report.eliminations} />}
@@ -429,6 +442,90 @@ function RollupTable({ title, rows }: { title: string; rows: any[] }) {
 function AgingView({ data, title }: { data: any; title: string }) {
   const buckets = [['Current', data.current], ['1-30', data.days1_30], ['31-60', data.days31_60], ['61-90', data.days61_90], ['Over 90', data.over90], ['Total', data.total]];
   return <div><h3 className="text-lg font-semibold mb-3">{title}</h3><div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-3">{buckets.map(([label, value]) => <StatCard key={label as string} label={label as string} value={fmtMoney(value as number)} />)}</div></div>;
+}
+
+/**
+ * Party linkage (Phase 3): one row per party with the control account balance, the open
+ * sub-ledger, and the difference; control lines without a party are their own row. A
+ * difference is a finding to read, never an error, and every party links to its profile.
+ */
+function ControlByPartyView({ data, title }: { data: any; title: string }) {
+  const kind = data.kind === 'customer' ? 'customer' : 'supplier';
+  const currency = data.baseCurrency ?? 'TZS';
+  const rows: any[] = Array.isArray(data.rows) ? data.rows : [];
+  const untagged = Number(data.untaggedControl ?? 0);
+  return (
+    <div className="overflow-x-auto">
+      <h3 className="text-lg font-semibold mb-3">{title}</h3>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+        <StatCard label="Control account" value={data.controlAccount ? `${data.controlAccount.accountCode} ${data.controlAccount.accountName}` : 'Not configured'} />
+        <StatCard label="Control total" value={fmtMoney(data.totals?.control, currency)} />
+        <StatCard label="Sub-ledger open" value={fmtMoney(data.totals?.subLedger, currency)} />
+        <StatCard label="Parties with a difference" value={data.partiesWithDifference ?? 0} />
+      </div>
+      {!data.controlAccount && <p className="text-sm mb-3" style={{ color: 'var(--aurora-text-muted)' }}>No {kind === 'supplier' ? 'AP' : 'AR'} control account resolves for this company, so only the sub-ledger is shown.</p>}
+      <WorkspaceTable className="w-full text-sm">
+        <thead><tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}><th className="px-3 py-2">{kind === 'supplier' ? 'Supplier' : 'Customer'}</th><th className="px-3 py-2 text-right">Control</th><th className="px-3 py-2 text-right">Sub-ledger</th><th className="px-3 py-2 text-right">Difference</th><th className="px-3 py-2 text-right">Open docs</th></tr></thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.length === 0 && untagged === 0 && <tr><td className="px-3 py-4 text-center" colSpan={5} style={{ color: 'var(--aurora-text-muted)' }}>No control or sub-ledger balance as of this date.</td></tr>}
+          {rows.map((row) => (
+            <tr key={row.partyId} data-testid="control-party-row" className={Number(row.difference) !== 0 ? 'bg-amber-50' : undefined}>
+              <td className="px-3 py-2"><a className="underline" href={openPartyIn('profile', kind, row.partyId)}>{row.name}</a>{row.code ? <span className="ml-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{row.code}</span> : null}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.control, currency)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.subLedger, currency)}</td>
+              <td className="px-3 py-2 text-right font-medium">{fmtMoney(row.difference, currency)}</td>
+              <td className="px-3 py-2 text-right">{row.documents ?? 0}</td>
+            </tr>
+          ))}
+          {untagged !== 0 && (
+            <tr data-testid="control-untagged-row" className="bg-amber-50">
+              <td className="px-3 py-2">Control lines without a party</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(untagged, currency)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(0, currency)}</td>
+              <td className="px-3 py-2 text-right font-medium">{fmtMoney(untagged, currency)}</td>
+              <td className="px-3 py-2 text-right">0</td>
+            </tr>
+          )}
+        </tbody>
+        <tfoot><tr className="font-semibold"><td className="px-3 py-2">Total</td><td className="px-3 py-2 text-right">{fmtMoney(data.totals?.control, currency)}</td><td className="px-3 py-2 text-right">{fmtMoney(data.totals?.subLedger, currency)}</td><td className="px-3 py-2 text-right">{fmtMoney(data.totals?.difference, currency)}</td><td className="px-3 py-2 text-right"></td></tr></tfoot>
+      </WorkspaceTable>
+    </div>
+  );
+}
+
+/**
+ * Party linkage (Phase 3 PR-7): taxable and tax amounts per party, direction and tax type
+ * from the party snapshot each tax row carries. Rows without a party stay visible.
+ */
+function TaxByPartyView({ data, title }: { data: any; title: string }) {
+  const rows: any[] = Array.isArray(data.rows) ? data.rows : [];
+  const totals: any[] = Array.isArray(data.totals) ? data.totals : [];
+  return (
+    <div className="overflow-x-auto">
+      <h3 className="text-lg font-semibold mb-3">{title}</h3>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+        {totals.map((t) => <StatCard key={`${t.direction}-${t.currency}`} label={`${t.direction} tax (${t.currency})`} value={fmtMoney(t.tax, t.currency)} />)}
+        <StatCard label="Rows without a party" value={data.untagged ?? 0} />
+      </div>
+      <WorkspaceTable className="w-full text-sm">
+        <thead><tr className="text-left text-xs uppercase bg-gray-50" style={{ color: 'var(--aurora-text-muted)' }}><th className="px-3 py-2">Party</th><th className="px-3 py-2">TIN / VRN</th><th className="px-3 py-2">Direction</th><th className="px-3 py-2">Tax type</th><th className="px-3 py-2 text-right">Taxable</th><th className="px-3 py-2 text-right">Tax</th><th className="px-3 py-2 text-right">Rows</th></tr></thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.length === 0 && <tr><td className="px-3 py-4 text-center" colSpan={7} style={{ color: 'var(--aurora-text-muted)' }}>No tax transactions in this period.</td></tr>}
+          {rows.map((row, i) => (
+            <tr key={`${row.partyType}-${row.partyId ?? 'none'}-${row.direction}-${row.taxType?.id}-${row.currency}-${i}`} data-testid="tax-party-row" className={row.partyType === 'NONE' ? 'bg-amber-50' : undefined}>
+              <td className="px-3 py-2">{row.kind && row.partyId ? <a className="underline" href={openPartyIn('profile', row.kind, row.partyId)}>{row.name}</a> : row.name}{row.code ? <span className="ml-2 text-xs" style={{ color: 'var(--aurora-text-muted)' }}>{row.code}</span> : null}</td>
+              <td className="px-3 py-2 text-xs">{[row.tin, row.vrn].filter(Boolean).join(' / ') || '—'}</td>
+              <td className="px-3 py-2">{row.direction}</td>
+              <td className="px-3 py-2">{row.taxType?.code || row.taxType?.name || '—'}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.taxable, row.currency)}</td>
+              <td className="px-3 py-2 text-right font-medium">{fmtMoney(row.tax, row.currency)}</td>
+              <td className="px-3 py-2 text-right">{row.transactions ?? 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </WorkspaceTable>
+    </div>
+  );
 }
 
 function IntercompanyView({ data }: { data: any[] }) {

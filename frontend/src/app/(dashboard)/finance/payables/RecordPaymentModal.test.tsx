@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { RecordPaymentModal, Payable } from './page';
+import { RecordPaymentModal, Payable } from '@/features/finance/screens/payables';
+import { getSelectField, selectFieldOptions } from '@/test/select-field';
 
 /**
  * Payables record-payment modal regressions.
@@ -83,10 +84,18 @@ describe('Payables RecordPaymentModal — cash-account handling', () => {
 
     render(<RecordPaymentModal payable={PAYABLE_USD} onClose={() => {}} onDone={() => {}} />);
 
-    await screen.findByRole('option', { name: 'USD Bank · BANK · USD' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).toContain(
+        'USD Bank · BANK · USD',
+      ),
+    );
     // TZS and inactive accounts are not offered against a USD payable.
-    expect(screen.queryByRole('option', { name: /Petty Cash/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /Closed Till/ })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).not.toContainEqual(
+      expect.stringMatching(/Petty Cash/),
+    );
+    expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).not.toContainEqual(
+      expect.stringMatching(/Closed Till/),
+    );
   });
 
   it('still requires a selection when matching accounts exist', async () => {
@@ -97,7 +106,11 @@ describe('Payables RecordPaymentModal — cash-account handling', () => {
 
     render(<RecordPaymentModal payable={PAYABLE_TZS} onClose={() => {}} onDone={() => {}} />);
 
-    await screen.findByRole('option', { name: 'Petty Cash · CASH · TZS' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).toContain(
+        'Petty Cash · CASH · TZS',
+      ),
+    );
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '100' } });
     fireEvent.click(screen.getByRole('button', { name: 'Record Payment' }));
 
@@ -144,7 +157,11 @@ describe('Payables RecordPaymentModal — cash-account handling', () => {
     // Retry re-runs the fetch and recovers the list.
     failAccounts = false;
     fireEvent.click(screen.getByText('Retry'));
-    await screen.findByRole('option', { name: 'Petty Cash · CASH · TZS' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).toContain(
+        'Petty Cash · CASH · TZS',
+      ),
+    );
     expect(screen.queryByText(/Couldn't load the cash \/ bank accounts/)).not.toBeInTheDocument();
   });
 

@@ -105,6 +105,7 @@ export class PostingEngineService {
           description: l.description ?? event.description,
           debit: l.debit ?? 0,
           credit: l.credit ?? 0,
+          ...partyColumns(l),
         })),
       });
 
@@ -186,6 +187,7 @@ export class PostingEngineService {
           companyId: input.companyId,
           divisionId: line.divisionId ?? input.divisionId,
           branchId: line.branchId ?? input.branchId,
+          ...partyColumns(line),
         })),
       });
 
@@ -271,7 +273,7 @@ export class PostingEngineService {
 
   private registerBuiltins(): void {
     // Sales confirmed: DR AR, CR Income
-    this.register<{ amount: number; incomeAccountRole?: AccountRole }>(
+    this.register<{ amount: number; incomeAccountRole?: AccountRole; customerId?: string | null }>(
       'sales.confirmed',
       async ({ event, ctx }) => {
         const ar = await ctx.resolveAccount('AR_CONTROL');
@@ -283,50 +285,125 @@ export class PostingEngineService {
           event.payload.incomeAccountRole ?? 'INCOME_SUMMARY',
         );
         return [
-          { accountId: ar.id, debit: event.payload.amount, credit: 0, description: 'AR' },
+          {
+            accountId: ar.id,
+            debit: event.payload.amount,
+            credit: 0,
+            description: 'AR',
+            ...partyOf('customer', event.payload.customerId),
+          },
           { accountId: income.id, debit: 0, credit: event.payload.amount, description: 'Income' },
         ];
       },
     );
 
     // Customer payment received: DR Cash, CR AR
-    this.register<{ amount: number }>('sales.payment_received', async ({ event, ctx }) => {
-      const cash = await ctx.resolveAccount('CASH_ON_HAND');
-      const ar = await ctx.resolveAccount('AR_CONTROL');
-      return [
-        {
-          accountId: cash.id,
-          debit: event.payload.amount,
-          credit: 0,
-          description: 'Cash received',
-        },
-        { accountId: ar.id, debit: 0, credit: event.payload.amount, description: 'AR settled' },
-      ];
-    });
+    this.register<{ amount: number; customerId?: string | null }>(
+      'sales.payment_received',
+      async ({ event, ctx }) => {
+        const cash = await ctx.resolveAccount('CASH_ON_HAND');
+        const ar = await ctx.resolveAccount('AR_CONTROL');
+        return [
+          {
+            accountId: cash.id,
+            debit: event.payload.amount,
+            credit: 0,
+            description: 'Cash received',
+          },
+          {
+            accountId: ar.id,
+            debit: 0,
+            credit: event.payload.amount,
+            description: 'AR settled',
+            ...partyOf('customer', event.payload.customerId),
+          },
+        ];
+      },
+    );
 
     // Supplier invoice received: DR Expense, CR AP. Caller supplies expense role.
-    this.register<{ amount: number; expenseAccountRole: AccountRole }>(
+    this.register<{ amount: number; expenseAccountRole: AccountRole; supplierId?: string | null }>(
       'procurement.invoice_received',
       async ({ event, ctx }) => {
         const expense = await ctx.resolveAccount(event.payload.expenseAccountRole);
         const ap = await ctx.resolveAccount('AP_CONTROL');
         return [
           { accountId: expense.id, debit: event.payload.amount, credit: 0, description: 'Expense' },
-          { accountId: ap.id, debit: 0, credit: event.payload.amount, description: 'AP' },
+          {
+            accountId: ap.id,
+            debit: 0,
+            credit: event.payload.amount,
+            description: 'AP',
+            ...partyOf('supplier', event.payload.supplierId),
+          },
         ];
       },
     );
 
     // Supplier paid: DR AP, CR Cash
-    this.register<{ amount: number }>('procurement.payment_made', async ({ event, ctx }) => {
-      const ap = await ctx.resolveAccount('AP_CONTROL');
-      const cash = await ctx.resolveAccount('CASH_ON_HAND');
-      return [
-        { accountId: ap.id, debit: event.payload.amount, credit: 0, description: 'AP settled' },
-        { accountId: cash.id, debit: 0, credit: event.payload.amount, description: 'Cash paid' },
-      ];
-    });
+    this.register<{ amount: number; supplierId?: string | null }>(
+      'procurement.payment_made',
+      async ({ event, ctx }) => {
+        const ap = await ctx.resolveAccount('AP_CONTROL');
+        const cash = await ctx.resolveAccount('CASH_ON_HAND');
+        return [
+          {
+            accountId: ap.id,
+            debit: event.payload.amount,
+            credit: 0,
+            description: 'AP settled',
+            ...partyOf('supplier', event.payload.supplierId),
+          },
+          { accountId: cash.id, debit: 0, credit: event.payload.amount, description: 'Cash paid' },
+        ];
+      },
+    );
   }
+}
+
+/** Party linkage (Phase 3): the party a control line carries. NONE when it names nobody. */
+export type PostingPartyType = 'NONE' | 'SUPPLIER' | 'CUSTOMER';
+
+/**
+ * Tag a posting line with its supplier or customer. Use it on every AP / AR control line;
+ * a missing id leaves the line untagged (a reconciliation finding, never a posting error).
+ */
+export function partyOf(
+  kind: 'supplier' | 'customer',
+  id: string | null | undefined,
+): Pick<PostingLine, 'partyType' | 'supplierId' | 'customerId'> {
+  if (!id) return {};
+  return kind === 'supplier'
+    ? { partyType: 'SUPPLIER', supplierId: id }
+    : { partyType: 'CUSTOMER', customerId: id };
+}
+
+/** The three stored columns for a line, derived so an id is never stored under the wrong type. */
+/**
+ * The party columns of a stored journal line, for a reversal that rebuilds its lines from the
+ * original: the reversing control line names the same party, so the control reconciliation
+ * sees the pair under one party instead of a tagged credit beside an untagged debit.
+ */
+export function partyOfLine(line: {
+  partyType?: string | null;
+  supplierId?: string | null;
+  customerId?: string | null;
+}): Pick<PostingLine, 'partyType' | 'supplierId' | 'customerId'> {
+  if (line.partyType === 'SUPPLIER' && line.supplierId)
+    return { partyType: 'SUPPLIER', supplierId: line.supplierId };
+  if (line.partyType === 'CUSTOMER' && line.customerId)
+    return { partyType: 'CUSTOMER', customerId: line.customerId };
+  return {};
+}
+
+export function partyColumns(line: Pick<PostingLine, 'partyType' | 'supplierId' | 'customerId'>) {
+  const partyType: PostingPartyType =
+    line.partyType ?? (line.supplierId ? 'SUPPLIER' : line.customerId ? 'CUSTOMER' : 'NONE');
+  return {
+    partyType,
+    supplierId: partyType === 'SUPPLIER' ? (line.supplierId ?? null) : null,
+    customerId: partyType === 'CUSTOMER' ? (line.customerId ?? null) : null,
+  };
 }
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -354,6 +431,10 @@ export interface PostingLine {
   description?: string;
   divisionId?: string | null;
   branchId?: string | null;
+  /** Party linkage (Phase 3): set on AP / AR control lines through `partyOf`. */
+  partyType?: PostingPartyType;
+  supplierId?: string | null;
+  customerId?: string | null;
 }
 
 export interface DirectPostingInput {

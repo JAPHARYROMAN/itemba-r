@@ -1,11 +1,10 @@
+import { ogCards } from '@/content/og';
 import { OG_CONTENT_TYPE, OG_SIZE, ogImageFor } from '@/lib/og-card';
+
+const { alt: cardAlt, ...card } = ogCards.locations;
 
 export const size = { width: OG_SIZE.width, height: OG_SIZE.height };
 export const contentType = OG_CONTENT_TYPE;
-export const alt = 'Itemba Group locations';
+export const alt = cardAlt;
 
-export default ogImageFor({
-  eyebrow: 'Locations',
-  title: 'Based in Songwe. Connected through Tunduma.',
-  subtitle: 'Headquartered in Mpemba-Tunduma on the Tanzania-Zambia trade corridor.',
-});
+export default ogImageFor(card);

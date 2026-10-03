@@ -16,6 +16,10 @@ import { SalesDeskModule } from './modules/sales-desk/sales-desk.module';
 import { RecordsModule } from './modules/records/records.module';
 import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
 import { CashDeskModule } from './modules/cash-desk/cash-desk.module';
+import { CashBookModule } from './modules/cash-book/cash-book.module';
+import { PartyBalanceModule } from './modules/party-balance/party-balance.module';
+import { PartyProfileModule } from './modules/party-profile/party-profile.module';
+import { PartyLinksModule } from './modules/party-links/party-links.module';
 import { InvoiceDeskModule } from './modules/invoice-desk/invoice-desk.module';
 import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -222,6 +226,8 @@ import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
 // ── UX Backend Wave 2b — Customer Payments ───────────────────────────────────
 import { CustomerPaymentsModule } from './modules/customer-payments/customer-payments.module';
+// ── Party linkage phase 1 — Supplier Payments ────────────────────────────────
+import { SupplierPaymentsModule } from './modules/supplier-payments/supplier-payments.module';
 
 // M16 - QA, Launch Readiness, Documentation, Training, Support
 
@@ -255,6 +261,10 @@ import { RolesGuard } from './common/guards/roles.guard';
     PetroDollarModule,
     InvoiceDeskModule,
     CashDeskModule,
+    CashBookModule,
+    PartyBalanceModule,
+    PartyProfileModule,
+    PartyLinksModule,
     SalesDeskModule,
     RecordsModule,
     DeskReportsModule,
@@ -446,6 +456,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     RefundsModule,
     // ── UX Backend Wave 2b — Customer Payments ─────────────────────────────────
     CustomerPaymentsModule,
+    // ── Party linkage phase 1 — Supplier Payments ──────────────────────────────
+    SupplierPaymentsModule,
     // ── Msaidizi — chat and autonomy each remain independently gated ──────────
     MsaidiziModule,
     MsaidiziTaskRuntimeModule,

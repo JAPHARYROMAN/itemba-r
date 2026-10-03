@@ -5,8 +5,10 @@ import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { QueryReceivableDto } from './dto/query-receivable.dto';
 import { RecordReceivablePaymentDto } from './dto/record-receivable-payment.dto';
 import { WriteOffReceivableDto } from './dto/write-off-receivable.dto';
+import { LinkReceivableCustomerDto } from './dto/link-receivable-customer.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 
 @Controller('receivables')
 export class ReceivablesController {
@@ -50,6 +52,17 @@ export class ReceivablesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.recordPayment(id, dto, user);
+  }
+
+  @Patch(':id/link-customer')
+  @AgentExcluded()
+  @RequirePermissions('receivables.manage')
+  linkCustomer(
+    @Param('id') id: string,
+    @Body() dto: LinkReceivableCustomerDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.linkCustomer(id, dto, user);
   }
 
   @Patch(':id/write-off')

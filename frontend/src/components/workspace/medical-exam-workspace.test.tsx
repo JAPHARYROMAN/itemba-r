@@ -6,6 +6,12 @@ import { join } from 'node:path';
 import { MedicalExamWorkspace } from './medical-exam-workspace';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   page: vi.fn(),
@@ -122,9 +128,11 @@ describe('Medical examination workspace', () => {
         expect.objectContaining({ query: expect.objectContaining({ page: 2 }) }),
       ),
     );
-    await userEvent.selectOptions(screen.getByLabelText('Company filter'), 'company');
-    await userEvent.selectOptions(screen.getByLabelText('Fitness filter'), 'FIT_WITH_RESTRICTIONS');
-    await userEvent.selectOptions(screen.getByLabelText('Renewal filter'), '30');
+    // The filters sit in a collapsed panel; open it to reach the shared select fields.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    await chooseSelectOption('Company filter', 'company');
+    await chooseSelectOption('Fitness filter', 'FIT_WITH_RESTRICTIONS');
+    await chooseSelectOption('Renewal filter', '30');
     await userEvent.click(screen.getByLabelText('Hazard-sector only'));
     await userEvent.type(
       screen.getByPlaceholderText('Search employee, doctor or facility…'),
@@ -195,23 +203,19 @@ describe('Medical examination workspace', () => {
     await userEvent.click(screen.getByRole('button', { name: 'New examination' }));
     const dialog = screen.getByRole('dialog', { name: 'New examination' });
     await waitFor(() =>
-      expect(
-        within(dialog)
-          .getByLabelText(/Company/)
-          .querySelector('option[value="company"]'),
-      ).toBeTruthy(),
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Example Company'),
     );
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Company/), 'company');
+    await chooseSelectOption('Company', 'company', userEvent, dialog);
     expect(await screen.findByText('Employees unavailable')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Save examination' })).toBeDisabled();
     state.failEmployees = false;
     await userEvent.click(screen.getByRole('button', { name: 'Retry employees' }));
-    await waitFor(() => expect(within(dialog).getByLabelText(/Employee/)).toBeEnabled());
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee/), 'employee');
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Company/), 'other');
-    expect(within(dialog).getByLabelText(/Employee/)).toHaveValue('');
-    await waitFor(() => expect(within(dialog).getByLabelText(/Employee/)).toBeEnabled());
-    await userEvent.selectOptions(within(dialog).getByLabelText(/Employee/), 'employee');
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
+    await chooseSelectOption('Company', 'other', userEvent, dialog);
+    expect(selectFieldValue(getSelectField('Employee', dialog))).toBe('');
+    await waitFor(() => expect(getSelectField('Employee', dialog)).toBeEnabled());
+    await chooseSelectOption('Employee', 'employee', userEvent, dialog);
     await setDateField(/Exam date/, '2026-09-01', userEvent, dialog);
     await setDateField(/Expiry date/, '2027-09-01', userEvent, dialog);
     await userEvent.click(within(dialog).getByLabelText('Hazard-sector employee'));

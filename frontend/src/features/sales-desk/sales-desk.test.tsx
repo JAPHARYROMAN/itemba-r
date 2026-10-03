@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { chooseSelectOption, getSelectField } from '@/test/select-field';
 import { DirectSalesDesk as SalesDesk } from './direct-sales-desk';
 import { SalesEditor } from './sales-editor';
 import { lineTotal, saleTotal, type Sale } from './types';
@@ -128,7 +130,7 @@ describe('Sales Desk', () => {
     api.permissions = new Set(['sales_desk.view']);
     render(<SalesDesk />);
     await screen.findByText('TZS 40.10');
-    fireEvent.change(screen.getByLabelText('Sales summary currency'), { target: { value: 'USD' } });
+    await chooseSelectOption('Currency', 'USD');
     expect(screen.getAllByText('USD 20.00')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'New sale' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Acme S-TEST/ }));
@@ -157,8 +159,8 @@ describe('Sales Desk', () => {
         onSaved={saved}
       />,
     );
-    await screen.findByRole('option', { name: 'Acme' });
-    fireEvent.change(screen.getByLabelText(/^Customer/), { target: { value: 'customer' } });
+    await waitFor(() => expect(getSelectField('Customer')).toBeEnabled());
+    await chooseSelectOption('Customer', 'Acme');
     fireEvent.change(screen.getByLabelText(/Item 1 description/), { target: { value: 'Feed' } });
     fireEvent.change(screen.getByLabelText(/Item 1 quantity/), { target: { value: '0.5' } });
     fireEvent.change(screen.getByLabelText(/Item 1 unit price/), { target: { value: '100.01' } });
@@ -201,9 +203,10 @@ describe('Sales Desk', () => {
         onSaved={saved}
       />,
     );
+    await userEvent.click(getSelectField('Receiving account'));
     await screen.findByRole('option', { name: /Till/ });
     expect(screen.queryByRole('option', { name: /Dollar account/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Receiving account/), { target: { value: 'till' } });
+    await userEvent.click(screen.getByRole('option', { name: /Till/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
     await waitFor(() => expect(saved).toHaveBeenCalledWith('sale'));
     expect(api.post).toHaveBeenCalledWith(

@@ -1,0 +1,16 @@
+{
+  "description": "Files that must stay byte-for-byte identical to origin/main during the website rebuild. SHA-256 of the raw bytes, nothing normalised (all nine are LF-only today; any line-ending conversion counts as a change). Checked by tests/unit/frozen-files.test.ts.",
+  "source": "origin/main 6bbaf66e",
+  "algorithm": "sha256",
+  "files": {
+    "src/app/api/enquiries/route.ts": "ce559f51c43cdd35c5dfe3220d2c8cc95b916e50570e18abc04b7299de4a16c0",
+    "src/app/api/health/route.ts": "f7df41a9f346ec281266fb681b1830084f3e87d6bebfd2d70f097c7880c27534",
+    "src/lib/analytics.ts": "2b9bb2b4fcba7fc701f4d55f75f046c4754fb8c4ae34b272e095b793cf3b6331",
+    "src/components/Analytics.tsx": "507633f6a9c6f193281e3ce4391e3fea9e712321a7a79d41904dd0e41b552a9e",
+    "src/components/ConversionTracker.tsx": "34328d14799fe8b3d05452b48a120196152644622170252d466b87117ff06c70",
+    "src/components/JsonLd.tsx": "db285448dad818e486b09887b9da39b7141736e802eaa1c9e1e369e6bfc8e66d",
+    "src/components/CompanyProfilePrintScope.tsx": "bddc897a524f5606420e4b506c57f59905095bc7a50df0ee1b1afba92d0dec2b",
+    "scripts/generate-profile-pdfs.mjs": "1484d66e9fd27e58e48fc9ed2e13c97984bd40e102a6b9b231d10506c0f01b04",
+    "Dockerfile": "ff5cb0be8f979c9e61241841b3421d1780875c6dbb725257ea43c1307fd5bfa1"
+  }
+}

@@ -2043,6 +2043,8 @@ model InvoiceDeskInvoice {
 
 model InvoiceDeskPayment {
   cashMovement   CashDeskMovement?
+  supplierPaymentId String?          @unique
+  supplierPayment   SupplierPayment? @relation(fields: [supplierPaymentId], references: [id], onDelete: Restrict)
   id             String             @id @default(uuid())
   invoiceId      String
   requestId      String             @unique
@@ -2132,6 +2134,7 @@ model Company {
   chartOfAccounts             ChartOfAccount[]
   fiscalYears                 FiscalYear[]
   accountingPeriods           AccountingPeriod[]
+  partyBalanceSnapshots       PartyBalanceSnapshot[]
   journalEntries              JournalEntry[]
   journalEntryLines           JournalEntryLine[]
   cashAccounts                CashAccount[]
@@ -2146,6 +2149,8 @@ model Company {
   refunds                     Refund[]
   customerPayments            CustomerPayment[]
   paymentAllocations          PaymentAllocation[]
+  supplierPayments            SupplierPayment[]
+  supplierPaymentAllocations  SupplierPaymentAllocation[]
   interCompanyTxFrom          InterCompanyTransaction[]   @relation("InterCompanyTxFrom")
   interCompanyTxTo            InterCompanyTransaction[]   @relation("InterCompanyTxTo")
   financialAttachments        FinancialAttachment[]
@@ -2511,6 +2516,7 @@ model Division {
   creditNotes      CreditNote[]
   refunds          Refund[]
   customerPayments CustomerPayment[]
+  supplierPayments SupplierPayment[]
 
   // Mobile POS Lite
   mobilePosTerminals MobilePosTerminal[]
@@ -2624,6 +2630,7 @@ model Branch {
   creditNotes      CreditNote[]
   refunds          Refund[]
   customerPayments CustomerPayment[]
+  supplierPayments SupplierPayment[]
 
   // Mobile POS Lite
   mobilePosTerminals MobilePosTerminal[]
@@ -2703,6 +2710,8 @@ model User {
   refundsCreated              Refund[]              @relation("RefundCreatedBy")
   customerPaymentsCreated     CustomerPayment[]     @relation("CustomerPaymentCreatedBy")
   customerPaymentsReversed    CustomerPayment[]     @relation("CustomerPaymentReversedBy")
+  supplierPaymentsCreated     SupplierPayment[]     @relation("SupplierPaymentCreatedBy")
+  supplierPaymentsReversed    SupplierPayment[]     @relation("SupplierPaymentReversedBy")
   recordBookSalesCreated      RecordBookDailySale[] @relation("RecordBookSaleCreatedBy")
   recordBookSalesUpdated      RecordBookDailySale[] @relation("RecordBookSaleUpdatedBy")
   recordBookSalesFinalized    RecordBookDailySale[] @relation("RecordBookSaleFinalizedBy")
@@ -3257,6 +3266,7 @@ model Loan {
   /// "Bank", "SACCO", "Individual", "Microfinance", "Director", etc.
   lenderType               String?
   lenderContact            String?
+  supplierId               String?
   principalAmount          Decimal              @db.Decimal(18, 2)
   currency                 CurrencyCode         @default(TZS)
   /// Annual interest rate stored as a decimal fraction: 0.18 = 18%
@@ -3292,6 +3302,7 @@ model Loan {
   group      Group?          @relation(fields: [groupId], references: [id], onDelete: Restrict)
   repayments LoanRepayment[]
   documents  Document[]      @relation("LoanDocuments")
+  supplier   Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([divisionId])
@@ -3303,6 +3314,7 @@ model Loan {
   @@index([maturityDate])
   @@index([companyId, status, maturityDate])
   @@index([companyId, createdAt])
+  @@index([supplierId])
   @@map("loans")
 }
 
@@ -3342,6 +3354,7 @@ model Debt {
   companyId       String
   creditorName    String
   creditorContact String?
+  supplierId      String?
   amount          Decimal      @db.Decimal(18, 2)
   /// Amount already paid (for partial payments).
   amountPaid      Decimal      @default(0) @db.Decimal(18, 2)
@@ -3359,6 +3372,7 @@ model Debt {
 
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
   documents Document[] @relation("DebtDocuments")
+  supplier  Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([status])
@@ -3366,6 +3380,7 @@ model Debt {
   @@index([riskLevel])
   @@index([companyId, status, dueDate])
   @@index([companyId, createdAt])
+  @@index([supplierId])
   @@map("debts")
 }
 
@@ -3387,6 +3402,8 @@ model Contract {
   counterpartyName    String
   counterpartyContact String?
   counterpartyAddress String?
+  supplierId          String?
+  customerId          String?
   startDate           DateTime
   endDate             DateTime?
   renewalDate         DateTime?
@@ -3411,6 +3428,8 @@ model Contract {
   company   Company?   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   group     Group?     @relation(fields: [groupId], references: [id], onDelete: Restrict)
   documents Document[] @relation("ContractDocuments")
+  supplier  Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  customer  Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([groupId])
@@ -3419,6 +3438,8 @@ model Contract {
   @@index([endDate])
   @@index([riskLevel])
   @@index([owningLevel])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("contracts")
 }
 
@@ -3869,6 +3890,7 @@ model AccountingPeriod {
   periodCloses     AccountingPeriodClose[]
   accountingLocks  AccountingLock[]
   auditAdjustments AuditAdjustment[]
+  partyBalanceSnapshots PartyBalanceSnapshot[]
 
   @@unique([fiscalYearId, name])
   @@index([companyId])
@@ -3882,6 +3904,7 @@ model AccountingPeriod {
 
 model JournalEntry {
   payrollCashMovement CashDeskMovement?   @relation("PayrollCashJournal")
+  cashDeskMovements   CashDeskMovement[]  @relation("CashDeskMovementJournal")
   loanFinancialEvent  LoanFinancialEvent?
   id                  String              @id @default(uuid())
   journalNumber       String
@@ -3922,6 +3945,8 @@ model JournalEntry {
   refundsPosted            Refund[]
   customerPaymentsPosted   CustomerPayment[]         @relation("CustomerPaymentJournalEntry")
   customerPaymentsReversed CustomerPayment[]         @relation("CustomerPaymentReversalJournalEntry")
+  supplierPaymentsPosted   SupplierPayment[]         @relation("SupplierPaymentJournalEntry")
+  supplierPaymentsReversed SupplierPayment[]         @relation("SupplierPaymentReversalJournalEntry")
   intercompanyFrom         InterCompanyTransaction[] @relation("InterCompanyFromJE")
   intercompanyTo           InterCompanyTransaction[] @relation("InterCompanyToJE")
 
@@ -3945,17 +3970,28 @@ model JournalEntryLine {
   companyId      String
   divisionId     String?
   branchId       String?
+  // Party linkage (Phase 3): AP / AR control lines carry the party so the ledger can be
+  // reconciled to the sub-ledgers per supplier or customer. NONE | SUPPLIER | CUSTOMER; the
+  // matching id must be set (database CHECK). Never required: a control line without a
+  // party is a reconciliation finding, not a posting error.
+  partyType      String   @default("NONE") @db.VarChar(10)
+  supplierId     String?
+  customerId     String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      ChartOfAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
   company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier     Supplier?      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customer     Customer?      @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@index([journalEntryId])
   @@index([accountId])
   @@index([companyId])
   @@index([companyId, accountId, createdAt])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("journal_entry_lines")
 }
 
@@ -3992,6 +4028,7 @@ model CashAccount {
   salesOrders          SalesOrder[]               @relation("SalesOrderCashAccount")
   refunds              Refund[]
   customerPayments     CustomerPayment[]
+  supplierPayments     SupplierPayment[]
   mobilePosPayments    MobilePosTerminalPayment[]
 
   // Westsides (Milestone 6)
@@ -4035,6 +4072,7 @@ model Expense {
   expenseCategoryId String
   cashAccountId     String?
   vendorName        String?
+  supplierId        String?
   amount            Decimal       @db.Decimal(18, 2)
   currency          CurrencyCode  @default(TZS)
   expenseDate       DateTime
@@ -4066,6 +4104,9 @@ model Expense {
   paidBy          User?           @relation("ExpensePaidBy", fields: [paidById], references: [id], onDelete: SetNull)
   journalEntry    JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
 
+  supplier        Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  cashDeskMovements CashDeskMovement[]
+
   @@unique([companyId, expenseNumber])
   @@index([companyId])
   @@index([status])
@@ -4076,6 +4117,7 @@ model Expense {
   @@index([createdById])
   @@index([approvedById])
   @@index([paidById])
+  @@index([supplierId])
   @@map("expenses")
 }
 
@@ -4177,6 +4219,7 @@ model RecordBookExpense {
   amount            Decimal                 @db.Decimal(18, 2)
   description       String
   paidTo            String?
+  supplierId        String?
   paymentMethod     RecordBookPaymentMethod @default(CASH)
   paymentLabel      String?
   reference         String?
@@ -4205,6 +4248,7 @@ model RecordBookExpense {
   finalizedBy     User?                     @relation("RecordBookExpenseFinalizedBy", fields: [finalizedById], references: [id], onDelete: SetNull)
   voidedBy        User?                     @relation("RecordBookExpenseVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
   reopenedBy      User?                     @relation("RecordBookExpenseReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
+  supplier        Supplier?                 @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([divisionId])
@@ -4214,6 +4258,7 @@ model RecordBookExpense {
   @@index([status])
   @@index([reopenedAt])
   @@index([companyId, recordDate, status])
+  @@index([supplierId])
   @@map("record_book_expenses")
 }
 
@@ -4260,6 +4305,7 @@ model Receivable {
   creditNotes        CreditNote[]
   refunds            Refund[]
   paymentAllocations PaymentAllocation[]
+  cashDeskMovements  CashDeskMovement[]
 
   @@unique([companyId, receivableNumber])
   @@index([companyId])
@@ -4302,6 +4348,10 @@ model Payable {
   journalEntry   JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
   fuelDeliveries FuelDelivery[]
+
+  cashDeskMovements CashDeskMovement[]
+  supplierInvoices  SupplierInvoice[]
+  paymentAllocations SupplierPaymentAllocation[]
 
   @@unique([companyId, payableNumber])
   @@index([companyId])
@@ -4473,6 +4523,8 @@ model Refund {
   journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   createdBy    User?         @relation("RefundCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
+  cashDeskMovements CashDeskMovement[]
+
   @@unique([companyId, refundNumber])
   @@index([companyId])
   @@index([divisionId])
@@ -4530,6 +4582,7 @@ model CustomerPayment {
   reversedBy           User?         @relation("CustomerPaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
 
   allocations PaymentAllocation[]
+  cashDeskMovement CashDeskMovement?
 
   @@unique([companyId, paymentNumber])
   @@index([companyId])
@@ -4571,6 +4624,94 @@ model PaymentAllocation {
 // INTER-COMPANY TRANSACTIONS
 // ───────────────────────────────────────────────────────────────────────────────
 
+/// Header for a supplier payment, mirroring CustomerPayment. Paying a payable, paying an
+/// expense, paying an Invoice Desk invoice and recording a Cash Desk SUPPLIER_PAYMENT all
+/// create exactly one row, so suppliers have a dated payment history. `appliedAmount` is
+/// the total allocated to payables; `unappliedAmount` is the remainder (desk payments
+/// carry their desk invoice as the applied document). Posting DR AP control / CR cash
+/// happens here for ERP payments; desk payments are posted later in Accounting connections.
+model SupplierPayment {
+  id                     String                @id @default(uuid())
+  paymentNumber          String
+  /// Client idempotency key; a repeat with the same key returns the original payment.
+  requestId              String?               @unique
+  companyId              String
+  divisionId             String?
+  branchId               String?
+  supplierId             String
+  amount                 Decimal               @db.Decimal(18, 2)
+  method                 PaymentMethodGeneral  @default(CASH)
+  reference              String?
+  paymentDate            DateTime
+  appliedAmount          Decimal               @default(0) @db.Decimal(18, 2)
+  unappliedAmount        Decimal               @default(0) @db.Decimal(18, 2)
+  currency               CurrencyCode          @default(TZS)
+  status                 CustomerPaymentStatus @default(COMPLETED)
+  /// Where the payment originated: Payable | Expense | InvoiceDeskInvoice | CashDesk.
+  sourceType             String?               @db.VarChar(40)
+  sourceId               String?
+  cashAccountId          String?
+  cashDeskMovementId     String?               @unique
+  journalEntryId         String?
+  reversalJournalEntryId String?
+  notes                  String?
+  createdById            String?
+  reversedById           String?
+  reversedAt             DateTime?
+  deletedAt              DateTime?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  company              Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division             Division?         @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  branch               Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplier             Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  cashAccount          CashAccount?      @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  cashDeskMovement     CashDeskMovement? @relation("SupplierPaymentCashMovement", fields: [cashDeskMovementId], references: [id], onDelete: Restrict)
+  journalEntry         JournalEntry?     @relation("SupplierPaymentJournalEntry", fields: [journalEntryId], references: [id], onDelete: SetNull)
+  reversalJournalEntry JournalEntry?     @relation("SupplierPaymentReversalJournalEntry", fields: [reversalJournalEntryId], references: [id], onDelete: SetNull)
+  createdBy            User?             @relation("SupplierPaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reversedBy           User?             @relation("SupplierPaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
+
+  allocations      SupplierPaymentAllocation[]
+  deskPayment      InvoiceDeskPayment?
+  carriedMovement  CashDeskMovement?           @relation("CashDeskMovementSupplierPayment")
+
+  @@unique([companyId, paymentNumber])
+  @@index([companyId])
+  @@index([divisionId])
+  @@index([branchId])
+  @@index([supplierId])
+  @@index([cashAccountId])
+  @@index([status])
+  @@index([paymentDate])
+  @@index([companyId, supplierId, paymentDate])
+  @@index([companyId, status, paymentDate])
+  @@index([sourceType, sourceId])
+  @@map("supplier_payments")
+}
+
+/// One application of a SupplierPayment against one open Payable.
+model SupplierPaymentAllocation {
+  id                String   @id @default(uuid())
+  supplierPaymentId String
+  payableId         String
+  companyId         String
+  amount            Decimal  @db.Decimal(18, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  supplierPayment SupplierPayment @relation(fields: [supplierPaymentId], references: [id], onDelete: Cascade)
+  payable         Payable         @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([supplierPaymentId, payableId])
+  @@index([supplierPaymentId])
+  @@index([payableId])
+  @@index([companyId])
+  @@index([companyId, payableId])
+  @@map("supplier_payment_allocations")
+}
 model InterCompanyTransaction {
   id                        String               @id @default(uuid())
   transactionNumber         String
@@ -4840,6 +4981,17 @@ model Customer {
   creditNotes               CreditNote[]
   refunds                   Refund[]
   customerPayments          CustomerPayment[]
+
+  // Party linkage (Phase 1)
+  cashDeskMovements CashDeskMovement[]
+  recordEntries     RecordEntry[]
+  journalEntryLines JournalEntryLine[]
+  approvalRequests  ApprovalRequest[]
+  taxTransactions   TaxTransaction[]
+  contracts         Contract[]
+  creditProfiles     CustomerCreditProfile[]
+  segmentMemberships CustomerSegmentMembership[]
+  statementRuns      CustomerStatementRun[]
   mobilePosGeneralTerminals MobilePosTerminal[] @relation("MobilePosTerminalGeneralCustomer")
 
   // Westsides (Milestone 6)
@@ -4906,6 +5058,29 @@ model Supplier {
   fuelDeliveries      FuelDelivery[]
   payables            Payable[]
   productCategories   SupplierProductCategory[]
+
+  // Party linkage (Phase 1)
+  cashDeskMovements  CashDeskMovement[]
+  journalEntryLines  JournalEntryLine[]
+  approvalRequests   ApprovalRequest[]
+  taxTransactions    TaxTransaction[]
+  expenses           Expense[]
+  recordEntries      RecordEntry[]
+  recordBookExpenses RecordBookExpense[]
+  debts              Debt[]
+  contracts          Contract[]
+  loans              Loan[]
+  goodsReceivedNotes        GoodsReceivedNote[]
+  supplierInvoices          SupplierInvoice[]
+  rfqInvitations            RFQSupplier[]
+  supplierQuotations        SupplierQuotation[]
+  bidComparisonLines        BidComparisonLine[]
+  recommendedBidComparisons BidComparison[]           @relation("BidComparisonRecommendedSupplier")
+  awardedRfqs               RequestForQuotation[]     @relation("RFQAwardedSupplier")
+  preferredRequisitionLines PurchaseRequisitionLine[]
+  performanceProfiles       SupplierPerformanceProfile[]
+  statementRuns             SupplierStatementRun[]
+  supplierPayments          SupplierPayment[]
 
   // Westsides (Milestone 6)
   productBatches   ProductBatch[]
@@ -5337,6 +5512,8 @@ model SalesOrder {
   idempotencyKey      String?
   /// The locked Mobile POS Lite terminal that recorded this sale, when applicable.
   mobilePosTerminalId String?
+  /// Server-validated original tender allocations for POS split/partial sales.
+  posTenders          Json?
   receivableId        String?
   journalEntryId      String?
   deletedAt           DateTime?
@@ -11417,8 +11594,18 @@ model TaxTransaction {
   taxRate   TaxRate? @relation(fields: [taxRateId], references: [id], onDelete: SetNull)
   createdBy User     @relation("TaxTransactionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   postedBy  User?    @relation("TaxTransactionPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  // Party linkage (Phase 3): the party behind the row and its tax identifiers as booked.
+  partyType  String    @default("NONE") @db.VarChar(10)
+  supplierId String?
+  customerId String?
+  partyTin   String?
+  partyVrn   String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@unique([companyId, taxTransactionNumber])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("tax_transactions")
 }
 
@@ -11900,6 +12087,7 @@ enum AlertType {
   CASH_SHORTAGE
   OVERDUE_RECEIVABLE
   OVERDUE_PAYABLE
+  CREDIT_LIMIT_BREACH
   RENT_ARREARS
   ROOM_OCCUPANCY
   PARKING_OVERSTAY
@@ -12074,6 +12262,11 @@ model ApprovalRequest {
   cancelledAt            DateTime?
   dueAt                  DateTime?
   notes                  String?
+  // Party linkage (Phase 3): the supplier or customer behind the request, derived from
+  // entityType / entityId at creation. 'NONE' when the document carries no party.
+  partyType              String                    @default("NONE") @db.VarChar(10)
+  supplierId             String?
+  customerId             String?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
   deletedAt              DateTime?
@@ -12081,10 +12274,14 @@ model ApprovalRequest {
   workflow    ApprovalWorkflow?    @relation(fields: [workflowId], references: [id], onDelete: SetNull)
   company     Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
   requestedBy User                 @relation("RequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  supplier    Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customer    Customer?            @relation(fields: [customerId], references: [id], onDelete: Restrict)
   actions     ApprovalAction[]
   attachments ApprovalAttachment[]
 
   @@unique([companyId, approvalRequestNumber])
+  @@index([supplierId])
+  @@index([customerId])
   @@index([entityType, entityId])
   @@index([status, companyId])
   @@index([requestedById])
@@ -15024,9 +15221,38 @@ model AccountingPeriodClose {
   createdBy        User             @relation("PeriodCloseCreatedBy", fields: [createdById], references: [id])
   closedBy         User?            @relation("PeriodCloseClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
   reopenedBy       User?            @relation("PeriodCloseReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
+  partyBalanceSnapshots PartyBalanceSnapshot[]
 
   @@index([companyId, fiscalYearId, accountingPeriodId, status])
   @@map("accounting_period_closes")
+}
+
+/// Party linkage (Phase 3): what the control account and the sub-ledger said for a party at
+/// period close, in the company base currency. 'NONE' rows hold the control balance without a
+/// party. Written only by a period close; never read back as a balance.
+model PartyBalanceSnapshot {
+  id                 String   @id @default(uuid())
+  companyId          String
+  accountingPeriodId String
+  periodCloseId      String?
+  role               String   @db.VarChar(2)
+  partyType          String   @default("NONE") @db.VarChar(10)
+  partyId            String?
+  partyName          String?
+  currency           String
+  subLedger          Decimal  @db.Decimal(18, 2)
+  control            Decimal  @db.Decimal(18, 2)
+  difference         Decimal  @db.Decimal(18, 2)
+  snapshotAt         DateTime @default(now())
+  createdById        String?
+
+  company          Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  accountingPeriod AccountingPeriod       @relation(fields: [accountingPeriodId], references: [id], onDelete: Restrict)
+  periodClose      AccountingPeriodClose? @relation(fields: [periodCloseId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, accountingPeriodId])
+  @@index([partyType, partyId])
+  @@map("party_balance_snapshots")
 }
 
 model AccountingLock {
@@ -15379,8 +15605,10 @@ model PurchaseRequisitionLine {
   updatedAt             DateTime @updatedAt
 
   purchaseRequisition PurchaseRequisition @relation(fields: [purchaseRequisitionId], references: [id], onDelete: Cascade)
+  preferredSupplier   Supplier?           @relation(fields: [preferredSupplierId], references: [id], onDelete: SetNull)
 
   @@index([purchaseRequisitionId])
+  @@index([preferredSupplierId])
   @@map("purchase_requisition_lines")
 }
 
@@ -15404,12 +15632,14 @@ model RequestForQuotation {
 
   company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   createdBy          User                @relation("RFQCreatedBy", fields: [createdById], references: [id])
+  awardedSupplier    Supplier?           @relation("RFQAwardedSupplier", fields: [awardedSupplierId], references: [id], onDelete: SetNull)
   rfqSuppliers       RFQSupplier[]
   supplierQuotations SupplierQuotation[]
   bidComparisons     BidComparison[]
 
   @@unique([companyId, rfqNumber])
   @@index([companyId, status, rfqDate])
+  @@index([awardedSupplierId])
   @@map("request_for_quotations")
 }
 
@@ -15424,6 +15654,7 @@ model RFQSupplier {
   updatedAt      DateTime                  @updatedAt
 
   rfq RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier Supplier         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([rfqId, supplierId])
   @@map("rfq_suppliers")
@@ -15456,6 +15687,7 @@ model SupplierQuotation {
   rfq                RequestForQuotation?    @relation(fields: [rfqId], references: [id], onDelete: SetNull)
   createdBy          User                    @relation("SupplierQuotCreatedBy", fields: [createdById], references: [id])
   acceptedBy         User?                   @relation("SupplierQuotAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+  supplier           Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   lines              SupplierQuotationLine[]
   bidComparisonLines BidComparisonLine[]
 
@@ -15508,9 +15740,11 @@ model BidComparison {
   rfq        RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Restrict)
   preparedBy User                @relation("BidCompPreparedBy", fields: [preparedById], references: [id])
   approvedBy User?               @relation("BidCompApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  recommendedSupplier Supplier? @relation("BidComparisonRecommendedSupplier", fields: [recommendedSupplierId], references: [id], onDelete: SetNull)
   lines      BidComparisonLine[]
 
   @@index([companyId, rfqId, status])
+  @@index([recommendedSupplierId])
   @@map("bid_comparisons")
 }
 
@@ -15530,6 +15764,7 @@ model BidComparisonLine {
 
   bidComparison     BidComparison     @relation(fields: [bidComparisonId], references: [id], onDelete: Cascade)
   supplierQuotation SupplierQuotation @relation(fields: [supplierQuotationId], references: [id], onDelete: Restrict)
+  supplier          Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([bidComparisonId, supplierId])
   @@map("bid_comparison_lines")
@@ -15560,6 +15795,7 @@ model GoodsReceivedNote {
   branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
   receivedBy       User                    @relation("GRNReceivedBy", fields: [receivedById], references: [id])
   approvedBy       User?                   @relation("GRNApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  supplier         Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   lines            GoodsReceivedNoteLine[]
   supplierInvoices SupplierInvoice[]
   threeWayMatches  ThreeWayMatch[]
@@ -15630,6 +15866,8 @@ model SupplierInvoice {
   purchaseOrder     PurchaseOrder?        @relation("PurchaseOrderSupplierInvoices", fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   createdBy         User                  @relation("SupplierInvCreatedBy", fields: [createdById], references: [id])
   approvedBy        User?                 @relation("SupplierInvApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  supplier          Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  payable           Payable?              @relation(fields: [payableId], references: [id], onDelete: SetNull)
   lines             SupplierInvoiceLine[]
   threeWayMatches   ThreeWayMatch[]
 
@@ -15637,6 +15875,7 @@ model SupplierInvoice {
   @@index([companyId, supplierId, status, invoiceDate])
   @@index([divisionId])
   @@index([branchId])
+  @@index([payableId])
   @@map("supplier_invoices")
 }
 
@@ -15806,6 +16045,7 @@ model CustomerCreditProfile {
 
   company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reviewedBy User?   @relation("CreditProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, customerId])
   @@index([companyId, customerId, creditStatus])
@@ -15832,6 +16072,7 @@ model SupplierPerformanceProfile {
 
   company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   reviewedBy User?   @relation("SupplierPerfReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, supplierId])
   @@index([companyId, supplierId, rating])
@@ -15866,9 +16107,11 @@ model CustomerSegmentMembership {
   notes             String?
 
   customerSegment CustomerSegment @relation(fields: [customerSegmentId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([customerSegmentId, customerId])
   @@index([customerSegmentId, customerId])
+  @@index([customerId])
   @@map("customer_segment_memberships")
 }
 
@@ -15876,7 +16119,7 @@ model CustomerStatementRun {
   id                 String                  @id @default(uuid())
   statementRunNumber String                  @unique
   companyId          String
-  customerId         String
+  customerId         String?
   periodStart        DateTime
   periodEnd          DateTime
   openingBalance     Decimal                 @default(0) @db.Decimal(18, 4)
@@ -15893,6 +16136,7 @@ model CustomerStatementRun {
 
   company     Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   generatedBy User    @relation("CustStatGeneratedBy", fields: [generatedById], references: [id])
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@index([companyId, customerId, status])
   @@map("customer_statement_runs")
@@ -15902,7 +16146,7 @@ model SupplierStatementRun {
   id                 String                  @id @default(uuid())
   statementRunNumber String                  @unique
   companyId          String
-  supplierId         String
+  supplierId         String?
   periodStart        DateTime
   periodEnd          DateTime
   openingBalance     Decimal                 @default(0) @db.Decimal(18, 4)
@@ -15919,6 +16163,7 @@ model SupplierStatementRun {
 
   company     Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   generatedBy User    @relation("SuppStatGeneratedBy", fields: [generatedById], references: [id])
+  supplier    Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([companyId, supplierId, status])
   @@map("supplier_statement_runs")
@@ -17265,6 +17510,31 @@ model CashDeskMovement {
   expenseCategory       String?             @db.VarChar(40)
   payee                 String?             @db.VarChar(160)
   expenseNotes          String?             @db.VarChar(2000)
+  // Party linkage (Phase 1). partyType is NONE | SUPPLIER | CUSTOMER | EMPLOYEE | COMPANY;
+  // the matching id must be set for SUPPLIER / CUSTOMER (database CHECK). Document
+  // references say what the movement settled; journalEntryId says which ERP journal
+  // already explains it, so Accounting connections never offers it for posting again.
+  partyType             String              @default("NONE") @db.VarChar(10)
+  supplierId            String?
+  supplier              Supplier?           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customerId            String?
+  customer              Customer?           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  payableId             String?
+  payable               Payable?            @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  receivableId          String?
+  receivable            Receivable?         @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  expenseId             String?
+  expense               Expense?            @relation(fields: [expenseId], references: [id], onDelete: Restrict)
+  refundId              String?
+  refund                Refund?             @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  customerPaymentId     String?             @unique
+  customerPayment       CustomerPayment?    @relation(fields: [customerPaymentId], references: [id], onDelete: Restrict)
+  journalEntryId        String?
+  journalEntry          JournalEntry?       @relation("CashDeskMovementJournal", fields: [journalEntryId], references: [id], onDelete: Restrict)
+  journalReferenceType  String?             @db.VarChar(40)
+  supplierPaymentId     String?             @unique
+  supplierPayment       SupplierPayment?    @relation("CashDeskMovementSupplierPayment", fields: [supplierPaymentId], references: [id], onDelete: Restrict)
+  settledSupplierPayment SupplierPayment?   @relation("SupplierPaymentCashMovement")
   id                    String              @id @default(uuid())
   requestId             String              @unique
   payloadKey            String
@@ -17292,6 +17562,13 @@ model CashDeskMovement {
   @@index([businessDate, createdAt])
   @@index([payrollRunId])
   @@index([fuelReportPostingId])
+  @@index([supplierId, businessDate])
+  @@index([customerId, businessDate])
+  @@index([payableId])
+  @@index([receivableId])
+  @@index([expenseId])
+  @@index([refundId])
+  @@index([journalEntryId])
   @@map("cash_desk_movements")
 }
 
@@ -17334,6 +17611,22 @@ model CashDeskLoan {
 }
 
 // Independent registers: no accounting, cash, stock or party links.
+/// Rows whose soft supplierId / customerId pointed at a missing master when the
+/// party_relations migration added real foreign keys. Nullable references were set to
+/// NULL and profile rows were deleted; both are copied here first for review.
+model PartyOrphanArchive {
+  id          String   @id @default(dbgenerated("gen_random_uuid()"))
+  tableName   String
+  columnName  String
+  rowId       String
+  orphanValue String
+  action      String
+  row         Json
+  archivedAt  DateTime @default(now())
+
+  @@index([tableName, columnName])
+  @@map("archive_party_orphans")
+}
 model RecordEntry {
   id            String   @id @default(uuid())
   requestId     String   @unique
@@ -17367,9 +17660,17 @@ model RecordEntry {
   events        RecordEvent[]
   statementStartsOn DateTime? @db.Date
   postings      RecordPosting[]
+  // Party linkage (Phase 1): identity only. DEBTOR may set customerId, CREDITOR may set
+  // supplierId, SALE/PURCHASE/EXPENSE may set either, NOTE neither (database CHECK).
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([ownerId, recordDate])
   @@index([companyId, divisionId, branchId, kind, recordDate])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("record_entries")
 }
 
@@ -17590,4 +17891,24 @@ model MobilePosPriceOverride {
   @@index([companyId, createdAt])
   @@index([terminalId, createdAt])
   @@map("mobile_pos_price_overrides")
+}
+
+/// Idempotent, atomic POS collections and returns. The result contains canonical
+/// document identities; it is never a second financial register.
+model PosTransactionAction {
+  id String @id @default(uuid())
+  companyId String
+  divisionId String
+  branchId String
+  terminalId String
+  userId String
+  saleId String
+  requestId String
+  kind String
+  payload Json
+  result Json
+  createdAt DateTime @default(now())
+  @@unique([companyId, requestId])
+  @@index([companyId, terminalId, saleId])
+  @@map("pos_transaction_actions")
 }

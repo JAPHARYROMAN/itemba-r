@@ -581,6 +581,10 @@ function journalLineCreateEffect(input: {
       description: input.description,
       divisionId: literal(null),
       journalEntryId: { effectRef: { effectId: input.journalEffectId } },
+      // Party linkage (Phase 3): a manual journal carries no party; the defaults are written.
+      partyType: literal('NONE'),
+      supplierId: literal(null),
+      customerId: literal(null),
     },
     generatedFields: {
       createdAt: { kind: 'action-time' },

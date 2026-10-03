@@ -219,7 +219,7 @@ export class GlobalSearchService {
           row.company?.code,
           row.branch?.code ?? row.branch?.name,
         ]),
-        href: `/westsides/customers/${row.id}`,
+        href: `/sales-desk/customers/${encodeURIComponent(row.id)}`,
         badge: row.status,
       })),
     };

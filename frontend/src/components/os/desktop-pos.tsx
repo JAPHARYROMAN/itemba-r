@@ -4,9 +4,11 @@ import { useWorkspaceHistory } from '@/components/workspace/workspace-navigation
 import { MobilePosLite } from '@/components/westsides/mobile-pos-lite/mobile-pos-lite';
 import { MobilePosActivation } from '@/components/westsides/mobile-pos-lite/mobile-pos-activation';
 import { PosHostContext, type PosHost } from '@/features/pos/core/pos-host-context';
+import { useWorkspaceInstanceId } from '@/components/workspace/workspace-session';
 
 export function DesktopPos() {
   const navigation = useWorkspaceHistory()!;
+  const instanceId = useWorkspaceInstanceId();
   const surface = useRef<HTMLDivElement>(null);
   const current = useRef(navigation);
   useLayoutEffect(() => {
@@ -23,6 +25,7 @@ export function DesktopPos() {
     };
     const withHash = (hash: string) => `${href.current.split('#')[0]}${hash}`;
     return {
+      instanceId,
       basePath: '/pos',
       ownsInput: (target) => {
         const frame = surface.current?.closest('.desktop-window');

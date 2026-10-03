@@ -15,6 +15,11 @@ import '@/components/workspace/workspace.css';
 import '@/components/workspace/partner-profile.css';
 
 import { SupplierFormModal, type Company } from './SupplierFormModal';
+import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
+import { PartyBalancePanel } from '@/features/party/party-balance-panel';
+import { SupplierAgingPanel } from '@/features/party/supplier-aging-panel';
+import { downloadBinaryGet } from '@/lib/export-download';
+import type { PartyBalance } from '@/features/party/party-balance';
 
 interface SupplierCategory {
   productCategory: { id: string; name: string; categoryType: string };
@@ -152,6 +157,8 @@ interface LedgerEvent {
 }
 
 interface SupplierControlCenter {
+  /** Party linkage (W5): the resolver's balance, carried by the control centre. */
+  balance?: PartyBalance | null;
   supplier: SupplierDetail;
   summary: {
     lifetimePurchaseTotal: number;
@@ -206,6 +213,7 @@ const TABS = [
   'Performance',
   'Audit',
   'Invoice Desk',
+  'Related',
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -273,6 +281,19 @@ export function SupplierProfile({
   const { request } = useUnsavedWork();
   const { hasPermission, loading: authLoading } = useAuth();
   const [notice, setNotice] = useState('');
+  // Party linkage (Phase 3): a statement run downloads as a letterhead PDF or a CSV.
+  async function exportStatementRun(id: string, number: string, format: 'pdf' | 'csv') {
+    setNotice('');
+    try {
+      await downloadBinaryGet(
+        `/supplier-statements/${encodeURIComponent(id)}/export?format=${format}`,
+        `supplier-statement-${number}.${format}`,
+      );
+      setNotice('Download started.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to export the statement.');
+    }
+  }
   const [tab, setTab] = useState<Tab>('Overview');
   const [invoicePage, setInvoicePage] = useState(1);
   const [editing, setEditing] = useState(false);
@@ -460,6 +481,14 @@ export function SupplierProfile({
           aria-label={`${tab} section`}
           className="partner-profile-content"
         >
+          <PartyBalancePanel kind="supplier" balance={data?.balance} />
+          {tab === 'Overview' && hasPermission('finance.reports.view') && (
+            <SupplierAgingPanel
+              companyId={supplier.companyId}
+              supplierId={supplierId}
+              currency={data?.balance?.baseCurrency ?? 'TZS'}
+            />
+          )}
           {tab === 'Overview' && (
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -714,9 +743,41 @@ export function SupplierProfile({
                         {shortDate(statement.periodStart)} - {shortDate(statement.periodEnd)}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold">{money(statement.closingBalance)}</p>
-                      <StatusBadge status={statement.status} />
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="font-semibold">{money(statement.closingBalance)}</p>
+                        <StatusBadge status={statement.status} />
+                      </div>
+                      {hasPermission('supplier_statements.view') && (
+                        <div className="flex gap-1">
+                          <Btn
+                            size="xs"
+                            variant="secondary"
+                            onClick={() =>
+                              void exportStatementRun(
+                                statement.id,
+                                statement.statementRunNumber,
+                                'pdf',
+                              )
+                            }
+                          >
+                            PDF
+                          </Btn>
+                          <Btn
+                            size="xs"
+                            variant="secondary"
+                            onClick={() =>
+                              void exportStatementRun(
+                                statement.id,
+                                statement.statementRunNumber,
+                                'csv',
+                              )
+                            }
+                          >
+                            CSV
+                          </Btn>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -958,6 +1019,7 @@ export function SupplierProfile({
               </div>
             </div>
           )}
+          {tab === 'Related' && <PartyRelatedTabs kind="supplier" partyId={supplierId} />}
         </section>
       </Card>
     </div>

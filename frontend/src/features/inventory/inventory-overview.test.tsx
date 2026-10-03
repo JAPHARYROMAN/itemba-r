@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import InventoryOverview, { movementQuantity } from './inventory-overview';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -226,9 +227,11 @@ describe('inventory overview', () => {
       }),
     );
     render(<InventoryOverview />);
-    await screen.findByRole('option', { name: 'Second company' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Second company'),
+    );
     expect(state.get).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'second' } });
+    changeSelectField('Company', 'second');
     await screen.findByText('TZS 4,800,000.00');
     expect(state.get).toHaveBeenCalledWith(
       '/inventory-balances/live',

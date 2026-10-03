@@ -3,7 +3,7 @@
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Btn, Card, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge } from '@/components/ui';
+import { Btn, Card, CustomerPicker, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, StatCard, StatusBadge, SupplierPicker } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 
@@ -81,6 +81,8 @@ function ContractModal({
     contractNumber: initial?.contractNumber ?? '',
     contractType: initial?.contractType ?? 'SUPPLIER',
     counterpartyName: initial?.counterpartyName ?? '',
+    supplierId: (initial as any)?.supplierId ?? '',
+    customerId: (initial as any)?.customerId ?? '',
     counterpartyContact: '',
     counterpartyAddress: '',
     startDate: initial?.startDate?.slice(0, 10) ?? '',
@@ -100,6 +102,7 @@ function ContractModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const { hasPermission } = useAuth();
   const setField = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const handleSubmit = async () => {
@@ -130,6 +133,9 @@ function ContractModal({
         isSensitive: form.isSensitive,
       };
       if (form.companyId) body.companyId = form.companyId;
+      // Party linkage (Phase 2): the profile behind the counterparty follows the contract type.
+      body.supplierId = form.contractType === 'SUPPLIER' && form.supplierId ? form.supplierId : null;
+      body.customerId = form.contractType === 'CUSTOMER' && form.customerId ? form.customerId : null;
       if (form.contractNumber) body.contractNumber = form.contractNumber;
       if (form.counterpartyContact) body.counterpartyContact = form.counterpartyContact;
       if (form.counterpartyAddress) body.counterpartyAddress = form.counterpartyAddress;
@@ -196,6 +202,26 @@ function ContractModal({
         <FormInput label="Contract Number" value={form.contractNumber} onChange={(e) => setField('contractNumber', e.target.value)} />
 
         <FormInput label="Counterparty Name" required value={form.counterpartyName} onChange={(e) => setField('counterpartyName', e.target.value)} />
+        {form.contractType === 'SUPPLIER' && hasPermission('suppliers.view') && (
+          <SupplierPicker
+            label="Supplier profile"
+            value={form.supplierId}
+            onChange={(supplierId, party) => setForm((f) => ({ ...f, supplierId, counterpartyName: party && !f.counterpartyName.trim() ? party.name : f.counterpartyName }))}
+            companyId={form.companyId || undefined}
+            placeholder={form.companyId ? 'Link to a supplier profile' : 'Pick a company first'}
+            disabled={!form.companyId}
+          />
+        )}
+        {form.contractType === 'CUSTOMER' && hasPermission('customers.view') && (
+          <CustomerPicker
+            label="Customer profile"
+            value={form.customerId}
+            onChange={(customerId, party) => setForm((f) => ({ ...f, customerId, counterpartyName: party && !f.counterpartyName.trim() ? party.name : f.counterpartyName }))}
+            companyId={form.companyId || undefined}
+            placeholder={form.companyId ? 'Link to a customer profile' : 'Pick a company first'}
+            disabled={!form.companyId}
+          />
+        )}
         <FormInput label="Counterparty Contact" value={form.counterpartyContact} onChange={(e) => setField('counterpartyContact', e.target.value)} />
 
         <div className="col-span-2"><FormInput label="Counterparty Address" value={form.counterpartyAddress} onChange={(e) => setField('counterpartyAddress', e.target.value)} /></div>

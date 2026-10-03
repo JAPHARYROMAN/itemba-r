@@ -14,12 +14,48 @@ import { usePosHost } from '@/features/pos/core/pos-host-context';
  * Only `#pos/...` hashes are ours; anything else (e.g. a Kaunta module hash
  * while the Kaunta bridge is open) is left alone.
  */
-export type PosStep = 'sale' | 'pay' | 'done' | 'queue';
+export type PosStep =
+  | 'sale'
+  | 'pay'
+  | 'done'
+  | 'queue'
+  | 'held'
+  | 'transactions'
+  | 'stock'
+  | 'counts'
+  | 'receiving'
+  | 'deliveries'
+  | 'reports';
 
 const PREFIX = '#pos/';
-const STEPS: readonly PosStep[] = ['sale', 'pay', 'done', 'queue'];
+const STEPS: readonly PosStep[] = [
+  'sale',
+  'pay',
+  'done',
+  'queue',
+  'held',
+  'transactions',
+  'stock',
+  'counts',
+  'receiving',
+  'deliveries',
+  'reports',
+];
+
+const LEGACY: Record<string, PosStep> = {
+  '#leo': 'reports',
+  '#leo/foleni': 'queue',
+  '#funga': 'reports',
+  '#ripoti': 'reports',
+  '#stoo': 'stock',
+  '#hesabu': 'counts',
+  '#historia': 'transactions',
+  '#manunuzi': 'receiving',
+  '#manunuzi/historia': 'deliveries',
+};
 
 function stepFromHash(hash: string): PosStep | null {
+  if (LEGACY[hash]) return LEGACY[hash];
   if (!hash.startsWith(PREFIX)) return null;
   const candidate = hash.slice(PREFIX.length) as PosStep;
   return STEPS.includes(candidate) ? candidate : null;
@@ -31,7 +67,7 @@ export function usePosStep() {
 
   useEffect(() => {
     const initial = stepFromHash(host?.history.hash() ?? window.location.hash);
-    const boot: PosStep = initial === 'queue' ? 'queue' : 'sale';
+    const boot: PosStep = initial && initial !== 'pay' && initial !== 'done' ? initial : 'sale';
     if (host) host.history.replace(`${PREFIX}${boot}`);
     else window.history.replaceState(window.history.state, '', `${PREFIX}${boot}`);
     setStep(boot);
@@ -41,7 +77,11 @@ export function usePosStep() {
     };
     if (host) return host.history.listen(onPop);
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    window.addEventListener('hashchange', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('hashchange', onPop);
+    };
   }, [host]);
 
   const go = useCallback(

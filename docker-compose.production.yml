@@ -490,6 +490,9 @@ services:
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: 1
+      ENQUIRY_STORAGE_DIR: /app/data
+    volumes:
+      - website_data:/app/data
     expose:
       - '3001'
     networks:
@@ -529,6 +532,9 @@ volumes:
   backend_storage:
   backend_backups:
   backend_exports:
+  website_data:
+    # deploy.sh adopts the existing site's data volume before the first upgrade.
+    name: ${WEBSITE_DATA_VOLUME:-itemba-r-prod_website_data}
 
 networks:
   itemba_network:

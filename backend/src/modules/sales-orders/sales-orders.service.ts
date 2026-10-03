@@ -1,3 +1,4 @@
+import { readPosTenders, tenderTotal, type PosTender } from './pos-tenders';
 import {
   BadRequestException,
   ConflictException,
@@ -5,12 +6,22 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  liveCustomerExposure,
+  refreshCachedPartyBalance,
+} from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
   AccountResolverService,
@@ -60,6 +71,7 @@ type MobilePosPriceOverrideRecord = {
 };
 
 type SalesOrderCreateContext = {
+  posTenders?: PosTender[];
   mobilePosTerminalId?: string;
   /**
    * Written in the same insert as the order, so a POS sale can never exist
@@ -397,6 +409,7 @@ export class SalesOrdersService {
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
     private readonly profit: ProfitService,
+    @Optional() private readonly cashBook?: CashBookService,
   ) {}
 
   private async resolveSalesOrderCustomer(
@@ -1482,6 +1495,7 @@ export class SalesOrdersService {
     terminalId: string,
     terminalCode: string,
     priceOverrides: MobilePosPriceOverrideRecord[] = [],
+    posTenders?: PosTender[],
   ) {
     const safeDto: CreateSalesOrderDto = {
       ...dto,
@@ -1491,6 +1505,7 @@ export class SalesOrdersService {
         .join('\n'),
     };
     return this.createAndConfirm(safeDto, user, {
+      posTenders,
       mobilePosTerminalId: terminalId,
       mobilePosPriceOverrides: priceOverrides,
     });
@@ -1697,6 +1712,7 @@ export class SalesOrdersService {
           paymentReference: dto.paymentReference,
           idempotencyKey: dto.idempotencyKey ?? null,
           mobilePosTerminalId: context.mobilePosTerminalId ?? null,
+          ...(context.posTenders ? { posTenders: context.posTenders } : {}),
           createdById: userId,
           ...(context.mobilePosPriceOverrides?.length
             ? { mobilePosPriceOverrides: { create: context.mobilePosPriceOverrides } }
@@ -1762,6 +1778,8 @@ export class SalesOrdersService {
   async update(id: string, dto: UpdateSalesOrderDto, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.posTenders)
+      throw new BadRequestException('Use linked POS returns for an allocated payment sale');
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Sales order can only be updated in DRAFT status');
     }
@@ -2044,7 +2062,10 @@ export class SalesOrdersService {
     const creditLimit = Number(customer.creditLimit ?? 0);
     if (creditLimit <= 0) return;
 
-    const projectedBalance = Number(customer.currentBalance ?? 0) + input.totalAmount;
+    // Party linkage (W5): live exposure (open receivables plus unpromoted Sales Desk sales)
+    // instead of the cached balance alone, so desk credit counts against the limit.
+    const exposure = await liveCustomerExposure(tx, input.companyId, input.customerId);
+    const projectedBalance = exposure + input.totalAmount;
     if (projectedBalance > creditLimit) {
       throw new BadRequestException(
         `Credit sale exceeds ${customer.name}'s credit limit. Limit: ${creditLimit.toFixed(
@@ -2207,17 +2228,52 @@ export class SalesOrdersService {
       // Non-CREDIT methods credit the chosen cash account immediately and
       // mark the order PAID. CREDIT creates a Receivable instead.
       const paymentMethod = (existing as any).paymentMethod ?? 'CREDIT';
-      let paymentStatus: 'UNPAID' | 'PAID' = 'UNPAID';
+      let paymentStatus: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' = 'UNPAID';
       let paidAmount = 0;
       let outstandingAmount = Number(existing.totalAmount);
       let receivableId: string | null = null;
 
-      if (paymentMethod === 'CREDIT') {
+      const tenders = readPosTenders(existing.posTenders);
+      const payments: Array<{ role: AccountRole; amount: number }> = [];
+      if (tenders) {
+        const paid = tenderTotal(tenders);
+        if (paid.gt(existing.totalAmount))
+          throw new BadRequestException('Payments exceed the sale total');
+        for (const tender of tenders) {
+          const account = await tx.cashAccount.findFirst({
+            where: {
+              id: tender.cashAccountId,
+              companyId: existing.companyId,
+              isActive: true,
+              deletedAt: null,
+              AND: [
+                { OR: [{ divisionId: existing.divisionId }, { divisionId: null }] },
+                { OR: [{ branchId: existing.branchId }, { branchId: null }] },
+              ],
+            },
+          });
+          if (
+            !account ||
+            account.currency !== existing.currency ||
+            !accountTypesForPaymentMethod(tender.method).includes(account.accountType)
+          )
+            throw new BadRequestException('A payment account is no longer available for this sale');
+          await tx.cashAccount.update({
+            where: { id: account.id },
+            data: { currentBalance: { increment: tender.amount } },
+          });
+          payments.push({ role: cashAccountRole(account.accountType), amount: tender.amount });
+        }
+        paidAmount = paid.toNumber();
+        outstandingAmount = new Prisma.Decimal(existing.totalAmount).minus(paid).toNumber();
+        paymentStatus = outstandingAmount === 0 ? 'PAID' : 'PARTIALLY_PAID';
+      }
+      if (paymentMethod === 'CREDIT' || (tenders && outstandingAmount > 0)) {
         await this.assertCustomerCreditAvailable(tx, {
           companyId: existing.companyId,
           customerId: existing.customerId,
-          paymentMethod,
-          totalAmount: Number(existing.totalAmount),
+          paymentMethod: 'CREDIT',
+          totalAmount: outstandingAmount,
         });
         const receivableCustomerName = salesOrderReceivableCustomerName(existing);
         const recNumber = await this.codes.next({
@@ -2234,19 +2290,19 @@ export class SalesOrdersService {
             customerId: existing.customerId ?? null,
             customerName: receivableCustomerName,
             amount: existing.totalAmount,
-            paidAmount: 0,
-            outstandingAmount: existing.totalAmount,
+            paidAmount,
+            outstandingAmount,
             currency: existing.currency,
             issueDate: new Date(),
             dueDate: existing.dueDate ?? new Date(Date.now() + 30 * 24 * 3600 * 1000),
-            status: 'OPEN' as any,
+            status: paidAmount > 0 ? 'PARTIALLY_PAID' : 'OPEN',
             sourceType: 'SalesOrder',
             sourceId: id,
             notes: `Sales Order ${existing.salesOrderNumber}`,
           },
         });
         receivableId = receivable.id;
-      } else if ((existing as any).cashAccountId) {
+      } else if (!tenders && (existing as any).cashAccountId) {
         // Guard against posting a receipt into a cash account denominated in a
         // different currency than the sale: incrementing its balance with the
         // order total would silently mix currencies on the cash ledger. We only
@@ -2271,10 +2327,37 @@ export class SalesOrdersService {
         order: existing as any,
         paymentMethod,
         cashAccountType: existing.cashAccount?.accountType ?? null,
+        ...(tenders ? { payments, outstandingAmount } : {}),
         cogsAmount,
         userId,
         tx,
       });
+
+      if (this.cashBook?.enabled()) {
+        const receipts =
+          tenders ??
+          (paidAmount > 0 && existing.cashAccountId
+            ? [{ cashAccountId: existing.cashAccountId, amount: paidAmount }]
+            : []);
+        for (const [index, receipt] of receipts.entries()) {
+          await this.cashBook.recordInTransaction(tx, user, {
+            kind: 'CUSTOMER_RECEIPT',
+            companyId: existing.companyId,
+            cashAccountId: receipt.cashAccountId,
+            amount: receipt.amount,
+            currency: existing.currency,
+            businessDate: existing.orderDate,
+            description: `Receipt for sales order ${existing.salesOrderNumber}`,
+            reference: existing.salesOrderNumber,
+            requestId: `SalesOrder:${id}:Receipt:${index}`,
+            partyType: existing.customerId ? 'CUSTOMER' : 'NONE',
+            customerId: existing.customerId,
+            receivableId,
+            journalEntryId: journalEntry.id,
+            journalReferenceType: 'SalesOrder',
+          });
+        }
+      }
 
       if (receivableId) {
         const linkedReceivable = await tx.receivable.update({
@@ -2423,8 +2506,12 @@ export class SalesOrdersService {
       orderDate: Date;
       totalAmount: Prisma.Decimal | number | string;
       taxAmount: Prisma.Decimal | number | string;
+      /** Party linkage (Phase 3): the AR control line names the customer. */
+      customerId?: string | null;
     };
     paymentMethod: SalesPaymentMethod | string;
+    payments?: Array<{ role: AccountRole; amount: number }>;
+    outstandingAmount?: number;
     cashAccountType?: CashAccountType | null;
     cogsAmount: number;
     userId: string;
@@ -2442,20 +2529,53 @@ export class SalesOrdersService {
       input.paymentMethod === SalesPaymentMethod.CREDIT
         ? 'AR_CONTROL'
         : cashAccountRole(input.cashAccountType);
-    const roles: AccountRole[] = [receivableOrCashRole, 'SALES_REVENUE'];
+    const roles: AccountRole[] = input.payments
+      ? [
+          ...input.payments.map((p) => p.role),
+          ...((input.outstandingAmount ?? 0) > 0 ? ['AR_CONTROL' as AccountRole] : []),
+          'SALES_REVENUE',
+        ]
+      : [receivableOrCashRole, 'SALES_REVENUE'];
     if (taxAmount > 0) roles.push('TAX_VAT_PAYABLE');
     if (cogsAmount > 0) roles.push('COST_OF_GOODS_SOLD', 'INVENTORY_ASSET');
 
     const accounts = await this.accountResolver.resolveMany(input.order.companyId, roles, input.tx);
     const description = `Sales order ${input.order.salesOrderNumber}`;
     const lines = [
-      {
-        accountId: accounts[receivableOrCashRole].id,
-        description:
-          input.paymentMethod === SalesPaymentMethod.CREDIT ? 'Customer receivable' : 'Cash sale',
-        debit: totalAmount,
-        credit: 0,
-      },
+      ...(input.payments
+        ? [
+            ...input.payments.map((p) => ({
+              accountId: accounts[p.role].id,
+              description: 'POS payment allocation',
+              debit: p.amount,
+              credit: 0,
+            })),
+            ...((input.outstandingAmount ?? 0) > 0
+              ? [
+                  {
+                    accountId: accounts.AR_CONTROL.id,
+                    ...partyOf('customer', input.order.customerId),
+                    description: 'Customer balance',
+                    debit: input.outstandingAmount!,
+                    credit: 0,
+                  },
+                ]
+              : []),
+          ]
+        : [
+            {
+              accountId: accounts[receivableOrCashRole].id,
+              ...(input.paymentMethod === SalesPaymentMethod.CREDIT
+                ? partyOf('customer', input.order.customerId)
+                : {}),
+              description:
+                input.paymentMethod === SalesPaymentMethod.CREDIT
+                  ? 'Customer receivable'
+                  : 'Cash sale',
+              debit: totalAmount,
+              credit: 0,
+            },
+          ]),
       ...(revenueAmount > 0
         ? [
             {
@@ -2567,6 +2687,7 @@ export class SalesOrdersService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       // Swap each side: a debit becomes a credit of the same magnitude and
       // vice-versa. A zero stays zero.
       debit: roundMoney(Number(line.credit ?? 0)),
@@ -2660,6 +2781,7 @@ export class SalesOrdersService {
         safeDto.idempotencyKey,
         safeDto,
         user,
+        context,
       );
       if (replay) return replay;
     }
@@ -2680,6 +2802,7 @@ export class SalesOrdersService {
           safeDto.idempotencyKey,
           safeDto,
           user,
+          context,
         );
         if (replay) return replay;
       }
@@ -2693,6 +2816,7 @@ export class SalesOrdersService {
     idempotencyKey: string,
     dto: CreateSalesOrderDto,
     user: AuthUser,
+    context: SalesOrderCreateContext = {},
   ) {
     // IMPORTANT (#32): do NOT filter by deletedAt here. The unique index backing
     // idempotencyKey is @@unique([companyId, idempotencyKey]) with no deletedAt
@@ -2715,6 +2839,7 @@ export class SalesOrdersService {
         orderDate: true,
         dueDate: true,
         currency: true,
+        posTenders: true,
         paymentMethod: true,
         cashAccountId: true,
         subtotal: true,
@@ -2739,6 +2864,11 @@ export class SalesOrdersService {
       },
     });
     if (!existing) return null;
+    if (
+      JSON.stringify(readPosTenders(existing.posTenders)) !==
+      JSON.stringify(readPosTenders(context.posTenders))
+    )
+      throw new ConflictException('Payment allocations differ from the original checkout');
 
     // The original order behind this key was soft-deleted. The key value is
     // still occupied in the unique index, so we can't create a fresh order with
@@ -2756,7 +2886,7 @@ export class SalesOrdersService {
       );
     }
 
-    if (existing.status !== 'CONFIRMED' && existing.status !== 'PAID') {
+    if (!['CONFIRMED', 'PAID', 'PARTIALLY_PAID'].includes(existing.status)) {
       throw new ConflictException(
         'The previous checkout attempt was not confirmed. Open the sales order list to retry or delete the draft before charging again.',
       );
@@ -2768,6 +2898,8 @@ export class SalesOrdersService {
   async cancel(id: string, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (existing.posTenders && existing.status !== 'DRAFT')
+      throw new BadRequestException('Use linked POS returns for an allocated payment sale');
     if (!['DRAFT', 'CONFIRMED'].includes(existing.status as string)) {
       throw new BadRequestException('Only DRAFT or CONFIRMED sales orders can be cancelled');
     }
@@ -2985,19 +3117,7 @@ export class SalesOrdersService {
     companyId: string,
     customerId?: string | null,
   ) {
-    if (!customerId) return;
-    const summary = await tx.receivable.aggregate({
-      where: {
-        companyId,
-        customerId,
-        deletedAt: null,
-        status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as any },
-      },
-      _sum: { outstandingAmount: true },
-    });
-    await tx.customer.updateMany({
-      where: { id: customerId, companyId, deletedAt: null },
-      data: { currentBalance: summary._sum.outstandingAmount ?? 0 },
-    });
+    // Party linkage (W5): one rule for the cached balance, shared by every module.
+    await refreshCachedPartyBalance(tx, 'customer', companyId, customerId);
   }
 }

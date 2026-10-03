@@ -225,6 +225,7 @@ function makeService(opts?: {
     },
     $queryRaw,
     $executeRaw,
+    companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (cb: any) => cb(prisma)),
   };
 

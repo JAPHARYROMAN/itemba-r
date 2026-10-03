@@ -1,8 +1,9 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 import { PeopleHub } from './people-hub';
 import { peopleDestinations, type PeopleDashboard } from './people-hub-types';
 const state = vi.hoisted(() => ({ permissions: new Set<string>(), get: vi.fn(), page: vi.fn() }));
@@ -155,12 +156,14 @@ describe('People hub', () => {
       .mockResolvedValueOnce({ ...fixture, workforce: { ...fixture.workforce, active: 7 } });
     render(<PeopleHub />);
     await screen.findByRole('region', { name: 'Workforce' });
-    await screen.findByRole('option', { name: 'Example Company' });
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'company');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Example Company'),
+    );
+    await chooseSelectOption('Company', 'company');
     expect(screen.queryByRole('region', { name: 'Workforce' })).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Loading');
     const signal = state.get.mock.calls[1][1].signal as AbortSignal;
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'other');
+    await chooseSelectOption('Company', 'other');
     expect(signal.aborted).toBe(true);
     await screen.findByRole('region', { name: 'Workforce' });
     await act(async () => finish(fixture));
@@ -179,8 +182,10 @@ describe('People hub', () => {
     expect(screen.queryByRole('region', { name: 'Workforce' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await screen.findByRole('region', { name: 'Workforce' });
-    await screen.findByRole('option', { name: 'Example Company' });
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'company');
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Example Company'),
+    );
+    await chooseSelectOption('Company', 'company');
     await screen.findByRole('region', { name: 'Workforce' });
     await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await screen.findByRole('region', { name: 'Workforce' });
@@ -202,8 +207,10 @@ describe('People hub', () => {
       .mockResolvedValueOnce({ data: [{ id: 'other', name: 'Other Company' }], total: 2 });
     render(<PeopleHub />);
     await userEvent.click(await screen.findByRole('button', { name: 'Retry companies' }));
-    await screen.findByRole('option', { name: 'Other Company' });
-    expect(within(screen.getByLabelText('Company')).getAllByRole('option')).toHaveLength(3);
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Other Company'),
+    );
+    expect(selectFieldOptions(getSelectField('Company'))).toHaveLength(3);
     expect(screen.getByText('No active employees in this scope.')).toBeInTheDocument();
     expect(screen.getByText('No employee profiles in this scope.')).toBeInTheDocument();
     await userEvent.click(screen.getByText('Upcoming contract expiries'));

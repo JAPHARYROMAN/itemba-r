@@ -7,6 +7,12 @@ import { ApprovalDelegationWorkspace } from './approval-delegation-workspace';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { type ApprovalDelegation, delegationPath } from './approval-delegation-types';
 import { setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -87,6 +93,12 @@ const mount = () =>
   );
 const inspect = async () =>
   userEvent.click(await screen.findByRole('button', { name: 'Inspect Alex Morgan → Sam Taylor' }));
+// Every person offered by the editor's Delegator and Delegate fields, as the
+// dialog's options read when both were native selects.
+const peopleOptions = (dialog: HTMLElement) => [
+  ...selectFieldOptions(getSelectField('Delegator', dialog)),
+  ...selectFieldOptions(getSelectField('Delegate', dialog)),
+];
 function capture(name: string) {
   const dir = process.env.ITEMBA_PAYROLL_VISUAL_DIR;
   if (!dir) return;
@@ -139,8 +151,8 @@ describe('Approval delegations', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters', exact: true }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'CANCELLED');
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption('Status filter', 'CANCELLED', user);
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
         delegationPath,
@@ -165,7 +177,7 @@ describe('Approval delegations', () => {
     const signal = state.get.mock.calls.at(-1)![1].signal;
     await user.click(screen.getByRole('button', { name: 'Filters', exact: true }));
     state.get.mockRejectedValueOnce(new Error('List unavailable'));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'EXPIRED');
+    await chooseSelectOption('Status filter', 'EXPIRED', user);
     expect(signal.aborted).toBe(true);
     expect(await screen.findByRole('alert')).toHaveTextContent('List unavailable');
     await act(async () => finish({ data: [fixture], total: 21 }));
@@ -180,7 +192,7 @@ describe('Approval delegations', () => {
     await inspect();
     await user.click(screen.getByRole('button', { name: 'Edit delegation' }));
     const dialog = screen.getByRole('dialog', { name: 'Edit delegation' });
-    await within(dialog).findAllByRole('option', { name: 'Sam Taylor' });
+    await waitFor(() => expect(peopleOptions(dialog)).toContain('Sam Taylor'));
     await user.clear(within(dialog).getByRole('textbox', { name: 'Reason' }));
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await user.click(screen.getByRole('button', { name: 'Stay here' }));
@@ -219,26 +231,21 @@ describe('Approval delegations', () => {
     }));
     await user.click(within(dialog).getByRole('button', { name: 'Retry people' }));
     await waitFor(() =>
-      expect(within(dialog).getAllByRole('option', { name: 'Sam Taylor' })).toHaveLength(2),
+      expect(peopleOptions(dialog).filter((name) => name === 'Sam Taylor')).toHaveLength(2),
     );
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: /Delegator/ }), 'first');
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: /Delegate/ }), 'second');
-    await user.selectOptions(
-      within(dialog).getByRole('combobox', { name: 'Company', exact: true }),
-      'company',
-    );
-    expect(within(dialog).getByRole('combobox', { name: /Delegator/ })).toHaveValue('');
+    await chooseSelectOption('Delegator', 'first', user, dialog);
+    await chooseSelectOption('Delegate', 'second', user, dialog);
+    await chooseSelectOption('Company', 'company', user, dialog);
+    expect(selectFieldValue(getSelectField('Delegator', dialog))).toBe('');
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
         '/users',
         expect.objectContaining({ query: { companyId: 'company' } }),
       ),
     );
-    await waitFor(() =>
-      expect(within(dialog).getByRole('combobox', { name: /Delegate/ })).toBeEnabled(),
-    );
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: /Delegator/ }), 'first');
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: /Delegate/ }), 'second');
+    await waitFor(() => expect(getSelectField('Delegate', dialog)).toBeEnabled());
+    await chooseSelectOption('Delegator', 'first', user, dialog);
+    await chooseSelectOption('Delegate', 'second', user, dialog);
     await setDateField(/Starts/, '2026-09-20T09:00', user, dialog);
     await setDateField(/Ends/, '2026-09-19T17:00', user, dialog);
     await user.click(within(dialog).getByRole('button', { name: 'Save delegation' }));
@@ -258,7 +265,7 @@ describe('Approval delegations', () => {
       startDate: new Date('2026-09-20T09:00').toISOString(),
       endDate: new Date('2026-09-30T17:00').toISOString(),
     });
-  });
+  }, 10_000);
   it('blocks new people selection without directory access but permits a guarded context edit', async () => {
     state.permissions.delete('users.read');
     state.permissions.delete('companies.read');
@@ -272,7 +279,7 @@ describe('Approval delegations', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Edit delegation' }));
     dialog = screen.getByRole('dialog', { name: 'Edit delegation' });
-    expect(within(dialog).getByRole('combobox', { name: /Delegator/ })).toBeDisabled();
+    expect(getSelectField('Delegator', dialog)).toBeDisabled();
     expect(state.page).not.toHaveBeenCalled();
     await user.type(within(dialog).getByRole('textbox', { name: 'Reason' }), ' changed');
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));

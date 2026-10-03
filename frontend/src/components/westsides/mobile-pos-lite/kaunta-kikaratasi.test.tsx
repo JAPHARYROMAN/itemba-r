@@ -469,7 +469,7 @@ const PURCHASE_REFUSALS: Array<[label: string, raw: string, swahili: string]> = 
 
 /** What a lost response must say instead of "Failed to fetch". */
 const SEND_FAILED_SW =
-  'Haikukamilika — mtandao umekatika. Fomu ipo hapa; subiri kidogo, kisha gonga POKEA tena.';
+  'Jibu limekatika; kupokea mzigo huu bado hakujathibitishwa. Hifadhi fomu hii na jaribu tena ombi lilelile.';
 
 /**
  * What a POKEA the PHONE refused must say. Deliberately not the save verb's

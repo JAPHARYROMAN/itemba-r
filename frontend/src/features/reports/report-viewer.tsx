@@ -11,6 +11,9 @@ import { useUnsavedWorkScopeId } from '@/components/workspace/unsaved-work-provi
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
 import { useAuth } from '@/hooks/use-auth';
+import { pickPrimaryTable } from '@/lib/report-export';
+import { StockValuationView } from '@/features/inventory/stock-valuation-view';
+import { normalizeValuationOptions } from '@/features/inventory/stock-valuation-format';
 import { AccountingDraftBoundary } from './accounting-drafts';
 import { ReportEvidence, ReportResults } from './report-results';
 import { ReportExports } from './report-exports';
@@ -89,9 +92,11 @@ function ReportViewerContent({
   supplied: ReportFilters;
 }) {
   const { hasPermission, user } = useAuth();
+  const isValuation = entry.id === 'ops.stock-valuation';
   const key = `reports.viewer.${useUnsavedWorkScopeId() || 'main'}.${entry.id}.${JSON.stringify(supplied)}`;
   const [filters, setFilters] = useWorkspaceState<ReportFilters>(`${key}.filters`, {
     ...supplied,
+    ...(isValuation ? { dateFrom: '', dateTo: '', asOf: '' } : {}),
     companyId: supplied.companyId || user?.companyId || '',
   });
   const [presentation, setPresentation] = useWorkspaceState<ReportPresentation>(
@@ -146,22 +151,26 @@ function ReportViewerContent({
             ? values.companyId
             : view.companyId || current.companyId,
         divisionId: values.divisionId || '',
-        dateFrom: values.dateFrom || '',
-        dateTo: values.dateTo || '',
-        asOf: values.asOf || '',
+        dateFrom: isValuation ? '' : values.dateFrom || '',
+        dateTo: isValuation ? '' : values.dateTo || '',
+        asOf: isValuation ? '' : values.asOf || '',
       }));
       setPresentation({
         viewMode: view.chartConfig?.viewMode === 'chart' ? 'chart' : 'table',
         metricColumns:
           view.chartConfig?.metricColumns?.filter((value) => typeof value === 'string') ?? null,
+        ...(isValuation
+          ? { stockValuation: normalizeValuationOptions(view.chartConfig?.stockValuation) }
+          : {}),
       });
       setTouched(true);
     },
-    [setFilters, setPresentation, setTouched],
+    [setFilters, setPresentation, setTouched, isValuation],
   );
   const needsCompany = entry.scopes.includes('COMPANY') || entry.apiPath.includes('{companyId}');
   const needsDates =
-    [
+    !isValuation &&
+    ([
       'Statements',
       'Sales',
       'Group Cross-sector',
@@ -170,8 +179,8 @@ function ReportViewerContent({
       'Inventory',
       'Procurement',
     ].includes(entry.category) ||
-    !!filters.dateFrom ||
-    !!filters.dateTo;
+      !!filters.dateFrom ||
+      !!filters.dateTo);
   const companyLabel =
     companyOptions.find((row) => row.value === filters.companyId)?.label || 'Permitted group scope';
   const scopeLabel = [
@@ -207,7 +216,7 @@ function ReportViewerContent({
       ) : (
         <>
           <Card className="report-viewer-section report-no-print">
-            <h3>Scope and period</h3>
+            <h3>{isValuation ? 'Organisation scope' : 'Scope and period'}</h3>
             <div className="report-filter-grid">
               {needsCompany && (
                 <FormSelect
@@ -317,21 +326,38 @@ function ReportViewerContent({
                 </p>
               </header>
               <ReportEvidence result={execution.result} />
-              <ReportResults
-                result={execution.result}
-                stateKey={key}
-                presentation={presentation}
-                setPresentation={(next) => {
-                  setTouched(true);
-                  setPresentation(next);
-                }}
-              />
+              {isValuation ? (
+                <StockValuationView
+                  rows={pickPrimaryTable(execution.result.data).rows}
+                  options={normalizeValuationOptions(presentation.stockValuation)}
+                  companyId={execution.result.filters.companyId}
+                  companyName={companyLabel}
+                  scopeLabel={scopeLabel}
+                  onChange={(stockValuation) => {
+                    setTouched(true);
+                    setPresentation({ ...presentation, stockValuation });
+                  }}
+                />
+              ) : (
+                <ReportResults
+                  result={execution.result}
+                  stateKey={key}
+                  presentation={presentation}
+                  setPresentation={(next) => {
+                    setTouched(true);
+                    setPresentation(next);
+                  }}
+                />
+              )}
               <ReportExports
                 key={execution.result.generatedAt}
                 entry={entry}
                 result={execution.result}
                 source={root}
                 scopeLabel={scopeLabel}
+                stockValuation={
+                  isValuation ? normalizeValuationOptions(presentation.stockValuation) : undefined
+                }
               />
             </>
           )}

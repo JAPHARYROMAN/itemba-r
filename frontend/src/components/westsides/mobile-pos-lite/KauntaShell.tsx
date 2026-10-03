@@ -161,7 +161,9 @@ export type KauntaShellProps = {
    * refuses, and the delivery is never received twice; classic passes nothing
    * and mints per attempt, unchanged.
    */
-  recordPurchase: (idempotencyKey?: string) => Promise<void>;
+  recordPurchase: (
+    idempotencyKey?: string,
+  ) => Promise<import('@/features/pos/core/pos-types').PurchaseResult | void>;
   beginPurchase: () => void;
   // Leo (day book)
   daySummary: DaySummary | null;

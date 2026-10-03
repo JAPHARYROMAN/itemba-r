@@ -4,6 +4,8 @@ import { CurrencyCode, DebtStatus, RiskLevel } from '@prisma/client';
 export class CreateDebtDto {
   @IsNotEmpty() @IsString() companyId!: string;
   @IsNotEmpty() @IsString() creditorName!: string;
+  /** Party linkage (Phase 2): the supplier profile behind the creditor, if any. */
+  @IsOptional() @IsString() supplierId?: string;
   @IsOptional() @IsString() creditorContact?: string;
   @IsNotEmpty() @IsString() amount!: string;
   @IsOptional() @IsString() amountPaid?: string;

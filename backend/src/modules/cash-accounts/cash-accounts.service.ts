@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, CashAccountType } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { AccessLevel, CashAccountType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
@@ -8,13 +9,50 @@ import { CreateCashAccountDto } from './dto/create-cash-account.dto';
 import { UpdateCashAccountDto } from './dto/update-cash-account.dto';
 import { QueryCashAccountDto } from './dto/query-cash-account.dto';
 
+/** Party linkage (Phase 3): the connected Cash Desk account, read beside every cash account. */
+const DESK_INCLUDE = {
+  deskAccount: { select: { id: true, name: true, balance: true, currency: true } },
+} as const;
+type DeskLink = { id: string; name: string; balance: Prisma.Decimal; currency: string } | null;
+
 @Injectable()
 export class CashAccountsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    // Party linkage (Phase 3 PR-8): optional so the existing callers keep constructing the
+    // service; without it the stored balance is what every read shows.
+    private readonly config?: ConfigService,
   ) {}
+
+  /** CASH_BOOK_UNIFIED: Cash Desk is the cash book, so its balance is the balance. */
+  unified(): boolean {
+    return this.config?.get<string>('CASH_BOOK_UNIFIED', 'false') === 'true';
+  }
+
+  /**
+   * One cash balance (Phase 3 PR-8). With the flag on and a connected Cash Desk account,
+   * `currentBalance` is the Cash Desk balance and `mirrorBalance` the stored figure (still
+   * written by every caller, so nothing downstream changes); otherwise the stored figure is
+   * both. `balanceSource` says which, and `cashDeskAccount` names the connection.
+   */
+  present<T extends { currentBalance: Prisma.Decimal | number | string; deskAccount?: DeskLink }>(
+    row: T,
+  ) {
+    const { deskAccount, ...rest } = row;
+    const stored = new Prisma.Decimal(row.currentBalance);
+    const live = this.unified() && deskAccount ? new Prisma.Decimal(deskAccount.balance) : null;
+    return {
+      ...rest,
+      currentBalance: live ?? stored,
+      mirrorBalance: stored,
+      balanceSource: live ? ('cash-desk' as const) : ('stored' as const),
+      cashDeskAccount: deskAccount
+        ? { id: deskAccount.id, name: deskAccount.name, currency: deskAccount.currency }
+        : null,
+    };
+  }
 
   async findAll(query: QueryCashAccountDto, user: AuthUser) {
     const { page = 1, limit = 20, companyId, divisionId, branchId, accountType, isActive } = query;
@@ -37,6 +75,7 @@ export class CashAccountsService {
           division: { select: { id: true, name: true, code: true } },
           branch: { select: { id: true, name: true, code: true } },
           linkedBank: { select: { id: true, bankName: true, accountName: true } },
+          ...DESK_INCLUDE,
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -45,7 +84,13 @@ export class CashAccountsService {
       this.prisma.cashAccount.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data: data.map((row) => this.present(row)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -56,23 +101,26 @@ export class CashAccountsService {
         division: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true } },
         linkedBank: { select: { id: true, bankName: true, accountName: true } },
+        ...DESK_INCLUDE,
       },
     });
     if (!record) throw new NotFoundException('Cash account not found');
     await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
-    return record;
+    return this.present(record);
   }
 
   async findByCompany(companyId: string, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, companyId);
-    return this.prisma.cashAccount.findMany({
+    const rows = await this.prisma.cashAccount.findMany({
       where: { companyId, deletedAt: null },
       include: {
         division: { select: { id: true, name: true, code: true } },
         branch: { select: { id: true, name: true, code: true } },
+        ...DESK_INCLUDE,
       },
       orderBy: { accountName: 'asc' },
     });
+    return rows.map((row) => this.present(row));
   }
 
   async create(dto: CreateCashAccountDto, user: AuthUser) {

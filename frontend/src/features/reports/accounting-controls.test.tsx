@@ -24,6 +24,12 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { ApiError } from '@/lib/api-client';
 import { setDateField } from '@/test/date-field';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   get: vi.fn(),
@@ -195,6 +201,9 @@ function change(label: string, value: string) {
     { target: { value } },
   );
 }
+function choose(label: string, value: string) {
+  changeSelectField(label, value, screen.getByRole('dialog'));
+}
 async function ack() {
   const dialog = within(screen.getByRole('dialog'));
   for (const box of await dialog.findAllByRole('checkbox'))
@@ -292,7 +301,7 @@ describe('Accounting control workspaces', () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Review PR-01' }));
     await screen.findByRole('heading', { name: 'PR-01' });
-    fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'other' } });
+    changeSelectField('Company', 'other');
     expect(screen.queryByRole('heading', { name: 'PR-01' })).not.toBeInTheDocument();
   });
   it('retains a posting form through Reports navigation and resumes without writing', async () => {
@@ -343,8 +352,8 @@ describe('Accounting control workspaces', () => {
     render(<App kind="period-close" />);
     await create('period-close');
     change('Reference', 'PC-NEW');
-    change('Fiscal year', 'year');
-    change('Accounting period', 'period');
+    choose('Fiscal year', 'year');
+    choose('Accounting period', 'period');
     change('Review notes', 'Reconciliations reviewed');
     await ack();
     submit('Create period close');
@@ -361,24 +370,22 @@ describe('Accounting control workspaces', () => {
   it('clears dependent selections when the company changes', async () => {
     render(<App kind="period-close" />);
     await create('period-close');
-    change('Fiscal year', 'year');
-    change('Accounting period', 'period');
-    change('Company', 'other');
+    choose('Fiscal year', 'year');
+    choose('Accounting period', 'period');
+    choose('Company', 'other');
     await waitFor(() =>
       expect(screen.queryByText('Loading available choices…')).not.toBeInTheDocument(),
     );
-    expect(
-      within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Fiscal year' }),
-    ).toHaveValue('');
-    expect(
-      within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Accounting period' }),
-    ).toHaveValue('');
+    expect(selectFieldValue(getSelectField('Fiscal year', screen.getByRole('dialog')))).toBe('');
+    expect(selectFieldValue(getSelectField('Accounting period', screen.getByRole('dialog')))).toBe(
+      '',
+    );
   });
   it('rejects a source choice that changed before save', async () => {
     render(<App kind="period-close" />);
     await create('period-close');
-    change('Fiscal year', 'year');
-    change('Accounting period', 'period');
+    choose('Fiscal year', 'year');
+    choose('Accounting period', 'period');
     state.page.mockImplementation(async (path, options) =>
       path === '/accounting-periods'
         ? list([
@@ -424,9 +431,9 @@ describe('Accounting control workspaces', () => {
     await create('audit-adjustments');
     change('Description', 'Accrual');
     change('Reason', 'Services received');
-    change('Account 1', 'debit');
+    choose('Account 1', 'debit');
     change('Debit 1', '120.25');
-    change('Account 2', 'credit');
+    choose('Account 2', 'credit');
     change('Credit 2', '120.25');
     await ack();
     submit('Create audit adjustment');
@@ -446,7 +453,7 @@ describe('Accounting control workspaces', () => {
   it('creates an asset schedule using ISO dates and six-place annual rates', async () => {
     render(<App kind="depreciation" />);
     await create('depreciation');
-    change('Fixed asset', 'asset');
+    choose('Fixed asset', 'asset');
     await setDateField(/Start date/, '2026-09-01', userEvent, screen.getByRole('dialog'));
     change('Depreciable amount', '1000');
     change('Annual rate', '0.123456');
@@ -478,23 +485,25 @@ describe('Accounting create read boundaries', () => {
     });
     render(<App />);
     await create('posting-runs');
-    expect(
-      within(screen.getByRole('dialog')).queryByRole('option', { name: 'Company 0' }),
-    ).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Company', screen.getByRole('dialog')))).not.toContain(
+      'Company 0',
+    );
     expect(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Create posting run' }),
     ).toBeDisabled();
     state.page.mockImplementation(paged);
     fireEvent.click(screen.getByRole('button', { name: 'Retry choices' }));
-    await within(screen.getByRole('dialog')).findByRole('option', { name: 'Itemba One' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company', screen.getByRole('dialog')))).toContain(
+        'Itemba One',
+      ),
+    );
   });
   it('uses the assigned company without requiring the company directory', async () => {
     state.permissions.delete('companies.view');
     render(<App />);
     await create('posting-runs');
-    expect(
-      within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Company' }),
-    ).toHaveValue('company');
+    expect(selectFieldValue(getSelectField('Company', screen.getByRole('dialog')))).toBe('company');
     await ack();
     submit('Create posting run');
     await waitFor(() => expect(state.post).toHaveBeenCalledTimes(1));
@@ -727,6 +736,139 @@ describe('Current accounting action review', () => {
     submit('Post depreciation entry');
     await waitFor(() =>
       expect(state.post).toHaveBeenCalledWith('/depreciation/entries/entry/post'),
+    );
+  });
+});
+
+/** Party linkage, Phase 3 PR-3: the close dialog shows the control check and asks for a reason. */
+describe('Period close party control gate', () => {
+  const check = {
+    asOf: '2026-09-30T00:00:00.000Z',
+    baseCurrency: 'TZS',
+    hasDifferences: true,
+    untagged: { ap: '0.00', ar: '0.00' },
+    differences: [
+      {
+        role: 'AP',
+        kind: 'supplier',
+        partyId: 'sup-1',
+        name: 'Mwanjalisi',
+        code: 'SUP-1',
+        control: '100.00',
+        subLedger: '80.00',
+        difference: '20.00',
+      },
+    ],
+  };
+  it('asks for a reason and closes through the acknowledged route when the sides differ', async () => {
+    state.get.mockImplementation(async (path: string) =>
+      path.endsWith('/party-check')
+        ? structuredClone(check)
+        : path.endsWith('/entries')
+          ? structuredClone(state.entries)
+          : structuredClone(state.record),
+    );
+    render(<App kind="period-close" />);
+    const label = await action('period-close', 'close');
+    expect(
+      await within(screen.getByRole('dialog')).findByRole('link', { name: 'Mwanjalisi' }),
+    ).toHaveAttribute('href', '/invoice-desk/suppliers/sup-1');
+    await ack();
+    submit(label);
+    await within(screen.getByRole('dialog')).findByText(
+      'Enter why the period closes with control differences (at least 5 characters).',
+    );
+    expect(state.post).not.toHaveBeenCalled();
+    change('Reason for closing with differences', 'Legacy lines await the backfill');
+    // Changing the input always needs a fresh acknowledgement (useAccountingReview).
+    await ack();
+    submit(label);
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith('/period-close/record/close-acknowledged', {
+        reason: 'Legacy lines await the backfill',
+      }),
+    );
+  });
+  it('closes plainly when the sides agree and shows the recorded balances once closed', async () => {
+    state.get.mockImplementation(async (path: string) =>
+      path.endsWith('/party-check')
+        ? { ...structuredClone(check), hasDifferences: false, differences: [] }
+        : path.endsWith('/party-snapshots')
+          ? {
+              snapshotAt: '2026-10-01T10:00:00.000Z',
+              closes: 1,
+              currency: 'TZS',
+              differences: 0,
+              rows: [
+                {
+                  id: 'a',
+                  role: 'AP',
+                  partyType: 'SUPPLIER',
+                  kind: 'supplier',
+                  partyId: 'sup-1',
+                  partyName: 'Mwanjalisi',
+                  currency: 'TZS',
+                  subLedger: '80.00',
+                  control: '80.00',
+                  difference: '0.00',
+                },
+              ],
+            }
+          : path.endsWith('/entries')
+            ? structuredClone(state.entries)
+            : structuredClone(state.record),
+    );
+    render(<App kind="period-close" />);
+    const label = await action('period-close', 'close');
+    await within(screen.getByRole('dialog')).findByText(
+      'Control accounts agree with the sub-ledger as of 2026-09-30.',
+    );
+    expect(
+      within(screen.getByRole('dialog')).queryByLabelText(/Reason for closing with differences/),
+    ).not.toBeInTheDocument();
+    await ack();
+    submit(label);
+    await waitFor(() =>
+      expect(state.post).toHaveBeenCalledWith('/period-close/record/close', undefined),
+    );
+  });
+  it('shows the recorded party balances on a closed record', async () => {
+    state.record.status = 'CLOSED';
+    state.get.mockImplementation(async (path: string) =>
+      path.endsWith('/party-snapshots')
+        ? {
+            snapshotAt: '2026-10-01T10:00:00.000Z',
+            closes: 1,
+            currency: 'TZS',
+            differences: 0,
+            rows: [
+              {
+                id: 'a',
+                role: 'AP',
+                partyType: 'SUPPLIER',
+                kind: 'supplier',
+                partyId: 'sup-1',
+                partyName: 'Mwanjalisi',
+                currency: 'TZS',
+                subLedger: '80.00',
+                control: '80.00',
+                difference: '0.00',
+              },
+            ],
+          }
+        : path.endsWith('/entries')
+          ? structuredClone(state.entries)
+          : structuredClone(state.record),
+    );
+    render(<App kind="period-close" />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: `Review ${state.record.closeNumber}` }),
+    );
+    expect(await screen.findByText('Party balances at close')).toBeInTheDocument();
+    expect(screen.getAllByTestId('party-snapshot-row')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Mwanjalisi' })).toHaveAttribute(
+      'href',
+      '/invoice-desk/suppliers/sup-1',
     );
   });
 });

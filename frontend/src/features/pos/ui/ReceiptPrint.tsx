@@ -42,10 +42,28 @@ export function ReceiptPrint({
         <span>{t('posReceiptTotal')}</span>
         <span>TZS {receiptAmount(model.total)}</span>
       </p>
-      <p className="pos-receipt-row">
-        <span>{model.paymentLabel}</span>
-        <span>{receiptAmount(model.total)}</span>
-      </p>
+      {model.payments ? (
+        model.payments.map((p) => (
+          <p className="pos-receipt-row" key={p.method}>
+            <span>
+              {p.method}
+              {p.reference ? ` · ${p.reference}` : ''}
+            </span>
+            <span>{receiptAmount(p.amount)}</span>
+          </p>
+        ))
+      ) : (
+        <p className="pos-receipt-row">
+          <span>{model.paymentLabel}</span>
+          <span>{receiptAmount(model.total)}</span>
+        </p>
+      )}
+      {model.outstanding != null && (
+        <p className="pos-receipt-row">
+          <span>{t('stillOwed')}</span>
+          <span>{receiptAmount(model.outstanding)}</span>
+        </p>
+      )}
       {model.received !== null && (
         <>
           <p className="pos-receipt-row">

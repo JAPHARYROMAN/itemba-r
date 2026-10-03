@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyBalanceService } from '../party-balance/party-balance.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { auditFor, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -25,6 +26,7 @@ export class SuppliersService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    private readonly partyBalance?: PartyBalanceService,
   ) {}
 
   async findAll(query: QuerySupplierDto, user: AuthUser) {
@@ -203,8 +205,12 @@ export class SuppliersService {
         this.productCoverage(id, supplier.companyId),
       ]);
 
+    // Party linkage (W5): the one balance (ERP, desk, NoteBook, per currency) beside the
+    // legacy summary figures, so the profile can show the breakdown.
+    const balance = (await this.partyBalance?.forParty('supplier', supplier)) ?? null;
     return {
       supplier,
+      balance,
       summary: {
         lifetimePurchaseTotal: purchaseSummary.totals.lifetimePurchaseTotal,
         ytdPurchaseTotal: purchaseSummary.totals.ytdPurchaseTotal,

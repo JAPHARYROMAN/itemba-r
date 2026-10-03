@@ -1,0 +1,29 @@
+# Unified ITEMBA OS and website release
+
+This release integrates the October 3 POS remake, all three party-linkage phases, configurable stock valuation, themed dropdowns, statutory-return PDFs and the public website rebuild. Existing PetroDollar equipment changes remain included. Cashier shifts, floats and handovers are excluded.
+
+## Integration decisions
+
+- Customer Payments retains its reusable transaction API, so a POS collection, its payment allocation, journal, cash effect, balance refresh and action identity commit or roll back together. The party-linkage payment implementation remains the shared implementation.
+- Split-payment debt uses the same customer on its AR journal line as credit sales, collections and credit notes. Reversals preserve party references.
+- POS collections use the existing `customer-payments.manage` permission, returns use `receivables.manage`, and paid refunds additionally require `refunds.manage`. Controller guards, service checks, action availability and database proofs use the same shared contract. No new permission codes or role grants are introduced.
+- With the unified cash-book flag enabled, initial sale receipts and each split tender also use the mapped cash book in the confirmation transaction. A sale cannot fund an ERP balance while leaving its refunds without cash-book funds; the standard configuration remains off until account mapping and opening reconciliation.
+- Supplier/customer navigation filters are applied in the extracted finance feature screens; Next page files remain valid route wrappers.
+- Dropdown changes preserve the new party selectors and stock-valuation filters. Existing native dropdown contrast fixes are incorporated by the dropdown branch.
+- Statutory PDFs use the current return workspace, all employee rows, the generated company's letterhead, recorded contributions and whole-return totals. Changing the company, period or return cancels an in-flight PDF; exporting does not file a return.
+- The website enquiry API and persistence contract remain unchanged. Production adopts the existing enquiry volume by identity and records it in the deployment environment; staging uses a named isolated volume. The rebuilt website's independent checks are included in release CI.
+- Printed attachment lists use tighter end spacing to avoid footer-only trailing sheets. All four website profile PDFs are regenerated and their dependency lock updated.
+
+## Data gates and operation
+
+Read-only preflight on October 3 found no blocking or review supplier/customer references in staging or production (14 checks each). Production has one used ERP cash account without a Cash Desk mapping, six idle unmapped accounts and no mapped pairs. Staging has two mapped pairs requiring balance review. **Keep `CASH_BOOK_UNIFIED=false`**; do not infer account mappings or opening amounts from names. Party links and new payment entities can ship with this switch off. Reconcile mappings and balances before a later activation.
+
+Apply the nine party migrations and one POS payment-lifecycle migration through Prisma after an authenticated, validated backup and restore rehearsal. Preserve organisation, roles, business records, website enquiry storage, uploads, persistent volumes and device outboxes. Do not run the seed or widen permissions.
+
+The combined POS database proof runs with mirroring both off and on, in disposable databases only. It checks replay, concurrent collections and returns, customer AR tags, debt/cash/stock/journal agreement and exports. The existing user instruction deferring a signed-in cashier pilot remains in force; synthetic proofs do not claim physical printer/scanner or fiscal-provider acceptance.
+
+Deploy a committed, pushed candidate to staging first. Promote only the same source after combined checks, production-build proofs and browser acceptance. The normal production workflow requires that the exact merged main revision passes `ITEMBA-R CI`; website blocking checks must also pass. Keep before/after image identities, encrypted backups and a tested rollback record in the private operations evidence.
+
+Verification before staging: 318 targeted frontend regressions and 626 targeted backend tests passed, followed by 321 focused backend checks after the original-receipt connection fix. Full frontend CI passed. The compiled release image passed 25 disposable financial checks with mirroring off and 26 with it on. The website passed 713 unit tests and 416 browser tests (16 explicitly skipped), its build budgets and Docker smoke. All four profile PDFs and the POS sale, collection, return and daily-report PDFs were rendered and inspected.
+
+The website's advisory Lighthouse run measured 2,782 ms for the fuel service and 2,516 ms for the company profile against the 2,500 ms LCP target. These are performance follow-ups, not claims of meeting that target. The authenticated encrypted production backup includes website enquiry storage; all eight archive checksums verified. Its database restored into 387 existing tables in isolation, all 171 migrations applied, and existing business-table contents remained unchanged. Final staging, rollback and production evidence is recorded in the release PR and private operations record after completion.

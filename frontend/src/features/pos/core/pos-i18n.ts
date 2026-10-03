@@ -15,6 +15,218 @@ const DEFAULT_LANG: PosLang = 'sw';
 
 const STRINGS = {
   en: {
+    all: 'All products',
+    refresh: 'Refresh',
+    loading: 'Loading…',
+    noProducts: 'No products match.',
+    quantity: 'Quantity',
+    posStockTab: 'Stock',
+    posReportsTab: 'Daily reports',
+    posStockWorkspace: 'Stock workspace',
+    posReceiveStock: 'Receive stock',
+    posDiscardDelivery:
+      'Discard this unsubmitted delivery draft? No stock or supplier balance will change.',
+    posDeliveryHistory: 'Deliveries',
+    posBranchStock: 'Branch stock',
+    posStockDescription: 'Availability and everyday stock controls.',
+    posOperationUnavailable: 'This workflow is not available with your current permissions.',
+    posOperationControl:
+      'Take till control to work on the saved stock draft. Another window currently controls this till.',
+    posSnapshotStale: 'Last known stock',
+    posSnapshotCurrent: 'Current stock snapshot',
+    posSearchStock: 'Find a product',
+    posStockStatus: 'Availability',
+    posLowStockFilter: 'Low stock',
+    posUnavailableFilter: 'Unavailable',
+    posNoStockSnapshot: 'No stock snapshot on this device yet.',
+    posStockProducts: '{count} products',
+    posStockAvailable: 'Available',
+    posStockDetails: 'Stock details',
+    posAvailable: 'Available',
+    posOnHand: 'On hand',
+    posReserved: 'Reserved',
+    posSnapshotNote:
+      'This snapshot can change while the branch trades. Refresh before making a decision.',
+    posSelectStock: 'Select a product to see its stock details.',
+    posReceivingDescription: 'Record delivered quantities against a shared supplier.',
+    posDeliveryReceived: 'Delivery received',
+    posDeliveryRecorded: 'Delivery recorded',
+    posPurchaseOrder: 'Purchase order',
+    posGoodsReceived: 'Goods received note',
+    posWaitingOffice: 'Waiting for the office',
+    posNextDelivery: 'New delivery',
+    posDraftOpening: 'Opening the saved draft…',
+    posReceivingSaved: 'Delivery draft saved on this device',
+    posReceivingUnsaved: 'Edits are not yet saved on this device',
+    posAddDeliveryProducts: 'Add delivered products',
+    posDeliveryEmpty: 'Choose the products that arrived.',
+    posTypedUnitCost: 'Typed unit cost · TZS (optional)',
+    posOfficeDefaultCost: 'Office default cost',
+    posTypedCostNote:
+      'Blank costs are resolved by the office. The total below includes only costs you typed; it is not the final invoice value.',
+    posTypedCostsTotal: 'Typed costs only',
+    posSaveDelivery: 'Save draft',
+    posReviewDelivery: 'Review delivery',
+    posReceiveConfirmation:
+      'Confirm the supplier, quantities and typed costs. Receiving changes inventory and valuation; no supplier payment is made.',
+    posConfirmReceive: 'Confirm and receive',
+    posSearchDeliveries: 'Find a delivery',
+    posDeliveryHistoryScope:
+      'Branch deliveries over the last 7 business days. Costs remain in the office.',
+    posDeliveryDetails: 'Delivery details',
+    posSelectDelivery: 'Select a delivery to review the quantities and its goods received note.',
+    posOnlineHistory: 'Connect to load current history. Cached history is not shown as live.',
+    posHistoryTruncated:
+      'Only the newest 100 records are shown. Use the office register for older records.',
+    posBlindCount: 'Count physical stock without seeing system quantities.',
+    posCountHistory: 'Count history',
+    posNoCounts: 'No counts in the last 7 business days.',
+    posCountOffline:
+      'Capture and save offline. Review and send online; counts never enter the sales queue.',
+    posCountSaved: 'Count draft saved on this device',
+    posCountEmptyNote: 'Empty = not counted. Zero = an empty shelf.',
+    posCountQuantity: 'Counted quantity',
+    posCountCorrectSheet: 'Correct the unsubmitted sheet before sending.',
+    posCountRecount: 'Ask the office to review the recorded request before recounting.',
+    posCountConfirm:
+      'The server reads current stock and posts a permitted adjustment or sends it for office approval. These are absolute shelf quantities, not quantities to add.',
+    posPreviousProducts: 'Previous products',
+    posNextProducts: 'Next products',
+    posOriginalStockRequest:
+      'This request has been attempted. Inputs stay frozen: retry the same reviewed request to recover its outcome, or ask the office to resolve it before starting another.',
+    posExportDailyPdf: 'Export PDF',
+    posBusinessDate: 'Business date · East Africa',
+    posDailyScope:
+      'Sales and original allocations use this business day. Later collections and paid refunds use their own payment date, including earlier sales by this cashier on this till. Net receipts are not the cash drawer or account balance. No shift is created or closed.',
+    posDailyOffline:
+      'Daily financial reports need a connection. Unsent work remains separate below.',
+    posReportAsOf: 'Generated {time}',
+    posSalesCount: '{count} sales',
+    posInitialReceipts: 'Original receipts',
+    posInitialCredit: 'Original credit',
+    posLaterCollections: 'Later collections',
+    posPaidRefunds: 'Paid refunds',
+    posNetReceipts: 'Net receipts',
+    posNetReceiptEquation: 'Original receipts + collections − refunds',
+    posOriginalAllocations: 'Original sale allocations',
+    posProductsTruncated: 'Top 50 products shown; totals include all products.',
+    posUnsentSales: 'Unsent device sales',
+    posUnsentReportNote:
+      'These device amounts are excluded from the financial report and PDF. Unpaid held carts are also excluded.',
+    posSplitPayments: 'Split / partial payment',
+    posSplitHint:
+      'Enter the amount received through each method. References record payments you have already received.',
+    posAllocated: 'Payment allocated',
+    posOverallocated: 'Above sale total',
+    posPartialHint:
+      'A remaining balance requires a named customer and credit enabled on this till.',
+    posPaymentsReturns: 'Payments & returns',
+    posRecorded: 'Recorded',
+    posCollectPayment: 'Collect payment',
+    posReturnRefund: 'Return / refund',
+    posCollectionAmount: 'Amount received',
+    posReturnable: 'Available to return',
+    posDisposition: 'Returned stock',
+    posRestock: 'Saleable — return to stock',
+    posDamaged: 'Damaged — do not restock',
+    posReturnReason: 'Reason for return',
+    posDebtReduced: 'Debt reduced',
+    posRefundAmount: 'Refund payable',
+    posRefundMethod: 'Refund method',
+    posActionReview:
+      'Review before confirming. This records money received or issues the return and its refund. Estimates are checked again by the server.',
+    posConfirmTransaction: 'Confirm transaction',
+    posActionRecovery:
+      'An earlier transaction needs reconciliation. Check its outcome or retry its original request before recording another.',
+    posCheckOutcome: 'Check outcome',
+    posRetryOriginal: 'Retry original request',
+    posActionRejected:
+      'The server refused this request and confirms it was not recorded. Review the inputs before trying again.',
+    posActionNotFound:
+      'No acknowledged transaction found. Retry the original request; do not collect or refund money again.',
+    posHeldCarts: 'Held carts',
+    posHold: 'Hold cart',
+    posResume: 'Resume',
+    posRename: 'Rename',
+    posCartName: 'Cart name',
+    posCartNote: 'Note (optional)',
+    posUnnamedCart: 'Unnamed cart',
+    posHoldNote:
+      'Unpaid carts on this device. Holding does not reserve stock, record revenue or take payment.',
+    posNoHeld: 'No held carts yet.',
+    posResumeEmpty: 'Hold or discard the current unpaid cart before resuming another.',
+    posDiscardCart: 'Discard cart',
+    posDiscardConfirm: 'Discard this unpaid cart? Its saved items and inputs will be removed.',
+    posCartAttention:
+      'Could not update the saved cart. It may have changed in another window. Keep this window open and reload the saved copy before continuing.',
+    posRestoredCart:
+      'Saved cart restored. Review the customer, prices and stock before payment. The server validates the sale when you complete it.',
+    posSavingCart: 'Saving cart…',
+    posSavedCart: 'Cart saved on this device',
+    posNeedsAttention: 'Needs attention',
+    posControlOther:
+      'Another window controls this till, or this browser cannot lock it safely. You can prepare a separate cart and inspect transactions. Release control in the selling window, then try here.',
+    posTakeControl: 'Use this till',
+    posReleaseControl: 'Release till',
+    posControlOwned: 'Selling control',
+    posTransactions: 'Transactions',
+    posHistoryScope:
+      'Your sales on this terminal over the last 7 business days, plus sales still on this device.',
+    posTransactionSearch: 'Receipt, customer, product or payment reference',
+    posSearch: 'Search',
+    posStatus: 'Status',
+    posAll: 'All statuses',
+    posPaid: 'Paid',
+    posCredit: 'Credit',
+    posPending: 'Pending sync',
+    posHistoryOffline:
+      'Connect to load confirmed transactions. Pending device sales are shown separately.',
+    posHistoryFailed: 'Transactions could not be loaded. Refresh to try again.',
+    posHistoryTotal:
+      '{count} confirmed sales · {total}. The list shows up to 200 recent sales; pending items are excluded from this total.',
+    posNoTransactions: 'No matching transactions.',
+    posSelectTransaction: 'Select a receipt to inspect or reprint it.',
+    posReprint: 'Reprint receipt',
+    posReprintNote:
+      'A copy of the original receipt. Reprinting does not create another sale or open the cash drawer.',
+    posReceiptPdf: 'Receipt PDF',
+    posReceiptFailed:
+      'The receipt could not be prepared. Retry the document; do not repeat the sale.',
+    posWalkIn: 'Walk-in customer',
+    posRefresh: 'Refresh',
+    posSyncExplanation:
+      'Unpaid held carts are separate. These sales have already been submitted or cash was received offline. Do not collect payment again.',
+    posSyncWaitingNote:
+      'Waiting for a connection. The original saved request will be sent safely when online.',
+    posSyncRejectedNote:
+      'The server rejected this sale. Check the outcome before retrying; ask your manager to resolve stock, payment or access issues.',
+    posSyncRemoveBlocked:
+      'Submitted sales cannot be discarded here. Keep the record for reconciliation with your manager.',
+    posCartOpening: 'Loading saved cart…',
+    posRetryCart: 'Retry saved cart',
+    posReviewCart: 'I have reviewed this cart',
+    posRestoredOffline:
+      'Offline prices use this device’s cached catalogue; final server validation happens on sync.',
+    posRecoveryTitle: 'Check this saved sale',
+    posRecoveryOtherOwner:
+      'This device has an unresolved sale from another cashier. Ask that cashier or your manager to reconcile it before continuing.',
+    posRecoveryNote:
+      'The payment outcome needs checking. This sale is saved with its original request; do not charge the customer again.',
+    posRecoveryCheck: 'Check outcome',
+    posRecoveryRetry: 'Retry the saved sale',
+    posRecoveryMissing:
+      'No sale was found yet. Retry sends the original saved request, without changing its items or payment.',
+    posRecoveryManager:
+      'This sale needs a manager to review its original business record before you charge again.',
+    posRecoveryChecking: 'Checking saved sale…',
+    posSaveFailed:
+      'The sale could not be saved on this device. Nothing was sent. Check device storage and try again.',
+    posSellTab: 'Sell',
+    posReceiptTab: 'Receipt',
+    posSyncTab: 'Sync centre',
+    posWorkspace: 'Counter workspace',
+    posReceiptDetails: 'Receipt details',
+    posReferenceRequired: 'Enter the payment reference to complete this sale.',
     opening: 'Opening Itemba POS...',
     setupAgain: 'Set up this phone again',
     terminalUnavailable: 'This terminal is not available.',
@@ -236,7 +448,7 @@ const STRINGS = {
     purchaseOfflineNote: 'No network — fill the form; the slip will be saved on this phone.',
     slabNewDelivery: 'NEW DELIVERY',
     purchaseSendFailedRetry:
-      'It did not go through — the network dropped. The form is still here; wait a moment, then tap RECEIVE again.',
+      'The response was interrupted; receipt of this delivery is not yet confirmed. Keep this form and retry the original request.',
     // Kaunta Historia + Funga Siku (spec-history-reports §5), translated from
     // the Swahili below.
     historyTitle: 'Sales history',
@@ -385,6 +597,216 @@ const STRINGS = {
     errOnePricePerProduct: 'A product can have only one price in a sale.',
   },
   sw: {
+    all: 'Bidhaa zote',
+    refresh: 'Sasisha',
+    loading: 'Inapakia…',
+    noProducts: 'Hakuna bidhaa zinazolingana.',
+    quantity: 'Kiasi',
+    posStockTab: 'Stoo',
+    posReportsTab: 'Ripoti za siku',
+    posStockWorkspace: 'Kazi za stoo',
+    posReceiveStock: 'Pokea mzigo',
+    posDiscardDelivery:
+      'Futa rasimu hii ya mzigo ambayo haijatumwa? Stoo na salio la msambazaji havitabadilika.',
+    posDeliveryHistory: 'Mizigo',
+    posBranchStock: 'Stoo ya tawi',
+    posStockDescription: 'Bidhaa zilizopo na udhibiti wa stoo.',
+    posOperationUnavailable: 'Ruhusa zako za sasa haziruhusu kazi hii.',
+    posOperationControl:
+      'Chukua udhibiti wa kaunta ili kutumia rasimu ya stoo. Dirisha jingine linadhibiti kaunta hii.',
+    posSnapshotStale: 'Stoo iliyojulikana mwisho',
+    posSnapshotCurrent: 'Picha ya sasa ya stoo',
+    posSearchStock: 'Tafuta bidhaa',
+    posStockStatus: 'Upatikanaji',
+    posLowStockFilter: 'Kidogo',
+    posUnavailableFilter: 'Haipatikani',
+    posNoStockSnapshot: 'Hakuna picha ya stoo kwenye kifaa hiki bado.',
+    posStockProducts: 'Bidhaa {count}',
+    posStockAvailable: 'Inapatikana',
+    posStockDetails: 'Maelezo ya stoo',
+    posAvailable: 'Zinazopatikana',
+    posOnHand: 'Zilizopo',
+    posReserved: 'Zilizotengwa',
+    posSnapshotNote: 'Stoo inaweza kubadilika wakati wa biashara. Sasisha kabla ya kufanya uamuzi.',
+    posSelectStock: 'Chagua bidhaa kuona maelezo ya stoo.',
+    posReceivingDescription: 'Andika mzigo uliowasili kwa muuzaji aliyesajiliwa.',
+    posDeliveryReceived: 'Mzigo umepokelewa',
+    posDeliveryRecorded: 'Mzigo umeandikwa',
+    posPurchaseOrder: 'Agizo la manunuzi',
+    posGoodsReceived: 'Hati ya kupokea mzigo',
+    posWaitingOffice: 'Inasubiri ofisi',
+    posNextDelivery: 'Mzigo mpya',
+    posDraftOpening: 'Inafungua rasimu iliyohifadhiwa…',
+    posReceivingSaved: 'Rasimu ya mzigo imehifadhiwa kwenye kifaa hiki',
+    posReceivingUnsaved: 'Mabadiliko bado hayajahifadhiwa kwenye kifaa hiki',
+    posAddDeliveryProducts: 'Ongeza bidhaa zilizowasili',
+    posDeliveryEmpty: 'Chagua bidhaa zilizowasili.',
+    posTypedUnitCost: 'Gharama uliyoandika · TZS (si lazima)',
+    posOfficeDefaultCost: 'Gharama ya ofisini',
+    posTypedCostNote:
+      'Gharama zilizoachwa wazi zitaamuliwa na ofisi. Jumla hapa ni gharama ulizoandika pekee; si thamani ya mwisho ya ankara.',
+    posTypedCostsTotal: 'Gharama ulizoandika pekee',
+    posSaveDelivery: 'Hifadhi rasimu',
+    posReviewDelivery: 'Kagua mzigo',
+    posReceiveConfirmation:
+      'Thibitisha muuzaji, kiasi na gharama ulizoandika. Kupokea kunabadilisha stoo na thamani; hakuna malipo kwa muuzaji.',
+    posConfirmReceive: 'Thibitisha na pokea',
+    posSearchDeliveries: 'Tafuta mzigo',
+    posDeliveryHistoryScope: 'Mizigo ya tawi kwa siku 7 za biashara. Gharama zinabaki ofisini.',
+    posDeliveryDetails: 'Maelezo ya mzigo',
+    posSelectDelivery: 'Chagua mzigo kuona kiasi na hati ya kupokea.',
+    posOnlineHistory:
+      'Unganisha mtandao kupakia historia ya sasa. Historia ya zamani haionyeshwi kama ya sasa.',
+    posHistoryTruncated:
+      'Rekodi 100 mpya pekee zinaonekana. Tumia daftari la ofisini kwa rekodi za zamani.',
+    posBlindCount: 'Hesabu bidhaa bila kuona kiasi cha mfumo.',
+    posCountHistory: 'Historia ya hesabu',
+    posNoCounts: 'Hakuna hesabu kwa siku 7 za biashara.',
+    posCountOffline:
+      'Hesabu na hifadhi bila mtandao. Kagua na tuma ukiwa na mtandao; hesabu haziingii kwenye foleni ya mauzo.',
+    posCountSaved: 'Rasimu ya hesabu imehifadhiwa kwenye kifaa hiki',
+    posCountEmptyNote: 'Wazi = haijahesabiwa. Sifuri = rafu tupu.',
+    posCountQuantity: 'Kiasi kilichohesabiwa',
+    posCountCorrectSheet: 'Sahihisha rasimu ambayo haijatumwa kabla ya kutuma.',
+    posCountRecount: 'Ulizia ofisi kuhusu ombi lililoandikwa kabla ya kuhesabu upya.',
+    posCountConfirm:
+      'Mfumo unasoma stoo ya sasa na kuandika marekebisho yaliyoruhusiwa au kutuma kwa idhini ya ofisi. Hiki ni kiasi halisi cha rafu, si kiasi cha kuongeza.',
+    posPreviousProducts: 'Bidhaa zilizotangulia',
+    posNextProducts: 'Bidhaa zinazofuata',
+    posOriginalStockRequest:
+      'Ombi hili limejaribiwa. Usibadilishe rasimu: jaribu tena ombi lilelile kujua matokeo, au ulizia ofisi kabla ya kuanza jingine.',
+    posExportDailyPdf: 'Toa PDF',
+    posBusinessDate: 'Tarehe ya biashara · Afrika Mashariki',
+    posDailyScope:
+      'Mauzo na malipo ya awali yanatumia siku hii. Makusanyo na fedha zilizorejeshwa zinatumia tarehe zao za malipo, ikiwemo mauzo ya zamani ya muuzaji huyu kwenye kaunta hii. Mapokezi halisi si salio la droo au akaunti. Hakuna zamu inayofunguliwa au kufungwa.',
+    posDailyOffline:
+      'Ripoti za fedha zinahitaji mtandao. Kazi ambayo haijatumwa inabaki tofauti hapa chini.',
+    posReportAsOf: 'Imetengenezwa {time}',
+    posSalesCount: 'Mauzo {count}',
+    posInitialReceipts: 'Mapokezi ya awali',
+    posInitialCredit: 'Mkopo wa awali',
+    posLaterCollections: 'Makusanyo ya madeni',
+    posPaidRefunds: 'Fedha zilizorejeshwa',
+    posNetReceipts: 'Mapokezi halisi',
+    posNetReceiptEquation: 'Mapokezi ya awali + makusanyo − marejesho',
+    posOriginalAllocations: 'Mgawanyo wa awali wa malipo',
+    posProductsTruncated: 'Bidhaa 50 za juu; jumla inajumuisha bidhaa zote.',
+    posUnsentSales: 'Mauzo ambayo hayajatumwa',
+    posUnsentReportNote:
+      'Kiasi cha kifaa hiki hakijumuishwi kwenye ripoti ya fedha na PDF. Mikokoteni ambayo haijalipwa pia haitajumuishwa.',
+    posSplitPayments: 'Gawanya malipo / lipa sehemu',
+    posSplitHint:
+      'Weka kiasi kilichopokelewa kwa kila njia. Kumbukumbu ni za malipo uliyopokea tayari.',
+    posAllocated: 'Malipo yaliyogawanywa',
+    posOverallocated: 'Zaidi ya jumla ya mauzo',
+    posPartialHint: 'Salio linahitaji mteja aliyetajwa na ruhusa ya mkopo kwenye kaunta.',
+    posPaymentsReturns: 'Malipo na marejesho',
+    posRecorded: 'Imerekodiwa',
+    posCollectPayment: 'Pokea malipo',
+    posReturnRefund: 'Rudisha bidhaa / fedha',
+    posCollectionAmount: 'Kiasi kilichopokelewa',
+    posReturnable: 'Idadi inayoweza kurudishwa',
+    posDisposition: 'Bidhaa zilizorudishwa',
+    posRestock: 'Inaweza kuuzwa — rudisha stoo',
+    posDamaged: 'Imeharibika — usirudishe kwenye stock',
+    posReturnReason: 'Sababu ya kurejesha',
+    posDebtReduced: 'Deni lililopunguzwa',
+    posRefundAmount: 'Fedha za kurejesha',
+    posRefundMethod: 'Njia ya kurejesha fedha',
+    posActionReview:
+      'Kagua kabla ya kuthibitisha. Hatua hii inarekodi fedha zilizopokelewa au marejesho ya bidhaa na fedha. Mfumo utahakiki kiasi tena.',
+    posConfirmTransaction: 'Thibitisha muamala',
+    posActionRecovery:
+      'Muamala wa awali unahitaji uhakiki. Kagua matokeo au jaribu ombi lilelile kabla ya kurekodi mwingine.',
+    posCheckOutcome: 'Kagua matokeo',
+    posRetryOriginal: 'Jaribu ombi lilelile',
+    posActionRejected:
+      'Mfumo ulikataa ombi na umethibitisha halikurekodiwa. Kagua taarifa kabla ya kujaribu tena.',
+    posActionNotFound:
+      'Hakuna muamala uliothibitishwa. Jaribu ombi lilelile; usipokee wala kurejesha fedha tena.',
+    posHeldCarts: 'Vikapu vilivyohifadhiwa',
+    posHold: 'Hifadhi kikapu',
+    posResume: 'Endelea',
+    posRename: 'Badili jina',
+    posCartName: 'Jina la kikapu',
+    posCartNote: 'Maelezo (si lazima)',
+    posUnnamedCart: 'Kikapu bila jina',
+    posHoldNote:
+      'Vikapu visivyolipwa kwenye kifaa hiki. Kuhifadhi hakutengi stock, kurekodi mauzo au kupokea malipo.',
+    posNoHeld: 'Hakuna kikapu kilichohifadhiwa.',
+    posResumeEmpty: 'Hifadhi au futa kikapu cha sasa kabla ya kufungua kingine.',
+    posDiscardCart: 'Futa kikapu',
+    posDiscardConfirm:
+      'Futa kikapu hiki kisicholipwa? Bidhaa na taarifa zake zilizohifadhiwa zitaondolewa.',
+    posCartAttention:
+      'Kikapu hakijahifadhiwa. Huenda kimebadilishwa kwenye dirisha lingine. Acha dirisha wazi na pakia nakala iliyohifadhiwa kabla ya kuendelea.',
+    posRestoredCart:
+      'Kikapu kimerejeshwa. Kagua mteja, bei na stock kabla ya malipo. Mfumo utathibitisha mauzo unapokamilisha.',
+    posSavingCart: 'Inahifadhi kikapu…',
+    posSavedCart: 'Kikapu kimehifadhiwa kwenye kifaa',
+    posNeedsAttention: 'Kinahitaji ukaguzi',
+    posControlOther:
+      'Dirisha lingine linatumia kaunta hii, au kivinjari hakiwezi kuifunga salama. Unaweza kuandaa kikapu tofauti na kukagua mauzo. Achia kaunta kwenye dirisha la mauzo, kisha jaribu hapa.',
+    posTakeControl: 'Tumia kaunta hii',
+    posReleaseControl: 'Achia kaunta',
+    posControlOwned: 'Udhibiti wa mauzo',
+    posTransactions: 'Miamala',
+    posHistoryScope:
+      'Mauzo yako kwenye kaunta hii kwa siku 7 za biashara, pamoja na mauzo yaliyobaki kwenye kifaa.',
+    posTransactionSearch: 'Risiti, mteja, bidhaa au kumbukumbu ya malipo',
+    posSearch: 'Tafuta',
+    posStatus: 'Hali',
+    posAll: 'Hali zote',
+    posPaid: 'Imelipwa',
+    posCredit: 'Mkopo',
+    posPending: 'Inasubiri kutumwa',
+    posHistoryOffline:
+      'Unganisha mtandao kupakia miamala iliyothibitishwa. Mauzo kwenye kifaa yanaonyeshwa tofauti.',
+    posHistoryFailed: 'Miamala haijapakiwa. Jaribu kupakia tena.',
+    posHistoryTotal:
+      'Mauzo {count} yaliyothibitishwa · {total}. Orodha ina hadi mauzo 200 ya karibuni; yanayosubiri hayamo kwenye jumla hii.',
+    posNoTransactions: 'Hakuna miamala inayolingana.',
+    posSelectTransaction: 'Chagua risiti kuikagua au kuichapisha tena.',
+    posReprint: 'Chapisha risiti tena',
+    posReprintNote:
+      'Nakala ya risiti ya awali. Kuchapisha tena hakutengenezi mauzo mapya wala kufungua droo ya fedha.',
+    posReceiptPdf: 'PDF ya risiti',
+    posReceiptFailed: 'Risiti haijaandaliwa. Jaribu hati tena; usirudie mauzo.',
+    posWalkIn: 'Mteja wa kawaida',
+    posRefresh: 'Pakia tena',
+    posSyncExplanation:
+      'Vikapu visivyolipwa ni tofauti. Mauzo haya tayari yametumwa au fedha zilipokelewa bila mtandao. Usipokee malipo tena.',
+    posSyncWaitingNote:
+      'Inasubiri mtandao. Ombi la awali lililohifadhiwa litatumwa salama mtandao ukirudi.',
+    posSyncRejectedNote:
+      'Mfumo umekataa mauzo. Kagua matokeo kabla ya kujaribu tena; omba meneja atatue stock, malipo au ruhusa.',
+    posSyncRemoveBlocked:
+      'Mauzo yaliyotumwa hayawezi kufutwa hapa. Hifadhi rekodi kwa ukaguzi na meneja.',
+    posCartOpening: 'Inapakia kikapu kilichohifadhiwa…',
+    posRetryCart: 'Jaribu tena kikapu kilichohifadhiwa',
+    posReviewCart: 'Nimekagua kikapu hiki',
+    posRestoredOffline:
+      'Bila mtandao bei hutumia orodha iliyohifadhiwa kwenye kifaa; seva itathibitisha wakati wa kusawazisha.',
+    posRecoveryTitle: 'Kagua mauzo yaliyohifadhiwa',
+    posRecoveryOtherOwner:
+      'Kifaa hiki kina mauzo ya mhudumu mwingine ambayo hayajakamilika. Mwombe mhudumu huyo au meneja ayakague kabla ya kuendelea.',
+    posRecoveryNote:
+      'Matokeo ya malipo yanahitaji kukaguliwa. Mauzo yamehifadhiwa na ombi lake la awali; usimtoze mteja tena.',
+    posRecoveryCheck: 'Kagua matokeo',
+    posRecoveryRetry: 'Jaribu mauzo yaliyohifadhiwa',
+    posRecoveryMissing:
+      'Mauzo hayajaonekana bado. Jaribu tena kwa ombi lilelile bila kubadili bidhaa au malipo.',
+    posRecoveryManager:
+      'Msimamizi anahitaji kukagua kumbukumbu ya awali kabla ya kumtoza mteja tena.',
+    posRecoveryChecking: 'Tunakagua mauzo…',
+    posSaveFailed:
+      'Mauzo hayajahifadhiwa kwenye kifaa. Hakuna ombi lililotumwa. Kagua nafasi ya kifaa na ujaribu tena.',
+    posSellTab: 'Mauzo',
+    posReceiptTab: 'Risiti',
+    posSyncTab: 'Usawazishaji',
+    posWorkspace: 'Kaunta ya mauzo',
+    posReceiptDetails: 'Maelezo ya risiti',
+    posReferenceRequired: 'Weka kumbukumbu ya malipo ili kukamilisha mauzo.',
     opening: 'Inafungua Itemba POS...',
     setupAgain: 'Sajili simu hii upya',
     terminalUnavailable: 'Kituo hiki hakipatikani.',
@@ -705,7 +1127,7 @@ const STRINGS = {
     // makes the identical retry safe, so that is what it names. "Fomu ipo hapa"
     // is the only promise that is always true.
     purchaseSendFailedRetry:
-      'Haikukamilika — mtandao umekatika. Fomu ipo hapa; subiri kidogo, kisha gonga POKEA tena.',
+      'Jibu limekatika; kupokea mzigo huu bado hakujathibitishwa. Hifadhi fomu hii na jaribu tena ombi lilelile.',
     // Kaunta Historia ya Mauzo (spec-history-reports §5): the rep's own 7 days.
     // The window is a SERVER constant, so the copy states it as a fact rather
     // than as a filter she chose.

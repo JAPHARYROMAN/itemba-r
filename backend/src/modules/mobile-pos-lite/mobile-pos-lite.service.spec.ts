@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
@@ -18,6 +23,7 @@ function repUser(): AuthUser {
     id: 'rep-1',
     email: 'rep@example.com',
     roles: [],
+    roleScopes: ['COMPANY'],
     permissions: ['mobile_pos_lite.use', 'mobile_pos_lite.purchase'],
     companyId: 'company-1',
     companyAccess: [],
@@ -113,6 +119,9 @@ function countAdjustment(overrides: Record<string, unknown> = {}) {
 
 function makeService() {
   const prisma: any = {
+    paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+    refund: { findMany: jest.fn().mockResolvedValue([]) },
+    creditNote: { findMany: jest.fn().mockResolvedValue([]) },
     mobilePosTerminal: {
       findFirst: jest.fn().mockResolvedValue(terminalRow()),
       update: jest.fn().mockResolvedValue({}),
@@ -216,6 +225,7 @@ function makeService() {
       ),
     },
   };
+  prisma.$transaction = jest.fn(async (work: (db: any) => Promise<unknown>) => work(prisma));
   const companyScope: any = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     assertGroupScoped: jest.fn(),
@@ -3885,7 +3895,7 @@ describe('MobilePosLiteController stock-counts route', () => {
 
   it('passes the terminal headers straight through to the service', () => {
     const service: any = { createStockCount: jest.fn().mockResolvedValue({ id: 'sa-1' }) };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const dto = countDto();
     const user = managerUser();
 
@@ -4103,6 +4113,26 @@ function allKeys(value: unknown): string[] {
 }
 
 describe('MobilePosLiteService salesHistory', () => {
+  it('reports a fully collected credit sale as paid from its current balance', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findMany.mockResolvedValue([
+      historySaleRow({
+        id: 'paid-credit',
+        paymentMethod: 'CREDIT',
+        status: 'CONFIRMED',
+        outstandingAmount: '0',
+      }),
+      historySaleRow({
+        id: 'part-credit',
+        paymentMethod: 'CREDIT',
+        status: 'PARTIALLY_PAID',
+        outstandingAmount: '1200',
+      }),
+    ]);
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+    expect(result.sales.map((sale) => sale.status)).toEqual(['PAID', 'CREDIT']);
+    expect(result.sales[0]).not.toHaveProperty('outstandingAmount');
+  });
   it('scopes to this terminal and this rep over the 7-day local-midnight window', async () => {
     const { service, prisma } = makeService();
     const { from, dayEnd } = historyBoundaries();
@@ -4174,6 +4204,7 @@ describe('MobilePosLiteService salesHistory', () => {
       'paymentMethod',
       'paymentReference',
       'salesOrderNumber',
+      'status',
       'totalAmount',
     ]);
     expect(Object.keys(serialized.sales[0].lines[0]).sort()).toEqual([
@@ -4922,6 +4953,9 @@ describe('MobilePosLiteService createDayReport', () => {
       where: {
         salesOrder: {
           companyId: 'company-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          deletedAt: null,
           mobilePosTerminalId: 'terminal-1',
           createdById: 'rep-1',
           status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
@@ -4938,8 +4972,11 @@ describe('MobilePosLiteService createDayReport', () => {
     // The line scope IS the headline scope — the two can never drift.
     const [aggregateCall] = prisma.salesOrder.aggregate.mock.calls[0];
     expect(call.where.salesOrder).toEqual(aggregateCall.where);
-    // Nothing reads whole orders for this any more.
-    expect(prisma.salesOrder.findMany).not.toHaveBeenCalled();
+    // Split allocations read only original tenders; item counts still come from the unbounded aggregate.
+    expect(prisma.salesOrder.findMany).toHaveBeenCalledWith({
+      where: { ...aggregateCall.where, paymentMethod: 'MIXED' },
+      select: { posTenders: true, totalAmount: true },
+    });
   });
 
   /**
@@ -5175,7 +5212,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
       purchaseHistory: jest.fn().mockResolvedValue({}),
       createDayReport: jest.fn().mockResolvedValue({}),
     };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const user = repUser();
     const dto = dayReportDto();
 
@@ -5194,7 +5231,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
         .fn()
         .mockResolvedValue({ buffer: Buffer.from('%PDF-1.4'), fileName: 'RIPOTI-X-1842.pdf' }),
     };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const res: any = { setHeader: jest.fn(), send: jest.fn() };
 
     await controller.dayReportPdf(TERMINAL_CODE, DEVICE_SECRET, 'report-1', repUser(), res);
@@ -5227,7 +5264,7 @@ describe('MobilePosLiteController history and day-report routes', () => {
   // CD-22, the route is a desktop call and carries nothing a client chose.
   it('passes only the query and the caller to the backfill — no terminal headers, no body', () => {
     const service: any = { counterDeliveryBackfill: jest.fn().mockResolvedValue({}) };
-    const controller = new MobilePosLiteController(service);
+    const controller = new MobilePosLiteController(service, {} as any);
     const user = repUser();
 
     controller.counterDeliveryBackfill({}, 'company-1', user);
@@ -5492,4 +5529,121 @@ describe('MobilePosLiteService createDayReport price changes', () => {
     );
     expect(result).toMatchObject({ priceChangeCount: 0, priceDropTotal: 0, priceRaiseTotal: 0 });
   });
+});
+
+describe('checkout outcome reconciliation', () => {
+  const key = 'physical-sale-key-2026-10-03';
+  it('observes the confirmed canonical sale without replaying it or returning costs', async () => {
+    const { service, prisma, salesOrders, companyScope } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue({
+      id: 'so-1',
+      salesOrderNumber: 'SO-1',
+      totalAmount: new Prisma.Decimal(2300),
+      status: 'PAID',
+      deletedAt: null,
+    });
+    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+      state: 'confirmed',
+      sale: { id: 'so-1', salesOrderNumber: 'SO-1', totalAmount: 2300 },
+    });
+    expect(prisma.salesOrder.findFirst).toHaveBeenCalledWith({
+      where: {
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        mobilePosTerminalId: 'terminal-1',
+        idempotencyKey: key,
+      },
+      select: {
+        id: true,
+        salesOrderNumber: true,
+        totalAmount: true,
+        paidAmount: true,
+        outstandingAmount: true,
+        posTenders: true,
+        status: true,
+        deletedAt: true,
+      },
+    });
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      repUser(),
+      'company-1',
+      'WRITE',
+    );
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+    expect(prisma.mobilePosTerminal.update).not.toHaveBeenCalled();
+  });
+  it('reports missing keys without creating an order', async () => {
+    const { service, salesOrders } = makeService();
+    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+      state: 'not_found',
+    });
+    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+  });
+  it.each(['DRAFT', 'CANCELLED', 'DELIVERED'])(
+    'preserves %s orders for office review without completing them',
+    async (status) => {
+      const { service, prisma, salesOrders } = makeService();
+      prisma.salesOrder.findFirst.mockResolvedValue({
+        status,
+        salesOrderNumber: 'SO-REVIEW',
+        deletedAt: null,
+      });
+      expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+        state: 'needs_attention',
+        reference: 'SO-REVIEW',
+      });
+      expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+    },
+  );
+  it('does not mistake a deleted confirmed record for an available retry', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue({
+      status: 'PAID',
+      salesOrderNumber: 'SO-DELETED',
+      deletedAt: new Date(),
+    });
+    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+      state: 'needs_attention',
+      reference: 'SO-DELETED',
+    });
+  });
+  it.each(['wrong-device', undefined])(
+    'refuses device credentials before accessing sales (%s)',
+    async (secret) => {
+      const { service, prisma } = makeService();
+      await expect(
+        service.checkoutOutcome(TERMINAL_CODE, secret, key, repUser()),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses a reassigned cashier and expired company permissions', async () => {
+    const { service, prisma, companyScope } = makeService();
+    await expect(
+      service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, { ...repUser(), id: 'other-rep' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    companyScope.assertCanAccessCompany.mockRejectedValue(
+      new ForbiddenException('Permission expired'),
+    );
+    await expect(
+      service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
+  });
+  it('requires POS use permission at the controller boundary', () => {
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.checkoutOutcome),
+    ).toEqual(['mobile_pos_lite.use']);
+  });
+  it.each(['short', 'k'.repeat(65)])(
+    'validates the request identity before database lookup',
+    async (invalid) => {
+      const { service, prisma } = makeService();
+      await expect(
+        service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, invalid, repUser()),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
+    },
+  );
 });

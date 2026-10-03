@@ -1,0 +1,217 @@
+{
+  "notFound": {
+    "/this-route-does-not-exist": {
+      "status": 404,
+      "cacheControl": "private, no-cache, no-store, max-age=0, must-revalidate",
+      "title": "Page Not Found | Itemba Group | Itemba Group",
+      "robots": "noindex",
+      "h1": [
+        "404"
+      ],
+      "h2": [
+        "Page Not Found",
+        "Ready to talk to Itemba Group?"
+      ],
+      "internalLinks": [
+        "/",
+        "/companies",
+        "/services"
+      ]
+    },
+    "/services/not-a-real-service": {
+      "status": 404,
+      "cacheControl": "s-maxage=31536000",
+      "title": "Page Not Found | Itemba Group | Itemba Group",
+      "robots": "noindex",
+      "h1": [],
+      "h2": [],
+      "internalLinks": []
+    },
+    "/companies/not-a-real-company": {
+      "status": 404,
+      "cacheControl": "s-maxage=31536000",
+      "title": "Page Not Found | Itemba Group | Itemba Group",
+      "robots": "noindex",
+      "h1": [],
+      "h2": [],
+      "internalLinks": []
+    },
+    "/locations/not-a-real-location": {
+      "status": 404,
+      "cacheControl": "s-maxage=31536000",
+      "title": "Page Not Found | Itemba Group | Itemba Group",
+      "robots": "noindex",
+      "h1": [],
+      "h2": [],
+      "internalLinks": []
+    },
+    "/insights/not-a-real-article": {
+      "status": 404,
+      "cacheControl": "s-maxage=31536000",
+      "title": "Page Not Found | Itemba Group | Itemba Group",
+      "robots": "noindex",
+      "h1": [],
+      "h2": [],
+      "internalLinks": []
+    }
+  },
+  "unknownOgImages": {
+    "/services/not-a-real-service/opengraph-image": {
+      "status": 200,
+      "contentType": "image/png"
+    },
+    "/companies/not-a-real-company/opengraph-image": {
+      "status": 200,
+      "contentType": "image/png"
+    },
+    "/locations/not-a-real-location/opengraph-image": {
+      "status": 200,
+      "contentType": "image/png"
+    },
+    "/insights/not-a-real-article/opengraph-image": {
+      "status": 200,
+      "contentType": "image/png"
+    }
+  },
+  "api": {
+    "health": {
+      "status": 200,
+      "contentType": "application/json",
+      "cacheControl": null,
+      "keys": [
+        "service",
+        "status",
+        "timestamp"
+      ],
+      "status_field": "ok",
+      "service": "itemba-group-website",
+      "timestampIsIso": true
+    },
+    "enquiriesGet": {
+      "status": 405,
+      "allow": null
+    }
+  },
+  "assets": {
+    "/logo.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 168787,
+      "sha256": "ea3939d380627e327023a45895879985244718092c94a963add812e100bcd025",
+      "png": {
+        "width": 930,
+        "height": 360
+      }
+    },
+    "/logo-print.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 23702,
+      "sha256": "9acf92abff36fdc6b6bb9b4e695fe7652716107a120ee48f4aca3d456505b09d",
+      "png": {
+        "width": 930,
+        "height": 360
+      }
+    },
+    "/favicon.ico": {
+      "status": 200,
+      "contentType": "image/x-icon",
+      "bytes": 8579,
+      "sha256": "faec27a64c680368598083fe54999d46cb0fd67aa6c33a56c7206cbe3f8e91ef"
+    },
+    "/favicon-16x16.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 574,
+      "sha256": "47ecac9751a232a1f862995f022375691a33dc8b37266f32a8ca119a82c31ce6",
+      "png": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    "/favicon-32x32.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 1440,
+      "sha256": "e43255d7873b0f470a5c611603391a539d90ede017ec15e38a9ea8fb95596115",
+      "png": {
+        "width": 32,
+        "height": 32
+      }
+    },
+    "/favicon-48x48.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 2628,
+      "sha256": "7dc46b026529d1c7217abede4d4200af05fa7e91be050bdd34e096a37ee882bc",
+      "png": {
+        "width": 48,
+        "height": 48
+      }
+    },
+    "/favicon-64x64.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 3867,
+      "sha256": "cead4b40b7beaf578f77ea4de5760c1253d03a952123877125a694f38cda59d1",
+      "png": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    "/apple-touch-icon.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 19407,
+      "sha256": "5d80bd2c7c228d2fce13106e2f475287b29ecd9bb8d0c11ae5b4abddffb3bebe",
+      "png": {
+        "width": 180,
+        "height": 180
+      }
+    },
+    "/site-icon-192.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 21684,
+      "sha256": "bd8fba35ea2bb11f02ca34ee52528dca28968137197d56fe905999fcb66b5554",
+      "png": {
+        "width": 192,
+        "height": 192
+      }
+    },
+    "/site-icon-512.png": {
+      "status": 200,
+      "contentType": "image/png",
+      "bytes": 150840,
+      "sha256": "4130472334972596ecd608f124b5490718a07075d467cc42db8bade09a67e8db",
+      "png": {
+        "width": 512,
+        "height": 512
+      }
+    },
+    "/downloads/itemba-group-profile.pdf": {
+      "status": 200,
+      "contentType": "application/pdf",
+      "bytes": 4836670,
+      "sha256": "3f4233cd6300d245ce925c2737321e92a67a4342a6e2e6afef5b0786b0f5737a"
+    },
+    "/downloads/itemba-westsides-profile.pdf": {
+      "status": 200,
+      "contentType": "application/pdf",
+      "bytes": 6596668,
+      "sha256": "5e7735fec26c20c6ed471f4cc7516ba196232a97c53c697cba0171753428fb19"
+    },
+    "/downloads/itemba-mwanjalisi-profile.pdf": {
+      "status": 200,
+      "contentType": "application/pdf",
+      "bytes": 3736520,
+      "sha256": "142201927771d367592a37e4c7d707f9b2a26c07fa0f612b9afb6099842d19f2"
+    },
+    "/downloads/itemba-enterprises-profile.pdf": {
+      "status": 200,
+      "contentType": "application/pdf",
+      "bytes": 4112219,
+      "sha256": "3d5398cb701c8d83c02d7300faad1ef258598f0d60a981ac3b589d9695476ae8"
+    }
+  }
+}

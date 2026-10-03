@@ -35,6 +35,11 @@ export class CreateExpenseDto {
   @IsString()
   vendorName?: string;
 
+  /** Party linkage (Phase 2): the supplier profile this expense was paid to, if any. */
+  @IsOptional()
+  @IsString()
+  supplierId?: string;
+
   @IsNotEmpty()
   @IsNumber()
   amount!: number;

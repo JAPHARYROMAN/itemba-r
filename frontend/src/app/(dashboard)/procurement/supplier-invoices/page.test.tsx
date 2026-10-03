@@ -38,7 +38,10 @@ vi.mock('@/components/documents', () => ({
   DocumentArtifactButton: () => null,
 }));
 
-import SupplierInvoicesPage, { VoidInvoiceModal, type SupplierInvoice } from './page';
+import SupplierInvoicesPage, {
+  VoidInvoiceModal,
+  type SupplierInvoice,
+} from '@/features/procurement/screens/supplier-invoices';
 
 function invoice(overrides: Partial<SupplierInvoice> = {}): SupplierInvoice {
   return {

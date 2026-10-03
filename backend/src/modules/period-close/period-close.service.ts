@@ -7,6 +7,10 @@ import { paginatedResponse } from '../../common/utils/paginated-response';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreatePeriodCloseDto, QueryPeriodCloseDto } from './dto/period-close.dto';
+import {
+  CloseAcknowledgement,
+  PartyCloseCheckService,
+} from '../financial-reports/party-close-check.service';
 
 @Injectable()
 export class PeriodCloseService {
@@ -14,6 +18,8 @@ export class PeriodCloseService {
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
+    // Party linkage (Phase 3): optional so the existing specs keep constructing the service.
+    private readonly closeCheck?: PartyCloseCheckService,
   ) {}
 
   async findAll(query: QueryPeriodCloseDto, user: AuthUser) {
@@ -73,9 +79,19 @@ export class PeriodCloseService {
     return item;
   }
 
-  async close(id: string, user: AuthUser) {
+  async close(id: string, user: AuthUser, acknowledged?: CloseAcknowledgement) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (existing.status === PeriodCloseStatus.CLOSED) throw new BadRequestException('Period already closed');
+    // Party linkage (Phase 3): the control-by-party reconciliation gates the close. Differences
+    // are refused unless acknowledged with a reason, and both sides are snapshotted at close.
+    const check = this.closeCheck
+      ? await this.closeCheck.checkOrRefuse(
+          existing.companyId,
+          await this.periodEnd(existing.accountingPeriodId),
+          user,
+          acknowledged,
+        )
+      : null;
     // Fast-fail outside the transaction for a clearer error path, but the
     // authoritative check is re-run inside the transaction below to close the
     // TOCTOU window (finding #24): a DRAFT journal created in the gap between this
@@ -93,6 +109,17 @@ export class PeriodCloseService {
         data: { status: 'CLOSED' },
       });
       await this.ensurePeriodLock(tx, existing, user.id);
+      if (check)
+        await this.closeCheck!.snapshot(
+          tx,
+          {
+            companyId: existing.companyId,
+            accountingPeriodId: existing.accountingPeriodId,
+            periodCloseId: id,
+            userId: user.id,
+          },
+          check,
+        );
       return close;
     });
     await this.auditLogs.log({
@@ -100,8 +127,44 @@ export class PeriodCloseService {
       entityType: 'AccountingPeriodClose',
       entityId: id,
       userId: user.id,
+      ...(check
+        ? {
+            companyId: existing.companyId,
+            metadata: this.closeCheck!.auditMetadata(check, acknowledged),
+          }
+        : {}),
     });
     return updated;
+  }
+
+  /** Party linkage (Phase 3): the check the close will apply, for the close dialog. */
+  async partyCheck(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    return this.requireCloseCheck().check(
+      existing.companyId,
+      await this.periodEnd(existing.accountingPeriodId),
+      user,
+    );
+  }
+
+  /** Party linkage (Phase 3): what both sides said at the latest close of this period. */
+  async partySnapshots(id: string, user: AuthUser) {
+    const existing = await this.findOne(id, user);
+    return this.requireCloseCheck().snapshots(existing.accountingPeriodId);
+  }
+
+  private requireCloseCheck() {
+    if (!this.closeCheck)
+      throw new BadRequestException('Control reconciliation is unavailable in this deployment.');
+    return this.closeCheck;
+  }
+
+  private async periodEnd(accountingPeriodId: string) {
+    const period = await this.prisma.accountingPeriod.findFirst({
+      where: { id: accountingPeriodId },
+      select: { endDate: true },
+    });
+    return period?.endDate ?? new Date();
   }
 
   async reopen(id: string, user: AuthUser) {

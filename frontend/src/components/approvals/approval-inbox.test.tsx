@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { ApprovalInbox } from './approval-inbox';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { type ApprovalRequest, requestPath } from './approval-request-types';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -35,6 +36,9 @@ const request: ApprovalRequest = {
   company: { id: 'company', name: 'Example Company' },
   entityType: 'SupplierInvoice',
   entityId: 'INV-42',
+  partyType: 'SUPPLIER',
+  supplierId: 'sup-1',
+  supplier: { id: 'sup-1', name: 'Mwanjalisi Station', supplierCode: 'SUP-1' },
   actionType: 'PAY',
   requestedById: 'maker',
   requestedBy: { fullName: 'Test requester' },
@@ -145,6 +149,12 @@ describe('Request register and assigned inbox', () => {
       'Verify invoice reference.',
     ])
       expect(within(detail).getAllByText(text).length).toBeGreaterThan(0);
+    // Party linkage (Phase 3): the row names the party; the inspector links to its profile.
+    expect(screen.getAllByText(/PAY-0142 · Mwanjalisi Station/).length).toBeGreaterThan(0);
+    expect(within(detail).getByRole('link', { name: 'Mwanjalisi Station' })).toHaveAttribute(
+      'href',
+      '/invoice-desk/suppliers/sup-1',
+    );
     await userEvent.click(within(detail).getByText('Recorded changes'));
     expect(within(detail).getByText(/4000000/)).toBeInTheDocument();
     capture('approval-pending');
@@ -184,8 +194,8 @@ describe('Request register and assigned inbox', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters', exact: true }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'DRAFT');
+    await chooseSelectOption('Company filter', 'company', user);
+    await chooseSelectOption('Status filter', 'DRAFT', user);
     await user.type(screen.getByRole('textbox', { name: 'Entity type filter' }), 'SupplierInvoice');
     await waitFor(() =>
       expect(api.get).toHaveBeenLastCalledWith(
@@ -202,7 +212,7 @@ describe('Request register and assigned inbox', () => {
         }),
       ),
     );
-    expect(screen.getByRole('option', { name: 'Expired' })).toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Status filter'))).toContain('Expired');
   });
   it('cancels obsolete list/detail reads, removes stale actions and retries list errors', async () => {
     const user = userEvent.setup();

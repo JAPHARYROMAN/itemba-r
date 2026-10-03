@@ -1,6 +1,17 @@
 import type { MetadataRoute } from 'next';
-import { site } from '@/lib/site';
+import { surfaces } from '@/design/tokens';
+import { site } from '@/content/site';
 
+/**
+ * The web app manifest.
+ * - The name and the flag-resolved group description, as on home.
+ * - The canvas colour, as on html/body and the theme-color meta, so the
+ *   launch splash and the browser chrome match the light shell.
+ * - `lang` is the html `lang`.
+ * - Only square icons, at their real sizes. /logo.png (930x360, a white
+ *   lockup) was declared as a 512x512 icon on origin/main and is gone;
+ *   there is no maskable icon until one is produced.
+ */
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: site.title,
@@ -9,9 +20,9 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    background_color: '#080f1e',
-    theme_color: '#080f1e',
-    lang: 'en-TZ',
+    background_color: surfaces.canvas,
+    theme_color: surfaces.canvas,
+    lang: site.language,
     categories: ['business'],
     icons: [
       {
@@ -31,11 +42,6 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: '512x512',
         type: 'image/png',
         purpose: 'any',
-      },
-      {
-        src: '/logo.png',
-        sizes: '512x512',
-        type: 'image/png',
       },
     ],
   };
