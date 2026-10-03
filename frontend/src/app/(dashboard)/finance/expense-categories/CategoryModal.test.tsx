@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { CategoryModal, Company, ExpenseCategory } from './page';
+import { CategoryModal, Company, ExpenseCategory } from '@/features/finance/screens/expense-categories';
 
 /**
  * Expense-category GL linkage regression.

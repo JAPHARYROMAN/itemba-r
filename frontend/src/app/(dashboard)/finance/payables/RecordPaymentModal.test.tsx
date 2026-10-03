@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { RecordPaymentModal, Payable } from './page';
+import { RecordPaymentModal, Payable } from '@/features/finance/screens/payables';
 
 /**
  * Payables record-payment modal regressions.

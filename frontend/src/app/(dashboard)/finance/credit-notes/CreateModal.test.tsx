@@ -31,7 +31,7 @@ vi.mock('@/lib/api-client', () => ({
   backendPatch: (...args: unknown[]) => backendPatch(...args),
 }));
 
-import { CreateModal } from './page';
+import { CreateModal } from '@/features/finance/screens/credit-notes';
 
 const COMPANY = { id: 'co-1', name: 'Itemba Ltd' };
 
