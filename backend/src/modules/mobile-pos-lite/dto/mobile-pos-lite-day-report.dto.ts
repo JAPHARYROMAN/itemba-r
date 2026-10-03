@@ -94,3 +94,11 @@ export class QueryMobilePosLiteDayReportsDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must be a calendar date in YYYY-MM-DD form' })
   to?: string;
 }
+
+/** A live, read-only till report; no shift or close is created. */
+export class QueryPosDailySummaryDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  businessDate?: string;
+}

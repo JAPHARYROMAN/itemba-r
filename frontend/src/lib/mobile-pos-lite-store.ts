@@ -527,6 +527,8 @@ export type PosPurchaseDraft = {
   type: 'purchase';
   terminalCode: string;
   idempotencyKey: string;
+  /** Missing on older drafts: conservatively treat those as attempted. */
+  attempted?: boolean;
   supplierId: string | null;
   supplierName: string | null;
   lines: Array<{

@@ -34,6 +34,7 @@ import { QueryMobilePosLiteCounterDeliveryBackfillDto } from './dto/mobile-pos-l
 import {
   CreateMobilePosLiteDayReportDto,
   QueryMobilePosLiteDayReportsDto,
+  QueryPosDailySummaryDto,
 } from './dto/mobile-pos-lite-day-report.dto';
 import { MobilePosLiteService } from './mobile-pos-lite.service';
 
@@ -373,6 +374,49 @@ export class MobilePosLiteController {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(report.buffer);
+  }
+
+  @Get('daily-summary')
+  @Header('Cache-Control', 'private, no-store')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.use')
+  dailySummary(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Query() query: QueryPosDailySummaryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.dailySummary(code, secret, query.businessDate, user);
+  }
+
+  @Get('daily-summary/pdf')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.use')
+  async dailySummaryPdf(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @Query() query: QueryPosDailySummaryDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const report = await this.service.dailySummaryPdf(code, secret, query.businessDate, user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${report.fileName}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(report.buffer);
+  }
+
+  @Get('stock-counts')
+  @Header('Cache-Control', 'private, no-store')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.stock_count')
+  stockCountHistory(
+    @Headers('x-mobile-pos-terminal') code: string | undefined,
+    @Headers('x-mobile-pos-device') secret: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.stockCountHistory(code, secret, user);
   }
 
   @Get('my-sales-today')

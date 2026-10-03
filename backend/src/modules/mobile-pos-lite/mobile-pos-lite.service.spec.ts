@@ -23,6 +23,7 @@ function repUser(): AuthUser {
     id: 'rep-1',
     email: 'rep@example.com',
     roles: [],
+    roleScopes: ['COMPANY'],
     permissions: ['mobile_pos_lite.use', 'mobile_pos_lite.purchase'],
     companyId: 'company-1',
     companyAccess: [],
@@ -118,6 +119,8 @@ function countAdjustment(overrides: Record<string, unknown> = {}) {
 
 function makeService() {
   const prisma: any = {
+    paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+    refund: { findMany: jest.fn().mockResolvedValue([]) },
     creditNote: { findMany: jest.fn().mockResolvedValue([]) },
     mobilePosTerminal: {
       findFirst: jest.fn().mockResolvedValue(terminalRow()),
@@ -222,6 +225,7 @@ function makeService() {
       ),
     },
   };
+  prisma.$transaction = jest.fn(async (work: (db: any) => Promise<unknown>) => work(prisma));
   const companyScope: any = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     assertGroupScoped: jest.fn(),
@@ -4949,6 +4953,9 @@ describe('MobilePosLiteService createDayReport', () => {
       where: {
         salesOrder: {
           companyId: 'company-1',
+          divisionId: 'division-1',
+          branchId: 'branch-1',
+          deletedAt: null,
           mobilePosTerminalId: 'terminal-1',
           createdById: 'rep-1',
           status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },

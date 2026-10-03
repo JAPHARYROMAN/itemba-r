@@ -51,7 +51,7 @@ export function PurchaseScreen({
   setPurchaseCart: Dispatch<SetStateAction<PurchaseLine[]>>;
   setPurchaseQuantity: (productId: string, next: number) => void;
   purchaseTotal: number;
-  recordPurchase: () => Promise<void>;
+  recordPurchase: () => Promise<import('@/features/pos/core/pos-types').PurchaseResult | void>;
   t: PosTranslate;
   setScreen: (screen: PosScreen) => void;
   /**

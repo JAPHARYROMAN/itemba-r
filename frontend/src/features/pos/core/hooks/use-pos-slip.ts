@@ -55,6 +55,7 @@ import type { PurchaseLine, Supplier } from '../pos-types';
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
 export type PosSlip = {
+  attempted: boolean;
   /**
    * The LAST write to this phone succeeded and the form on screen is what it
    * holds — the ribbon's brass badge and the Pokea "saved on this phone" line.
@@ -73,7 +74,7 @@ export type PosSlip = {
    */
   sendKey: () => Promise<string | null>;
   /** Pokea opened: restore the parked slip into the form, online or offline. */
-  enter: () => void;
+  enter: () => Promise<void>;
   /** HIFADHI KIKARATASI — resolves false when nothing reached the phone. */
   save: () => Promise<boolean>;
   /** A save the phone refused: the slab shakes, exactly like a rejection. */
@@ -180,6 +181,7 @@ export function usePosSlip({
    * cannot see). From here the key is frozen: see the key rule at the top.
    */
   const committedRef = useRef(false);
+  const [attempted, setAttempted] = useState(false);
   /**
    * Notes a restored slip carried. The Kaunta form has no notes box yet, so
    * this only ever rides a restore through untouched — but it rides, so the
@@ -205,6 +207,7 @@ export function usePosSlip({
    * re-park the slip we just deleted under a brand-new key. Lifted by `enter()`.
    */
   const settledRef = useRef(false);
+  const freezingRef = useRef(false);
 
   useEffect(() => {
     if (!purchasesEnabled) return;
@@ -224,6 +227,7 @@ export function usePosSlip({
     // delivery is a new delivery under a new key rather than a resend of this
     // one against an order the server has already recorded.
     committedRef.current = false;
+    setAttempted(false);
     notesRef.current = undefined;
     draftRef.current = null;
     savedSignatureRef.current = null;
@@ -279,37 +283,46 @@ export function usePosSlip({
   const buildDraft = useCallback((): PosPurchaseDraft | null => {
     const body = buildBody();
     if (body.lines.length === 0 && !body.supplierId) return null;
-    return { ...body, idempotencyKey: keyFor(body), savedAt: Date.now() };
+    return {
+      ...body,
+      idempotencyKey: keyFor(body),
+      attempted: committedRef.current,
+      savedAt: Date.now(),
+    };
   }, [buildBody, keyFor]);
 
-  const persist = useCallback(async (): Promise<boolean> => {
-    const draft = buildDraft();
-    if (!draft) return false;
-    try {
-      await savePurchaseDraft(terminalCode, draft);
-    } catch {
-      // Storage refused (quota, private mode): the form on screen is still the
-      // manager's work, so the honest answer is "not saved" — the caller keeps
-      // them on Pokea rather than navigating away from unsaved lines.
-      //
-      // …and the badge drops with it, even when an EARLIER save succeeded.
-      // `parked` is a custody claim about the lines in front of her — the brass
-      // ribbon chip and "Kikaratasi kimehifadhiwa kwenye simu hii." — and once
-      // a phone that is over quota starts refusing writes, every later edit is
-      // work it did not keep. Claiming custody of the best write instead of the
-      // last one is how ten lines vanish behind a badge that said they were
-      // safe. Nothing is deleted here and `forget()` is deliberately NOT
-      // called: whatever version IS on the phone stays, with its frozen key
-      // intact, so a later successful save (or a resend) still resumes the same
-      // chain rather than opening a second delivery.
-      setParked(false);
-      return false;
-    }
-    draftRef.current = draft;
-    savedSignatureRef.current = slipSignature(draft);
-    setParked(true);
-    return true;
-  }, [buildDraft, terminalCode]);
+  const persist = useCallback(
+    async (freeze = false): Promise<boolean> => {
+      const draft = buildDraft();
+      if (!draft) return false;
+      if (freeze) draft.attempted = true;
+      try {
+        await savePurchaseDraft(terminalCode, draft);
+      } catch {
+        // Storage refused (quota, private mode): the form on screen is still the
+        // manager's work, so the honest answer is "not saved" — the caller keeps
+        // them on Pokea rather than navigating away from unsaved lines.
+        //
+        // …and the badge drops with it, even when an EARLIER save succeeded.
+        // `parked` is a custody claim about the lines in front of her — the brass
+        // ribbon chip and "Kikaratasi kimehifadhiwa kwenye simu hii." — and once
+        // a phone that is over quota starts refusing writes, every later edit is
+        // work it did not keep. Claiming custody of the best write instead of the
+        // last one is how ten lines vanish behind a badge that said they were
+        // safe. Nothing is deleted here and `forget()` is deliberately NOT
+        // called: whatever version IS on the phone stays, with its frozen key
+        // intact, so a later successful save (or a resend) still resumes the same
+        // chain rather than opening a second delivery.
+        setParked(false);
+        return false;
+      }
+      draftRef.current = draft;
+      savedSignatureRef.current = slipSignature(draft);
+      setParked(true);
+      return true;
+    },
+    [buildDraft, terminalCode],
+  );
 
   /**
    * POKEA. Taking the key is what commits it — not a 2xx, not even a completed
@@ -352,7 +365,9 @@ export function usePosSlip({
     // `persist()` re-derives the body synchronously from the same refs, so the
     // key it writes is the key returned here — the two cannot disagree.
     const key = keyFor(buildBody());
-    const saved = await persist();
+    freezingRef.current = true;
+    const saved = await persist(true);
+    freezingRef.current = false;
     if (!saved) {
       // A verb that did not do what it says is a rejection, whoever refused it:
       // the same haptic and the same slab shake a server refusal gets (§4).
@@ -361,6 +376,7 @@ export function usePosSlip({
       return null;
     }
     committedRef.current = true;
+    setAttempted(true);
     // The delivery can post while this write is still in flight, and
     // `completed()` deletes the slip the moment it does — a write that lands
     // after that would resurrect a dead one under a spent key. Same guard the
@@ -384,7 +400,7 @@ export function usePosSlip({
     const timer = window.setTimeout(() => {
       // The delivery posted while this timer was running: nothing changed the
       // effect's inputs, so only the flag can stop it re-parking a dead slip.
-      if (settledRef.current) return;
+      if (settledRef.current || freezingRef.current) return;
       const draft = buildDraft();
       if (draft && slipSignature(draft) === savedSignatureRef.current) return;
       // A failed autosave costs the crash-recovery net, never the form in
@@ -398,10 +414,10 @@ export function usePosSlip({
   }, [buildDraft, forget, hasContent, persist, purchaseCart, purchasesEnabled, supplier]);
 
   const enter = useCallback(() => {
-    if (!enabledRef.current) return;
+    if (!enabledRef.current) return Promise.resolve();
     settledRef.current = false;
     restoringRef.current = true;
-    void (loadedRef.current ?? Promise.resolve()).then(() => {
+    return (loadedRef.current ?? Promise.resolve()).then(() => {
       restoringRef.current = false;
       const draft = draftRef.current;
       if (!draft) {
@@ -409,6 +425,7 @@ export function usePosSlip({
         // left over from an abandoned form-session must not ride into it.
         keyRef.current = null;
         committedRef.current = false;
+        setAttempted(false);
         notesRef.current = undefined;
         return;
       }
@@ -417,16 +434,12 @@ export function usePosSlip({
       // manager reviews it and taps POKEA. The parked key comes back so an
       // interrupted attempt resumes its own chain instead of opening a second.
       //
-      // A restored slip counts as COMMITTED. Whether the session that parked
-      // it ever tapped POKEA is not knowable here — the draft record has no
-      // room for the flag and the phone may have died between the tap and the
-      // response — and the two mistakes are not symmetric: freezing a key that
-      // never left the phone costs nothing at all (no marker exists, so it can
-      // carry any content), while re-minting one that did costs the branch a
-      // delivery it never received. An unknown resolves to the safe side.
+      // New drafts durably record the attempt before sending. Older drafts
+      // lack the flag and remain frozen because their submission is uncertain.
       notesRef.current = draft.notes;
       keyRef.current = { signature: payloadSignature(draft), key: draft.idempotencyKey };
-      committedRef.current = true;
+      committedRef.current = draft.attempted !== false;
+      setAttempted(committedRef.current);
       savedSignatureRef.current = slipSignature(draft);
       setSupplierRef.current(
         draft.supplierId ? { id: draft.supplierId, name: draft.supplierName ?? '' } : null,
@@ -465,5 +478,5 @@ export function usePosSlip({
     forget();
   }, [forget]);
 
-  return { parked, hasContent, sendKey, enter, save, shake, completed };
+  return { parked, hasContent, attempted, sendKey, enter, save, shake, completed };
 }

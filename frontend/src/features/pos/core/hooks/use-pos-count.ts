@@ -143,6 +143,7 @@ export type PosCountUnresolvedLine = {
 };
 
 export type PosCount = {
+  attempted: boolean;
   step: PosCountStep;
   /** productId → counted quantity. An ABSENT key is "not counted"; 0 is counted. */
   lines: Record<string, number>;
@@ -207,7 +208,7 @@ export type PosCount = {
   needsNetwork: boolean;
   shake: boolean;
   result: PosCountResult | null;
-  enter: () => void;
+  enter: () => Promise<void>;
   setLine: (productId: string, value: number | null) => void;
   resumeDraft: () => void;
   discardDraft: () => void;
@@ -390,6 +391,7 @@ export function usePosCount({
   visibleProducts: ReadonlyMap<string, string> | null;
 }): PosCount {
   const [step, setStep] = useState<PosCountStep>('entry');
+  const [attempted, setAttempted] = useState(false);
   const [lines, setLines] = useState<Record<string, number>>({});
   const [capturedAt, setCapturedAt] = useState<number | null>(null);
   const [revision, setRevision] = useState(0);
@@ -559,6 +561,7 @@ export function usePosCount({
    */
   const releaseKey = useCallback(() => {
     keyRef.current = null;
+    setAttempted(false);
     // No sheet, nothing on the phone to claim custody of.
     setDraftKept(null);
     // The sheet is already gone from this session; a failed delete costs one
@@ -566,7 +569,7 @@ export function usePosCount({
     return clearCountDraft(binding.terminalCode).catch(() => undefined);
   }, [binding.terminalCode]);
 
-  const enter = useCallback(() => {
+  const enter = useCallback(async () => {
     setErrorRaw(null);
     setRefusal('unproven');
     setNeedsNetwork(false);
@@ -579,6 +582,7 @@ export function usePosCount({
       setStep('entry');
       setResult(null);
       keyRef.current = null;
+      setAttempted(false);
       setDraftKept(null);
       setRevision((current) => current + 1);
       return;
@@ -586,7 +590,7 @@ export function usePosCount({
     // Stepping out to Stoo and back continues the sheet in hand; only an empty
     // sheet (app restart, cold start) asks the resume/discard question.
     if (Object.keys(linesRef.current).length > 0) return;
-    readCountDraft(binding.terminalCode)
+    await readCountDraft(binding.terminalCode)
       .then((draft) => {
         if (draft && Object.keys(draft.lines).length > 0) {
           draftOfferRef.current = draft;
@@ -639,6 +643,7 @@ export function usePosCount({
     // fresh one). A draft written before the field existed carries no attempt,
     // so it resumes in the NONE state, exactly as it was left.
     keyRef.current = draft.idempotencyKey ?? null;
+    setAttempted(Boolean(draft.idempotencyKey));
     writeLines({ ...draft.lines }, draft.capturedAt);
     draftOfferRef.current = null;
     setDraftOffer(null);
@@ -756,6 +761,7 @@ export function usePosCount({
         return;
       }
       keyRef.current = idempotencyKey;
+      setAttempted(true);
 
       const response = await backendPost<PosCountResult>(
         '/mobile-pos-lite/stock-counts',
@@ -810,6 +816,7 @@ export function usePosCount({
   }, [binding, persistDraft, releaseKey]);
 
   return {
+    attempted,
     step,
     lines,
     countedCount,

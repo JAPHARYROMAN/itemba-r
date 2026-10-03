@@ -82,6 +82,8 @@ export function usePosStock({ binding }: { binding: MobilePosLiteBinding }): {
         const response = await backendGet<StockResponse>('/mobile-pos-lite/stock', {
           headers: terminalHeaders(binding),
         });
+        if (!Array.isArray(response.items) || !response.asOf)
+          throw new Error('Invalid stock snapshot');
         const fresh: PosStockSnapshot = {
           items: response.items,
           asOf: response.asOf,

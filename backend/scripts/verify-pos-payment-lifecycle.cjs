@@ -89,6 +89,8 @@ async function main() {
       roleScopes: ['GROUP'],
       permissions: [
         'mobile_pos_lite.use',
+        'mobile_pos_lite.purchase',
+        'mobile_pos_lite.stock_count',
         'sales.create',
         'sales.view',
         'cash_desk.view',
@@ -177,6 +179,8 @@ async function main() {
       ['COST_OF_GOODS_SOLD', 'COST_OF_GOODS_SOLD'],
       ['INVENTORY_ASSET', 'ASSET'],
       ['TAX_VAT_PAYABLE', 'LIABILITY'],
+      ['AP_CONTROL', 'LIABILITY'],
+      ['INVENTORY_ADJUSTMENT_VARIANCE', 'EXPENSE'],
     ]) {
       await db.chartOfAccount.create({
         data: {
@@ -256,16 +260,19 @@ async function main() {
       'GeneratedDocumentsService',
     );
     const documents = new Generated(db, audit, null, companies);
+    const Purchases = load('modules/purchase-orders/purchase-orders.service', 'PurchaseOrdersService');
+    const GoodsReceived = load('modules/goods-received-notes/goods-received-notes.service', 'GoodsReceivedNotesService');
+    const Adjustments = load('modules/stock-adjustments/stock-adjustments.service', 'StockAdjustmentsService');
     const pos = new Mobile(
       db,
       companies,
       audit,
       sales,
-      null,
-      null,
+      new Purchases(db, audit, movements, new Tax(db, companies, audit), codes, companies, engine, resolver, profit),
+      new GoodsReceived(db, audit, companies, movements),
       codes,
       documents,
-      null,
+      new Adjustments(db, audit, movements, companies, engine, resolver),
       new Delivery(db, audit, codes),
     );
     const cash = new Cash(db, companies, org),
@@ -768,6 +775,47 @@ async function main() {
     checks.push(
       'Company-letterhead sale, collection and return PDFs render; revoked branch cannot download',
     );
+    const daily = await pos.dailySummary(terminal.terminalCode, secret, undefined, user);
+    const allocations = await db.paymentAllocation.findMany({
+      where: { companyId: company.id, customerPayment: { status: 'COMPLETED', deletedAt: null } },
+    });
+    const refunds = await db.refund.findMany({ where: { companyId: company.id, status: 'PAID', deletedAt: null } });
+    assert.equal(daily.collectionTotal, allocations.reduce((n, row) => n + Number(row.amount), 0));
+    assert.equal(daily.refundTotal, refunds.reduce((n, row) => n + Number(row.amount), 0));
+    assert.equal(daily.netReceipts, daily.initialReceipts + daily.collectionTotal - daily.refundTotal);
+    await assert.rejects(pos.dailySummary(terminal.terminalCode, secret, undefined, restricted));
+    const dailyPdf = await pos.dailySummaryPdf(terminal.terminalCode, secret, undefined, user);
+    assert(dailyPdf.buffer.subarray(0, 5).toString() === '%PDF-');
+    if (process.env.POS_PROOF_PDF_DIR) require('node:fs').writeFileSync(path.join(process.env.POS_PROOF_PDF_DIR, 'daily-report.pdf'), dailyPdf.buffer);
+    checks.push('Native daily report reconciles real collections and paid refunds, renders letterhead PDF and rejects revoked scope');
+    // Receiving and counting share canonical records, with replay-safe stock movements.
+    const supplier = await db.supplier.create({ data: { ...scope, supplierCode: 'SUP-PROOF', name: 'Proof supplier' } });
+    const beforeReceive = Number((await db.inventoryBalance.findFirst({ where: { productId: product.id, branchId: branch.id } })).quantityOnHand);
+    const purchaseRequest = { supplierId: supplier.id, idempotencyKey: randomUUID(), lines: [{ productId: product.id, quantity: 2 }] };
+    const purchase = await pos.createPurchase(terminal.terminalCode, secret, purchaseRequest, user);
+    const purchaseReplay = await pos.createPurchase(terminal.terminalCode, secret, purchaseRequest, user);
+    assert.equal(purchase.id, purchaseReplay.id);
+    assert(purchase.grnNumber);
+    assert.equal(Number((await db.inventoryBalance.findFirst({ where: { productId: product.id, branchId: branch.id } })).quantityOnHand), beforeReceive + 2);
+    assert.equal(await db.purchaseOrder.count(), 1);
+    assert.equal(await db.goodsReceivedNote.count(), 1);
+    const deliveryHistory = await pos.purchaseHistory(terminal.terminalCode, secret, user);
+    assert.equal(deliveryHistory.purchases[0].id, purchase.id);
+    assert.equal(JSON.stringify(deliveryHistory).includes('unitCost'), false);
+    checks.push('Native receiving creates one shared PO and posted GRN, increases stock once and exposes cost-blind history');
+    const countRequest = { idempotencyKey: randomUUID(), countedAt: new Date().toISOString(), lines: [{ productId: product.id, countedQuantity: beforeReceive + 1 }] };
+    const count = await pos.createStockCount(terminal.terminalCode, secret, countRequest, user);
+    const countReplay = await pos.createStockCount(terminal.terminalCode, secret, countRequest, user);
+    assert.equal(count.id, countReplay.id);
+    assert.equal(count.status, 'POSTED');
+    assert.equal(Number((await db.inventoryBalance.findFirst({ where: { productId: product.id, branchId: branch.id } })).quantityOnHand), beforeReceive + 1);
+    const countHistory = await pos.stockCountHistory(terminal.terminalCode, secret, user);
+    assert.equal(countHistory.counts[0].id, count.id);
+    assert.equal(countHistory.counts[0].lines[0].varianceQuantity, -1);
+    const countJournal = await db.journalEntry.findMany({ where: { referenceType: 'StockAdjustment', referenceId: count.id }, include: { lines: true } });
+    assert.equal(countJournal.length, 1);
+    assert.equal(countJournal[0].lines.reduce((n,l)=>n+Number(l.debit),0), countJournal[0].lines.reduce((n,l)=>n+Number(l.credit),0));
+    checks.push('Native count posts one canonical adjustment and balanced journal, replays without another stock change and lists its original variance');
     console.log(JSON.stringify({ ok: true, compiled, checks, existingBusinessDataChanged: false }));
   } finally {
     await db?.$disconnect();
@@ -780,5 +828,7 @@ async function main() {
 }
 main().catch((error) => {
   console.error('POS disposable proof failed: ' + error.message);
+  const location = error.stack?.split('\n').find((line) => line.includes('verify-pos-payment-lifecycle.cjs:'));
+  if (location) console.error(location.trim());
   process.exitCode = 1;
 });

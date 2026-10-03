@@ -9,12 +9,14 @@ import userEvent from '@testing-library/user-event';
 import { MobilePosLite } from '@/components/westsides/mobile-pos-lite/mobile-pos-lite';
 import { deviceDatabase, deviceLocks } from '../core/testing/device-database';
 import { PosHostContext, type PosHost } from '../core/pos-host-context';
+import { writeCountDraft, savePurchaseDraft } from '@/lib/mobile-pos-lite-store';
 
 const h = vi.hoisted(() => {
   const state = {
     binding: null as null | { terminalCode: string; deviceSecret: string; activatedAt: string },
     session: null as unknown,
     outbox: [] as Array<Record<string, unknown>>,
+    drafts: new Map<string, unknown>(),
   };
   const router = { replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), back: vi.fn() };
   return {
@@ -87,6 +89,21 @@ vi.mock('@/lib/mobile-pos-lite-store', () => ({
   writeDaylogSent: vi.fn(async () => undefined),
   // Kaunta (v2) boot reads these; the v2 comparison test mounts it.
   readCachedStock: vi.fn(async () => null),
+  writeCachedStock: vi.fn(async () => undefined),
+  readPurchaseDraft: vi.fn(async (code: string) => h.state.drafts.get(code + ':purchase') ?? null),
+  savePurchaseDraft: vi.fn(async (code: string, value: unknown) => {
+    h.state.drafts.set(code + ':purchase', structuredClone(value));
+  }),
+  deletePurchaseDraft: vi.fn(async (code: string) => {
+    h.state.drafts.delete(code + ':purchase');
+  }),
+  readCountDraft: vi.fn(async (code: string) => h.state.drafts.get(code + ':count') ?? null),
+  writeCountDraft: vi.fn(async (code: string, value: unknown) => {
+    h.state.drafts.set(code + ':count', structuredClone(value));
+  }),
+  clearCountDraft: vi.fn(async (code: string) => {
+    h.state.drafts.delete(code + ':count');
+  }),
   sweepOrphanDrafts: vi.fn(async () => []),
   getDaylogEntry: vi.fn(async () => null),
 }));
@@ -124,6 +141,13 @@ function salesPosts() {
 }
 
 beforeEach(() => {
+  localStorage.removeItem('itemba-pos-lang');
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute('open', '');
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute('open');
+  };
   h.db = deviceDatabase().db;
   Object.defineProperty(navigator, 'locks', { configurable: true, value: deviceLocks() });
   sessionStorage.clear();
@@ -135,6 +159,7 @@ beforeEach(() => {
   };
   h.state.session = makeSession(3);
   h.state.outbox = [];
+  h.state.drafts.clear();
   setOnLine(true);
   h.backendGet.mockImplementation(async (path: string) => {
     if (path === '/mobile-pos-lite/session') return h.state.session;
@@ -1044,27 +1069,206 @@ describe('hardware on the new POS', () => {
   });
 });
 
-describe('Kaunta modules in the OS skin', () => {
+describe('Native stock transactions', () => {
+  async function openStock(user: ReturnType<typeof userEvent.setup>, tab: string) {
+    localStorage.setItem('itemba-pos-lang', 'en');
+    h.state.session = makeSession(3, { purchasesEnabled: true, stockCountsEnabled: true });
+    const originalGet = h.backendGet.getMockImplementation()!;
+    h.backendGet.mockImplementation(async (path: string, ...args: unknown[]) => {
+      if (path === '/mobile-pos-lite/stock')
+        return {
+          asOf: new Date().toISOString(),
+          branch: { id: 'b1', name: 'Kisimani Main' },
+          items: [SODA, MAJI].map((p) => ({
+            productId: p.id,
+            name: p.name,
+            code: p.code,
+            barcode: p.barcode,
+            unitSymbol: 'pc',
+            quantityOnHand: 5,
+            quantityReserved: 0,
+            available: 5,
+            threshold: 2,
+            status: 'IN_STOCK',
+          })),
+        };
+      if (path === '/mobile-pos-lite/suppliers')
+        return [{ id: 'sup-1', name: 'Supplier One', supplierCode: 'SUP-1' }];
+      return originalGet(path, ...args);
+    });
+    await boot();
+    await user.click(screen.getByRole('button', { name: 'Stock' }));
+    await user.click(screen.getAllByRole('button', { name: tab })[0]);
+  }
+  it('keeps counts blind, sends zero but not uncounted products, and shows pending approval honestly', async () => {
+    const user = userEvent.setup();
+    await openStock(user, 'Stock count');
+    const field = await screen.findByRole('spinbutton', { name: 'Counted quantity Soda Baridi' });
+    await waitFor(() => expect(field).toBeEnabled());
+    expect(screen.queryByText('On hand')).toBeNull();
+    await user.type(field, '0');
+    h.backendPost.mockResolvedValue({
+      adjustmentId: 'sa-1',
+      adjustmentNumber: 'SA-1',
+      status: 'PENDING_APPROVAL',
+      lines: [{ productId: 'p-soda', countedQuantity: 0, systemQuantity: 5, varianceQuantity: -5 }],
+    });
+    await user.click(screen.getByRole('button', { name: 'REVIEW COUNT' }));
+    await user.click(screen.getByRole('button', { name: 'SEND COUNT' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, send the count' }));
+    await screen.findByRole('heading', { name: 'Waiting for office approval' });
+    expect(screen.queryByRole('heading', { name: 'COUNT COMPLETE' })).toBeNull();
+    expect(h.backendPost.mock.calls[0][0]).toBe('/mobile-pos-lite/stock-counts');
+    expect(h.backendPost.mock.calls[0][1].lines).toEqual([
+      { productId: 'p-soda', countedQuantity: 0 },
+    ]);
+  });
+  it('does not post a count when the device refuses to keep its request identity', async () => {
+    const user = userEvent.setup();
+    await openStock(user, 'Stock count');
+    const field = await screen.findByRole('spinbutton', { name: 'Counted quantity Soda Baridi' });
+    await waitFor(() => expect(field).toBeEnabled());
+    await user.type(field, '4');
+    await user.click(screen.getByRole('button', { name: 'REVIEW COUNT' }));
+    await user.click(screen.getByRole('button', { name: 'SEND COUNT' }));
+    vi.mocked(writeCountDraft).mockRejectedValueOnce(new Error('storage full'));
+    await user.click(screen.getByRole('button', { name: 'Yes, send the count' }));
+    await screen.findByText(
+      'This count is not saved on this phone — it cannot be sent until it is. Try again.',
+    );
+    expect(h.backendPost).not.toHaveBeenCalled();
+  });
+  it('freezes receiving inputs after a lost response and retries the same payload and identity', async () => {
+    const user = userEvent.setup();
+    await openStock(user, 'Receive stock');
+    const supplierSearch = screen.getByRole('textbox', { name: 'Supplier name or code' });
+    await waitFor(() => expect(supplierSearch).toBeEnabled());
+    await user.type(supplierSearch, 'su');
+    await user.click(await screen.findByRole('button', { name: /Supplier One/ }));
+    await user.type(screen.getByRole('searchbox', { name: 'Find a product' }), 'soda');
+    await user.click(screen.getByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getByRole('button', { name: 'Review delivery' }));
+    h.backendPost.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await user.click(screen.getByRole('button', { name: 'Confirm and receive' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Confirm and receive' })).toBeEnabled(),
+    );
+    expect(screen.getByRole('spinbutton', { name: 'Quantity · pc', hidden: true })).toBeDisabled();
+    h.backendPost.mockResolvedValueOnce({
+      id: 'po-1',
+      purchaseOrderNumber: 'PO-1',
+      grnNumber: 'GRN-1',
+      totalAmount: 1500,
+    });
+    await user.click(screen.getByRole('button', { name: 'Confirm and receive' }));
+    await screen.findByRole('heading', { name: 'Delivery received' });
+    const calls = h.backendPost.mock.calls.filter(
+      ([path]) => path === '/mobile-pos-lite/purchases',
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1]).toEqual(calls[0][1]);
+    expect(h.state.drafts.has('T-001:purchase')).toBe(false);
+  });
+  it('blocks receiving when draft persistence fails before submission', async () => {
+    const user = userEvent.setup();
+    await openStock(user, 'Receive stock');
+    const supplierSearch = screen.getByRole('textbox', { name: 'Supplier name or code' });
+    await waitFor(() => expect(supplierSearch).toBeEnabled());
+    await user.type(supplierSearch, 'su');
+    await user.click(await screen.findByRole('button', { name: /Supplier One/ }));
+    await user.type(screen.getByRole('searchbox', { name: 'Find a product' }), 'soda');
+    await user.click(screen.getByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getByRole('button', { name: 'Review delivery' }));
+    vi.mocked(savePurchaseDraft).mockRejectedValueOnce(new Error('storage full'));
+    await user.click(screen.getByRole('button', { name: 'Confirm and receive' }));
+    await screen.findAllByText('The slip was not saved on this phone — try again.');
+    expect(h.backendPost).not.toHaveBeenCalled();
+  });
+  it('restores an unsubmitted delivery as editable and keeps it while switching workspaces', async () => {
+    h.state.drafts.set('T-001:purchase', {
+      type: 'purchase',
+      terminalCode: 'T-001',
+      idempotencyKey: 'unsubmitted-delivery',
+      attempted: false,
+      supplierId: 'sup-1',
+      supplierName: 'Supplier One',
+      savedAt: Date.now(),
+      lines: [{ productId: 'p-soda', name: 'Soda Baridi', unitSymbol: 'pc', quantity: 2 }],
+    });
+    const user = userEvent.setup();
+    await openStock(user, 'Receive stock');
+    const field = await screen.findByRole('spinbutton', { name: 'Quantity · pc' });
+    await waitFor(() => expect(field).toBeEnabled());
+    expect(field).toHaveValue(2);
+    await user.clear(field);
+    await user.type(field, '3');
+    await user.click(screen.getByRole('button', { name: 'Sell', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Stock', exact: true }));
+    await user.click(screen.getAllByRole('button', { name: 'Receive stock', exact: true })[0]);
+    expect(screen.getByRole('spinbutton', { name: 'Quantity · pc' })).toHaveValue(3);
+    expect(screen.getByRole('button', { name: 'Discard draft', exact: true })).toBeEnabled();
+    expect(h.backendPost).not.toHaveBeenCalled();
+  });
+  it('prevents a second OS window from opening a writer over the controlling delivery draft', async () => {
+    h.state.drafts.set('T-001:purchase', {
+      type: 'purchase',
+      terminalCode: 'T-001',
+      idempotencyKey: 'controlling-delivery',
+      attempted: false,
+      supplierId: 'sup-1',
+      supplierName: 'Supplier One',
+      savedAt: Date.now(),
+      lines: [{ productId: 'p-soda', name: 'Soda Baridi', unitSymbol: 'pc', quantity: 2 }],
+    });
+    const user = userEvent.setup();
+    await openStock(user, 'Receive stock');
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: 'Quantity · pc' })).toHaveValue(2),
+    );
+    const saved = JSON.stringify(h.state.drafts.get('T-001:purchase'));
+    const host: PosHost = {
+      instanceId: 'readonly-delivery',
+      basePath: '/pos',
+      ownsInput: () => true,
+      router: h.router,
+      history: {
+        hash: () => '#pos/receiving',
+        replace: () => undefined,
+        push: () => undefined,
+        back: () => undefined,
+        listen: () => () => undefined,
+      },
+    };
+    const second = render(
+      <PosHostContext.Provider value={host}>
+        <MobilePosLite />
+      </PosHostContext.Provider>,
+    );
+    const readonly = within(second.container);
+    await readonly.findByText(
+      'Take till control to work on the saved stock draft. Another window currently controls this till.',
+    );
+    expect(readonly.queryByRole('spinbutton', { name: 'Quantity · pc' })).toBeNull();
+    expect(readonly.queryByRole('button', { name: 'Review delivery', exact: true })).toBeNull();
+    expect(JSON.stringify(h.state.drafts.get('T-001:purchase'))).toBe(saved);
+    expect(h.backendPost).not.toHaveBeenCalled();
+  });
+});
+
+describe('Native operations and compatible Settings', () => {
   async function openMenuItem(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
     await user.click(screen.getByRole('button', { name: 'Menyu' }));
     await user.click(screen.getByRole('menuitem', { name }));
   }
 
-  it('opens the day book in the OS skin and returns to the new sale from Mauzo', async () => {
+  it('opens the native daily report and returns to Sell', async () => {
     const user = userEvent.setup();
     const { container } = await boot();
-    await openMenuItem(user, /^Leo/);
-
-    const kaunta = await waitFor(() => {
-      const root = container.querySelector('.pos-shell');
-      expect(root).not.toBeNull();
-      return root as HTMLElement;
-    });
-    expect(kaunta).toHaveAttribute('data-pos-skin', 'os');
-    // The OS skin follows the OS theme, never Mchana/Usiku.
-    expect(kaunta).not.toHaveAttribute('data-pos-theme');
-    expect(container.querySelector('.pos-app')).toBeNull();
-    expect(window.location.hash).toBe('#leo');
+    await user.click(screen.getByRole('button', { name: 'Ripoti za siku' }));
+    await screen.findByRole('heading', { name: 'Ripoti za siku' });
+    expect(container.querySelector('.pos-shell')).toBeNull();
+    expect(container.querySelector('.pos-app')).not.toBeNull();
+    expect(window.location.hash).toBe('#pos/reports');
 
     await user.click(screen.getAllByRole('button', { name: /Mauzo/ })[0]);
     await waitFor(() => expect(container.querySelector('.pos-app')).not.toBeNull());
@@ -1077,16 +1281,18 @@ describe('Kaunta modules in the OS skin', () => {
     await boot();
     await user.click(screen.getByRole('button', { name: 'Menyu' }));
     expect(screen.queryByRole('menuitem', { name: 'Mizigo' })).toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'Stoo na hesabu' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Mipangilio' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Menyu' }));
+    await user.click(screen.getByRole('button', { name: 'Stoo' }));
+    expect(screen.queryByRole('button', { name: 'Pokea mzigo' })).toBeNull();
   });
 
   it('shows deliveries when purchases are enabled', async () => {
     h.state.session = makeSession(3, { purchasesEnabled: true });
     const user = userEvent.setup();
     await boot();
-    await user.click(screen.getByRole('button', { name: 'Menyu' }));
-    expect(screen.getByRole('menuitem', { name: 'Mizigo' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stoo' }));
+    expect(screen.getByRole('button', { name: 'Mizigo' })).toBeInTheDocument();
   });
 
   it('opens a module from its link on load, not the sale screen', async () => {
@@ -1111,22 +1317,18 @@ describe('Kaunta modules in the OS skin', () => {
     window.history.pushState(null, '', '/mobile-pos#leo');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
 
-    await waitFor(() => expect(container.querySelector('.pos-shell')).not.toBeNull());
-    expect(container.querySelector('.pos-app')).toBeNull();
+    await screen.findByRole('heading', { name: 'Ripoti za siku' });
+    expect(container.querySelector('.pos-shell')).toBeNull();
+    expect(container.querySelector('.pos-app')).not.toBeNull();
   });
 
-  it('reads as the same till: the module rail carries the branch and rep', async () => {
+  it('carries the same branch and rep into the native report', async () => {
     const user = userEvent.setup();
     const { container } = await boot();
-    await openMenuItem(user, /^Leo/);
-
-    const rail = await waitFor(() => {
-      const nav = container.querySelector('.pos-shell nav');
-      expect(nav).not.toBeNull();
-      return nav as HTMLElement;
-    });
-    expect(within(rail).getByText('Kaunta')).toBeInTheDocument();
-    expect(within(rail).getByText('Kisimani Main · Jofu K.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ripoti za siku' }));
+    await screen.findByRole('heading', { name: 'Ripoti za siku' });
+    expect(container.querySelector('.pos-app')).not.toBeNull();
+    expect(screen.getByText('Kisimani Main · Kaunta 1 · Jofu K.')).toBeInTheDocument();
   });
 
   it('offers no Mchana/Usiku choice in the OS skin, which follows the OS theme', async () => {

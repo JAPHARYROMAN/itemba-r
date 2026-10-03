@@ -52,6 +52,12 @@ export type CartLine = {
   price?: CartLinePrice;
 };
 export type PurchaseLine = { product: MobilePosLiteProduct; quantity: number; unitCost: string };
+export type PurchaseResult = {
+  id: string;
+  purchaseOrderNumber: string;
+  grnNumber: string | null;
+  totalAmount: number;
+};
 export type DaySummary = {
   count: number;
   totalAmount: number;

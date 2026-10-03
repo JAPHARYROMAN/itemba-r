@@ -2,7 +2,16 @@
 
 import { SplitPayments } from './SplitPayments';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Check, Clock3, ReceiptText, ShoppingBag, RefreshCw, Search } from 'lucide-react';
+import {
+  Check,
+  Clock3,
+  ReceiptText,
+  ShoppingBag,
+  RefreshCw,
+  Search,
+  Package,
+  BarChart3,
+} from 'lucide-react';
 import { usePosHost } from '../core/pos-host-context';
 import type { MobilePosLiteProduct, PendingMobilePosLiteSale } from '@/lib/mobile-pos-lite-store';
 import {
@@ -23,6 +32,7 @@ import { ReceiptPrint } from './ReceiptPrint';
 import { usePosStep } from './use-pos-step';
 import { HeldCarts, type HeldCartActions } from './HeldCarts';
 import { Transactions } from './Transactions';
+import { OperationsWorkspace } from './OperationsWorkspace';
 import './pos-app.css';
 
 /**
@@ -33,9 +43,8 @@ import './pos-app.css';
  * search, receipts) is the same proven code; this file only draws it. The
  * layout is chosen by container width in pos-app.css, not here.
  *
- * Day book, stock, counts, purchases, history and day close are ported in
- * phase 5. Until then "More" opens them in the Kaunta shell, so a v3 terminal
- * loses nothing.
+ * Stock, receiving, counts and daily reports have native interiors. Settings
+ * retains its compatible Kaunta host until hardware acceptance is complete.
  */
 export type PosShellProps = KauntaShellProps & {
   payments?: import('../core/pos-types').PosPayment[];
@@ -77,13 +86,8 @@ function stockLabel(product: MobilePosLiteProduct, t: PosTranslate): string {
 /** A Kaunta module the new POS opens in the OS skin, by its deep-link hash. */
 export type PosModule = 'leo' | 'stoo' | 'manunuzi' | 'mipangilio';
 
-/**
- * Kaunta routes that belong to a module (not the sale flow Kaunta shares with
- * the new POS). A link to one, on boot or typed into the address bar, opens
- * the module; Kaunta's router then lands on the exact screen or normalises it
- * to its parent (`#hesabu` → `#stoo`), as KAUNTA-7 already does.
- */
-const MODULE_LINK = /^#(leo|stoo|hesabu|manunuzi|historia|funga|ripoti|mipangilio)(\/|$)/;
+/** Only Settings retains the compatibility host; business routes use native screens. */
+const MODULE_LINK = /^#mipangilio(\/|$)/;
 
 function isModuleLink(hash: string): boolean {
   return MODULE_LINK.test(hash);
@@ -100,7 +104,7 @@ export function PosShell(props: PosShellProps) {
 
   useEffect(() => {
     const onHashChange = () => {
-      if (isModuleLink(host?.history.hash() ?? window.location.hash)) setModule(true);
+      setModule(isModuleLink(host?.history.hash() ?? window.location.hash));
     };
     if (host) return host.history.listen(onHashChange);
     window.addEventListener('hashchange', onHashChange);
@@ -108,9 +112,8 @@ export function PosShell(props: PosShellProps) {
   }, [host]);
 
   if (module) {
-    // The day book, stock, counts, deliveries, history, close and settings are
-    // Kaunta's own screens, hooks and slab in the OS skin (phase 5), so every
-    // behaviour their tests pin carries over. Reaching Mauzo returns here.
+    // Existing terminal settings remain compatible while business workflows
+    // use the native OS workspace. Reaching Sell returns here.
     return <KauntaShell {...props} skin="os" onReturnToSale={() => setModule(false)} />;
   }
 
@@ -192,6 +195,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   const [holdNote, setHoldNote] = useState('');
   const [holdBusy, setHoldBusy] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [operationsBusy, setOperationsBusy] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -485,26 +489,22 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           </button>
           {menuOpen && (
             <div className="pos-menu-list" id={instanceId + '-pos-menu'} role="menu">
-              {(
-                [
-                  ['leo', 'posModuleLeo'],
-                  ['stoo', 'posModuleStoo'],
-                  ...(session.purchasesEnabled ? [['manunuzi', 'posModuleManunuzi']] : []),
-                  ['mipangilio', 'posModuleMipangilio'],
-                ] as Array<[PosModule, PosStringKey]>
-              ).map(([module, label]) => (
-                <button
-                  key={module}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    openModule(module);
-                  }}
-                >
-                  {t(label)}
-                </button>
-              ))}
+              {([['mipangilio', 'posModuleMipangilio']] as Array<[PosModule, PosStringKey]>).map(
+                ([module, label]) => (
+                  <button
+                    key={module}
+                    type="button"
+                    role="menuitem"
+                    disabled={operationsBusy}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      openModule(module);
+                    }}
+                  >
+                    {t(label)}
+                  </button>
+                ),
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -585,6 +585,24 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
             )}
           </button>
         )}
+        <button
+          type="button"
+          aria-current={
+            ['stock', 'counts', 'receiving', 'deliveries'].includes(step) ? 'page' : undefined
+          }
+          onClick={() => go('stock')}
+        >
+          <Package size={17} aria-hidden="true" />
+          {t('posStockTab')}
+        </button>
+        <button
+          type="button"
+          aria-current={step === 'reports' ? 'page' : undefined}
+          onClick={() => go('reports')}
+        >
+          <BarChart3 size={17} aria-hidden="true" />
+          {t('posReportsTab')}
+        </button>
         <span className="pos-terminal-label">{session.terminal.name}</span>
       </nav>
 
@@ -594,7 +612,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           <button
             type="button"
             className="pos-btn"
-            disabled={busy || holdBusy}
+            disabled={busy || holdBusy || operationsBusy}
             onClick={control.owned ? control.release : control.request}
           >
             {t(control.owned ? 'posReleaseControl' : 'posTakeControl')}
@@ -612,6 +630,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           )}
         </div>
       )}
+      <OperationsWorkspace props={props} step={step} go={go} onBusy={setOperationsBusy} />
       {heldCarts && !heldCarts.ready && (
         <p className="pos-note" data-tone="warn" role="status">
           {t(heldCarts.status === 'attention' ? 'posCartAttention' : 'posCartOpening')}

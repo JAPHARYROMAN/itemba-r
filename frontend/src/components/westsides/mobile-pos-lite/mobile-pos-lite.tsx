@@ -429,7 +429,12 @@ export function MobilePosLite() {
 
   // Supplier live-search for the purchase flow (min 2 chars, like customers).
   useEffect(() => {
-    if (!binding || !online || screen !== 'purchase' || supplierQuery.trim().length < 2) {
+    if (
+      !binding ||
+      !online ||
+      (!posAppEnabled && screen !== 'purchase') ||
+      supplierQuery.trim().length < 2
+    ) {
       setSuppliers([]);
       return;
     }
@@ -446,7 +451,7 @@ export function MobilePosLite() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [binding, online, screen, supplierQuery]);
+  }, [binding, online, screen, supplierQuery, posAppEnabled]);
 
   const purchaseMatches = useMemo(() => {
     const term = purchaseQuery.trim().toLocaleLowerCase();
@@ -545,7 +550,7 @@ export function MobilePosLite() {
     setBusy(true);
     setNotice('');
     try {
-      await backendPost(
+      const recorded = await backendPost<import('@/features/pos/core/pos-types').PurchaseResult>(
         '/mobile-pos-lite/purchases',
         {
           supplierId: supplier.id,
@@ -572,6 +577,7 @@ export function MobilePosLite() {
       }
       if (binding) void syncCatalog(binding).catch(() => undefined);
       setScreen('home');
+      return recorded;
     } catch (error) {
       // Kaunta only (§3.1 "Error handling"): the ONE place a POKEA failure
       // becomes words. `posPurchaseFailureMessage` answers all three cases —

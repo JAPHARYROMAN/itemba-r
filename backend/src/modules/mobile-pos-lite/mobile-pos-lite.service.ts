@@ -32,7 +32,7 @@ import { GeneratedDocumentsService } from '../generated-documents/generated-docu
 import type { BusinessPdfSection } from '../generated-documents/pdf-builder';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
 import {
   businessDayKeyOf,
   businessDayStart,
@@ -801,9 +801,10 @@ export class MobilePosLiteService {
     private readonly codes: EntityCodeGeneratorService,
     private readonly generatedDocuments: GeneratedDocumentsService,
     private readonly stockAdjustments: StockAdjustmentsService,
-    // LAST argument on purpose: every existing construction site (and the whole
-    // of mobile-pos-lite.service.spec.ts) keeps its argument order.
     private readonly deliveryNotes: DeliveryNotesService,
+    private readonly organizationScope: OrganizationScopeService = new OrganizationScopeService(
+      prisma,
+    ),
   ) {}
 
   /**
@@ -1335,6 +1336,251 @@ export class MobilePosLiteService {
       orderBy: { name: 'asc' },
       take: 12,
     });
+  }
+
+  /** Read-only business-day totals. Collections use allocation amounts, never
+   * the whole payment header; a receipt shared across sales is counted once.
+   * Earlier sales can be collected/refunded today. No shift or journal is made. */
+  async dailySummary(
+    code: string | undefined,
+    secret: string | undefined,
+    date: string | undefined,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(code, secret, user);
+    const today = businessDayKeyOf(new Date());
+    const key = date ?? today;
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(key) ||
+      Number.isNaN(utcCalendarDate(key).getTime()) ||
+      businessDateKey(utcCalendarDate(key)) !== key ||
+      key < shiftBusinessDayKey(today, -6) ||
+      key > today
+    )
+      throw new BadRequestException('Choose a business date within the last seven days');
+    const window = businessDayWindow(key);
+    const businessDay = { key, storedAt: utcCalendarDate(key), ...window };
+    const scope = {
+      companyId: terminal.companyId,
+      divisionId: terminal.divisionId,
+      branchId: terminal.branchId,
+    };
+    const saleScope: Prisma.SalesOrderWhereInput = {
+      ...scope,
+      mobilePosTerminalId: terminal.id,
+      createdById: user.id,
+      deletedAt: null,
+    };
+    return this.prisma.$transaction(
+      async (db) => {
+        const [sales, collections, refunds] = await Promise.all([
+          this.computeDayReport(terminal, businessDay, user, db),
+          db.paymentAllocation.findMany({
+            where: {
+              companyId: terminal.companyId,
+              receivable: { deletedAt: null, salesOrders: { some: saleScope } },
+              customerPayment: {
+                ...scope,
+                status: 'COMPLETED',
+                deletedAt: null,
+                paymentDate: { gte: window.dayStart, lt: window.dayEnd },
+              },
+            },
+            select: { amount: true, customerPayment: { select: { id: true, method: true } } },
+          }),
+          db.refund.findMany({
+            where: {
+              ...scope,
+              status: 'PAID',
+              deletedAt: null,
+              refundDate: { gte: window.dayStart, lt: window.dayEnd },
+              creditNote: { status: 'ISSUED', deletedAt: null, salesOrder: saleScope },
+            },
+            select: { id: true, amount: true },
+          }),
+        ]);
+        const collected = collections.reduce(
+          (sum, row) => sum.plus(row.amount),
+          new Prisma.Decimal(0),
+        );
+        const refunded = refunds.reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0));
+        const initial = sales.byMethod
+          .filter((row) => row.paymentMethod !== 'CREDIT')
+          .reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0));
+        const methods = new Map<string, { amount: Prisma.Decimal; ids: Set<string> }>();
+        for (const row of collections) {
+          const method = row.customerPayment.method;
+          const total = methods.get(method) ?? {
+            amount: new Prisma.Decimal(0),
+            ids: new Set<string>(),
+          };
+          total.amount = total.amount.plus(row.amount);
+          total.ids.add(row.customerPayment.id);
+          methods.set(method, total);
+        }
+        return {
+          businessDate: key,
+          asOf: new Date().toISOString(),
+          branch: { id: terminal.branchId, name: terminal.branch.name },
+          terminal: { id: terminal.id, code: terminal.terminalCode, name: terminal.name },
+          rep: { id: user.id, name: terminal.assignedUser.fullName },
+          currency: 'TZS',
+          ...sales,
+          initialReceipts: initial.toNumber(),
+          initialCredit: sales.byMethod.find((row) => row.paymentMethod === 'CREDIT')?.amount ?? 0,
+          collectionCount: new Set(collections.map((row) => row.customerPayment.id)).size,
+          collectionTotal: collected.toNumber(),
+          collectionByMethod: [...methods].map(([method, value]) => ({
+            method,
+            amount: value.amount.toNumber(),
+            count: value.ids.size,
+          })),
+          refundCount: refunds.length,
+          refundTotal: refunded.toNumber(),
+          netReceipts: initial.plus(collected).minus(refunded).toNumber(),
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30000 },
+    );
+  }
+
+  async dailySummaryPdf(
+    code: string | undefined,
+    secret: string | undefined,
+    date: string | undefined,
+    user: AuthUser,
+  ) {
+    const report = await this.dailySummary(code, secret, date, user);
+    const terminal = await this.requireTerminal(code, secret, user);
+    const buffer = await this.generatedDocuments.renderLetterheadPdf(
+      { companyId: terminal.companyId, branchId: terminal.branchId },
+      {
+        title: 'RIPOTI YA SIKU / DAILY POS REPORT',
+        reference: `${terminal.terminalCode}-${report.businessDate}`,
+        generatedAt: new Date(report.asOf),
+        meta: [
+          { label: 'Tarehe / Business date', value: report.businessDate },
+          { label: 'Tawi / Branch', value: report.branch.name },
+          { label: 'Muuzaji / Cashier', value: report.rep.name },
+        ],
+        sections: [
+          {
+            title: 'Muhtasari / Summary',
+            items: [
+              { label: 'Mauzo / Gross sales', value: tzsWhole(report.grossTotal) },
+              { label: 'Risiti / Sales', value: String(report.salesCount) },
+              {
+                label: 'Malipo ya awali / Initial receipts',
+                value: tzsWhole(report.initialReceipts),
+              },
+              { label: 'Mkopo wa awali / Initial credit', value: tzsWhole(report.initialCredit) },
+              {
+                label: 'Makusanyo ya madeni / Later collections',
+                value: tzsWhole(report.collectionTotal),
+              },
+              { label: 'Marejesho ya fedha / Paid refunds', value: tzsWhole(report.refundTotal) },
+            ],
+            totals: [
+              {
+                label: 'Mapokezi halisi / Net receipts',
+                value: tzsWhole(report.netReceipts),
+                emphasis: true,
+              },
+            ],
+            paragraphs: [
+              'Sales and original allocations use the selected East Africa business day. Later collections and paid refunds use their own payment date, including earlier sales by this cashier on this terminal. Net receipts are not the cash drawer or account balance. Unsent device sales and unpaid carts are excluded. No cashier shift is created or closed.',
+            ],
+          },
+          {
+            title: 'Malipo ya awali / Original sale allocations',
+            table: {
+              headers: ['Njia / Method', 'Idadi / Count', 'Kiasi / Amount'],
+              numericColumns: [1, 2],
+              rows: report.byMethod.map((row) => [
+                bilingualPaymentMethod(row.paymentMethod, row.label),
+                String(row.count),
+                tzsWhole(row.amount),
+              ]),
+            },
+          },
+          {
+            title: 'Bidhaa / Products sold',
+            paragraphs: report.itemsTruncated
+              ? ['The product list is limited to 50 rows; summary totals include all records.']
+              : [],
+            table: {
+              headers: ['Bidhaa / Product', 'Kiasi / Quantity', 'Jumla / Amount'],
+              numericColumns: [1, 2],
+              rows: report.items.map((row) => [
+                row.name,
+                String(row.quantity),
+                tzsWhole(row.amount),
+              ]),
+            },
+          },
+        ],
+      },
+      user,
+    );
+    return {
+      buffer,
+      fileName: `POS-${receiptFileStem(terminal.terminalCode)}-${report.businessDate}.pdf`,
+    };
+  }
+
+  async stockCountHistory(code: string | undefined, secret: string | undefined, user: AuthUser) {
+    if (!user.permissions?.includes('mobile_pos_lite.stock_count'))
+      throw new ForbiddenException('Stock count permission required');
+    const terminal = await this.requireTerminal(code, secret, user);
+    const from = businessDayStart(shiftBusinessDayKey(businessDayKeyOf(new Date()), -6));
+    const where: Prisma.StockAdjustmentWhereInput = {
+      companyId: terminal.companyId,
+      divisionId: terminal.divisionId,
+      branchId: terminal.branchId,
+      createdById: user.id,
+      deletedAt: null,
+      reason: MOBILE_POS_STOCK_COUNT_REASON,
+      OR: [
+        { notes: { contains: `Stock count from terminal ${terminal.terminalCode} captured ` } },
+        { notes: { endsWith: `Stock count from terminal ${terminal.terminalCode}` } },
+      ],
+      createdAt: { gte: from },
+    };
+    const [count, rows] = await Promise.all([
+      this.prisma.stockAdjustment.count({ where }),
+      this.prisma.stockAdjustment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true,
+          adjustmentNumber: true,
+          createdAt: true,
+          status: true,
+          lines: {
+            select: {
+              productId: true,
+              countedQuantity: true,
+              systemQuantity: true,
+              varianceQuantity: true,
+            },
+          },
+        },
+      }),
+    ]);
+    return {
+      count,
+      truncated: count > rows.length,
+      counts: rows.map((row) => ({
+        ...row,
+        lines: row.lines.map((line) => ({
+          productId: line.productId,
+          countedQuantity: Number(line.countedQuantity),
+          systemQuantity: Number(line.systemQuantity),
+          varianceQuantity: Number(line.varianceQuantity),
+        })),
+      })),
+    };
   }
 
   async mySalesToday(
@@ -3296,9 +3542,17 @@ export class MobilePosLiteService {
    * The ONLY bound left is the 50-row display cap on the item list, it can move
    * no total, and `itemsTruncated` says when it bit.
    */
-  private async computeDayReport(terminal: Terminal, businessDay: DayReportWindow, user: AuthUser) {
+  private async computeDayReport(
+    terminal: Terminal,
+    businessDay: DayReportWindow,
+    user: AuthUser,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     const where: Prisma.SalesOrderWhereInput = {
       companyId: terminal.companyId,
+      divisionId: terminal.divisionId,
+      branchId: terminal.branchId,
+      deletedAt: null,
       mobilePosTerminalId: terminal.id,
       createdById: user.id,
       status: { in: [...CONFIRMED_SALES_STATUSES] },
@@ -3312,14 +3566,14 @@ export class MobilePosLiteService {
 
     const [totals, methods, lineTotals, priceChanges, allocatedSales] = await Promise.all([
       // Unbounded and exact.
-      this.prisma.salesOrder.aggregate({
+      db.salesOrder.aggregate({
         where,
         _count: { _all: true },
         _sum: { totalAmount: true },
       }),
       // The breakdown is what makes the gross legible: money in the pocket is
       // the CASH row, not the total.
-      this.prisma.salesOrder.groupBy({
+      db.salesOrder.groupBy({
         by: ['paymentMethod'],
         where,
         _count: { _all: true },
@@ -3329,18 +3583,18 @@ export class MobilePosLiteService {
       // database rather than in JS over a page of orders. Nothing here is
       // capped — the cap is applied to the DISPLAY list below, after the
       // ranking, so the figure the Summary prints is the day's real one.
-      this.prisma.salesOrderLine.groupBy({
+      db.salesOrderLine.groupBy({
         by: ['productId'],
         where: lineWhere,
         _sum: { quantity: true, lineTotal: true },
       }),
       // Every changed price in the same sales, through the same relation
       // filter so it can never cover different orders from the totals above.
-      this.prisma.mobilePosPriceOverride.findMany({
+      db.mobilePosPriceOverride.findMany({
         where: { salesOrder: where },
         select: { listUnitPrice: true, chargedUnitPrice: true, quantity: true },
       }),
-      this.prisma.salesOrder.findMany({
+      db.salesOrder.findMany({
         where: { ...where, paymentMethod: 'MIXED' },
         select: { posTenders: true, totalAmount: true },
       }),
@@ -3409,7 +3663,7 @@ export class MobilePosLiteService {
     // that somehow will not resolve must not blank a paper: the id stands in.
     const shown = ranked.slice(0, MOBILE_POS_DAY_REPORT_ITEM_CAP);
     const named = shown.length
-      ? await this.prisma.product.findMany({
+      ? await db.product.findMany({
           where: { id: { in: shown.map((item) => item.productId) }, companyId: terminal.companyId },
           select: { id: true, name: true },
         })
@@ -4897,6 +5151,12 @@ export class MobilePosLiteService {
       throw new ForbiddenException('The assigned Mobile POS user is not active');
     }
     await this.companyScope.assertCanAccessCompany(user, terminal.companyId, AccessLevel.WRITE);
+    await this.organizationScope.assertCanAccessScope(
+      user,
+      terminal.divisionId,
+      terminal.branchId,
+      AccessLevel.WRITE,
+    );
   }
 
   private async findTerminalForManagement(
