@@ -189,6 +189,11 @@ export default function CustomerStatementsPage() {
   // Filters
   const [companyId, setCompanyId] = useState('');
   const [customerId, setCustomerId] = useState('');
+  // Party linkage (Phase 2): /crm/customer-statements?customerId= opens the runs for one customer.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('customerId');
+    if (requested) setCustomerId(requested);
+  }, []);
   const [page, setPage] = useState(1);
 
   // Generate modal state
@@ -566,7 +571,7 @@ export default function CustomerStatementsPage() {
         }
         return (
           <Link
-            href={`/operations/customers/${r.customerId}`}
+            href={`/sales-desk/customers/${encodeURIComponent(r.customerId)}`}
             className="font-medium hover:underline"
             style={{ color: 'var(--aurora-primary)' }}
             title="Open customer 360"
@@ -642,7 +647,7 @@ export default function CustomerStatementsPage() {
           </button>
         ) : (
           <Link
-            href={`/operations/customers/${r.customerId}`}
+            href={`/sales-desk/customers/${encodeURIComponent(r.customerId)}`}
             className="text-xs font-medium hover:underline"
             style={{ color: 'var(--aurora-primary)' }}
             title="Open the customer 360"

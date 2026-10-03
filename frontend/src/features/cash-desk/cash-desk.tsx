@@ -52,6 +52,8 @@ import {
 import { movementDocuments, movementParty, type MovementLink } from './movement-links';
 import { SupplierPaymentDialog } from './supplier-payment-dialog';
 import { partyProfileHref, type PartyBalanceSummary } from '@/features/party/party-balance';
+import { PartyCard } from '@/features/party/party-card';
+import type { PartyKind } from '@/features/party/party-links';
 import '../invoice-desk/invoice-desk.css';
 import './cash-desk.css';
 
@@ -191,6 +193,8 @@ export function CashDesk({
     allowed && supplierAccess && section === 'suppliers',
   );
   const [payingSupplier, setPayingSupplier] = useState<PartyBalanceSummary | null>(null);
+  // Party linkage (Phase 2): the same peek at a party from every app.
+  const [peek, setPeek] = useState<{ kind: PartyKind; id: string } | null>(null);
   const dir = directory.data ?? emptyDirectory;
   const currencies = overview.data?.currencies ?? [],
     current = currencies.find((c) => c.currency === currency) ?? currencies[0];
@@ -814,6 +818,7 @@ export function CashDesk({
                         key={s.partyId}
                         balance={s}
                         onPay={canPaySupplier ? () => setPayingSupplier(s) : undefined}
+                        onPeek={() => setPeek({ kind: 'supplier', id: s.partyId })}
                       />
                     ))}
                   </div>
@@ -917,7 +922,11 @@ export function CashDesk({
                 {dateLabel(selected.businessDate)} · {money(selected.amount, selected.currency)}
               </p>
               <p className="desk-muted">{selected.reference || 'No reference'}</p>
-              <MovementLinks movement={selected} can={hasPermission} />
+              <MovementLinks
+                movement={selected}
+                can={hasPermission}
+                onPeek={(kind, id) => setPeek({ kind, id })}
+              />
               {selected.fuelReportPostingId && (
                 <p className="desk-muted">
                   Posted from PetroDollar. Reverse the entire shift posting there to keep cash,
@@ -992,6 +1001,7 @@ export function CashDesk({
           )}
         </Modal>
       )}
+      {peek && <PartyCard kind={peek.kind} partyId={peek.id} onClose={() => setPeek(null)} />}
       {payingSupplier && (
         <SupplierPaymentDialog
           supplier={payingSupplier}
@@ -1130,12 +1140,19 @@ function MovementList({
 function MovementLinks({
   movement,
   can,
+  onPeek,
 }: {
   movement: Movement;
   can: (...permissions: string[]) => boolean;
+  onPeek?: (kind: PartyKind, id: string) => void;
 }) {
   const party = movementParty(movement, can),
     documents = movementDocuments(movement, can);
+  const peekTarget = movement.supplier
+    ? { kind: 'supplier' as const, id: movement.supplier.id }
+    : movement.customer
+      ? { kind: 'customer' as const, id: movement.customer.id }
+      : null;
   if (!party && !documents.length) return null;
   const render = (link: MovementLink) =>
     link.href ? (
@@ -1150,7 +1167,18 @@ function MovementLinks({
       {party && (
         <p>
           <span>Counterparty · {party.label}</span>
-          <strong>{render(party)}</strong>
+          <strong>
+            {render(party)}
+            {onPeek && peekTarget && (
+              <button
+                type="button"
+                className="cash-peek"
+                onClick={() => onPeek(peekTarget.kind, peekTarget.id)}
+              >
+                Peek
+              </button>
+            )}
+          </strong>
         </p>
       )}
       {documents.map((d) => (
@@ -1170,15 +1198,22 @@ function MovementLinks({
 function SupplierBalanceRow({
   balance,
   onPay,
+  onPeek,
 }: {
   balance: PartyBalanceSummary;
   onPay?: () => void;
+  onPeek?: () => void;
 }) {
   const erpOpen = balance.erp.some((b) => Number(b.open) > 0);
   return (
     <div className="cash-party-balance">
       <span>
         <Link href={partyProfileHref('supplier', balance.partyId)}>{balance.name}</Link>
+        {onPeek && (
+          <button type="button" className="cash-peek" onClick={onPeek}>
+            Peek
+          </button>
+        )}
         <small>
           {balance.code}
           {balance.lastPaymentAt

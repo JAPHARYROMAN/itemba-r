@@ -2,6 +2,7 @@
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { ErrorState, PageSpinner, PageToolbar, Modal, Btn, FormInput, FormSelect, FormTextarea } from '@/components/ui';
 import { backendPost, backendPut, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
@@ -15,6 +16,7 @@ interface SupplierPerf {
   companyId: string;
   company?: { name: string };
   supplierId: string;
+  supplier?: { id: string; name: string; supplierCode?: string | null } | null;
   rating: string;
   onTimeDeliveryRate?: number | string | null;
   qualityScore?: number | string | null;
@@ -228,7 +230,11 @@ export default function SupplierPerformancePage() {
               ) : data.map((row) => (
                 <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3">{row.company?.name ?? row.companyId}</td>
-                  <td className="px-4 py-3 font-medium">{row.supplierId}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <Link href={`/invoice-desk/suppliers/${encodeURIComponent(row.supplierId)}`} className="text-brand-600 hover:underline" title="Open supplier profile">
+                      {row.supplier?.name ?? row.supplierId}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${RATING_CLS[row.rating] ?? 'bg-gray-100 text-gray-600'}`}>
                       {row.rating}

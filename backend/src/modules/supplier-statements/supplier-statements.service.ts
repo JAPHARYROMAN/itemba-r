@@ -40,6 +40,8 @@ export class SupplierStatementsService {
         where,
         include: {
           company: { select: { id: true, name: true, code: true } },
+          // Party linkage (Phase 2): the run names its supplier so the list can link the profile.
+          supplier: { select: { id: true, name: true, supplierCode: true } },
           generatedBy: { select: { id: true, fullName: true, email: true } },
         },
         skip,

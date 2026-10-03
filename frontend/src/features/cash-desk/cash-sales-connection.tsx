@@ -8,6 +8,7 @@ import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { useAuth } from '@/hooks/use-auth';
 import { RecordSalesOrderPaymentModal } from '@/app/(dashboard)/operations/_components/record-sales-order-payment-modal';
 import { money, dateLabel, type Scope } from './types';
+import { PartyCard } from '@/features/party/party-card';
 
 type OutstandingSale = {
   id: string;
@@ -95,6 +96,7 @@ export function CashSalesConnection({
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [paying, setPaying] = useState<OutstandingSale | null>(null);
+  const [peek, setPeek] = useState<string | null>(null);
   const query = Object.fromEntries(Object.entries(scope).filter(([, value]) => value));
   const data = useWorkspaceResource<SalesConnection>(
     '/cash-desk/sales-connection',
@@ -243,6 +245,15 @@ export function CashSalesConnection({
                             r.customerName
                           )}
                         </strong>
+                        {r.customerId && hasPermission('customers.view') && (
+                          <button
+                            type="button"
+                            className="cash-peek"
+                            onClick={() => setPeek(r.customerId ?? null)}
+                          >
+                            Peek
+                          </button>
+                        )}
                         <p>
                           {sourceLabels[r.source ?? 'RECEIVABLE']} ·{' '}
                           {r.salesOrderNumber ?? r.saleNumber ?? r.receivableNumber} ·{' '}
@@ -383,6 +394,7 @@ export function CashSalesConnection({
           }}
         />
       )}
+      {peek && <PartyCard kind="customer" partyId={peek} onClose={() => setPeek(null)} />}
     </section>
   );
 }

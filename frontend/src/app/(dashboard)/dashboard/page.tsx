@@ -99,6 +99,8 @@ interface ExceptionItem {
   title: string;
   description: string;
   dueDate: string | null;
+  /** Party linkage (Phase 2): the party behind the exception, when it has a profile. */
+  party?: { kind: 'supplier' | 'customer'; id: string; name: string } | null;
   href: string;
 }
 
@@ -106,6 +108,7 @@ interface RecentSalesOrder {
   id: string;
   salesOrderNumber: string;
   customerName: string | null;
+  customerId?: string | null;
   totalAmount: string | number;
   outstandingAmount: string | number;
   status: string;
@@ -117,6 +120,7 @@ interface RecentPurchaseOrder {
   id: string;
   purchaseOrderNumber: string;
   supplierName: string | null;
+  supplierId?: string | null;
   totalAmount: string | number;
   outstandingAmount: string | number;
   status: string;
@@ -890,9 +894,8 @@ export default function DashboardPage() {
             ) : (
               <div className="p-5 grid grid-cols-1 gap-3 xl:grid-cols-2">
                 {data.exceptions.map((item) => (
-                  <Link
+                  <div
                     key={item.id}
-                    href={item.href}
                     className="rounded-aurora border p-4 aurora-transition hover:-translate-y-0.5"
                     style={{
                       background: 'var(--aurora-card)',
@@ -906,11 +909,20 @@ export default function DashboardPage() {
                           {item.type}
                         </p>
                         <h3 className="mt-1 text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                          {item.title}
+                          <Link href={item.href} className="hover:underline">{item.title}</Link>
                         </h3>
                         <p className="mt-1 text-xs" style={{ color: 'var(--aurora-text-secondary)' }}>
                           {item.description}
                         </p>
+                        {item.party && (
+                          <Link
+                            href={item.party.kind === 'supplier' ? `/invoice-desk/suppliers/${encodeURIComponent(item.party.id)}` : `/sales-desk/customers/${encodeURIComponent(item.party.id)}`}
+                            className="mt-1 inline-block text-xs font-semibold hover:underline"
+                            style={{ color: 'var(--aurora-primary)' }}
+                          >
+                            Open {item.party.kind} profile →
+                          </Link>
+                        )}
                       </div>
                       <div className="text-right">
                         <StatusBadge status={item.severity} size="sm" />
@@ -919,7 +931,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                     </div>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}
@@ -938,18 +950,27 @@ export default function DashboardPage() {
                 </div>
                 <div className="space-y-3">
                   {data.recentTransactions.salesOrders.map((order) => (
-                    <Link
+                    <div
                       key={order.id}
-                      href={`/operations/sales-orders?search=${encodeURIComponent(order.salesOrderNumber)}`}
                       className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
                       style={{ borderColor: 'var(--aurora-border)' }}
                     >
                       <div>
                         <p className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                          {order.salesOrderNumber}
+                          <Link href={`/operations/sales-orders?search=${encodeURIComponent(order.salesOrderNumber)}`} className="hover:underline">
+                            {order.salesOrderNumber}
+                          </Link>
                         </p>
                         <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                          {order.customerName ?? 'Walk-in customer'} · {fmtDate(order.orderDate)}
+                          {order.customerId ? (
+                            <Link href={`/sales-desk/customers/${encodeURIComponent(order.customerId)}`} className="hover:underline">
+                              {order.customerName ?? 'Customer'}
+                            </Link>
+                          ) : (
+                            order.customerName ?? 'Walk-in customer'
+                          )}
+                          {' · '}
+                          {fmtDate(order.orderDate)}
                         </p>
                       </div>
                       <div className="text-right">
@@ -958,7 +979,7 @@ export default function DashboardPage() {
                         </p>
                         <StatusBadge status={order.paymentStatus} size="sm" />
                       </div>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               </AuroraCard>
@@ -974,18 +995,27 @@ export default function DashboardPage() {
                 </div>
                 <div className="space-y-3">
                   {data.recentTransactions.purchaseOrders.map((order) => (
-                    <Link
+                    <div
                       key={order.id}
-                      href={`/operations/purchase-orders?search=${encodeURIComponent(order.purchaseOrderNumber)}`}
                       className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
                       style={{ borderColor: 'var(--aurora-border)' }}
                     >
                       <div>
                         <p className="text-sm font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                          {order.purchaseOrderNumber}
+                          <Link href={`/operations/purchase-orders?search=${encodeURIComponent(order.purchaseOrderNumber)}`} className="hover:underline">
+                            {order.purchaseOrderNumber}
+                          </Link>
                         </p>
                         <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                          {order.supplierName ?? 'Unknown supplier'} · {fmtDate(order.orderDate)}
+                          {order.supplierId ? (
+                            <Link href={`/invoice-desk/suppliers/${encodeURIComponent(order.supplierId)}`} className="hover:underline">
+                              {order.supplierName ?? 'Supplier'}
+                            </Link>
+                          ) : (
+                            order.supplierName ?? 'Unknown supplier'
+                          )}
+                          {' · '}
+                          {fmtDate(order.orderDate)}
                         </p>
                       </div>
                       <div className="text-right">
@@ -994,7 +1024,7 @@ export default function DashboardPage() {
                         </p>
                         <StatusBadge status={order.status} size="sm" />
                       </div>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               </AuroraCard>
