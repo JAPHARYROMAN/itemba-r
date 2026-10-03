@@ -1,10 +1,16 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { StatutoryReturnWorkspace } from './statutory-return-workspace';
 import type { ReturnKind, StatutoryReturn } from './statutory-return-types';
+import {
+  chooseSelectOption,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   companyId: null as string | null,
@@ -114,10 +120,12 @@ beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
 });
 async function choose() {
-  await screen.findByRole('option', { name: 'Example Company' });
-  await userEvent.selectOptions(screen.getByLabelText('Company'), 'company');
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Company'))).toContain('Example Company'),
+  );
+  await chooseSelectOption('Company', 'company');
   fireEvent.change(screen.getByRole('spinbutton', { name: /Year/ }), { target: { value: '2026' } });
-  await userEvent.selectOptions(screen.getByLabelText('Month'), '9');
+  await chooseSelectOption('Month', '9');
 }
 async function generate() {
   await userEvent.click(screen.getByRole('button', { name: 'Generate return' }));
@@ -149,7 +157,7 @@ describe('Statutory return workspace', () => {
     state.companyId = 'assigned';
     render(<StatutoryReturnWorkspace />);
     await generate();
-    expect(screen.queryByLabelText('Company')).not.toBeInTheDocument();
+    expect(querySelectField('Company')).not.toBeInTheDocument();
     expect(state.page).not.toHaveBeenCalled();
     expect(state.get).toHaveBeenCalledWith(
       '/hr/statutory-returns/paye',
@@ -203,7 +211,7 @@ describe('Statutory return workspace', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('button', { name: 'Inspect Example Person 21' })).toBeInTheDocument();
     expect(state.get).toHaveBeenCalledTimes(1);
-    await userEvent.selectOptions(screen.getByLabelText('Month'), '8');
+    await chooseSelectOption('Month', '8');
     expect(screen.queryByRole('button', { name: /Download CSV/ })).not.toBeInTheDocument();
     expect(
       screen.queryByRole('region', { name: 'Complete return totals' }),
@@ -282,8 +290,10 @@ describe('Statutory return workspace', () => {
     state.page.mockResolvedValueOnce({ data: [{ id: 'other', name: 'Other Company' }], total: 2 });
     render(<StatutoryReturnWorkspace />);
     await userEvent.click(await screen.findByRole('button', { name: 'Retry companies' }));
-    await screen.findByRole('option', { name: 'Other Company' });
-    expect(within(screen.getByLabelText('Company')).getAllByRole('option')).toHaveLength(3);
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Other Company'),
+    );
+    expect(selectFieldOptions(getSelectField('Company'))).toHaveLength(3);
   });
   it('rejects invalid years and makes an empty return explicit while retaining its downloadable file', async () => {
     render(<StatutoryReturnWorkspace />);

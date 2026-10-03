@@ -17,6 +17,7 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { PayrollWorkspace } from './payroll-workspace';
 import { EmployeeDetail } from './employee-detail';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -176,6 +177,9 @@ async function keepAndResume(user: ReturnType<typeof userEvent.setup>, title: st
   await user.click(screen.getByRole('button', { name: 'Resume ' + title }));
   return within(await screen.findByRole('dialog', { name: title }));
 }
+// The open edit dialog's linked user account field.
+const accountField = (title: string) =>
+  getSelectField('User account', screen.getByRole('dialog', { name: title }));
 
 describe('Employee edits across the Payroll workspace', () => {
   it('requires review when the source version is unavailable and preserves an explicit account unlink', async () => {
@@ -185,9 +189,9 @@ describe('Employee edits across the Payroll workspace', () => {
         : [],
     );
     render(<App />);
-    const { user, title, form } = await edit();
-    await waitFor(() => expect(form.getByLabelText('User account')).toBeEnabled());
-    await user.selectOptions(form.getByLabelText('User account'), '');
+    const { user, title } = await edit();
+    await waitFor(() => expect(accountField(title)).toBeEnabled());
+    await chooseSelectOption(accountField(title), '', user);
     const resumed = await keepAndResume(user, title);
     await user.click(resumed.getByRole('button', { name: 'Save', exact: true }));
     expect(await resumed.findByRole('alert')).toHaveTextContent('Review the latest record');
@@ -316,16 +320,18 @@ describe('Employee edits across the Payroll workspace', () => {
   it('requires a fresh eligible linked account and still saves unrelated edits during directory failure', async () => {
     render(<App />);
     const { user, title, form } = await edit();
-    await form.findByRole('option', { name: 'New account (new@example.test)' });
-    await user.selectOptions(form.getByLabelText('User account'), 'new-user');
+    await waitFor(() =>
+      expect(selectFieldOptions(accountField(title))).toContain('New account (new@example.test)'),
+    );
+    await chooseSelectOption(accountField(title), 'new-user', user);
     fireEvent.change(form.getByLabelText('Phone'), { target: { value: 'TEST-PHONE' } });
     state.users = false;
     let resumed = await keepAndResume(user, title);
-    await waitFor(() => expect(resumed.getByLabelText('User account')).toBeEnabled());
+    await waitFor(() => expect(accountField(title)).toBeEnabled());
     await user.click(resumed.getByRole('button', { name: 'Save', exact: true }));
     expect(await resumed.findByRole('alert')).toHaveTextContent('no longer available');
     expect(state.put).not.toHaveBeenCalled();
-    await user.selectOptions(resumed.getByLabelText('User account'), '');
+    await chooseSelectOption(accountField(title), '', user);
     await user.click(resumed.getByRole('button', { name: 'Keep draft', exact: true }));
     state.usersError = true;
     await user.click(screen.getByRole('button', { name: 'Resume ' + title }));

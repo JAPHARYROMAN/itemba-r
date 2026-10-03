@@ -18,6 +18,12 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { PayrollDraftWorkspace } from './payroll-drafts';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -230,6 +236,8 @@ beforeEach(() => {
   };
 });
 type User = ReturnType<typeof userEvent.setup>;
+/** A select field in the open dialog, scoped as the `form` queries are. */
+const dialogSelect = (label: string) => getSelectField(label, screen.getByRole('dialog'));
 async function keep(user: User) {
   await user.click(screen.getByRole('button', { name: 'Keep draft', exact: true }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -246,8 +254,8 @@ async function edit(user: User, name: string, action: string) {
 async function newPeriod(user: User) {
   await user.click(screen.getByRole('button', { name: 'New period' }));
   const form = within(await screen.findByRole('dialog', { name: 'New payroll period' }));
-  await waitFor(() => expect(form.getByLabelText(/^Company/)).toBeEnabled());
-  await user.selectOptions(form.getByLabelText(/^Company/), 'company');
+  await waitFor(() => expect(dialogSelect('Company')).toBeEnabled());
+  await chooseSelectOption(dialogSelect('Company'), 'company', user);
   await user.type(form.getByLabelText(/^Name/), 'October 2026');
   await setDateField(/^Start date/, '2026-10-01', user, form);
   await setDateField(/^End date/, '2026-10-31', user, form);
@@ -258,13 +266,17 @@ async function newAssignment(user: User) {
   await user.click(screen.getByRole('button', { name: 'New assignment' }));
   const form = within(await screen.findByRole('dialog', { name: 'New assignment' }));
   await waitFor(() => expect(form.getByRole('button', { name: 'Save assignment' })).toBeEnabled());
-  await user.selectOptions(form.getByLabelText(/^Employee/), 'employee');
-  await user.selectOptions(form.getByLabelText(/^Destination company/), 'company');
-  await form.findByRole('option', { name: /Retail/ });
-  await waitFor(() => expect(form.getByLabelText('Division')).toBeEnabled());
-  await user.selectOptions(form.getByLabelText('Division'), 'division');
-  await user.selectOptions(form.getByLabelText('Branch'), 'branch');
-  await user.selectOptions(form.getByLabelText('Assignment context'), 'BRANCH');
+  await chooseSelectOption(dialogSelect('Employee'), 'employee', user);
+  await chooseSelectOption(dialogSelect('Destination company'), 'company', user);
+  await waitFor(() =>
+    expect(selectFieldOptions(dialogSelect('Division'))).toEqual(
+      expect.arrayContaining([expect.stringMatching(/Retail/)]),
+    ),
+  );
+  await waitFor(() => expect(dialogSelect('Division')).toBeEnabled());
+  await chooseSelectOption(dialogSelect('Division'), 'division', user);
+  await chooseSelectOption(dialogSelect('Branch'), 'branch', user);
+  await chooseSelectOption(dialogSelect('Assignment context'), 'BRANCH', user);
   await setDateField(/^Start date/, '2026-10-01', user, form);
   await user.type(form.getByLabelText('Notes'), 'Branch placement to finish');
   return form;
@@ -279,11 +291,11 @@ describe('Payroll setup continuity', () => {
     await waitFor(() =>
       expect(form.getByRole('button', { name: 'Save leave type' })).toBeEnabled(),
     );
-    await user.selectOptions(form.getByLabelText(/^Company/), 'company');
+    await chooseSelectOption(dialogSelect('Company'), 'company', user);
     await user.type(form.getByLabelText(/^Name/), 'Study leave');
     await user.type(form.getByLabelText(/^Code/), 'STUDY');
-    await user.selectOptions(form.getByLabelText('Paid leave'), 'false');
-    await user.selectOptions(form.getByLabelText('Allow carry forward'), 'true');
+    await chooseSelectOption(dialogSelect('Paid leave'), 'false', user);
+    await chooseSelectOption(dialogSelect('Allow carry forward'), 'true', user);
     fireEvent.change(form.getByLabelText('Annual allowance days'), { target: { value: '10' } });
     await keep(user);
     await user.click(screen.getByRole('link', { name: 'Open home' }));
@@ -292,8 +304,8 @@ describe('Payroll setup continuity', () => {
       expect(form.getByRole('button', { name: 'Save leave type' })).toBeEnabled(),
     );
     expect(form.getByLabelText(/^Code/)).toHaveValue('STUDY');
-    expect(form.getByLabelText('Paid leave')).toHaveValue('false');
-    expect(form.getByLabelText('Allow carry forward')).toHaveValue('true');
+    expect(selectFieldValue(dialogSelect('Paid leave'))).toBe('false');
+    expect(selectFieldValue(dialogSelect('Allow carry forward'))).toBe('true');
     expect(state.post).not.toHaveBeenCalled();
     await user.click(form.getByRole('button', { name: 'Save leave type' }));
     expect(state.post).toHaveBeenCalledWith('/hr/leave-types', {
@@ -394,7 +406,9 @@ describe('Payroll setup continuity', () => {
     await waitFor(() => expect(form.getByRole('button', { name: 'Create period' })).toBeEnabled());
     await user.click(form.getByRole('button', { name: 'Create period' }));
     expect(state.post).not.toHaveBeenCalled();
-    expect(form.queryByRole('option', { name: /Company A/ })).not.toBeInTheDocument();
+    expect(selectFieldOptions(dialogSelect('Company'))).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/Company A/)]),
+    );
     expect(form.getByLabelText(/^Name/)).toHaveValue('October 2026');
   });
   it('merges current leave settings while retaining only an edited name and requiring review', async () => {
@@ -419,8 +433,8 @@ describe('Payroll setup continuity', () => {
       expect(form.getByRole('button', { name: 'Save leave type' })).toBeEnabled(),
     );
     expect(form.getByLabelText('Annual allowance days')).toHaveValue(28);
-    expect(form.getByLabelText('Paid leave')).toHaveValue('false');
-    expect(form.getByLabelText('Active')).toHaveValue('false');
+    expect(selectFieldValue(dialogSelect('Paid leave'))).toBe('false');
+    expect(selectFieldValue(dialogSelect('Active'))).toBe('false');
     expect(form.getByLabelText(/^Name/)).toHaveValue('Annual entitlement');
     await user.click(form.getByRole('button', { name: 'Save leave type' }));
     expect(state.put).not.toHaveBeenCalled();
@@ -517,11 +531,12 @@ describe('Payroll setup continuity', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Allocate leave' }));
     let form = within(await screen.findByRole('dialog', { name: 'Allocate leave balance' }));
-    await waitFor(() => expect(form.getByLabelText('Company')).toBeEnabled());
-    await user.selectOptions(form.getByLabelText('Company'), 'company');
-    await waitFor(() => expect(form.getByLabelText('Employee')).toBeEnabled());
-    await user.selectOptions(form.getByLabelText('Employee'), 'employee');
-    await user.selectOptions(form.getByLabelText('Leave Type'), 'type');
+    await waitFor(() => expect(dialogSelect('Company')).toBeEnabled());
+    await chooseSelectOption(dialogSelect('Company'), 'company', user);
+    await waitFor(() => expect(dialogSelect('Employee')).toBeEnabled());
+    await chooseSelectOption(dialogSelect('Employee'), 'employee', user);
+    // The field's visible label names it now; its "Leave Type" aria-label is not used.
+    await chooseSelectOption(dialogSelect('Leave type'), 'type', user);
     fireEvent.change(form.getByLabelText('Allocated Days'), { target: { value: '24' } });
     await keep(user);
     state.typeActive = false;
@@ -547,8 +562,8 @@ describe('Payroll setup continuity', () => {
     await waitFor(() =>
       expect(form.getByRole('button', { name: 'Save assignment' })).toBeEnabled(),
     );
-    expect(form.getByLabelText('Division')).toHaveValue('division');
-    expect(form.getByLabelText('Branch')).toHaveValue('branch');
+    expect(selectFieldValue(dialogSelect('Division'))).toBe('division');
+    expect(selectFieldValue(dialogSelect('Branch'))).toBe('branch');
     expect(form.getByLabelText('Notes')).toHaveValue('Branch placement to finish');
     expect(state.post).toHaveBeenCalledTimes(1);
     await user.click(form.getByRole('button', { name: 'Save assignment' }));
@@ -575,8 +590,8 @@ describe('Payroll setup continuity', () => {
     await waitFor(() =>
       expect(form.getByRole('button', { name: 'Save assignment' })).toBeEnabled(),
     );
-    expect(form.getByLabelText('Status')).toHaveValue('ACTIVE');
-    expect(form.getByLabelText(/^Employee/)).toBeDisabled();
+    expect(selectFieldValue(dialogSelect('Status'))).toBe('ACTIVE');
+    expect(dialogSelect('Employee')).toBeDisabled();
     await user.click(form.getByRole('checkbox', { name: /I have reviewed/ }));
     await user.click(form.getByRole('button', { name: 'Save assignment' }));
     expect(state.put).toHaveBeenCalledWith('/hr/employee-assignments/assignment', {
@@ -590,7 +605,7 @@ describe('Payroll setup continuity', () => {
     await waitFor(() =>
       expect(form.getByRole('button', { name: 'Save assignment' })).toBeEnabled(),
     );
-    await user.selectOptions(form.getByLabelText('Status'), 'ACTIVE');
+    await chooseSelectOption(dialogSelect('Status'), 'ACTIVE', user);
     await user.type(form.getByLabelText('Notes'), ' reviewed');
     await keep(user);
     state.assignment = {
@@ -602,8 +617,8 @@ describe('Payroll setup continuity', () => {
     await waitFor(() =>
       expect(form.getByRole('button', { name: 'Save assignment' })).toBeEnabled(),
     );
-    expect(form.getByLabelText('Status')).toHaveValue('ACTIVE');
-    expect(form.getByLabelText('Status')).toBeDisabled();
+    expect(selectFieldValue(dialogSelect('Status'))).toBe('ACTIVE');
+    expect(dialogSelect('Status')).toBeDisabled();
     await user.click(form.getByRole('checkbox', { name: /I have reviewed/ }));
     await user.click(form.getByRole('button', { name: 'Save assignment' }));
     expect(state.put).not.toHaveBeenCalled();
@@ -683,7 +698,7 @@ describe('Payroll setup continuity', () => {
         view === 'periods' ? 'September 2026' : view === 'types' ? 'Annual leave' : 'Alex Example';
       await screen.findByRole('button', { name: 'Inspect ' + name });
       await user.click(screen.getByRole('button', { name: /Filters/ }));
-      await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+      await chooseSelectOption('Company filter', 'company', user);
       await user.type(screen.getByRole('searchbox'), 'A');
       await waitFor(() =>
         expect(state.page).toHaveBeenCalledWith(

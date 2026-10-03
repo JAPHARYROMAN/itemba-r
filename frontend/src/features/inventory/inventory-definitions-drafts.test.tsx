@@ -17,6 +17,7 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { InventoryDraftWorkspace, useInventoryDefinitionEditor } from './inventory-drafts';
+import { chooseSelectOption, getSelectField, selectFieldValue } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -278,6 +279,8 @@ beforeEach(() => {
   };
 });
 type User = ReturnType<typeof userEvent.setup>;
+// The one editor dialog open at a time, as a scope for its select fields.
+const openDialog = () => screen.getByRole('dialog');
 async function prepare(user: User, v: View) {
   const app = render(<App initial={v} />);
   if (v === 'conversion')
@@ -321,8 +324,8 @@ async function create(user: User, v: View) {
   fireEvent.change(form.getByLabelText(specs[v].field), { target: { value: 'Retained input' } });
   if (v === 'unit') fireEvent.change(form.getByLabelText(/^Symbol/), { target: { value: 'ret' } });
   if (v === 'conversion') {
-    await user.selectOptions(form.getByLabelText(/^From unit/), 'unit');
-    await user.selectOptions(form.getByLabelText(/^To unit/), 'piece');
+    await chooseSelectOption('From unit', 'unit', user, openDialog());
+    await chooseSelectOption('To unit', 'piece', user, openDialog());
     fireEvent.change(form.getByLabelText(/^Conversion factor/), { target: { value: '24.5' } });
   }
   if (v === 'family')
@@ -444,7 +447,7 @@ describe('Inventory catalogue continuity', () => {
     form = await resume(user, v);
     expect(form.getByLabelText(specs[v].field)).toHaveValue('Edited text');
     if (v === 'unit') {
-      expect(form.getByLabelText('Status')).toHaveValue('INACTIVE');
+      expect(selectFieldValue(getSelectField('Status', openDialog()))).toBe('INACTIVE');
       expect(
         form.getByRole('checkbox', { name: 'Base unit for this type and scope' }),
       ).toBeChecked();
@@ -466,7 +469,7 @@ describe('Inventory catalogue continuity', () => {
       await prepare(user, v);
       let form = await edit(user, v);
       await user.clear(form.getByLabelText('Description'));
-      if (v === 'category') await user.selectOptions(form.getByLabelText('Parent category'), '');
+      if (v === 'category') await chooseSelectOption('Parent category', '', user, openDialog());
       if (v === 'family') await user.clear(form.getByLabelText('Wholesale price'));
       await keep(user);
       form = await resume(user, v);
@@ -499,8 +502,8 @@ describe('Inventory catalogue continuity', () => {
       const user = userEvent.setup();
       await prepare(user, 'category');
       let form = await create(user, 'category');
-      await waitFor(() => expect(form.getByLabelText('Parent category')).toBeEnabled());
-      await user.selectOptions(form.getByLabelText('Parent category'), '__new__');
+      await waitFor(() => expect(getSelectField('Parent category', openDialog())).toBeEnabled());
+      await chooseSelectOption('Parent category', '__new__', user, openDialog());
       await user.type(form.getByLabelText(/^New parent name/), 'New finishes');
       state.post
         .mockResolvedValueOnce(state.records.createdParent)
@@ -520,8 +523,10 @@ describe('Inventory catalogue continuity', () => {
         return;
       }
       form = await resume(user, 'category', false);
-      expect(form.getByLabelText(/^Company/)).toBeDisabled();
-      expect(form.getByLabelText('Parent category')).toHaveValue('created-parent');
+      expect(getSelectField('Company', openDialog())).toBeDisabled();
+      expect(selectFieldValue(getSelectField('Parent category', openDialog()))).toBe(
+        'created-parent',
+      );
       // The draft hint is a live region too, so name the one under test rather
       // than assuming the form has only one.
       expect(

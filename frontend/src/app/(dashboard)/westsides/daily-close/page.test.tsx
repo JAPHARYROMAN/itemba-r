@@ -10,8 +10,8 @@
  */
 
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { chooseSelectOption } from '@/test/select-field';
 
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: () => true }),
@@ -156,8 +156,10 @@ async function renderClose(payload: Record<string, unknown>) {
     }),
   );
   render(<DailyClosePage />);
-  const companySelect = screen.getAllByRole('combobox')[0];
-  await userEvent.selectOptions(companySelect, 'company-1');
+  // The unlabelled scope selects both read "Pick company" until a company is
+  // chosen; the company select comes first.
+  const companySelect = screen.getAllByRole('button', { name: 'Pick company' })[0];
+  await chooseSelectOption(companySelect, 'company-1');
   await waitFor(() => expect(screen.getByText('Method reconciliation')).toBeInTheDocument());
 }
 

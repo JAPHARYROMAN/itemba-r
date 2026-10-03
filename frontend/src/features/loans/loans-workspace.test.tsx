@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LoansDebtsPage from '@/app/(dashboard)/group-control/loans-debts/page';
+import { chooseSelectOption } from '@/test/select-field';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -99,8 +100,8 @@ describe('Loans & Debts workspace', () => {
     render(<LoansDebtsPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'Review Example bank' }));
     await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
-    await userEvent.selectOptions(screen.getByLabelText('Company'), 'co');
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'ACTIVE');
+    await chooseSelectOption('Company', 'co');
+    await chooseSelectOption('Status', 'ACTIVE');
     await userEvent.type(screen.getByRole('searchbox'), 'bank');
     await waitFor(() =>
       expect(

@@ -16,6 +16,12 @@ import {
   useWorkspacePathname,
 } from '@/components/workspace/workspace-navigation';
 import { PayrollDraftWorkspace } from './payroll-drafts';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -254,6 +260,8 @@ beforeEach(() => {
   };
 });
 type User = ReturnType<typeof userEvent.setup>;
+// The one editor dialog open at a time, as a scope for its select fields.
+const openDialog = () => screen.getByRole('dialog');
 async function ready(view: View, editing = true) {
   const form = within(await screen.findByRole('dialog', { name: title(view, editing) }));
   await waitFor(() => expect(form.getByRole('button', { name: specs[view].save })).toBeEnabled());
@@ -275,17 +283,21 @@ async function resume(user: User, view: View, editing = true) {
 async function create(user: User, view: View) {
   await user.click(screen.getByRole('button', { name: title(view, false) }));
   const form = await ready(view, false);
-  await user.selectOptions(form.getByLabelText(/^Company/), 'company');
+  await chooseSelectOption('Company', 'company', user, openDialog());
   if (view === 'department' || view === 'position') {
-    await within(form.getByLabelText('Division')).findByRole('option', { name: /Retail/ });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Division', openDialog()))).toContainEqual(
+        expect.stringMatching(/Retail/),
+      ),
+    );
     await waitFor(() => expect(form.getByRole('button', { name: specs[view].save })).toBeEnabled());
-    await user.selectOptions(form.getByLabelText('Division'), 'division');
-    await user.selectOptions(form.getByLabelText('Branch / Location'), 'branch');
+    await chooseSelectOption('Division', 'division', user, openDialog());
+    await chooseSelectOption('Branch / Location', 'branch', user, openDialog());
     if (view === 'position')
-      await user.selectOptions(form.getByLabelText(/^Department/), 'department');
+      await chooseSelectOption('Department', 'department', user, openDialog());
   } else {
     await user.type(form.getByLabelText(/^Code/), 'NEW');
-    await user.selectOptions(form.getByLabelText('Recurring'), 'true');
+    await chooseSelectOption('Recurring', 'true', user, openDialog());
     fireEvent.change(form.getByLabelText('Default amount (TZS)'), { target: { value: '0' } });
   }
   await user.type(form.getByLabelText(specs[view].field), 'New definition');
@@ -305,7 +317,7 @@ describe('Payroll definition continuity', () => {
       const form = await resume(user, view, false);
       expect(state.post).not.toHaveBeenCalled();
       expect(form.getByLabelText(specs[view].field)).toHaveValue('New definition');
-      expect(form.getByLabelText(/^Company/)).toHaveValue('company');
+      expect(selectFieldValue(getSelectField('Company', openDialog()))).toBe('company');
       state.post.mockRejectedValueOnce(new Error('Save temporarily unavailable'));
       await user.click(form.getByRole('button', { name: specs[view].save }));
       expect(await form.findByRole('alert')).toHaveTextContent('Save temporarily unavailable');
@@ -356,13 +368,15 @@ describe('Payroll definition continuity', () => {
       form = await resume(user, view);
       expect(form.getByLabelText(specs[view].field)).toHaveValue('Retained name');
       if (view === 'department' || view === 'position')
-        expect(form.getByLabelText('Status')).toHaveValue('INACTIVE');
+        expect(selectFieldValue(getSelectField('Status', openDialog()))).toBe('INACTIVE');
       else {
         expect(form.getByLabelText('Default amount (TZS)')).toHaveValue(800);
-        expect(form.getByLabelText('Recurring')).toHaveValue('false');
-        expect(form.getByLabelText(view === 'allowance' ? 'Taxable' : 'Statutory')).toHaveValue(
-          'false',
-        );
+        expect(selectFieldValue(getSelectField('Recurring', openDialog()))).toBe('false');
+        expect(
+          selectFieldValue(
+            getSelectField(view === 'allowance' ? 'Taxable' : 'Statutory', openDialog()),
+          ),
+        ).toBe('false');
       }
       if (view === 'position') {
         expect(form.getByLabelText('Default salary')).toHaveValue(250);
@@ -385,7 +399,7 @@ describe('Payroll definition continuity', () => {
       const user = userEvent.setup();
       render(<App initial={view} />);
       let form = await edit(user, view);
-      if (view === 'department') await user.selectOptions(form.getByLabelText('Division'), '');
+      if (view === 'department') await chooseSelectOption('Division', '', user, openDialog());
       else
         await user.clear(
           form.getByLabelText(view === 'position' ? 'Default salary' : 'Default amount (TZS)'),
@@ -423,9 +437,9 @@ describe('Payroll definition continuity', () => {
       expect(form.getByLabelText('Department code')).toHaveAttribute('placeholder', 'AUTO-2'),
     );
     expect(form.getByLabelText('Department code')).toHaveValue('');
-    await user.selectOptions(form.getByLabelText(/^Company/), 'company-b');
-    expect(form.getByLabelText('Division')).toHaveValue('');
-    expect(form.getByLabelText('Branch / Location')).toHaveValue('');
+    await chooseSelectOption('Company', 'company-b', user, openDialog());
+    expect(selectFieldValue(getSelectField('Division', openDialog()))).toBe('');
+    expect(selectFieldValue(getSelectField('Branch / Location', openDialog()))).toBe('');
   });
   it('blocks a kept department draft when its branch is no longer available', async () => {
     const user = userEvent.setup();
@@ -437,7 +451,7 @@ describe('Payroll definition continuity', () => {
     await user.click(form.getByRole('button', { name: 'Save department' }));
     expect(await form.findByRole('alert')).toHaveTextContent('Choose an available branch');
     expect(state.post).not.toHaveBeenCalled();
-    await user.selectOptions(form.getByLabelText('Branch / Location'), '');
+    await chooseSelectOption('Branch / Location', '', user, openDialog());
     await user.click(form.getByRole('button', { name: 'Save department' }));
     expect(state.post).toHaveBeenCalledWith(
       '/hr/departments',
@@ -452,7 +466,7 @@ describe('Payroll definition continuity', () => {
     await keep(user);
     state.departmentAvailable = false;
     form = await resume(user, 'position');
-    expect(form.getByLabelText(/^Department/)).toHaveValue('department');
+    expect(selectFieldValue(getSelectField('Department', openDialog()))).toBe('department');
     await user.click(form.getByRole('button', { name: 'Save position' }));
     expect(await form.findByRole('alert')).toHaveTextContent(
       'Choose an available active department',
@@ -464,8 +478,8 @@ describe('Payroll definition continuity', () => {
     state.permissions.delete('departments.view');
     render(<App initial="position" />);
     const form = await edit(user, 'position');
-    expect(form.getByLabelText(/^Department/)).toBeDisabled();
-    expect(form.getByLabelText(/^Company/)).toBeDisabled();
+    expect(getSelectField('Department', openDialog())).toBeDisabled();
+    expect(getSelectField('Company', openDialog())).toBeDisabled();
     await user.type(form.getByLabelText(/^Title/), ' revised');
     await user.click(form.getByRole('button', { name: 'Save position' }));
     expect(state.put).toHaveBeenCalledWith('/hr/positions/position', {
@@ -539,7 +553,7 @@ describe('Payroll definition continuity', () => {
       render(<App initial={view} />);
       await screen.findByRole('button', { name: 'Inspect ' + specs[view].name });
       await user.click(screen.getByRole('button', { name: /Filters/ }));
-      await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+      await chooseSelectOption('Company filter', 'company', user);
       await user.type(screen.getByRole('searchbox'), 'A');
       await waitFor(() =>
         expect(state.page).toHaveBeenCalledWith(

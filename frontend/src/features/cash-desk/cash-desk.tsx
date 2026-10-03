@@ -24,7 +24,7 @@ import {
   Search,
   Wallet,
 } from 'lucide-react';
-import { Btn, FormDateField, Modal } from '@/components/ui';
+import { Btn, FormDateField, Modal, SelectField } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet } from '@/lib/api-client';
@@ -416,21 +416,23 @@ export function CashDesk({
                         (!scope.divisionId || b.divisionId === scope.divisionId),
                     );
             return (
-              <label key={key}>
-                <span>{['Company', 'Division', 'Branch'][i]}</span>
-                <select value={scope[key]} onChange={(e) => changeScope(key, e.target.value)}>
-                  <option value="">
-                    {i === 0 && directory.data?.requiresCompanySelection
-                      ? 'Choose a company'
-                      : `All ${['companies', 'divisions', 'branches'][i]}`}
-                  </option>
-                  {list.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                key={key}
+                variant="bare"
+                label={['Company', 'Division', 'Branch'][i]}
+                value={scope[key]}
+                onChange={(value) => changeScope(key, value)}
+                options={[
+                  {
+                    value: '',
+                    label:
+                      i === 0 && directory.data?.requiresCompanySelection
+                        ? 'Choose a company'
+                        : `All ${['companies', 'divisions', 'branches'][i]}`,
+                  },
+                  ...list.map((x) => ({ value: x.id, label: x.name })),
+                ]}
+              />
             );
           })}
         </div>
@@ -468,19 +470,17 @@ export function CashDesk({
               />
             </div>
             {section !== 'collections' && (
-              <label>
-                Desk account currency{' '}
-                <select
-                  value={current?.currency ?? ''}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  {currencies.length ? (
-                    currencies.map((c) => <option key={c.currency}>{c.currency}</option>)
-                  ) : (
-                    <option value="">No accounts yet</option>
-                  )}
-                </select>
-              </label>
+              <SelectField
+                label="Desk account currency"
+                labelPlacement="side"
+                value={current?.currency ?? ''}
+                onChange={setCurrency}
+                options={
+                  currencies.length
+                    ? currencies.map((c) => ({ value: c.currency, label: c.currency }))
+                    : [{ value: '', label: 'No accounts yet' }]
+                }
+              />
             )}
             <span>Dates use East Africa Time</span>
           </div>
@@ -608,51 +608,28 @@ export function CashDesk({
                     }}
                   />
                 </label>
-                <select
+                <SelectField
                   aria-label="Movement type"
                   value={kind}
-                  onChange={(e) => {
-                    setKind(e.target.value);
+                  onChange={(value) => {
+                    setKind(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">All movements</option>
-                  {Object.entries(movementLabels).map(([k, l]) => (
-                    <option key={k} value={k}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-                <select
+                  options={[
+                    { value: '', label: 'All movements' },
+                    ...Object.entries(movementLabels).map(([k, l]) => ({ value: k, label: l })),
+                  ]}
+                />
+                <SelectField
                   aria-label="Account filter"
                   value={accountId}
-                  onChange={(e) => {
-                    setAccountId(e.target.value);
+                  onChange={(value) => {
+                    setAccountId(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">All accounts</option>
-                  {accounts.data?.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} · {a.company.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Counterparty type"
-                  value={partyType}
-                  onChange={(e) => {
-                    setPartyType(e.target.value);
-                    setPage(1);
-                  }}
-                >
-                  <option value="">All counterparties</option>
-                  {Object.entries(partyTypeLabels).map(([k, l]) => (
-                    <option key={k} value={k}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
+                  options={[{ value: '', label: 'All accounts' }, ...(accounts.data ?? []).map(a => ({value: a.id, label: a.name + ' · ' + a.company.name}))]}
+                />
+                <SelectField aria-label="Counterparty type" value={partyType} onChange={value => { setPartyType(value); setPage(1); }} options={[{value:'',label:'All counterparties'}, ...Object.entries(partyTypeLabels).map(([value,label]) => ({value,label}))]} />
                 {partyTarget && (
                   <span className="cash-party-chip">
                     Showing {targetSupplierId ? 'supplier' : 'customer'}{' '}

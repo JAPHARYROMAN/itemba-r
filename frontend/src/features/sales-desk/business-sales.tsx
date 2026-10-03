@@ -24,11 +24,11 @@ import {
   EmptyState,
   FormDateField,
   FormInput,
-  FormSelect,
   FormTextarea,
   Modal,
   PageHeader,
   PageToolbar,
+  SelectField,
   showToast,
   SkeletonTable,
   StatCard,
@@ -952,16 +952,16 @@ function SalesOrderModal({
       <div className="workspace-form space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <h3 className="workspace-form-heading">Order context</h3>
-          <FormSelect
+          <SelectField
             label="Company"
             required
             value={form.companyId}
-            onChange={(e) => {
+            onChange={(value) => {
               setProductSearchQuery('');
               setProductSearchCategoryId('');
               setForm((f) => ({
                 ...f,
-                companyId: e.target.value,
+                companyId: value,
                 divisionId: '',
                 branchId: '',
                 customerId: '',
@@ -973,21 +973,17 @@ function SalesOrderModal({
                 })),
               }));
             }}
-            placeholder="Select company"
             disabled={mode === 'edit'}
-          >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </FormSelect>
-          <FormSelect
+            options={[
+              { value: '', label: 'Select company' },
+              ...companies.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
+          <SelectField
             label="Sales Type"
             required
             value={form.salesType}
-            onChange={(e) => {
-              const salesType = e.target.value;
+            onChange={(salesType) => {
               setForm((current) => {
                 const paymentMethod = defaultPaymentMethodForSalesType(
                   salesType,
@@ -1002,19 +998,13 @@ function SalesOrderModal({
                 };
               });
             }}
-          >
-            {SALES_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t.replace(/_/g, ' ')}
-              </option>
-            ))}
-          </FormSelect>
-          <FormSelect
+            options={SALES_TYPES.map((t) => ({ value: t, label: t.replace(/_/g, ' ') }))}
+          />
+          <SelectField
             label="Division"
             required
             value={form.divisionId}
-            onChange={(e) => {
-              const divisionId = e.target.value;
+            onChange={(divisionId) => {
               setProductSearchQuery('');
               setProductSearchCategoryId('');
               setForm((f) => ({
@@ -1030,20 +1020,19 @@ function SalesOrderModal({
                 })),
               }));
             }}
-            placeholder={form.companyId ? 'Select division' : 'Select company first'}
-          >
-            {divisions.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.code ? `${d.code} — ${d.name}` : d.name}
-              </option>
-            ))}
-          </FormSelect>
-          <FormSelect
+            options={[
+              { value: '', label: form.companyId ? 'Select division' : 'Select company first' },
+              ...divisions.map((d) => ({
+                value: d.id,
+                label: d.code ? `${d.code} — ${d.name}` : d.name,
+              })),
+            ]}
+          />
+          <SelectField
             label="Branch / Location"
             required
             value={form.branchId}
-            onChange={(e) => {
-              const branchId = e.target.value;
+            onChange={(branchId) => {
               setProductSearchQuery('');
               setProductSearchCategoryId('');
               setForm((f) => ({
@@ -1058,27 +1047,22 @@ function SalesOrderModal({
                 })),
               }));
             }}
-            placeholder={form.divisionId ? 'Select branch' : 'Select division first'}
             disabled={!form.divisionId}
-          >
-            {branchOptions.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.code ? `${branch.code} — ${branch.name}` : branch.name}
-              </option>
-            ))}
-          </FormSelect>
-          <FormSelect
+            options={[
+              { value: '', label: form.divisionId ? 'Select branch' : 'Select division first' },
+              ...branchOptions.map((branch) => ({
+                value: branch.id,
+                label: branch.code ? `${branch.code} — ${branch.name}` : branch.name,
+              })),
+            ]}
+          />
+          <SelectField
             label="Currency"
             required
             value={form.currency}
-            onChange={(e) => setField('currency', e.target.value)}
-          >
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </FormSelect>
+            onChange={(value) => setField('currency', value)}
+            options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+          />
           <h3 className="workspace-form-heading">Customer and dates</h3>
           <CustomerPicker
             label="Customer"
@@ -1128,33 +1112,28 @@ function SalesOrderModal({
                 : undefined
             }
           />
-          <FormSelect
+          <SelectField
             label="Salesperson"
             value={form.salespersonId}
-            onChange={(e) => setField('salespersonId', e.target.value)}
-            placeholder={form.branchId ? 'None (no commission)' : 'Select branch first'}
+            onChange={(value) => setField('salespersonId', value)}
             disabled={!form.branchId}
-          >
-            {employees.map((e) => {
-              const ratePct =
-                e.defaultCommissionRate != null
-                  ? ` — ${(Number(e.defaultCommissionRate) * 100).toFixed(2)}%`
-                  : '';
-              const label = `${e.fullName ?? employeeLabel(e)}${ratePct}`;
-              return (
-                <option key={e.id} value={e.id}>
-                  {label}
-                </option>
-              );
-            })}
-          </FormSelect>
+            options={[
+              { value: '', label: form.branchId ? 'None (no commission)' : 'Select branch first' },
+              ...employees.map((e) => {
+                const ratePct =
+                  e.defaultCommissionRate != null
+                    ? ` — ${(Number(e.defaultCommissionRate) * 100).toFixed(2)}%`
+                    : '';
+                return { value: e.id, label: `${e.fullName ?? employeeLabel(e)}${ratePct}` };
+              }),
+            ]}
+          />
           <h3 className="workspace-form-heading">Payment details</h3>
-          <FormSelect
+          <SelectField
             label="Payment Method"
             required
             value={form.paymentMethod}
-            onChange={(e) => {
-              const paymentMethod = e.target.value;
+            onChange={(paymentMethod) => {
               setForm((current) => ({
                 ...current,
                 paymentMethod,
@@ -1165,18 +1144,11 @@ function SalesOrderModal({
           />
           {form.paymentMethod !== 'CREDIT' && (
             <>
-              <FormSelect
+              <SelectField
                 label={accountSelectLabel(form.paymentMethod)}
                 required
                 value={form.cashAccountId}
-                onChange={(e) => setField('cashAccountId', e.target.value)}
-                placeholder={
-                  !form.companyId
-                    ? 'Pick company first'
-                    : !form.branchId
-                      ? 'Pick branch/location first'
-                      : `Select ${accountSelectLabel(form.paymentMethod).toLowerCase()}`
-                }
+                onChange={(value) => setField('cashAccountId', value)}
                 disabled={!form.companyId || !form.branchId || receiptAccounts.length === 0}
                 hint={
                   form.companyId && !form.branchId
@@ -1189,13 +1161,18 @@ function SalesOrderModal({
                         }`
                       : undefined
                 }
-              >
-                {receiptAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {accountOptionLabel(a)}
-                  </option>
-                ))}
-              </FormSelect>
+                options={[
+                  {
+                    value: '',
+                    label: !form.companyId
+                      ? 'Pick company first'
+                      : !form.branchId
+                        ? 'Pick branch/location first'
+                        : `Select ${accountSelectLabel(form.paymentMethod).toLowerCase()}`,
+                  },
+                  ...receiptAccounts.map((a) => ({ value: a.id, label: accountOptionLabel(a) })),
+                ]}
+              />
               <FormInput
                 label="Payment Reference"
                 value={form.paymentReference}
@@ -1866,14 +1843,6 @@ export function BusinessSales() {
     );
   };
 
-  const filterSelectCls =
-    'text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500';
-  const filterStyle = {
-    borderColor: 'var(--aurora-border)',
-    background: 'var(--aurora-card)',
-    color: 'var(--aurora-text)',
-  } as const;
-
   return (
     <div className="business-workspace space-y-6">
       {creating && (
@@ -1991,74 +1960,54 @@ export function BusinessSales() {
         searchPlaceholder="Order # or customer…"
         filters={
           <>
-            <select
+            <SelectField
               aria-label="Filter by company"
               value={filterCompany}
-              onChange={(e) => {
-                setFilterCompany(e.target.value);
+              onChange={(value) => {
+                setFilterCompany(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Companies</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All Companies' },
+                ...companies.map((c) => ({ value: c.id, label: c.name })),
+              ]}
+            />
+            <SelectField
               aria-label="Filter by sales type"
               value={filterType}
-              onChange={(e) => {
-                setFilterType(e.target.value);
+              onChange={(value) => {
+                setFilterType(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Types</option>
-              {SALES_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All Types' },
+                ...SALES_TYPES.map((t) => ({ value: t, label: t.replace(/_/g, ' ') })),
+              ]}
+            />
+            <SelectField
               aria-label="Filter by status"
               value={filterStatus}
-              onChange={(e) => {
-                setFilterStatus(e.target.value);
+              onChange={(value) => {
+                setFilterStatus(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Status</option>
-              {SALES_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: '', label: 'All Status' },
+                ...SALES_STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, ' ') })),
+              ]}
+            />
+            <SelectField
               aria-label="Filter by payment status"
               value={filterPayment}
-              onChange={(e) => {
-                setFilterPayment(e.target.value);
+              onChange={(value) => {
+                setFilterPayment(value);
                 setPage(1);
               }}
-              className={filterSelectCls}
-              style={filterStyle}
-            >
-              <option value="">All Payments</option>
-              {PAYMENT_STATUSES.map((p) => (
-                <option key={p} value={p}>
-                  {p.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: 'All Payments' },
+                ...PAYMENT_STATUSES.map((p) => ({ value: p, label: p.replace(/_/g, ' ') })),
+              ]}
+            />
             <FormDateField
               aria-label="Filter from date"
               value={filterDateFrom}

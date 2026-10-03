@@ -18,6 +18,7 @@ import {
 import type { CatalogEntry, SavedReportView } from './report-viewer-types';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
 import { DEFAULT_VALUATION, VALUATION_PRESETS } from '@/features/inventory/stock-valuation-format';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -236,7 +237,7 @@ beforeEach(() => {
 });
 async function ready() {
   await screen.findByRole('button', { name: 'Run report' });
-  await screen.findByRole('option', { name: 'Company A' });
+  await waitFor(() => expect(selectFieldOptions(getSelectField('Company'))).toContain('Company A'));
 }
 async function run() {
   await ready();
@@ -268,13 +269,13 @@ describe('Report library and viewer workspace', () => {
           resolve = done;
         }),
     );
-    fireEvent.change(screen.getByLabelText('Export format'), { target: { value: 'xlsx' } });
+    changeSelectField('Export format', 'xlsx');
     fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
     await waitFor(() => expect(state.binary).toHaveBeenCalled());
     const signal = state.binary.mock.calls[0][3] as AbortSignal;
     const reads = state.get.mock.calls.filter(([path]) => path.includes('/export-audit/')).length;
-    fireEvent.change(screen.getByLabelText('Column layout'), { target: { value: 'compact' } });
-    fireEvent.change(screen.getByLabelText('Find product'), { target: { value: 'Water' } });
+    changeSelectField('Column layout', 'compact');
+    changeSelectField('Find product', 'Water');
     expect(signal.aborted).toBe(true);
     expect(screen.getByLabelText('Export format')).toHaveValue('xlsx');
     await act(async () => resolve());
@@ -419,9 +420,7 @@ describe('Report library and viewer workspace', () => {
     render(<App />);
     await ready();
     await setDateField('Date from', '2026-09-01');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Division' }), {
-      target: { value: 'division' },
-    });
+    changeSelectField('Division', 'division');
     await run();
     expect(state.get).toHaveBeenCalledWith(
       '/source/company',
@@ -451,9 +450,7 @@ describe('Report library and viewer workspace', () => {
   it('invalidates results and exports immediately when scope changes', async () => {
     render(<App />);
     await run();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Company' }), {
-      target: { value: 'second' },
-    });
+    changeSelectField('Company', 'second');
     expect(screen.queryByText('Customer 1')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export report' })).not.toBeInTheDocument();
     expect(screen.getByText(/Filters changed/)).toBeInTheDocument();
@@ -476,9 +473,7 @@ describe('Report library and viewer workspace', () => {
     fireEvent.click(button);
     fireEvent.click(button);
     expect(state.get.mock.calls.filter(([path]) => path.startsWith('/source/'))).toHaveLength(1);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Company' }), {
-      target: { value: 'second' },
-    });
+    changeSelectField('Company', 'second');
     expect(signal.aborted).toBe(true);
     await act(async () => resolve({ rows: [{ customer: 'Old scope response' }] }));
     expect(screen.queryByText('Old scope response')).not.toBeInTheDocument();
@@ -545,9 +540,7 @@ describe('Report library and viewer workspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Search result rows' }), {
       target: { value: 'Customer 75' },
     });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Export format' }), {
-      target: { value: 'csv' },
-    });
+    changeSelectField('Export format', 'csv');
     fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
     await screen.findByText('Report export prepared. Export activity recorded.');
     expect(state.download).toHaveBeenCalledWith(
@@ -572,9 +565,7 @@ describe('Report library and viewer workspace', () => {
     async (format) => {
       render(<App />);
       await run();
-      fireEvent.change(screen.getByRole('combobox', { name: 'Export format' }), {
-        target: { value: format },
-      });
+      changeSelectField('Export format', format);
       fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
       await screen.findByText('Report export prepared. Export activity recorded.');
       if (format === 'pdf')
@@ -753,10 +744,12 @@ describe('Report library and viewer workspace', () => {
     });
     render(<App />);
     await screen.findByText(/Directory page unavailable/);
-    expect(screen.queryByRole('option', { name: 'Company 199' })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Company'))).not.toContain('Company 199');
     fail = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry organisation choices' }));
-    await screen.findByRole('option', { name: 'Last company' });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company'))).toContain('Last company'),
+    );
   });
   it('applies a default only when there are no supplied or retained choices', async () => {
     state.views = [{ ...makeView(), isDefault: true }];
@@ -804,9 +797,7 @@ describe('Report library and viewer workspace', () => {
     await screen.findByText(/Document exports support up to 5,000 rows/);
     expect(state.pdf).not.toHaveBeenCalled();
     expect(state.post).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Export format' }), {
-      target: { value: 'csv' },
-    });
+    changeSelectField('Export format', 'csv');
     fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
     await screen.findByText('Report export prepared. Export activity recorded.');
     expect(state.download.mock.calls[0][2]).toContain('Row 5000,5000');
@@ -817,9 +808,7 @@ describe('Report library and viewer workspace', () => {
     };
     render(<App />);
     await run();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Result presentation' }), {
-      target: { value: 'chart' },
-    });
+    changeSelectField('Result presentation', 'chart');
     await screen.findByText(
       'Chart samples 200 of 251 matching values, including the first and last.',
     );

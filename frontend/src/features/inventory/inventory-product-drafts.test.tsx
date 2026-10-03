@@ -17,6 +17,7 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { InventoryDraftWorkspace } from './inventory-drafts';
+import { changeSelectField, getSelectField, selectFieldValue } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -213,12 +214,16 @@ const input = (label: string, value: string) =>
   fireEvent.change(within(screen.getByRole('dialog')).getByLabelText(new RegExp('^' + label)), {
     target: { value },
   });
+// The editor's dropdowns are shared select fields, set by value like `input`.
+const pick = (label: string, value: string) =>
+  changeSelectField(label, value, screen.getByRole('dialog'));
+const field = (label: string) => getSelectField(label, screen.getByRole('dialog'));
 async function dialog(editing = true) {
-  const form = within(
-    await screen.findByRole('dialog', { name: editing ? 'Edit product' : 'New product' }),
-  );
-  await waitFor(() => expect(form.getByLabelText('Product family')).not.toBeDisabled());
-  return form;
+  const modal = await screen.findByRole('dialog', {
+    name: editing ? 'Edit product' : 'New product',
+  });
+  await waitFor(() => expect(getSelectField('Product family', modal)).not.toBeDisabled());
+  return within(modal);
 }
 async function edit(user: User) {
   await user.click(await screen.findByRole('button', { name: 'Inspect White paint' }));
@@ -228,14 +233,12 @@ async function edit(user: User) {
 async function create(user: User) {
   await user.click(screen.getByRole('button', { name: 'New product' }));
   await screen.findByRole('dialog', { name: 'New product' });
-  await waitFor(() =>
-    expect(within(screen.getByRole('dialog')).getByLabelText(/^Category/)).not.toBeDisabled(),
-  );
+  await waitFor(() => expect(field('Category')).not.toBeDisabled());
   input('Product name', 'New white paint');
-  input('Category', 'paint');
+  pick('Category', 'paint');
   await dialog(false);
-  input('Base unit', 'unit');
-  input('Product family', 'family');
+  pick('Base unit', 'unit');
+  pick('Product family', 'family');
 }
 async function keep(user: User) {
   await user.click(screen.getByRole('button', { name: 'Keep draft', exact: true }));
@@ -304,13 +307,13 @@ describe('Inventory product continuity', () => {
     const user = userEvent.setup();
     render(<App />);
     await create(user);
-    input('Product family', '__new__');
+    pick('Product family', '__new__');
     input('New family name', '10 litre');
     input('Family brand', 'Coral');
     input('Selling price', '25');
     await keep(user);
     await resume(user, false);
-    expect(screen.getByLabelText('Product family')).toHaveValue('__new__');
+    expect(selectFieldValue(field('Product family'))).toBe('__new__');
     expect(screen.getByLabelText('New family name', { exact: false })).toHaveValue('10 litre');
     save();
     await waitFor(() => expect(state.post).toHaveBeenCalledTimes(1));
@@ -344,7 +347,7 @@ describe('Inventory product continuity', () => {
     );
     expect(screen.getByLabelText('Product name', { exact: false })).toHaveValue('Ivory paint');
     expect(screen.getByLabelText('Purchase price', { exact: false })).toHaveValue(40);
-    expect(screen.getByLabelText('Status')).toHaveValue('INACTIVE');
+    expect(selectFieldValue(field('Status'))).toBe('INACTIVE');
     expect(screen.getByLabelText('Track batches')).toBeChecked();
     expect(screen.getByRole('button', { name: 'Save product' })).toBeDisabled();
     expect(state.patch).not.toHaveBeenCalled();
@@ -360,7 +363,7 @@ describe('Inventory product continuity', () => {
     await edit(user);
     input('Description', '');
     input('SKU', '');
-    input('Sales unit', '');
+    pick('Sales unit', '');
     input('Minimum stock', '0');
     await user.click(screen.getByLabelText('Taxable product'));
     await keep(user);
@@ -422,9 +425,9 @@ describe('Inventory product continuity', () => {
       render(<App />);
       await create(user);
       if (choice === 'division') {
-        input('Division', 'division');
+        pick('Division', 'division');
         await dialog(false);
-        input('Product family', 'family');
+        pick('Product family', 'family');
       }
       await keep(user);
       state.removed.add(choice);

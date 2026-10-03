@@ -10,6 +10,8 @@ import {
   useFieldA11y,
   useShakeOnError,
 } from './field-chrome';
+import { SelectField } from './select-field';
+import { optionsFromChildren, selectChangeEvent } from './select-field-compat';
 
 // ── FormInput ─────────────────────────────────────────────────────────────────
 interface FormInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -41,38 +43,67 @@ export function FormInput({ label, hint, error, success, className = '', ...prop
 }
 
 // ── FormSelect ────────────────────────────────────────────────────────────────
-interface SelectOption { value: string; label: string }
+interface SelectOption { value: string; label: string; disabled?: boolean }
 
-interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+/**
+ * The `<select>`-shaped API every form already speaks, rendered as a
+ * SelectField. Only what the call sites use is accepted, so a prop the
+ * SelectField cannot honour fails to compile instead of being dropped.
+ */
+export interface FormSelectProps {
   label?: string;
+  'aria-label'?: string;
   hint?: string;
   error?: string;
-  /** Green border, e.g. after async validation passes (no check icon — the native arrow lives on the right). */
-  success?: boolean;
+  value: string | number | null | undefined;
+  onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   options?: SelectOption[];
+  /** A leading `''` row, choosable as it was in the native select. */
   placeholder?: string;
+  /** `<option>` elements, when `options` is not given. */
   children?: React.ReactNode;
+  required?: boolean;
+  disabled?: boolean;
+  id?: string;
+  name?: string;
+  className?: string;
 }
 
-export function FormSelect({ label, hint, error, success, options, placeholder, children, className = '', ...props }: FormSelectProps) {
-  const shake = useShakeOnError(error);
-  const { fieldId, errorId, hintId, aria } = useFieldA11y(props.id, error, hint);
+export function FormSelect({
+  label,
+  'aria-label': ariaLabel,
+  hint,
+  error,
+  value,
+  onChange,
+  options,
+  placeholder,
+  children,
+  required,
+  disabled,
+  id,
+  name,
+  className,
+}: FormSelectProps) {
+  const rows = [
+    ...(placeholder ? [{ value: '', label: placeholder }] : []),
+    ...(options ?? optionsFromChildren(children)),
+  ];
   return (
-    <div className={className}>
-      {label && <Label required={props.required} htmlFor={fieldId}>{label}</Label>}
-      <select
-        className={`${INPUT_BASE} ${fieldStateClasses(error, success)}${shake}`}
-        {...props}
-        id={fieldId}
-        {...aria}
-      >
-        {placeholder && <option value="">{placeholder}</option>}
-        {options
-          ? options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)
-          : children}
-      </select>
-      {error ? <FieldError id={errorId}>{error}</FieldError> : hint ? <Hint id={hintId}>{hint}</Hint> : null}
-    </div>
+    <SelectField
+      className={className}
+      label={label}
+      aria-label={ariaLabel}
+      hint={hint}
+      error={error}
+      value={value == null ? '' : String(value)}
+      onChange={(next) => onChange(selectChangeEvent(next, name, id))}
+      options={rows}
+      required={required}
+      disabled={disabled}
+      id={id}
+      name={name}
+    />
   );
 }
 

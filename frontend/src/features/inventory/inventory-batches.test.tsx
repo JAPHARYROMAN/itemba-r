@@ -8,6 +8,12 @@ import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { WorkspaceSessionProvider } from '@/components/workspace/workspace-session';
 import { setDateField } from '@/test/date-field';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   params: '',
@@ -259,7 +265,7 @@ describe('Batches workspace', () => {
       ),
     );
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }));
-    fireEvent.change(screen.getByLabelText('Batch status'), { target: { value: 'ACTIVE' } });
+    changeSelectField('Batch status', 'ACTIVE');
     fireEvent.change(screen.getByPlaceholderText('Search batch, product or supplier…'), {
       target: { value: ' dairy ' },
     });
@@ -350,8 +356,10 @@ function editor(saved = vi.fn(), close = vi.fn()) {
   );
 }
 async function fillEditor() {
-  await screen.findByRole('option', { name: 'Litre (L)' });
-  fireEvent.change(screen.getByLabelText(/Batch unit/), { target: { value: 'unit' } });
+  await waitFor(() =>
+    expect(selectFieldOptions(getSelectField('Batch unit'))).toContain('Litre (L)'),
+  );
+  changeSelectField('Batch unit', 'unit');
   fireEvent.change(screen.getByLabelText(/Initial quantity/), { target: { value: '12.3456' } });
 }
 describe('Batch creation', () => {
@@ -360,7 +368,7 @@ describe('Batch creation', () => {
       close = vi.fn();
     editor(saved, close);
     await fillEditor();
-    fireEvent.change(screen.getByLabelText('Supplier'), { target: { value: 'supplier' } });
+    changeSelectField('Supplier', 'supplier');
     await setDateField('Manufacture date', '2026-09-01');
     await setDateField('Expiry date', '2026-10-01');
     capture('inventory-batch-editor');
@@ -422,21 +430,23 @@ describe('Batch creation', () => {
     });
     editor();
     expect(await screen.findByRole('alert')).toHaveTextContent('Second page unavailable');
-    expect(screen.queryByRole('option', { name: 'Unit 0' })).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Batch unit'))).not.toContain('Unit 0');
     expect(screen.getByRole('button', { name: 'Create batch', exact: true })).toBeDisabled();
     failed = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry unit choices' }));
-    await screen.findByRole('option', { name: 'Litre (L)' });
-    expect(screen.getByRole('option', { name: 'Unit 99' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Batch unit'))).toContain('Litre (L)'),
+    );
+    expect(selectFieldOptions(getSelectField('Batch unit'))).toContain('Unit 99');
   });
   it('clears dependent references when company changes and guards optional directory permissions', async () => {
     editor();
     await fillEditor();
-    fireEvent.change(screen.getByLabelText('Supplier'), { target: { value: 'supplier' } });
-    fireEvent.change(screen.getByLabelText(/Batch company/), { target: { value: 'other' } });
-    expect(screen.getByLabelText('Supplier')).toHaveValue('');
-    expect(screen.getByLabelText('Batch branch')).toHaveValue('');
-    expect(screen.getByLabelText(/Batch unit/)).toHaveValue('');
+    changeSelectField('Supplier', 'supplier');
+    changeSelectField('Batch company', 'other');
+    expect(selectFieldValue(getSelectField('Supplier'))).toBe('');
+    expect(selectFieldValue(getSelectField('Batch branch'))).toBe('');
+    expect(selectFieldValue(getSelectField('Batch unit'))).toBe('');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(
         '/units',

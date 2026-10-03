@@ -6,6 +6,7 @@ import { ProductWorkspace, productExportRows, productLowStock } from './product-
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { InventoryWorkspaceProvider } from '@/features/inventory/inventory-workspace-context';
 import type { Product } from './product-types';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -109,6 +110,8 @@ const embedded = (companyId = 'company', searchQuery = '') => (
     <ProductWorkspace />
   </InventoryWorkspaceProvider>
 );
+// The register's filters sit in a collapsed panel; open it to reach the shared select fields.
+const openFilters = () => fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
 const inspect = async () =>
   fireEvent.click(await screen.findByRole('button', { name: 'Inspect Coral white' }));
 function capture(name: string) {
@@ -203,21 +206,20 @@ describe('product register', () => {
     });
     mount();
     await screen.findByRole('button', { name: 'Inspect Paint 0' });
-    await waitFor(() => expect(screen.getByLabelText('Company filter')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Company filter'), { target: { value: 'company' } });
-    await waitFor(() => expect(screen.getByLabelText('Division filter')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Division filter'), { target: { value: 'division' } });
-    await waitFor(() => expect(screen.getByLabelText('Branch filter')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Branch filter'), { target: { value: 'branch' } });
-    await waitFor(() => expect(screen.getByLabelText('Category filter')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Category filter'), { target: { value: 'paint' } });
-    await waitFor(() => expect(screen.getByLabelText('Family filter')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Family filter'), { target: { value: 'family' } });
-    fireEvent.change(screen.getByLabelText('Type filter'), { target: { value: 'STOCK_ITEM' } });
-    fireEvent.change(screen.getByLabelText('Status filter'), { target: { value: 'ACTIVE' } });
-    fireEvent.change(screen.getByLabelText('Price source filter'), {
-      target: { value: 'FAMILY_DEFAULT' },
-    });
+    openFilters();
+    await waitFor(() => expect(getSelectField('Company filter')).toBeEnabled());
+    changeSelectField('Company filter', 'company');
+    await waitFor(() => expect(getSelectField('Division filter')).toBeEnabled());
+    changeSelectField('Division filter', 'division');
+    await waitFor(() => expect(getSelectField('Branch filter')).toBeEnabled());
+    changeSelectField('Branch filter', 'branch');
+    await waitFor(() => expect(getSelectField('Category filter')).toBeEnabled());
+    changeSelectField('Category filter', 'paint');
+    await waitFor(() => expect(getSelectField('Family filter')).toBeEnabled());
+    changeSelectField('Family filter', 'family');
+    changeSelectField('Type filter', 'STOCK_ITEM');
+    changeSelectField('Status filter', 'ACTIVE');
+    changeSelectField('Price source filter', 'FAMILY_DEFAULT');
     fireEvent.change(screen.getByPlaceholderText('Search products…'), {
       target: { value: 'coral' },
     });
@@ -248,7 +250,7 @@ describe('product register', () => {
         expect.objectContaining({ query: { ...expected, page: 2 } }),
       ),
     );
-    fireEvent.change(screen.getByLabelText('Status filter'), { target: { value: 'INACTIVE' } });
+    changeSelectField('Status filter', 'INACTIVE');
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
         '/products',
@@ -266,7 +268,8 @@ describe('product register', () => {
     expect(href).toBe(
       '/inventory/products/product?companyId=company&divisionId=division&branchId=branch',
     );
-    fireEvent.change(screen.getByLabelText('Category filter'), { target: { value: 'paint' } });
+    openFilters();
+    changeSelectField('Category filter', 'paint');
     ui.rerender(<UnsavedWorkProvider>{embedded('second', 'blue')}</UnsavedWorkProvider>);
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
@@ -296,7 +299,8 @@ describe('product register', () => {
     mount();
     const signal = state.get.mock.calls[0][1].signal as AbortSignal;
     state.get.mockRejectedValueOnce(new Error('Products unavailable'));
-    fireEvent.change(screen.getByLabelText('Status filter'), { target: { value: 'INACTIVE' } });
+    openFilters();
+    changeSelectField('Status filter', 'INACTIVE');
     expect(await screen.findByRole('alert')).toHaveTextContent('Products unavailable');
     expect(signal.aborted).toBe(true);
     await act(async () => resolve({ data: [product], total: 1 }));
@@ -317,12 +321,14 @@ describe('product register', () => {
     });
     mount();
     expect(await screen.findByRole('alert')).toHaveTextContent('Directory page failed');
-    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    expect(screen.getByLabelText('Company filter')).toBeDisabled();
-    expect(screen.queryByRole('option', { name: 'Example Company' })).not.toBeInTheDocument();
+    openFilters();
+    expect(getSelectField('Company filter')).toBeDisabled();
+    expect(selectFieldOptions(getSelectField('Company filter'))).not.toContain('Example Company');
     failed = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry company choices' }));
-    expect(await screen.findByRole('option', { name: 'Second Company' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company filter'))).toContain('Second Company'),
+    );
   });
   it('exports every filtered page with explicit unknown values and refuses oversized PDF', async () => {
     const normal = state.page.getMockImplementation()!;
@@ -382,6 +388,7 @@ describe('product register', () => {
     });
     mount();
     await inspect();
+    openFilters();
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Export page failed');
     expect(state.download).not.toHaveBeenCalled();
@@ -396,7 +403,7 @@ describe('product register', () => {
         : normal(path, opts),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
-    fireEvent.change(screen.getByLabelText('Status filter'), { target: { value: 'INACTIVE' } });
+    changeSelectField('Status filter', 'INACTIVE');
     expect(signal.aborted).toBe(true);
     await act(async () => finish({ data: [product], total: 1 }));
     expect(state.download).not.toHaveBeenCalled();
@@ -420,21 +427,21 @@ describe('product register', () => {
     mount();
     await inspect();
     fireEvent.click(screen.getByRole('button', { name: 'Edit product' }));
-    await waitFor(() => expect(screen.getByLabelText('Product family')).toBeEnabled());
+    await waitFor(() => expect(getSelectField('Product family')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Description'), {
       target: { value: 'Updated description' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save product' }));
     expect(await screen.findByText('“Coral white” updated.')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'New product' }));
-    await waitFor(() => expect(screen.getByLabelText('Category*')).toBeEnabled());
+    await waitFor(() => expect(getSelectField('Category')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Product name', { exact: false }), {
       target: { value: 'Coral ivory' },
     });
-    fireEvent.change(screen.getByLabelText('Category*'), { target: { value: 'paint' } });
-    await waitFor(() => expect(screen.getByLabelText('Product family')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Product family'), { target: { value: 'family' } });
-    fireEvent.change(screen.getByLabelText('Base unit*'), { target: { value: 'unit' } });
+    changeSelectField('Category', 'paint');
+    await waitFor(() => expect(getSelectField('Product family')).toBeEnabled());
+    changeSelectField('Product family', 'family');
+    changeSelectField('Base unit', 'unit');
     state.post.mockResolvedValue({
       ...product,
       name: 'Coral ivory',

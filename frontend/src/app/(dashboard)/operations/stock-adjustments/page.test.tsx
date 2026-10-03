@@ -2,6 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InventoryWorkspaceProvider } from '@/features/inventory/inventory-workspace-context';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const backendList = vi.fn();
 const backendPage = vi.fn();
@@ -80,14 +86,14 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
     await user.click(createButton);
 
     expect(await screen.findByRole('dialog', { name: 'New stock adjustment' })).toBeInTheDocument();
-    const branchSelect = screen.getByLabelText(/^Adjustment branch/);
+    const branchSelect = getSelectField('Adjustment branch');
     await waitFor(() => expect(branchSelect).toBeEnabled());
 
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: /kisimani/i })).toBeInTheDocument(),
+      expect(selectFieldOptions(branchSelect)).toContainEqual(expect.stringMatching(/kisimani/i)),
     );
-    await user.selectOptions(branchSelect, 'branch-1');
-    expect(branchSelect).toHaveValue('branch-1');
+    await chooseSelectOption(branchSelect, 'branch-1', user);
+    expect(selectFieldValue(branchSelect)).toBe('branch-1');
 
     await user.click(screen.getByRole('combobox', { name: 'Product, line 1' }));
     await waitFor(() =>

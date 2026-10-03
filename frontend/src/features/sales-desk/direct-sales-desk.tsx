@@ -20,7 +20,7 @@ import {
   ShoppingBag,
   Users,
 } from 'lucide-react';
-import { Btn, FormDateField, Modal } from '@/components/ui';
+import { Btn, FormDateField, Modal, SelectField } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { backendGet } from '@/lib/api-client';
@@ -248,17 +248,17 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                         (!scope.divisionId || b.divisionId === scope.divisionId),
                     );
             return (
-              <label key={key}>
-                <span>{['Company', 'Division', 'Branch'][i]}</span>
-                <select value={scope[key]} onChange={(e) => changeScope(key, e.target.value)}>
-                  <option value="">All {['companies', 'divisions', 'branches'][i]}</option>
-                  {list.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                key={key}
+                variant="bare"
+                label={['Company', 'Division', 'Branch'][i]}
+                value={scope[key]}
+                onChange={(value) => changeScope(key, value)}
+                options={[
+                  { value: '', label: `All ${['companies', 'divisions', 'branches'][i]}` },
+                  ...list.map((x) => ({ value: x.id, label: x.name })),
+                ]}
+              />
             );
           })}
         </div>
@@ -279,20 +279,17 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
           <>
             <div className="sales-section-title">
               <span>All recorded sales in this organisation scope</span>
-              <label>
-                Currency{' '}
-                <select
-                  aria-label="Sales summary currency"
-                  value={current?.currency ?? ''}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  {totals.length ? (
-                    totals.map((c) => <option key={c.currency}>{c.currency}</option>)
-                  ) : (
-                    <option value="">No sales yet</option>
-                  )}
-                </select>
-              </label>
+              <SelectField
+                label="Currency"
+                labelPlacement="side"
+                value={current?.currency ?? ''}
+                onChange={setCurrency}
+                options={
+                  totals.length
+                    ? totals.map((c) => ({ value: c.currency, label: c.currency }))
+                    : [{ value: '', label: 'No sales yet' }]
+                }
+              />
             </div>
             <div className="sales-stats">
               {[
@@ -405,27 +402,22 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                   }}
                 />
               </label>
-              <select
+              <SelectField
                 aria-label="Sale status"
                 value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
+                onChange={(value) => {
+                  setStatus(value);
                   setPage(1);
                 }}
-              >
-                {[
-                  ['all', 'All statuses'],
-                  ['unpaid', 'Unpaid'],
-                  ['partial', 'Part paid'],
-                  ['paid', 'Paid'],
-                  ['overdue', 'Overdue'],
-                  ['void', 'Void'],
-                ].map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: 'all', label: 'All statuses' },
+                  { value: 'unpaid', label: 'Unpaid' },
+                  { value: 'partial', label: 'Part paid' },
+                  { value: 'paid', label: 'Paid' },
+                  { value: 'overdue', label: 'Overdue' },
+                  { value: 'void', label: 'Void' },
+                ]}
+              />
               <div className="ui-date-caption">
                 From{' '}
                 <FormDateField

@@ -6,6 +6,12 @@ import { ProductEditor } from './product-editor';
 import { productBody, productForm } from './product-form';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import type { Product } from './product-types';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -78,7 +84,7 @@ const change = (label: string, value: string) =>
   fireEvent.change(screen.getByLabelText(label, { exact: false }), { target: { value } });
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save product' }));
 async function ready() {
-  await waitFor(() => expect(screen.getByLabelText('Product family')).not.toBeDisabled());
+  await waitFor(() => expect(getSelectField('Product family')).not.toBeDisabled());
 }
 function capture(name: string) {
   const dir = process.env.ITEMBA_PAYROLL_VISUAL_DIR;
@@ -158,10 +164,10 @@ describe('product editor', () => {
     const saved = vi.fn();
     mount({ divisionId: 'division', onSaved: saved });
     await ready();
-    expect(screen.getByLabelText('Division')).toHaveValue('');
+    expect(selectFieldValue(getSelectField('Division'))).toBe('');
     change('Description', '');
     change('SKU', '');
-    change('Purchase unit', '');
+    changeSelectField('Purchase unit', '');
     fireEvent.click(screen.getByLabelText('Taxable product'));
     save();
     await waitFor(() =>
@@ -237,15 +243,15 @@ describe('product editor', () => {
     );
     const saved = vi.fn();
     mount({ record: undefined, onSaved: saved });
-    await waitFor(() =>
-      expect(screen.getByLabelText('Category', { exact: false })).not.toBeDisabled(),
-    );
-    change('Category', 'paint');
+    await waitFor(() => expect(getSelectField('Category')).not.toBeDisabled());
+    changeSelectField('Category', 'paint');
     await ready();
     change('Product name', 'Coral white');
-    change('Base unit', 'unit');
-    change('Product family', 'family');
-    expect(screen.queryByRole('option', { name: /Division family/ })).not.toBeInTheDocument();
+    changeSelectField('Base unit', 'unit');
+    changeSelectField('Product family', 'family');
+    expect(selectFieldOptions(getSelectField('Product family'))).not.toContainEqual(
+      expect.stringMatching(/Division family/),
+    );
     expect(
       screen.getByText('1 other active family in this category and scope.', { exact: false }),
     ).toBeVisible();
@@ -284,11 +290,11 @@ describe('product editor', () => {
     });
     mount();
     expect(await screen.findByRole('alert')).toHaveTextContent('Second page failed');
-    expect(screen.getByLabelText('Product family')).toBeDisabled();
+    expect(getSelectField('Product family')).toBeDisabled();
     failed = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry family choices' }));
     await ready();
-    expect(screen.getByRole('option', { name: 'Coral · 1 litre' })).toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Product family'))).toContain('Coral · 1 litre');
   });
   it('keeps product update separate from create and directory permissions', async () => {
     state.permissions = new Set(['products.create']);
@@ -314,14 +320,14 @@ describe('product editor', () => {
   it('creates a family inline and keeps variant, unit, stock and tax fields', async () => {
     mount();
     await ready();
-    change('Product family', '__new__');
+    changeSelectField('Product family', '__new__');
     change('New family name', '10 litre');
     change('Family brand', 'Coral');
     change('Colour', 'Ivory');
     change('Size', '10 L');
     change('Finish', 'Matt');
     change('Variant name', 'Premium');
-    change('Sales unit', 'unit');
+    changeSelectField('Sales unit', 'unit');
     change('Minimum stock', '0');
     change('Maximum stock', '150.5');
     change('Reorder level', '20');

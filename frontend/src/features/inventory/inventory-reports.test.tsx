@@ -6,6 +6,7 @@ import InventoryReports from './inventory-reports';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { INVENTORY_REPORTS, normalizeInventoryReport, reportValue } from './inventory-report-data';
 import { loadInventoryReport } from './inventory-report-loader';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 
 const api = vi.hoisted(() => ({
   get: vi.fn(),
@@ -95,8 +96,8 @@ describe('Inventory reports workspace', () => {
     api.get.mockResolvedValue(rows);
     render(tree());
     await screen.findByRole('cell', { name: 'Water 0', exact: true });
-    fireEvent.change(screen.getByLabelText('Category filter'), { target: { value: 'Beverages' } });
-    fireEvent.change(screen.getByLabelText('Column layout'), { target: { value: 'compact' } });
+    changeSelectField('Category filter', 'Beverages');
+    changeSelectField('Column layout', 'compact');
     expect(screen.queryByRole('columnheader', { name: 'Category' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => expect(api.csv).toHaveBeenCalled());
@@ -128,7 +129,7 @@ describe('Inventory reports workspace', () => {
         }),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
-    fireEvent.change(screen.getByLabelText('Column layout'), { target: { value: 'compact' } });
+    changeSelectField('Column layout', 'compact');
     await act(async () => resolve([stock]));
     expect(api.csv).not.toHaveBeenCalled();
   });
@@ -141,7 +142,7 @@ describe('Inventory reports workspace', () => {
     expect(screen.getByRole('cell', { name: '12.0001', exact: true })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '18,000.25', exact: true })).toBeInTheDocument();
     capture('inventory-reports');
-    fireEvent.change(screen.getByLabelText('Inventory report'), { target: { value: 'low-stock' } });
+    changeSelectField('Inventory report', 'low-stock');
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect Bottled water' }));
     expect(screen.getByLabelText('Record details')).toHaveTextContent('WATER_01');
     capture('inventory-reports-details');
@@ -151,9 +152,7 @@ describe('Inventory reports workspace', () => {
           ? { rows: [stock], total: 1 }
           : [stock],
       );
-      fireEvent.change(screen.getByLabelText('Inventory report'), {
-        target: { value: report.key },
-      });
+      changeSelectField('Inventory report', report.key);
       await waitFor(() =>
         expect(api.get).toHaveBeenCalledWith(
           report.endpoint,
@@ -175,7 +174,7 @@ describe('Inventory reports workspace', () => {
     expect(api.get).not.toHaveBeenCalled();
     view.rerender(tree());
     await screen.findByRole('button', { name: 'Inspect Bottled water' });
-    expect(screen.getAllByRole('option')).toHaveLength(2);
+    expect(selectFieldOptions(getSelectField('Inventory report'))).toHaveLength(2);
     expect(api.page).not.toHaveBeenCalled();
     expect(api.get).toHaveBeenCalledWith('/westsides/reports/batch-status', expect.anything());
     api.permissions.clear();
@@ -226,9 +225,7 @@ describe('Inventory reports workspace', () => {
     await screen.findByRole('cell', { name: 'Product 20', exact: true });
     expect(api.get).toHaveBeenCalledTimes(1);
     api.get.mockResolvedValue({ rows: [stock], total: 41 });
-    fireEvent.change(screen.getByLabelText('Inventory report'), {
-      target: { value: 'inventory-movements' },
-    });
+    changeSelectField('Inventory report', 'inventory-movements');
     await screen.findByRole('button', { name: 'Inspect Bottled water' });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() =>
@@ -272,7 +269,7 @@ describe('Inventory reports workspace', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     await screen.findByRole('status');
-    fireEvent.change(screen.getByLabelText('Inventory report'), { target: { value: 'low-stock' } });
+    changeSelectField('Inventory report', 'low-stock');
     await act(async () => resolve([stock]));
     expect(api.csv).not.toHaveBeenCalled();
   });

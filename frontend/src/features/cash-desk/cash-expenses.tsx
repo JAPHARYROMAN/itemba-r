@@ -2,7 +2,7 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ChevronRight, Receipt, Search } from 'lucide-react';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
-import { Btn, FormDateField } from '@/components/ui';
+import { Btn, FormDateField, SelectField } from '@/components/ui';
 import {
   Account,
   ExpenseReport,
@@ -98,40 +98,35 @@ export function CashExpenses({
             className="ui-date-field-inline"
           />
         </div>
-        <select
+        <SelectField
           aria-label="Filter expense category"
           value={category}
-          onChange={(e) => filters(setCategory, e.target.value)}
-        >
-          <option value="">All categories</option>
-          {Object.entries(expenseCategories).map(([id, label]) => (
-            <option value={id} key={id}>
-              {label}
-            </option>
-          ))}
-          <option value="UNCATEGORIZED">Uncategorized (earlier records)</option>
-        </select>
-        <select
+          onChange={(value) => filters(setCategory, value)}
+          options={[
+            { value: '', label: 'All categories' },
+            ...Object.entries(expenseCategories).map(([id, label]) => ({ value: id, label })),
+            { value: 'UNCATEGORIZED', label: 'Uncategorized (earlier records)' },
+          ]}
+        />
+        <SelectField
           aria-label="Filter expense account"
           value={accountId}
-          onChange={(e) => filters(setAccountId, e.target.value)}
-        >
-          <option value="">All accounts</option>
-          {accounts.map((a) => (
-            <option value={a.id} key={a.id}>
-              {a.name} · {a.company.name}
-            </option>
-          ))}
-        </select>
-        <select
+          onChange={(value) => filters(setAccountId, value)}
+          options={[
+            { value: '', label: 'All accounts' },
+            ...accounts.map((a) => ({ value: a.id, label: `${a.name} · ${a.company.name}` })),
+          ]}
+        />
+        <SelectField
           aria-label="Expense status"
           value={status}
-          onChange={(e) => filters(setStatus, e.target.value)}
-        >
-          <option value="all">All statuses</option>
-          <option value="paid">Paid</option>
-          <option value="reversed">Reversed</option>
-        </select>
+          onChange={(value) => filters(setStatus, value)}
+          options={[
+            { value: 'all', label: 'All statuses' },
+            { value: 'paid', label: 'Paid' },
+            { value: 'reversed', label: 'Reversed' },
+          ]}
+        />
         <label className="cash-search">
           <Search size={16} />
           <input
@@ -160,18 +155,14 @@ export function CashExpenses({
             <>
               <div className="cash-section-title">
                 <h2>Spending summary</h2>
-                <label className="cash-expense-currency">
-                  Currency{' '}
-                  <select
-                    aria-label="Expense summary currency"
-                    value={current?.currency ?? ''}
-                    onChange={(e) => setCurrency(e.target.value)}
-                  >
-                    {totals.map((c) => (
-                      <option key={c.currency}>{c.currency}</option>
-                    ))}
-                  </select>
-                </label>
+                <SelectField
+                  className="cash-expense-currency"
+                  label="Currency"
+                  labelPlacement="side"
+                  value={current?.currency ?? ''}
+                  onChange={setCurrency}
+                  options={totals.map((c) => ({ value: c.currency, label: c.currency }))}
+                />
               </div>
               {current && (
                 <div className="cash-stats">

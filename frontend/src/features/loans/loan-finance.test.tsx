@@ -6,6 +6,12 @@ import {
   LoanFinancialHistory,
   emptyFunding,
 } from './loan-finance';
+import {
+  changeSelectField,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({ post: vi.fn(), canReverse: true }));
 vi.mock('@/lib/api-client', () => ({ backendPost: state.post }));
 vi.mock('@/hooks/use-auth', () => ({
@@ -82,15 +88,18 @@ describe('Connected loan forms', () => {
       />,
     );
     expect(screen.getByText(/No cash is received/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Receive into/)).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /Opening equity/ })).toBeInTheDocument();
+    expect(querySelectField(/Receive into/)).not.toBeInTheDocument();
+    expect(selectFieldOptions(getSelectField('Opening equity account'))).toContainEqual(
+      expect.stringMatching(/Opening equity/),
+    );
   });
   it('only offers cash in the loan currency', () => {
     render(
       <LoanFundingFields companyId="co" currency="TZS" value={emptyFunding} onChange={vi.fn()} />,
     );
-    expect(screen.getByRole('option', { name: 'Connected bank' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'USD account' })).not.toBeInTheDocument();
+    const cash = getSelectField('Receive into Cash Desk account');
+    expect(selectFieldOptions(cash)).toContain('Connected bank');
+    expect(selectFieldOptions(cash)).not.toContain('USD account');
   });
   it('sends selected accounts and preserves the request reference after an uncertain error', async () => {
     state.post.mockRejectedValueOnce(new Error('Connection interrupted')).mockResolvedValueOnce({});
@@ -104,10 +113,8 @@ describe('Connected loan forms', () => {
     );
     fireEvent.change(screen.getByLabelText(/Total paid/), { target: { value: '15' } });
     fireEvent.change(screen.getByLabelText(/^Interest$/), { target: { value: '5' } });
-    fireEvent.change(screen.getByLabelText(/Pay from Cash Desk/), { target: { value: 'cash' } });
-    fireEvent.change(screen.getByLabelText('Interest expense account'), {
-      target: { value: 'expense' },
-    });
+    changeSelectField('Pay from Cash Desk account', 'cash');
+    changeSelectField('Interest expense account', 'expense');
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
     await screen.findByText('Connection interrupted');

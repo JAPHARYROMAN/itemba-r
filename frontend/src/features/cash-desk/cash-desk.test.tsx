@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDateField } from '@/test/date-field';
+import userEvent from '@testing-library/user-event';
+import { chooseSelectOption, getSelectField } from '@/test/select-field';
 import { CashDesk } from './cash-desk';
 import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
@@ -86,9 +88,7 @@ describe('Cash Desk', () => {
         'Choose a company to view its sales, collections and account balances.',
       ),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Company', { exact: true }), {
-      target: { value: 'company' },
-    });
+    await chooseSelectOption('Company', 'Company');
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(
         '/cash-desk/directory',
@@ -172,9 +172,9 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/Paying account/), { target: { value: 'till' } });
+    await chooseSelectOption('Paying account', /Main till/);
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '150.25' } });
-    fireEvent.change(screen.getByLabelText(/Expense category/), { target: { value: 'TRANSPORT' } });
+    await chooseSelectOption('Expense category', 'Travel & transport');
     fireEvent.change(screen.getByLabelText(/Paid to/), { target: { value: 'Courier service' } });
     fireEvent.change(screen.getByLabelText(/Description/), {
       target: { value: 'Document delivery' },
@@ -264,9 +264,7 @@ describe('Cash Desk', () => {
     await screen.findByText('TZS 500.20');
     expect(screen.getAllByText('TZS 125,000.10')).toHaveLength(2);
     expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Expense summary currency'), {
-      target: { value: 'USD' },
-    });
+    await chooseSelectOption('Currency', 'USD');
     expect(screen.getAllByText('USD 10.10')).toHaveLength(2);
     expect(screen.queryByText('TZS 500.20')).not.toBeInTheDocument();
   });
@@ -282,9 +280,7 @@ describe('Cash Desk', () => {
       />,
     );
     await screen.findByText('No expenses in this view');
-    fireEvent.change(screen.getByLabelText('Filter expense category'), {
-      target: { value: 'RENT' },
-    });
+    await chooseSelectOption('Filter expense category', 'Rent & premises');
     await waitFor(() =>
       expect(api.get).toHaveBeenLastCalledWith(
         '/cash-desk/expenses',
@@ -320,7 +316,7 @@ describe('Cash Desk', () => {
   it('keeps currency balances separate and formats exact decimal strings', async () => {
     render(<CashDesk />);
     await screen.findByText('TZS 9,999,999,999,999,999.99');
-    fireEvent.change(screen.getByLabelText('Desk account currency'), { target: { value: 'USD' } });
+    await chooseSelectOption('Desk account currency', 'USD');
     expect(screen.getByText('USD 20.00')).toBeInTheDocument();
     expect(screen.queryByText('TZS 9,999,999,999,999,999.99')).not.toBeInTheDocument();
   });
@@ -353,7 +349,7 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/Receiving account/), { target: { value: 'till' } });
+    await chooseSelectOption('Receiving account', /Main till/);
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '20.10' } });
     fireEvent.change(screen.getByLabelText(/Description/), {
       target: { value: 'Tuesday cash sales' },
@@ -506,8 +502,10 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
+    await userEvent.click(getSelectField('Paying account'));
+    await screen.findByRole('option', { name: /Main till/ });
     expect(screen.queryByRole('option', { name: /Other till/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Paying account/), { target: { value: 'till' } });
+    await userEvent.click(screen.getByRole('option', { name: /Main till/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save movement' }));
     await waitFor(() => expect(saved).toHaveBeenCalled());
     expect(api.post.mock.calls[0][1]).toMatchObject({

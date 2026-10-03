@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
 import { BusinessTransactionLink } from './business-transaction-link';
 const api = vi.hoisted(() => ({ get: vi.fn(), patch: vi.fn(), permissions: new Set<string>() }));
 vi.mock('@/hooks/use-auth', () => ({
@@ -38,10 +39,12 @@ describe('Reviewed transaction links', () => {
     fireEvent.change(screen.getByLabelText('Find business reference'), {
       target: { value: 'INV' },
     });
-    await screen.findByRole('option', { name: /INV-BUSINESS/ });
-    fireEvent.change(screen.getByLabelText('Matching business transaction'), {
-      target: { value: 'business' },
-    });
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Matching business transaction'))).toContainEqual(
+        expect.stringMatching(/INV-BUSINESS/),
+      ),
+    );
+    changeSelectField('Matching business transaction', 'business');
     expect(screen.getByRole('button', { name: 'Link reviewed transaction' })).toBeDisabled();
     fireEvent.click(screen.getByRole('checkbox'));
     api.patch.mockResolvedValue({ id: 'old', canonicalId: 'business' });

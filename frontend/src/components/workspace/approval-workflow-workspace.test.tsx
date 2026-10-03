@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 import { ApprovalWorkflowWorkspace } from './approval-workflow-workspace';
 import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { type ApprovalWorkflow, workflowPath } from './approval-workflow-types';
@@ -130,9 +131,9 @@ describe('Approval workflows', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Filters', exact: true }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
+    await chooseSelectOption('Company filter', 'company', user);
     await user.type(screen.getByRole('textbox', { name: 'Entity type filter' }), 'PurchaseOrder');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Status filter' }), 'false');
+    await chooseSelectOption('Status filter', 'false', user);
     await user.type(screen.getByRole('searchbox'), ' WF ');
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
@@ -162,13 +163,13 @@ describe('Approval workflows', () => {
           finish = resolve;
         }),
     );
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'company');
+    await chooseSelectOption('Company filter', 'company', user);
     const signal = state.get.mock.calls.at(-1)![1].signal;
     expect(
       screen.queryByRole('button', { name: 'Inspect Purchase review' }),
     ).not.toBeInTheDocument();
     state.get.mockRejectedValueOnce(new Error('Scope unavailable'));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Company filter' }), 'other');
+    await chooseSelectOption('Company filter', 'other', user);
     expect(signal.aborted).toBe(true);
     expect(await screen.findByRole('alert')).toHaveTextContent('Scope unavailable');
     await act(async () => finish({ data: [fixture], total: 21 }));
@@ -209,21 +210,17 @@ describe('Approval workflows', () => {
       .mockResolvedValueOnce({ data: [{ id: 'company', name: 'Example Company' }], total: 2 })
       .mockResolvedValueOnce({ data: [{ id: 'other', name: 'Other Company' }], total: 2 });
     await user.click(within(dialog).getByRole('button', { name: 'Retry companies' }));
-    await within(dialog).findByRole('option', { name: 'Other Company' });
-    await user.selectOptions(
-      within(dialog).getByRole('combobox', { name: 'Company', exact: true }),
-      'other',
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company', dialog))).toContain('Other Company'),
     );
+    await chooseSelectOption('Company', 'other', user, dialog);
     await user.type(within(dialog).getByRole('textbox', { name: /^Name/ }), ' New review ');
     await user.type(within(dialog).getByRole('textbox', { name: /^Entity type/ }), 'PurchaseOrder');
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Scope' }), 'COMPANY');
-    await user.selectOptions(
-      within(dialog).getByRole('combobox', { name: 'Trigger action' }),
-      'POST',
-    );
+    await chooseSelectOption('Scope', 'COMPANY', user, dialog);
+    await chooseSelectOption('Trigger action', 'POST', user, dialog);
     await user.clear(within(dialog).getByRole('spinbutton', { name: /Priority/ }));
     await user.type(within(dialog).getByRole('spinbutton', { name: /Priority/ }), '7');
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Status' }), 'false');
+    await chooseSelectOption('Status', 'false', user, dialog);
     capture('approval-workflow-editor');
     await user.click(within(dialog).getByRole('button', { name: 'Save workflow' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());

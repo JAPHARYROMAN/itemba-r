@@ -9,6 +9,13 @@ import { UnsavedWorkProvider } from './unsaved-work-provider';
 import { InventoryWorkspaceProvider } from '@/features/inventory/inventory-workspace-context';
 import type { Unit, UnitConversion } from './unit-types';
 import InventoryWorkspace from '@/features/inventory/inventory-workspace';
+import {
+  chooseSelectOption,
+  getSelectField,
+  querySelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   get: vi.fn(),
@@ -98,6 +105,9 @@ const conversion: UnitConversion = {
   fromUnit: bag,
   toUnit: kg,
 };
+// Every unit choice the conversion editor offers, across its From and To fields.
+const unitOptions = () =>
+  ['From unit', 'To unit'].flatMap((label) => selectFieldOptions(getSelectField(label)));
 const mount = (children: React.ReactNode = <UnitWorkspace />) =>
   render(<UnsavedWorkProvider>{children}</UnsavedWorkProvider>);
 const ready = () => screen.findByRole('button', { name: 'Inspect Cement bag' });
@@ -213,16 +223,12 @@ describe('Unit register', () => {
     mount();
     await ready();
     await userEvent.click(screen.getByRole('button', { name: /^Filters/ }));
-    await screen.findByRole('option', { name: 'Other Company' });
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: 'Company filter' }),
-      'other',
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Company filter'))).toContain('Other Company'),
     );
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: 'Status filter' }),
-      'INACTIVE',
-    );
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Type filter' }), 'WEIGHT');
+    await chooseSelectOption('Company filter', 'other');
+    await chooseSelectOption('Status filter', 'INACTIVE');
+    await chooseSelectOption('Type filter', 'WEIGHT');
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'gram' } });
     await waitFor(() =>
       expect(state.get).toHaveBeenLastCalledWith(
@@ -326,7 +332,7 @@ describe('Unit register', () => {
       }),
     );
     await userEvent.click(screen.getByRole('button', { name: /^Filters/ }));
-    expect(screen.queryByRole('combobox', { name: 'Company filter' })).not.toBeInTheDocument();
+    expect(querySelectField('Company filter')).not.toBeInTheDocument();
   });
   it('retains a failed named deletion and retries the same record', async () => {
     mount();
@@ -352,7 +358,7 @@ describe('Measurement editors', () => {
     fireEvent.change(screen.getByRole('textbox', { name: /Symbol/ }), {
       target: { value: ' crt ' },
     });
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /Unit type/ }), 'PACKAGE');
+    await chooseSelectOption('Unit type', 'PACKAGE');
     await userEvent.click(
       screen.getByRole('checkbox', { name: 'Base unit for this type and scope' }),
     );
@@ -420,7 +426,7 @@ describe('Measurement editors', () => {
     });
     view.rerender(content('other'));
     expect(screen.getByRole('textbox', { name: /Name/ })).toHaveValue('Draft quantity');
-    expect(screen.getByRole('combobox', { name: 'Company scope' })).toHaveValue('company');
+    expect(selectFieldValue(getSelectField('Company scope'))).toBe('company');
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     expect(screen.queryByRole('dialog', { name: 'New unit' })).not.toBeInTheDocument();
@@ -434,12 +440,12 @@ describe('Measurement editors', () => {
     });
     mount(<ConversionEditor companyId="company" onClose={vi.fn()} onSaved={vi.fn()} />);
     await screen.findByText(/Second page unavailable/);
-    expect(screen.queryByRole('option', { name: 'Cement bag (bag)' })).not.toBeInTheDocument();
+    expect(unitOptions()).not.toContain('Cement bag (bag)');
     expect(screen.getByRole('button', { name: 'Create conversion' })).toBeDisabled();
     state.page.mockResolvedValue({ data: [bag, kg], total: 2 });
     await userEvent.click(screen.getByRole('button', { name: 'Retry unit choices' }));
     await waitFor(() =>
-      expect(screen.getAllByRole('option', { name: 'Kilogram (kg)' })).toHaveLength(2),
+      expect(unitOptions().filter((option) => option === 'Kilogram (kg)')).toHaveLength(2),
     );
     expect(screen.getByRole('button', { name: 'Create conversion' })).toBeEnabled();
   });
@@ -467,8 +473,8 @@ describe('Measurement editors', () => {
   it('keeps existing conversion pairs fixed and can clear a description', async () => {
     const saved = vi.fn();
     mount(<ConversionEditor record={conversion} companyId="" onClose={vi.fn()} onSaved={saved} />);
-    expect(screen.getByRole('combobox', { name: /From unit/ })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: /To unit/ })).toBeDisabled();
+    expect(getSelectField('From unit')).toBeDisabled();
+    expect(getSelectField('To unit')).toBeDisabled();
     expect(state.page).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
       target: { value: '' },
@@ -500,13 +506,13 @@ describe('Measurement editors', () => {
     const saved = vi.fn();
     mount(<ConversionEditor companyId="company" onClose={vi.fn()} onSaved={saved} />);
     await waitFor(() =>
-      expect(screen.getAllByRole('option', { name: 'Kilogram (kg)' })).toHaveLength(2),
+      expect(unitOptions().filter((option) => option === 'Kilogram (kg)')).toHaveLength(2),
     );
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /From unit/ }), 'bag');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /To unit/ }), 'bag');
+    await chooseSelectOption('From unit', 'bag');
+    await chooseSelectOption('To unit', 'bag');
     await userEvent.click(screen.getByRole('button', { name: 'Create conversion' }));
     await screen.findByText('Choose two different units.');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /To unit/ }), 'kg');
+    await chooseSelectOption('To unit', 'kg');
     fireEvent.change(screen.getByRole('spinbutton', { name: /Conversion factor/ }), {
       target: { value: '50' },
     });

@@ -292,7 +292,8 @@
   padding: 15px 0;
 }
 .business-workspace [data-page-toolbar] input,
-.business-workspace [data-page-toolbar] select {
+.business-workspace [data-page-toolbar] select,
+.business-workspace [data-page-toolbar] .ui-select-trigger {
   min-height: 36px;
 }
 .business-workspace > div.aurora-stagger {
@@ -324,7 +325,8 @@
 }
 .workspace-form input,
 .workspace-form select,
-.workspace-form textarea {
+.workspace-form textarea,
+.workspace-form .ui-select-trigger {
   border-radius: 8px !important;
   box-shadow: none !important;
 }

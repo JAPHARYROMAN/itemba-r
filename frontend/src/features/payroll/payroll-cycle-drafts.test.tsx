@@ -17,6 +17,12 @@ import {
 } from '@/components/workspace/workspace-navigation';
 import { PayrollDraftWorkspace } from './payroll-drafts';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import {
+  chooseSelectOption,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -211,6 +217,8 @@ beforeEach(() => {
   };
 });
 type User = ReturnType<typeof userEvent.setup>;
+/** A select field in the open dialog, scoped as the `form` queries are. */
+const dialogSelect = (label: string) => getSelectField(label, screen.getByRole('dialog'));
 async function keep(user: User) {
   await user.click(screen.getByRole('button', { name: 'Keep draft', exact: true }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -226,8 +234,8 @@ async function runAction(user: User, action = 'Record payment') {
 }
 async function fillPayment(user: User) {
   const form = await runAction(user);
-  await waitFor(() => expect(form.getByLabelText('Cash Desk account')).toBeEnabled());
-  await user.selectOptions(form.getByLabelText('Cash Desk account'), 'bank');
+  await waitFor(() => expect(dialogSelect('Cash Desk account')).toBeEnabled());
+  await chooseSelectOption(dialogSelect('Cash Desk account'), 'bank', user);
   await setDateField('Payment date', '2026-09-01', user, form);
   return form;
 }
@@ -246,16 +254,20 @@ describe('Payroll pay cycle continuity', () => {
     render(<App initial="/hr/payroll-runs?companyId=company&payrollPeriodId=period" />);
     await user.click(screen.getByRole('button', { name: 'New run' }));
     let form = within(await screen.findByRole('dialog', { name: 'New payroll run' }));
-    await form.findByRole('option', { name: /September 2026/ });
-    await user.selectOptions(form.getByLabelText('Run type'), 'BONUS');
+    await waitFor(() =>
+      expect(selectFieldOptions(dialogSelect('Payroll period'))).toEqual(
+        expect.arrayContaining([expect.stringMatching(/September 2026/)]),
+      ),
+    );
+    await chooseSelectOption(dialogSelect('Run type'), 'BONUS', user);
     await user.click(screen.getByRole('link', { name: 'Open home' }));
     await user.click(screen.getByRole('button', { name: 'Keep draft and continue' }));
     await screen.findByRole('heading', { name: 'Payroll overview' });
     expect(state.post).not.toHaveBeenCalled();
     form = await resume(user, 'New payroll run', 'New payroll run');
     await waitFor(() => expect(form.getByRole('button', { name: 'Create run' })).toBeEnabled());
-    expect(form.getByLabelText(/Payroll period/)).toHaveValue('period');
-    expect(form.getByLabelText('Run type')).toHaveValue('BONUS');
+    expect(selectFieldValue(dialogSelect('Payroll period'))).toBe('period');
+    expect(selectFieldValue(dialogSelect('Run type'))).toBe('BONUS');
     state.post.mockRejectedValueOnce(new Error('Create unavailable'));
     await user.click(form.getByRole('button', { name: 'Create run' }));
     expect(await form.findByRole('alert')).toHaveTextContent('Create unavailable');
@@ -279,7 +291,9 @@ describe('Payroll pay cycle continuity', () => {
     await waitFor(() => expect(form.getByRole('button', { name: 'Create run' })).toBeEnabled());
     await user.click(form.getByRole('button', { name: 'Create run' }));
     expect(state.post).not.toHaveBeenCalled();
-    expect(form.queryByRole('option', { name: /September 2026/ })).not.toBeInTheDocument();
+    expect(selectFieldOptions(dialogSelect('Payroll period'))).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/September 2026/)]),
+    );
   });
   it('requires a review of changed net pay before submitting a kept, unattempted payment', async () => {
     const user = userEvent.setup();
@@ -288,7 +302,7 @@ describe('Payroll pay cycle continuity', () => {
     await keep(user);
     state.run = { ...state.run, totalNetPay: '900.25', updatedAt: 'v2' };
     const form = await resume(user, 'Record payment', 'Record payment · PR-01');
-    await waitFor(() => expect(form.getByLabelText('Cash Desk account')).toHaveValue('bank'));
+    await waitFor(() => expect(selectFieldValue(dialogSelect('Cash Desk account'))).toBe('bank'));
     expect(dateFieldValue(getDateField('Payment date', form))).toBe('2026-09-01');
     expect(form.getByText(/Net TZS 900.25/)).toBeInTheDocument();
     await user.click(form.getByRole('button', { name: 'Record payment' }));
@@ -314,7 +328,7 @@ describe('Payroll pay cycle continuity', () => {
     await user.click(form.getByRole('button', { name: 'Record payment' }));
     expect(await form.findByRole('alert')).toHaveTextContent('Connection lost');
     const original = structuredClone(state.patch.mock.calls[0]);
-    expect(form.getByLabelText('Cash Desk account')).toBeDisabled();
+    expect(dialogSelect('Cash Desk account')).toBeDisabled();
     expect(getDateField('Payment date', form)).toHaveAttribute('aria-disabled', 'true');
     await keep(user);
     state.run = {
@@ -444,16 +458,20 @@ describe('Payroll pay cycle continuity', () => {
     render(<App initial="/hr/salary-advances" />);
     await user.click(screen.getByRole('button', { name: 'Request advance' }));
     let form = within(await screen.findByRole('dialog', { name: 'Request salary advance' }));
-    await waitFor(() => expect(form.getByLabelText(/^Company/)).toBeEnabled());
-    await user.selectOptions(form.getByLabelText(/^Company/), 'company');
-    await form.findByRole('option', { name: /Alex Example/ });
-    await user.selectOptions(form.getByLabelText(/^Employee/), 'employee');
+    await waitFor(() => expect(dialogSelect('Company')).toBeEnabled());
+    await chooseSelectOption(dialogSelect('Company'), 'company', user);
+    await waitFor(() =>
+      expect(selectFieldOptions(dialogSelect('Employee'))).toEqual(
+        expect.arrayContaining([expect.stringMatching(/Alex Example/)]),
+      ),
+    );
+    await chooseSelectOption(dialogSelect('Employee'), 'employee', user);
     fireEvent.change(form.getByLabelText(/Amount \(TZS\)/), { target: { value: '300' } });
     await user.type(form.getByLabelText('Reason (optional)'), 'School fees');
     await keep(user);
     state.employeeAvailable = false;
     form = await resume(user, 'Request salary advance', 'Request salary advance');
-    await waitFor(() => expect(form.getByLabelText(/^Employee/)).toBeEnabled());
+    await waitFor(() => expect(dialogSelect('Employee')).toBeEnabled());
     expect(form.getByLabelText(/Amount \(TZS\)/)).toHaveValue(300);
     expect(form.getByLabelText('Reason (optional)')).toHaveValue('School fees');
     await user.click(form.getByRole('button', { name: 'Request advance' }));
@@ -461,7 +479,7 @@ describe('Payroll pay cycle continuity', () => {
     await keep(user);
     state.employeeAvailable = true;
     form = await resume(user, 'Request salary advance', 'Request salary advance');
-    await waitFor(() => expect(form.getByLabelText(/^Employee/)).toHaveValue('employee'));
+    await waitFor(() => expect(selectFieldValue(dialogSelect('Employee'))).toBe('employee'));
     await user.click(form.getByRole('button', { name: 'Request advance' }));
     await waitFor(() =>
       expect(state.post).toHaveBeenCalledWith(
@@ -503,7 +521,7 @@ describe('Payroll pay cycle continuity', () => {
     render(<App />);
     await screen.findByRole('button', { name: 'Inspect PR-01' });
     await user.click(screen.getByRole('button', { name: /Filters/ }));
-    await user.selectOptions(screen.getByLabelText('Company filter'), 'company');
+    await chooseSelectOption('Company filter', 'company', user);
     await user.type(screen.getByRole('searchbox'), 'PR');
     await waitFor(() =>
       expect(state.page).toHaveBeenCalledWith(

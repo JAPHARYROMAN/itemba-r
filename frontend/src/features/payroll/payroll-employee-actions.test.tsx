@@ -19,6 +19,7 @@ import { PayrollWorkspace } from './payroll-workspace';
 import { EmployeeDetail } from './employee-detail';
 import type { MobileMoney } from './mobile-money-types';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
+import { chooseSelectOption } from '@/test/select-field';
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -326,7 +327,12 @@ describe('Employee payment-account and termination drafts', () => {
     await user.click(resumed.getByRole('button', { name: 'Add', exact: true }));
     expect(await resumed.findByRole('alert')).toHaveTextContent('already has a M-Pesa');
     expect(state.post).not.toHaveBeenCalled();
-    await user.selectOptions(resumed.getByLabelText('Provider'), 'AIRTEL_MONEY');
+    await chooseSelectOption(
+      'Provider',
+      'AIRTEL_MONEY',
+      user,
+      screen.getByRole('dialog', { name: title }),
+    );
     await user.click(resumed.getByRole('button', { name: 'Add', exact: true }));
     await waitFor(() =>
       expect(state.post).toHaveBeenCalledWith(
