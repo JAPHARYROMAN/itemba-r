@@ -9,7 +9,7 @@ This release integrates the October 3 POS remake, all three party-linkage phases
 - Supplier/customer navigation filters are applied in the extracted finance feature screens; Next page files remain valid route wrappers.
 - Dropdown changes preserve the new party selectors and stock-valuation filters. Existing native dropdown contrast fixes are incorporated by the dropdown branch.
 - Statutory PDFs use the current return workspace, all employee rows, the generated company's letterhead, recorded contributions and whole-return totals. Changing the company, period or return cancels an in-flight PDF; exporting does not file a return.
-- The website enquiry API and persistence contract remain unchanged. The rebuilt website's independent checks are included in release CI.
+- The website enquiry API and persistence contract remain unchanged. Production adopts the existing enquiry volume by identity and records it in the deployment environment; staging uses a named isolated volume. The rebuilt website's independent checks are included in release CI.
 
 ## Data gates and operation
 
@@ -21,4 +21,4 @@ The combined POS database proof runs with mirroring both off and on, in disposab
 
 Deploy a committed, pushed candidate to staging first. Promote only the same source after combined checks, production-build proofs and browser acceptance. The normal production workflow requires that the exact merged main revision passes `ITEMBA-R CI`; website blocking checks must also pass. Keep before/after image identities, encrypted backups and a tested rollback record in the private operations evidence.
 
-Release outcomes and exact revision are recorded after verification, rather than pre-labelled successful here.
+Verification so far: 318 targeted frontend regressions and 626 targeted backend tests passed. The website passed 713 unit tests and 416 browser tests (16 explicitly skipped), its build budgets and Docker smoke. Lighthouse's advisory run measured a 2,527 ms company-profile LCP against the 2,500 ms target; the other three measured routes met their budgets. The production encrypted backup authenticated, all six archive checksums verified and its database restored into 387 existing tables in an isolated database. Migration and staging results follow after completion.
