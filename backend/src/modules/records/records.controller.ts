@@ -16,6 +16,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import {
   CreateRecordDto,
+  RecordPartyStatementQuery,
   RecordReasonDto,
   RecordSettlementDto,
   RecordStatementQuery,
@@ -70,6 +71,29 @@ export class RecordsController {
       'X-Content-Type-Options': 'nosniff',
     });
     res.send(buffer);
+  }
+  // Party linkage (Phase 2 PR-6): one statement across a party's NoteBook records. Declared
+  // before ':id' so the literal path wins.
+  @Get('party-statement')
+  @Header('Cache-Control', 'no-store')
+  partyStatement(@CurrentUser() u: AuthUser, @Query() q: RecordPartyStatementQuery) {
+    return this.service.partyStatement(u, q);
+  }
+  @Get('party-statement/export')
+  @RequirePermissions('records.view', 'records.export')
+  async exportPartyStatement(
+    @CurrentUser() u: AuthUser,
+    @Query() q: RecordPartyStatementQuery,
+    @Res() res: Response,
+  ) {
+    const result = await this.service.exportPartyStatement(u, q);
+    res.set({
+      'Content-Type': result.mimeType,
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(result.buffer);
   }
   @Get(':id') detail(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.detail(u, id);

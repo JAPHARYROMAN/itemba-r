@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { StatusBadge } from '@/components/ui';
+import { Btn, StatusBadge } from '@/components/ui';
+import { downloadBinaryGet } from '@/lib/export-download';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
@@ -256,7 +257,21 @@ export function PartyRelatedTabs({ kind, partyId }: { kind: Kind; partyId: strin
   const { hasPermission } = useAuth();
   const sections = SECTIONS[kind].filter((s) => hasPermission(s.permission));
   const [active, setActive] = useState('');
+  const [exportNote, setExportNote] = useState('');
   const current = sections.find((s) => s.id === active) ?? sections[0];
+  // Party linkage (PR-6): one NoteBook statement across every record of the party.
+  async function exportStatement(format: 'pdf' | 'csv') {
+    setExportNote('');
+    try {
+      await downloadBinaryGet(
+        `/records/party-statement/export?${kind}Id=${encodeURIComponent(partyId)}&format=${format}`,
+        `notebook-statement.${format}`,
+      );
+      setExportNote('Download started.');
+    } catch (error) {
+      setExportNote(error instanceof Error ? error.message : 'Unable to export the statement.');
+    }
+  }
   const result = useWorkspaceResource<RelatedSection>(
     `/party-profile/${kind}s/${encodeURIComponent(partyId)}/${current?.id ?? ''}`,
     {},
@@ -283,6 +298,21 @@ export function PartyRelatedTabs({ kind, partyId }: { kind: Kind; partyId: strin
           </button>
         ))}
       </nav>
+      {current?.id === 'notebook' && hasPermission('records.export') && (
+        <div className="party-related-actions">
+          <Btn variant="secondary" onClick={() => void exportStatement('pdf')}>
+            NoteBook statement PDF
+          </Btn>
+          <Btn variant="secondary" onClick={() => void exportStatement('csv')}>
+            NoteBook statement CSV
+          </Btn>
+          {exportNote && (
+            <p role="status" className="partner-profile-history-note">
+              {exportNote}
+            </p>
+          )}
+        </div>
+      )}
       {result.error ? (
         <p role="alert" className="partner-profile-history-note">
           {result.error}{' '}

@@ -13,6 +13,7 @@ import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
   CreateRecordDto,
+  RecordPartyStatementQuery,
   RecordReasonDto,
   RecordSettlementDto,
   RecordStatementQuery,
@@ -75,6 +76,8 @@ export class RecordsService {
           divisionId: q.divisionId,
           branchId: q.branchId,
           currency: q.currency,
+          supplierId: q.supplierId,
+          customerId: q.customerId,
           voidedAt: q.status === 'void' ? { not: null } : null,
           recordDate: {
             gte: q.from ? new Date(q.from) : undefined,
@@ -518,6 +521,123 @@ export class RecordsService {
       to,
       startsOn,
       ...statementRows(row.kind, postings, q.from, to),
+    };
+  }
+  /**
+   * Party linkage (Phase 2 PR-6): one statement across every NoteBook debtor record of a
+   * customer or creditor record of a supplier, in one currency, with the same debit /
+   * credit rules, brought-forward handling and "independent of the ledger" basis as a
+   * single-record statement. Reads only records the reader may already see.
+   */
+  async partyStatement(user: AuthUser, q: RecordPartyStatementQuery) {
+    if (!!q.supplierId === !!q.customerId)
+      throw new BadRequestException('Choose one party: a supplier or a customer.');
+    const kind = q.supplierId ? 'CREDITOR' : 'DEBTOR';
+    const to = q.to ?? today().toISOString().slice(0, 10);
+    if (q.from && q.from > to)
+      throw new BadRequestException('Start date must be on or before end date.');
+    if (q.companyId) await this.companies.assertCanAccessCompany(user, q.companyId);
+    const partySelect = {
+      id: true,
+      name: true,
+      phone: true,
+      companyId: true,
+      company: { select: { name: true } },
+    } as const;
+    const partyWhere = { deletedAt: null, ...(q.companyId ? { companyId: q.companyId } : {}) };
+    const party = q.supplierId
+      ? await this.db.supplier.findFirst({
+          where: { id: q.supplierId, ...partyWhere },
+          select: partySelect,
+        })
+      : await this.db.customer.findFirst({
+          where: { id: q.customerId, ...partyWhere },
+          select: partySelect,
+        });
+    if (!party) throw new NotFoundException('Party not found or no longer accessible.');
+    await this.companies.assertCanAccessCompany(user, party.companyId);
+    const access = await this.access(user);
+    const records = await this.db.$transaction(
+      (tx) =>
+        tx.recordEntry.findMany({
+          where: {
+            AND: [
+              access,
+              {
+                kind,
+                voidedAt: null,
+                ...(q.supplierId ? { supplierId: q.supplierId } : { customerId: q.customerId }),
+                ...(q.companyId ? { companyId: q.companyId } : {}),
+              },
+            ],
+          },
+          include: { ...names, postings: { orderBy: [{ date: 'asc' }, { sequence: 'asc' }] } },
+          orderBy: [{ recordDate: 'asc' }, { id: 'asc' }],
+        }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    const currencies = [...new Set(records.map((r) => r.currency))].sort();
+    const currency = q.currency ?? currencies[0] ?? 'TZS';
+    const selected = records.filter((r) => r.currency === currency);
+    const postings = selected
+      .flatMap((r) =>
+        r.postings.map((p) => ({ ...p, description: `${r.title} · ${p.description}` })),
+      )
+      .sort((a, b) => a.date.getTime() - b.date.getTime() || a.sequence - b.sequence);
+    const startsOn =
+      selected
+        .map((r) => r.statementStartsOn?.toISOString().slice(0, 10) ?? null)
+        .filter((v): v is string => !!v)
+        .sort()
+        .at(-1) ?? null;
+    const label = kind === 'DEBTOR' ? 'debtor' : 'creditor';
+    return {
+      record: {
+        id: party.id,
+        companyId: party.companyId,
+        kind,
+        title: `${selected.length} NoteBook ${label} record${selected.length === 1 ? '' : 's'}`,
+        counterparty: party.name,
+        contact: party.phone ?? null,
+        currency,
+        reference: null,
+        dueDate: null,
+        company: party.company ?? null,
+        division: null,
+        branch: null,
+      },
+      party: { kind: q.supplierId ? 'supplier' : 'customer', id: party.id, name: party.name },
+      currencies,
+      records: selected.map((r) => ({
+        id: r.id,
+        title: r.title,
+        reference: r.reference,
+        recordDate: r.recordDate,
+        dueDate: r.dueDate,
+        amount: r.amount.toFixed(2),
+        settledAmount: r.settledAmount.toFixed(2),
+      })),
+      from: q.from ?? null,
+      to,
+      startsOn,
+      ...statementRows(kind, postings, q.from, to),
+    };
+  }
+  async exportPartyStatement(user: AuthUser, q: RecordPartyStatementQuery) {
+    const statement = await this.partyStatement(user, q);
+    if (statement.rows.length > 10000)
+      throw new BadRequestException(
+        'Choose a smaller date range to export up to 10,000 movements.',
+      );
+    const format = q.format ?? 'pdf';
+    const buffer =
+      format === 'csv'
+        ? Buffer.from(statementCsv(statement), 'utf8')
+        : await this.documents.renderLetterheadPdf(statement.record, statementPdf(statement), user);
+    return {
+      buffer,
+      filename: `notebook-${statement.party.kind}-statement-${statement.party.id.slice(0, 8)}-${statement.to}.${format}`,
+      mimeType: format === 'csv' ? 'text/csv; charset=utf-8' : 'application/pdf',
     };
   }
   async exportStatement(user: AuthUser, id: string, q: RecordStatementQuery) {

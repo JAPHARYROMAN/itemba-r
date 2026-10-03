@@ -25,6 +25,9 @@ export class RecordsQuery {
   @IsOptional() @Matches(/^[A-Z]{3}$/) currency?: string;
   @IsOptional() @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) from?: string;
   @IsOptional() @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) to?: string;
+  // Party linkage (Phase 2): /records?supplierId= or ?customerId= lists one party's records.
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsUUID() customerId?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100000) page = 1;
 }
 export class RecordValuesDto {
@@ -71,4 +74,11 @@ export class RecordStatementQuery {
   @IsOptional() @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) from?: string;
   @IsOptional() @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) to?: string;
   @IsOptional() @IsIn(['pdf', 'csv']) format?: string;
+}
+/** One statement across every NoteBook record of a party (party linkage, Phase 2 PR-6). */
+export class RecordPartyStatementQuery extends RecordStatementQuery {
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsUUID() customerId?: string;
+  @IsOptional() @IsUUID() companyId?: string;
+  @IsOptional() @Matches(/^[A-Z]{3}$/) currency?: string;
 }

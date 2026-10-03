@@ -316,3 +316,9 @@
   border-color: color-mix(in srgb, #67ad99 60%, var(--aurora-border));
   background: color-mix(in srgb, #67ad99 12%, transparent);
 }
+.party-related-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}

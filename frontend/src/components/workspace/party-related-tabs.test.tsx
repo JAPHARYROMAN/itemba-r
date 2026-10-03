@@ -10,6 +10,8 @@ vi.mock('@/hooks/use-auth', () => ({
 vi.mock('@/components/workspace/workspace-navigation', () => ({
   WorkspaceLink: (props: any) => <a {...props} />,
 }));
+const download = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock('@/lib/export-download', () => ({ downloadBinaryGet: download.get }));
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -86,6 +88,21 @@ describe('PartyRelatedTabs', () => {
     expect(relatedHref(row('document', 'd1'))).toBe('/group-control/documents/d1');
     expect(relatedHref({ ...row('expense'), link: null })).toBeNull();
     expect(relatedHref(row('contact'))).toBeNull();
+  });
+
+  it('offers the party NoteBook statement only on the NoteBook section with export access', async () => {
+    api.permissions = new Set(['records.view', 'records.export']);
+    download.get.mockResolvedValue(undefined);
+    api.get.mockResolvedValue({ section: 'notebook', total: 0, rows: [] });
+    render(<PartyRelatedTabs kind="customer" partyId="cus 1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'NoteBook statement CSV' }));
+    await waitFor(() =>
+      expect(download.get).toHaveBeenCalledWith(
+        '/records/party-statement/export?customerId=cus%201&format=csv',
+        'notebook-statement.csv',
+      ),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Download started.');
   });
 
   it('tells readers without any register permission that nothing is available', () => {
