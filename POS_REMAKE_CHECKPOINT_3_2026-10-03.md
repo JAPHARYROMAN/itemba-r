@@ -2,7 +2,7 @@
 
 Date: 3 October 2026. Branch: `codex/pos-remake-foundation`.
 
-The native POS now supports split and partial payments, later customer collections, linked returns and refunds. It uses the shared business finance and inventory services. Cashier shifts, opening floats, handovers and shift closing remain excluded. Production is unchanged; staging packaging and runtime acceptance are recorded below when complete.
+The native POS now supports split and partial payments, later customer collections, linked returns and refunds. It uses the shared business finance and inventory services. Cashier shifts, opening floats, handovers and shift closing remain excluded. Source commit `c69fd0c3` is deployed to staging; production is unchanged.
 
 ## Behaviour
 
@@ -17,13 +17,21 @@ The native POS now supports split and partial payments, later customer collectio
 
 ## Verification
 
-- **448 frontend tests and 415 backend tests passed** across the POS, device stores, shared sales/payment/credit/refund services and Cash Desk. Subsequent receipt changes passed the affected 211 backend and 44 frontend tests.
+- **448 frontend tests and 415 backend tests passed** across the POS, device stores, shared sales/payment/credit/refund services and Cash Desk. Subsequent receipt changes passed the affected 211 backend and 49 frontend tests.
 - The production frontend build passed with route/type checking enabled. The current compiled backend builds. Scoped frontend lint has no errors or warnings. Backend lint has no errors; existing untyped fixture/service warnings remain.
 - `backend/scripts/verify-pos-payment-lifecycle.cjs` passed **21 compiled-service checks** in a generated disposable database on the staging PostgreSQL host. The database is removed in `finally`; existing staging business records are untouched. Evidence is under ignored `.release/pos-phase3-*` files.
 - Checks cover canonical cash and credit selling, shared Sales Desk/Cash Desk/Reports records, split allocations, later partial collections, concurrent original-key replay, changed allocation rejection, debt-first returns and cash refunds, repeat/over-return rejection, damaged disposition, insufficient-funds and denied-refund rollback, branch revocation, exact discounted/VAT reversal and balanced journals.
 - Real generated sale, collection and return PDFs were rendered and visually inspected as one-page documents. The reprinted split sale shows the later collection and zero debt after returns; revoked branch access cannot download the action receipt.
 
-Browser layout evidence and staging deployment details are appended after final runtime verification. The local component fixture is explicitly synthetic; it is not a substitute for database-backed proof or physical hardware acceptance.
+The local component fixture is explicitly synthetic; it is not a substitute for database-backed proof or physical hardware acceptance. The actual POS components and IndexedDB were exercised in the browser through an F12 split sale (500 cash + 400 mobile + 300 debt), a lost-response collection of 100 and original-outcome recovery, and a reviewed damaged-stock return that reduced 200 debt and refunded 1,000. Keyboard navigation reached and submitted the return confirmation. Checked light/dark return layouts at 390, 768, 1,440 and 1,920 px have no page-level horizontal overflow. Evidence is under `.release/pos-phase3-browser-*` and `.release/pos-preview/phase3-return-*`.
+
+## Staging release
+
+The committed source archive built backend, migration and frontend production images labelled with `c69fd0c34a38bf49a31efc8f80f8d25d12ba0afb`. Migration `20261003150000_pos_payment_lifecycle` applied successfully. Backend and frontend containers are healthy, retain the existing staging data/ports, and run the expected labelled images. Prior images remain available. The pre-migration dump was validated, encrypted with AES-256-GCM using the existing protected backup key, authenticated by decrypting and comparing its contents, and its plaintext copy removed.
+
+The actual packaged migration image, using its compiled backend and generated Prisma client, passed all **21 financial proof checks** again in a disposable database. Public staging login responds 200, API health reports `ok` with the database `up`, and the new transaction and original-request endpoints return 401 without authentication. A fresh authenticated browser load renders the native OS POS host and activation screen. The current account cannot supply an authorised cashier/till trading session, so full deployed browser sale/collection/return acceptance is still pending. No permissions were expanded to bypass that boundary.
+
+Release evidence is under ignored `.release/pos-payments-stage/`: `candidate.json`, `build-result.json`, `staging-deployment.json`, `image-proof.json`, `runtime-verification.json`, build/migration logs and the encrypted backup. No production services or business records were changed.
 
 ## Migration and rollout
 

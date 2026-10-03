@@ -52,3 +52,7 @@ The proof is a compiled-service integration test, not a deployed staging browser
 - Deploy the checkpoint 1 outcome endpoint and this additive history response before activating the frontend on selected uiVersion 3 terminals. Preserve frozen queues, request identities and versioned carts. An older frontend rollback needs format-compatibility review; rollback cannot undo completed sales.
 
 Next: complete the payment lifecycle and its reconciliation, then stock/report interiors and hardware acceptance, without cashier shifts.
+
+## Subsequent staging verification
+
+Checkpoint 2 source `7daac810` was packaged and deployed to staging on 3 October 2026, with preserved data/ports, healthy backend/frontend services and an authenticated encrypted pre-migration backup. It was subsequently replaced by payment-lifecycle source `c69fd0c3`; see `POS_REMAKE_CHECKPOINT_3_2026-10-03.md` for the current staging evidence and acceptance limits. Production remains unchanged.
