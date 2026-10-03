@@ -7,6 +7,7 @@ import { InventoryMovementsModule } from '../inventory-movements/inventory-movem
 import { TaxAutoApplyModule } from '../tax-auto-apply/tax-auto-apply.module';
 import { ProfitModule } from '../profit/profit.module';
 import { CompanyScopeService } from '../../common/services';
+import { CashBookModule } from '../cash-book/cash-book.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { CompanyScopeService } from '../../common/services';
     InventoryMovementsModule,
     TaxAutoApplyModule,
     ProfitModule,
+    CashBookModule,
   ],
   controllers: [SalesOrdersController],
   providers: [SalesOrdersService, CompanyScopeService],

@@ -38,6 +38,11 @@ describe('profile PDF downloads', () => {
     const text = pdf.pages.map((p) => p.text).join('\n');
     const missing = Object.keys(facts.keyStrings).filter((key) => !textIncludes(text, key));
     expect(missing).toEqual([]);
+    const lastPageBody = pdf.pages.at(-1)!.text
+      .replace(/Page\s+\d+\s+of\s+\d+/gi, '')
+      .replace(/www\.itembagrouptz\.com|Itemba Group/gi, '')
+      .trim();
+    expect(lastPageBody.split(/\s+/).length, `${file} ends with a footer-only sheet`).toBeGreaterThanOrEqual(20);
   });
 });
 

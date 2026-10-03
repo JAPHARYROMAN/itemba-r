@@ -6,10 +6,12 @@ This release integrates the October 3 POS remake, all three party-linkage phases
 
 - Customer Payments retains its reusable transaction API, so a POS collection, its payment allocation, journal, cash effect, balance refresh and action identity commit or roll back together. The party-linkage payment implementation remains the shared implementation.
 - Split-payment debt uses the same customer on its AR journal line as credit sales, collections and credit notes. Reversals preserve party references.
+- With the unified cash-book flag enabled, initial sale receipts and each split tender also use the mapped cash book in the confirmation transaction. A sale cannot fund an ERP balance while leaving its refunds without cash-book funds; the standard configuration remains off until account mapping and opening reconciliation.
 - Supplier/customer navigation filters are applied in the extracted finance feature screens; Next page files remain valid route wrappers.
 - Dropdown changes preserve the new party selectors and stock-valuation filters. Existing native dropdown contrast fixes are incorporated by the dropdown branch.
 - Statutory PDFs use the current return workspace, all employee rows, the generated company's letterhead, recorded contributions and whole-return totals. Changing the company, period or return cancels an in-flight PDF; exporting does not file a return.
 - The website enquiry API and persistence contract remain unchanged. Production adopts the existing enquiry volume by identity and records it in the deployment environment; staging uses a named isolated volume. The rebuilt website's independent checks are included in release CI.
+- Printed attachment lists use tighter end spacing to avoid footer-only trailing sheets. All four website profile PDFs are regenerated and their dependency lock updated.
 
 ## Data gates and operation
 

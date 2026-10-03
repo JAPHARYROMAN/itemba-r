@@ -245,6 +245,9 @@ async function main() {
       engine = new Engine(db, new Control(db), resolver),
       profit = new Profit(db, companies, audit);
     const movements = new Movements(db, audit, codes, companies, profit);
+    const CashBook = load('modules/cash-book/cash-book.service', 'CashBookService');
+    let cashBookReady = false;
+    const cashBook = new CashBook(db, audit, companies, { get: () => unifiedCashBook && cashBookReady ? 'true' : 'false' });
     const sales = new Sales(
       db,
       audit,
@@ -255,6 +258,7 @@ async function main() {
       engine,
       resolver,
       profit,
+      cashBook,
     );
     const Generated = load(
       'modules/generated-documents/generated-documents.service',
@@ -403,8 +407,6 @@ async function main() {
       'modules/mobile-pos-lite/pos-transactions.service',
       'PosTransactionsService',
     );
-    const CashBook = load('modules/cash-book/cash-book.service', 'CashBookService');
-    const cashBook = new CashBook(db, audit, companies, { get: () => unifiedCashBook ? 'true' : 'false' });
     const lifecycle = new Lifecycle(
       db,
       pos,
@@ -470,6 +472,7 @@ async function main() {
         const opening = await db.cashDeskMovement.create({data:{requestId:randomUUID(), payloadKey:'proof-opening', kind:'OPENING', amount:erp.currentBalance, currency:'TZS', businessDate:new Date(date), description:'Synthetic opening for integration proof', reference:'PROOF', createdBy:user.id, actorName:'Proof'}});
         await db.cashDeskEntry.create({data:{movementId:opening.id, accountId:mapped.id, businessDate:new Date(date), amount:erp.currentBalance}});
       }
+      cashBookReady = true;
     }
     const collect = { requestId: randomUUID(), method: 'CASH', amount: 500 };
     const responses = await Promise.all([
@@ -745,6 +748,11 @@ async function main() {
       terminal.terminalCode,
     );
     const taxableDetail = await lifecycle.detail(terminal.terminalCode, secret, taxable.id, user);
+    if (unifiedCashBook) {
+      const initial = await db.cashDeskMovement.findMany({where:{journalEntryId:taxable.journalEntryId,journalReferenceType:'SalesOrder'}});
+      assert.equal(initial.length,1);
+      assert.equal(initial[0].amount.toFixed(2),taxable.totalAmount.toFixed(2));
+    }
     for (let i = 0; i < 3; i++)
       await lifecycle.returnSale(
         terminal.terminalCode,
@@ -758,6 +766,11 @@ async function main() {
         user,
       );
     const taxableCredits = await db.creditNote.findMany({ where: { salesOrderId: taxable.id } });
+    if (unifiedCashBook) {
+      const erp=await db.cashAccount.findUnique({where:{id:account.id}});
+      const desk=await db.cashDeskAccount.findUnique({where:{erpCashAccountId:account.id}});
+      assert.equal(desk.balance.toFixed(2),erp.currentBalance.toFixed(2));
+    }
     const sum = (key) => taxableCredits.reduce((n, c) => n + Math.round(Number(c[key]) * 100), 0);
     assert.equal(sum('totalAmount'), Math.round(Number(taxable.totalAmount) * 100));
     assert.equal(sum('taxAmount'), Math.round(Number(taxable.taxAmount) * 100));

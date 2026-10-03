@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -13,6 +14,7 @@ import {
   refreshCachedPartyBalance,
 } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CashBookService } from '../cash-book/cash-book.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
 import {
@@ -407,6 +409,7 @@ export class SalesOrdersService {
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
     private readonly profit: ProfitService,
+    @Optional() private readonly cashBook?: CashBookService,
   ) {}
 
   private async resolveSalesOrderCustomer(
@@ -2329,6 +2332,32 @@ export class SalesOrdersService {
         userId,
         tx,
       });
+
+      if (this.cashBook?.enabled()) {
+        const receipts =
+          tenders ??
+          (paidAmount > 0 && existing.cashAccountId
+            ? [{ cashAccountId: existing.cashAccountId, amount: paidAmount }]
+            : []);
+        for (const [index, receipt] of receipts.entries()) {
+          await this.cashBook.recordInTransaction(tx, user, {
+            kind: 'CUSTOMER_RECEIPT',
+            companyId: existing.companyId,
+            cashAccountId: receipt.cashAccountId,
+            amount: receipt.amount,
+            currency: existing.currency,
+            businessDate: existing.orderDate,
+            description: `Receipt for sales order ${existing.salesOrderNumber}`,
+            reference: existing.salesOrderNumber,
+            requestId: `SalesOrder:${id}:Receipt:${index}`,
+            partyType: existing.customerId ? 'CUSTOMER' : 'NONE',
+            customerId: existing.customerId,
+            receivableId,
+            journalEntryId: journalEntry.id,
+            journalReferenceType: 'SalesOrder',
+          });
+        }
+      }
 
       if (receivableId) {
         const linkedReceivable = await tx.receivable.update({

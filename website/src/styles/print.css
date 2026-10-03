@@ -426,9 +426,27 @@
 
   .print-document-footer {
     border-top: 1px solid #cbd5e1;
+    break-before: avoid;
+    page-break-before: avoid;
     display: flex !important;
     justify-content: space-between;
     margin-top: 5mm;
     padding-top: 2mm;
+  }
+
+  /* The short attachment list and signature footer should finish together,
+     without spending another sheet on a footer or the final list item. */
+  .print-profile-document > .print-section:last-of-type {
+    break-inside: avoid;
+    margin-top: 4mm;
+    padding-top: 3mm;
+  }
+
+  .print-profile-document > .print-section:last-of-type .print-list li {
+    line-height: 1.35;
+  }
+
+  .print-profile-document > .print-section:last-of-type .print-list li + li {
+    margin-top: 1mm;
   }
 }

@@ -13,7 +13,7 @@
       "src/print/ProfileDocuments.tsx",
       "src/content/profile/index.ts"
     ],
-    "sha256": "ef7ed348171c68d58a5a06533e6733cd7b94d2c417658d29bd7fed764e598404",
+    "sha256": "ac20efbef1fbcf67e72405d5e9c564eb692b7b98daaf6b7cef62f1dd5d58ca4f",
     "files": {
       "src/assets/fonts/InterVariable-latin.woff2": "94753cba6cd3f5417ffe2e1c3401803b976bc41e58b51ad785dddd4790c4e709",
       "src/content/companies.ts": "2b688c40436db0f7e989adea594793aa1c3a1f102014e29a33f40661be5af0ff",
@@ -50,25 +50,25 @@
       "src/islands/PrintAssetLoader.tsx": "8c3d42b99f7c88fd61323eb2104dd9f93d8ffeb2e86b37ec408b9f2399f75fb8",
       "src/lib/print-assets.ts": "eebdb7cbb2e18cf381f0f4e7e935cb41e68835df49976fe88ba76179887ac7e2",
       "src/print/ProfileDocuments.tsx": "aa6c3645c3d3ec1edb344dae1c4807b96920f797b1420f4c287b880eb782f7f0",
-      "src/styles/print.css": "0b3761ca36f9fa8dc4e91ca2e232c8270c53ab2f9f9b9a5c2be540a4c4104eaa"
+      "src/styles/print.css": "020b60c48bd67b90ef46f1867ebc66953967eabf04fbcf677f5a5029e8e97546"
     }
   },
   "outputs": {
     "public/downloads/itemba-group-profile.pdf": {
-      "sha256": "dfdd6a0fa94449485895901fcd31da60f40d7cdf8aff4ed04fbb953bd0d2b12a",
-      "bytes": 4115485
+      "sha256": "21460409c31fa643bd22a60e6575288218c92042029060484bd352dae3ac9868",
+      "bytes": 4114322
     },
     "public/downloads/itemba-westsides-profile.pdf": {
-      "sha256": "f7cdb86a4ac2b7195a47e10c4ff336ee0dea82f98a5ff4ee77f697aa4a84aefb",
-      "bytes": 6086571
+      "sha256": "b672bc20a9c4458c026067d2a166c5ba166239c96e3f56a233e3fef7c7cccd73",
+      "bytes": 6086563
     },
     "public/downloads/itemba-mwanjalisi-profile.pdf": {
-      "sha256": "712b147b55a83aae56a6110b4692e5ab8947431f778ad101cd89da3f78d4efbf",
-      "bytes": 2776748
+      "sha256": "e20c3ebd6ca6fa8464c3750bec7207461ed2bf9bcd0b5e6fe591d00794c62dac",
+      "bytes": 2776906
     },
     "public/downloads/itemba-enterprises-profile.pdf": {
-      "sha256": "01417f1e30801da486edf0e494f48fdfa0e366aa956783bb6ec3f7e00f7fbdfa",
-      "bytes": 3755656
+      "sha256": "8f549fcfc6053e65219e5d101967aafdcb22865562d9a4341b3e8611ab983ddc",
+      "bytes": 3754605
     }
   }
 }
