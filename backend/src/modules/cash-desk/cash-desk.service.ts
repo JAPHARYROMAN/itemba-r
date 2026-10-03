@@ -111,9 +111,16 @@ export class CashDeskService {
     };
   }
   async accounts(user: AuthUser, q: CashQuery) {
+    // Party linkage (Phase 3 PR-8): each desk account carries its connected ERP cash account
+    // and that account's stored mirror, so Accounts can show the connection and any difference.
     return this.db.cashDeskAccount.findMany({
       where: await this.scope(user, q),
-      include: names,
+      include: {
+        ...names,
+        erpCashAccount: {
+          select: { id: true, accountName: true, currentBalance: true, currency: true },
+        },
+      },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });
   }

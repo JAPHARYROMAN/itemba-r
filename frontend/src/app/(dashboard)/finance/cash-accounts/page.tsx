@@ -45,6 +45,10 @@ interface CashAccount {
   accountType: string;
   currency: string;
   currentBalance: number | string;
+  // Party linkage (Phase 3 PR-8): the stored figure and which balance currentBalance is.
+  mirrorBalance?: number | string;
+  balanceSource?: 'cash-desk' | 'stored';
+  cashDeskAccount?: { id: string; name: string; currency: string } | null;
   openingBalance: number | string;
   isActive: boolean;
   linkedBankAccountId?: string | null;
@@ -792,6 +796,9 @@ export default function CashAccountsPage() {
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {fmtMoney(acc.currentBalance, acc.currency)}
+                      {acc.balanceSource === 'cash-desk' && (
+                        <span className="block text-xs text-gray-400" title={`Cash Desk: ${acc.cashDeskAccount?.name ?? ''}`}>Cash Desk balance · stored {fmtMoney(acc.mirrorBalance ?? acc.currentBalance, acc.currency)}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span

@@ -13,7 +13,51 @@ export type Account = {
   company: { name: string };
   division: { name: string };
   branch: { name: string };
+  // Party linkage (Phase 3 PR-8): the connected ERP cash account and its stored mirror.
+  erpCashAccountId?: string | null;
+  erpCashAccount?: {
+    id: string;
+    accountName: string;
+    currentBalance: string | number;
+    currency: string;
+  } | null;
 };
+/** Exact cents from a decimal string of any length (no thousands separators). */
+function cents(value: string | number): bigint {
+  const text = String(value).trim();
+  const match = /^(-?)(\d+)(?:\.(\d{1,2})\d*)?$/.exec(text);
+  if (!match) throw new Error(`Not a decimal amount: ${text}`);
+  const [, sign, whole, fraction = ''] = match;
+  const units = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'));
+  return sign ? -units : units;
+}
+function fromCents(units: bigint): string {
+  const absolute = units < 0n ? -units : units;
+  const text = `${absolute / 100n}.${(absolute % 100n).toString().padStart(2, '0')}`;
+  return units < 0n ? `-${text}` : text;
+}
+/** The ERP mirror beside a desk balance, exact to the cent: a difference is a finding. */
+export function erpMirror(account: Account) {
+  const erp = account.erpCashAccount;
+  if (!erp) return null;
+  try {
+    const mirror = cents(erp.currentBalance ?? '0');
+    const difference = mirror - cents(account.balance);
+    return {
+      name: erp.accountName,
+      mirror: fromCents(mirror),
+      difference: fromCents(difference),
+      inStep: difference === 0n,
+    };
+  } catch {
+    return {
+      name: erp.accountName,
+      mirror: String(erp.currentBalance),
+      difference: '?',
+      inStep: false,
+    };
+  }
+}
 export type Movement = {
   fuelReportPostingId?: string | null;
   payrollRunId?: string | null;

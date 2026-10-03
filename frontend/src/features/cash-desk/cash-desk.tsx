@@ -48,6 +48,7 @@ import {
   movementLabels,
   expenseCategories,
   partyTypeLabels,
+  erpMirror,
 } from './types';
 import { movementDocuments, movementParty, type MovementLink } from './movement-links';
 import { SupplierPaymentDialog } from './supplier-payment-dialog';
@@ -718,6 +719,20 @@ export function CashDesk({
                     {a.company.name} / {a.division.name} / {a.branch.name}
                   </p>
                   <strong>{money(a.balance, a.currency)}</strong>
+                  {(() => {
+                    // Party linkage (Phase 3 PR-8): the ERP mirror and any difference.
+                    const mirror = erpMirror(a);
+                    return (
+                      <small data-testid="cash-account-mirror">
+                        {mirror
+                          ? `ERP ${mirror.name} · mirror ${money(mirror.mirror, a.currency)}` +
+                            (mirror.inStep
+                              ? ' · in step'
+                              : ` · difference ${money(mirror.difference, a.currency)}`)
+                          : 'Not connected to an ERP cash account'}
+                      </small>
+                    );
+                  })()}
                   <small>
                     View movements <ChevronRight size={13} />
                   </small>

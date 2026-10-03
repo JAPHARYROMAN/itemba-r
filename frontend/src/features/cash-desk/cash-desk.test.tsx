@@ -5,6 +5,7 @@ import { CashDesk } from './cash-desk';
 import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
 import type { Account, Invoice, Movement } from './types';
+import { erpMirror, money } from './types';
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
 const api = vi.hoisted(() => ({
@@ -515,5 +516,49 @@ describe('Cash Desk', () => {
       invoiceVersion: 4,
       amount: '30.10',
     });
+  });
+});
+
+/** Party linkage, Phase 3 PR-8: Accounts shows the connected ERP account and any difference. */
+describe('Cash Desk accounts and the ERP mirror', () => {
+  const connected = (currentBalance: string): Account => ({
+    ...account,
+    erpCashAccountId: 'bank',
+    erpCashAccount: { id: 'bank', accountName: 'Main bank', currentBalance, currency: 'TZS' },
+  });
+
+  it('computes the mirror and the difference exactly, to the cent, whatever the size', () => {
+    expect(erpMirror(account)).toBeNull();
+    expect(erpMirror(connected('9999999999999998.99'))).toEqual({
+      name: 'Main bank',
+      mirror: '9999999999999998.99',
+      difference: '-1.00',
+      inStep: false,
+    });
+    expect(erpMirror(connected(account.balance))).toMatchObject({
+      difference: '0.00',
+      inStep: true,
+    });
+    expect(erpMirror(connected('10000000000000000.49'))).toMatchObject({ difference: '0.50' });
+    expect(erpMirror(connected('not money'))).toMatchObject({ difference: '?', inStep: false });
+  });
+
+  it('names the connection and the difference on each account card', async () => {
+    const fallback = api.get.getMockImplementation()!;
+    api.get.mockImplementation((path, ...args) =>
+      path.endsWith('accounts')
+        ? Promise.resolve([
+            connected('9999999999999998.99'),
+            { ...account, id: 'petty', name: 'Petty cash', balance: '5.00' },
+          ])
+        : fallback(path, ...args),
+    );
+    render(<CashDesk />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Accounts' }));
+    const notes = await screen.findAllByTestId('cash-account-mirror');
+    expect(notes.map((n) => n.textContent)).toEqual([
+      `ERP Main bank · mirror ${money('9999999999999998.99', 'TZS')} · difference ${money('-1.00', 'TZS')}`,
+      'Not connected to an ERP cash account',
+    ]);
   });
 });
