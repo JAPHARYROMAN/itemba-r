@@ -9,7 +9,7 @@
 -- archive_party_orphans first. Statement runs lose the 'ALL' sentinel: NULL now means a
 -- whole-company run.
 --
--- Additive except for the archived orphan rows described above (no DROP TABLE / DROP COLUMN).
+-- Additive except for the archived orphan rows described above; no table or column is removed.
 
 -- ── archive for orphan rows ───────────────────────────────────────────────────
 CREATE TABLE "archive_party_orphans" (
