@@ -1461,6 +1461,8 @@ export class MobilePosLiteService {
           salesOrderNumber: true,
           createdAt: true,
           paymentMethod: true,
+          status: true,
+          outstandingAmount: true,
           paymentReference: true,
           customerName: true,
           totalAmount: true,
@@ -1495,6 +1497,7 @@ export class MobilePosLiteService {
       sales: orders.map((order) => ({
         id: order.id,
         salesOrderNumber: order.salesOrderNumber,
+        status: Number(order.outstandingAmount) > 0 ? 'CREDIT' : 'PAID',
         createdAt: order.createdAt,
         paymentMethod: order.paymentMethod,
         paymentReference: order.paymentReference ?? null,
@@ -2048,8 +2051,11 @@ export class MobilePosLiteService {
         idempotencyKey: requestId,
       },
       select: {
-        id: true, salesOrderNumber: true, totalAmount: true,
-        status: true, deletedAt: true,
+        id: true,
+        salesOrderNumber: true,
+        totalAmount: true,
+        status: true,
+        deletedAt: true,
       },
     });
     if (!sale) return { state: 'not_found' as const };
@@ -2058,7 +2064,11 @@ export class MobilePosLiteService {
     }
     return {
       state: 'confirmed' as const,
-      sale: { id: sale.id, salesOrderNumber: sale.salesOrderNumber, totalAmount: Number(sale.totalAmount) },
+      sale: {
+        id: sale.id,
+        salesOrderNumber: sale.salesOrderNumber,
+        totalAmount: Number(sale.totalAmount),
+      },
     };
   }
 

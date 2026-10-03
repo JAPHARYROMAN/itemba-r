@@ -20,6 +20,8 @@ import { PriceSheet } from './PriceSheet';
 import { PrinterPanel } from './PrinterPanel';
 import { ReceiptPrint } from './ReceiptPrint';
 import { usePosStep } from './use-pos-step';
+import { HeldCarts, type HeldCartActions } from './HeldCarts';
+import { Transactions } from './Transactions';
 import './pos-app.css';
 
 /**
@@ -34,7 +36,11 @@ import './pos-app.css';
  * phase 5. Until then "More" opens them in the Kaunta shell, so a v3 terminal
  * loses nothing.
  */
-export type PosShellProps = KauntaShellProps;
+export type PosShellProps = KauntaShellProps & {
+  heldCarts?: HeldCartActions;
+  control?: { owned: boolean; request: () => void; release: () => void };
+  onHold?: (name: string, note: string) => Promise<void>;
+};
 
 const LOW_STOCK = 5;
 
@@ -171,9 +177,17 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
     confirmRemoveId,
     setConfirmRemoveId,
     openModule,
+    heldCarts,
+    control,
+    onHold,
   } = props;
   const { step, go } = usePosStep();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const [holdName, setHoldName] = useState('');
+  const [holdNote, setHoldNote] = useState('');
+  const [holdBusy, setHoldBusy] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -207,7 +221,15 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   // what the server finds, with a plain note instead of a silent miss.
   useScanner(
     (code) => {
-      if (priceFor || menuOpen || printerOpen || (step !== 'sale' && step !== 'pay')) return;
+      if (
+        priceFor ||
+        holding ||
+        clearing ||
+        menuOpen ||
+        printerOpen ||
+        (step !== 'sale' && step !== 'pay')
+      )
+        return;
       const product = productForCode(catalog ?? [], code);
       if (product) {
         setScanMiss(null);
@@ -245,7 +267,17 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   const cashOnly = !online;
   const shortCash = paymentMethod === 'CASH' && receivedAmount !== null && receivedAmount < total;
   const missingReference = !!selectedPayment?.requiresReference && !paymentReference.trim();
-  const canPay = cart.length > 0 && !busy && !shortCash && !missingReference;
+  const canPay =
+    cart.length > 0 &&
+    !busy &&
+    !holding &&
+    !clearing &&
+    !shortCash &&
+    !missingReference &&
+    (control?.owned ?? true) &&
+    (heldCarts?.ready ?? true) &&
+    !heldCarts?.restored &&
+    heldCarts?.status !== 'attention';
   const creditNeedsCustomer = paymentMethod === 'CREDIT' && !customer;
   const held = saleResult?.pending ?? (Boolean(notice) && screen === 'success');
 
@@ -297,6 +329,14 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   }
 
   function newSale() {
+    if (cart.length && screen !== 'success') {
+      setClearing(true);
+      return;
+    }
+    clearSale();
+  }
+  function clearSale() {
+    setClearing(false);
     beginSale();
     go('sale', { replace: true });
     searchRef.current?.focus();
@@ -308,7 +348,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (host && !host.ownsInput(event.target)) return;
-      if (priceFor || menuOpen || printerOpen) return;
+      if (priceFor || holding || clearing || menuOpen || printerOpen) return;
       if (event.key === 'F4') {
         event.preventDefault();
         const last = cart[cart.length - 1];
@@ -328,6 +368,17 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
 
   const products = query.trim().length >= 2 ? matches : quickPicks;
   const mode = query.trim().length >= 2 ? 'results' : 'picks';
+  const restoredNotice = heldCarts?.restored && (
+    <div className="pos-field">
+      <p className="pos-note" data-tone="warn">
+        {t('posRestoredCart')}
+        {!online && ` ${t('posRestoredOffline')}`}
+      </p>
+      <button type="button" className="pos-btn" onClick={heldCarts.review}>
+        {t('posReviewCart')}
+      </button>
+    </div>
+  );
 
   return (
     <div className="pos-app" data-step={step} lang={lang}>
@@ -476,8 +527,88 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
           {t('posSyncTab')}
           {pendingCount > 0 && <span className="pos-tab-count">{pendingCount}</span>}
         </button>
+        <button
+          type="button"
+          aria-current={step === 'transactions' ? 'page' : undefined}
+          onClick={() => go('transactions')}
+        >
+          <ReceiptText size={17} aria-hidden="true" />
+          {t('posTransactions')}
+        </button>
+        {heldCarts && (
+          <button
+            type="button"
+            aria-current={step === 'held' ? 'page' : undefined}
+            onClick={() => go('held')}
+          >
+            <ShoppingBag size={17} aria-hidden="true" />
+            {t('posHeldCarts')}
+            {heldCarts.held.length > 0 && (
+              <span className="pos-tab-count">{heldCarts.held.length}</span>
+            )}
+          </button>
+        )}
         <span className="pos-terminal-label">{session.terminal.name}</span>
       </nav>
+
+      {control && (
+        <div className="pos-control-strip" role="status">
+          <span>{control.owned ? t('posControlOwned') : t('posControlOther')}</span>
+          <button
+            type="button"
+            className="pos-btn"
+            disabled={busy || holdBusy}
+            onClick={control.owned ? control.release : control.request}
+          >
+            {t(control.owned ? 'posReleaseControl' : 'posTakeControl')}
+          </button>
+          {heldCarts && (
+            <span>
+              {t(
+                heldCarts.status === 'saving'
+                  ? 'posSavingCart'
+                  : heldCarts.status === 'saved'
+                    ? 'posSavedCart'
+                    : 'posNeedsAttention',
+              )}
+            </span>
+          )}
+        </div>
+      )}
+      {heldCarts && !heldCarts.ready && (
+        <p className="pos-note" data-tone="warn" role="status">
+          {t(heldCarts.status === 'attention' ? 'posCartAttention' : 'posCartOpening')}
+        </p>
+      )}
+      {heldCarts?.status === 'attention' && (
+        <div className="pos-actions">
+          <button
+            type="button"
+            className="pos-btn"
+            onClick={() => void heldCarts.retry().catch(() => setNotice(t('posCartAttention')))}
+          >
+            {t('posRetryCart')}
+          </button>
+        </div>
+      )}
+      {step === 'transactions' && (
+        <Transactions
+          binding={binding}
+          session={session}
+          online={online}
+          pending={pendingSales}
+          t={t}
+          openSync={() => go('queue')}
+        />
+      )}
+      {step === 'held' && heldCarts && (
+        <HeldCarts
+          actions={heldCarts}
+          empty={cart.length === 0}
+          t={t}
+          onResume={() => go('sale')}
+        />
+      )}
 
       {step === 'done' && (
         <main className="pos-full">
@@ -606,6 +737,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 {syncing ? t('sending') : t('sendNow')}
               </button>
             </div>
+            <p className="pos-hint">{t('posSyncExplanation')}</p>
             {pendingSales.length === 0 ? (
               <p className="pos-empty">{t('queueEmpty')}</p>
             ) : (
@@ -628,7 +760,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
         </main>
       )}
 
-      {(step === 'sale' || step === 'pay') && (
+      {(step === 'sale' || step === 'pay') && (heldCarts?.ready ?? true) && (
         <>
           <div className="pos-body" data-step={step}>
             <section className="pos-panel pos-find" aria-label={t('addProducts')}>
@@ -723,12 +855,95 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
                 <h2 id={instanceId + '-pos-cart-title'}>{t('saleItems')}</h2>
                 <span>{t('items', { count: cartCount })}</span>
                 <div className="pos-spacer" />
+                {onHold && (
+                  <button
+                    type="button"
+                    className="pos-btn"
+                    disabled={!cart.length || busy || holdBusy}
+                    onClick={() => {
+                      setHolding(true);
+                      setHoldName(customer?.name ?? '');
+                      setHoldNote('');
+                    }}
+                  >
+                    {t('posHold')}
+                  </button>
+                )}
                 {cart.length > 0 && (
                   <button type="button" className="pos-btn" onClick={newSale}>
                     {t('posClearCart')}
                   </button>
                 )}
               </div>
+              {step !== 'pay' && restoredNotice}
+              {holding && (
+                <form
+                  className="pos-hold-form"
+                  aria-label={t('posHold')}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!onHold || holdBusy) return;
+                    setHoldBusy(true);
+                    setNotice('');
+                    void onHold(holdName, holdNote)
+                      .then(() => {
+                        setHolding(false);
+                        go('sale');
+                      })
+                      .catch(() => setNotice(t('posCartAttention')))
+                      .finally(() => setHoldBusy(false));
+                  }}
+                >
+                  <label className="pos-field">
+                    {t('posCartName')}
+                    <input
+                      autoFocus
+                      className="pos-input"
+                      maxLength={80}
+                      value={holdName}
+                      onChange={(e) => setHoldName(e.target.value)}
+                    />
+                  </label>
+                  <label className="pos-field">
+                    {t('posCartNote')}
+                    <textarea
+                      className="pos-input"
+                      maxLength={500}
+                      value={holdNote}
+                      onChange={(e) => setHoldNote(e.target.value)}
+                    />
+                  </label>
+                  <p className="pos-hint">{t('posHoldNote')}</p>
+                  <div className="pos-actions">
+                    <button type="submit" className="pos-btn pos-btn-primary" disabled={holdBusy}>
+                      {t('posHold')}
+                    </button>
+                    <button
+                      type="button"
+                      className="pos-btn"
+                      disabled={holdBusy}
+                      onClick={() => setHolding(false)}
+                    >
+                      {t('posCancel')}
+                    </button>
+                  </div>
+                </form>
+              )}
+              {clearing && (
+                <div role="group" aria-label={t('posDiscardCart')}>
+                  <p className="pos-note" data-tone="warn">
+                    {t('posDiscardConfirm')}
+                  </p>
+                  <div className="pos-actions">
+                    <button type="button" className="pos-btn" onClick={() => setClearing(false)}>
+                      {t('keepIt')}
+                    </button>
+                    <button type="button" className="pos-btn" onClick={clearSale}>
+                      {t('posDiscardCart')}
+                    </button>
+                  </div>
+                </div>
+              )}
               {cart.length === 0 ? (
                 <p className="pos-empty">{t('posCartEmpty')}</p>
               ) : (
@@ -813,6 +1028,7 @@ function PosApp(props: PosShellProps & { openModule: (module: PosModule) => void
             </section>
 
             <section className="pos-panel pos-pay" aria-labelledby={instanceId + '-pos-pay-title'}>
+              {step === 'pay' && restoredNotice}
               <button
                 type="button"
                 className="pos-back"
@@ -1075,6 +1291,10 @@ function QueueItem({
           <p className="pos-note" data-tone="bad">
             {posErrorMessage(item.lastError ?? '', t)}
           </p>
+          <p className="pos-hint">{t('posSyncRejectedNote')}</p>
+          {item.requiresReview !== undefined ? (
+            <p className="pos-hint">{t('posSyncRemoveBlocked')}</p>
+          ) : null}
           {confirming ? (
             <div className="pos-field">
               <strong>{t('removeConfirmTitle')}</strong>
@@ -1105,13 +1325,19 @@ function QueueItem({
               >
                 {retrying ? t('sending') : t('retryThisSale')}
               </button>
-              <button type="button" className="pos-btn" onClick={() => setConfirmRemoveId(item.id)}>
+              <button
+                type="button"
+                className="pos-btn"
+                disabled={item.requiresReview !== undefined}
+                onClick={() => setConfirmRemoveId(item.id)}
+              >
                 {t('remove')}
               </button>
             </div>
           )}
         </>
       )}
+      {!failed && <p className="pos-hint">{t('posSyncWaitingNote')}</p>}
     </div>
   );
 }

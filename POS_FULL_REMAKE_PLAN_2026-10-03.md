@@ -14,38 +14,37 @@ This expands the September remake beyond a selling-screen reskin. Preserve the e
 
 This is a source-based plan, not a fresh production browser acceptance report. The working checkout is at `395026f6`; the locally available `origin/main` is at `3346ce7e`. The inspected POS files are present in this checkout. Phase 0 must confirm the implementation against the selected release commit and actual terminal configuration. Existing unrelated working changes are outside this plan.
 
-| Area | What the code already contains | Remake implication |
-|---|---|---|
-| OS hosting | App registry entry at `/pos`, `DesktopPos`, an instance navigation transport and a window close guard | Improve the existing host; preserve `/mobile-pos` and activation/deep links |
-| Selling | New `PosShell` selected by terminal `uiVersion >= 3`; search, cart, price changes, payment and receipts | Preserve behaviour and finish the design consistently |
-| Other modules | `PosShell` opens `KauntaShell skin="os"` for day book, stock, receiving, counts, history and closing | These need complete OS-native layouts, not just new colours |
-| Responsive layout | Container-based phone/tablet/till rules; POS CSS also contains viewport-height assumptions | Audit hosted height, small windows, scrolling and maximisation before redesign |
-| Data | POS uses `MobilePosLiteService` and `SalesOrdersService.mobilePosLiteQuickSale`, with shared customers, products, stock and finance | Retain canonical business records rather than migrate sales into a parallel POS database |
-| Payments | POS request carries one method; terminal receipt methods are Cash, Mobile Money and Bank Transfer, with Credit separately enabled | Split payment, deposits and additional methods require backend contracts, not frontend toggles |
-| Offline | Existing IndexedDB binding, catalog/session cache, outbox, count/purchase drafts and day log | Preserve queued transactions through the remake; add recovery deliberately |
-| Receipts/hardware | Letterhead PDF receipts/day reports, 58/80 mm printing, scanner support and Serial/Bluetooth ESC/POS code | Retest on actual equipment; direct-print support is not universal |
-| Closing | Server-computed day report and declared held-sale counts/amounts | A day report is not a full cashier shift and cash handover system |
-| Returns | Core refund services exist, but the POS controller has no complete returns workflow | Inspect and extend shared services for POS permissions, item quantities, stock disposition and settlement |
-| Transaction recovery | The sale action constructs a fresh idempotency key when called | Explicitly test lost-response/retry paths; persist the submission identity before sending |
+| Area                 | What the code already contains                                                                                                      | Remake implication                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| OS hosting           | App registry entry at `/pos`, `DesktopPos`, an instance navigation transport and a window close guard                               | Improve the existing host; preserve `/mobile-pos` and activation/deep links                               |
+| Selling              | New `PosShell` selected by terminal `uiVersion >= 3`; search, cart, price changes, payment and receipts                             | Preserve behaviour and finish the design consistently                                                     |
+| Other modules        | `PosShell` opens `KauntaShell skin="os"` for day book, stock, receiving, counts, history and closing                                | These need complete OS-native layouts, not just new colours                                               |
+| Responsive layout    | Container-based phone/tablet/till rules; POS CSS also contains viewport-height assumptions                                          | Audit hosted height, small windows, scrolling and maximisation before redesign                            |
+| Data                 | POS uses `MobilePosLiteService` and `SalesOrdersService.mobilePosLiteQuickSale`, with shared customers, products, stock and finance | Retain canonical business records rather than migrate sales into a parallel POS database                  |
+| Payments             | POS request carries one method; terminal receipt methods are Cash, Mobile Money and Bank Transfer, with Credit separately enabled   | Split payment, deposits and additional methods require backend contracts, not frontend toggles            |
+| Offline              | Existing IndexedDB binding, catalog/session cache, outbox, count/purchase drafts and day log                                        | Preserve queued transactions through the remake; add recovery deliberately                                |
+| Receipts/hardware    | Letterhead PDF receipts/day reports, 58/80 mm printing, scanner support and Serial/Bluetooth ESC/POS code                           | Retest on actual equipment; direct-print support is not universal                                         |
+| Closing              | Server-computed day report and declared held-sale counts/amounts                                                                    | A day report is not a full cashier shift and cash handover system                                         |
+| Returns              | Core refund services exist, but the POS controller has no complete returns workflow                                                 | Inspect and extend shared services for POS permissions, item quantities, stock disposition and settlement |
+| Transaction recovery | The sale action constructs a fresh idempotency key when called                                                                      | Explicitly test lost-response/retry paths; persist the submission identity before sending                 |
 
 The September plan and pilot runbook contain historical rollout assumptions. Their statements about the desktop remaining disabled, deployment blockers and pilot completion must be revalidated; they are not current release status. This review did not reproduce a duplicate sale or verify that the historical pilot has completed.
 
 ## Experience and navigation
 
-Open directly into **Sell**, with the branch, cashier, terminal, shift and connection state visible. Avoid a dashboard as an extra step before every sale.
+Open directly into **Sell**, with the branch, cashier, terminal and connection state visible. Avoid a dashboard as an extra step before every sale. Cashier shifts, opening floats, handovers and shift closing are excluded by the owner's 3 October decision.
 
-| Section | Purpose |
-|---|---|
-| Sell | Find products, scan, build the cart and charge |
-| Held sales | Resume an unpaid customer cart without blocking the next customer |
-| Transactions | Find receipts, reprint, inspect payments and start permitted returns |
-| Customers | Find the shared customer and view permitted balance information |
-| Stock | Branch quantities, availability, authorised counts and receiving |
-| Shift | Open the till, record authorised cash movements, hand over and close |
-| Sync centre | Understand queued, rejected and uncertain transactions and resolve them |
-| Settings | Language, terminal, scanner, printing and accessibility; administration by permission |
+| Section      | Purpose                                                                               |
+| ------------ | ------------------------------------------------------------------------------------- |
+| Sell         | Find products, scan, build the cart and charge                                        |
+| Held sales   | Resume an unpaid customer cart without blocking the next customer                     |
+| Transactions | Find receipts, reprint, inspect payments and start permitted returns                  |
+| Customers    | Find the shared customer and view permitted balance information                       |
+| Stock        | Branch quantities, availability, authorised counts and receiving                      |
+| Sync centre  | Understand queued, rejected and uncertain transactions and resolve them               |
+| Settings     | Language, terminal, scanner, printing and accessibility; administration by permission |
 
-On phones, keep Sell, Transactions and Shift within easy reach, with other sections in More. On tablets and desktop, use a compact navigation rail. Managers can see a branch overview; cashiers see their own shift rather than group-wide financial information. Preserve Swahili-first copy with an English choice from the existing product direction.
+On phones, keep Sell, Transactions, Held carts and Sync within easy reach, with other sections in More. On tablets and desktop, use compact navigation. Managers can see a branch overview; cashiers see their own terminal sales and daily totals. Preserve Swahili-first copy with an English choice from the existing product direction.
 
 ### Layout and visual system
 
@@ -88,17 +87,9 @@ Start from an original receipt. Allow full or partial item returns, with returne
 
 Coordinate refund/credit, receivable correction, tax adjustment, inventory movement and journal posting through the core services. Refund only the eligible paid amount; a credit sale return may reduce debt rather than pay out cash. Print a linked return document. Keep immutable original records and reasons; no deletion of completed sales. Exchanges should be a linked return plus a new sale.
 
-### 5. Shift and till accountability
+### 5. Daily accountability without cashier shifts
 
-Open a shift with declared float, cashier, terminal and business date. Track cash receipts, cash refunds, authorised paid-in/paid-out, cash drops and handovers. Paid-out must refer to an authorised expense, settlement or transfer, rather than become an unclassified loss of cash.
-
-Close with counted cash, expected cash, variance, explanation and approval when required. Proposed calculation:
-
-`Expected cash = opening float + net cash received + paid-in - cash refunds - paid-out - cash drops`
-
-Net cash received already excludes change. Float movements and cash drops are transfers, not sales or expenses. Mobile-money/bank/card takings need separate settlement/reconciliation. Queued offline sales must be shown separately from acknowledged server totals; an unresolved submission cannot be silently treated as a reconciled final close. Corrections to a close create an audited revision or adjustment.
-
-Use East Africa business dates consistently, including shifts crossing midnight. Keep daily reports, but link them to shifts rather than using them as a substitute for cashier custody records.
+Keep the existing server-computed daily reports, cashier/terminal attribution, payment-method breakdown and pending-device totals. Use East Africa business dates consistently. Show acknowledged sales separately from unresolved or offline submissions. Cash Desk remains the place for authorised expenses, settlements and transfers; those movements must not create duplicate POS sales. No cashier shift, opening float, handover or shift-closing model or workflow will be introduced.
 
 ### 6. Shared customers and stock
 
@@ -116,24 +107,24 @@ Track fiscal status separately from printing and payment. Assess the existing EF
 
 ### 8. Terminal administration and reports
 
-Provide terminal setup, assignment, activation/revocation, branch/account mapping, offline policy, price-change limits, language and printer settings. Restrict terminal reassignment while work is pending. Separate sell, price override, refund, return approval, shift close, receiving, stock count and terminal management permissions.
+Provide terminal setup, assignment, activation/revocation, branch/account mapping, offline policy, price-change limits, language and printer settings. Restrict terminal reassignment while work is pending. Separate sell, price override, refund, return approval, receiving, stock count and terminal management permissions.
 
-Cashiers need their shift totals, payment breakdown, receipts and pending sync. Managers need branch/terminal/cashier sales, returns, discounts, variances, incomplete shifts, outstanding credit and reconciliation exceptions. Reports can show authorised profit/margin data in the office; those fields must not enter the till API or offline cache.
+Cashiers need daily sales totals, payment breakdown, receipts and pending sync. Managers need branch/terminal/cashier sales, returns, discounts, outstanding credit and reconciliation exceptions. Reports can show authorised profit/margin data in the office; those fields must not enter the till API or offline cache.
 
 ## How it connects to ITEMBA OS
 
-| App/service | Ownership and connection |
-|---|---|
-| Organisation and access | Existing company → division → branch structure; terminal scope enforced server-side |
-| Sales Desk | Same canonical sale/customer IDs, sale details, history, outstanding balances and document links |
-| Cash Desk | Canonical receipt/payment accounts, collections, refunds and shift cash movements; trace to the originating sale |
-| Inventory | Same products and stock movements; stock issue once per finalised sale and explicit return/disposition movements |
-| Invoice Desk | Shared supplier/procurement references for authorised receiving; receiving goods does not imply paying an invoice |
-| Accounting | Existing posting services for sales, VAT, inventory cost, collections and reversals; POS never independently constructs journals |
-| Reports | Read posted source records; distinguish offline declarations, acknowledged transactions and final reconciled totals |
-| Documents | Shared letterhead, PDF generation and canonical record links |
-| PetroDollar | Keep fuel-meter, tank and shift reporting there. Any later forecourt POS connection must map its transactions explicitly to prevent two sale/stock postings |
-| Records | Remains the user's independent record book. No automatic mirrored sales, debts or expenses |
+| App/service             | Ownership and connection                                                                                                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Organisation and access | Existing company → division → branch structure; terminal scope enforced server-side                                                                         |
+| Sales Desk              | Same canonical sale/customer IDs, sale details, history, outstanding balances and document links                                                            |
+| Cash Desk               | Canonical receipt/payment accounts, collections and refunds; trace to the originating sale                                                                  |
+| Inventory               | Same products and stock movements; stock issue once per finalised sale and explicit return/disposition movements                                            |
+| Invoice Desk            | Shared supplier/procurement references for authorised receiving; receiving goods does not imply paying an invoice                                           |
+| Accounting              | Existing posting services for sales, VAT, inventory cost, collections and reversals; POS never independently constructs journals                            |
+| Reports                 | Read posted source records; distinguish offline declarations, acknowledged transactions and final reconciled totals                                         |
+| Documents               | Shared letterhead, PDF generation and canonical record links                                                                                                |
+| PetroDollar             | Keep fuel-meter, tank and shift reporting there. Any later forecourt POS connection must map its transactions explicitly to prevent two sale/stock postings |
+| Records                 | Remains the user's independent record book. No automatic mirrored sales, debts or expenses                                                                  |
 
 Important boundary: the code contains both canonical `CashAccount`/business finance records and the separate `CashDeskAccount` register, plus canonical sales and Sales Desk direct entries. POS already uses the canonical business route. Link and expose that route clearly in the new app; do not copy its money into the separate register and count it twice.
 
@@ -147,7 +138,7 @@ Keep the `features/pos` core and hardware adapters. Introduce dedicated screen/l
 
 Maintain explicit standalone and OS hosts using instance navigation. Preserve `/mobile-pos`, `/pos`, activation links, legacy receipt links and browser Back/Forward. Manager inspection windows can coexist; a selling terminal needs one active cashier controller/lease, with other windows clearly read-only or requiring a controlled handover. Independent drafts must never overwrite the terminal's count/purchase draft keys.
 
-Add backend models only where needed: cashier shifts and cash movements, held-sale metadata, split-tender allocation and fiscal transmission status. Reuse canonical sale/payment/refund/inventory models. Publish versioned request contracts and add migrations with reversibility and reconciliation checks. Do not rename shared tables merely to remove ITEMBA-R wording.
+Add backend models only where needed: shared held-sale metadata, split-tender allocation and fiscal transmission status. Device-private unpaid carts initially reuse the existing versioned IndexedDB draft store. Reuse canonical sale/payment/refund/inventory models. Publish versioned request contracts and add migrations with reversibility and reconciliation checks. Do not rename shared tables merely to remove ITEMBA-R wording.
 
 ### Offline is a custody decision
 
@@ -163,15 +154,15 @@ No online design can promise exact global stock availability while independent t
 
 ## Delivery sequence and gates
 
-| Phase | Work | Completion gate |
-|---|---|---|
-| 0. Establish safe baseline | Revalidate current release/pilot status, trace existing sale/payment/stock paths, verify role boundaries, persistent intent and uncertain-outcome recovery; audit height and shared device state | No duplicate after lost response/retry; existing offline outboxes recover; a documented feature/source map exists |
-| 1. Design and OS foundation | Design Sell, Pay, Receipt, Transactions, Shift and Sync in light/dark phone/tablet/till layouts; define tokens and hosts | Reviewed visual references; container resizing, focus, scanner ownership and full workspace maximisation work |
-| 2. Complete selling | Build native OS selling and module navigation, customer selection, price controls, held carts, drafts and sync centre | One keyboard-only sale; two independent drafts; refresh/restart recovery; same records appear in Sales Desk |
-| 3. Complete payment lifecycle | Split/partial payments, collections, returns/refunds and receipt/fiscal status integration | Cash, customer balance, inventory and journal entries reconcile through sale, collection, return and retry |
-| 4. Complete shifts and stock | Float, paid-in/out, drops, count/variance, handover/close; native receiving/count/history screens | Shift totals match canonical accounts; offline declarations remain separate; authorised workflows preserve scope and costing controls |
-| 5. Hardware and release hardening | Real printers/scanners, PDFs, accessibility, performance, fiscal acceptance, migrations and operating runbook | Device matrix and business workflow tests pass; no misleading payment/print/fiscal success; rollback rehearsed |
-| 6. Pilot and retirement | Enable by selected terminal/branch, observe real trading, expand gradually; retire classic/Kaunta UI after parity and accepted stability | Agreed pilot evidence, clean reconciliation and usable recovery; old links/outboxes preserved; old shells removed only after rollback need ends |
+| Phase                                 | Work                                                                                                                                                                                             | Completion gate                                                                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0. Establish safe baseline            | Revalidate current release/pilot status, trace existing sale/payment/stock paths, verify role boundaries, persistent intent and uncertain-outcome recovery; audit height and shared device state | No duplicate after lost response/retry; existing offline outboxes recover; a documented feature/source map exists                               |
+| 1. Design and OS foundation           | Design Sell, Pay, Receipt, Transactions, Held carts and Sync in light/dark phone/tablet/till layouts; define tokens and hosts                                                                    | Reviewed visual references; container resizing, focus, scanner ownership and full workspace maximisation work                                   |
+| 2. Complete selling                   | Build native OS selling and module navigation, customer selection, price controls, held carts, drafts and sync centre                                                                            | One keyboard-only sale; two independent drafts; refresh/restart recovery; same records appear in Sales Desk                                     |
+| 3. Complete payment lifecycle         | Split/partial payments, collections, returns/refunds and receipt/fiscal status integration                                                                                                       | Cash, customer balance, inventory and journal entries reconcile through sale, collection, return and retry                                      |
+| 4. Complete stock and daily reporting | Native receiving/count/history screens and daily sales reports                                                                                                                                   | Daily totals match canonical sales; offline declarations remain separate; authorised workflows preserve scope and costing controls              |
+| 5. Hardware and release hardening     | Real printers/scanners, PDFs, accessibility, performance, fiscal acceptance, migrations and operating runbook                                                                                    | Device matrix and business workflow tests pass; no misleading payment/print/fiscal success; rollback rehearsed                                  |
+| 6. Pilot and retirement               | Enable by selected terminal/branch, observe real trading, expand gradually; retire classic/Kaunta UI after parity and accepted stability                                                         | Agreed pilot evidence, clean reconciliation and usable recovery; old links/outboxes preserved; old shells removed only after rollback need ends |
 
 Finish each phase with reviewable staging evidence. New financial capabilities require additive migrations and service tests. Keep a per-terminal rollout control; rollback must read new queue/draft formats or activation of those formats must be deferred until compatible. A frontend rollback cannot undo completed business transactions.
 
@@ -184,7 +175,7 @@ Finish each phase with reviewable staging evidence. New financial capabilities r
 5. Hold cart A, sell cart B and resume A; separate OS windows cannot change one another's customer, prices or draft.
 6. Cold-start an authorised offline terminal, sell cash, restart and sync; work survives and a rejected item remains resolvable.
 7. A partial return, repeat return attempt, refund and damaged stock disposition do not over-refund or over-restock.
-8. Open a shift, give change, record a cash drop and an expense, hand over and close with variance; amounts reconcile and transfers are not revenue.
+8. Cash change, daily payment breakdown and Cash Desk movements reconcile; expenses and transfers do not create additional POS revenue.
 9. Revoked permission, expired identity, reassigned branch or stolen/revoked terminal cannot submit outside its authorised scope.
 10. Printer disconnect and reprint create no sale/payment replay; fiscal retry has its own protected identity.
 11. Sell and navigate entirely by keyboard; screen-reader dialogs, focus restoration, dark/custom themes and reduced effects remain usable.
@@ -198,7 +189,7 @@ After the complete till is stable: customer-specific price agreements, loyalty, 
 
 ## Decisions to resolve before dependent work
 
-Use existing choices as defaults: Swahili first, TZS tills, shared organisation/customer/product records, controlled price edits, hardware scanning and browser-print fallback. Before hardware/fiscal acceptance, confirm actual printer/scanner models and each company's current receipt integration. Before shift/payment implementation, agree cashier handover, variance approval, refund approval and paid-out policies with the operating team. These are targeted phase decisions, not reasons to stop foundation work.
+Use existing choices as defaults: Swahili first, TZS tills, shared organisation/customer/product records, controlled price edits, hardware scanning and browser-print fallback. Cashier shifts are excluded. Before hardware/fiscal acceptance, confirm actual printer/scanner models and each company's current receipt integration. Before payment implementation, agree refund approval and collection policies with the operating team. These are targeted phase decisions, not reasons to stop foundation work.
 
 ## Source references
 

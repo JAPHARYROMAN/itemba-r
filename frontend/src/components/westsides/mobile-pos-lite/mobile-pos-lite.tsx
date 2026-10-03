@@ -7,8 +7,11 @@ import {
   type CheckoutObservation,
 } from '@/features/pos/core/checkout-recovery';
 import { CheckoutRecoveryPanel } from '@/features/pos/ui/CheckoutRecoveryPanel';
+import { useHeldCarts } from '@/features/pos/core/hooks/use-held-carts';
+import { useTerminalControl } from '@/features/pos/core/hooks/use-terminal-control';
+import { terminalOperation } from '@/features/pos/core/terminal-control';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { RotateCw } from 'lucide-react';
 import { showToast } from '@/components/ui';
@@ -17,6 +20,7 @@ import {
   bumpDaylogTally,
   bumpMobilePosLiteFrequents,
   clearMobilePosLiteBinding,
+  getPendingMobilePosLiteSales,
   enqueueMobilePosLiteSale,
   posDaylogDate,
   removePendingMobilePosLiteSale,
@@ -128,6 +132,95 @@ export function MobilePosLite() {
   const shellClass = kauntaEnabled ? ' pos-shell' : '';
 
   const pendingCount = pendingSales.length;
+  const posAppEnabled = (session?.terminal.uiVersion ?? 1) >= 3;
+  const [standaloneInstance] = useState(() => {
+    // sessionStorage holds a random, non-sensitive tab identity only.
+    const key = 'itemba-pos-window';
+    try {
+      const id = sessionStorage.getItem(key) ?? crypto.randomUUID();
+      sessionStorage.setItem(key, id);
+      return id;
+    } catch {
+      return crypto.randomUUID();
+    }
+  });
+  const cartInputs = useMemo(
+    () => ({ cart, customer, paymentMethod, paymentReference, receivedValue }),
+    [cart, customer, paymentMethod, paymentReference, receivedValue],
+  );
+  const cartScope = session
+    ? JSON.stringify([
+        session.terminal.id,
+        session.company.id,
+        session.division.id,
+        session.branch.id,
+        user?.id ?? session.rep.id,
+      ])
+    : null;
+  const currentCartScope = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    currentCartScope.current = canUse ? cartScope : null;
+  }, [cartScope, canUse]);
+  const heldCarts = useHeldCarts({
+    enabled: posAppEnabled && canUse,
+    scope: cartScope,
+    instance: host?.instanceId ?? standaloneInstance,
+    inputs: cartInputs,
+    editable: !busy && screen !== 'success' && !activeReview,
+    restore: async (saved) => {
+      // Rehydrate unpaid lines against current authorised references. Price
+      // overrides remain explicit; default prices follow the refreshed product.
+      if (!saved.cart.length) {
+        setCart([]);
+        setCustomer(null);
+        setPaymentMethod(saved.paymentMethod);
+        setPaymentReference('');
+        setReceivedValue('');
+        setSaleResult(null);
+        setScreen('sale');
+        setQuery('');
+        setCustomerQuery('');
+        return;
+      }
+      const lines = await Promise.all(
+        saved.cart.map(async (line) => {
+          const products =
+            online && binding
+              ? await backendGet<MobilePosLiteProduct[]>('/mobile-pos-lite/products', {
+                  headers: terminalHeaders(binding),
+                  query: { search: line.product.code },
+                })
+              : catalog;
+          const product = products.find((candidate) => candidate.id === line.product.id);
+          if (!product) throw new Error(t('posCartAttention'));
+          return { ...line, product };
+        }),
+      );
+      if (!canUse || currentCartScope.current !== cartScope) throw new Error(t('posCartAttention'));
+      setCart(lines);
+      setCustomer(saved.customer);
+      setPaymentMethod(saved.paymentMethod);
+      setPaymentReference(saved.paymentReference);
+      setReceivedValue(saved.receivedValue);
+      setScreen('sale');
+    },
+    resolveSubmitted: async (requestId) => {
+      if (!binding) return 'blocked';
+      const pending = await getPendingMobilePosLiteSales(binding.terminalCode);
+      const original = pending.find((item) => item.payload.idempotencyKey === requestId);
+      if (original) return 'done'; // Its frozen outbox owns recovery, never this editable cart.
+      const observed = await backendGet<CheckoutObservation>(
+        `/mobile-pos-lite/sales/requests/${encodeURIComponent(requestId)}`,
+        { headers: terminalHeaders(binding) },
+      );
+      return observed.state === 'confirmed'
+        ? 'done'
+        : observed.state === 'not_found'
+          ? 'editable'
+          : 'blocked';
+    },
+  });
+  const control = useTerminalControl(binding?.terminalCode, posAppEnabled && canUse);
 
   // Customer live-search for every payment method (owner request, 2026-08-12):
   // CREDIT still requires a pick at completion; CASH/MOBILE_MONEY attach one
@@ -160,7 +253,7 @@ export function MobilePosLite() {
     return digits ? Number(digits) : null;
   }, [receivedValue]);
 
-  function beginSale() {
+  function resetSaleInputs() {
     setNotice('');
     setCart([]);
     setQuery('');
@@ -171,15 +264,25 @@ export function MobilePosLite() {
     setPaymentMethod(session?.paymentMethods[0]?.code ?? 'CASH');
     setScreen('sale');
   }
+  function beginSale() {
+    if (posAppEnabled)
+      void heldCarts
+        .clear()
+        .then(resetSaleInputs)
+        .catch(() => setNotice(t('posCartAttention')));
+    else resetSaleInputs();
+  }
 
   function checkoutDependencies() {
     return {
       save: enqueueMobilePosLiteSale,
       remove: removePendingMobilePosLiteSale,
       submit: (payload: PendingMobilePosLiteSale['payload']) =>
-        backendPost<SaleResult>('/mobile-pos-lite/sales', payload, {
-          headers: terminalHeaders(binding!),
-        }),
+        terminalOperation(binding!.terminalCode, () =>
+          backendPost<SaleResult>('/mobile-pos-lite/sales', payload, {
+            headers: terminalHeaders(binding!),
+          }),
+        ),
       observe: (key: string) =>
         backendGet<CheckoutObservation>(
           `/mobile-pos-lite/sales/requests/${encodeURIComponent(key)}`,
@@ -221,6 +324,13 @@ export function MobilePosLite() {
 
   async function completeSale() {
     if (!binding || !session || cart.length === 0 || submitting.current) return;
+    if (
+      posAppEnabled &&
+      (!control.owned || !heldCarts.ready || heldCarts.restored || heldCarts.status === 'attention')
+    ) {
+      setNotice(t('posControlOther'));
+      return;
+    }
     if (pendingSales.some((item) => item.requiresReview && !acknowledged.has(item.id))) return;
     if (paymentMethod === 'CREDIT' && !customer) {
       setNotice(t('selectCreditCustomer'));
@@ -233,6 +343,15 @@ export function MobilePosLite() {
     submitting.current = true;
     setBusy(true);
     setNotice('');
+    let requestId: string;
+    try {
+      requestId = posAppEnabled ? await heldCarts.protect() : newIdempotencyKey();
+    } catch {
+      setNotice(t('posCartAttention'));
+      submitting.current = false;
+      setBusy(false);
+      return;
+    }
     const attempt: PendingMobilePosLiteSale = {
       id: crypto.randomUUID(),
       terminalCode: binding.terminalCode,
@@ -249,7 +368,7 @@ export function MobilePosLite() {
         paymentMethod,
         ...(customer ? { customerId: customer.id } : {}),
         ...(paymentReference.trim() ? { paymentReference: paymentReference.trim() } : {}),
-        idempotencyKey: newIdempotencyKey(),
+        idempotencyKey: requestId,
         lines: cart.map((line) => ({
           productId: line.product.id,
           quantity: line.quantity,
@@ -273,6 +392,7 @@ export function MobilePosLite() {
       else if (outcome.kind === 'queued')
         acknowledgeCheckout(attempt, { id: attempt.id, totalAmount: total }, true);
       else {
+        if (outcome.kind === 'rejected' && posAppEnabled) await heldCarts.unlock();
         if (outcome.kind === 'review') setActiveReview(outcome.attempt);
         setNotice(
           outcome.kind === 'rejected'
@@ -286,6 +406,7 @@ export function MobilePosLite() {
       }
       await refreshPendingSales(binding).catch(() => undefined);
     } catch {
+      if (posAppEnabled) await heldCarts.unlock().catch(() => undefined);
       setNotice(t('posSaveFailed')); // No durable intent means no request was sent.
     } finally {
       submitting.current = false;
@@ -512,6 +633,12 @@ export function MobilePosLite() {
     item: PendingMobilePosLiteSale,
   ): Promise<'sent' | 'rejected' | 'connection'> {
     if (!binding) return 'connection';
+    return terminalOperation(binding.terminalCode, () => retryPendingSaleLocked(item));
+  }
+  async function retryPendingSaleLocked(
+    item: PendingMobilePosLiteSale,
+  ): Promise<'sent' | 'rejected' | 'connection'> {
+    if (!binding) return 'connection';
     if (item.ownerId && item.ownerId !== (user?.id ?? session?.rep.id)) return 'rejected';
     try {
       if (item.requiresReview) return 'rejected';
@@ -612,6 +739,10 @@ export function MobilePosLite() {
 
   async function removePending(id: string) {
     if (!binding) return;
+    if (pendingSales.find((item) => item.id === id)?.requiresReview !== undefined) {
+      setNotice(t('posSyncRemoveBlocked'));
+      return;
+    }
     await removePendingMobilePosLiteSale(id);
     setConfirmRemoveId(null);
     await refreshPendingSales(binding);
@@ -786,7 +917,6 @@ export function MobilePosLite() {
   // New POS on ITEMBA OS (POS remake): uiVersion >= 3 draws the same props in
   // the OS design. It is a subset of kauntaEnabled, so every Kaunta-only money
   // path above (mapped refusal wording, haptics, day-log tally) applies to it.
-  const posAppEnabled = (session.terminal.uiVersion ?? 1) >= 3;
 
   // Kaunta shell pilot: uiVersion >= 2 replaces the classic screen dispatch
   // entirely — hash router, top module rail, bottom slab, boot-into-Mauzo.
@@ -796,7 +926,18 @@ export function MobilePosLite() {
     const Shell = posAppEnabled ? PosShell : KauntaShell;
     return (
       <Shell
+        key={cartScope}
         session={session}
+        {...(posAppEnabled
+          ? {
+              heldCarts,
+              control,
+              onHold: async (name: string, note: string) => {
+                await heldCarts.hold(name, note);
+                resetSaleInputs();
+              },
+            }
+          : {})}
         binding={binding}
         online={online}
         screen={screen}

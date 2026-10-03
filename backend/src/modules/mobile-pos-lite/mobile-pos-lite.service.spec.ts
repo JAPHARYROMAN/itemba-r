@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
@@ -4103,6 +4108,26 @@ function allKeys(value: unknown): string[] {
 }
 
 describe('MobilePosLiteService salesHistory', () => {
+  it('reports a fully collected credit sale as paid from its current balance', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findMany.mockResolvedValue([
+      historySaleRow({
+        id: 'paid-credit',
+        paymentMethod: 'CREDIT',
+        status: 'CONFIRMED',
+        outstandingAmount: '0',
+      }),
+      historySaleRow({
+        id: 'part-credit',
+        paymentMethod: 'CREDIT',
+        status: 'PARTIALLY_PAID',
+        outstandingAmount: '1200',
+      }),
+    ]);
+    const result = await service.salesHistory(TERMINAL_CODE, DEVICE_SECRET, repUser());
+    expect(result.sales.map((sale) => sale.status)).toEqual(['PAID', 'CREDIT']);
+    expect(result.sales[0]).not.toHaveProperty('outstandingAmount');
+  });
   it('scopes to this terminal and this rep over the 7-day local-midnight window', async () => {
     const { service, prisma } = makeService();
     const { from, dayEnd } = historyBoundaries();
@@ -4174,6 +4199,7 @@ describe('MobilePosLiteService salesHistory', () => {
       'paymentMethod',
       'paymentReference',
       'salesOrderNumber',
+      'status',
       'totalAmount',
     ]);
     expect(Object.keys(serialized.sales[0].lines[0]).sort()).toEqual([
@@ -5498,52 +5524,112 @@ describe('checkout outcome reconciliation', () => {
   const key = 'physical-sale-key-2026-10-03';
   it('observes the confirmed canonical sale without replaying it or returning costs', async () => {
     const { service, prisma, salesOrders, companyScope } = makeService();
-    prisma.salesOrder.findFirst.mockResolvedValue({ id: 'so-1', salesOrderNumber: 'SO-1', totalAmount: new Prisma.Decimal(2300), status: 'PAID', deletedAt: null });
+    prisma.salesOrder.findFirst.mockResolvedValue({
+      id: 'so-1',
+      salesOrderNumber: 'SO-1',
+      totalAmount: new Prisma.Decimal(2300),
+      status: 'PAID',
+      deletedAt: null,
+    });
     expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
-      state: 'confirmed', sale: { id: 'so-1', salesOrderNumber: 'SO-1', totalAmount: 2300 },
+      state: 'confirmed',
+      sale: { id: 'so-1', salesOrderNumber: 'SO-1', totalAmount: 2300 },
     });
     expect(prisma.salesOrder.findFirst).toHaveBeenCalledWith({
-      where: { companyId: 'company-1', divisionId: 'division-1', branchId: 'branch-1', mobilePosTerminalId: 'terminal-1', idempotencyKey: key },
-      select: { id: true, salesOrderNumber: true, totalAmount: true, status: true, deletedAt: true },
+      where: {
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        mobilePosTerminalId: 'terminal-1',
+        idempotencyKey: key,
+      },
+      select: {
+        id: true,
+        salesOrderNumber: true,
+        totalAmount: true,
+        status: true,
+        deletedAt: true,
+      },
     });
-    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(repUser(), 'company-1', 'WRITE');
+    expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(
+      repUser(),
+      'company-1',
+      'WRITE',
+    );
     expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
     expect(prisma.mobilePosTerminal.update).not.toHaveBeenCalled();
   });
   it('reports missing keys without creating an order', async () => {
     const { service, salesOrders } = makeService();
-    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({ state: 'not_found' });
+    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+      state: 'not_found',
+    });
     expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
   });
-  it.each(['DRAFT', 'CANCELLED', 'DELIVERED'])('preserves %s orders for office review without completing them', async status => {
-    const { service, prisma, salesOrders } = makeService();
-    prisma.salesOrder.findFirst.mockResolvedValue({ status, salesOrderNumber: 'SO-REVIEW', deletedAt: null });
-    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({ state: 'needs_attention', reference: 'SO-REVIEW' });
-    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
-  });
+  it.each(['DRAFT', 'CANCELLED', 'DELIVERED'])(
+    'preserves %s orders for office review without completing them',
+    async (status) => {
+      const { service, prisma, salesOrders } = makeService();
+      prisma.salesOrder.findFirst.mockResolvedValue({
+        status,
+        salesOrderNumber: 'SO-REVIEW',
+        deletedAt: null,
+      });
+      expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+        state: 'needs_attention',
+        reference: 'SO-REVIEW',
+      });
+      expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+    },
+  );
   it('does not mistake a deleted confirmed record for an available retry', async () => {
     const { service, prisma } = makeService();
-    prisma.salesOrder.findFirst.mockResolvedValue({ status: 'PAID', salesOrderNumber: 'SO-DELETED', deletedAt: new Date() });
-    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({ state: 'needs_attention', reference: 'SO-DELETED' });
+    prisma.salesOrder.findFirst.mockResolvedValue({
+      status: 'PAID',
+      salesOrderNumber: 'SO-DELETED',
+      deletedAt: new Date(),
+    });
+    expect(await service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).toEqual({
+      state: 'needs_attention',
+      reference: 'SO-DELETED',
+    });
   });
-  it.each(['wrong-device', undefined])('refuses device credentials before accessing sales (%s)', async secret => {
-    const { service, prisma } = makeService();
-    await expect(service.checkoutOutcome(TERMINAL_CODE, secret, key, repUser())).rejects.toBeInstanceOf(ForbiddenException);
-    expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
-  });
+  it.each(['wrong-device', undefined])(
+    'refuses device credentials before accessing sales (%s)',
+    async (secret) => {
+      const { service, prisma } = makeService();
+      await expect(
+        service.checkoutOutcome(TERMINAL_CODE, secret, key, repUser()),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
+    },
+  );
   it('refuses a reassigned cashier and expired company permissions', async () => {
     const { service, prisma, companyScope } = makeService();
-    await expect(service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, { ...repUser(), id: 'other-rep' })).rejects.toBeInstanceOf(ForbiddenException);
-    companyScope.assertCanAccessCompany.mockRejectedValue(new ForbiddenException('Permission expired'));
-    await expect(service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser())).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, { ...repUser(), id: 'other-rep' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    companyScope.assertCanAccessCompany.mockRejectedValue(
+      new ForbiddenException('Permission expired'),
+    );
+    await expect(
+      service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, key, repUser()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
   });
   it('requires POS use permission at the controller boundary', () => {
-    expect(Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.checkoutOutcome)).toEqual(['mobile_pos_lite.use']);
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, MobilePosLiteController.prototype.checkoutOutcome),
+    ).toEqual(['mobile_pos_lite.use']);
   });
-  it.each(['short', 'k'.repeat(65)])('validates the request identity before database lookup', async invalid => {
-    const { service, prisma } = makeService();
-    await expect(service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, invalid, repUser())).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
-  });
+  it.each(['short', 'k'.repeat(65)])(
+    'validates the request identity before database lookup',
+    async (invalid) => {
+      const { service, prisma } = makeService();
+      await expect(
+        service.checkoutOutcome(TERMINAL_CODE, DEVICE_SECRET, invalid, repUser()),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.salesOrder.findFirst).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MobilePosLite } from '@/components/westsides/mobile-pos-lite/mobile-pos-lite';
+import { deviceDatabase, deviceLocks } from '../core/testing/device-database';
+import { PosHostContext, type PosHost } from '../core/pos-host-context';
 
 const h = vi.hoisted(() => {
   const state = {
@@ -15,7 +17,14 @@ const h = vi.hoisted(() => {
     outbox: [] as Array<Record<string, unknown>>,
   };
   const router = { replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), back: vi.fn() };
-  return { state, router, backendGet: vi.fn(), backendPost: vi.fn(), logout: vi.fn() };
+  return {
+    state,
+    router,
+    db: null as unknown as IDBDatabase,
+    backendGet: vi.fn(),
+    backendPost: vi.fn(),
+    logout: vi.fn(),
+  };
 });
 
 const SODA = {
@@ -53,6 +62,7 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }));
 vi.mock('@/lib/mobile-pos-lite-store', () => ({
+  openDatabase: async () => h.db,
   getMobilePosLiteBinding: vi.fn(async () => h.state.binding),
   clearMobilePosLiteBinding: vi.fn(async () => undefined),
   getMobilePosLiteCatalog: vi.fn(async () => [SODA, MAJI]),
@@ -114,6 +124,9 @@ function salesPosts() {
 }
 
 beforeEach(() => {
+  h.db = deviceDatabase().db;
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: deviceLocks() });
+  sessionStorage.clear();
   window.history.replaceState(null, '', '/mobile-pos');
   h.state.binding = {
     terminalCode: 'T-001',
@@ -126,6 +139,7 @@ beforeEach(() => {
   h.backendGet.mockImplementation(async (path: string) => {
     if (path === '/mobile-pos-lite/session') return h.state.session;
     if (path === '/mobile-pos-lite/catalog') return [SODA, MAJI];
+    if (path === '/mobile-pos-lite/products') return [SODA, MAJI];
     if (path.startsWith('/mobile-pos-lite/sales/requests/')) return { state: 'not_found' };
     if (path === '/mobile-pos-lite/my-sales-today') return { count: 0, totalAmount: 0, sales: [] };
     if (path === '/mobile-pos-lite/stock')
@@ -146,12 +160,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined });
   vi.clearAllMocks();
 });
 
 async function boot() {
   const utils = render(<MobilePosLite />);
   await screen.findByText('Kisimani Main · Jofu K.');
+  if (utils.container.querySelector('.pos-app'))
+    await screen.findAllByRole('button', { name: /Soda Baridi/ });
   return utils;
 }
 
@@ -312,6 +329,205 @@ describe('selling on the new POS', () => {
     expect(window.location.hash).toBe('#pos/sale');
     const cart = screen.getByRole('region', { name: 'Bidhaa za mauzo' });
     expect(within(cart).getByText('Soda Baridi')).toBeInTheDocument();
+  });
+});
+
+describe('unpaid work and native transactions', () => {
+  it('holds a named cart with customer and payment inputs, sells another cart and resumes it without posting', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.click(screen.getByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: 'M-Pesa' }));
+    await user.type(screen.getByLabelText('Kumbukumbu'), 'MP-HELD');
+    await user.type(screen.getByPlaceholderText('Jina, simu au namba ya mteja'), 'Asha');
+    await user.click(await screen.findByRole('button', { name: /Asha Duka/ }));
+    await user.click(screen.getByRole('button', { name: 'Hifadhi kikapu' }));
+    const form = screen.getByRole('form', { name: 'Hifadhi kikapu' });
+    await user.clear(within(form).getByLabelText('Jina la kikapu'));
+    await user.type(within(form).getByLabelText('Jina la kikapu'), 'Asha order');
+    await user.type(within(form).getByLabelText('Maelezo (si lazima)'), 'Collect tomorrow');
+    await user.click(within(form).getByRole('button', { name: 'Hifadhi kikapu' }));
+    await screen.findByText('Kikapu ni tupu. Tafuta au scan bidhaa.');
+    expect(salesPosts()).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: /Maji ya Uhai/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    await user.click(screen.getByRole('button', { name: 'Mauzo Mapya' }));
+    await screen.findByText('Kikapu ni tupu. Tafuta au scan bidhaa.');
+    await user.click(screen.getByRole('button', { name: /Vikapu vilivyohifadhiwa/ }));
+    await screen.findByRole('heading', { name: 'Asha order' });
+    expect(screen.getByText('Collect tomorrow')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Endelea' }));
+    await screen.findByText(/Kikapu kimerejeshwa/);
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    expect(screen.getByLabelText('Kumbukumbu')).toHaveValue('MP-HELD');
+    expect(screen.getByText('Asha Duka')).toBeInTheDocument();
+    expect(salesPosts()).toHaveLength(1);
+    expect((salesPosts()[0][1] as { lines: unknown[] }).lines).toEqual([
+      { productId: 'p-maji', quantity: 1 },
+    ]);
+  });
+
+  it('recovers the acknowledged active unpaid cart after refresh and asks for review before checkout', async () => {
+    const user = userEvent.setup();
+    const view = await boot();
+    await user.click(screen.getByRole('button', { name: /Soda Baridi/ }));
+    await waitFor(() =>
+      expect(screen.getByText('Kikapu kimehifadhiwa kwenye kifaa')).toBeInTheDocument(),
+    );
+    view.unmount();
+    await boot();
+    await screen.findByText(/Kikapu kimerejeshwa/);
+    expect(screen.getByLabelText('Idadi ya Soda Baridi')).toHaveTextContent('1');
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    expect(screen.getByRole('button', { name: /Maliza Mauzo/ })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Nimekagua kikapu hiki' }));
+    expect(screen.getByRole('button', { name: /Maliza Mauzo/ })).toBeEnabled();
+    expect(salesPosts()).toHaveLength(0);
+  });
+
+  it('refreshes restored default prices before review and keeps a failed lookup recoverable', async () => {
+    const user = userEvent.setup();
+    const view = await boot();
+    await user.click(screen.getByRole('button', { name: /Soda Baridi/ }));
+    await waitFor(() =>
+      expect(screen.getByText('Kikapu kimehifadhiwa kwenye kifaa')).toBeInTheDocument(),
+    );
+    view.unmount();
+    const previous = h.backendGet.getMockImplementation()!;
+    let fail = true;
+    h.backendGet.mockImplementation(async (path: string, ...args: unknown[]) => {
+      if (path !== '/mobile-pos-lite/products') return previous(path, ...args);
+      if (fail) throw new TypeError('Failed to fetch');
+      return [{ ...SODA, sellingPrice: 1500 }, MAJI];
+    });
+    render(<MobilePosLite />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Jaribu tena kikapu kilichohifadhiwa' }),
+    );
+    fail = false;
+    await user.click(
+      await screen.findByRole('button', { name: 'Jaribu tena kikapu kilichohifadhiwa' }),
+    );
+    await screen.findByText(/Kikapu kimerejeshwa/);
+    const cart = screen.getByRole('region', { name: 'Bidhaa za mauzo' });
+    expect(within(cart).getAllByText(/TZS 1,500/).length).toBeGreaterThan(0);
+    expect(salesPosts()).toHaveLength(0);
+  });
+
+  it('keeps duplicate OS window carts independent and transfers selling control explicitly', async () => {
+    const user = userEvent.setup();
+    function makeHost(instanceId: string): PosHost {
+      return {
+        instanceId,
+        basePath: '/pos',
+        ownsInput: () => true,
+        router: h.router,
+        history: {
+          hash: () => '',
+          replace: () => undefined,
+          push: () => undefined,
+          back: () => undefined,
+          listen: () => () => undefined,
+        },
+      };
+    }
+    const a = render(
+      <PosHostContext.Provider value={makeHost('a')}>
+        <MobilePosLite />
+      </PosHostContext.Provider>,
+    );
+    const wa = within(a.container);
+    await user.click(await wa.findByRole('button', { name: /Soda Baridi/ }));
+    const b = render(
+      <PosHostContext.Provider value={makeHost('b')}>
+        <MobilePosLite />
+      </PosHostContext.Provider>,
+    );
+    const wb = within(b.container);
+    await user.click(await wb.findByRole('button', { name: /Maji ya Uhai/ }));
+    expect(wa.getByLabelText('Idadi ya Soda Baridi')).toHaveTextContent('1');
+    expect(wb.queryByLabelText('Idadi ya Soda Baridi')).toBeNull();
+    await user.click(wb.getAllByRole('button', { name: 'Lipa' })[0]);
+    expect(wb.getByRole('button', { name: /Maliza Mauzo/ })).toBeDisabled();
+    await user.click(wa.getByRole('button', { name: 'Achia kaunta' }));
+    await user.click(wb.getByRole('button', { name: 'Tumia kaunta hii' }));
+    await waitFor(() => expect(wb.getByRole('button', { name: /Maliza Mauzo/ })).toBeEnabled());
+    expect(wa.getByRole('button', { name: 'Tumia kaunta hii' })).toBeInTheDocument();
+    expect(salesPosts()).toHaveLength(0);
+  });
+
+  it('searches and filters canonical receipt details without submitting or opening the drawer', async () => {
+    const previous = h.backendGet.getMockImplementation()!;
+    h.backendGet.mockImplementation(async (path: string, ...args: unknown[]) =>
+      path === '/mobile-pos-lite/sales'
+        ? {
+            days: 7,
+            from: '2026-09-27',
+            count: 2,
+            totalAmount: 2200,
+            sales: [
+              {
+                id: 'paid',
+                salesOrderNumber: 'SO-PAID',
+                status: 'PAID',
+                createdAt: new Date().toISOString(),
+                paymentMethod: 'CASH',
+                customerName: 'Asha',
+                paymentReference: null,
+                totalAmount: 1200,
+                lines: [
+                  {
+                    productId: 'p-soda',
+                    name: 'Soda Baridi',
+                    quantity: 1,
+                    unitSymbol: 'pc',
+                    unitPrice: 1200,
+                    lineTotal: 1200,
+                  },
+                ],
+              },
+              {
+                id: 'credit',
+                salesOrderNumber: 'SO-CREDIT',
+                status: 'CREDIT',
+                createdAt: new Date().toISOString(),
+                paymentMethod: 'CREDIT',
+                customerName: 'Juma',
+                paymentReference: null,
+                totalAmount: 1000,
+                lines: [],
+              },
+            ],
+          }
+        : previous(path, ...args),
+    );
+    const user = userEvent.setup();
+    await boot();
+    await user.click(screen.getByRole('button', { name: 'Miamala' }));
+    await user.click(await screen.findByRole('button', { name: /SO-PAID/ }));
+    expect(screen.getByRole('heading', { name: 'SO-PAID' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'PDF ya risiti' })).toBeEnabled();
+    let printed = '';
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {
+      printed = document.querySelector('.pos-receipt')?.textContent ?? '';
+    });
+    try {
+      await user.click(screen.getByRole('button', { name: 'Chapisha risiti tena' }));
+      await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+      expect(printed).toContain('SO-PAID');
+      expect(printed).toContain('TZS 1,200');
+    } finally {
+      print.mockRestore();
+    }
+    await user.selectOptions(screen.getByLabelText('Hali'), 'credit');
+    expect(screen.queryByRole('button', { name: /SO-PAID/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /SO-CREDIT/ })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Tafuta'), 'missing');
+    expect(screen.getByText('Hakuna miamala inayolingana.')).toBeInTheDocument();
+    expect(salesPosts()).toHaveLength(0);
   });
 });
 
@@ -680,7 +896,7 @@ describe('hardware on the new POS', () => {
 
   it('adds the exact barcode match when a scanner fires outside a text field', async () => {
     await boot();
-    await screen.findByRole('button', { name: /Soda Baridi/ });
+    await screen.findAllByRole('button', { name: /Soda Baridi/ });
     (document.activeElement as HTMLElement | null)?.blur();
     scan('6200001');
     const cart = screen.getByRole('region', { name: 'Bidhaa za mauzo' });
@@ -689,10 +905,14 @@ describe('hardware on the new POS', () => {
 
   it('puts an unknown scan in the search box with a plain note', async () => {
     await boot();
-    await screen.findByRole('button', { name: /Soda Baridi/ });
+    await screen.findAllByRole('button', { name: /Soda Baridi/ });
     (document.activeElement as HTMLElement | null)?.blur();
     scan('999000111');
-    expect(await screen.findByRole('status')).toHaveTextContent('999000111');
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('status').some((node) => node.textContent?.includes('999000111')),
+      ).toBe(true),
+    );
     expect(screen.getByLabelText('Tafuta au skani bidhaa')).toHaveValue('999000111');
   });
 

@@ -14,10 +14,10 @@ import { usePosHost } from '@/features/pos/core/pos-host-context';
  * Only `#pos/...` hashes are ours; anything else (e.g. a Kaunta module hash
  * while the Kaunta bridge is open) is left alone.
  */
-export type PosStep = 'sale' | 'pay' | 'done' | 'queue';
+export type PosStep = 'sale' | 'pay' | 'done' | 'queue' | 'held' | 'transactions';
 
 const PREFIX = '#pos/';
-const STEPS: readonly PosStep[] = ['sale', 'pay', 'done', 'queue'];
+const STEPS: readonly PosStep[] = ['sale', 'pay', 'done', 'queue', 'held', 'transactions'];
 
 function stepFromHash(hash: string): PosStep | null {
   if (!hash.startsWith(PREFIX)) return null;
@@ -31,7 +31,8 @@ export function usePosStep() {
 
   useEffect(() => {
     const initial = stepFromHash(host?.history.hash() ?? window.location.hash);
-    const boot: PosStep = initial === 'queue' ? 'queue' : 'sale';
+    const boot: PosStep =
+      initial && ['queue', 'held', 'transactions'].includes(initial) ? initial : 'sale';
     if (host) host.history.replace(`${PREFIX}${boot}`);
     else window.history.replaceState(window.history.state, '', `${PREFIX}${boot}`);
     setStep(boot);

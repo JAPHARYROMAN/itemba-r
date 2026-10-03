@@ -12,6 +12,7 @@ import {
 } from '@/lib/mobile-pos-lite-store';
 import { isConnectionProblem, terminalHeaders } from '../pos-utils';
 import type { CheckoutObservation } from '../checkout-recovery';
+import { terminalOperation } from '../terminal-control';
 
 /**
  * The offline-sale outbox: the pending list plus the sync engine.
@@ -50,40 +51,41 @@ export function usePosOutbox(ownerId?: string): {
       syncingRef.current = true;
       setSyncing(true);
       try {
-        const pending = await getPendingMobilePosLiteSales(current.terminalCode);
-        for (const item of pending) {
-          if (item.requiresReview) continue;
-          if (item.ownerId && item.ownerId !== ownerId) continue;
-          try {
-            // New durable intents may have committed before the connection dropped.
-            // Legacy queues keep their established verbatim replay behaviour.
-            if (item.requiresReview === false) {
-              const result = await backendGet<CheckoutObservation>(
-                `/mobile-pos-lite/sales/requests/${encodeURIComponent(item.payload.idempotencyKey)}`,
-                { headers: terminalHeaders(current) },
-              );
-              if (result.state === 'confirmed') {
-                await removePendingMobilePosLiteSale(item.id);
-                continue;
+        await terminalOperation(current.terminalCode, async () => {
+          const pending = await getPendingMobilePosLiteSales(current.terminalCode);
+          for (const item of pending) {
+            if (item.requiresReview || (item.requiresReview === false && item.lastError)) continue;
+            if (item.ownerId && item.ownerId !== ownerId) continue;
+            try {
+              // New durable intents may have committed before the connection dropped.
+              // Legacy queues keep their established verbatim replay behaviour.
+              if (item.requiresReview === false) {
+                const result = await backendGet<CheckoutObservation>(
+                  `/mobile-pos-lite/sales/requests/${encodeURIComponent(item.payload.idempotencyKey)}`,
+                  { headers: terminalHeaders(current) },
+                );
+                if (result.state === 'confirmed') {
+                  await removePendingMobilePosLiteSale(item.id);
+                  continue;
+                }
+                if (result.state !== 'not_found') {
+                  await enqueueMobilePosLiteSale({ ...item, requiresReview: true });
+                  continue;
+                }
               }
-              if (result.state !== 'not_found') {
-                await enqueueMobilePosLiteSale({ ...item, requiresReview: true });
-                continue;
-              }
+              await backendPost('/mobile-pos-lite/sales', item.payload, {
+                headers: terminalHeaders(current),
+              });
+              await removePendingMobilePosLiteSale(item.id);
+            } catch (error) {
+              if (isConnectionProblem(error)) break;
+              const lastError =
+                error instanceof Error ? error.message : 'This sale still needs attention.';
+              await updatePendingMobilePosLiteSaleError(item.id, lastError);
             }
-            await backendPost('/mobile-pos-lite/sales', item.payload, {
-              headers: terminalHeaders(current),
-            });
-            await removePendingMobilePosLiteSale(item.id);
-          } catch (error) {
-            if (isConnectionProblem(error)) break;
-            await updatePendingMobilePosLiteSaleError(
-              item.id,
-              error instanceof Error ? error.message : 'This sale still needs attention.',
-            );
           }
-        }
-        await refreshPendingSales(current);
+          await refreshPendingSales(current);
+        });
       } finally {
         syncingRef.current = false;
         setSyncing(false);

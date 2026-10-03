@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react';
 
 /** The terminal's routing transport. Its sale/outbox and activation contracts stay unchanged. */
 export type PosHost = {
+  instanceId?: string;
   basePath: string;
   ownsInput: (target: EventTarget | null) => boolean;
   router: { replace: (href: string) => void };

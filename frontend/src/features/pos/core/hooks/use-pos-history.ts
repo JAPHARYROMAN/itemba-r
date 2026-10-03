@@ -51,6 +51,7 @@ export type PosSalesHistoryLine = {
 };
 
 export type PosSalesHistorySale = {
+  status?: 'PAID' | 'CREDIT';
   id: string;
   salesOrderNumber: string;
   createdAt: string;
