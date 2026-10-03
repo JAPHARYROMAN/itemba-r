@@ -587,7 +587,7 @@ async function main() {
       checks.push('Unified cash book mirrors collections and refunds exactly once without doubling Sales Desk receipts');
     }
     const ar = await resolver.resolve(company.id, 'AR_CONTROL', db);
-    const arLines = await db.journalLine.findMany({where:{accountId:ar.id}});
+    const arLines = await db.journalEntryLine.findMany({where:{accountId:ar.id}});
     assert(arLines.length>0);
     assert(arLines.every(line=>line.partyType==='CUSTOMER' && line.customerId===customer.id));
     checks.push('Sales, split debt, collections and credit notes carry the same customer on every AR control line');
