@@ -93,7 +93,7 @@ With `CASH_BOOK_UNIFIED` on, `GET /cash-accounts` and `/:id` return `currentBala
 
 ## 6. Status — 3 October 2026
 
-Started. Stacked on Phase 2 (`party-linkage-phase-2` at `f8ba6adb`, PR #96 open).
+Built, PR-1 to PR-9 (D4 stays out, see section 4). Stacked on Phase 2 (`party-linkage-phase-2` at `f8ba6adb`, PR #96 open).
 
 | PR | State | What landed |
 |---|---|---|
@@ -105,7 +105,7 @@ Started. Stacked on Phase 2 (`party-linkage-phase-2` at `f8ba6adb`, PR #96 open)
 | PR-6 Supplier statement and remittance advice | **Built** | `GET /supplier-statements/:id/export?format=pdf|csv` renders a statement run through the shared letterhead renderer (`GeneratedDocumentsService.renderLetterheadPdf`, the same one Records uses): the run's recorded opening, payables raised, settlements and closing, then the period's activity (payables by issue date, payments by payment date) with a running balance, and a "recorded closing" line whenever the two closings differ; CSV carries the same rows. `GET /supplier-payments/:id/remittance?format=pdf` renders the payment, method, reference, paying account and every allocation with the payable's amount, paid to date and outstanding now, plus the applied / on-account split. Both agent-excluded and read-only. Frontend: PDF and CSV buttons on each run in the supplier profile's Statements tab (`supplier_statements.view`), and a "Remittance PDF" button on each row of Related → Payments. |
 | PR-7 Tax rows say who | **Built** | Migration `20261003150000_tax_transaction_party`: `partyType` / `supplierId` / `customerId` / `partyTin` / `partyVrn` on `tax_transactions` with foreign keys, indexes and a CHECK. Tax auto-apply reads the party with the source (sales order → customer, purchase order and expense → supplier, with the master's TIN and VRN as they stand) and stamps it on every row it books; a source without a party books NONE. `GET /tax/transactions/by-party?companyId=&dateFrom=&dateTo=&direction=` (agent-excluded, read-only) groups taxable and tax amounts per party snapshot, direction, tax type and currency, keeps rows without a party as "No party", and totals per direction and currency. Finance reports gains a "Tax by Party" tab (company + period) with party links. |
 | PR-8 One cash balance | **Built** | `GET /cash-accounts`, `/:id` and `/company/:companyId` read the connected Cash Desk account beside every ERP cash account; with `CASH_BOOK_UNIFIED` on and a connection present, `currentBalance` is the Cash Desk balance and `mirrorBalance` the stored figure, otherwise both are the stored figure; `balanceSource` ("cash-desk" or "stored") and `cashDeskAccount` say which and through what. The stored column keeps being written by every caller. Cash Desk → Accounts reads the connected ERP account with each desk account and shows the mirror and any difference, exact to the cent, or that the account is not connected; the Finance cash accounts page shows the stored figure under a Cash Desk balance. |
-| PR-9 Docs and status | Not started | |
+| PR-9 Docs and status | **Built** | `docs/os-business-connections.md` gains "Party linkage phase 3" (the three new rules, every PR, what stays open, the release order) and release step 3b; this section records each PR, its deviations and its verification. `docs/design/itemba-os/records.md` was not touched: the NoteBook did not change in phase 3. |
 
 Deviations from the PR-1 text:
 
