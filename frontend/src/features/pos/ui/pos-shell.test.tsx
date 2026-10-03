@@ -47,7 +47,7 @@ vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     logout: h.logout,
     loading: false,
-    user: { permissions: ['mobile_pos_lite.use'] },
+    user: { id: 'r1', permissions: ['mobile_pos_lite.use'] },
     authOffline: false,
     hasPermission: (...perms: string[]) => perms.every((p) => p === 'mobile_pos_lite.use'),
   }),
@@ -62,13 +62,16 @@ vi.mock('@/lib/mobile-pos-lite-store', () => ({
   getMobilePosLiteFrequents: vi.fn(async () => ({ 'p-soda': 5 })),
   bumpMobilePosLiteFrequents: vi.fn(async () => ({})),
   enqueueMobilePosLiteSale: vi.fn(async (sale: Record<string, unknown>) => {
+    h.state.outbox = h.state.outbox.filter((item) => item.id !== sale.id);
     h.state.outbox.push(sale);
   }),
   getPendingMobilePosLiteSales: vi.fn(async () => [...h.state.outbox]),
   removePendingMobilePosLiteSale: vi.fn(async (id: string) => {
     h.state.outbox = h.state.outbox.filter((item) => item.id !== id);
   }),
-  updatePendingMobilePosLiteSaleError: vi.fn(async () => undefined),
+  updatePendingMobilePosLiteSaleError: vi.fn(async (id: string, lastError: string) => {
+    h.state.outbox = h.state.outbox.map((item) => (item.id === id ? { ...item, lastError } : item));
+  }),
   bumpDaylogTally: vi.fn(async () => undefined),
   posDaylogDate: vi.fn(() => '2026-09-23'),
   writeDaylogSent: vi.fn(async () => undefined),
@@ -123,6 +126,7 @@ beforeEach(() => {
   h.backendGet.mockImplementation(async (path: string) => {
     if (path === '/mobile-pos-lite/session') return h.state.session;
     if (path === '/mobile-pos-lite/catalog') return [SODA, MAJI];
+    if (path.startsWith('/mobile-pos-lite/sales/requests/')) return { state: 'not_found' };
     if (path === '/mobile-pos-lite/my-sales-today') return { count: 0, totalAmount: 0, sales: [] };
     if (path === '/mobile-pos-lite/stock')
       return {
@@ -171,6 +175,33 @@ describe('uiVersion 3 mounts the new POS', () => {
 });
 
 describe('selling on the new POS', () => {
+  it('requires enough received cash and a configured payment reference before completing', async () => {
+    const user = userEvent.setup();
+    await boot();
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.type(screen.getByLabelText(/Amepokea/), '500');
+    expect(screen.getByRole('button', { name: /Maliza Mauzo/ })).toBeDisabled();
+    fireEvent.keyDown(window, { key: 'F12' });
+    expect(salesPosts()).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'M-Pesa' }));
+    expect(screen.getByRole('button', { name: /Maliza Mauzo/ })).toBeDisabled();
+    await user.type(screen.getByLabelText('Kumbukumbu'), 'MP-123');
+    expect(screen.getByRole('button', { name: /Maliza Mauzo/ })).toBeEnabled();
+  });
+
+  it('opens the menu by keyboard, moves between items and restores focus on Escape', async () => {
+    await boot();
+    const menu = screen.getByRole('button', { name: 'Menyu' });
+    menu.focus();
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.getAllByRole('menuitem')[0]).toHaveFocus());
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getAllByRole('menuitem')[1]).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(menu).toHaveFocus();
+  });
   it('builds a cart, pays in cash and sends lines with no price fields', async () => {
     const user = userEvent.setup();
     await boot();
@@ -285,6 +316,116 @@ describe('selling on the new POS', () => {
 });
 
 describe('offline custody on the new POS', () => {
+  it('recovers an interrupted mobile-money sale after remount without resubmitting the payment', async () => {
+    const user = userEvent.setup();
+    const first = await boot();
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
+    await user.click(screen.getByRole('button', { name: 'M-Pesa' }));
+    await user.type(screen.getByLabelText('Kumbukumbu'), 'MP-123');
+    h.backendPost.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
+    await screen.findByRole('heading', { name: 'Kagua mauzo yaliyohifadhiwa' });
+    expect(h.state.outbox).toHaveLength(1);
+    expect(h.state.outbox[0]).toMatchObject({
+      requiresReview: true,
+      payload: { paymentReference: 'MP-123' },
+    });
+    first.unmount();
+    // A new tab or refreshed desktop host can start without the old pay hash.
+    window.history.replaceState(null, '', '/');
+    render(<MobilePosLite />);
+    await screen.findByRole('heading', { name: 'Kagua mauzo yaliyohifadhiwa' });
+    expect(salesPosts()).toHaveLength(1);
+    const previous = h.backendGet.getMockImplementation()!;
+    h.backendGet.mockImplementation((path: string, ...args: unknown[]) =>
+      path.startsWith('/mobile-pos-lite/sales/requests/')
+        ? Promise.resolve({
+            state: 'confirmed',
+            sale: { id: 'so-paid', salesOrderNumber: 'SO-PAID', totalAmount: 1200 },
+          })
+        : previous(path, ...args),
+    );
+    await user.click(screen.getByRole('button', { name: 'Kagua matokeo' }));
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    expect(screen.getByText('SO-PAID')).toBeInTheDocument();
+    const restoredReceipt = screen.getByRole('region', { name: 'Maelezo ya risiti' });
+    expect(within(restoredReceipt).getByText(/Soda Baridi/)).toBeInTheDocument();
+    expect(within(restoredReceipt).getByText('M-Pesa')).toBeInTheDocument();
+    expect(within(restoredReceipt).getByText('MP-123')).toBeInTheDocument();
+    expect(salesPosts()).toHaveLength(1);
+    expect(h.state.outbox).toHaveLength(0);
+  });
+
+  it('requires checking before retry and preserves the original sale request', async () => {
+    h.state.session = makeSession(3, {
+      terminal: { ...makeSession(3).terminal, offlineCashEnabled: false },
+    });
+    const user = userEvent.setup();
+    await boot();
+    h.backendPost.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await user.click(await screen.findByRole('button', { name: /Soda Baridi/ }));
+    fireEvent.keyDown(window, { key: 'F12' });
+    await screen.findByRole('heading', { name: 'Kagua mauzo yaliyohifadhiwa' });
+    expect(screen.queryByRole('button', { name: 'Jaribu mauzo yaliyohifadhiwa' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Kagua matokeo' }));
+    await user.click(await screen.findByRole('button', { name: 'Jaribu mauzo yaliyohifadhiwa' }));
+    await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
+    expect(salesPosts()).toHaveLength(2);
+    expect(salesPosts()[1][1]).toEqual(salesPosts()[0][1]);
+  });
+
+  it('does not replay an acknowledged queued sale on boot, even if prices have since changed', async () => {
+    h.state.outbox = [
+      {
+        id: 'lost-cash',
+        terminalCode: 'T-001',
+        requiresReview: false,
+        createdAt: '2026-10-03',
+        payload: {
+          paymentMethod: 'CASH',
+          idempotencyKey: 'same-sale-key-123456',
+          lines: [{ productId: 'p-soda', quantity: 1 }],
+        },
+      },
+    ];
+    const previous = h.backendGet.getMockImplementation()!;
+    h.backendGet.mockImplementation((path: string, ...args: unknown[]) =>
+      path.startsWith('/mobile-pos-lite/sales/requests/')
+        ? Promise.resolve({ state: 'confirmed', sale: { id: 'so-paid', totalAmount: 1200 } })
+        : previous(path, ...args),
+    );
+    await boot();
+    await waitFor(() => expect(h.state.outbox).toHaveLength(0));
+    expect(salesPosts()).toHaveLength(0);
+  });
+
+  it.each([true, false])(
+    'protects a previous cashier’s sale (review=%s) without exposing its records',
+    async (requiresReview) => {
+      h.state.outbox = [
+        {
+          id: 'private-sale',
+          ownerId: 'other-rep',
+          terminalCode: 'T-001',
+          requiresReview,
+          createdAt: '2026-10-03',
+          lineSummary: 'Private customer product',
+          totalAmount: 999,
+          payload: {
+            paymentMethod: 'MOBILE_MONEY',
+            idempotencyKey: 'private-sale-key-1234',
+            lines: [],
+          },
+        },
+      ];
+      render(<MobilePosLite />);
+      await screen.findByRole('alert');
+      expect(screen.queryByText('Private customer product')).toBeNull();
+      expect(salesPosts()).toHaveLength(0);
+    },
+  );
+
   it('holds an offline cash sale on the phone and says so honestly', async () => {
     const user = userEvent.setup();
     await boot();
@@ -306,6 +447,39 @@ describe('offline custody on the new POS', () => {
     expect(
       screen.getByRole('button', { name: /Hakuna mtandao · 1 yanasubiri kutumwa/ }),
     ).toBeInTheDocument();
+  });
+
+  it('checks the outcome again before retrying a new-format queued sale', async () => {
+    const user = userEvent.setup();
+    h.state.outbox = [
+      {
+        id: 'queued-cash',
+        terminalCode: 'T-001',
+        requiresReview: false,
+        createdAt: '2026-10-03',
+        totalAmount: 1200,
+        lineSummary: '1× Soda Baridi',
+        payload: {
+          paymentMethod: 'CASH',
+          idempotencyKey: 'k'.repeat(32),
+          lines: [{ productId: 'p-soda', quantity: 1 }],
+        },
+      },
+    ];
+    h.backendPost.mockRejectedValue(new Error('Insufficient stock for Soda Baridi'));
+    await boot();
+    await user.click(await screen.findByRole('button', { name: /1 yanasubiri kutumwa/ }));
+    await screen.findByRole('button', { name: 'Jaribu tena' });
+    const beforeRetry = salesPosts().length;
+    const previous = h.backendGet.getMockImplementation()!;
+    h.backendGet.mockImplementation((path: string, ...args: unknown[]) =>
+      path.startsWith('/mobile-pos-lite/sales/requests/')
+        ? Promise.resolve({ state: 'confirmed', sale: { id: 'already-paid', totalAmount: 1200 } })
+        : previous(path, ...args),
+    );
+    await user.click(screen.getByRole('button', { name: 'Jaribu tena' }));
+    await waitFor(() => expect(h.state.outbox).toHaveLength(0));
+    expect(salesPosts()).toHaveLength(beforeRetry);
   });
 
   it('shows a refused queued sale in plain words with retry and a confirmed remove', async () => {

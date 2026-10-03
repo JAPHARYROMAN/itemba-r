@@ -135,7 +135,7 @@ vi.mock('@/lib/mobile-pos-lite-store', () => ({ ...h.store }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     logout: h.logout,
-    user: { permissions: ['mobile_pos_lite.use'] },
+    user: { id: 'r1', permissions: ['mobile_pos_lite.use'] },
     loading: false,
     authOffline: false,
     hasPermission: (...perms: string[]) => perms.every((p) => p === 'mobile_pos_lite.use'),
@@ -282,6 +282,7 @@ function buildHarness(options: HarnessOptions = {}) {
     (async () => ({ id: 'srv-1', salesOrderNumber: 'SO-1', totalAmount: 1200 }));
 
   h.backendGet.mockImplementation(async (path: string) => {
+    if (path.startsWith('/mobile-pos-lite/sales/requests/')) return { state: 'not_found' };
     if (path === '/mobile-pos-lite/session') return sessionGet();
     if (path === '/mobile-pos-lite/catalog') return [...(h.state.catalogs.get(TERMINAL) ?? [])];
     if (path === '/mobile-pos-lite/products') return [];

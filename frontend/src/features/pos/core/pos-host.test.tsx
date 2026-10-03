@@ -1,9 +1,11 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { PosHostContext, type PosHost } from './pos-host-context';
 import { useKauntaRouter } from '@/components/westsides/mobile-pos-lite/pos-router';
 import { usePosStep } from '../ui/use-pos-step';
+import { CheckoutRecoveryPanel } from '../ui/CheckoutRecoveryPanel';
+import type { PendingMobilePosLiteSale } from '@/lib/mobile-pos-lite-store';
 
 function transport(hash = '') {
   let current = hash;
@@ -66,5 +68,48 @@ describe('hosted POS routing', () => {
     expect(result.current.route).toBe('stoo');
     act(() => t.pop('#manunuzi/historia'));
     expect(result.current.route).toBe('mauzo');
+  });
+});
+
+describe('recovery focus in the desktop', () => {
+  const attempt: PendingMobilePosLiteSale = {
+    id: 'saved-sale',
+    terminalCode: 'T-001',
+    createdAt: '2026-10-03',
+    payload: { paymentMethod: 'CASH', idempotencyKey: 'original-sale-request', lines: [] },
+  };
+  const recovery = (
+    <CheckoutRecoveryPanel
+      attempt={attempt}
+      t={(key) => key}
+      lang="en"
+      onCheck={async () => ({ state: 'not_found' })}
+      onRetry={async () => undefined}
+    />
+  );
+
+  it('keeps typing focus in another app when an inactive POS window recovers', () => {
+    const t = transport();
+    t.host.ownsInput = () => false;
+    const view = render(
+      <>
+        <button>Other app</button>
+        <PosHostContext.Provider value={t.host}>{null}</PosHostContext.Provider>
+      </>,
+    );
+    screen.getByRole('button', { name: 'Other app' }).focus();
+    view.rerender(
+      <>
+        <button>Other app</button>
+        <PosHostContext.Provider value={t.host}>{recovery}</PosHostContext.Provider>
+      </>,
+    );
+    expect(screen.getByRole('button', { name: 'Other app' })).toHaveFocus();
+  });
+
+  it('announces the protected sale by focusing its heading in the active POS window', () => {
+    const t = transport();
+    render(<PosHostContext.Provider value={t.host}>{recovery}</PosHostContext.Provider>);
+    expect(screen.getByRole('heading', { name: 'posRecoveryTitle' })).toHaveFocus();
   });
 });

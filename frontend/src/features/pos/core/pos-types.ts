@@ -69,6 +69,7 @@ export type SaleResult = {
   salesOrderNumber?: string;
   totalAmount?: number;
   receiptNumber?: string;
+  pending?: boolean;
 };
 
 /** The screen-state union of the POS orchestrator. */

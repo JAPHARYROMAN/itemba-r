@@ -11,17 +11,17 @@
  * a person. Money is tabular and the largest type on screen.
  */
 .pos-app {
-  --pos-bg: #f6f7fa;
-  --pos-bg-subtle: #f1f3f7;
-  --pos-card: #ffffff;
-  --pos-line: #e4e8ee;
-  --pos-line-strong: #cbd3df;
-  --pos-ink: #263143;
-  --pos-ink-2: #657185;
-  --pos-primary: #3268ca;
-  --pos-primary-ink: #ffffff;
-  --pos-primary-subtle: #edf3ff;
-  --pos-primary-text: #2556a8;
+  --pos-bg: var(--aurora-bg, #f6f7fa);
+  --pos-bg-subtle: var(--aurora-bg-subtle, #f1f3f7);
+  --pos-card: var(--aurora-card, #ffffff);
+  --pos-line: var(--aurora-border, #e4e8ee);
+  --pos-line-strong: var(--aurora-border-strong, #cbd3df);
+  --pos-ink: var(--aurora-text, #263143);
+  --pos-ink-2: var(--aurora-text-secondary, #657185);
+  --pos-primary: var(--aurora-primary, #3268ca);
+  --pos-primary-ink: var(--desktop-accent-ink, #ffffff);
+  --pos-primary-subtle: var(--aurora-primary-subtle, #edf3ff);
+  --pos-primary-text: var(--aurora-primary-text, #2556a8);
   --pos-ok-bg: #d1fae5;
   --pos-ok-dot: #10b981;
   --pos-ok-text: #064e3b;
@@ -42,18 +42,157 @@
   font-family: Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* OS identity stays on chrome; business content remains opaque and crisp. */
+.pos-app-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--pos-primary-ink);
+  background: var(--pos-primary);
+  border-radius: 13px;
+}
+.pos-workspace-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--pos-line);
+  background: var(--pos-card);
+}
+.pos-workspace-tabs button,
+.pos-tab-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--pos-ink-2);
+  font-weight: 600;
+  font-size: 13px;
+}
+.pos-workspace-tabs button {
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.pos-workspace-tabs [aria-current='page'] {
+  color: var(--pos-primary-text);
+  background: var(--pos-primary-subtle);
+}
+.pos-terminal-label {
+  margin-left: auto;
+  color: var(--pos-ink-2);
+  font-size: 12px;
+}
+.pos-tab-count {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--pos-warn-bg);
+  color: var(--pos-warn-text);
+}
+.pos-receipt-preview {
+  width: min(100%, 620px);
+  margin: 0 auto;
+  padding: 20px;
+  border: 1px solid var(--pos-line);
+  border-radius: 20px;
+  background: var(--pos-card);
+}
+.pos-receipt-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 12px;
+}
+.pos-receipt-preview .pos-receipt-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-top: 1px solid var(--pos-line);
+  font-size: 14px;
+}
+.pos-receipt-preview .pos-receipt-line strong {
+  flex-shrink: 0;
+}
+.pos-recovery {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.pos-recovery-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  width: min(100%, 600px);
+  padding: clamp(24px, 4vw, 48px);
+  background: var(--pos-card);
+  border: 1px solid var(--pos-line);
+  border-radius: 24px;
+  box-shadow: 0 12px 40px rgb(20 35 55 / 5%);
+}
+.pos-recovery-card h1 {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.2;
+}
+.pos-recovery-card p {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--pos-ink-2);
+}
+.pos-recovery-total {
+  font-size: 32px;
+}
+.pos-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--pos-ink-2);
+}
+@container pos (max-width: 639px) {
+  .pos-terminal-label {
+    display: none;
+  }
+  .pos-workspace-tabs {
+    padding: 6px 12px;
+  }
+  .pos-workspace-tabs button {
+    min-height: 48px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pos-app *,
+  .pos-app *::before,
+  .pos-app *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+html[data-motion='reduced'] .pos-app * {
+  animation: none !important;
+  transition: none !important;
+}
 .dark .pos-app {
-  --pos-bg: #19202c;
-  --pos-bg-subtle: #242d3c;
-  --pos-card: #202837;
-  --pos-line: #354054;
-  --pos-line-strong: #536079;
-  --pos-ink: #ecf0f8;
-  --pos-ink-2: #b0bdd2;
-  --pos-primary: #8bb6ff;
-  --pos-primary-ink: #0f1a2e;
-  --pos-primary-subtle: #2b3c58;
-  --pos-primary-text: #b4ceff;
+  --pos-bg: var(--aurora-bg, #19202c);
+  --pos-bg-subtle: var(--aurora-bg-subtle, #242d3c);
+  --pos-card: var(--aurora-card, #202837);
+  --pos-line: var(--aurora-border, #354054);
+  --pos-line-strong: var(--aurora-border-strong, #536079);
+  --pos-ink: var(--aurora-text, #ecf0f8);
+  --pos-ink-2: var(--aurora-text-secondary, #b0bdd2);
+  --pos-primary: var(--aurora-primary, #8bb6ff);
+  --pos-primary-ink: var(--desktop-accent-ink, #ffffff);
+  --pos-primary-subtle: var(--aurora-primary-subtle, #2b3c58);
+  --pos-primary-text: var(--aurora-primary-text, #b4ceff);
   --pos-ok-bg: #064e3b;
   --pos-ok-text: #6ee7b7;
   --pos-warn-bg: #451a03;

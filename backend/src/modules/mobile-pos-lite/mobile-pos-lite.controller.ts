@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
@@ -185,6 +185,19 @@ export class MobilePosLiteController {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.send(receipt.buffer);
+  }
+
+  @Get('sales/requests/:requestId')
+  @Header('Cache-Control', 'private, no-store')
+  @AgentExcluded('device_headers_not_represented')
+  @RequirePermissions('mobile_pos_lite.use')
+  checkoutOutcome(
+    @Headers('x-mobile-pos-terminal') terminalCode: string | undefined,
+    @Headers('x-mobile-pos-device') deviceSecret: string | undefined,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.checkoutOutcome(terminalCode, deviceSecret, requestId, user);
   }
 
   /**

@@ -2028,6 +2028,40 @@ export class MobilePosLiteService {
     return result;
   }
 
+  /** Cost-blind, owner/device/scope checked observation; never completes a draft. */
+  async checkoutOutcome(
+    terminalCode: string | undefined,
+    deviceSecret: string | undefined,
+    requestId: string,
+    user: AuthUser,
+  ) {
+    const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    if (requestId.length < 16 || requestId.length > 64) {
+      throw new BadRequestException('Invalid checkout request identity');
+    }
+    const sale = await this.prisma.salesOrder.findFirst({
+      where: {
+        companyId: terminal.companyId,
+        divisionId: terminal.divisionId,
+        branchId: terminal.branchId,
+        mobilePosTerminalId: terminal.id,
+        idempotencyKey: requestId,
+      },
+      select: {
+        id: true, salesOrderNumber: true, totalAmount: true,
+        status: true, deletedAt: true,
+      },
+    });
+    if (!sale) return { state: 'not_found' as const };
+    if (sale.deletedAt || !['CONFIRMED', 'PAID'].includes(sale.status)) {
+      return { state: 'needs_attention' as const, reference: sale.salesOrderNumber };
+    }
+    return {
+      state: 'confirmed' as const,
+      sale: { id: sale.id, salesOrderNumber: sale.salesOrderNumber, totalAmount: Number(sale.totalAmount) },
+    };
+  }
+
   async createSale(
     terminalCode: string | undefined,
     deviceSecret: string | undefined,

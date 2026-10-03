@@ -1,6 +1,12 @@
 'use client';
 import { usePosHost } from '@/features/pos/core/pos-host-context';
 import { usePosWindowGuard } from '@/features/pos/core/use-pos-window-guard';
+import {
+  sendCheckout,
+  observeCheckout,
+  type CheckoutObservation,
+} from '@/features/pos/core/checkout-recovery';
+import { CheckoutRecoveryPanel } from '@/features/pos/ui/CheckoutRecoveryPanel';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -67,6 +73,8 @@ export function MobilePosLite() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [acknowledged, setAcknowledged] = useState<Set<string>>(() => new Set());
   const [notice, setNotice] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [receiptBusy, setReceiptBusy] = useState(false);
@@ -76,7 +84,9 @@ export function MobilePosLite() {
   // while their consumers run after bootstrap — hook-owning any of them would
   // be a circular hook dependency. Raw setters go in as stable args.
   const [frequents, setFrequents] = useState<Record<string, number>>({});
-  const { pendingSales, syncing, refreshPendingSales, syncPendingSales } = usePosOutbox();
+  const { pendingSales, syncing, outboxReady, refreshPendingSales, syncPendingSales } =
+    usePosOutbox(user?.id);
+  const [activeReview, setActiveReview] = useState<PendingMobilePosLiteSale | null>(null);
   const { binding, session, catalog, online, updateCatalog, syncCatalog, retryBoot } =
     usePosBootstrap({
       refreshPendingSales,
@@ -162,8 +172,56 @@ export function MobilePosLite() {
     setScreen('sale');
   }
 
+  function checkoutDependencies() {
+    return {
+      save: enqueueMobilePosLiteSale,
+      remove: removePendingMobilePosLiteSale,
+      submit: (payload: PendingMobilePosLiteSale['payload']) =>
+        backendPost<SaleResult>('/mobile-pos-lite/sales', payload, {
+          headers: terminalHeaders(binding!),
+        }),
+      observe: (key: string) =>
+        backendGet<CheckoutObservation>(
+          `/mobile-pos-lite/sales/requests/${encodeURIComponent(key)}`,
+          { headers: terminalHeaders(binding!) },
+        ),
+      connectionFailure: isConnectionProblem,
+    };
+  }
+
+  function acknowledgeCheckout(
+    attempt: PendingMobilePosLiteSale,
+    result: SaleResult,
+    queued = false,
+  ) {
+    setAcknowledged((current) => new Set(current).add(attempt.id));
+    setActiveReview(null);
+    if (attempt.snapshot) {
+      setCart(attempt.snapshot.cart);
+      setCustomer(attempt.snapshot.customer);
+      setReceivedValue(attempt.snapshot.receivedValue);
+    }
+    setPaymentMethod(attempt.payload.paymentMethod);
+    setPaymentReference(attempt.payload.paymentReference ?? '');
+    setSaleResult({ ...result, pending: queued });
+    setNotice(queued ? t('savedOffline') : '');
+    if (kauntaEnabled) {
+      if (queued) stampHeld();
+      else stampSent();
+      void bumpDaylogTally(binding!.terminalCode).catch(() => undefined);
+    }
+    void bumpMobilePosLiteFrequents(
+      binding!.terminalCode,
+      attempt.payload.lines.map((line) => line.productId),
+    )
+      .then(setFrequents)
+      .catch(() => undefined);
+    setScreen('success');
+  }
+
   async function completeSale() {
-    if (!binding || !session || cart.length === 0) return;
+    if (!binding || !session || cart.length === 0 || submitting.current) return;
+    if (pendingSales.some((item) => item.requiresReview && !acknowledged.has(item.id))) return;
     if (paymentMethod === 'CREDIT' && !customer) {
       setNotice(t('selectCreditCustomer'));
       return;
@@ -172,98 +230,65 @@ export function MobilePosLite() {
       setNotice(t('cashOnlyOffline'));
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setNotice('');
-    const payload = {
-      paymentMethod,
-      ...(customer ? { customerId: customer.id } : {}),
-      ...(paymentReference.trim() ? { paymentReference: paymentReference.trim() } : {}),
-      idempotencyKey: newIdempotencyKey(),
-      // An edited line (new POS only) carries its price and reason; every
-      // other line stays exactly { productId, quantity }, as it always was.
-      lines: cart.map((line) => ({
-        productId: line.product.id,
-        quantity: line.quantity,
-        ...(line.price
-          ? {
-              unitPrice: line.price.unitPrice,
-              priceReason: line.price.reason,
-              ...(line.price.note ? { priceNote: line.price.note } : {}),
-            }
-          : {}),
-      })),
+    const attempt: PendingMobilePosLiteSale = {
+      id: crypto.randomUUID(),
+      terminalCode: binding.terminalCode,
+      ownerId: user?.id ?? session.rep.id,
+      createdAt: new Date().toISOString(),
+      totalAmount: total,
+      itemCount: cartCount,
+      lineSummary: cart
+        .map((line) => `${line.quantity}× ${line.product.name}`)
+        .join(', ')
+        .slice(0, 160),
+      snapshot: { cart: structuredClone(cart), customer, receivedValue },
+      payload: {
+        paymentMethod,
+        ...(customer ? { customerId: customer.id } : {}),
+        ...(paymentReference.trim() ? { paymentReference: paymentReference.trim() } : {}),
+        idempotencyKey: newIdempotencyKey(),
+        lines: cart.map((line) => ({
+          productId: line.product.id,
+          quantity: line.quantity,
+          ...(line.price
+            ? {
+                unitPrice: line.price.unitPrice,
+                priceReason: line.price.reason,
+                priceNote: line.price.note,
+              }
+            : {}),
+        })),
+      },
     };
-    // Personalize the quick-pick grid regardless of how the sale completes —
-    // a queued offline sale is still a real sale for frequency purposes.
-    void bumpMobilePosLiteFrequents(
-      binding.terminalCode,
-      cart.map((line) => line.product.id),
-    ).then((counts) => setFrequents(counts));
     try {
-      const result = await backendPost<SaleResult>('/mobile-pos-lite/sales', payload, {
-        headers: terminalHeaders(binding),
-      });
-      setSaleResult(result);
-      // Kaunta MUHURI local commit (design direction §5): stamp haptic + one
-      // tally mark. Still inside the slab tap's user-gesture continuation, so
-      // vibrate is permitted; the daylog write must never block the sale.
-      if (kauntaEnabled) {
-        stampSent();
-        void bumpDaylogTally(binding.terminalCode).catch(() => undefined);
-      }
-      setScreen('success');
-    } catch (error) {
-      const canQueue =
-        paymentMethod === 'CASH' &&
-        session.terminal.offlineCashEnabled &&
-        isConnectionProblem(error);
-      if (!canQueue) {
-        // Kaunta only, and the same opt-in shape `recordPurchase` uses below:
-        // the ONE place a failed KAMILISHA MAUZO becomes words, classified once
-        // here because the screen sees a string and cannot tell a status from
-        // it. Before this the raw sentence went straight into the notice cell,
-        // and PaymentScreen prints that cell verbatim in a red danger box — so
-        // the module's highest-volume refusals ("Credit sale exceeds Asha
-        // Duka's credit limit…", "Insufficient stock at branch/location…")
-        // reached a Swahili-first rep in English, while the identical sentences
-        // arriving through the outbox were mapped two screens away.
-        //
-        // WORDING ONLY: the cart, the customer and the screen are untouched,
-        // exactly as before. Classic (uiVersion 1) keeps the raw message, so
-        // the fleet running today is byte-identical.
+      const outcome = await sendCheckout(
+        attempt,
+        checkoutDependencies(),
+        session.terminal.offlineCashEnabled,
+      );
+      if (outcome.kind === 'confirmed') acknowledgeCheckout(attempt, outcome.sale);
+      else if (outcome.kind === 'queued')
+        acknowledgeCheckout(attempt, { id: attempt.id, totalAmount: total }, true);
+      else {
+        if (outcome.kind === 'review') setActiveReview(outcome.attempt);
         setNotice(
-          kauntaEnabled
-            ? posSaleFailureMessage(error, t)
-            : error instanceof Error
-              ? error.message
-              : t('couldNotComplete'),
+          outcome.kind === 'rejected'
+            ? kauntaEnabled
+              ? posSaleFailureMessage(outcome.error, t)
+              : outcome.error instanceof Error
+                ? outcome.error.message
+                : t('posRecoveryNote')
+            : t('posRecoveryNote'),
         );
-        return;
       }
-      const pending: PendingMobilePosLiteSale = {
-        id: crypto.randomUUID(),
-        terminalCode: binding.terminalCode,
-        payload,
-        createdAt: new Date().toISOString(),
-        totalAmount: total,
-        itemCount: cartCount,
-        lineSummary: cart
-          .map((line) => `${line.quantity}× ${line.product.name}`)
-          .join(', ')
-          .slice(0, 160),
-      };
-      await enqueueMobilePosLiteSale(pending);
-      await refreshPendingSales(binding);
-      setSaleResult({ id: pending.id, totalAmount: total });
-      setNotice(t('savedOffline'));
-      // The queued sale is a finished job too: distinct held haptic, same
-      // tally mark (the documented decision — the tally counts ALL stamps).
-      if (kauntaEnabled) {
-        stampHeld();
-        void bumpDaylogTally(binding.terminalCode).catch(() => undefined);
-      }
-      setScreen('success');
+      await refreshPendingSales(binding).catch(() => undefined);
+    } catch {
+      setNotice(t('posSaveFailed')); // No durable intent means no request was sent.
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -487,7 +512,21 @@ export function MobilePosLite() {
     item: PendingMobilePosLiteSale,
   ): Promise<'sent' | 'rejected' | 'connection'> {
     if (!binding) return 'connection';
+    if (item.ownerId && item.ownerId !== (user?.id ?? session?.rep.id)) return 'rejected';
     try {
+      if (item.requiresReview) return 'rejected';
+      if (item.requiresReview === false) {
+        const observed = await observeCheckout(item, checkoutDependencies());
+        if (observed.state === 'confirmed') {
+          await refreshPendingSales(binding);
+          return 'sent';
+        }
+        if (observed.state !== 'not_found') {
+          await enqueueMobilePosLiteSale({ ...item, requiresReview: true });
+          await refreshPendingSales(binding);
+          return 'rejected';
+        }
+      }
       await backendPost('/mobile-pos-lite/sales', item.payload, {
         headers: terminalHeaders(binding),
       });
@@ -520,7 +559,7 @@ export function MobilePosLite() {
    */
   async function shareReceipt() {
     if (!session || receiptBusy) return;
-    if (binding && online && saleResult?.id) {
+    if (binding && online && saleResult?.id && !saleResult.pending) {
       setReceiptBusy(true);
       // A connection or share-sheet failure resolves null — the plain-text
       // share below still delivers a receipt, so nothing is surfaced here.
@@ -539,7 +578,7 @@ export function MobilePosLite() {
       '--------------------',
       ...cart.map(
         (line) =>
-          `${line.quantity} x ${line.product.name} = ${money(line.product.sellingPrice * line.quantity)}`,
+          `${line.quantity} x ${line.product.name} = ${money((line.price?.unitPrice ?? line.product.sellingPrice) * line.quantity)}`,
       ),
       '--------------------',
       `${t('totalLabel')}: ${money(Number(saleResult?.totalAmount ?? total))}`,
@@ -638,6 +677,108 @@ export function MobilePosLite() {
             </div>
           )}
         </div>
+      </main>
+    );
+  }
+
+  if (!outboxReady)
+    return (
+      <main className="pos-app pos-recovery">
+        <section className="pos-recovery-card">
+          <h1>{t('opening')}</h1>
+          <p role="status">{notice}</p>
+          <button
+            className="pos-btn"
+            onClick={() =>
+              void refreshPendingSales(binding).catch(() => setNotice(t('posSaveFailed')))
+            }
+          >
+            {t('tryAgain')}
+          </button>
+        </section>
+      </main>
+    );
+
+  const currentOwner = user?.id ?? session.rep.id;
+  const recoveryAttempt =
+    (activeReview && (!activeReview.ownerId || activeReview.ownerId === currentOwner)
+      ? activeReview
+      : null) ??
+    pendingSales.find(
+      (item) =>
+        item.requiresReview &&
+        !acknowledged.has(item.id) &&
+        (!item.ownerId || item.ownerId === currentOwner),
+    );
+  if (recoveryAttempt) {
+    return (
+      <CheckoutRecoveryPanel
+        key={recoveryAttempt.id}
+        attempt={recoveryAttempt}
+        t={t}
+        lang={lang}
+        onCheck={async () => {
+          const observed = await observeCheckout(recoveryAttempt, checkoutDependencies());
+          if (observed.state === 'confirmed') {
+            acknowledgeCheckout(recoveryAttempt, observed.sale);
+            await refreshPendingSales(binding).catch(() => undefined);
+          }
+          return observed;
+        }}
+        onRetry={async () => {
+          if (submitting.current) return;
+          submitting.current = true;
+          try {
+            // Inspect again immediately before a retry; never retry a known committed sale.
+            const observed = await observeCheckout(recoveryAttempt, checkoutDependencies());
+            if (observed.state === 'confirmed') acknowledgeCheckout(recoveryAttempt, observed.sale);
+            else if (observed.state === 'not_found') {
+              const outcome = await sendCheckout(recoveryAttempt, checkoutDependencies(), false);
+              if (outcome.kind === 'confirmed') acknowledgeCheckout(recoveryAttempt, outcome.sale);
+              else if (outcome.kind === 'rejected') {
+                if (recoveryAttempt.snapshot) setCart(recoveryAttempt.snapshot.cart);
+                setActiveReview(null);
+                setNotice(
+                  kauntaEnabled
+                    ? posSaleFailureMessage(outcome.error, t)
+                    : outcome.error instanceof Error
+                      ? outcome.error.message
+                      : t('posRecoveryNote'),
+                );
+                setScreen('sale');
+              } else throw new Error(t('posRecoveryNote'));
+            } else throw new Error(t('posRecoveryManager'));
+            await refreshPendingSales(binding);
+          } finally {
+            submitting.current = false;
+          }
+        }}
+      />
+    );
+  }
+  if (
+    pendingSales.some(
+      (item) =>
+        (item.requiresReview || (item.ownerId && item.ownerId !== currentOwner)) &&
+        !acknowledged.has(item.id),
+    )
+  ) {
+    // A reassigned device must not expose or replay another cashier's saved payment.
+    return (
+      <main className="pos-app pos-recovery" lang={lang}>
+        <section className="pos-recovery-card">
+          <h1>{t('posRecoveryTitle')}</h1>
+          <p role="alert">{t('posRecoveryOtherOwner')}</p>
+          <button
+            className="pos-btn"
+            onClick={() =>
+              void refreshPendingSales(binding).catch(() => setNotice(t('posSaveFailed')))
+            }
+          >
+            {t('tryAgain')}
+          </button>
+          <p role="status">{notice}</p>
+        </section>
       </main>
     );
   }

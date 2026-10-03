@@ -15,6 +15,26 @@ const DEFAULT_LANG: PosLang = 'sw';
 
 const STRINGS = {
   en: {
+    posRecoveryTitle: 'Check this saved sale',
+    posRecoveryOtherOwner:
+      'This device has an unresolved sale from another cashier. Ask that cashier or your manager to reconcile it before continuing.',
+    posRecoveryNote:
+      'The payment outcome needs checking. This sale is saved with its original request; do not charge the customer again.',
+    posRecoveryCheck: 'Check outcome',
+    posRecoveryRetry: 'Retry the saved sale',
+    posRecoveryMissing:
+      'No sale was found yet. Retry sends the original saved request, without changing its items or payment.',
+    posRecoveryManager:
+      'This sale needs a manager to review its original business record before you charge again.',
+    posRecoveryChecking: 'Checking saved sale…',
+    posSaveFailed:
+      'The sale could not be saved on this device. Nothing was sent. Check device storage and try again.',
+    posSellTab: 'Sell',
+    posReceiptTab: 'Receipt',
+    posSyncTab: 'Sync centre',
+    posWorkspace: 'Counter workspace',
+    posReceiptDetails: 'Receipt details',
+    posReferenceRequired: 'Enter the payment reference to complete this sale.',
     opening: 'Opening Itemba POS...',
     setupAgain: 'Set up this phone again',
     terminalUnavailable: 'This terminal is not available.',
@@ -385,6 +405,26 @@ const STRINGS = {
     errOnePricePerProduct: 'A product can have only one price in a sale.',
   },
   sw: {
+    posRecoveryTitle: 'Kagua mauzo yaliyohifadhiwa',
+    posRecoveryOtherOwner:
+      'Kifaa hiki kina mauzo ya mhudumu mwingine ambayo hayajakamilika. Mwombe mhudumu huyo au meneja ayakague kabla ya kuendelea.',
+    posRecoveryNote:
+      'Matokeo ya malipo yanahitaji kukaguliwa. Mauzo yamehifadhiwa na ombi lake la awali; usimtoze mteja tena.',
+    posRecoveryCheck: 'Kagua matokeo',
+    posRecoveryRetry: 'Jaribu mauzo yaliyohifadhiwa',
+    posRecoveryMissing:
+      'Mauzo hayajaonekana bado. Jaribu tena kwa ombi lilelile bila kubadili bidhaa au malipo.',
+    posRecoveryManager:
+      'Msimamizi anahitaji kukagua kumbukumbu ya awali kabla ya kumtoza mteja tena.',
+    posRecoveryChecking: 'Tunakagua mauzo…',
+    posSaveFailed:
+      'Mauzo hayajahifadhiwa kwenye kifaa. Hakuna ombi lililotumwa. Kagua nafasi ya kifaa na ujaribu tena.',
+    posSellTab: 'Mauzo',
+    posReceiptTab: 'Risiti',
+    posSyncTab: 'Usawazishaji',
+    posWorkspace: 'Kaunta ya mauzo',
+    posReceiptDetails: 'Maelezo ya risiti',
+    posReferenceRequired: 'Weka kumbukumbu ya malipo ili kukamilisha mauzo.',
     opening: 'Inafungua Itemba POS...',
     setupAgain: 'Sajili simu hii upya',
     terminalUnavailable: 'Kituo hiki hakipatikani.',
