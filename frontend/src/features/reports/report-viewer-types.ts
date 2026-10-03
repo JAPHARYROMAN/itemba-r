@@ -1,3 +1,5 @@
+import type { ValuationOptions } from '@/features/inventory/stock-valuation-format';
+
 export interface CatalogEntry {
   id: string;
   sector: string;
@@ -176,6 +178,7 @@ export interface SavedViewFilters {
 export interface SavedViewChartConfig {
   viewMode?: 'table' | 'chart';
   metricColumns?: string[] | null;
+  stockValuation?: ValuationOptions;
 }
 
 export interface SavedReportView {
@@ -198,7 +201,11 @@ export type ReportFilters = {
   dateTo: string;
   asOf: string;
 };
-export type ReportPresentation = { viewMode: 'table' | 'chart'; metricColumns: string[] | null };
+export type ReportPresentation = {
+  viewMode: 'table' | 'chart';
+  metricColumns: string[] | null;
+  stockValuation?: ValuationOptions;
+};
 export type ReportCatalog = { entries: CatalogEntry[]; generatedAt: string };
 export type SavedViewTarget =
   | {
