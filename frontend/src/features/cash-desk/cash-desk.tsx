@@ -50,6 +50,8 @@ import {
   partyTypeLabels,
 } from './types';
 import { movementDocuments, movementParty, type MovementLink } from './movement-links';
+import { SupplierPaymentDialog } from './supplier-payment-dialog';
+import { partyProfileHref, type PartyBalanceSummary } from '@/features/party/party-balance';
 import '../invoice-desk/invoice-desk.css';
 import './cash-desk.css';
 
@@ -175,6 +177,20 @@ export function CashDesk({
     { ...query, page, search: deferred, status: 'all' },
     allowed && invoiceAccess && section === 'suppliers',
   );
+  // Party linkage (Phase 2): Supplier balances come from the resolver, never from a desk-only
+  // sum. One number per supplier with its ERP / Invoice Desk / NoteBook split.
+  const supplierAccess = hasPermission('suppliers.view'),
+    canPaySupplier = hasPermission(
+      'supplier-payments.manage',
+      'payables.view',
+      'cash_accounts.view',
+    );
+  const supplierBalances = useWorkspaceResource<PartyBalanceSummary[]>(
+    '/party-balance/suppliers',
+    scope.companyId ? { companyId: scope.companyId } : {},
+    allowed && supplierAccess && section === 'suppliers',
+  );
+  const [payingSupplier, setPayingSupplier] = useState<PartyBalanceSummary | null>(null);
   const dir = directory.data ?? emptyDirectory;
   const currencies = overview.data?.currencies ?? [],
     current = currencies.find((c) => c.currency === currency) ?? currencies[0];
@@ -187,6 +203,7 @@ export function CashDesk({
     loans.error,
     supplierOverview.error,
     invoices.error,
+    supplierBalances.error,
   ].filter(Boolean);
   function reload() {
     setExpenseRevision((r) => r + 1);
@@ -199,8 +216,9 @@ export function CashDesk({
     loans.reload();
     supplierOverview.reload();
     invoices.reload();
+    supplierBalances.reload();
   }
-  useLinkedDeskChanges('cash-desk', !!editor, reload);
+  useLinkedDeskChanges('cash-desk', !!editor || !!payingSupplier, reload);
   function go(next: Section) {
     setSection(next);
     setPage(1);
@@ -782,24 +800,28 @@ export function CashDesk({
                   Open Invoice Desk <ChevronRight size={14} />
                 </Link>
               </div>
-              <div className="cash-supplier-balances">
-                {supplierOverview.data?.suppliers.map((s) => (
-                  <div key={`${s.id}:${s.currency}`}>
-                    <span>
-                      {s.name}
-                      <small>
-                        {s.count} open invoice{s.count === 1 ? '' : 's'}
-                      </small>
-                    </span>
-                    <strong>{money(s.outstanding, s.currency)}</strong>
+              {!supplierAccess ? (
+                <p className="desk-muted">
+                  Supplier profile access is needed to show balances by supplier.
+                </p>
+              ) : supplierBalances.loading ? (
+                <Loading />
+              ) : (
+                <>
+                  <div className="cash-supplier-balances">
+                    {supplierBalances.data?.map((s) => (
+                      <SupplierBalanceRow
+                        key={s.partyId}
+                        balance={s}
+                        onPay={canPaySupplier ? () => setPayingSupplier(s) : undefined}
+                      />
+                    ))}
                   </div>
-                ))}
-              </div>
-              {!supplierOverview.loading &&
-                !supplierOverview.error &&
-                !supplierOverview.data?.suppliers.length && (
-                  <p className="desk-muted">No outstanding supplier balances in this scope.</p>
-                )}
+                  {!supplierBalances.error && !supplierBalances.data?.length && (
+                    <p className="desk-muted">No outstanding supplier balances in this scope.</p>
+                  )}
+                </>
+              )}
               <div className="cash-toolbar">
                 <label className="cash-search">
                   <Search size={16} />
@@ -970,6 +992,17 @@ export function CashDesk({
           )}
         </Modal>
       )}
+      {payingSupplier && (
+        <SupplierPaymentDialog
+          supplier={payingSupplier}
+          onClose={() => setPayingSupplier(null)}
+          onSaved={() => {
+            setPayingSupplier(null);
+            notifyDeskSaved('cash-desk');
+            reload();
+          }}
+        />
+      )}
       {editor &&
         (allAccounts.loading ? (
           <Modal open title="Loading accounts" onClose={() => setEditor(null)}>
@@ -1126,6 +1159,59 @@ function MovementLinks({
           <strong>{render(d)}</strong>
         </p>
       ))}
+    </div>
+  );
+}
+/**
+ * One supplier's balance from the resolver: the name opens the profile, the chips show the
+ * ERP / Invoice Desk / NoteBook split (NoteBook is informal and outside the total), and the
+ * total is the resolver's, per currency. The cached balance is never shown.
+ */
+function SupplierBalanceRow({
+  balance,
+  onPay,
+}: {
+  balance: PartyBalanceSummary;
+  onPay?: () => void;
+}) {
+  const erpOpen = balance.erp.some((b) => Number(b.open) > 0);
+  return (
+    <div className="cash-party-balance">
+      <span>
+        <Link href={partyProfileHref('supplier', balance.partyId)}>{balance.name}</Link>
+        <small>
+          {balance.code}
+          {balance.lastPaymentAt
+            ? ` · Last paid ${dateLabel(balance.lastPaymentAt.slice(0, 10))}`
+            : ' · No payment recorded'}
+        </small>
+        <span className="cash-balance-chips">
+          {balance.erp.map((b) => (
+            <em key={`erp:${b.currency}`}>
+              Payables {money(b.open, b.currency)}
+              {Number(b.overdue) > 0 ? ` · ${money(b.overdue, b.currency)} overdue` : ''}
+            </em>
+          ))}
+          {balance.desk.map((b) => (
+            <em key={`desk:${b.currency}`}>Invoice Desk {money(b.outstanding, b.currency)}</em>
+          ))}
+          {balance.notebook.map((b) => (
+            <em key={`notebook:${b.currency}`}>
+              NoteBook {money(b.outstanding, b.currency)} · not in total
+            </em>
+          ))}
+        </span>
+      </span>
+      <span className="cash-party-balance-total">
+        {balance.total.map((t) => (
+          <strong key={t.currency}>{money(t.amount, t.currency)}</strong>
+        ))}
+        {onPay && erpOpen && (
+          <Btn variant="secondary" onClick={onPay}>
+            Record payment
+          </Btn>
+        )}
+      </span>
     </div>
   );
 }

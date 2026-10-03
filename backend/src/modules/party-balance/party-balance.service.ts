@@ -5,8 +5,10 @@ import { CompanyScopeService } from '../../common/services/company-scope.service
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   PartyBalance,
+  PartyBalanceSummary,
   PartyKind,
   computePartyBalance,
+  computePartyBalanceList,
   refreshCachedPartyBalance,
 } from './party-balance.helper';
 
@@ -43,6 +45,26 @@ export class PartyBalanceService {
     if (!party) throw new NotFoundException('Customer not found');
     await this.companyScope.assertCanAccessCompany(user, party.companyId);
     return computePartyBalance(this.prisma, 'customer', party, asOf);
+  }
+
+  /** Every supplier in the company scope with a balance, set-wise (Phase 2 lists). */
+  async suppliers(
+    user: AuthUser,
+    companyId?: string | null,
+    asOf?: Date,
+  ): Promise<PartyBalanceSummary[]> {
+    const where = await this.companyScope.companyWhereFor(user, companyId);
+    return computePartyBalanceList(this.prisma, 'supplier', where, asOf);
+  }
+
+  /** Every customer in the company scope with a balance, set-wise (Phase 2 lists). */
+  async customers(
+    user: AuthUser,
+    companyId?: string | null,
+    asOf?: Date,
+  ): Promise<PartyBalanceSummary[]> {
+    const where = await this.companyScope.companyWhereFor(user, companyId);
+    return computePartyBalanceList(this.prisma, 'customer', where, asOf);
   }
 
   /** For callers that already hold an access-checked party row (control centres). */

@@ -1231,6 +1231,8 @@ export default function PayablesPage() {
   const [writingOff, setWritingOff] = useState<Payable | null>(null);
 
   const [scopeReady, setScopeReady] = useState(false);
+  // Party linkage (Phase 2): /finance/payables?supplierId= opens the register for one supplier.
+  const [supplierId, setSupplierId] = useState('');
   const readSearch = useWorkspaceSearchReader();
   useEffect(() => {
     // Read the window-local URL inside an OS window, the page URL elsewhere. A URL that
@@ -1238,6 +1240,7 @@ export default function PayablesPage() {
     const params = readSearch();
     setCompanyId(params.get('companyId') ?? '');
     setStatus(params.get('status') ?? '');
+    setSupplierId(params.get('supplierId') ?? '');
     const requested = params.get('search');
     if (requested) setSearch(requested);
     setScopeReady(true);
@@ -1273,6 +1276,7 @@ export default function PayablesPage() {
       if (query.trim()) params.set('search', query.trim());
       if (companyId) params.set('companyId', companyId);
       if (status) params.set('status', status);
+      if (supplierId) params.set('supplierId', supplierId);
       const endpoint =
         viewMode === 'accounts' ? '/api/backend/payables/accounts' : '/api/backend/payables';
       const res = await fetch(`${endpoint}?${params}`, { signal: request.signal });
@@ -1292,7 +1296,18 @@ export default function PayablesPage() {
     } finally {
       if (request.current()) setLoading(false);
     }
-  }, [authLoading, beginRequest, canView, scopeReady, query, page, companyId, status, viewMode]);
+  }, [
+    authLoading,
+    beginRequest,
+    canView,
+    scopeReady,
+    query,
+    page,
+    companyId,
+    status,
+    supplierId,
+    viewMode,
+  ]);
 
   useEffect(() => {
     load();
@@ -1450,6 +1465,21 @@ export default function PayablesPage() {
       )}
 
       <PageHeader title="Payables" subtitle="Accounts payable management (AP)" />
+      {supplierId && (
+        <p className="mb-3 text-sm">
+          Showing one supplier&apos;s payables.{' '}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              setSupplierId('');
+              setPage(1);
+            }}
+          >
+            Show all suppliers
+          </button>
+        </p>
+      )}
 
       <div className="workspace-metrics grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard

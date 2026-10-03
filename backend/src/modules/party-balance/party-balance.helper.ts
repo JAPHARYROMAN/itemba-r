@@ -311,3 +311,365 @@ export async function computePartyBalance(
     lastPaymentAt: lastPayment?.paymentDate?.toISOString() ?? null,
   };
 }
+
+/** A party's balance in list form: the same split as `PartyBalance`, without aging. */
+export interface PartyBalanceSummary {
+  kind: PartyKind;
+  partyId: string;
+  companyId: string;
+  name: string;
+  code: string;
+  baseCurrency: string;
+  erp: Array<{ currency: string; open: string; overdue: string; documents: number }>;
+  desk: Array<{ currency: string; outstanding: string; overdue: string; documents: number }>;
+  notebook: PartyBalanceNotebookBucket[];
+  /** erp.open + desk.outstanding, per currency. */
+  total: Array<{ currency: string; amount: string }>;
+  /** erp.overdue + desk.overdue, per currency. */
+  overdue: Array<{ currency: string; amount: string }>;
+  creditLimit: string;
+  creditAvailable: string | null;
+  cached: string;
+  lastPaymentAt: string | null;
+}
+
+/** The company scope a list read runs under (CompanyScopeService.companyWhereFor). */
+export type PartyCompanyWhere = { companyId?: string | { in: string[] }; id?: { in: string[] } };
+
+type Grouped = { partyId: string; currency: string; amount: Prisma.Decimal; count: number };
+type Buckets = Map<string, Map<string, { amount: Prisma.Decimal; count: number }>>;
+const decimal = (value: Prisma.Decimal | number | string | null | undefined) =>
+  new Prisma.Decimal(value ?? 0);
+/** Sums grouped rows per party and currency; two desk parties mapped to one canonical add up. */
+const bucket = (rows: Grouped[]): Buckets => {
+  const map: Buckets = new Map();
+  for (const row of rows) {
+    if (row.amount.lte(0)) continue;
+    const party = map.get(row.partyId) ?? new Map();
+    const current = party.get(row.currency) ?? { amount: ZERO, count: 0 };
+    current.amount = current.amount.plus(row.amount);
+    current.count += row.count;
+    party.set(row.currency, current);
+    map.set(row.partyId, party);
+  }
+  return map;
+};
+const sortedEntries = (map?: Map<string, { amount: Prisma.Decimal; count: number }>) =>
+  [...(map?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b));
+
+/**
+ * The list form of the resolver (party linkage, Phase 2): every supplier or customer in the
+ * company scope that owes or is owed anything, computed set-wise with grouped queries, never
+ * a per-party loop. Same rules as `computePartyBalance`: open documents only, rows with no
+ * balance ignored, overdue by due date, NoteBook listed but never in the total. Cash Desk
+ * balances and Sales collections read this; profiles read the per-party form for aging.
+ */
+export async function computePartyBalanceList(
+  db: Db,
+  kind: PartyKind,
+  companyWhere: PartyCompanyWhere,
+  asOf: Date = new Date(),
+): Promise<PartyBalanceSummary[]> {
+  const status = { in: [...OPEN_DOCUMENT_STATUSES] as never };
+  const parties: Array<{
+    id: string;
+    companyId: string;
+    name: string;
+    code: string;
+    creditLimit: Prisma.Decimal;
+    currentBalance: Prisma.Decimal;
+  }> =
+    kind === 'supplier'
+      ? (
+          await db.supplier.findMany({
+            where: { ...companyWhere, deletedAt: null },
+            select: {
+              id: true,
+              companyId: true,
+              name: true,
+              supplierCode: true,
+              creditLimit: true,
+              currentBalance: true,
+            },
+          })
+        ).map((s) => ({ ...s, code: s.supplierCode }))
+      : (
+          await db.customer.findMany({
+            where: { ...companyWhere, deletedAt: null },
+            select: {
+              id: true,
+              companyId: true,
+              name: true,
+              customerCode: true,
+              creditLimit: true,
+              currentBalance: true,
+            },
+          })
+        ).map((c) => ({ ...c, code: c.customerCode }));
+  if (!parties.length) return [];
+  // Mirrors computePartyBalance: ERP overdue once a full day past due, desk overdue when past.
+  const erpOverdueBefore = new Date(asOf.getTime() - 86400000);
+
+  const erpWhere = { ...companyWhere, deletedAt: null, status, outstandingAmount: { gt: 0 } };
+  const erpOpen: Grouped[] =
+    kind === 'supplier'
+      ? (
+          await db.payable.groupBy({
+            by: ['supplierId', 'currency'],
+            where: { ...erpWhere, supplierId: { not: null } },
+            _sum: { outstandingAmount: true },
+            _count: { _all: true },
+          })
+        ).map((g) => ({
+          partyId: g.supplierId as string,
+          currency: g.currency,
+          amount: decimal(g._sum.outstandingAmount),
+          count: g._count._all,
+        }))
+      : (
+          await db.receivable.groupBy({
+            by: ['customerId', 'currency'],
+            where: { ...erpWhere, customerId: { not: null } },
+            _sum: { outstandingAmount: true },
+            _count: { _all: true },
+          })
+        ).map((g) => ({
+          partyId: g.customerId as string,
+          currency: g.currency,
+          amount: decimal(g._sum.outstandingAmount),
+          count: g._count._all,
+        }));
+  const erpOverdue: Grouped[] =
+    kind === 'supplier'
+      ? (
+          await db.payable.groupBy({
+            by: ['supplierId', 'currency'],
+            where: { ...erpWhere, supplierId: { not: null }, dueDate: { lte: erpOverdueBefore } },
+            _sum: { outstandingAmount: true },
+          })
+        ).map((g) => ({
+          partyId: g.supplierId as string,
+          currency: g.currency,
+          amount: decimal(g._sum.outstandingAmount),
+          count: 0,
+        }))
+      : (
+          await db.receivable.groupBy({
+            by: ['customerId', 'currency'],
+            where: { ...erpWhere, customerId: { not: null }, dueDate: { lte: erpOverdueBefore } },
+            _sum: { outstandingAmount: true },
+          })
+        ).map((g) => ({
+          partyId: g.customerId as string,
+          currency: g.currency,
+          amount: decimal(g._sum.outstandingAmount),
+          count: 0,
+        }));
+
+  // Desk documents are grouped by their desk party, then mapped to the canonical party.
+  const deskRows: Array<Grouped & { overdue: boolean }> = [];
+  if (kind === 'supplier') {
+    const where = {
+      ...companyWhere,
+      voidedAt: null,
+      canonicalInvoiceId: null,
+      supplier: { canonicalSupplierId: { not: null } },
+      paidAmount: { lt: db.invoiceDeskInvoice.fields.totalAmount },
+    };
+    for (const overdue of [false, true]) {
+      const groups = await db.invoiceDeskInvoice.groupBy({
+        by: ['supplierId', 'currency'],
+        where: overdue ? { ...where, dueDate: { lt: asOf } } : where,
+        _sum: { totalAmount: true, paidAmount: true },
+        _count: { _all: true },
+      });
+      for (const g of groups)
+        deskRows.push({
+          partyId: g.supplierId,
+          currency: g.currency,
+          amount: decimal(g._sum.totalAmount).minus(decimal(g._sum.paidAmount)),
+          count: g._count._all,
+          overdue,
+        });
+    }
+  } else {
+    const where = {
+      ...companyWhere,
+      voidedAt: null,
+      canonicalSalesOrderId: null,
+      customer: { canonicalCustomerId: { not: null } },
+      paidAmount: { lt: db.salesDeskSale.fields.totalAmount },
+    };
+    for (const overdue of [false, true]) {
+      const groups = await db.salesDeskSale.groupBy({
+        by: ['customerId', 'currency'],
+        where: overdue ? { ...where, dueDate: { lt: asOf } } : where,
+        _sum: { totalAmount: true, paidAmount: true },
+        _count: { _all: true },
+      });
+      for (const g of groups)
+        deskRows.push({
+          partyId: g.customerId,
+          currency: g.currency,
+          amount: decimal(g._sum.totalAmount).minus(decimal(g._sum.paidAmount)),
+          count: g._count._all,
+          overdue,
+        });
+    }
+  }
+  const deskPartyIds = [...new Set(deskRows.map((r) => r.partyId))];
+  const canonical = new Map<string, string>();
+  if (deskPartyIds.length) {
+    const links =
+      kind === 'supplier'
+        ? (
+            await db.invoiceDeskSupplier.findMany({
+              where: { id: { in: deskPartyIds } },
+              select: { id: true, canonicalSupplierId: true },
+            })
+          ).map((s) => [s.id, s.canonicalSupplierId] as const)
+        : (
+            await db.salesDeskCustomer.findMany({
+              where: { id: { in: deskPartyIds } },
+              select: { id: true, canonicalCustomerId: true },
+            })
+          ).map((c) => [c.id, c.canonicalCustomerId] as const);
+    for (const [id, canonicalId] of links) if (canonicalId) canonical.set(id, canonicalId);
+  }
+  const deskCanonical = (overdue: boolean) =>
+    deskRows.flatMap((r) => {
+      const partyId = canonical.get(r.partyId);
+      return r.overdue === overdue && partyId ? [{ ...r, partyId }] : [];
+    });
+
+  const notebookRows: Grouped[] =
+    kind === 'supplier'
+      ? (
+          await db.recordEntry.groupBy({
+            by: ['supplierId', 'currency'],
+            where: {
+              ...companyWhere,
+              voidedAt: null,
+              kind: 'CREDITOR',
+              supplierId: { not: null },
+              settledAmount: { lt: db.recordEntry.fields.amount },
+            },
+            _sum: { amount: true, settledAmount: true },
+            _count: { _all: true },
+          })
+        ).map((g) => ({
+          partyId: g.supplierId as string,
+          currency: g.currency,
+          amount: decimal(g._sum.amount).minus(decimal(g._sum.settledAmount)),
+          count: g._count._all,
+        }))
+      : (
+          await db.recordEntry.groupBy({
+            by: ['customerId', 'currency'],
+            where: {
+              ...companyWhere,
+              voidedAt: null,
+              kind: 'DEBTOR',
+              customerId: { not: null },
+              settledAmount: { lt: db.recordEntry.fields.amount },
+            },
+            _sum: { amount: true, settledAmount: true },
+            _count: { _all: true },
+          })
+        ).map((g) => ({
+          partyId: g.customerId as string,
+          currency: g.currency,
+          amount: decimal(g._sum.amount).minus(decimal(g._sum.settledAmount)),
+          count: g._count._all,
+        }));
+
+  const lastPayments = new Map<string, Date | null>(
+    kind === 'supplier'
+      ? (
+          await db.supplierPayment.groupBy({
+            by: ['supplierId'],
+            where: { ...companyWhere, status: 'COMPLETED', deletedAt: null },
+            _max: { paymentDate: true },
+          })
+        ).map((g) => [g.supplierId, g._max.paymentDate] as const)
+      : (
+          await db.customerPayment.groupBy({
+            by: ['customerId'],
+            where: { ...companyWhere, status: 'COMPLETED', deletedAt: null },
+            _max: { paymentDate: true },
+          })
+        ).map((g) => [g.customerId, g._max.paymentDate] as const),
+  );
+  const profiles = await db.companyProfile.findMany({
+    where: { companyId: { in: [...new Set(parties.map((p) => p.companyId))] } },
+    select: { companyId: true, currency: true },
+  });
+  const baseCurrencies = new Map(profiles.map((p) => [p.companyId, p.currency as string]));
+
+  const erpOpenBy = bucket(erpOpen),
+    erpOverdueBy = bucket(erpOverdue),
+    deskOpenBy = bucket(deskCanonical(false)),
+    deskOverdueBy = bucket(deskCanonical(true)),
+    notebookBy = bucket(notebookRows);
+  const summaries: PartyBalanceSummary[] = [];
+  for (const party of parties) {
+    const erp = erpOpenBy.get(party.id),
+      desk = deskOpenBy.get(party.id),
+      notebook = notebookBy.get(party.id);
+    if (!erp && !desk && !notebook) continue;
+    const erpLate = erpOverdueBy.get(party.id),
+      deskLate = deskOverdueBy.get(party.id);
+    const currencies = [...new Set([...(erp?.keys() ?? []), ...(desk?.keys() ?? [])])].sort();
+    const total = currencies.map((currency) => ({
+      currency,
+      amount: money((erp?.get(currency)?.amount ?? ZERO).plus(desk?.get(currency)?.amount ?? ZERO)),
+    }));
+    const overdue = currencies.map((currency) => ({
+      currency,
+      amount: money(
+        (erpLate?.get(currency)?.amount ?? ZERO).plus(deskLate?.get(currency)?.amount ?? ZERO),
+      ),
+    }));
+    const baseCurrency = baseCurrencies.get(party.companyId) ?? 'TZS';
+    const creditLimit = decimal(party.creditLimit);
+    const baseTotal = decimal(total.find((t) => t.currency === baseCurrency)?.amount);
+    summaries.push({
+      kind,
+      partyId: party.id,
+      companyId: party.companyId,
+      name: party.name,
+      code: party.code,
+      baseCurrency,
+      erp: sortedEntries(erp).map(([currency, b]) => ({
+        currency,
+        open: money(b.amount),
+        overdue: money(erpLate?.get(currency)?.amount ?? ZERO),
+        documents: b.count,
+      })),
+      desk: sortedEntries(desk).map(([currency, b]) => ({
+        currency,
+        outstanding: money(b.amount),
+        overdue: money(deskLate?.get(currency)?.amount ?? ZERO),
+        documents: b.count,
+      })),
+      notebook: sortedEntries(notebook).map(([currency, b]) => ({
+        currency,
+        outstanding: money(b.amount),
+        records: b.count,
+      })),
+      total,
+      overdue,
+      creditLimit: money(creditLimit),
+      creditAvailable: creditLimit.gt(0)
+        ? money(Prisma.Decimal.max(creditLimit.minus(baseTotal), ZERO))
+        : null,
+      cached: money(decimal(party.currentBalance)),
+      lastPaymentAt: lastPayments.get(party.id)?.toISOString() ?? null,
+    });
+  }
+  const baseTotalOf = (s: PartyBalanceSummary) =>
+    decimal(s.total.find((t) => t.currency === s.baseCurrency)?.amount);
+  return summaries.sort(
+    (a, b) => baseTotalOf(b).comparedTo(baseTotalOf(a)) || a.name.localeCompare(b.name),
+  );
+}

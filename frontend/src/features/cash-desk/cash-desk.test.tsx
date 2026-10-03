@@ -391,6 +391,45 @@ describe('Cash Desk', () => {
       scroll: false,
     });
   });
+  it('shows supplier balances from the resolver with their split and a profile link', async () => {
+    api.permissions.add('suppliers.view');
+    const fallback = api.get.getMockImplementation()!;
+    api.get.mockImplementation((path, ...args) =>
+      path === '/party-balance/suppliers'
+        ? Promise.resolve([
+            {
+              kind: 'supplier',
+              partyId: 'sup-1',
+              companyId: 'company',
+              name: 'Mwanjalisi Station',
+              code: 'SUP-001',
+              baseCurrency: 'TZS',
+              erp: [{ currency: 'TZS', open: '1000.00', overdue: '400.00', documents: 3 }],
+              desk: [{ currency: 'TZS', outstanding: '150.00', overdue: '0.00', documents: 2 }],
+              notebook: [{ currency: 'TZS', outstanding: '50.00', records: 1 }],
+              total: [{ currency: 'TZS', amount: '1150.00' }],
+              overdue: [{ currency: 'TZS', amount: '400.00' }],
+              creditLimit: '0.00',
+              creditAvailable: null,
+              cached: '900.00',
+              lastPaymentAt: '2026-09-30T00:00:00.000Z',
+            },
+          ])
+        : fallback(path, ...args),
+    );
+    render(<CashDesk />);
+    await screen.findByText('TZS 9,999,999,999,999,999.99');
+    fireEvent.click(screen.getByRole('button', { name: 'Supplier balances' }));
+    expect(await screen.findByRole('link', { name: 'Mwanjalisi Station' })).toHaveAttribute(
+      'href',
+      '/invoice-desk/suppliers/sup-1',
+    );
+    expect(screen.getByText('TZS 1,150.00')).toBeInTheDocument();
+    expect(screen.getByText(/Payables TZS 1,000\.00 · TZS 400\.00 overdue/)).toBeInTheDocument();
+    expect(screen.getByText(/NoteBook TZS 50\.00 · not in total/)).toBeInTheDocument();
+    expect(screen.queryByText('TZS 900.00')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
+  });
   it('links supplier payment to the selected invoice and its version', async () => {
     const invoice = {
       ...scope,

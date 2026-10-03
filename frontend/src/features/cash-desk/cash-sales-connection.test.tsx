@@ -158,6 +158,57 @@ describe('Business sales in Cash Desk', () => {
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     expect(api.get).not.toHaveBeenCalled();
   });
+  it('labels Sales Desk and NoteBook debt by source, links the customer and only collects receivables', async () => {
+    api.permissions.add('customers.view');
+    const base = response.outstanding.rows[0];
+    api.get.mockResolvedValue({
+      ...response,
+      currencies: [{ ...response.currencies[0], notebook: '20' }],
+      outstanding: {
+        total: 3,
+        rows: [
+          { ...base, source: 'RECEIVABLE', customerId: 'cus-1' },
+          {
+            ...base,
+            id: 'desk',
+            source: 'SALES_DESK',
+            customerId: 'cus-1',
+            saleId: null,
+            salesOrderNumber: null,
+            deskSaleId: 'desk',
+            saleNumber: 'SD-1',
+          },
+          {
+            ...base,
+            id: 'note',
+            source: 'NOTEBOOK',
+            customerId: null,
+            customerName: 'Walk-in',
+            saleId: null,
+            salesOrderNumber: null,
+            recordId: 'note',
+            receivableNumber: 'NB-1',
+          },
+        ],
+      },
+    });
+    render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
+    const customers = await screen.findAllByRole('link', { name: 'Test customer' });
+    expect(customers).toHaveLength(2);
+    expect(customers[0]).toHaveAttribute('href', '/sales-desk/customers/cus-1');
+    expect(screen.getByText('Walk-in')).toBeInTheDocument();
+    expect(screen.getByText('NoteBook debtors (informal)')).toBeInTheDocument();
+    expect(screen.getByText(/Sales Desk · SD-1/)).toBeInTheDocument();
+    expect(screen.getByText(/NoteBook · NB-1/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open NoteBook' })).toHaveAttribute(
+      'href',
+      '/records?record=note',
+    );
+    expect(
+      screen.getAllByRole('link', { name: 'View sale' }).map((l) => l.getAttribute('href')),
+    ).toEqual(['/sales-desk/sales/s', '/sales-desk/sales/desk']);
+    expect(screen.getAllByRole('button', { name: /Collect payment for/ })).toHaveLength(1);
+  });
   it('shows a failed read as unavailable instead of a zero balance', async () => {
     api.get.mockRejectedValue(new Error('Connection unavailable'));
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);

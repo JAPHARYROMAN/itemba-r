@@ -817,3 +817,63 @@
     display: none;
   }
 }
+/* Party linkage (Phase 2): resolver balances by supplier and the supplier payment dialog. */
+.cash-party-balance > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.cash-party-balance a {
+  font-weight: 500;
+}
+.cash-balance-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cash-balance-chips em {
+  font-style: normal;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--desk-ink) 6%, transparent);
+  color: var(--desk-muted);
+}
+.cash-party-balance-total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.cash-party-balance-total strong {
+  white-space: nowrap;
+}
+.cash-payment-allocations {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.cash-payment-allocations label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--desk-line);
+  border-radius: 10px;
+}
+.cash-payment-allocations label small {
+  display: block;
+  color: var(--desk-muted);
+  font-size: 10px;
+  margin-top: 3px;
+}
+.cash-payment-allocations input[type='text'] {
+  width: 9rem;
+  text-align: right;
+  background: var(--desk-panel);
+  color: var(--desk-ink);
+  border: 1px solid var(--desk-line);
+  border-radius: 8px;
+  padding: 7px 9px;
+}

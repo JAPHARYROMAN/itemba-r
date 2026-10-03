@@ -15,6 +15,32 @@ const asOfDate = (value?: string) => {
 export class PartyBalanceController {
   constructor(private readonly service: PartyBalanceService) {}
 
+  @Get('suppliers')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (collection read).
+  @AgentExcluded()
+  @RequirePermissions('suppliers.view')
+  suppliers(
+    @Query('companyId') companyId: string | undefined,
+    @Query('asOf') asOf: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.suppliers(user, companyId || undefined, asOfDate(asOf));
+  }
+
+  @Get('customers')
+  // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
+  // must stay closed over positive fixtures and explicit exclusions (collection read).
+  @AgentExcluded()
+  @RequirePermissions('customers.view')
+  customers(
+    @Query('companyId') companyId: string | undefined,
+    @Query('asOf') asOf: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.customers(user, companyId || undefined, asOfDate(asOf));
+  }
+
   @Get('suppliers/:id')
   // Agent-excluded until its Msaidizi evidence fixture is authored: the capability manifest
   // must stay closed over positive fixtures and explicit exclusions (path read).

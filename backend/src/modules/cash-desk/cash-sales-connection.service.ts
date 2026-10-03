@@ -103,6 +103,7 @@ export class CashSalesConnectionService {
         divisionId: true,
         branchId: true,
         customerName: true,
+        customerId: true,
         currency: true,
         amount: true,
         paidAmount: true,
@@ -117,6 +118,72 @@ export class CashSalesConnectionService {
       orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
     });
     if (receivables.length > MAX_SOURCES)
+      throw new BadRequestException(
+        'Choose a smaller company, division or branch to view collections.',
+      );
+    // Party linkage (Phase 2): a customer's other open debt appears beside its receivables,
+    // labelled by source. Unpromoted Sales Desk sales count towards what customers owe;
+    // NoteBook debtors are informal and reported separately, never added to the total. Each
+    // source is read only with its own permission and only for records linked to a canonical
+    // customer, so a free-text NoteBook name never becomes a guessed identity.
+    const deskVisible = user.permissions.includes('sales_desk.view');
+    const notebookVisible = user.permissions.includes('records.view');
+    const deskSales = deskVisible
+      ? await db.salesDeskSale.findMany({
+          where: {
+            AND: scope.AND,
+            voidedAt: null,
+            canonicalSalesOrderId: null,
+            customer: { canonicalCustomerId: { not: null } },
+            paidAmount: { lt: db.salesDeskSale.fields.totalAmount },
+          },
+          select: {
+            id: true,
+            saleNumber: true,
+            companyId: true,
+            divisionId: true,
+            branchId: true,
+            currency: true,
+            totalAmount: true,
+            paidAmount: true,
+            dueDate: true,
+            customer: { select: { name: true, canonicalCustomerId: true } },
+            branch: { select: { name: true } },
+          },
+          take: MAX_SOURCES + 1,
+          orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+        })
+      : [];
+    const notebook = notebookVisible
+      ? await db.recordEntry.findMany({
+          where: {
+            AND: scope.AND,
+            voidedAt: null,
+            kind: 'DEBTOR',
+            customerId: { not: null },
+            settledAmount: { lt: db.recordEntry.fields.amount },
+          },
+          select: {
+            id: true,
+            title: true,
+            counterparty: true,
+            reference: true,
+            companyId: true,
+            divisionId: true,
+            branchId: true,
+            currency: true,
+            amount: true,
+            settledAmount: true,
+            dueDate: true,
+            customerId: true,
+            customer: { select: { name: true } },
+            branch: { select: { name: true } },
+          },
+          take: MAX_SOURCES + 1,
+          orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+        })
+      : [];
+    if (deskSales.length > MAX_SOURCES || notebook.length > MAX_SOURCES)
       throw new BadRequestException(
         'Choose a smaller company, division or branch to view collections.',
       );
@@ -262,8 +329,71 @@ export class CashSalesConnectionService {
       }
     }
     receipts.sort((a, b) => b.date.getTime() - a.date.getTime() || a.id.localeCompare(b.id));
-    const outstanding = receivables.filter(
+    const openReceivables = receivables.filter(
       (r) => (open as readonly string[]).includes(r.status) && r.outstandingAmount.gt(0),
+    );
+    // One list, labelled by source. Receivable rows keep their full shape (and the collect
+    // action); Sales Desk and NoteBook rows carry the same display fields and their own link.
+    const none = null as string | null;
+    const outstanding = [
+      ...openReceivables.map((r) => ({
+        ...r,
+        source: 'RECEIVABLE' as const,
+        customerId: r.customerId ?? none,
+        saleId: saleFor(r)?.id ?? none,
+        salesOrderNumber: saleFor(r)?.salesOrderNumber ?? none,
+        deskSaleId: none,
+        recordId: none,
+        saleNumber: none,
+      })),
+      ...deskSales.map((s) => ({
+        id: s.id,
+        source: 'SALES_DESK' as const,
+        companyId: s.companyId,
+        divisionId: s.divisionId,
+        branchId: s.branchId,
+        customerId: s.customer.canonicalCustomerId,
+        customerName: s.customer.name,
+        receivableNumber: none,
+        salesOrderNumber: none,
+        saleId: none,
+        deskSaleId: s.id,
+        recordId: none,
+        saleNumber: s.saleNumber,
+        currency: s.currency,
+        amount: s.totalAmount,
+        paidAmount: s.paidAmount,
+        outstandingAmount: s.totalAmount.minus(s.paidAmount),
+        status: 'OPEN',
+        dueDate: s.dueDate as Date | null,
+        branch: s.branch,
+      })),
+      ...notebook.map((n) => ({
+        id: n.id,
+        source: 'NOTEBOOK' as const,
+        companyId: n.companyId,
+        divisionId: n.divisionId,
+        branchId: n.branchId,
+        customerId: n.customerId,
+        customerName: n.customer?.name ?? n.counterparty ?? n.title,
+        receivableNumber: n.reference,
+        salesOrderNumber: none,
+        saleId: none,
+        deskSaleId: none,
+        recordId: n.id,
+        saleNumber: none,
+        currency: n.currency,
+        amount: n.amount,
+        paidAmount: n.settledAmount,
+        outstandingAmount: n.amount.minus(n.settledAmount),
+        status: 'NOTEBOOK',
+        dueDate: n.dueDate,
+        branch: n.branch,
+      })),
+    ].sort(
+      (a, b) =>
+        (a.dueDate?.getTime() ?? Infinity) - (b.dueDate?.getTime() ?? Infinity) ||
+        a.id.localeCompare(b.id),
     );
     const currencies = [
       ...new Set([
@@ -282,9 +412,15 @@ export class CashSalesConnectionService {
               .toFixed(2)
           : null,
         outstanding: outstanding
-          .filter((r) => r.currency === currency)
+          .filter((r) => r.currency === currency && r.source !== 'NOTEBOOK')
           .reduce((n, r) => n.plus(r.outstandingAmount), new Prisma.Decimal(0))
           .toFixed(2),
+        notebook: notebookVisible
+          ? outstanding
+              .filter((r) => r.currency === currency && r.source === 'NOTEBOOK')
+              .reduce((n, r) => n.plus(r.outstandingAmount), new Prisma.Decimal(0))
+              .toFixed(2)
+          : null,
         received: receiptsVisible
           ? receipts
               .filter((r) => r.currency === currency)
@@ -296,7 +432,7 @@ export class CashSalesConnectionService {
     const filtered = outstanding.filter(
       (r) =>
         !search ||
-        [r.customerName, r.receivableNumber, saleFor(r)?.salesOrderNumber].some((v) =>
+        [r.customerName, r.receivableNumber, r.salesOrderNumber, r.saleNumber].some((v) =>
           v?.toLowerCase().includes(search),
         ),
     );
@@ -308,14 +444,7 @@ export class CashSalesConnectionService {
       accounts,
       accountsVisible,
       receiptsVisible,
-      outstanding: {
-        rows: filtered.slice(offset, offset + pageSize).map((r) => ({
-          ...r,
-          saleId: saleFor(r)?.id ?? null,
-          salesOrderNumber: saleFor(r)?.salesOrderNumber ?? null,
-        })),
-        total: filtered.length,
-      },
+      outstanding: { rows: filtered.slice(offset, offset + pageSize), total: filtered.length },
       receipts: { rows: receipts.slice(offset, offset + pageSize), total: receipts.length },
       page: q.page,
       pageSize,
