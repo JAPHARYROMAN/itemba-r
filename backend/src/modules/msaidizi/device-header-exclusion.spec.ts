@@ -8,11 +8,15 @@ import { crudEvidenceFixturesForManifest } from './crud-execution-evidence';
 import { buildRegistry } from './tool-registry';
 
 const DEVICE_HEADER_BOUND_CAPABILITY_IDS = [
+  'MobilePosLiteController.actionReceipt',
   'MobilePosLiteController.catalog',
+  'MobilePosLiteController.checkoutOutcome',
   'MobilePosLiteController.createDayReport',
   'MobilePosLiteController.createPurchase',
   'MobilePosLiteController.createStockCount',
   'MobilePosLiteController.customers',
+  'MobilePosLiteController.dailySummary',
+  'MobilePosLiteController.dailySummaryPdf',
   'MobilePosLiteController.dayReportPdf',
   'MobilePosLiteController.mySalesToday',
   'MobilePosLiteController.products',
@@ -21,7 +25,10 @@ const DEVICE_HEADER_BOUND_CAPABILITY_IDS = [
   'MobilePosLiteController.salesHistory',
   'MobilePosLiteController.session',
   'MobilePosLiteController.stock',
+  'MobilePosLiteController.stockCountHistory',
   'MobilePosLiteController.suppliers',
+  'MobilePosLiteController.transactionDetail',
+  'MobilePosLiteController.transactionOutcome',
 ] as const;
 
 describe('unrepresented terminal/device credential policy', () => {

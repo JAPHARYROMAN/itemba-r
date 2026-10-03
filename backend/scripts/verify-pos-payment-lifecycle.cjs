@@ -99,11 +99,9 @@ async function main() {
         'receivables.view',
         'customer-payments.view',
         'inventory.view',
-        'customer-payments.create',
-        'credit-notes.create',
-        'credit-notes.issue',
-        'refunds.create',
-        'refunds.pay',
+        'customer-payments.manage',
+        'receivables.manage',
+        'refunds.manage',
       ],
       companyAccess: [{ companyId: company.id, accessLevel: 'MANAGE' }],
       divisionAccess: [],
@@ -625,7 +623,7 @@ async function main() {
             },
           ],
         },
-        { ...user, permissions: user.permissions.filter((p) => p !== 'refunds.pay') },
+        { ...user, permissions: user.permissions.filter((p) => p !== 'refunds.manage') },
       ),
     );
     assert.equal(await db.creditNote.count(), 2);

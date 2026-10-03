@@ -6,6 +6,7 @@ This release integrates the October 3 POS remake, all three party-linkage phases
 
 - Customer Payments retains its reusable transaction API, so a POS collection, its payment allocation, journal, cash effect, balance refresh and action identity commit or roll back together. The party-linkage payment implementation remains the shared implementation.
 - Split-payment debt uses the same customer on its AR journal line as credit sales, collections and credit notes. Reversals preserve party references.
+- POS collections use the existing `customer-payments.manage` permission, returns use `receivables.manage`, and paid refunds additionally require `refunds.manage`. Controller guards, service checks, action availability and database proofs use the same shared contract. No new permission codes or role grants are introduced.
 - With the unified cash-book flag enabled, initial sale receipts and each split tender also use the mapped cash book in the confirmation transaction. A sale cannot fund an ERP balance while leaving its refunds without cash-book funds; the standard configuration remains off until account mapping and opening reconciliation.
 - Supplier/customer navigation filters are applied in the extracted finance feature screens; Next page files remain valid route wrappers.
 - Dropdown changes preserve the new party selectors and stock-valuation filters. Existing native dropdown contrast fixes are incorporated by the dropdown branch.

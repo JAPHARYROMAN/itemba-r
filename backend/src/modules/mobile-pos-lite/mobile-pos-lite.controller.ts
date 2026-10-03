@@ -229,7 +229,7 @@ export class MobilePosLiteController {
   }
   @Post('transactions/:id/collections')
   @AgentExcluded()
-  @RequirePermissions('mobile_pos_lite.use', 'customer-payments.create')
+  @RequirePermissions('mobile_pos_lite.use', 'customer-payments.manage')
   collection(
     @Headers('x-mobile-pos-terminal') code: string | undefined,
     @Headers('x-mobile-pos-device') secret: string | undefined,
@@ -241,7 +241,7 @@ export class MobilePosLiteController {
   }
   @Post('transactions/:id/returns')
   @AgentExcluded()
-  @RequirePermissions('mobile_pos_lite.use', 'credit-notes.create', 'credit-notes.issue')
+  @RequirePermissions('mobile_pos_lite.use', 'receivables.manage')
   returnSale(
     @Headers('x-mobile-pos-terminal') code: string | undefined,
     @Headers('x-mobile-pos-device') secret: string | undefined,

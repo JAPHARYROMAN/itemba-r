@@ -178,11 +178,9 @@ export class PosTransactionsService {
         unitPrice: Number(l.lineTotal) / Number(l.quantity),
         stock: l.product.trackInventory,
       })),
-      canCollect: user.permissions.includes('customer-payments.create'),
-      canReturn: ['credit-notes.create', 'credit-notes.issue'].every((p) =>
-        user.permissions.includes(p),
-      ),
-      canRefund: ['refunds.create', 'refunds.pay'].every((p) => user.permissions.includes(p)),
+      canCollect: user.permissions.includes('customer-payments.manage'),
+      canReturn: user.permissions.includes('receivables.manage'),
+      canRefund: user.permissions.includes('refunds.manage'),
     };
   }
   async outcome(
@@ -343,7 +341,7 @@ export class PosTransactionsService {
     dto: PosCollectionDto,
     user: AuthUser,
   ) {
-    permissions(user, ['customer-payments.create']);
+    permissions(user, ['customer-payments.manage']);
     const t = await this.pos.transactionContext(code, secret, user);
     const accountId = this.account(t, dto.method, dto.reference);
     return this.action(t, id, 'COLLECTION', dto, user, async (tx, sale) => {
@@ -381,7 +379,7 @@ export class PosTransactionsService {
     dto: PosReturnDto,
     user: AuthUser,
   ) {
-    permissions(user, ['credit-notes.create', 'credit-notes.issue']);
+    permissions(user, ['receivables.manage']);
     const t = await this.pos.transactionContext(code, secret, user);
     return this.action(t, id, 'RETURN', dto, user, async (tx, sale) => {
       if (new Set(dto.lines.map((l) => l.lineId)).size !== dto.lines.length)
@@ -466,7 +464,7 @@ export class PosTransactionsService {
         .toDecimalPlaces(2);
       let refund: { id: string; refundNumber: string } | null = null;
       if (cashRefund.gt(0)) {
-        permissions(user, ['refunds.create', 'refunds.pay']);
+        permissions(user, ['refunds.manage']);
         if (!dto.refundMethod) throw new BadRequestException('Select how to pay the refund');
         const accountId = this.account(t, dto.refundMethod, dto.reference);
         await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${accountId} FOR UPDATE`;
