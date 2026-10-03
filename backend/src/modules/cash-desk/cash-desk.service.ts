@@ -21,6 +21,7 @@ import {
   CashReverseDto,
 } from './cash-desk.dto';
 import { cashDate, checkDailyBalances, payloadKey } from './cash-desk.domain';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { CashConnectionsService } from '../desk-reports/cash-connections.service';
 import { IntercompanyLoanLedgerService } from '../loans/intercompany-loan-ledger.service';
 import { allocateLoanPayment } from '../loans/loan-allocation';
@@ -78,6 +79,7 @@ export class CashDeskService {
     private readonly invoices: InvoiceDeskService,
     private readonly connections?: CashConnectionsService,
     private readonly intercompany?: IntercompanyLoanLedgerService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   async directory(user: AuthUser, companyId?: string) {
@@ -451,13 +453,38 @@ export class CashDeskService {
         });
         movementSupplierId = supplierPayment?.supplierId ?? null;
       }
+      // Party linkage (Phase 2): an expense may name its supplier and other money in its
+      // customer, picked from the directory of the account's company. The id is the link;
+      // the payee stays the display snapshot and defaults to the supplier's name.
+      let movementCustomerId: string | null = null,
+        payee = d.kind === 'EXPENSE' ? d.payee?.trim() || null : null;
+      if (d.supplierId || d.customerId) {
+        if (d.kind === 'EXPENSE' && d.supplierId && !d.customerId) {
+          await this.parties?.assertSupplier(account.companyId, d.supplierId, tx);
+          movementSupplierId = d.supplierId;
+          if (!payee)
+            payee =
+              (
+                await tx.supplier.findUnique({
+                  where: { id: d.supplierId },
+                  select: { name: true },
+                })
+              )?.name.slice(0, 160) ?? null;
+        } else if (d.kind === 'OTHER_IN' && d.customerId && !d.supplierId) {
+          await this.parties?.assertCustomer(account.companyId, d.customerId, tx);
+          movementCustomerId = d.customerId;
+        } else
+          throw new BadRequestException(
+            'Link a supplier to an expense or a customer to other money in: one party per movement.',
+          );
+      }
       const movement = await tx.cashDeskMovement.create({
         data: {
           requestId: d.requestId,
           payloadKey: key,
           kind: d.kind,
           expenseCategory: d.kind === 'EXPENSE' ? d.expenseCategory || 'OTHER' : null,
-          payee: d.kind === 'EXPENSE' ? d.payee?.trim() || null : null,
+          payee,
           expenseNotes: d.kind === 'EXPENSE' ? d.expenseNotes?.trim() || null : null,
           amount,
           currency: account.currency,
@@ -473,7 +500,8 @@ export class CashDeskService {
           invoicePaymentId,
           supplierPaymentId,
           supplierId: movementSupplierId,
-          partyType: movementSupplierId ? 'SUPPLIER' : 'NONE',
+          customerId: movementCustomerId,
+          partyType: movementSupplierId ? 'SUPPLIER' : movementCustomerId ? 'CUSTOMER' : 'NONE',
           dailySalesKey: d.kind === 'DAILY_SALES' ? `${account.id}:${d.businessDate}` : null,
         },
       });

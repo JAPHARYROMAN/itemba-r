@@ -38,6 +38,10 @@ export class RecordValuesDto {
   @IsOptional() @IsUUID() companyId?: string | null;
   @IsOptional() @IsUUID() divisionId?: string | null;
   @IsOptional() @IsUUID() branchId?: string | null;
+  // Party linkage (Phase 2, D2): identity only. A debtor or sale may name its customer, a
+  // creditor, purchase or expense its supplier. The NoteBook's money stays its own.
+  @IsOptional() @IsUUID() supplierId?: string | null;
+  @IsOptional() @IsUUID() customerId?: string | null;
   @IsIn(['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP']) currency!: string;
   @Matches(/^\d{1,12}(\.\d{1,2})?$/) amount!: string;
   @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) recordDate!: string;

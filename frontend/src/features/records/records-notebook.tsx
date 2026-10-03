@@ -842,6 +842,10 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
           scope={visibility === 'personal' ? emptyScope : scope}
           directory={dir}
           returnFocusRef={editor.mode === 'create' ? createTrigger : undefined}
+          parties={{
+            supplier: hasPermission('suppliers.view'),
+            customer: hasPermission('customers.view'),
+          }}
           onClose={() => setEditor(null)}
           onSaved={saved}
         />

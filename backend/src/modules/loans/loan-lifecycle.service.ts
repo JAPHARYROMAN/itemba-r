@@ -7,6 +7,7 @@ import {
 import { BorrowerLevel, Loan, LoanPaymentMethod, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { LoanLedgerService } from './loan-ledger.service';
@@ -41,6 +42,7 @@ export class LoanLifecycleService {
     private readonly db: PrismaService,
     private readonly ledger: LoanLedgerService,
     private readonly audit: AuditLogsService,
+    private readonly parties?: PartyExistsService,
   ) {}
   private async transaction<T>(work: (tx: Tx) => Promise<T>) {
     try {
@@ -289,9 +291,12 @@ export class LoanLifecycleService {
         scope,
         'LIABILITY',
       );
+      // Party linkage (Phase 2): a lender that is a supplier must exist in the borrower company.
+      if (dto.supplierId) await this.parties?.assertSupplier(company.id, dto.supplierId, tx);
       const loan = await tx.loan.create({
         data: {
           ...scope,
+          supplierId: dto.supplierId || null,
           fundingMode: dto.fundingMode,
           principalLedgerAccountId: payable.id,
           obligationType: dto.obligationType,

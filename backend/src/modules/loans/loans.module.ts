@@ -6,10 +6,11 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { CompanyScopeService } from '../../common/services';
 import { LoanLifecycleModule } from './loan-lifecycle.module';
 
+import { PartyExistsService } from '../../common/services/party-exists.service';
 @Module({
   imports: [PrismaModule, AuditLogsModule, LoanLifecycleModule],
   controllers: [LoansController],
-  providers: [LoansService, CompanyScopeService],
+  providers: [LoansService, CompanyScopeService, PartyExistsService],
   exports: [LoansService],
 })
 export class LoansModule {}

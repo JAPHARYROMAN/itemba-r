@@ -1,6 +1,15 @@
 'use client';
 import { useId, useRef, useState, type RefObject } from 'react';
-import { Btn, FormDateField, FormInput, FormSelect, FormTextarea, Modal } from '@/components/ui';
+import {
+  Btn,
+  CustomerPicker,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  SupplierPicker,
+} from '@/components/ui';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { ApiError, backendPatch, backendPost } from '@/lib/api-client';
 import {
@@ -21,6 +30,7 @@ export function RecordsEditor({
   onClose,
   onSaved,
   returnFocusRef,
+  parties,
 }: {
   editor: Editor;
   scope: Scope;
@@ -28,12 +38,16 @@ export function RecordsEditor({
   onClose: () => void;
   onSaved: (id: string) => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Party linkage (Phase 2, D2): which profile pickers the reader may use. Identity only. */
+  parties?: { supplier: boolean; customer: boolean };
 }) {
   const { entry, mode } = editor;
   const register = registers.find((r) => r.kind === editor.kind)!;
   const [form, setForm] = useState({
     title: entry?.title ?? '',
     counterparty: entry?.counterparty ?? '',
+    supplierId: entry?.supplierId ?? '',
+    customerId: entry?.customerId ?? '',
     contact: entry?.contact ?? '',
     reference: mode === 'settle' ? '' : (entry?.reference ?? ''),
     category: entry?.category ?? '',
@@ -102,6 +116,8 @@ export function RecordsEditor({
               kind: editor.kind,
               title: form.title,
               counterparty: form.counterparty,
+              supplierId: editor.kind === 'NOTE' ? null : form.supplierId || null,
+              customerId: editor.kind === 'NOTE' ? null : form.customerId || null,
               contact: form.contact,
               reference: form.reference,
               category: form.category,
@@ -244,6 +260,48 @@ export function RecordsEditor({
                 value={form.counterparty}
                 onChange={(e) => set('counterparty', e.target.value)}
               />
+              {['DEBTOR', 'SALE'].includes(editor.kind) && parties?.customer && (
+                <CustomerPicker
+                  label="Customer profile (optional)"
+                  value={form.customerId}
+                  onChange={(customerId, party) =>
+                    guard.change(() =>
+                      setForm((f) => ({
+                        ...f,
+                        customerId,
+                        counterparty: party && !f.counterparty.trim() ? party.name : f.counterparty,
+                      })),
+                    )
+                  }
+                  companyId={form.companyId || undefined}
+                  placeholder={
+                    form.companyId ? 'Link to a customer profile' : 'Choose a company first'
+                  }
+                  disabled={!form.companyId}
+                  className="records-full"
+                />
+              )}
+              {['CREDITOR', 'PURCHASE', 'EXPENSE'].includes(editor.kind) && parties?.supplier && (
+                <SupplierPicker
+                  label="Supplier profile (optional)"
+                  value={form.supplierId}
+                  onChange={(supplierId, party) =>
+                    guard.change(() =>
+                      setForm((f) => ({
+                        ...f,
+                        supplierId,
+                        counterparty: party && !f.counterparty.trim() ? party.name : f.counterparty,
+                      })),
+                    )
+                  }
+                  companyId={form.companyId || undefined}
+                  placeholder={
+                    form.companyId ? 'Link to a supplier profile' : 'Choose a company first'
+                  }
+                  disabled={!form.companyId}
+                  className="records-full"
+                />
+              )}
               {editor.kind !== 'NOTE' && (
                 <>
                   <FormInput

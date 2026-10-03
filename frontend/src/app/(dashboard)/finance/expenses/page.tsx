@@ -25,6 +25,7 @@ import {
   PageToolbar,
   StatCard,
   StatusBadge,
+  SupplierPicker,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { downloadTablePdf } from '@/lib/export-download';
@@ -55,6 +56,7 @@ interface Expense {
   expenseNumber?: string;
   expenseDate: string;
   vendorName?: string | null;
+  supplierId?: string | null;
   description: string;
   amount: number;
   currency: string;
@@ -121,6 +123,7 @@ interface ExpenseForm {
   expenseDate: string;
   description: string;
   vendorName: string;
+  supplierId: string;
   paymentMethod: string;
   cashAccountId: string;
   isTaxable: boolean;
@@ -135,6 +138,7 @@ const BLANK_FORM: ExpenseForm = {
   expenseDate: '',
   description: '',
   vendorName: '',
+  supplierId: '',
   paymentMethod: '',
   cashAccountId: '',
   isTaxable: false,
@@ -665,6 +669,7 @@ function ExpenseModal({
           expenseDate: initial.expenseDate.split('T')[0],
           description: initial.description,
           vendorName: initial.vendorName ?? '',
+          supplierId: initial.supplierId ?? '',
           paymentMethod: initial.paymentMethod ?? '',
           cashAccountId: initial.cashAccountId ?? '',
           isTaxable: initial.isTaxable ?? false,
@@ -682,6 +687,7 @@ function ExpenseModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const { hasPermission } = useAuth();
   const set = (k: keyof ExpenseForm, v: string | number | boolean) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -751,6 +757,7 @@ function ExpenseModal({
         ...form,
         amount: Number(form.amount),
         vendorName: form.vendorName || undefined,
+        supplierId: form.supplierId || (mode === 'edit' ? null : undefined),
         paymentMethod: form.paymentMethod || undefined,
         cashAccountId: form.cashAccountId || undefined,
         isTaxable: form.isTaxable,
@@ -911,6 +918,22 @@ function ExpenseModal({
             value={form.expenseDate}
             onChange={(value) => set('expenseDate', value)}
           />
+          {hasPermission('suppliers.view') && (
+            <SupplierPicker
+              label="Supplier"
+              value={form.supplierId}
+              onChange={(supplierId, party) =>
+                setForm((f) => ({
+                  ...f,
+                  supplierId,
+                  vendorName: party && !f.vendorName.trim() ? party.name : f.vendorName,
+                }))
+              }
+              companyId={form.companyId || undefined}
+              placeholder={form.companyId ? 'Link to a supplier profile' : 'Select company first'}
+              disabled={!form.companyId}
+            />
+          )}
           <FormInput
             label="Vendor Name"
             value={form.vendorName}

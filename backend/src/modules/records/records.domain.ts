@@ -21,6 +21,17 @@ export function recordValues(d: RecordValuesDto) {
     throw new BadRequestException('A debt due date must be on or after its record date.');
   if ((!d.companyId && (d.divisionId || d.branchId)) || (!d.divisionId && d.branchId))
     throw new BadRequestException('Choose company, division, then branch.');
+  // Party linkage (Phase 2, D2): one party, matching the register. Identity only.
+  if (d.supplierId && d.customerId)
+    throw new BadRequestException('Link one party: a supplier or a customer, not both.');
+  if (d.kind === 'NOTE' && (d.supplierId || d.customerId))
+    throw new BadRequestException('A note has no linked party.');
+  if ((d.kind === 'DEBTOR' || d.kind === 'SALE') && d.supplierId)
+    throw new BadRequestException('Debtors and sales link to a customer, not a supplier.');
+  if (['CREDITOR', 'PURCHASE', 'EXPENSE'].includes(d.kind) && d.customerId)
+    throw new BadRequestException(
+      'Creditors, purchases and expenses link to a supplier, not a customer.',
+    );
   return {
     kind: d.kind,
     title: d.title.trim(),
@@ -32,6 +43,8 @@ export function recordValues(d: RecordValuesDto) {
     companyId: d.companyId || null,
     divisionId: d.divisionId || null,
     branchId: d.branchId || null,
+    supplierId: d.supplierId || null,
+    customerId: d.customerId || null,
     currency: d.currency,
     amount,
     recordDate: new Date(d.recordDate),

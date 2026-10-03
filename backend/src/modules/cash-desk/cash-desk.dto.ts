@@ -84,6 +84,9 @@ export class CashMovementDto {
   @IsOptional() @IsIn(CASH_EXPENSE_CATEGORIES) expenseCategory?: string;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(160) payee?: string;
   @IsOptional() @IsString() @MaxLength(2000) expenseNotes?: string;
+  // Party linkage (Phase 2): an expense may name its supplier, other money in its customer.
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsUUID() customerId?: string;
   @IsUUID() requestId!: string;
   @IsIn([
     'DAILY_SALES',

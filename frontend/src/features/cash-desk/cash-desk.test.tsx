@@ -7,11 +7,20 @@ import { CashExpenses } from './cash-expenses';
 import type { Account, Invoice, Movement } from './types';
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), permissions: new Set<string>() }));
+const api = vi.hoisted(() => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  list: vi.fn(),
+  permissions: new Set<string>(),
+}));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: (p: string) => api.permissions.has(p) }),
 }));
-vi.mock('@/lib/api-client', () => ({ backendGet: api.get, backendPost: api.post }));
+vi.mock('@/lib/api-client', () => ({
+  backendGet: api.get,
+  backendPost: api.post,
+  backendList: api.list,
+}));
 const scope = { companyId: 'company', divisionId: 'division', branchId: 'branch' };
 const directory = {
   companies: [{ id: 'company', name: 'Company' }],
@@ -181,6 +190,48 @@ describe('Cash Desk', () => {
       payee: 'Courier service',
       expenseNotes: 'Delivery to head office',
       amount: '150.25',
+    });
+  });
+  it('links an expense to a supplier picked from the directory and defaults the payee to its name', async () => {
+    api.permissions.add('suppliers.view');
+    const supplier = { id: 'sup-1', name: 'Mwanjalisi Station' };
+    api.list.mockResolvedValue([supplier]);
+    const fallback = api.get.getMockImplementation()!;
+    api.get.mockImplementation((path, ...args) =>
+      path === '/suppliers/sup-1' ? Promise.resolve(supplier) : fallback(path, ...args),
+    );
+    const saved = vi.fn();
+    render(
+      <CashEditor
+        editor={{ kind: 'movement', movementKind: 'EXPENSE' }}
+        accounts={[account]}
+        directory={directory}
+        scope={scope}
+        onClose={vi.fn()}
+        onSaved={saved}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/Paying account/), { target: { value: 'till' } });
+    const picker = screen.getByLabelText('Supplier (optional)');
+    fireEvent.focus(picker);
+    fireEvent.change(picker, { target: { value: 'Mwan' } });
+    const option = await screen.findByText('Mwanjalisi Station');
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
+    await waitFor(() => expect(screen.getByLabelText(/Paid to/)).toHaveValue('Mwanjalisi Station'));
+    expect(api.list).toHaveBeenCalledWith(
+      '/suppliers',
+      expect.objectContaining({ query: expect.objectContaining({ companyId: 'company' }) }),
+    );
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '150.25' } });
+    fireEvent.change(screen.getByLabelText(/Expense category/), { target: { value: 'TRANSPORT' } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Fuel delivery' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save movement' }));
+    await waitFor(() => expect(saved).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1]).toMatchObject({
+      kind: 'EXPENSE',
+      supplierId: 'sup-1',
+      payee: 'Mwanjalisi Station',
     });
   });
   it('keeps paid and reversed spending separate, and never adds different currencies', async () => {

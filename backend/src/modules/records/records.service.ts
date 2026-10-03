@@ -9,6 +9,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
   CreateRecordDto,
@@ -36,6 +37,7 @@ export class RecordsService {
     private readonly org: OrganizationScopeService,
     private readonly audit: AuditLogsService,
     private readonly documents: GeneratedDocumentsService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   private async access(user: AuthUser): Promise<Prisma.RecordEntryWhereInput> {
@@ -208,6 +210,15 @@ export class RecordsService {
         'Choose an active company, division and branch in the same organisation.',
       );
   }
+  /** Party linkage (Phase 2, D2): identity only; the party must exist in the record's company. */
+  private async assertParty(values: {
+    companyId: string | null;
+    supplierId: string | null;
+    customerId: string | null;
+  }) {
+    if (values.supplierId) await this.parties?.assertSupplier(values.companyId, values.supplierId);
+    if (values.customerId) await this.parties?.assertCustomer(values.companyId, values.customerId);
+  }
   private async transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>) {
     try {
       return await this.db.$transaction(work, { timeout: 20000 });
@@ -271,6 +282,7 @@ export class RecordsService {
         'A debt record cannot be dated in the future. Use the due date for a future payment.',
       );
     await this.scope(user, values, true);
+    await this.assertParty(values);
     const existing = await this.db.recordEntry.findUnique({ where: { requestId: d.requestId } });
     if (existing) {
       if (existing.ownerId !== user.id || existing.payloadKey !== key)
@@ -301,6 +313,7 @@ export class RecordsService {
       values = recordValues(d);
     await this.scope(user, row);
     await this.scope(user, values, true);
+    await this.assertParty(values);
     // A linked register cannot be made private or moved to another scope after creation.
     if (
       (['companyId', 'divisionId', 'branchId', 'kind', 'currency'] as const).some(

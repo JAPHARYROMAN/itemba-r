@@ -5,10 +5,11 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { CompanyScopeService } from '../../common/services';
 
+import { PartyExistsService } from '../../common/services/party-exists.service';
 @Module({
   imports: [PrismaModule, AuditLogsModule],
   controllers: [ContractsController],
-  providers: [ContractsService, CompanyScopeService],
+  providers: [ContractsService, CompanyScopeService, PartyExistsService],
   exports: [ContractsService],
 })
 export class ContractsModule {}

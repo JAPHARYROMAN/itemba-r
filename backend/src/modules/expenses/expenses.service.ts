@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PartyExistsService } from '../../common/services/party-exists.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
@@ -37,6 +38,7 @@ export class ExpensesService {
     private readonly taxAutoApply: TaxAutoApplyService,
     private readonly supplierPayments?: SupplierPaymentsService,
     private readonly cashBook?: CashBookService,
+    private readonly parties?: PartyExistsService,
   ) {}
 
   private async resolveCashLedgerAccountId(
@@ -324,6 +326,8 @@ export class ExpensesService {
 
   async create(dto: CreateExpenseDto, user: AuthUser) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    // Party linkage (Phase 2): a linked supplier must exist in the expense's company.
+    if (dto.supplierId) await this.parties?.assertSupplier(dto.companyId, dto.supplierId);
     // Cross-field pairing (defense in depth behind the DTO validator, for
     // direct service callers): flagging recoverable VAT without assessing it
     // would otherwise approve as an unsplittable gross posting.
@@ -349,6 +353,7 @@ export class ExpensesService {
         expenseCategoryId: dto.expenseCategoryId,
         cashAccountId: dto.cashAccountId,
         vendorName: dto.vendorName,
+        supplierId: dto.supplierId || null,
         amount: dto.amount,
         currency: dto.currency,
         expenseDate: new Date(dto.expenseDate),
@@ -377,6 +382,7 @@ export class ExpensesService {
   async update(id: string, dto: UpdateExpenseDto, user: AuthUser) {
     const userId = user.id;
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    if (dto.supplierId) await this.parties?.assertSupplier(existing.companyId, dto.supplierId);
     if (!['DRAFT', 'PENDING_APPROVAL'].includes(existing.status)) {
       throw new BadRequestException(
         'Expense can only be updated in DRAFT or PENDING_APPROVAL status',
@@ -410,6 +416,7 @@ export class ExpensesService {
       where: { id, status: { in: ['DRAFT', 'PENDING_APPROVAL'] }, deletedAt: null },
       data: {
         ...(dto.vendorName !== undefined && { vendorName: dto.vendorName }),
+        ...(dto.supplierId !== undefined && { supplierId: dto.supplierId || null }),
         ...(dto.amount !== undefined && { amount: dto.amount }),
         ...(dto.currency && { currency: dto.currency }),
         ...(dto.expenseDate && { expenseDate: new Date(dto.expenseDate) }),
