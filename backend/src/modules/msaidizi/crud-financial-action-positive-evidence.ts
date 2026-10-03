@@ -63,6 +63,8 @@ interface JournalLineSpec {
   credit: CrudMutationEffectValue;
   divisionId?: CrudMutationEffectValue;
   branchId?: CrudMutationEffectValue;
+  /** Party linkage (Phase 3): the party the line names; NONE unless the fixture binds one. */
+  party?: { partyType: CrudMutationEffectValue; supplierId: CrudMutationEffectValue; customerId: CrudMutationEffectValue };
   recoveryOrder: number;
 }
 
@@ -213,6 +215,14 @@ function journalEffect(spec: JournalSpec): CrudMutationCompoundNamedEffect {
   };
 }
 
+/** Party linkage (Phase 3): the party a journal line names; NONE unless the fixture binds one. */
+const NO_PARTY = { partyType: literal('NONE'), supplierId: literal(null), customerId: literal(null) };
+const customerParty = (id: CrudMutationEffectValue) => ({
+  partyType: literal('CUSTOMER'),
+  supplierId: literal(null),
+  customerId: id,
+});
+
 function journalLineEffect(spec: JournalLineSpec): CrudMutationCompoundNamedEffect {
   return {
     effectId: spec.effectId,
@@ -235,9 +245,10 @@ function journalLineEffect(spec: JournalLineSpec): CrudMutationCompoundNamedEffe
       companyId: spec.companyId,
       divisionId: spec.divisionId ?? literal(null),
       branchId: spec.branchId ?? literal(null),
+      ...(spec.party ?? NO_PARTY),
     },
     generatedFields: {},
-    allowedFields: ['id', 'createdAt', 'updatedAt', 'partyType', 'supplierId', 'customerId'],
+    allowedFields: ['id', 'createdAt', 'updatedAt'],
     recovery: 'restore-scope',
     recoveryOrder: spec.recoveryOrder,
   };
@@ -1099,6 +1110,8 @@ const definitions: readonly FixtureDefinition[] = [
           expenseCategoryId: idOf('ExpenseCategory'),
           cashAccountId: literal(null),
           vendorName: literal(null),
+          // Party linkage (Phase 3): no supplier, so the accrued payable line is partyless.
+          supplierId: literal(null),
           amount: literal(AMOUNT),
           currency: literal('TZS'),
           // Pinned INSIDE the seeded OPEN 2026 period: the accrual posts at
@@ -1270,6 +1283,8 @@ const definitions: readonly FixtureDefinition[] = [
           branchId: literal(null),
           expenseCategoryId: idOf('ExpenseCategory'),
           cashAccountId: literal(null),
+          // Party linkage (Phase 3): no supplier, so the settlement line is partyless.
+          supplierId: literal(null),
           amount: literal(AMOUNT),
           currency: literal('TZS'),
           description: literal('Fixture expense'),
@@ -2718,6 +2733,7 @@ const definitions: readonly FixtureDefinition[] = [
           description: literal('Settle receivables: Fixture Customer'),
           debit: literal(0),
           credit: literal(AMOUNT),
+          party: customerParty(binding('financialPositiveCustomerPaymentCreate', ['customer', 'id'])),
           recoveryOrder: 51,
         }),
         {
@@ -2993,6 +3009,7 @@ const definitions: readonly FixtureDefinition[] = [
           description: literal('Reversal: Settle receivables: Fixture Customer'),
           debit: literal(AMOUNT),
           credit: literal(0),
+          party: customerParty(binding('financialPositiveCustomerPaymentReverse', ['customer', 'id'])),
           recoveryOrder: 61,
         }),
         {

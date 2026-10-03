@@ -28,7 +28,11 @@ import {
   AccountResolverService,
   AccountRole,
 } from '../../common/services/account-resolver.service';
-import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 
 /**
  * Receivable statuses that still carry an outstanding balance and therefore can
@@ -693,6 +697,7 @@ export class ExternalPaymentsService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       debit: new Prisma.Decimal(line.credit ?? 0).toDecimalPlaces(2),
       credit: new Prisma.Decimal(line.debit ?? 0).toDecimalPlaces(2),
       description: `Reversal: ${line.description ?? ''}`.trim(),

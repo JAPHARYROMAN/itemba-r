@@ -379,6 +379,23 @@ export function partyOf(
 }
 
 /** The three stored columns for a line, derived so an id is never stored under the wrong type. */
+/**
+ * The party columns of a stored journal line, for a reversal that rebuilds its lines from the
+ * original: the reversing control line names the same party, so the control reconciliation
+ * sees the pair under one party instead of a tagged credit beside an untagged debit.
+ */
+export function partyOfLine(line: {
+  partyType?: string | null;
+  supplierId?: string | null;
+  customerId?: string | null;
+}): Pick<PostingLine, 'partyType' | 'supplierId' | 'customerId'> {
+  if (line.partyType === 'SUPPLIER' && line.supplierId)
+    return { partyType: 'SUPPLIER', supplierId: line.supplierId };
+  if (line.partyType === 'CUSTOMER' && line.customerId)
+    return { partyType: 'CUSTOMER', customerId: line.customerId };
+  return {};
+}
+
 export function partyColumns(line: Pick<PostingLine, 'partyType' | 'supplierId' | 'customerId'>) {
   const partyType: PostingPartyType =
     line.partyType ?? (line.supplierId ? 'SUPPLIER' : line.customerId ? 'CUSTOMER' : 'NONE');

@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOfLine } from '../accounting-engine/posting-engine.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { DeskReportQuery } from './desk-reports.dto';
 import { reportPeriod } from './desk-reports.domain';
@@ -808,6 +808,7 @@ export class CashConnectionsService {
         moduleName: 'CashDesk',
         lines: original.lines.map((l) => ({
           accountId: l.accountId,
+          ...partyOfLine(l),
           debit: l.credit,
           credit: l.debit,
         })),

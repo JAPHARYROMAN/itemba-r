@@ -10,7 +10,11 @@ import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import type { PostingLine } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
@@ -799,6 +803,10 @@ export class SupplierInvoicesService {
         description: string | null;
         divisionId: string | null;
         branchId: string | null;
+        // Party linkage (Phase 3): stored on every line; the reversal keeps it.
+        partyType?: string | null;
+        supplierId?: string | null;
+        customerId?: string | null;
       }>;
     },
     reason: string | undefined,
@@ -824,6 +832,7 @@ export class SupplierInvoicesService {
 
     const reversedLines: PostingLine[] = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       // Swap each side: a debit becomes a credit of the same magnitude and
       // vice-versa. A zero stays zero.
       debit: this.fromCents(this.moneyToCents(line.credit ?? 0)),

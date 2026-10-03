@@ -14,7 +14,11 @@ import {
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
-import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  partyOf,
+  partyOfLine,
+} from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
   AccountResolverService,
@@ -2580,6 +2584,7 @@ export class SalesOrdersService {
 
     const reversedLines = original.lines.map((line) => ({
       accountId: line.accountId,
+      ...partyOfLine(line),
       // Swap each side: a debit becomes a credit of the same magnitude and
       // vice-versa. A zero stays zero.
       debit: roundMoney(Number(line.credit ?? 0)),
