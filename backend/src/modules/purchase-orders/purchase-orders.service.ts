@@ -10,7 +10,7 @@ import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -1703,6 +1703,7 @@ export class PurchaseOrdersService {
           },
           {
             accountId: accounts.AP_CONTROL.id,
+            ...partyOf('supplier', input.order.supplierId),
             description: `Accounts payable: ${supplierName}`,
             debit: 0,
             credit: amount,

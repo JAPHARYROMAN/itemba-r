@@ -3968,17 +3968,28 @@ model JournalEntryLine {
   companyId      String
   divisionId     String?
   branchId       String?
+  // Party linkage (Phase 3): AP / AR control lines carry the party so the ledger can be
+  // reconciled to the sub-ledgers per supplier or customer. NONE | SUPPLIER | CUSTOMER; the
+  // matching id must be set (database CHECK). Never required: a control line without a
+  // party is a reconciliation finding, not a posting error.
+  partyType      String   @default("NONE") @db.VarChar(10)
+  supplierId     String?
+  customerId     String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      ChartOfAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
   company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier     Supplier?      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  customer     Customer?      @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@index([journalEntryId])
   @@index([accountId])
   @@index([companyId])
   @@index([companyId, accountId, createdAt])
+  @@index([supplierId])
+  @@index([customerId])
   @@map("journal_entry_lines")
 }
 
@@ -4972,6 +4983,7 @@ model Customer {
   // Party linkage (Phase 1)
   cashDeskMovements CashDeskMovement[]
   recordEntries     RecordEntry[]
+  journalEntryLines JournalEntryLine[]
   contracts         Contract[]
   creditProfiles     CustomerCreditProfile[]
   segmentMemberships CustomerSegmentMembership[]
@@ -5045,6 +5057,7 @@ model Supplier {
 
   // Party linkage (Phase 1)
   cashDeskMovements  CashDeskMovement[]
+  journalEntryLines  JournalEntryLine[]
   expenses           Expense[]
   recordEntries      RecordEntry[]
   recordBookExpenses RecordBookExpense[]

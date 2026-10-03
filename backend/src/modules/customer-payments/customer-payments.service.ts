@@ -20,7 +20,7 @@ import {
   AccountRole,
 } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
@@ -376,6 +376,7 @@ export class CustomerPaymentsService {
       cashAccountType: cashAccount?.accountType ?? null,
       cashAccountName: cashAccount?.accountName ?? 'cash',
       customerLabel: customer.name ?? input.customerId,
+      customerId: input.customerId,
       fullAmount: amount,
       appliedAmount: allocatedTotal,
       unappliedAmount: unapplied,
@@ -624,6 +625,7 @@ export class CustomerPaymentsService {
       cashAccountType: CashAccountType | null;
       cashAccountName: string;
       customerLabel: string;
+      customerId: string;
       fullAmount: Prisma.Decimal;
       appliedAmount: Prisma.Decimal;
       unappliedAmount: Prisma.Decimal;
@@ -649,6 +651,9 @@ export class CustomerPaymentsService {
       debit: Prisma.Decimal;
       credit: Prisma.Decimal;
       description: string;
+      partyType?: 'NONE' | 'SUPPLIER' | 'CUSTOMER';
+      supplierId?: string | null;
+      customerId?: string | null;
     }> = [
       {
         accountId: cashAcct.id,
@@ -661,6 +666,7 @@ export class CustomerPaymentsService {
     if (input.appliedAmount.gt(0)) {
       lines.push({
         accountId: arAcct.id,
+        ...partyOf('customer', input.customerId),
         debit: new Prisma.Decimal(0),
         credit: input.appliedAmount,
         description: `Settle receivables: ${input.customerLabel}`,
@@ -697,6 +703,7 @@ export class CustomerPaymentsService {
         // is traceable and can be reclassified once an advance account exists.
         lines.push({
           accountId: arAcct.id,
+          ...partyOf('customer', input.customerId),
           debit: new Prisma.Decimal(0),
           credit: input.unappliedAmount,
           description:

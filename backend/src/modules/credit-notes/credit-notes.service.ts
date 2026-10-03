@@ -10,7 +10,7 @@ import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, AccountRole, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { ProfitService } from '../profit/profit.service';
@@ -411,6 +411,7 @@ export class CreditNotesService {
           : []),
         {
           accountId: accounts.AR_CONTROL.id,
+          ...partyOf('customer', existing.customerId),
           description: `Accounts receivable credit: ${existing.customerName}`,
           debit: ZERO,
           credit: totalAmount,

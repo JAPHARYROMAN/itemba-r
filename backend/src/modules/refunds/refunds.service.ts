@@ -13,7 +13,7 @@ import {
   AccountRole,
 } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
@@ -322,6 +322,7 @@ export class RefundsService {
           lines: [
             {
               accountId: arAcct.id,
+              ...partyOf('customer', current.customerId),
               description: `Release customer credit: ${current.customerName ?? current.customerId ?? 'customer'}`,
               debit: amount,
               credit: 0,

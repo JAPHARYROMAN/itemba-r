@@ -93,4 +93,17 @@ With `CASH_BOOK_UNIFIED` on, `GET /cash-accounts` and `/:id` return `currentBala
 
 ## 6. Status — 3 October 2026
 
-Started. Stacked on Phase 2 (`party-linkage-phase-2` at `f8ba6adb`, PR #96 open). PR-1 in progress.
+Started. Stacked on Phase 2 (`party-linkage-phase-2` at `f8ba6adb`, PR #96 open).
+
+| PR | State | What landed |
+|---|---|---|
+| PR-1 The ledger knows the party | **Built** (first code commit on `party-linkage-phase-3`) | Migration `20261003110000_journal_line_party`: `partyType` (NONE / SUPPLIER / CUSTOMER), `supplierId`, `customerId` on `journal_entry_lines` with foreign keys, indexes and a CHECK. `PostingLine` gains the three optional fields; `partyOf(kind, id)` tags a line and `partyColumns` derives the stored columns so an id is never stored under the wrong type; both persist paths in `PostingEngineService` write them and the four built-in AP / AR handlers take the party from their payload. Every AP / AR control line writer passes the party: payables (creation and write-off), receivables (creation, settlement, write-off), supplier payments, customer payments (settlement and the overpayment held in AR), supplier invoices, sales orders (credit sales only), credit notes, refunds, expenses (accrual and settlement), external payments (from the relieved receivable) and desk postings (the canonical party behind the desk document). Payables and receivables refuse a party change once posted or partly paid. `backend/scripts/backfill-journal-party.cjs` (dry run by default, `--apply` to write, idempotent) tags historical control lines from thirteen reference types including desk documents through their canonical party, and lists the control lines it cannot explain as findings. |
+| PR-2 to PR-9 | Not started | |
+
+Deviations from the PR-1 text:
+
+1. Fixed-asset capitalisation on supplier credit stays untagged: a fixed asset carries no supplier id, so its AP line is a finding until the asset learns its supplier.
+2. Cash-book journals (`DeskCash`) and manual journals are not tagged; both are reconciliation findings by design (rule 1 of section 2).
+3. Control-line balances are in the company base currency (journal lines carry no currency); the reconciliation in PR-2 compares them with the resolver's base-currency bucket.
+
+PR-1 verification: backend typecheck clean; the suites of every touched module (accounting engine, payables, receivables, customer payments, supplier invoices, refunds, expenses, external payments, sales orders, credit notes, purchase orders, supplier payments, desk reports) 21 files / 408 tests passing, including the new `journal-line-party.spec.ts`, a desk-posting case for the canonical party and a payables case for the re-point refusal; the seven Msaidizi manifest specs passing; migration-safety scan OK; the migration applied inside a rolled-back transaction on the local database and on a fresh database created from all 166 migrations; the backfill's SELECT, UPDATE and findings statements validated on that migrated database inside a rolled-back transaction and its dry run executed. The local database holds no payables or AP / AR journals (4 journal lines in total), so the backfill could not be shown tagging real rows; eslint zero errors. Not walked through in a browser.

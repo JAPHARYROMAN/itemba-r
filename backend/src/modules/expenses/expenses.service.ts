@@ -15,7 +15,11 @@ import {
   assertCashAccountScopeCompatible,
 } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService, PostingLine } from '../accounting-engine/posting-engine.service';
+import {
+  PostingEngineService,
+  PostingLine,
+  partyOf,
+} from '../accounting-engine/posting-engine.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { PayExpenseDto } from './dto/pay-expense.dto';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
@@ -580,6 +584,7 @@ export class ExpensesService {
             : []),
           {
             accountId: apAccountId,
+            ...partyOf('supplier', existing.supplierId),
             description: `Accrued payable for expense ${existing.expenseNumber}`,
             debit: 0,
             credit: this.fromCents(grossCents),
@@ -869,6 +874,7 @@ export class ExpensesService {
         const apAccount = await this.accountResolver.resolve(existing.companyId, 'AP_CONTROL', tx);
         debitLine = {
           accountId: apAccount.id,
+          ...partyOf('supplier', existing.supplierId),
           description: `Settle accrued payable for expense ${existing.expenseNumber}`,
           debit: Number(existing.amount),
           credit: 0,

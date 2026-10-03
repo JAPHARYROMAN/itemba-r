@@ -425,7 +425,8 @@ describe('PayablesService.update supplier balance projection', () => {
   });
 
   it('refreshes the old and new supplier exactly once when reassigned', async () => {
-    const existing = lockedPayable();
+    // Party linkage (Phase 3): only an unposted, unpaid payable may be re-pointed.
+    const existing = lockedPayable({ journalEntryId: null, paidAmount: '0' });
     const { service, tx } = makeService(existing);
     jest.spyOn(service as any, 'resolvePayableScope').mockResolvedValue({
       divisionId: null,
@@ -446,6 +447,14 @@ describe('PayablesService.update supplier balance projection', () => {
       'supplier-1',
       'supplier-2',
     ]);
+  });
+
+  it('refuses to re-point a posted or partly paid payable to another supplier (Phase 3)', async () => {
+    const { service, tx } = makeService(lockedPayable());
+    await expect(
+      service.update('pay-1', { supplierId: 'supplier-2' } as any, user),
+    ).rejects.toThrow('cannot be changed');
+    expect(tx.payable.update).not.toHaveBeenCalled();
   });
 });
 

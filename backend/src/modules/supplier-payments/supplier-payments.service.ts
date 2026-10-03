@@ -20,7 +20,7 @@ import {
   AccountRole,
 } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
 import { pagination } from '../../common/utils/pagination';
@@ -376,6 +376,7 @@ export class SupplierPaymentsService {
         lines: [
           {
             accountId: apAccount!.id,
+            ...partyOf('supplier', supplier.id),
             description: `Accounts payable settlement: ${supplier.name}`,
             debit: allocatedTotal,
             credit: 0,

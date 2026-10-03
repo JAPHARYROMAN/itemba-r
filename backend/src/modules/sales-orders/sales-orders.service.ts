@@ -14,7 +14,7 @@ import {
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
   AccountResolverService,
@@ -2430,6 +2430,8 @@ export class SalesOrdersService {
       orderDate: Date;
       totalAmount: Prisma.Decimal | number | string;
       taxAmount: Prisma.Decimal | number | string;
+      /** Party linkage (Phase 3): the AR control line names the customer. */
+      customerId?: string | null;
     };
     paymentMethod: SalesPaymentMethod | string;
     cashAccountType?: CashAccountType | null;
@@ -2458,6 +2460,10 @@ export class SalesOrdersService {
     const lines = [
       {
         accountId: accounts[receivableOrCashRole].id,
+        // Party linkage (Phase 3): only the AR control line names the customer.
+        ...(input.paymentMethod === SalesPaymentMethod.CREDIT
+          ? partyOf('customer', input.order.customerId)
+          : {}),
         description:
           input.paymentMethod === SalesPaymentMethod.CREDIT ? 'Customer receivable' : 'Cash sale',
         debit: totalAmount,

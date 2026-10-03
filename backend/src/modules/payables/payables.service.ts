@@ -6,7 +6,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import type { AccountRole } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { CreatePayableDto } from './dto/create-payable.dto';
 import { UpdatePayableDto } from './dto/update-payable.dto';
 import { QueryPayableDto } from './dto/query-payable.dto';
@@ -307,6 +307,7 @@ export class PayablesService {
             },
             {
               accountId: apAccount.id,
+              ...partyOf('supplier', created.supplierId),
               description: `Accounts payable: ${created.supplierName}`,
               debit: 0,
               credit: amount,
@@ -339,6 +340,16 @@ export class PayablesService {
   async update(id: string, dto: UpdatePayableDto, user: AuthUser) {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+    // Party linkage (Phase 3): once the ledger knows the party, the party is not re-pointed
+    // without re-posting. Void and re-create the document to change it.
+    if (
+      dto.supplierId !== undefined &&
+      (dto.supplierId || null) !== (existing.supplierId || null) &&
+      (existing.journalEntryId || new Prisma.Decimal(existing.paidAmount ?? 0).gt(0))
+    )
+      throw new BadRequestException(
+        'This payable is posted or partly paid; its supplier cannot be changed. Void and re-create it to re-point the party.',
+      );
     const userId = user.id;
     const scope = await this.resolvePayableScope({
       companyId: existing.companyId,
@@ -653,6 +664,7 @@ export class PayablesService {
           payableId: locked.id,
           payableNumber: locked.payableNumber,
           supplierName: locked.supplierName,
+          supplierId: locked.supplierId,
           outstanding: outstanding.toDecimalPlaces(2),
           transactionDate: new Date(),
           userId,
@@ -720,6 +732,7 @@ export class PayablesService {
       payableId: string;
       payableNumber: string;
       supplierName: string | null;
+      supplierId: string | null;
       outstanding: Prisma.Decimal;
       transactionDate: Date;
       userId: string;
@@ -752,6 +765,7 @@ export class PayablesService {
         lines: [
           {
             accountId: apAccount.id,
+            ...partyOf('supplier', input.supplierId),
             description: `Accounts payable written off: ${input.supplierName ?? ''}`.trim(),
             debit: input.outstanding,
             credit: 0,

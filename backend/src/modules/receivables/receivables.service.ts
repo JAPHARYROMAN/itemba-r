@@ -11,7 +11,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import type { AccountRole } from '../../common/services/account-resolver.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { QueryReceivableDto } from './dto/query-receivable.dto';
@@ -300,6 +300,7 @@ export class ReceivablesService {
           lines: [
             {
               accountId: arAccount.id,
+              ...partyOf('customer', created.customerId),
               description: `Accounts receivable: ${created.customerName}`,
               debit: amount,
               credit: 0,
@@ -338,6 +339,16 @@ export class ReceivablesService {
   async update(id: string, dto: UpdateReceivableDto, user: AuthUser) {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+    // Party linkage (Phase 3): once the ledger knows the party, the party is not re-pointed
+    // without re-posting. Void and re-create the document to change it.
+    if (
+      dto.customerId !== undefined &&
+      (dto.customerId || null) !== (existing.customerId || null) &&
+      (existing.journalEntryId || new Prisma.Decimal(existing.paidAmount ?? 0).gt(0))
+    )
+      throw new BadRequestException(
+        'This receivable is posted or partly paid; its customer cannot be changed. Void and re-create it to re-point the party.',
+      );
     const userId = user.id;
     const scope = await this.resolveReceivableScope({
       companyId: existing.companyId,
@@ -483,6 +494,7 @@ export class ReceivablesService {
       companyId: string;
       divisionId: string | null;
       branchId: string | null;
+      customerId: string | null;
       customerName: string | null;
       receivableNumber: string;
       outstandingAmount: Prisma.Decimal;
@@ -544,6 +556,7 @@ export class ReceivablesService {
           },
           {
             accountId: arAccount.id,
+            ...partyOf('customer', locked.customerId),
             description: `Accounts receivable settlement: ${locked.customerName ?? 'customer'}`,
             debit: 0,
             credit: paymentAmount,
@@ -709,6 +722,7 @@ export class ReceivablesService {
               },
               {
                 accountId: arAccount.id,
+                ...partyOf('customer', locked.customerId),
                 description: `Derecognise receivable ${locked.receivableNumber}`,
                 debit: 0,
                 credit: outstanding,

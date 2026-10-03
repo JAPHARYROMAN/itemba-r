@@ -10,7 +10,7 @@ import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AccountResolverService, CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import type { PostingLine } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import {
@@ -1084,6 +1084,7 @@ export class SupplierInvoicesService {
     }
     lines.push({
       accountId: apAccount.id,
+      ...partyOf('supplier', invoice.supplierId),
       debit: 0,
       credit: this.fromCents(payableCents),
       description: `Accounts payable for supplier invoice ${invoice.supplierInvoiceNumber}`,

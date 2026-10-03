@@ -28,7 +28,7 @@ import {
   AccountResolverService,
   AccountRole,
 } from '../../common/services/account-resolver.service';
-import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 
 /**
  * Receivable statuses that still carry an outstanding balance and therefore can
@@ -523,6 +523,9 @@ export class ExternalPaymentsService {
       debit: Prisma.Decimal;
       credit: Prisma.Decimal;
       description: string;
+      partyType?: 'NONE' | 'SUPPLIER' | 'CUSTOMER';
+      supplierId?: string | null;
+      customerId?: string | null;
     }> = [
       {
         accountId: cashAcct.id,
@@ -535,6 +538,7 @@ export class ExternalPaymentsService {
     if (appliedToAr.gt(0)) {
       lines.push({
         accountId: arAcct.id,
+        ...partyOf('customer', relief?.customerId),
         debit: new Prisma.Decimal(0),
         credit: appliedToAr,
         description: `Settle receivable: ${customerLabel}`,
@@ -564,6 +568,7 @@ export class ExternalPaymentsService {
       } else {
         lines.push({
           accountId: arAcct.id,
+          ...partyOf('customer', relief?.customerId),
           debit: new Prisma.Decimal(0),
           credit: advanceAmount,
           description:
