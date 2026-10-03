@@ -45,4 +45,4 @@ Staging deployment must archive the committed source, label images with that com
 - Device-private financial intentions and unpaid carts are not cross-device cloud drafts or a server cashier lease. Web Locks prevent simultaneous selling windows on the same browser origin; the backend still checks current device assignment and organisation/action permissions.
 - Mobile/bank references record an operator-confirmed payment, not automated provider settlement. Payment provider integrations, fiscal submission and fiscal retry are separate work. An ITEMBA PDF is not proof of fiscal acknowledgement.
 - Physical printer/scanner acceptance and six-window production performance measurements remain release gates. This checkpoint does not claim hardware or fiscal certification.
-- Native stock receiving/counting and daily-report interiors are the next remake phase. Existing gated workflows remain available in the legacy POS shell meanwhile.
+- Native stock receiving/counting and daily-report interiors are now implemented and staged in [checkpoint 4](POS_REMAKE_CHECKPOINT_4_2026-10-03.md). Authorised cashier and hardware acceptance remain outstanding.

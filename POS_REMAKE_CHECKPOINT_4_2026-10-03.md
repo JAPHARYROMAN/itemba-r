@@ -42,6 +42,14 @@ They use the existing authenticated terminal/device headers and permission syste
 
 Local evidence: ignored `.release/pos-phase4-*`, `.release/pos-proof-pdfs/` and `.release/pos-stock-stage/`. The staging image proof must rerun these checks using the exact packaged compiled backend and Prisma client before promotion.
 
+## Staging release
+
+Source commit `d3f5bdb7ca012e552271ef09d8dd42af29999c49` is deployed to staging. The archived committed source built backend, migration and frontend production images labelled with that revision. Normal backend declaration output and the full frontend route/type build passed. The actual packaged migration image passed all 24 compiled-service proof checks again in a disposable database.
+
+An authenticated AES-256-GCM backup was taken before migration/startup, verified by decrypting and comparing its bytes, and its plaintext copy removed. Previous backend/frontend images remain available for rollback. There were no pending migrations. Both replacement services are healthy with the expected source labels and preserved staging ports/data. Six public route checks passed: login/POS entry and API health respond 200, while the daily JSON/PDF and count-history endpoints return 401 without authentication. API health reports the database up.
+
+A fresh authenticated browser navigation restored ITEMBA OS and opened the deployed POS setup window without horizontal overflow. It requires a correctly assigned cashier/till to proceed; no permissions, employee assignments or live trading records were changed for this check. Production is unchanged. Packaged build, backup, deployment, public-route and runtime evidence is saved under `.release/pos-stock-stage/`.
+
 ## Remaining release gates
 
 An existing authorised staging cashier must activate an eligible till and exercise deployed selling, collection, refund, receiving and counting. Physical printer/scanner acceptance, fiscal/provider integrations and six-populated-window performance acceptance remain separate release gates. This checkpoint does not claim completion of those checks.
