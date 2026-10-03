@@ -246,6 +246,11 @@ jobs:
         run: npm run test:e2e:ci
       - name: Prove PetroDollar station posting, payments, reversal and corrections
         run: npm run test:petrodollar-posting
+      - name: Prove combined POS payments, party ledger and unified cash-book replay
+        run: |
+          npm run build
+          POS_PROOF_COMPILED=1 node scripts/verify-pos-payment-lifecycle.cjs
+          POS_PROOF_COMPILED=1 POS_PROOF_CASH_BOOK_UNIFIED=1 node scripts/verify-pos-payment-lifecycle.cjs
       - name: Prove the Msaidizi chat expense workflow in a separate database
         env:
           DATABASE_URL: postgresql://itemba:1618@localhost:5432/msaidizi_chat_proof?schema=public

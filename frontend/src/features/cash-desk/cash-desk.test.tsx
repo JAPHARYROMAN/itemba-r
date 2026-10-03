@@ -212,7 +212,7 @@ describe('Cash Desk', () => {
         onSaved={saved}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/Paying account/), { target: { value: 'till' } });
+    await chooseSelectOption(/Paying account/, 'till');
     const picker = screen.getByLabelText('Supplier (optional)');
     fireEvent.focus(picker);
     fireEvent.change(picker, { target: { value: 'Mwan' } });
@@ -225,7 +225,7 @@ describe('Cash Desk', () => {
       expect.objectContaining({ query: expect.objectContaining({ companyId: 'company' }) }),
     );
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '150.25' } });
-    fireEvent.change(screen.getByLabelText(/Expense category/), { target: { value: 'TRANSPORT' } });
+    await chooseSelectOption(/Expense category/, 'TRANSPORT');
     fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Fuel delivery' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save movement' }));
     await waitFor(() => expect(saved).toHaveBeenCalled());

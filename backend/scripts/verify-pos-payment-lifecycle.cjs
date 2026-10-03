@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 const { PrismaClient } = require('@prisma/client');
 require('reflect-metadata');
 const compiled = process.env.POS_PROOF_COMPILED === '1';
+const unifiedCashBook = process.env.POS_PROOF_CASH_BOOK_UNIFIED === '1';
 if (!compiled)
   require('ts-node').register({
     transpileOnly: true,
@@ -402,12 +403,14 @@ async function main() {
       'modules/mobile-pos-lite/pos-transactions.service',
       'PosTransactionsService',
     );
+    const CashBook = load('modules/cash-book/cash-book.service', 'CashBookService');
+    const cashBook = new CashBook(db, audit, companies, { get: () => unifiedCashBook ? 'true' : 'false' });
     const lifecycle = new Lifecycle(
       db,
       pos,
-      new Payments(db, audit, companies, resolver, engine, codes),
+      new Payments(db, audit, companies, resolver, engine, codes, cashBook),
       new Credits(db, audit, companies, resolver, engine, codes, movements, profit),
-      new Refunds(db, audit, companies, resolver, engine, codes),
+      new Refunds(db, audit, companies, resolver, engine, codes, cashBook),
       documents,
       org,
     );
@@ -460,6 +463,14 @@ async function main() {
     checks.push(
       'Split/partial sale records original accounts and debt once; changed allocations refuse replay',
     );
+    if (unifiedCashBook) {
+      for (const id of [account.id, mobile.id]) {
+        const erp = await db.cashAccount.findUnique({where:{id}});
+        const mapped = await db.cashDeskAccount.create({data:{...scope, erpCashAccountId:id, name:erp.accountName, nameKey:id, kind:'CASH', currency:'TZS', openingDate:new Date(date), balance:erp.currentBalance}});
+        const opening = await db.cashDeskMovement.create({data:{requestId:randomUUID(), payloadKey:'proof-opening', kind:'OPENING', amount:erp.currentBalance, currency:'TZS', businessDate:new Date(date), description:'Synthetic opening for integration proof', reference:'PROOF', createdBy:user.id, actorName:'Proof'}});
+        await db.cashDeskEntry.create({data:{movementId:opening.id, accountId:mapped.id, businessDate:new Date(date), amount:erp.currentBalance}});
+      }
+    }
     const collect = { requestId: randomUUID(), method: 'CASH', amount: 500 };
     const responses = await Promise.all([
       lifecycle.collect(terminal.terminalCode, secret, split.id, collect, user),
@@ -565,6 +576,21 @@ async function main() {
     checks.push(
       'Cash Desk keeps original allocations separate from collections and actual account balances',
     );
+    if (unifiedCashBook) {
+      assert.equal(await db.cashDeskMovement.count({where:{customerPaymentId:{not:null}}}),1);
+      assert.equal(await db.cashDeskMovement.count({where:{refundId:{not:null}}}),2);
+      for (const id of [account.id,mobile.id]) {
+        const erp=await db.cashAccount.findUnique({where:{id}});
+        const desk=await db.cashDeskAccount.findUnique({where:{erpCashAccountId:id}});
+        assert.equal(desk.balance.toFixed(2),erp.currentBalance.toFixed(2));
+      }
+      checks.push('Unified cash book mirrors collections and refunds exactly once without doubling Sales Desk receipts');
+    }
+    const ar = await resolver.resolve(company.id, 'AR_CONTROL', db);
+    const arLines = await db.journalLine.findMany({where:{accountId:ar.id}});
+    assert(arLines.length>0);
+    assert(arLines.every(line=>line.partyType==='CUSTOMER' && line.customerId===customer.id));
+    checks.push('Sales, split debt, collections and credit notes carry the same customer on every AR control line');
     for (const j of await db.journalEntry.findMany({ include: { lines: true } }))
       assert.equal(
         j.lines.reduce((n, l) => n + Number(l.debit), 0),
@@ -816,7 +842,7 @@ async function main() {
     assert.equal(countJournal.length, 1);
     assert.equal(countJournal[0].lines.reduce((n,l)=>n+Number(l.debit),0), countJournal[0].lines.reduce((n,l)=>n+Number(l.credit),0));
     checks.push('Native count posts one canonical adjustment and balanced journal, replays without another stock change and lists its original variance');
-    console.log(JSON.stringify({ ok: true, compiled, checks, existingBusinessDataChanged: false }));
+    console.log(JSON.stringify({ ok: true, compiled, unifiedCashBook, checks, existingBusinessDataChanged: false }));
   } finally {
     await db?.$disconnect();
     if (created) {

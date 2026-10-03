@@ -136,9 +136,7 @@ describe('Inventory reports workspace', () => {
   it('offers all seven reports with a valuation preview and inspectors for other reports', async () => {
     render(tree());
     await screen.findByRole('cell', { name: 'Bottled water', exact: true });
-    expect(within(screen.getByLabelText('Inventory report')).getAllByRole('option')).toHaveLength(
-      7,
-    );
+    expect(selectFieldOptions(getSelectField('Inventory report'))).toHaveLength(7);
     expect(screen.getByRole('cell', { name: '12.0001', exact: true })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '18,000.25', exact: true })).toBeInTheDocument();
     capture('inventory-reports');

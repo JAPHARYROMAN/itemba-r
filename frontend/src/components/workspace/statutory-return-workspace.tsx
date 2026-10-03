@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { downloadTablePdf } from '@/lib/export-download';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { Btn, FormInput, FormSelect, PageHeader, PermissionDeniedState } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
@@ -37,6 +38,9 @@ export function StatutoryReturnWorkspace() {
   const [generated, setGenerated] = useState('');
   const [validation, setValidation] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const exportRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => exportRequest.current?.abort(), []);
   const [page, setPage] = useState(1);
   const query = { companyId, year: filters.year, month: filters.month };
   const key = JSON.stringify([kind, query]);
@@ -51,6 +55,7 @@ export function StatutoryReturnWorkspace() {
     canRead && canChooseCompany,
   );
   function change(field: keyof typeof filters, value: string) {
+    exportRequest.current?.abort();
     setFilters((f) => ({ ...f, [field]: value }));
     setGenerated('');
     setValidation('');
@@ -58,6 +63,7 @@ export function StatutoryReturnWorkspace() {
     setPage(1);
   }
   function generate() {
+    exportRequest.current?.abort();
     if (!companyId) {
       setValidation('Select a company to generate a return.');
       return;
@@ -88,7 +94,7 @@ export function StatutoryReturnWorkspace() {
     <div className="business-workspace hr-report-workspace statutory-return-workspace">
       <PageHeader
         title="Statutory returns"
-        subtitle="Review recorded payroll contributions and download a monthly CSV."
+        subtitle="Review recorded payroll contributions and download a monthly CSV or PDF."
         breadcrumbs={[
           { label: 'People', href: '/hr' },
           { label: 'Reports', href: '/hr/reports' },
@@ -106,6 +112,7 @@ export function StatutoryReturnWorkspace() {
             key={t.key}
             aria-pressed={kind === t.key}
             onClick={() => {
+              exportRequest.current?.abort();
               setKind(t.key);
               setGenerated('');
               setValidation('');
@@ -214,6 +221,61 @@ export function StatutoryReturnWorkspace() {
                   }}
                 >
                   Download CSV ({data.file.rowCount} {data.file.rowCount === 1 ? 'row' : 'rows'})
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  loading={exportingPdf}
+                  onClick={async () => {
+                    if (exportingPdf) return;
+                    const request = new AbortController();
+                    exportRequest.current = request;
+                    setExportingPdf(true);
+                    setDownloadError('');
+                    try {
+                      await downloadTablePdf(
+                        {
+                          title: `${kind.toUpperCase()} return`,
+                          subtitle: `${data.formCode} · ${data.formName}`,
+                          companyId: data.header.companyId,
+                          columns: [
+                            'Employee code',
+                            'Employee',
+                            ...returnColumns[kind].map((c) => c.label),
+                          ],
+                          rows: data.rows.map((row) => [
+                            String(row.employeeCode ?? ''),
+                            String(row.fullName ?? ''),
+                            ...returnColumns[kind].map((c) => c.format(row[c.key])),
+                          ]),
+                          numericColumns: returnColumns[kind].flatMap((c, i) =>
+                            c.numeric ? [i + 2] : [],
+                          ),
+                          meta: [
+                            { label: 'Period', value: data.header.periodLabel },
+                            { label: 'Company', value: data.header.companyName },
+                            ...Object.entries(data.summary).map(([k, v]) => ({
+                              label: returnSummaryLabel(k),
+                              value: returnSummaryValue(k, v),
+                            })),
+                          ],
+                          baseName: data.file.filename.replace(/\.csv$/i, ''),
+                        },
+                        request.signal,
+                      );
+                    } catch (error) {
+                      if (!request.signal.aborted)
+                        setDownloadError(
+                          error instanceof Error
+                            ? error.message
+                            : 'The PDF could not be downloaded. Try Export PDF again.',
+                        );
+                    } finally {
+                      setExportingPdf(false);
+                      if (exportRequest.current === request) exportRequest.current = null;
+                    }
+                  }}
+                >
+                  Export PDF
                 </Btn>
                 <p className="statutory-return-context">
                   Generated from recorded payroll lines. Downloading does not submit, approve or

@@ -18,7 +18,12 @@ import {
 import type { CatalogEntry, SavedReportView } from './report-viewer-types';
 import { dateFieldValue, getDateField, setDateField } from '@/test/date-field';
 import { DEFAULT_VALUATION, VALUATION_PRESETS } from '@/features/inventory/stock-valuation-format';
-import { changeSelectField, getSelectField, selectFieldOptions } from '@/test/select-field';
+import {
+  changeSelectField,
+  getSelectField,
+  selectFieldOptions,
+  selectFieldValue,
+} from '@/test/select-field';
 const state = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
@@ -275,9 +280,9 @@ describe('Report library and viewer workspace', () => {
     const signal = state.binary.mock.calls[0][3] as AbortSignal;
     const reads = state.get.mock.calls.filter(([path]) => path.includes('/export-audit/')).length;
     changeSelectField('Column layout', 'compact');
-    changeSelectField('Find product', 'Water');
+    fireEvent.change(screen.getByLabelText('Find product'), { target: { value: 'Water' } });
     expect(signal.aborted).toBe(true);
-    expect(screen.getByLabelText('Export format')).toHaveValue('xlsx');
+    expect(selectFieldValue(getSelectField('Export format'))).toBe('xlsx');
     await act(async () => resolve());
     expect(state.get.mock.calls.filter(([path]) => path.includes('/export-audit/'))).toHaveLength(
       reads,
@@ -316,7 +321,7 @@ describe('Report library and viewer workspace', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Apply Compact drinks' }));
     expect(screen.queryByLabelText('Date from')).toBeNull();
     await run();
-    expect(screen.getByLabelText('Category filter')).toHaveValue('Drinks');
+    expect(selectFieldValue(getSelectField('Category filter'))).toBe('Drinks');
     expect(screen.queryByRole('columnheader', { name: 'Category' })).toBeNull();
     expect(screen.queryByRole('cell', { name: 'Stock 23', exact: true })).toBeNull();
     expect(screen.queryByRole('cell', { name: 'Stock 22', exact: true })).toBeNull();
@@ -332,7 +337,7 @@ describe('Report library and viewer workspace', () => {
     expect(audit.parameters.stockValuation.columns).not.toContain('category');
     for (const format of ['xlsx', 'docx', 'txt', 'csv', 'json']) {
       state.post.mockClear();
-      fireEvent.change(screen.getByLabelText('Export format'), { target: { value: format } });
+      changeSelectField('Export format', format);
       fireEvent.click(screen.getByRole('button', { name: 'Export report' }));
       await waitFor(() =>
         expect(state.post).toHaveBeenCalledWith(

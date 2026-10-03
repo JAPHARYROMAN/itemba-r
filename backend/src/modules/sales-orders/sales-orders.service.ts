@@ -2536,7 +2536,9 @@ export class SalesOrdersService {
         : [
             {
               accountId: accounts[receivableOrCashRole].id,
-              ...(input.paymentMethod === SalesPaymentMethod.CREDIT ? partyOf('customer', input.order.customerId) : {}),
+              ...(input.paymentMethod === SalesPaymentMethod.CREDIT
+                ? partyOf('customer', input.order.customerId)
+                : {}),
               description:
                 input.paymentMethod === SalesPaymentMethod.CREDIT
                   ? 'Customer receivable'

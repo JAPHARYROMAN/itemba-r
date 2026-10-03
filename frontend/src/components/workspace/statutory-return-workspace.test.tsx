@@ -16,7 +16,9 @@ const state = vi.hoisted(() => ({
   companyId: null as string | null,
   get: vi.fn(),
   page: vi.fn(),
+  pdf: vi.fn(),
 }));
+vi.mock('@/lib/export-download', () => ({ downloadTablePdf: state.pdf }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     user: { companyId: state.companyId },
@@ -105,6 +107,7 @@ function fixture(kind: ReturnKind): StatutoryReturn {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  state.pdf.mockResolvedValue(undefined);
   state.companyId = null;
   state.permissions = new Set(['payroll.view', 'companies.read']);
   state.get.mockImplementation(async (path: string) =>
@@ -146,6 +149,47 @@ function capture(name: string) {
   }
 }
 describe('Statutory return workspace', () => {
+  it.each(['paye', 'nssf', 'psssf', 'wcf', 'sdl', 'nhif', 'heslb'] as const)(
+    'exports all %s employees on the selected company letterhead, independently of pagination',
+    async (kind) => {
+      render(<StatutoryReturnWorkspace />);
+      await choose();
+      await userEvent.click(screen.getByRole('button', { name: kind.toUpperCase(), exact: true }));
+      await generate();
+      await userEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+      await waitFor(() => expect(state.pdf).toHaveBeenCalled());
+      const [request, signal] = state.pdf.mock.calls[0];
+      expect(request.companyId).toBe('company');
+      expect(request.rows).toHaveLength(21);
+      expect(request.columns.slice(0, 2)).toEqual(['Employee code', 'Employee']);
+      expect(request.rows[0].slice(0, 2)).toEqual(['EXAMPLE-1', 'Alex Example']);
+      expect(request.rows[20][1]).toBe('Example Person 21');
+      expect(request.meta).toContainEqual({ label: 'Period', value: 'September 2026' });
+      expect(signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+  it('cancels a stale PDF when the company changes and reports an export failure', async () => {
+    render(<StatutoryReturnWorkspace />);
+    await choose();
+    await generate();
+    let reject!: (error: Error) => void;
+    state.pdf.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    const signal = state.pdf.mock.calls[0][1];
+    await chooseSelectOption('Company', 'other');
+    expect(signal.aborted).toBe(true);
+    await act(async () => reject(new Error('Cancelled')));
+    expect(screen.queryByText('Cancelled')).not.toBeInTheDocument();
+    await generate();
+    state.pdf.mockRejectedValueOnce(new Error('PDF service unavailable'));
+    await userEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('PDF service unavailable');
+  });
   it('gates reads and supports the assigned company without requesting company-directory permission', async () => {
     state.permissions.clear();
     const denied = render(<StatutoryReturnWorkspace />);

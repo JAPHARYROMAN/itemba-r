@@ -38,7 +38,7 @@ import {
   fmtDateOnly as fmtDetailDate,
   fmtDateTime,
   fmtQty,
-} from '../_components/ar-ap-detail-ui';
+} from '@/app/(dashboard)/finance/_components/ar-ap-detail-ui';
 
 interface Company {
   id: string;

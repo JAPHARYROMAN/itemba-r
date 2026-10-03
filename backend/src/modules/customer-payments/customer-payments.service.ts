@@ -155,7 +155,11 @@ export class CustomerPaymentsService {
 
   // ── create (records payment + allocations atomically) ───────────────────────
 
-  async create(dto: CreateCustomerPaymentDto, user: AuthUser, transaction?: Prisma.TransactionClient) {
+  async create(
+    dto: CreateCustomerPaymentDto,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+  ) {
     const client = transaction ?? this.prisma;
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     if (!dto.allocations || dto.allocations.length === 0) {
@@ -449,12 +453,20 @@ export class CustomerPaymentsService {
     return { payment: withJournal, receivables };
   }
 
-  private runWithTransaction<T>(transaction: Prisma.TransactionClient | undefined, run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  private runWithTransaction<T>(
+    transaction: Prisma.TransactionClient | undefined,
+    run: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
     return transaction ? run(transaction) : this.prisma.$transaction(run);
   }
 
-  private logInContext(transaction: Prisma.TransactionClient | undefined, entry: Parameters<AuditLogsService['log']>[0]) {
-    return transaction ? this.auditLogs.logStrictInTransaction(transaction, entry) : this.auditLogs.log(entry);
+  private logInContext(
+    transaction: Prisma.TransactionClient | undefined,
+    entry: Parameters<AuditLogsService['log']>[0],
+  ) {
+    return transaction
+      ? this.auditLogs.logStrictInTransaction(transaction, entry)
+      : this.auditLogs.log(entry);
   }
 
   // ── reverse (COMPLETED -> REVERSED) ─────────────────────────────────────────

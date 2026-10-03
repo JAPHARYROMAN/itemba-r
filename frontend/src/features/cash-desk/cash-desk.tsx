@@ -627,9 +627,26 @@ export function CashDesk({
                     setAccountId(value);
                     setPage(1);
                   }}
-                  options={[{ value: '', label: 'All accounts' }, ...(accounts.data ?? []).map(a => ({value: a.id, label: a.name + ' · ' + a.company.name}))]}
+                  options={[
+                    { value: '', label: 'All accounts' },
+                    ...(accounts.data ?? []).map((a) => ({
+                      value: a.id,
+                      label: a.name + ' · ' + a.company.name,
+                    })),
+                  ]}
                 />
-                <SelectField aria-label="Counterparty type" value={partyType} onChange={value => { setPartyType(value); setPage(1); }} options={[{value:'',label:'All counterparties'}, ...Object.entries(partyTypeLabels).map(([value,label]) => ({value,label}))]} />
+                <SelectField
+                  aria-label="Counterparty type"
+                  value={partyType}
+                  onChange={(value) => {
+                    setPartyType(value);
+                    setPage(1);
+                  }}
+                  options={[
+                    { value: '', label: 'All counterparties' },
+                    ...Object.entries(partyTypeLabels).map(([value, label]) => ({ value, label })),
+                  ]}
+                />
                 {partyTarget && (
                   <span className="cash-party-chip">
                     Showing {targetSupplierId ? 'supplier' : 'customer'}{' '}

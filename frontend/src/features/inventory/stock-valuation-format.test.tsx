@@ -114,7 +114,7 @@ describe('Stock valuation format', () => {
     await user.keyboard(' ');
     expect(first.queryByRole('columnheader', { name: 'Category', exact: true })).toBeNull();
     expect(second.getByRole('columnheader', { name: 'Category', exact: true })).toBeInTheDocument();
-    fireEvent.change(first.getByLabelText('Category filter'), { target: { value: 'Food' } });
+    changeSelectField('Category filter', 'Food', screen.getByRole('region', { name: 'First' }));
     expect(first.queryByRole('cell', { name: 'Water', exact: true })).toBeNull();
     expect(second.getByRole('cell', { name: 'Water', exact: true })).toBeInTheDocument();
     for (const checkbox of first
@@ -144,3 +144,4 @@ describe('Stock valuation format', () => {
     expect(view.container.querySelector('.valuation-print-table')).toBeNull();
   });
 });
+import { changeSelectField } from '@/test/select-field';

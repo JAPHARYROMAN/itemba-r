@@ -46,6 +46,7 @@ export const returnTypes: Array<{ key: ReturnKind; label: string; description: s
 interface ReturnColumn {
   key: string;
   label: string;
+  numeric?: boolean;
   format: (v: string | number | null | undefined) => string;
 }
 const text = (key: string, label: string): ReturnColumn => ({
@@ -53,7 +54,12 @@ const text = (key: string, label: string): ReturnColumn => ({
   label,
   format: (v) => (v == null || v === '' ? 'Not recorded' : String(v)),
 });
-const money = (key: string, label: string): ReturnColumn => ({ key, label, format: payrollMoney });
+const money = (key: string, label: string): ReturnColumn => ({
+  key,
+  label,
+  numeric: true,
+  format: payrollMoney,
+});
 const pension = [
   money('pensionableSalary', 'Pensionable salary'),
   money('totalContribution', 'Total contribution'),
