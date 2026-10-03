@@ -82,7 +82,11 @@ function Surface({ appId }: { appId: string }) {
     ) : appId === 'invoice-desk' ? (
       <Invoice targetRecordId={record} />
     ) : appId === 'cash-desk' ? (
-      <Cash targetRecordId={record} />
+      <Cash
+        targetRecordId={record}
+        targetSupplierId={params.get('supplierId') ?? undefined}
+        targetCustomerId={params.get('customerId') ?? undefined}
+      />
     ) : appId === 'sales-desk' ? (
       <Sales targetRecordId={record} />
     ) : appId === 'pos' ? (

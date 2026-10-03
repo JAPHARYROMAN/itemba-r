@@ -318,6 +318,79 @@ describe('Cash Desk', () => {
       accountId: 'till',
     });
   });
+  it('shows the counterparty and the settled document as links when the reader may open them', async () => {
+    api.permissions.add('suppliers.view');
+    api.permissions.add('payables.view');
+    const fallback = api.get.getMockImplementation()!;
+    const movement = {
+      id: 'target',
+      kind: 'SUPPLIER_PAYMENT',
+      description: 'Fuel delivery settled',
+      businessDate: '2026-09-01',
+      amount: '1000',
+      currency: 'TZS',
+      reference: 'REF-9',
+      entries: [],
+      actorName: 'Treasury',
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      supplier: { id: 'sup-1', name: 'Mwanjalisi Station' },
+      payable: { id: 'pay-1', payableNumber: 'PAY-7' },
+      supplierPayment: { id: 'sp-1', paymentNumber: 'SPY-3' },
+    } as Movement;
+    api.get.mockImplementation((path, ...args) =>
+      path === '/cash-desk/movements/target' ? Promise.resolve(movement) : fallback(path, ...args),
+    );
+    render(<CashDesk targetRecordId="target" />);
+    await screen.findByRole('dialog', { name: 'Supplier payment' });
+    expect(screen.getByRole('link', { name: /Mwanjalisi Station/ })).toHaveAttribute(
+      'href',
+      '/invoice-desk/suppliers/sup-1',
+    );
+    expect(screen.getByRole('link', { name: /PAY-7/ })).toHaveAttribute(
+      'href',
+      '/cash-desk/payables?search=PAY-7',
+    );
+    expect(screen.getByText('SPY-3')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /SPY-3/ })).not.toBeInTheDocument();
+  });
+  it('keeps the counterparty as text without profile access and honours a supplier in the URL', async () => {
+    const fallback = api.get.getMockImplementation()!;
+    const row = {
+      id: 'm1',
+      kind: 'SUPPLIER_PAYMENT',
+      description: 'Fuel delivery settled',
+      businessDate: '2026-09-01',
+      amount: '1000',
+      currency: 'TZS',
+      reference: 'REF-9',
+      entries: [],
+      actorName: 'Treasury',
+      partyType: 'SUPPLIER',
+      supplierId: 'sup-1',
+      supplier: { id: 'sup-1', name: 'Mwanjalisi Station' },
+      payable: { id: 'pay-1', payableNumber: 'PAY-7' },
+    } as Movement;
+    api.get.mockImplementation((path, ...args) =>
+      path === '/cash-desk/movements'
+        ? Promise.resolve({ rows: [row], total: 1, page: 1, pageSize: 25 })
+        : fallback(path, ...args),
+    );
+    render(<CashDesk targetSupplierId="sup-1" />);
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/cash-desk/movements',
+        expect.objectContaining({ query: expect.objectContaining({ supplierId: 'sup-1' }) }),
+      ),
+    );
+    expect(await screen.findByText('Showing supplier', { exact: false })).toBeInTheDocument();
+    expect(screen.getAllByText('Mwanjalisi Station').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /Mwanjalisi Station/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    expect(navigation.replace).toHaveBeenCalledWith('/cash-desk?view=movements', {
+      scroll: false,
+    });
+  });
   it('links supplier payment to the selected invoice and its version', async () => {
     const invoice = {
       ...scope,

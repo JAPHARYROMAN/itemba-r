@@ -778,3 +778,42 @@
     flex-direction: column;
   }
 }
+/* Party linkage (Phase 2): the counterparty column on register rows, the URL party chip
+   in the toolbar and the counterparty / settles block in the movement detail. */
+.cash-movement-party {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  min-width: 0;
+  max-width: 220px;
+  flex-shrink: 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.cash-movement-party small {
+  margin-top: 3px;
+}
+.cash-movement-links strong a {
+  font-weight: 500;
+}
+.cash-toolbar .cash-party-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: color-mix(in srgb, #67ad99 12%, transparent);
+  color: var(--desk-ink);
+}
+.cash-toolbar .cash-party-chip button {
+  color: #529681;
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .cash-movement-party {
+    display: none;
+  }
+}

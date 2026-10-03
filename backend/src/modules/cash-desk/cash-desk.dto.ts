@@ -49,9 +49,15 @@ export class CashQuery {
     'REVERSAL',
     'BORROWING',
     'DEBT_REPAYMENT',
+    'CUSTOMER_RECEIPT',
+    'REFUND',
   ])
   kind?: string;
   @IsOptional() @IsString() @MaxLength(100) search?: string;
+  // Party linkage (Phase 2): filter the register by who the money went to or came from.
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsUUID() customerId?: string;
+  @IsOptional() @IsIn(['SUPPLIER', 'CUSTOMER', 'EMPLOYEE', 'COMPANY', 'NONE']) partyType?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100000) page = 1;
 }
 export class CashAccountDto {

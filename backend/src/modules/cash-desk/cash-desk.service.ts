@@ -37,6 +37,36 @@ const party = {
   currency: true,
   company: { select: { name: true } },
 } as const;
+/**
+ * Party linkage (Phase 2). Every movement the register returns says who the money went to
+ * or came from and which document it settled, so Cash Desk can show and link them. The
+ * names are display snapshots; the ids are the links.
+ */
+const linkage = {
+  supplier: { select: { id: true, name: true } },
+  customer: { select: { id: true, name: true } },
+  payable: { select: { id: true, payableNumber: true } },
+  receivable: { select: { id: true, receivableNumber: true } },
+  expense: { select: { id: true, expenseNumber: true } },
+  refund: { select: { id: true, refundNumber: true } },
+  supplierPayment: { select: { id: true, paymentNumber: true } },
+  customerPayment: { select: { id: true, paymentNumber: true } },
+  invoicePayment: {
+    select: { id: true, invoiceId: true, invoice: { select: { invoiceNumber: true } } },
+  },
+  salesPayment: { select: { id: true, saleId: true, sale: { select: { saleNumber: true } } } },
+} as const;
+/** Register filters by party; an undefined value leaves that dimension unfiltered. */
+const partyFilter = (q: CashQuery): Prisma.CashDeskMovementWhereInput => ({
+  supplierId: q.supplierId,
+  customerId: q.customerId,
+  partyType: q.partyType,
+});
+/** Search also matches the linked party's name, so a supplier's name finds its payments. */
+const partyNameSearch = (search: string): Prisma.CashDeskMovementWhereInput[] => [
+  { supplier: { name: { contains: search, mode: 'insensitive' } } },
+  { customer: { name: { contains: search, mode: 'insensitive' } } },
+];
 
 @Injectable()
 export class CashDeskService {
@@ -480,9 +510,12 @@ export class CashDeskService {
                 OR: [
                   { description: { contains: q.search, mode: 'insensitive' } },
                   { reference: { contains: q.search, mode: 'insensitive' } },
+                  { payee: { contains: q.search, mode: 'insensitive' } },
+                  ...partyNameSearch(q.search),
                 ],
               }
             : {},
+          partyFilter(q),
         ],
       };
     const [rows, total] = await this.db.$transaction(
@@ -492,6 +525,7 @@ export class CashDeskService {
           include: {
             entries: { where: { account: scope }, include: { account: { select: party } } },
             loanFinancialEvent: { select: { loanId: true, id: true } },
+            ...linkage,
           },
           orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
           take: 25,
@@ -510,6 +544,7 @@ export class CashDeskService {
       include: {
         entries: { where: { account: scope }, include: { account: { select: party } } },
         loanFinancialEvent: { select: { loanId: true, id: true } },
+        ...linkage,
       },
     });
     if (!row) throw new NotFoundException('Cash movement not found.');
@@ -527,7 +562,8 @@ export class CashDeskService {
   async expenses(user: AuthUser, q: CashExpenseQuery) {
     if (q.from && q.to && q.from > q.to)
       throw new BadRequestException('The start date must be on or before the end date.');
-    const scope = await this.scope(user, q);
+    const scope = await this.scope(user, q),
+      search = q.search?.trim();
     const where: Prisma.CashDeskMovementWhereInput = {
       AND: [
         { kind: 'EXPENSE', entries: { some: { account: scope } } },
@@ -543,13 +579,19 @@ export class CashDeskService {
               ? { reversedAt: { not: null } }
               : {}),
         },
-        q.search?.trim()
+        search
           ? {
-              OR: ['description', 'reference', 'payee', 'expenseNotes'].map((field) => ({
-                [field]: { contains: q.search!.trim(), mode: 'insensitive' },
-              })),
+              OR: [
+                ...['description', 'reference', 'payee', 'expenseNotes'].map(
+                  (field): Prisma.CashDeskMovementWhereInput => ({
+                    [field]: { contains: search, mode: 'insensitive' },
+                  }),
+                ),
+                ...partyNameSearch(search),
+              ],
             }
           : {},
+        partyFilter(q),
       ],
     };
     const groupedExpenses = this.db.cashDeskMovement.groupBy({
@@ -564,6 +606,7 @@ export class CashDeskService {
           where,
           include: {
             entries: { where: { account: scope }, include: { account: { select: party } } },
+            ...linkage,
           },
           orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
           take: 25,

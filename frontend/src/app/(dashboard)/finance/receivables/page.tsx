@@ -1,6 +1,7 @@
 'use client';
 import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useWorkspaceSearchReader } from '@/components/workspace/workspace-navigation';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -1294,10 +1295,15 @@ export default function ReceivablesPage() {
   const [writingOff, setWritingOff] = useState<Receivable | null>(null);
 
   const [scopeReady, setScopeReady] = useState(false);
+  const readSearch = useWorkspaceSearchReader();
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    // Read the window-local URL inside an OS window, the page URL elsewhere. A URL that
+    // names a document (?search=RCV-7) opens the register filtered to it.
+    const params = readSearch();
     setCompanyId(params.get('companyId') ?? '');
     setStatus(params.get('status') ?? '');
+    const requested = params.get('search');
+    if (requested) setSearch(requested);
     setScopeReady(true);
   }, []);
 

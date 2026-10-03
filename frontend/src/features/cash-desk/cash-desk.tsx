@@ -1,5 +1,5 @@
 'use client';
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AppGlyph } from '@/components/os/app-glyph';
 import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
@@ -7,6 +7,7 @@ import { getApp } from '@/lib/apps';
 import { useDeskRecordSelection } from '@/components/workspace/desk-record-selection';
 import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
+import { useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
 import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
 import {
   ArrowDownLeft,
@@ -46,7 +47,9 @@ import {
   money,
   movementLabels,
   expenseCategories,
+  partyTypeLabels,
 } from './types';
+import { movementDocuments, movementParty, type MovementLink } from './movement-links';
 import '../invoice-desk/invoice-desk.css';
 import './cash-desk.css';
 
@@ -64,7 +67,11 @@ const sections = [
 type Section = (typeof sections)[number]['id'];
 const emptyDirectory: Directory = { companies: [], divisions: [], branches: [] };
 
-export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
+export function CashDesk({
+  targetRecordId,
+  targetSupplierId,
+  targetCustomerId,
+}: { targetRecordId?: string; targetSupplierId?: string; targetCustomerId?: string } = {}) {
   const { hasPermission } = useAuth(),
     allowed = hasPermission('cash_desk.view'),
     manage = hasPermission('cash_desk.manage'),
@@ -86,7 +93,24 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
     [search, setSearch] = useWorkspaceState('cash-desk.search', ''),
     [kind, setKind] = useWorkspaceState('cash-desk.kind', ''),
     [accountId, setAccountId] = useWorkspaceState('cash-desk.accountId', ''),
-    [page, setPage] = useWorkspaceState('cash-desk.page', 1);
+    [page, setPage] = useWorkspaceState('cash-desk.page', 1),
+    [partyType, setPartyType] = useWorkspaceState('cash-desk.partyType', '');
+  const router = useWorkspaceRouter();
+  // A URL that names a party (/cash-desk?supplierId= or ?customerId=) opens the register
+  // filtered to that party until the reader clears it. The section is forced to Movements
+  // once per target so the reader sees the filtered register, not the overview.
+  const partyTarget: Record<string, string> | null = targetSupplierId
+      ? { supplierId: targetSupplierId }
+      : targetCustomerId
+        ? { customerId: targetCustomerId }
+        : null,
+    partyTargetKey = targetSupplierId || targetCustomerId || '';
+  const forcedTarget = useRef('');
+  useEffect(() => {
+    if (forcedTarget.current === partyTargetKey) return;
+    forcedTarget.current = partyTargetKey;
+    if (partyTargetKey) setSection('movements');
+  }, [partyTargetKey, setSection]);
   const [editor, setEditor] = useState<Editor | null>(null),
     [notice, setNotice] = useState('');
   const [selectedId, selectRecord] = useDeskRecordSelection('cash-desk', targetRecordId);
@@ -120,11 +144,22 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
       ...(section === 'sales'
         ? { kind: 'SALES_INCOME', date }
         : section === 'movements'
-          ? { ...(kind ? { kind } : {}), ...(accountId ? { accountId } : {}), search: deferred }
+          ? {
+              ...(kind ? { kind } : {}),
+              ...(accountId ? { accountId } : {}),
+              ...(partyType ? { partyType } : {}),
+              ...(partyTarget ?? {}),
+              search: deferred,
+            }
           : {}),
     },
     allowed && ['overview', 'sales', 'movements'].includes(section),
   );
+  const partyTargetName = partyTarget
+    ? ((movements.data?.rows ?? [])
+        .map((m) => m.supplier?.name ?? m.customer?.name)
+        .find(Boolean) ?? null)
+    : null;
   const loans = useWorkspaceResource<Page<Loan>>(
     '/cash-desk/loans',
     { ...query, page },
@@ -542,7 +577,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                   <Search size={16} />
                   <input
                     aria-label="Search movements"
-                    placeholder="Search description or reference"
+                    placeholder="Search description, reference or counterparty"
                     value={search}
                     onChange={(e) => {
                       setSearch(e.target.value);
@@ -580,6 +615,33 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                     </option>
                   ))}
                 </select>
+                <select
+                  aria-label="Counterparty type"
+                  value={partyType}
+                  onChange={(e) => {
+                    setPartyType(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All counterparties</option>
+                  {Object.entries(partyTypeLabels).map(([k, l]) => (
+                    <option key={k} value={k}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+                {partyTarget && (
+                  <span className="cash-party-chip">
+                    Showing {targetSupplierId ? 'supplier' : 'customer'}{' '}
+                    <strong>{partyTargetName ?? 'movements'}</strong>
+                    <button
+                      type="button"
+                      onClick={() => router.replace('/cash-desk?view=movements', { scroll: false })}
+                    >
+                      Show all
+                    </button>
+                  </span>
+                )}
               </div>
             )}
             {section === 'sales' && (
@@ -833,6 +895,7 @@ export function CashDesk({ targetRecordId }: { targetRecordId?: string } = {}) {
                 {dateLabel(selected.businessDate)} · {money(selected.amount, selected.currency)}
               </p>
               <p className="desk-muted">{selected.reference || 'No reference'}</p>
+              <MovementLinks movement={selected} can={hasPermission} />
               {selected.fuelReportPostingId && (
                 <p className="desk-muted">
                   Posted from PetroDollar. Reverse the entire shift posting there to keep cash,
@@ -984,35 +1047,84 @@ function MovementList({
     );
   return (
     <div className="cash-movements">
-      {rows.map((m) => (
-        <button key={m.id} onClick={() => onSelect(m)}>
-          <span className={`cash-movement-icon ${m.reversedAt ? 'is-reversed' : ''}`}>
-            {[
-              'DAILY_SALES',
-              'SALE_RECEIPT',
-              'CUSTOMER_RECEIPT',
-              'OTHER_IN',
-              'OPENING',
-              'BORROWING',
-            ].includes(m.kind) ? (
-              <ArrowDownLeft size={18} />
-            ) : ['LOAN', 'TRANSFER', 'LOAN_REPAYMENT'].includes(m.kind) ? (
-              <ArrowLeftRight size={18} />
-            ) : (
-              <ArrowUpRight size={18} />
+      {rows.map((m) => {
+        const party = movementParty(m),
+          documents = movementDocuments(m);
+        return (
+          <button key={m.id} onClick={() => onSelect(m)}>
+            <span className={`cash-movement-icon ${m.reversedAt ? 'is-reversed' : ''}`}>
+              {[
+                'DAILY_SALES',
+                'SALE_RECEIPT',
+                'CUSTOMER_RECEIPT',
+                'OTHER_IN',
+                'OPENING',
+                'BORROWING',
+              ].includes(m.kind) ? (
+                <ArrowDownLeft size={18} />
+              ) : ['LOAN', 'TRANSFER', 'LOAN_REPAYMENT'].includes(m.kind) ? (
+                <ArrowLeftRight size={18} />
+              ) : (
+                <ArrowUpRight size={18} />
+              )}
+            </span>
+            <span className="cash-movement-name">
+              <strong>{m.description}</strong>
+              <small>
+                {movementLabels[m.kind]} · {m.entries.map((e) => e.account.name).join(' → ')}
+                {m.reversedAt ? ' · Reversed' : ''}
+              </small>
+            </span>
+            {(party || documents.length > 0) && (
+              <span className="cash-movement-party">
+                {party?.text}
+                {documents.length > 0 && <small>{documents.map((d) => d.text).join(' · ')}</small>}
+              </span>
             )}
-          </span>
-          <span className="cash-movement-name">
-            <strong>{m.description}</strong>
-            <small>
-              {movementLabels[m.kind]} · {m.entries.map((e) => e.account.name).join(' → ')}
-              {m.reversedAt ? ' · Reversed' : ''}
-            </small>
-          </span>
-          <span className="cash-movement-date">{dateLabel(m.businessDate)}</span>
-          <strong className="cash-movement-amount">{money(m.amount, m.currency)}</strong>
-          <ChevronRight size={14} />
-        </button>
+            <span className="cash-movement-date">{dateLabel(m.businessDate)}</span>
+            <strong className="cash-movement-amount">{money(m.amount, m.currency)}</strong>
+            <ChevronRight size={14} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+/**
+ * Who the money went to or came from and what it settled, each a link when the reader may
+ * open the profile or the document, plain text otherwise (a name is never a guessed link).
+ */
+function MovementLinks({
+  movement,
+  can,
+}: {
+  movement: Movement;
+  can: (...permissions: string[]) => boolean;
+}) {
+  const party = movementParty(movement, can),
+    documents = movementDocuments(movement, can);
+  if (!party && !documents.length) return null;
+  const render = (link: MovementLink) =>
+    link.href ? (
+      <Link href={link.href} className="text-blue-600">
+        {link.text} →
+      </Link>
+    ) : (
+      link.text
+    );
+  return (
+    <div className="cash-expense-detail cash-movement-links">
+      {party && (
+        <p>
+          <span>Counterparty · {party.label}</span>
+          <strong>{render(party)}</strong>
+        </p>
+      )}
+      {documents.map((d) => (
+        <p key={`${d.label}:${d.text}`}>
+          <span>Settles · {d.label}</span>
+          <strong>{render(d)}</strong>
+        </p>
       ))}
     </div>
   );

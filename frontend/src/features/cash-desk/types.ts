@@ -35,6 +35,20 @@ export type Movement = {
   reversalReason: string | null;
   reversalOfId: string | null;
   invoicePaymentId: string | null;
+  // Party linkage (Phase 2): who the money went to or came from, and what it settled.
+  partyType?: string | null;
+  supplierId?: string | null;
+  customerId?: string | null;
+  supplier?: { id: string; name: string } | null;
+  customer?: { id: string; name: string } | null;
+  payable?: { id: string; payableNumber: string } | null;
+  receivable?: { id: string; receivableNumber: string } | null;
+  expense?: { id: string; expenseNumber: string } | null;
+  refund?: { id: string; refundNumber: string } | null;
+  supplierPayment?: { id: string; paymentNumber: string } | null;
+  customerPayment?: { id: string; paymentNumber: string } | null;
+  invoicePayment?: { id: string; invoiceId: string; invoice: { invoiceNumber: string } } | null;
+  salesPayment?: { id: string; saleId: string; sale: { saleNumber: string } } | null;
   entries: {
     id: string;
     amount: string;
@@ -96,6 +110,13 @@ export const movementLabels: Record<string, string> = {
   REVERSAL: 'Reversal',
   BORROWING: 'Borrowing received',
   DEBT_REPAYMENT: 'External loan repayment',
+};
+export const partyTypeLabels: Record<string, string> = {
+  SUPPLIER: 'Suppliers',
+  CUSTOMER: 'Customers',
+  EMPLOYEE: 'Employees',
+  COMPANY: 'Group companies',
+  NONE: 'No counterparty',
 };
 export type Editor = {
   draftId?: string;
