@@ -1100,6 +1100,36 @@ describe('Native stock transactions', () => {
     await user.click(screen.getByRole('button', { name: 'Stock' }));
     await user.click(screen.getAllByRole('button', { name: tab })[0]);
   }
+  it('refreshes stock after returning from selling even when the saved snapshot is still fresh', async () => {
+    const user = userEvent.setup();
+    await openStock(user, 'Stock');
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('button', { name: /Soda Baridi/ })).getByText('5'),
+      ).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Sell', exact: true }));
+    const original = h.backendGet.getMockImplementation()!;
+    h.backendGet.mockImplementation(async (path: string, ...args: unknown[]) => {
+      const value = await original(path, ...args);
+      if (path !== '/mobile-pos-lite/stock') return value;
+      return {
+        ...value,
+        items: value.items.map((item: any) => ({ ...item, quantityOnHand: 3, available: 3 })),
+      };
+    });
+    await user.click(
+      screen
+        .getByRole('navigation', { name: 'Counter workspace' })
+        .querySelector('button[title="Stock"]') ??
+        screen.getByRole('button', { name: 'Stock', exact: true }),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('button', { name: /Soda Baridi/ })).getByText('3'),
+      ).toBeInTheDocument(),
+    );
+  });
   it('keeps counts blind, sends zero but not uncounted products, and shows pending approval honestly', async () => {
     const user = userEvent.setup();
     await openStock(user, 'Stock count');

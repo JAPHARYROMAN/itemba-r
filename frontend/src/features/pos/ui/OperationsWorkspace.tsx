@@ -21,7 +21,7 @@ export type OperationsProps = {
  * instance. Read-only instances never mount a writer to the terminal draft. */
 export function OperationsWorkspace({ props, step, go, onBusy }: OperationsProps) {
   const stock = usePosStock({ binding: props.binding });
-  const ensureFresh = stock.ensureFresh;
+  const refreshStock = stock.refresh;
   const [receivingBusy, setReceivingBusy] = useState(false);
   const [countBusy, setCountBusy] = useState(false);
   const active = ['stock', 'counts', 'receiving', 'deliveries', 'reports'].includes(step);
@@ -40,8 +40,10 @@ export function OperationsWorkspace({ props, step, go, onBusy }: OperationsProps
     onBusy(receivingBusy || countBusy);
   }, [receivingBusy, countBusy, onBusy]);
   useEffect(() => {
-    if (active && step !== 'reports') ensureFresh();
-  }, [active, step, ensureFresh]);
+    // Sales and returns can change stock while this snapshot is still inside
+    // its cache lifetime. Re-entering online must read the updated quantities.
+    if (active && step !== 'reports' && props.online) refreshStock();
+  }, [active, step, props.online, refreshStock]);
   return (
     <div hidden={!active} className="pos-operations">
       {active && (
