@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import { readPosTenders, tenderTotal } from '../sales-orders/pos-tenders';
 import {
   BadRequestException,
@@ -682,7 +683,7 @@ export type MobilePosPriceOverrideInput = {
   note: string | null;
 };
 
-function effectiveSellingPrice(product: {
+export function effectiveSellingPrice(product: {
   defaultSellingPrice?: unknown;
   retailPrice?: unknown;
   wholesalePrice?: unknown;
@@ -916,7 +917,8 @@ export class MobilePosLiteService {
       companyId: existing.companyId,
       divisionId: existing.divisionId,
       branchId: existing.branchId,
-      salespersonId: dto.salespersonId ?? existing.salespersonId,
+      salespersonId: dto.salespersonId ?? existing.salespersonId ?? undefined,
+      assignedUserId: existing.assignedUserId,
       generalCustomerId: dto.generalCustomerId ?? existing.generalCustomerId,
       paymentMethods: paymentInputs,
     });
@@ -930,7 +932,7 @@ export class MobilePosLiteService {
         data: {
           name: (dto.name ?? existing.name).trim(),
           assignedUserId: configuration.assignedUserId,
-          salespersonId: dto.salespersonId ?? existing.salespersonId,
+          salespersonId: dto.salespersonId ?? existing.salespersonId ?? undefined,
           generalCustomerId: dto.generalCustomerId ?? existing.generalCustomerId,
           creditEnabled: dto.creditEnabled ?? existing.creditEnabled,
           offlineCashEnabled: dto.offlineCashEnabled ?? existing.offlineCashEnabled,
@@ -1955,6 +1957,7 @@ export class MobilePosLiteService {
     user: AuthUser,
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    await assertLegacyPosWriteAllowed(this.prisma, user, terminal.companyId, terminal.branchId);
     const marker = purchaseIdempotencyMarker(dto.idempotencyKey);
 
     // Replay/resume BEFORE validation, exactly like createStockCount and for
@@ -2158,6 +2161,7 @@ export class MobilePosLiteService {
     user: AuthUser,
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    await assertLegacyPosWriteAllowed(this.prisma, user, terminal.companyId, terminal.branchId);
     const marker = stockCountIdempotencyMarker(dto.idempotencyKey);
 
     // Replay/resume BEFORE validation: an adjustment carrying this key means
@@ -2340,6 +2344,7 @@ export class MobilePosLiteService {
     user: AuthUser,
   ) {
     const terminal = await this.requireTerminal(terminalCode, deviceSecret, user);
+    await assertLegacyPosWriteAllowed(this.prisma, user, terminal.companyId, terminal.branchId);
     const paymentMethod = dto.paymentMethod;
     const allocated = dto.payments !== undefined;
     const isCredit = paymentMethod === SalesPaymentMethod.CREDIT;
@@ -2432,7 +2437,7 @@ export class MobilePosLiteService {
         paymentMethod,
         cashAccountId: tenders?.[0].cashAccountId ?? payment?.cashAccountId,
         paymentReference: dto.paymentReference?.trim() || undefined,
-        salespersonId: terminal.salespersonId,
+        salespersonId: terminal.salespersonId ?? undefined,
         idempotencyKey: dto.idempotencyKey,
         lines,
       };
@@ -5124,6 +5129,33 @@ export class MobilePosLiteService {
     deviceSecret: string | undefined,
     user: AuthUser,
   ) {
+    if (user.tokenUse === 'mobile-pos') {
+      const enrollment = await this.prisma.mobilePosEnrollment.findFirst({
+        where: {
+          id: user.mobilePosEnrollmentId,
+          userId: user.id,
+          status: 'APPROVED',
+          terminalId: user.mobilePosTerminalId,
+          credentialVersion: user.mobilePosCredentialVersion,
+          branchSetup: { enabled: true },
+        },
+      });
+      if (!enrollment) throw new ForbiddenException('This POS enrollment is no longer active');
+      const bound = await this.prisma.mobilePosTerminal.findFirst({
+        where: {
+          id: enrollment.terminalId!,
+          companyId: enrollment.companyId,
+          branchId: enrollment.branchId,
+          assignedUserId: user.id,
+          status: 'ACTIVE',
+        },
+        include: TERMINAL_INCLUDE,
+      });
+      if (!bound || (terminalCode && terminalCode !== bound.terminalCode))
+        throw new ForbiddenException('Invalid POS terminal binding');
+      await this.assertAssignedUserCanSell(bound, user);
+      return bound;
+    }
     if (!terminalCode || !deviceSecret) {
       throw new ForbiddenException('Activate this Mobile POS device before selling');
     }
@@ -5181,7 +5213,8 @@ export class MobilePosLiteService {
     companyId: string;
     divisionId: string;
     branchId: string;
-    salespersonId: string;
+    salespersonId?: string;
+    assignedUserId?: string;
     generalCustomerId: string;
     paymentMethods: PaymentInput[];
   }) {
@@ -5194,10 +5227,12 @@ export class MobilePosLiteService {
         where: { id: dto.branchId, divisionId: dto.divisionId, isActive: true },
         select: { id: true },
       }),
-      this.prisma.employee.findFirst({
-        where: { id: dto.salespersonId, companyId: dto.companyId, employmentStatus: 'ACTIVE' },
-        select: { id: true, userId: true, divisionId: true, branchId: true },
-      }),
+      dto.salespersonId
+        ? this.prisma.employee.findFirst({
+            where: { id: dto.salespersonId, companyId: dto.companyId, employmentStatus: 'ACTIVE' },
+            select: { id: true, userId: true, divisionId: true, branchId: true },
+          })
+        : Promise.resolve(null),
       this.prisma.customer.findFirst({
         where: { id: dto.generalCustomerId, companyId: dto.companyId, status: 'ACTIVE' },
         select: { id: true, divisionId: true, branchId: true },
@@ -5206,14 +5241,14 @@ export class MobilePosLiteService {
     if (!division)
       throw new BadRequestException('Division does not belong to the selected company');
     if (!branch) throw new BadRequestException('Branch does not belong to the selected division');
-    if (!salesperson?.userId) {
+    if (dto.salespersonId && !salesperson?.userId) {
       throw new BadRequestException(
         'The selected sales rep must be an active employee linked to a user account',
       );
     }
     if (
-      (salesperson.divisionId && salesperson.divisionId !== dto.divisionId) ||
-      (salesperson.branchId && salesperson.branchId !== dto.branchId)
+      (salesperson?.divisionId && salesperson.divisionId !== dto.divisionId) ||
+      (salesperson?.branchId && salesperson.branchId !== dto.branchId)
     ) {
       throw new BadRequestException(
         'The selected sales rep is not assigned to this division and branch',
@@ -5236,7 +5271,17 @@ export class MobilePosLiteService {
       dto.branchId,
       dto.paymentMethods,
     );
-    return { assignedUserId: salesperson.userId, paymentMethods };
+    const assignedUserId = salesperson?.userId ?? dto.assignedUserId;
+    if (
+      !assignedUserId ||
+      (!salesperson &&
+        !(await this.prisma.user.findFirst({
+          where: { id: assignedUserId, status: 'ACTIVE', deletedAt: null },
+          select: { id: true },
+        })))
+    )
+      throw new BadRequestException('An active assigned POS user is required');
+    return { assignedUserId, paymentMethods };
   }
 
   private async validatePaymentMethods(

@@ -146,6 +146,9 @@ import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-log
 import { MobileSessionsModule } from './modules/mobile-sessions/mobile-sessions.module';
 import { OfflineSyncModule } from './modules/offline-sync/offline-sync.module';
 import { MobilePosLiteModule } from './modules/mobile-pos-lite/mobile-pos-lite.module';
+import { MobilePosAuthModule } from './modules/mobile-pos-auth/mobile-pos-auth.module';
+import { PosDraftsModule } from './modules/pos-drafts/pos-drafts.module';
+import { MobilePosSessionGuard } from './common/guards/mobile-pos-session.guard';
 import { MsaidiziModule } from './modules/msaidizi/msaidizi.module';
 import { MsaidiziTaskRuntimeModule } from './modules/msaidizi-task-runtime/msaidizi-task-runtime.module';
 import { MsaidiziArtifactsModule } from './modules/msaidizi-artifacts/msaidizi-artifacts.module';
@@ -391,6 +394,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     MobileSessionsModule,
     OfflineSyncModule,
     MobilePosLiteModule,
+    MobilePosAuthModule,
+    PosDraftsModule,
     ExternalPaymentsModule,
     ExternalMessagesModule,
     MessageTemplatesModule,
@@ -481,6 +486,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     // Guard execution order: Throttler → JWT → exact task scope → Roles → Permissions
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: MobilePosSessionGuard },
     { provide: APP_GUARD, useClass: MsaidiziTaskScopeGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

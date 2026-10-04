@@ -18,8 +18,6 @@ import {
   ownsReportsPath,
 } from './os-navigable-app';
 const loading = () => <PageSpinner label="Opening your workspace" />;
-const preservesPosCounter = (from: string, to: string) =>
-  from.split(/[?#]/)[0] === '/pos' && to.split(/[?#]/)[0] === '/pos';
 const Invoice = dynamic(
   () => import('@/features/invoice-desk/invoice-workspace').then((m) => m.InvoiceWorkspace),
   { loading },
@@ -34,7 +32,10 @@ const Sales = dynamic(() => import('@/features/sales-desk/sales-desk').then((m) 
   loading,
 });
 const Documents = dynamic(() => import('@/app/(dashboard)/documents/documents-app'), { loading });
-const Pos = dynamic(() => import('./desktop-pos').then((m) => m.DesktopPos), { loading });
+const PosDraft = dynamic(
+  () => import('@/features/pos-draft/pos-draft-workspace').then((m) => m.PosDraftWorkspace),
+  { loading },
+);
 const Records = dynamic(() => import('@/features/records/records-app').then((m) => m.RecordsApp), {
   loading,
 });
@@ -89,8 +90,8 @@ function Surface({ appId }: { appId: string }) {
       />
     ) : appId === 'sales-desk' ? (
       <Sales targetRecordId={record} />
-    ) : appId === 'pos' ? (
-      <Pos />
+    ) : appId === 'pos-draft' ? (
+      <PosDraft />
     ) : appId === 'records' ? (
       <Records />
     ) : appId === 'petrodollar' ? (
@@ -148,13 +149,7 @@ export const DesktopAppHost = memo(function DesktopAppHost({
         initialHref={href}
         ownsPath={(path) => desktopAppForPath(path) === appId}
         onHrefChange={onHrefChange}
-        preservesContent={
-          appId === 'pos'
-            ? preservesPosCounter
-            : appId === 'petrodollar'
-              ? preservesPetroDollarEditor
-              : undefined
-        }
+        preservesContent={appId === 'petrodollar' ? preservesPetroDollarEditor : undefined}
       >
         <Surface appId={appId} />
       </WorkspaceNavigationProvider>

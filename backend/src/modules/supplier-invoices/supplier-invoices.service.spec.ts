@@ -35,9 +35,34 @@ function makeService(txOverrides: Record<string, any> = {}) {
       findFirst: jest.fn(async () => ({ id: 'supplier-1', name: 'Acme' })),
     },
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
+    purchaseOrder: {
+      findFirst: jest.fn(async () => ({
+        id: 'po-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        currency: 'TZS',
+        purchaseType: 'STOCK_PURCHASE',
+        payableId: null,
+      })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+    },
+    $queryRaw: jest.fn(async () => [{ id: 'po-1' }]),
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     ...txOverrides,
   };
+  if (txOverrides.purchaseOrder)
+    prisma.purchaseOrder = {
+      findFirst: jest.fn(async () => ({
+        id: 'po-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        currency: 'TZS',
+        purchaseType: 'STOCK_PURCHASE',
+        payableId: null,
+      })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+      ...txOverrides.purchaseOrder,
+    };
   const auditLogs = {
     log: jest.fn().mockResolvedValue(undefined),
     logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
@@ -63,6 +88,104 @@ function makeService(txOverrides: Record<string, any> = {}) {
 const user = { id: 'user-1' } as any;
 
 describe('SupplierInvoicesService approve atomic claim', () => {
+  it('reuses the received order payable and posted journal, retaining payments already applied', async () => {
+    const covered = {
+      id: 'pay-receipt',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
+      amount: new Prisma.Decimal(100),
+      paidAmount: new Prisma.Decimal(40),
+      outstandingAmount: new Prisma.Decimal(60),
+      sourceType: 'PurchaseOrder',
+      sourceId: 'po-1',
+      status: 'PARTIAL',
+      journalEntryId: 'je-receipt',
+      journalEntry: { status: 'POSTED', companyId: 'company-1' },
+    };
+    const { service, prisma } = makeService({
+      purchaseOrder: {
+        findFirst: jest.fn(async () => ({
+          id: 'po-1',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          currency: 'TZS',
+          purchaseType: 'CREDIT_PURCHASE',
+          payableId: 'pay-receipt',
+        })),
+      },
+      payable: {
+        findUnique: jest.fn(async () => covered),
+        create: jest.fn(),
+        update: jest.fn(async ({ data }: any) => ({ ...covered, ...data })),
+      },
+    });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ purchaseOrderId: 'po-1' }) as any);
+    jest.spyOn(service as any, 'createThreeWayMatch').mockResolvedValue({ matchStatus: 'MATCHED' });
+    const post = jest.spyOn(service as any, 'postSupplierInvoicePayable');
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+    await service.approve('si-1', undefined, user);
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    const final = prisma.supplierInvoice.update.mock.calls.at(-1)[0].data;
+    expect(final.payableId).toBe('pay-receipt');
+    expect(final.paidAmount.toNumber()).toBe(40);
+    expect(final.outstandingAmount.toNumber()).toBe(60);
+  });
+
+  it.each([
+    { purchaseType: 'CASH_PURCHASE', payableId: null },
+    { purchaseType: 'CREDIT_PURCHASE', payableId: 'different-payable' },
+  ])(
+    'rejects conflicting or cash purchase coverage before claiming the invoice (%s)',
+    async (order) => {
+      const { service, prisma } = makeService({
+        purchaseOrder: {
+          findFirst: jest.fn(async () => ({ ...order, supplierId: 'supplier-1', currency: 'TZS' })),
+        },
+      });
+      jest
+        .spyOn(service, 'findOne')
+        .mockResolvedValue(
+          approvableInvoice({ purchaseOrderId: 'po-1', payableId: 'pay-1' }) as any,
+        );
+      await expect(service.approve('si-1', undefined, user)).rejects.toThrow();
+      expect(prisma.supplierInvoice.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses invoice variance even with allowVariance when a receipt journal already covers a different amount', async () => {
+    const { service, prisma } = makeService({
+      purchaseOrder: {
+        findFirst: jest.fn(async () => ({
+          supplierId: 'supplier-1',
+          currency: 'TZS',
+          purchaseType: 'CREDIT_PURCHASE',
+          payableId: 'pay-1',
+        })),
+      },
+      payable: {
+        findUnique: jest.fn(async () => ({
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          currency: 'TZS',
+          amount: 99,
+          paidAmount: 0,
+        })),
+      },
+    });
+    jest
+      .spyOn(service, 'findOne')
+      .mockResolvedValue(approvableInvoice({ purchaseOrderId: 'po-1' }) as any);
+    await expect(service.approve('si-1', { allowVariance: true }, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(prisma.supplierInvoice.updateMany).not.toHaveBeenCalled();
+  });
+
   it('rejects an update-to-approve stale snapshot before creating or posting a payable', async () => {
     const { service, prisma } = makeService();
     // findOne decorates results via extra queries; bypass it for a focused test.

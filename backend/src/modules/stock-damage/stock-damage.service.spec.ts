@@ -43,6 +43,12 @@ function makeService(overrides: { damage?: any } = {}) {
   } as any;
 
   const prisma = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosTerminal: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     $transaction: jest.fn(async (fn: any) => fn(tx)),
     stockDamage: {
       findFirst: jest.fn().mockResolvedValue(damage),

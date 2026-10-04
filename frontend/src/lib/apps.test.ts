@@ -57,14 +57,33 @@ describe('App registration contract', () => {
     expect(canOpenApp(petrodollar, (p) => p === 'fuel_grid.access')).toBe(false);
     expect(isWindowApp('petrodollar')).toBe(true);
   });
-  it('hosts one POS terminal with its existing permission and preserves standalone routes', () => {
-    const pos = getApp('pos')!;
-    expect(appForPath('/pos/activate')).toBe(pos);
-    expect(pos.hosting.kind).toBe('singleton');
-    expect(canOpenApp(pos, (permission) => permission === 'mobile_pos_lite.use')).toBe(true);
+  it('hosts independent POS Draft windows and preserves the standalone mobile workspace', () => {
+    const pos = getApp('pos-draft')!;
+    expect(appForPath('/pos-draft/requests/request-id')).toBe(pos);
+    expect(pos.hosting.kind).toBe('independent');
+    expect(isWindowApp('pos-draft')).toBe(true);
+    expect(getApp('pos')).toBeUndefined();
+    expect(canOpenApp(pos, (permission) => permission === 'pos_drafts.view')).toBe(true);
+    expect(canOpenApp(pos, (permission) => permission === 'mobile_pos_onboarding.manage')).toBe(
+      true,
+    );
+    expect(canOpenApp(pos, (permission) => permission === 'mobile_pos_lite.use')).toBe(false);
     expect(canOpenApp(pos, (permission) => permission === 'sales_desk.view')).toBe(false);
     expect(usesStandalonePosShell('/pos')).toBe(false);
     expect(usesStandalonePosShell('/mobile-pos')).toBe(true);
+  });
+  it.each([
+    ['/mobile-pos', true],
+    ['/mobile-pos/join/invite', true],
+    ['/mobile-pos/activate', true],
+    ['/westsides/mobile-pos/install', true],
+    ['/westsides/mobile-pos/day-reports', false],
+    ['/westsides/mobile-pos/terminals', false],
+    ['/westsides/mobile-pos/install/private', false],
+    ['/mobile-pos-other', false],
+    ['/westsides/mobile-pos-other', false],
+  ])('keeps the phone/provider boundary scoped correctly for %s', (pathname, standalone) => {
+    expect(usesStandalonePosShell(pathname)).toBe(standalone);
   });
   it('keeps the employee-to-pay lifecycle inside Payroll', () => {
     const payroll = getApp('payroll')!;

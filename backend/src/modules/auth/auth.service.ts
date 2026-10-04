@@ -32,7 +32,10 @@ export interface JwtPayload {
    */
   sid?: string;
   /** Discriminator for a short-lived, exact-step service-principal token. */
-  tokenUse?: 'msaidizi-task';
+  tokenUse?: 'msaidizi-task' | 'mobile-pos' | 'mobile-pos-refresh';
+  mobilePosEnrollmentId?: string;
+  mobilePosTerminalId?: string;
+  mobilePosCredentialVersion?: number;
   principalId?: string;
   taskId?: string;
   planVersion?: number;
@@ -209,7 +212,7 @@ export class AuthService {
     // the real-user path.
     const ok = await this.constantTimeVerify(user?.passwordHash, dto.password);
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || user.status !== 'ACTIVE' || user.authKind === 'POS_PIN') {
       this.recordEmailLoginFailure(normalizedEmail);
       if (user) {
         await this.logSecurityEvent('LOGIN_FAILED', user.id, 'MEDIUM', meta);
@@ -367,9 +370,7 @@ export class AuthService {
     } catch (err) {
       const attempts = user.failedLoginAttempts + 1;
       const locked = attempts >= TWO_FACTOR_MAX_FAILURES;
-      const lockData = locked
-        ? { lockedUntil: new Date(Date.now() + TWO_FACTOR_LOCK_MS) }
-        : {};
+      const lockData = locked ? { lockedUntil: new Date(Date.now() + TWO_FACTOR_LOCK_MS) } : {};
       await this.prisma.user.update({
         where: { id: user.id },
         data: { failedLoginAttempts: attempts, ...lockData },
@@ -411,7 +412,11 @@ export class AuthService {
         { sub: user.id, email: user.email, scope: 'passwordChange' } as JwtPayload,
         { secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'), expiresIn: '15m' },
       );
-      return { requiresPasswordChange: true, reason: passwordChangeReason, tempToken: pwChangeToken };
+      return {
+        requiresPasswordChange: true,
+        reason: passwordChangeReason,
+        tempToken: pwChangeToken,
+      };
     }
 
     await this.logSecurityEvent('LOGIN_SUCCESS', user.id, 'LOW', meta);
@@ -661,7 +666,8 @@ export class AuthService {
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.status !== 'ACTIVE') throw new UnauthorizedException('Account is not active');
+    if (!user || user.status !== 'ACTIVE' || user.authKind === 'POS_PIN')
+      throw new UnauthorizedException('Account is not active');
 
     // P1-01: Block refresh when the bound session has been explicitly revoked
     // (e.g. admin clicked "Sign out everywhere" on this device). When sid is
@@ -670,7 +676,7 @@ export class AuthService {
     let preservedSid: string | undefined = sid;
     if (sid) {
       const session = await this.prisma.activeSession.findUnique({ where: { id: sid } });
-      if (!session || session.status !== 'ACTIVE') {
+      if (!session || session.status !== 'ACTIVE' || session.sessionType === 'POS') {
         await this.audit.log({
           action: 'REFRESH_REJECTED_SESSION_REVOKED',
           entityType: 'ActiveSession',
@@ -736,6 +742,7 @@ export class AuthService {
       },
     });
 
+    if (user.authKind === 'POS_PIN') throw new UnauthorizedException('Use approved device sign-in');
     const roles = user.userRoles.map((ur) => ur.role.name);
     const permissions = Array.from(
       new Set(

@@ -28,6 +28,12 @@ function makeService(
   let committedRow = { ...lockedRow };
   let stagedRow = { ...committedRow };
   const tx = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosTerminal: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
     receivable: {
@@ -81,6 +87,12 @@ function makeService(
   } as any;
 
   const prisma = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosTerminal: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     $transaction: jest.fn(async (fn: any) => {
       stagedRow = { ...committedRow };
       try {

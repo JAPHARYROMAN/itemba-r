@@ -9,7 +9,7 @@ export const WINDOW_APP_IDS = [
   'payroll',
   'reports',
   'documents',
-  'pos',
+  'pos-draft',
   'records',
   'petrodollar',
 ] as const;
@@ -121,13 +121,26 @@ export function parseAppearance(input: unknown): DesktopAppearance {
     transparency: v.transparency === 'reduced' ? 'reduced' : 'full',
     motion: v.motion === 'full' || v.motion === 'reduced' ? v.motion : 'system',
     pinnedApps: Array.isArray(v.pinnedApps)
-      ? [...new Set(v.pinnedApps.filter((id) => !!getApp(id)))].slice(0, 20)
+      ? [
+          ...new Set(
+            v.pinnedApps
+              .map((id) => (id === 'pos' ? 'pos-draft' : id))
+              .filter((id) => !!getApp(id)),
+          ),
+        ].slice(0, 20)
       : DEFAULT_APPEARANCE.pinnedApps,
     recentApps: Array.isArray(v.recentApps)
-      ? [...new Set(v.recentApps.filter((id) => !!getApp(id)))].slice(0, 8)
+      ? [
+          ...new Set(
+            v.recentApps
+              .map((id) => (id === 'pos' ? 'pos-draft' : id))
+              .filter((id) => !!getApp(id)),
+          ),
+        ].slice(0, 8)
       : [],
     shortcuts: Array.isArray(v.shortcuts)
       ? v.shortcuts
+          .map((s) => (s?.appId === 'pos' ? { ...s, appId: 'pos-draft' } : s))
           .filter((s) => s && !!getApp(s.appId))
           .slice(0, 20)
           .filter((s, i, all) => all.findIndex((a) => a.appId === s.appId) === i)
@@ -182,6 +195,11 @@ export function parseDesktopSession(input: unknown): DesktopSession {
   ];
   const seen = new Set<string>();
   const windows = v.windows
+    .map((window) =>
+      window?.appId === 'pos'
+        ? { ...window, appId: 'pos-draft', href: '/pos-draft?view=pending' }
+        : window,
+    )
     .filter(
       (w) =>
         w &&

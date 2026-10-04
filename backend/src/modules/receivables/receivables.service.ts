@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -425,6 +426,7 @@ export class ReceivablesService {
         FOR UPDATE`;
 
       if (!locked) throw new NotFoundException('Receivable not found');
+      await assertLegacyPosWriteAllowed(tx, user, locked.companyId, locked.branchId);
       await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
       await this.org.assertCanAccessScope(
         user,

@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import { readPosTenders, tenderTotal, type PosTender } from './pos-tenders';
 import {
   BadRequestException,
@@ -70,7 +71,8 @@ type MobilePosPriceOverrideRecord = {
   note: string | null;
 };
 
-type SalesOrderCreateContext = {
+export type SalesOrderCreateContext = {
+  originUserId?: string;
   posTenders?: PosTender[];
   mobilePosTerminalId?: string;
   /**
@@ -1205,8 +1207,13 @@ export class SalesOrdersService {
     };
   }
 
-  async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
-    const record = await this.prisma.salesOrder.findFirst({
+  async findOne(
+    id: string,
+    user?: AuthUser,
+    minimum: AccessLevel = AccessLevel.READ,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const record = await (transaction ?? this.prisma).salesOrder.findFirst({
       where: { id, deletedAt: null },
       include: {
         company: {
@@ -1271,7 +1278,7 @@ export class SalesOrdersService {
 
     const sourceReceivable = record.receivable
       ? null
-      : await this.prisma.receivable.findFirst({
+      : await (transaction ?? this.prisma).receivable.findFirst({
           where: { sourceType: 'SalesOrder', sourceId: id, deletedAt: null },
           select: {
             id: true,
@@ -1628,7 +1635,12 @@ export class SalesOrdersService {
     });
   }
 
-  async create(dto: CreateSalesOrderDto, user: AuthUser, context: SalesOrderCreateContext = {}) {
+  async create(
+    dto: CreateSalesOrderDto,
+    user: AuthUser,
+    context: SalesOrderCreateContext = {},
+    transaction?: Prisma.TransactionClient,
+  ) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     const paymentMethod = normalizePaymentMethodForSalesType(dto.salesType, dto.paymentMethod);
     const cashAccountId =
@@ -1638,7 +1650,9 @@ export class SalesOrdersService {
       paymentMethod,
       cashAccountId,
     });
-    const userId = user.id;
+    const userId = context.originUserId ?? user.id;
+    if (!transaction)
+      await assertLegacyPosWriteAllowed(this.prisma, user, dto.companyId, dto.branchId);
     // Carve output VAT out of VAT-inclusive till/shelf prices for any line the
     // caller left untaxed (POS / Quick-Sale / Kaunta send taxAmount:0). A normal
     // Sales Order that already supplies per-line VAT is passed through untouched.
@@ -1660,11 +1674,11 @@ export class SalesOrdersService {
           discountAmount: Number(line.discountAmount ?? 0),
         })),
       },
-      this.prisma,
+      transaction ?? this.prisma,
       { user, source: 'SalesOrderCreate', referenceType: 'SalesOrder' },
     );
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient) => {
       const customer = await this.resolveSalesOrderCustomer(tx, {
         companyId: dto.companyId,
         divisionId: dto.divisionId,
@@ -1737,18 +1751,21 @@ export class SalesOrdersService {
       });
 
       return order;
-    });
+    };
+    const record = transaction ? await run(transaction) : await this.prisma.$transaction(run);
 
-    await this.auditLogs.log({
+    const audit = {
       action: 'SALES_ORDER_CREATE',
       entityType: 'SalesOrder',
       entityId: record.id,
-      userId,
+      userId: user.id,
       companyId: record.companyId,
       newValue: record as any,
-    });
+    };
+    if (transaction) await this.auditLogs.logStrictInTransaction(transaction, audit);
+    else await this.auditLogs.log(audit);
 
-    return this.findOne(record.id, user);
+    return this.findOne(record.id, user, AccessLevel.READ, transaction);
   }
 
   /**
@@ -2131,9 +2148,11 @@ export class SalesOrdersService {
     }
   }
 
-  async confirm(id: string, user: AuthUser) {
+  async confirm(id: string, user: AuthUser, transaction?: Prisma.TransactionClient) {
     const userId = user.id;
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    const existing = await this.findOne(id, user, AccessLevel.WRITE, transaction);
+    if (!transaction)
+      await assertLegacyPosWriteAllowed(this.prisma, user, existing.companyId, existing.branchId);
     if (existing.status !== 'DRAFT') {
       throw new BadRequestException('Only DRAFT sales orders can be confirmed');
     }
@@ -2142,7 +2161,7 @@ export class SalesOrdersService {
     }
     const issuingBranchId = existing.branchId;
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient) => {
       // Atomically claim the order: flip DRAFT -> CONFIRMED in one guarded write
       // BEFORE doing any of the posting work. The status check above happened
       // outside the transaction, so two concurrent confirms could both pass it;
@@ -2202,7 +2221,8 @@ export class SalesOrdersService {
             unitId: line.unitId,
             unitCost,
             movementDate: existing.orderDate,
-            createdById: userId,
+            createdById: existing.createdById ?? userId,
+            auditActorUserId: userId,
             referenceType: 'SalesOrder',
             referenceId: id,
             divisionId: existing.divisionId ?? undefined,
@@ -2396,9 +2416,10 @@ export class SalesOrdersService {
           ...(receivableId ? { receivableId } : {}),
         },
       });
-    });
+    };
+    const record = transaction ? await run(transaction) : await this.prisma.$transaction(run);
 
-    await this.auditLogs.log({
+    const audit = {
       action: 'SALES_ORDER_CONFIRM',
       entityType: 'SalesOrder',
       entityId: id,
@@ -2407,7 +2428,9 @@ export class SalesOrdersService {
       oldValue: { status: 'DRAFT' } as any,
       newValue: { status: 'CONFIRMED' } as any,
       severity: AuditSeverity.MEDIUM,
-    });
+    };
+    if (transaction) await this.auditLogs.logStrictInTransaction(transaction, audit);
+    else await this.auditLogs.log(audit);
 
     // Auto-create a DRAFT SalesCommission when the order has a salesperson
     // with a defaultCommissionRate set. Idempotent: the unique key on
@@ -2415,14 +2438,49 @@ export class SalesOrdersService {
     // (e.g. if the order is unconfirmed/reconfirmed). Soft-fails so a
     // configuration gap doesn't break the confirmation flow.
     try {
-      await this.maybeCreateAutoCommission(id, userId);
+      await this.maybeCreateAutoCommission(id, userId, transaction);
     } catch (err) {
       this.logger.warn(
         `Auto-commission creation failed for order ${id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
 
-    return this.findOne(id, user);
+    return this.findOne(id, user, AccessLevel.READ, transaction);
+  }
+
+  /** Validate the captured gross prices using the canonical VAT and profit policy. */
+  async assertDraftSaleProfitable(
+    scope: { companyId: string; branchId: string },
+    lines: SalesOrderLineDto[],
+    user: AuthUser,
+    db: Prisma.TransactionClient | PrismaService,
+  ) {
+    const netLines = await this.deriveInclusiveOutputVat(scope.companyId, lines);
+    const { computed } = calculateLineTotals(netLines);
+    await this.profit.assertSaleLinesProfitable(
+      {
+        ...scope,
+        lines: computed.map((line) => ({
+          productId: line.productId,
+          quantity: Number(line.quantity),
+          unitPrice: Number(line.unitPrice),
+          discountAmount: Number(line.discountAmount ?? 0),
+        })),
+      },
+      db,
+      { user, source: 'PosDraftCapture', referenceType: 'PosDraft' },
+    );
+  }
+
+  /** Canonical sale and all posting effects share the caller-owned approval transaction. */
+  async createAndConfirmInTransaction(
+    dto: CreateSalesOrderDto,
+    user: AuthUser,
+    tx: Prisma.TransactionClient,
+    context: SalesOrderCreateContext = {},
+  ) {
+    const order = await this.create(dto, user, context, tx);
+    return this.confirm(order.id, user, tx);
   }
 
   /**
@@ -2430,8 +2488,12 @@ export class SalesOrdersService {
    * a GROSS-basis commission amount, and creates the row. Skips silently
    * when there's no salesperson, no rate, or a commission already exists.
    */
-  private async maybeCreateAutoCommission(orderId: string, userId: string) {
-    const order = await this.prisma.salesOrder.findUnique({
+  private async maybeCreateAutoCommission(
+    orderId: string,
+    userId: string,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const order = await (transaction ?? this.prisma).salesOrder.findUnique({
       where: { id: orderId },
       select: {
         id: true,
@@ -2443,13 +2505,13 @@ export class SalesOrdersService {
     });
     if (!order?.salespersonId) return;
 
-    const salesperson = await this.prisma.employee.findFirst({
+    const salesperson = await (transaction ?? this.prisma).employee.findFirst({
       where: { id: order.salespersonId, companyId: order.companyId, deletedAt: null },
       select: { id: true, defaultCommissionRate: true },
     });
     if (!salesperson?.defaultCommissionRate) return;
 
-    const existing = await this.prisma.salesCommission.findFirst({
+    const existing = await (transaction ?? this.prisma).salesCommission.findFirst({
       where: { salesOrderId: orderId, employeeId: salesperson.id, deletedAt: null },
       select: { id: true },
     });
@@ -2459,7 +2521,7 @@ export class SalesOrdersService {
     const subtotal = Number(order.subtotal);
     const amount = Math.round(subtotal * rate * 100) / 100;
 
-    await this.prisma.salesCommission.create({
+    await (transaction ?? this.prisma).salesCommission.create({
       data: {
         companyId: order.companyId,
         employeeId: salesperson.id,

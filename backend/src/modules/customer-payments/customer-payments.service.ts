@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -36,6 +37,7 @@ import { CustomerPaymentStatus } from './dto/customer-payment-status.enum';
 
 /** Everything a caller supplies to record one customer payment inside its own transaction. */
 export interface CustomerPaymentInput {
+  originUserId?: string;
   companyId: string;
   divisionId?: string | null;
   branchId?: string | null;
@@ -159,8 +161,11 @@ export class CustomerPaymentsService {
     dto: CreateCustomerPaymentDto,
     user: AuthUser,
     transaction?: Prisma.TransactionClient,
+    context?: { originUserId?: string },
   ) {
     const client = transaction ?? this.prisma;
+    if (!transaction)
+      await assertLegacyPosWriteAllowed(this.prisma, user, dto.companyId, dto.branchId);
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     if (!dto.allocations || dto.allocations.length === 0) {
       throw new BadRequestException('At least one allocation is required');
@@ -180,6 +185,7 @@ export class CustomerPaymentsService {
     });
     const { payment } = await this.runWithTransaction(transaction, (tx) =>
       this.createInTransaction(tx, user, {
+        originUserId: context?.originUserId,
         companyId: dto.companyId,
         divisionId: dto.divisionId ?? null,
         branchId: dto.branchId ?? null,
@@ -367,7 +373,7 @@ export class CustomerPaymentsService {
         status: CustomerPaymentStatus.COMPLETED,
         cashAccountId: input.cashAccountId ?? null,
         notes: input.notes ?? null,
-        createdById: userId,
+        createdById: input.originUserId ?? userId,
         allocations: {
           create: allocations.map((a) => ({
             companyId: input.companyId,

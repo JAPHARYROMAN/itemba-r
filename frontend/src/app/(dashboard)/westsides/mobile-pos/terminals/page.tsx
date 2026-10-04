@@ -1,5 +1,5 @@
-import { MobilePosTerminalAdmin } from '@/components/westsides/mobile-pos-lite/mobile-pos-terminal-admin';
+import { redirect } from 'next/navigation';
 
 export default function MobilePosTerminalsPage() {
-  return <MobilePosTerminalAdmin />;
+  redirect('/pos-draft?view=devices');
 }

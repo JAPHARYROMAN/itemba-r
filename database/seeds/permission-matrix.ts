@@ -197,6 +197,9 @@ export const ALL_PERMISSIONS: PermDef[] = [
   // reserved for a group-controlled administrator. Stock-in purchases from a
   // terminal are a manager-level grant (`purchase`), not part of `use`.
   ...perms('mobile_pos_lite', ['use']),
+  ...perms('mobile_pos_lite', ['access']),
+  ...perms('pos_drafts', ['view', 'create', 'dispatch', 'approve', 'reject', 'direct_post']),
+  ...perms('mobile_pos_onboarding', ['manage']),
   {
     code: 'mobile_pos_lite.purchase',
     description: 'Record stock-in purchases from a Mobile POS Lite terminal',
@@ -1281,6 +1284,27 @@ export interface RoleDef {
 
 const BASE_ROLES: RoleDef[] = [
   {
+    name: 'MOBILE_POS_CASHIER',
+    displayName: 'Mobile POS Cashier',
+    description: 'Captures own branch sales for review from an approved PIN device.',
+    scope: RoleScope.BRANCH,
+    filter: (p) =>
+      ['mobile_pos_lite.access', 'pos_drafts.view', 'pos_drafts.create'].includes(p.code),
+  },
+  {
+    name: 'MOBILE_POS_STOCKIST',
+    displayName: 'Mobile POS Stockist',
+    description: 'Captures and prepares branch stock requests from an approved PIN device.',
+    scope: RoleScope.BRANCH,
+    filter: (p) =>
+      [
+        'mobile_pos_lite.access',
+        'pos_drafts.view',
+        'pos_drafts.create',
+        'pos_drafts.dispatch',
+      ].includes(p.code),
+  },
+  {
     name: 'GROUP_SUPER_ADMIN',
     displayName: 'Group Super Admin',
     description: 'Full unrestricted access to the entire system including Group Control.',
@@ -2046,17 +2070,23 @@ export const ROLES: RoleDef[] = BASE_ROLES.map((role) => {
   return {
     ...role,
     filter: (permission) =>
-      ['sales_desk', 'cash_desk', 'invoice_desk', 'records'].includes(permission.module)
-        ? role.name === 'GROUP_SUPER_ADMIN'
-        : permission.module === 'fuel_reporting'
-          ? role.name === 'GROUP_SUPER_ADMIN' ||
-            (role.name === 'BRANCH_MANAGER' && permission.action !== 'admin') ||
-            (['COMPANY_MANAGER', 'GROUP_DIRECTOR', 'GROUP_AUDITOR', 'ACCOUNTANT'].includes(
-              role.name,
-            ) &&
-              permission.action === 'read')
-          : (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
-            (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
-            role.filter(permission),
+      permission.module === 'mobile_pos_onboarding'
+        ? ['GROUP_SUPER_ADMIN', 'COMPANY_MANAGER', 'BRANCH_MANAGER'].includes(role.name)
+        : permission.module === 'pos_drafts' && !role.name.startsWith('MOBILE_POS_')
+          ? ['GROUP_SUPER_ADMIN', 'COMPANY_MANAGER', 'BRANCH_MANAGER'].includes(role.name) ||
+            (permission.action === 'view' &&
+              ['GROUP_DIRECTOR', 'GROUP_AUDITOR', 'GROUP_FINANCE_CONTROLLER'].includes(role.name))
+          : ['sales_desk', 'cash_desk', 'invoice_desk', 'records'].includes(permission.module)
+            ? role.name === 'GROUP_SUPER_ADMIN'
+            : permission.module === 'fuel_reporting'
+              ? role.name === 'GROUP_SUPER_ADMIN' ||
+                (role.name === 'BRANCH_MANAGER' && permission.action !== 'admin') ||
+                (['COMPANY_MANAGER', 'GROUP_DIRECTOR', 'GROUP_AUDITOR', 'ACCOUNTANT'].includes(
+                  role.name,
+                ) &&
+                  permission.action === 'read')
+              : (mayUseMsaidizi || !isMsaidiziPerm(permission)) &&
+                (mayAccessFuelGrid || !isFuelGridPerm(permission)) &&
+                role.filter(permission),
   };
 });

@@ -1,12 +1,15 @@
-export const dynamic = 'force-static';
+import { mobilePosSetupStartUrl } from '@/lib/mobile-pos-proxy-policy';
 
-export function GET() {
+export const dynamic = 'force-dynamic';
+
+export function GET(request: Request) {
   return new Response(
     JSON.stringify({
       name: 'Itemba POS',
+      id: '/mobile-pos',
       short_name: 'Itemba POS',
-      description: 'A branch-locked mobile sales counter connected to ITEMBA-R.',
-      start_url: '/mobile-pos',
+      description: 'Sales and stock, with your team and ITEMBA OS.',
+      start_url: mobilePosSetupStartUrl(new URL(request.url).searchParams.get('setup')),
       scope: '/',
       display: 'standalone',
       // Kaunta identity: warm-paper chrome (design-direction §2.1); the old
@@ -32,6 +35,7 @@ export function GET() {
     {
       headers: {
         'Content-Type': 'application/manifest+json',
+        'Cache-Control': 'private, no-store',
       },
     },
   );

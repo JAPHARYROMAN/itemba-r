@@ -17,6 +17,7 @@ import { exactActionEnvelopeDigest } from '../../../common/utils/action-envelope
 import { MSAIDIZI_SERVICE_PRINCIPAL_TYPE } from '../../../common/context/request-context';
 import { enrichRequestContext } from '../../../common/context/request-context';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+import { mobilePosPermissions } from '../../mobile-pos-auth/mobile-pos-auth.service';
 
 const SCOPE_PRIORITY = ['GROUP', 'COMPANY', 'BRANCH', 'DIVISION'] as const;
 
@@ -64,6 +65,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (payload.tokenUse === 'msaidizi-task') {
       return this.validateMsaidiziTask(payload);
     }
+    if (payload.tokenUse === 'mobile-pos') return this.validateMobilePos(payload);
+    if (payload.tokenUse === 'mobile-pos-refresh')
+      throw new UnauthorizedException('Refresh token cannot authorize API operations');
 
     // P1-01: When the token carries a session id, verify the bound
     // ActiveSession is still ACTIVE. Tokens minted before this field was
@@ -72,11 +76,13 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (payload.sid) {
       const session = await this.prisma.activeSession.findUnique({
         where: { id: payload.sid },
-        select: { status: true, expiresAt: true },
+        select: { status: true, expiresAt: true, sessionType: true, userId: true },
       });
       if (!session || session.status !== 'ACTIVE') {
         throw new UnauthorizedException('Session is no longer active');
       }
+      if (session.sessionType === 'POS' || session.userId !== payload.sub)
+        throw new UnauthorizedException('Session credential does not match its scope');
       if (session.expiresAt && session.expiresAt < new Date()) {
         throw new UnauthorizedException('Session has expired');
       }
@@ -102,7 +108,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         },
       },
     });
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || user.status !== 'ACTIVE' || user.authKind === 'POS_PIN') {
       // Do not return null silently — explicit failure is clearer for callers
       // and keeps cache state predictable when an account is disabled.
       throw new UnauthorizedException('Account is not active');
@@ -132,6 +138,88 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     this.permissionCache.set(payload.sub, result, PERMISSION_CACHE_TTL_MS);
 
     return { ...result, sid: payload.sid };
+  }
+
+  private async validateMobilePos(
+    payload: JwtPayload,
+  ): Promise<CachedAuthPayload & { sid?: string }> {
+    if (
+      !payload.sid ||
+      !payload.mobilePosEnrollmentId ||
+      !payload.mobilePosTerminalId ||
+      !Number.isInteger(payload.mobilePosCredentialVersion)
+    ) {
+      throw new UnauthorizedException('Device session is incomplete');
+    }
+    const [session, enrollment, user] = await Promise.all([
+      this.prisma.activeSession.findUnique({ where: { id: payload.sid } }),
+      this.prisma.mobilePosEnrollment.findUnique({
+        where: { id: payload.mobilePosEnrollmentId },
+        include: { branchSetup: true },
+      }),
+      this.prisma.user.findUnique({ where: { id: payload.sub } }),
+    ]);
+    if (
+      !session ||
+      session.status !== 'ACTIVE' ||
+      session.sessionType !== 'POS' ||
+      session.userId !== payload.sub ||
+      session.deviceId !== payload.mobilePosEnrollmentId ||
+      !session.expiresAt ||
+      session.expiresAt < new Date() ||
+      !enrollment ||
+      enrollment.status !== 'APPROVED' ||
+      !enrollment.branchSetup.enabled ||
+      !enrollment.branchSetup.approvalRequired ||
+      !!enrollment.setupTokenHash ||
+      enrollment.userId !== payload.sub ||
+      enrollment.terminalId !== payload.mobilePosTerminalId ||
+      enrollment.credentialVersion !== payload.mobilePosCredentialVersion ||
+      !enrollment.pinHash ||
+      !enrollment.deviceSecretHash ||
+      !['CASHIER', 'STOCKIST'].includes(enrollment.approvedRole ?? '') ||
+      !user ||
+      user.status !== 'ACTIVE' ||
+      !!user.deletedAt ||
+      user.authKind !== 'POS_PIN'
+    ) {
+      throw new UnauthorizedException('Device session is no longer active');
+    }
+    const terminal = await this.prisma.mobilePosTerminal.findUnique({
+      where: { id: enrollment.terminalId! },
+    });
+    if (
+      !terminal ||
+      terminal.status !== 'ACTIVE' ||
+      terminal.assignedUserId !== payload.sub ||
+      terminal.companyId !== enrollment.companyId ||
+      terminal.divisionId !== enrollment.divisionId ||
+      terminal.branchId !== enrollment.branchId ||
+      terminal.deviceSecretHash !== enrollment.deviceSecretHash
+    ) {
+      throw new UnauthorizedException('Device binding is no longer active');
+    }
+    const role = enrollment.approvedRole as 'CASHIER' | 'STOCKIST';
+    // Project from the live approval, independent of ordinary user-role caches.
+    return {
+      id: user.id,
+      email: '',
+      fullName: enrollment.name,
+      roles: ['MOBILE_POS_' + role],
+      roleScopes: ['BRANCH'],
+      role: { scope: 'BRANCH' },
+      permissions: mobilePosPermissions(role),
+      companyId: enrollment.companyId,
+      companyAccess: [{ companyId: enrollment.companyId, accessLevel: 'READ' }],
+      divisionAccess: [{ divisionId: enrollment.divisionId, accessLevel: 'READ' }],
+      branchAccess: [{ branchId: enrollment.branchId, accessLevel: 'READ' }],
+      sid: payload.sid,
+      tokenUse: 'mobile-pos',
+      mobilePosRole: role,
+      mobilePosEnrollmentId: enrollment.id,
+      mobilePosTerminalId: terminal.id,
+      mobilePosCredentialVersion: enrollment.credentialVersion,
+    };
   }
 
   private async validateMsaidiziTask(
@@ -263,7 +351,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       legacyDigest != null &&
       legacyDigest === payload.argsDigest &&
       attempt?.argsDigest === payload.argsDigest;
-    if (!plan || plan.version !== payload.planVersion || (!resolvedBindingValid && !legacyBindingValid)) {
+    if (
+      !plan ||
+      plan.version !== payload.planVersion ||
+      (!resolvedBindingValid && !legacyBindingValid)
+    ) {
       throw new UnauthorizedException('Autonomous task action binding changed');
     }
 

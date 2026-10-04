@@ -32,7 +32,7 @@ export class PasswordResetService {
   ): Promise<{ message: string }> {
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    if (user && user.status === 'ACTIVE') {
+    if (user && user.status === 'ACTIVE' && user.authKind !== 'POS_PIN') {
       // Generate a cryptographically random token
       const rawToken = crypto.randomBytes(32).toString('hex');
       const tokenHash = this.hashResetToken(rawToken);
@@ -84,7 +84,7 @@ export class PasswordResetService {
     }
 
     const user = matched.user;
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || user.status !== 'ACTIVE' || user.authKind === 'POS_PIN') {
       throw new BadRequestException('Invalid or expired password reset token.');
     }
 

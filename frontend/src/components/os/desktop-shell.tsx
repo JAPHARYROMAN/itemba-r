@@ -56,6 +56,7 @@ import { DesktopAppHost, desktopAppForPath } from './desktop-app-host';
 import { desktopWindowLabel } from '@/lib/desktop-window-label';
 import type { DesktopViewState } from '@/lib/desktop-view-state';
 import { AppearanceStudio } from './appearance-studio';
+import { InstallMobileWidget } from '@/features/pos-draft/install-mobile-widget';
 import { useDesktopProfile } from './use-desktop-profile';
 import { useDesktopSession } from './use-desktop-session';
 import { getBuiltInWallpaper } from '@/lib/wallpapers';
@@ -778,6 +779,7 @@ export function DesktopShell({
                 })}
               </div>
               <aside className="desktop-widgets" aria-label="Desktop widgets">
+                <InstallMobileWidget open={() => navigate('/pos-draft?view=devices')} />
                 {appearance.widgets.recent && (
                   <section className="desktop-widget" data-widget="recent">
                     <header>

@@ -1,12 +1,42 @@
-const CACHE_NAME = 'itemba-mobile-pos-lite-v1';
-const POS_ROUTES = new Set(['/mobile-pos', '/mobile-pos/activate']);
+const CACHE_NAME = 'itemba-mobile-pos-draft-v2';
+const setup = new URL(self.location.href).searchParams.get('setup');
+const setupPath =
+  setup && /^[A-Za-z0-9_-]{20,128}$/.test(setup) ? `/mobile-pos/join/${setup}` : null;
+const isPosRoute = (path) =>
+  path === '/mobile-pos' || /^\/mobile-pos\/join\/[A-Za-z0-9_-]{20,128}$/.test(path);
 
-self.addEventListener('install', () => {
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Public shells only. Failure to precache cannot make online setup unusable.
+      for (const path of ['/mobile-pos', ...(setupPath ? [setupPath] : [])]) {
+        try {
+          const response = await fetch(path, { cache: 'reload' });
+          if (response.ok) await cache.put(path, response);
+        } catch {
+          // Precache is optional; online navigation retries and saved captures remain in IndexedDB.
+          continue;
+        }
+      }
+    }),
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      for (const name of await caches.keys()) {
+        if (
+          (name.startsWith('itemba-mobile-pos-lite-') ||
+            name.startsWith('itemba-mobile-pos-draft-')) &&
+          name !== CACHE_NAME
+        )
+          await caches.delete(name);
+      }
+      await self.clients.claim();
+    })(),
+  );
 });
 
 self.addEventListener('fetch', (event) => {
@@ -18,8 +48,9 @@ self.addEventListener('fetch', (event) => {
   // posting must always be verified by the server when a connection returns.
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
-  const isPosDocument = request.mode === 'navigate' && POS_ROUTES.has(url.pathname);
-  const isStaticAsset = url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/brand/');
+  const isPosDocument = request.mode === 'navigate' && isPosRoute(url.pathname);
+  const isStaticAsset =
+    url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/brand/');
   if (!isPosDocument && !isStaticAsset) return;
 
   event.respondWith(
@@ -32,7 +63,9 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(async () => {
-        const cached = await caches.match(request);
+        const cache = await caches.open(CACHE_NAME);
+        const cached =
+          (await cache.match(request)) || (isPosDocument ? await cache.match(url.pathname) : null);
         return cached || Response.error();
       }),
   );

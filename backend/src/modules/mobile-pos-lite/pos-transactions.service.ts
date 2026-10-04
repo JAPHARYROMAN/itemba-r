@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import { AccessLevel } from '@prisma/client';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
@@ -343,6 +344,7 @@ export class PosTransactionsService {
   ) {
     permissions(user, ['customer-payments.manage']);
     const t = await this.pos.transactionContext(code, secret, user);
+    await assertLegacyPosWriteAllowed(this.db, user, t.companyId, t.branchId);
     const accountId = this.account(t, dto.method, dto.reference);
     return this.action(t, id, 'COLLECTION', dto, user, async (tx, sale) => {
       if (!sale.customerId || !sale.receivableId)

@@ -11,6 +11,51 @@ env:
   DATABASE_URL: postgresql://itemba:1618@localhost:5432/itemba_r_ci_placeholder?schema=public
 
 jobs:
+  pos-draft-workflows:
+    name: POS Draft — Isolated transaction and security proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: itemba_pos_proof
+          POSTGRES_PASSWORD: isolated-pos-proof-ci
+          POSTGRES_DB: itemba_release_proof
+        ports: ['18564:5432']
+        options: >-
+          --health-cmd "pg_isready -U itemba_pos_proof -d itemba_release_proof"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['16392:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://itemba_pos_proof:isolated-pos-proof-ci@127.0.0.1:18564/itemba_release_proof?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run prisma:generate
+        working-directory: backend
+      - run: npm run build
+        working-directory: backend
+      - name: Migrate a fresh private database and prove compiled workflows
+        run: node scripts/run-pos-draft-proof.mjs --ci-setup
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pos-draft-proof
+          path: .release/pos-draft-proof.json
+          if-no-files-found: ignore
+
   dependency-security:
     name: Dependencies — ${{ matrix.package }} production audit
     runs-on: ubuntu-latest
