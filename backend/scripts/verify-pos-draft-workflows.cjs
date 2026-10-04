@@ -229,6 +229,7 @@ async function fixtures() {
     },
   });
   const permissions = [
+    'notifications.view',
     'mobile_pos_onboarding.manage',
     'mobile_pos_lite.access',
     'mobile_pos_lite.manage',
@@ -459,12 +460,18 @@ async function main() {
   assert.equal(publicInfo.branch.id, f.branch.id);
   assert.ok(!('paymentMappings' in publicInfo), 'Public install link exposes no payment registry');
   async function enroll(name, role) {
+    const requestId = crypto.randomUUID();
+    const claimToken = crypto.randomBytes(24).toString('base64url');
     const registration = await call(null, 'POST', '/mobile-pos-auth/invite/' + invite.token, {
       name,
       role,
+      requestId,
+      claimToken,
     });
     return {
       ...registration,
+      requestName: name,
+      requestedRole: role,
       secret: crypto.randomBytes(32).toString('hex'),
       pin: role === 'CASHIER' ? '123456' : '234567',
     };
@@ -472,6 +479,61 @@ async function main() {
   const cashier = await enroll('Proof cashier', 'CASHIER');
   const stockist = await enroll('Proof stockist', 'STOCKIST');
   const adminClaim = await enroll('Existing office administrator', 'ADMIN');
+  await check(
+    'A lost enrollment response retries the same request and exact inbox delivery',
+    async () => {
+      const retry = await call(null, 'POST', '/mobile-pos-auth/invite/' + invite.token, {
+        name: cashier.requestName,
+        role: cashier.requestedRole,
+        requestId: cashier.enrollmentId,
+        claimToken: cashier.claimToken,
+      });
+      assert.equal(retry.enrollmentId, cashier.enrollmentId);
+      assert.ok(
+        retry.claimToken === cashier.claimToken,
+        'Retry did not preserve the enrollment claim',
+      );
+      await call(
+        null,
+        'POST',
+        '/mobile-pos-auth/invite/' + invite.token,
+        {
+          name: 'Changed request',
+          role: cashier.requestedRole,
+          requestId: cashier.enrollmentId,
+          claimToken: cashier.claimToken,
+        },
+        409,
+      );
+      const delivered = await db.notification.findMany({
+        where: {
+          linkedEntityType: 'MobilePosEnrollment',
+          linkedEntityId: cashier.enrollmentId,
+          notificationType: 'APPROVAL_REQUIRED',
+        },
+      });
+      assert.deepEqual(
+        delivered.map((item) => item.recipientUserId).sort(),
+        [f.admin.user.id, f.reviewer.user.id].sort(),
+      );
+      assert.ok(!JSON.stringify(delivered).includes(cashier.claimToken));
+      assert.ok(
+        !JSON.stringify(delivered).includes(
+          crypto.createHash('sha256').update(cashier.claimToken).digest('hex'),
+        ),
+      );
+    },
+  );
+  await check('Main OS inboxes contain scoped review links without claim credentials', async () => {
+    for (const actor of [f.admin, f.reviewer]) {
+      const inbox = await call(actor.token, 'GET', '/notifications/my?limit=100');
+      const item = inbox.data.find((row) => row.linkedEntityId === cashier.enrollmentId);
+      assert.equal(item.notificationType, 'APPROVAL_REQUIRED');
+      assert.equal(item.actionUrl, `/pos-draft?view=devices&enrollmentId=${cashier.enrollmentId}`);
+    }
+    const other = await call(f.legacyStaff.token, 'GET', '/notifications/my?limit=100');
+    assert.ok(!other.data.some((row) => row.linkedEntityId === cashier.enrollmentId));
+  });
   await check(
     'Pending enrollment cannot set a PIN; public status does not contain a setup secret',
     async () => {
@@ -487,30 +549,114 @@ async function main() {
       );
     },
   );
-  await check('Administrator selection requires the existing scoped OS administrator', async () => {
-    await call(
-      f.admin.token,
-      'POST',
-      `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/approve`,
-      { role: 'ADMIN' },
-      400,
-    );
-    await call(
-      f.admin.token,
-      'POST',
-      `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/approve`,
-      { role: 'CASHIER' },
-      400,
-    );
-    const linked = await call(
-      f.admin.token,
-      'POST',
-      `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/admin-link`,
-      { claimToken: adminClaim.claimToken },
-    );
-    assert.equal(linked.userId, f.admin.user.id);
-    assert.equal(linked.approvedRole, 'ADMIN');
-  });
+  await check(
+    'Administrator selection requires review then an existing scoped OS account without new privileges',
+    async () => {
+      await call(
+        f.admin.token,
+        'POST',
+        `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/admin-link`,
+        { claimToken: adminClaim.claimToken },
+        403,
+      );
+      await call(
+        f.admin.token,
+        'POST',
+        `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/approve`,
+        { role: 'CASHIER' },
+        400,
+      );
+      const usersBefore = await db.user.count({ where: { companyId: f.company.id } });
+      const terminalsBefore = await db.mobilePosTerminal.count({
+        where: { companyId: f.company.id },
+      });
+      const approved = await call(
+        f.reviewer.token,
+        'POST',
+        `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/approve`,
+        { role: 'ADMIN' },
+      );
+      assert.equal(approved.userId, null);
+      assert.equal(approved.terminalId, null);
+      assert.equal(approved.adminLinked, false);
+      assert.equal(await db.user.count({ where: { companyId: f.company.id } }), usersBefore);
+      assert.equal(
+        await db.mobilePosTerminal.count({ where: { companyId: f.company.id } }),
+        terminalsBefore,
+      );
+      const links = await Promise.all(
+        [0, 1].map(() =>
+          call(
+            f.admin.token,
+            'POST',
+            `/mobile-pos-onboarding/enrollments/${adminClaim.enrollmentId}/admin-link`,
+            { claimToken: adminClaim.claimToken },
+          ),
+        ),
+      );
+      const linked = links[0];
+      assert.equal(linked.userId, f.admin.user.id);
+      assert.equal(linked.approvedRole, 'ADMIN');
+      assert.equal(linked.adminLinked, true);
+      assert.deepEqual(links[0], links[1]);
+      const retry = await call(null, 'POST', '/mobile-pos-auth/invite/' + invite.token, {
+        name: adminClaim.requestName,
+        role: 'ADMIN',
+        requestId: adminClaim.enrollmentId,
+        claimToken: adminClaim.claimToken,
+      });
+      assert.equal(retry.status, 'APPROVED');
+      assert.equal(retry.role, 'ADMIN');
+      assert.equal(retry.adminLinked, true);
+      assert.equal(
+        await db.notification.count({
+          where: {
+            linkedEntityType: 'MobilePosEnrollment',
+            linkedEntityId: adminClaim.enrollmentId,
+            notificationType: 'APPROVAL_REQUIRED',
+            status: 'UNREAD',
+          },
+        }),
+        0,
+      );
+      const reviewed = await db.mobilePosEnrollment.findUniqueOrThrow({
+        where: { id: adminClaim.enrollmentId },
+      });
+      assert.equal(reviewed.approvedById, f.reviewer.user.id);
+      assert.equal(reviewed.approvedAt.toISOString(), approved.approvedAt);
+      assert.equal(
+        await db.auditLog.count({
+          where: { action: 'MOBILE_POS_ADMIN_LINKED', entityId: adminClaim.enrollmentId },
+        }),
+        1,
+      );
+    },
+  );
+  await check(
+    'Rejection closes the review notification and announces the decision without issuing a PIN account',
+    async () => {
+      const rejected = await enroll('Proof rejected request', 'CASHIER');
+      await call(
+        f.admin.token,
+        'POST',
+        `/mobile-pos-onboarding/enrollments/${rejected.enrollmentId}/reject`,
+        { reason: 'Synthetic review rejected' },
+      );
+      const inbox = await call(f.admin.token, 'GET', '/notifications/my?limit=100');
+      const rows = inbox.data.filter((row) => row.linkedEntityId === rejected.enrollmentId);
+      assert.ok(
+        rows.some((row) => row.notificationType === 'APPROVAL_REQUIRED' && row.status === 'READ'),
+      );
+      assert.ok(
+        rows.some((row) => row.notificationType === 'APPROVAL_REJECTED' && row.status === 'UNREAD'),
+      );
+      const row = await db.mobilePosEnrollment.findUniqueOrThrow({
+        where: { id: rejected.enrollmentId },
+      });
+      assert.equal(row.userId, null);
+      assert.equal(row.pinHash, null);
+    },
+  );
   for (const [operator, role] of [
     [cashier, 'CASHIER'],
     [stockist, 'STOCKIST'],

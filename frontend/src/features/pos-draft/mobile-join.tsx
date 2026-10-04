@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Download, ShieldCheck, Smartphone } from 'lucide-react';
@@ -18,6 +18,9 @@ import {
   readSetupBinding,
   saveSetupBinding,
   clearSetupBinding,
+  readPendingRegistration,
+  prepareRegistration,
+  clearPendingRegistration,
 } from './mobile-api';
 import type { EnrollmentProfile, InviteProfile, MobileProfile } from './mobile-types';
 import type { PosRole } from './types';
@@ -44,6 +47,15 @@ export function MobileJoin({ token }: { token: string }) {
   const [revision, setRevision] = useState(0);
   const [claimToken, setClaimToken] = useState(token);
   const [resetRecovery, setResetRecovery] = useState(false);
+  const [registrationPending, setRegistrationPending] = useState(false);
+  const routeGeneration = useRef(0);
+  useEffect(() => {
+    routeGeneration.current += 1;
+    setBusy(false);
+    return () => {
+      routeGeneration.current += 1;
+    };
+  }, [token]);
   useEffect(() => {
     setInstalled(isInstalled());
     if ('serviceWorker' in navigator)
@@ -87,6 +99,13 @@ export function MobileJoin({ token }: { token: string }) {
       return () => controller.abort();
     }
     const pending = isInstalled() ? readPendingEnrollment() : null;
+    const attempt = isInstalled() ? readPendingRegistration() : null;
+    const unacknowledged = attempt?.inviteToken === token ? attempt : null;
+    setRegistrationPending(!!unacknowledged);
+    if (unacknowledged) {
+      setName(unacknowledged.name);
+      setRole(unacknowledged.role);
+    }
     const resumed = pending?.inviteToken === token ? pending.claimToken : token;
     setClaimToken(resumed);
     if (resumed !== token) router.replace(`/mobile-pos/join/${encodeURIComponent(resumed)}`);
@@ -105,6 +124,8 @@ export function MobileJoin({ token }: { token: string }) {
       .catch(async (e) => {
         if (controller.signal.aborted) return;
         if (!(e instanceof ApiError) || ![400, 404, 410].includes(e.status)) throw e;
+        // An unacknowledged registration stays on its invite until a matching POST receipt.
+        if (unacknowledged && resumed === token) throw e;
         const value = await mobileApi<EnrollmentProfile>(
           `/mobile-pos-auth/enrollment/${encodeURIComponent(resumed)}`,
           { signal: controller.signal },
@@ -170,27 +191,56 @@ export function MobileJoin({ token }: { token: string }) {
       setError('Open the installed app to request access.');
       return;
     }
-    if (!name.trim()) {
-      setError('Enter your full name.');
+    if (name.trim().length < 2 || name.trim().length > 120) {
+      setError('Enter a full name between 2 and 120 characters.');
       return;
     }
     setBusy(true);
     setError('');
+    const submittedGeneration = routeGeneration.current;
+    const ownsRoute = () => routeGeneration.current === submittedGeneration;
     try {
+      const attempt = prepareRegistration(token, name, role);
+      setRegistrationPending(true);
       const value = await mobileApi<{ enrollmentId: string; claimToken: string }>(
         `/mobile-pos-auth/invite/${encodeURIComponent(token)}`,
-        { method: 'POST', body: { name: name.trim(), role }, public: true },
+        {
+          method: 'POST',
+          body: {
+            name: attempt.name,
+            role: attempt.role,
+            requestId: attempt.requestId,
+            claimToken: attempt.claimToken,
+          },
+          public: true,
+        },
       );
+      if (!ownsRoute()) return;
+      const current = readPendingRegistration();
+      if (
+        current?.requestId !== attempt.requestId ||
+        current.claimToken !== attempt.claimToken ||
+        current.inviteToken !== attempt.inviteToken ||
+        current.name !== attempt.name ||
+        current.role !== attempt.role
+      )
+        throw new Error(
+          'This access request changed in another tab. Reopen the app before continuing.',
+        );
+      if (value.enrollmentId !== attempt.requestId || value.claimToken !== attempt.claimToken)
+        throw new Error('The access request receipt did not match. Retry this request.');
       savePendingEnrollment({
         inviteToken: token,
         claimToken: value.claimToken,
         enrollmentId: value.enrollmentId,
       });
+      clearPendingRegistration(attempt.requestId);
+      setRegistrationPending(false);
       router.replace(`/mobile-pos/join/${encodeURIComponent(value.claimToken)}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not request access.');
+      if (ownsRoute()) setError(e instanceof Error ? e.message : 'Could not request access.');
     } finally {
-      setBusy(false);
+      if (ownsRoute()) setBusy(false);
     }
   }
   async function setup(event: React.FormEvent) {
@@ -282,14 +332,23 @@ export function MobileJoin({ token }: { token: string }) {
     }
   }
   async function linkAdmin() {
-    if (!enrollment || !isInstalled()) return;
+    if (
+      !enrollment ||
+      !isInstalled() ||
+      enrollment.status !== 'APPROVED' ||
+      enrollment.role !== 'ADMIN' ||
+      enrollment.adminLinked
+    )
+      return;
     setBusy(true);
     setError('');
     try {
-      await backendPost(
+      const linked = await backendPost<{ adminLinked: boolean }>(
         `/mobile-pos-onboarding/enrollments/${enrollment.enrollmentId}/admin-link`,
         { claimToken },
       );
+      if (linked.adminLinked !== true)
+        throw new Error('The account link was not confirmed. Check approval and try again.');
       saveAdminInstallation({
         inviteToken: readPendingEnrollment()?.inviteToken ?? token,
         claimToken,
@@ -365,7 +424,7 @@ export function MobileJoin({ token }: { token: string }) {
             </button>
           </>
         )}
-        {!loading && installed && invite && (
+        {!loading && installed && (invite || registrationPending) && !enrollment && (
           <form onSubmit={request}>
             <label className="pd-field">
               Full name
@@ -373,18 +432,28 @@ export function MobileJoin({ token }: { token: string }) {
                 autoComplete="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                readOnly={registrationPending}
                 required
               />
             </label>
             <label className="pd-field">
               Requested role
-              <select value={role} onChange={(e) => setRole(e.target.value as PosRole)}>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as PosRole)}
+                disabled={registrationPending}
+              >
                 <option value="CASHIER">Cashier · sales and collections</option>
                 <option value="STOCKIST">Stockist · stock and dispatch</option>
                 <option value="ADMIN">Admin · existing OS account</option>
               </select>
             </label>
             <p className="pd-muted">Your administrator confirms your role and branch access.</p>
+            {registrationPending && (
+              <p className="pd-muted">
+                Retry your saved request to confirm its outcome before requesting changes.
+              </p>
+            )}
             <button className="pd-button pd-primary" disabled={busy} type="submit">
               {busy ? 'Sending…' : 'Request access'}
             </button>
@@ -393,31 +462,46 @@ export function MobileJoin({ token }: { token: string }) {
         {installed && enrollment?.status === 'PENDING' && (
           <>
             <p>
-              {enrollment.name}, your requested {enrollment.role.toLowerCase()} access is pending.
-              You can close the app and return when approved.
+              {enrollment.name}, your requested{' '}
+              {(enrollment.requestedRole ?? enrollment.role).toLowerCase()} access is pending. You
+              can close the app and return when approved.
             </p>
-            {enrollment.role === 'ADMIN' && (
-              <>
-                <a
-                  className="pd-button"
-                  href={`/login?from=${encodeURIComponent(`/mobile-pos/join/${token}`)}`}
-                >
-                  Sign in with your OS account
-                </a>
-                <button
-                  className="pd-button pd-primary"
-                  disabled={busy}
-                  onClick={() => void linkAdmin()}
-                >
-                  Link authorized admin account
-                </button>
-              </>
-            )}
             <button className="pd-button" onClick={() => setRevision((v) => v + 1)} disabled={busy}>
               Check approval
             </button>
           </>
         )}
+        {installed &&
+          enrollment?.status === 'APPROVED' &&
+          enrollment.role === 'ADMIN' &&
+          !enrollment.adminLinked && (
+            <>
+              <p>
+                Your admin access is approved. Link your existing authorized OS account to this
+                phone.
+              </p>
+              <a
+                className="pd-button"
+                href={`/login?from=${encodeURIComponent(`/mobile-pos/join/${token}`)}`}
+              >
+                Sign in with your OS account
+              </a>
+              <button
+                className="pd-button pd-primary"
+                disabled={busy}
+                onClick={() => void linkAdmin()}
+              >
+                Link authorized admin account
+              </button>
+              <button
+                className="pd-button"
+                onClick={() => setRevision((v) => v + 1)}
+                disabled={busy}
+              >
+                Check approval
+              </button>
+            </>
+          )}
         {installed &&
           enrollment?.status === 'APPROVED' &&
           (!enrollment.pinReady || recovering) &&
@@ -462,19 +546,26 @@ export function MobileJoin({ token }: { token: string }) {
               </button>
             </form>
           )}
-        {installed && enrollment?.status === 'APPROVED' && enrollment.pinReady && !recovering && (
-          <a className="pd-button pd-primary" href="/mobile-pos">
-            Open Itemba POS
-          </a>
-        )}
-        {installed && enrollment?.status === 'APPROVED' && enrollment.role === 'ADMIN' && (
-          <a
-            className="pd-button pd-primary"
-            href={`/mobile-pos?admin=1&companyId=${encodeURIComponent(enrollment.company.id)}&branchId=${encodeURIComponent(enrollment.branch.id)}`}
-          >
-            Open admin POS
-          </a>
-        )}
+        {installed &&
+          enrollment?.status === 'APPROVED' &&
+          enrollment.role !== 'ADMIN' &&
+          enrollment.pinReady &&
+          !recovering && (
+            <a className="pd-button pd-primary" href="/mobile-pos">
+              Open Itemba POS
+            </a>
+          )}
+        {installed &&
+          enrollment?.status === 'APPROVED' &&
+          enrollment.role === 'ADMIN' &&
+          enrollment.adminLinked === true && (
+            <a
+              className="pd-button pd-primary"
+              href={`/mobile-pos?admin=1&companyId=${encodeURIComponent(enrollment.company.id)}&branchId=${encodeURIComponent(enrollment.branch.id)}`}
+            >
+              Open admin POS
+            </a>
+          )}
         {enrollment && ['REJECTED', 'REVOKED'].includes(enrollment.status) && (
           <p className="pd-error">
             This access is {enrollment.status.toLowerCase()}. Contact your administrator.

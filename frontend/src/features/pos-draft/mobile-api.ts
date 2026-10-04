@@ -1,4 +1,5 @@
 import { unwrapApiPayload, ApiError, buildQuery } from '@/lib/api-client';
+import type { PosRole } from './types';
 
 export type DeviceIdentity = {
   enrollmentId: string;
@@ -10,8 +11,74 @@ export type DeviceIdentity = {
 };
 const DEVICE_KEY = 'itemba.pos.device.v2';
 const PENDING_KEY = 'itemba.pos.pending.v1';
+const REGISTRATION_KEY = 'itemba.pos.registration-attempt.v1';
 const ADMIN_KEY = 'itemba.pos.admin-install.v1';
 const SETUP_KEY = 'itemba.pos.setup-binding.v1';
+export type PendingRegistration = {
+  inviteToken: string;
+  name: string;
+  role: PosRole;
+  requestId: string;
+  claimToken: string;
+};
+export function readPendingRegistration(): PendingRegistration | null {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem(REGISTRATION_KEY) ?? 'null',
+    ) as PendingRegistration | null;
+    return value &&
+      typeof value.inviteToken === 'string' &&
+      /^[\w-]{1,128}$/.test(value.inviteToken) &&
+      typeof value.name === 'string' &&
+      value.name.trim() === value.name &&
+      value.name.length >= 2 &&
+      value.name.length <= 120 &&
+      ['CASHIER', 'STOCKIST', 'ADMIN'].includes(value.role) &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+        value.requestId,
+      ) &&
+      /^[A-Za-z0-9_-]{32}$/.test(value.claimToken)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+export function prepareRegistration(
+  inviteToken: string,
+  name: string,
+  role: PosRole,
+): PendingRegistration {
+  const previous = readPendingRegistration();
+  const normalized = name.trim();
+  if (normalized.length < 2 || normalized.length > 120)
+    throw new Error('Enter a full name between 2 and 120 characters.');
+  if (
+    previous?.inviteToken === inviteToken &&
+    previous.name === normalized &&
+    previous.role === role
+  )
+    return previous;
+  if (previous)
+    throw new Error(
+      'Retry your saved access request before requesting a different name, role or branch.',
+    );
+  const value: PendingRegistration = {
+    inviteToken,
+    name: normalized,
+    role,
+    requestId: crypto.randomUUID(),
+    claimToken: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))))
+      .replaceAll('+', '-')
+      .replaceAll('/', '_'),
+  };
+  // Persistence must succeed before callers can submit the registration.
+  localStorage.setItem(REGISTRATION_KEY, JSON.stringify(value));
+  return value;
+}
+export function clearPendingRegistration(requestId: string) {
+  if (readPendingRegistration()?.requestId === requestId) localStorage.removeItem(REGISTRATION_KEY);
+}
 export function readSetupBinding(enrollmentId: string): string | null {
   try {
     const value = JSON.parse(localStorage.getItem(SETUP_KEY) ?? 'null') as {

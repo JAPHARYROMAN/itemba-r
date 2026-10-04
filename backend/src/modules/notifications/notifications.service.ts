@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
   MsaidiziTaskStatus,
+  MobilePosEnrollment,
   NotificationPriority,
   NotificationStatus,
   NotificationType,
@@ -62,6 +63,75 @@ export class NotificationsService {
     private readonly audit: AuditLogsService,
     private readonly emailService: EmailService,
   ) {}
+
+  /** Enrollment and inbox delivery share one transaction; deterministic keys keep retries unique. */
+  async notifyMobilePosEnrollmentRequested(
+    tx: Prisma.TransactionClient,
+    enrollment: Pick<MobilePosEnrollment, 'id' | 'name' | 'requestedRole' | 'companyId'>,
+    scopedRecipientIds: string[],
+  ) {
+    for (const recipientUserId of new Set(scopedRecipientIds)) {
+      const notificationNumber = `POS-ENROLL-${enrollment.id}-${recipientUserId}`;
+      await tx.notification.upsert({
+        where: { notificationNumber },
+        update: {},
+        create: {
+          notificationNumber,
+          recipientUserId,
+          companyId: enrollment.companyId,
+          title: 'POS access request',
+          message: `${enrollment.name} requested ${enrollment.requestedRole.toLowerCase()} access. Review the request in POS Draft Devices.`,
+          notificationType: NotificationType.APPROVAL_REQUIRED,
+          priority: NotificationPriority.HIGH,
+          status: 'UNREAD',
+          linkedEntityType: 'MobilePosEnrollment',
+          linkedEntityId: enrollment.id,
+          actionUrl: `/pos-draft?view=devices&enrollmentId=${encodeURIComponent(enrollment.id)}`,
+        },
+      });
+    }
+    return new Set(scopedRecipientIds).size;
+  }
+
+  async notifyMobilePosEnrollmentDecision(
+    tx: Prisma.TransactionClient,
+    enrollment: Pick<MobilePosEnrollment, 'id' | 'name' | 'companyId' | 'status'>,
+    scopedRecipientIds: string[],
+  ) {
+    if (!['APPROVED', 'REJECTED'].includes(enrollment.status)) return;
+    await tx.notification.updateMany({
+      where: {
+        linkedEntityType: 'MobilePosEnrollment',
+        linkedEntityId: enrollment.id,
+        notificationType: NotificationType.APPROVAL_REQUIRED,
+        status: 'UNREAD',
+      },
+      data: { status: 'READ', readAt: new Date() },
+    });
+    const approved = enrollment.status === 'APPROVED';
+    for (const recipientUserId of new Set(scopedRecipientIds)) {
+      const notificationNumber = `POS-ENROLL-${enrollment.id}-${enrollment.status}-${recipientUserId}`;
+      await tx.notification.upsert({
+        where: { notificationNumber },
+        update: {},
+        create: {
+          notificationNumber,
+          recipientUserId,
+          companyId: enrollment.companyId,
+          title: approved ? 'POS access approved' : 'POS access rejected',
+          message: `${enrollment.name}’s POS access request was ${approved ? 'approved' : 'rejected'}. Open POS Draft Devices for its current status.`,
+          notificationType: approved
+            ? NotificationType.APPROVAL_APPROVED
+            : NotificationType.APPROVAL_REJECTED,
+          priority: NotificationPriority.NORMAL,
+          status: 'UNREAD',
+          linkedEntityType: 'MobilePosEnrollment',
+          linkedEntityId: enrollment.id,
+          actionUrl: `/pos-draft?view=devices&enrollmentId=${encodeURIComponent(enrollment.id)}`,
+        },
+      });
+    }
+  }
 
   /**
    * Writes a terminal-task notification through the caller's transaction.

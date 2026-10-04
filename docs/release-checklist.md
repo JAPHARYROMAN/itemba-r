@@ -7,11 +7,13 @@ Use this checklist before deploying to production.
 ## Pre-Deployment
 
 ### Code Quality
+
 - [ ] TypeScript: `npx tsc --noEmit` passes on both backend and frontend (0 errors)
 - [ ] Linting passes on backend and frontend
 - [ ] All PR reviews approved
 
 ### Database
+
 - [ ] Prisma schema validated: `npx prisma validate --schema=database/prisma/schema.prisma`
 - [ ] Migration tested on a disposable database with `npx prisma migrate deploy`
 - [ ] `backend-migrate` Compose service completed successfully before backend startup
@@ -19,6 +21,7 @@ Use this checklist before deploying to production.
 - [ ] Seed data verified on staging
 
 ### Security
+
 - [ ] No secrets committed to version control
 - [ ] `.env` files not tracked in git
 - [ ] JWT secrets rotated if required
@@ -26,6 +29,7 @@ Use this checklist before deploying to production.
 - [ ] Audit logging in place for all sensitive actions
 
 ### Public Domain & Email
+
 - [ ] Domain purchased or transferred to managed DNS
 - [ ] `staging.itembagrouptz.com`, `api-staging.itembagrouptz.com`, `app.itembagrouptz.com`, and `api.itembagrouptz.com` resolve to the deployment target
 - [ ] TLS certificates are active for every public hostname
@@ -40,23 +44,27 @@ Use this checklist before deploying to production.
 - [ ] Live SMTP smoke passes for staging and production
 
 ### Performance
+
 - [ ] New endpoints have pagination
 - [ ] New queries use company scope filters
 - [ ] No N+1 query patterns introduced
 - [ ] Database indexes added for new high-traffic models
 
 ### Multi-Company Isolation
+
 - [ ] New modules respect company scoping
 - [ ] Data isolation tests pass on staging
 - [ ] No cross-company data leaks detected
 
 ### Docker
+
 - [ ] Backend Docker image builds successfully
 - [ ] Frontend Docker image builds successfully
 - [ ] `npm run verify:deploy` passes
 - [ ] Production Compose smoke passes in CI, or locally with `npm run smoke:deploy -- --allow-local`
 
 ### Smoke Coverage
+
 - [ ] Auth flow passes: `npm run smoke:auth-flow`
 - [ ] Authenticated dashboard data passes: `npm run smoke:authenticated-dashboard-data`
 - [ ] Current live staging dashboard correctness passes without deleting volumes: `npm run smoke:live-dashboard-data -- .env.staging`
@@ -71,6 +79,7 @@ Use this checklist before deploying to production.
 ## Deployment
 
 ### Steps
+
 1. Create a Deployment Release record in ITEMBA-R (Deployment → Releases → New Release)
 2. Set `environment = STAGING`, run final checks
 3. If staging passes, create a PRODUCTION release record
@@ -81,6 +90,7 @@ Use this checklist before deploying to production.
 8. Monitor error logs for 15 minutes post-deployment
 
 ### Health Verification
+
 - [ ] Backend readiness check responds: `GET /api/v1/health/ready`
 - [ ] Frontend loads correctly
 - [ ] Login works
@@ -90,18 +100,23 @@ Use this checklist before deploying to production.
 ## Post-Deployment
 
 ### Monitoring
+
 - Check: Monitoring → System Health
 - Check: Performance & Ops → Background Jobs (no DEAD_LETTER backlog)
 - Check: Security → Security Events (no unexpected events)
 - Check: Error Logs (no new critical errors)
 
 ### Rollback Trigger Conditions
+
 - Health check failing after 3 retries
 - Critical errors in error logs
 - Login or auth failures
 - Data corruption detected
 
 ### Rollback Steps
+
+For an activated POS Draft deployment, use the [POS Draft pause and rollback procedure](pos-draft-rollout.md#pause-and-rollback) instead of the generic steps below. Keep the security-capable backend and preserve drafts, reservations, decisions and collected-funds reconciliation. Do not restore an older backend that allows immediate staff posting or restore a database over later business transactions. Backend recovery requires affected mobile writes stopped and a guard-compatible recovery build; a database restore requires a deliberate disaster recovery cutover.
+
 1. Mark release as ROLLED_BACK in ITEMBA-R UI
 2. `docker compose --env-file .env.production -f docker-compose.production.yml down`
 3. Restore previous image tags
@@ -111,10 +126,10 @@ Use this checklist before deploying to production.
 
 ## Environment Inventory
 
-| Service | Production Port | Health Check |
-|---|---|---|
-| Backend API | 3001 | `GET /api/v1/health/ready` |
-| Frontend | 3000 | HTTP 200 on `/login` |
-| PostgreSQL | 5432 | `pg_isready` |
-| Redis | 6379 | authenticated `redis-cli ping` |
-| Caddy | 80/443 | `caddy validate` |
+| Service     | Production Port | Health Check                   |
+| ----------- | --------------- | ------------------------------ |
+| Backend API | 3001            | `GET /api/v1/health/ready`     |
+| Frontend    | 3000            | HTTP 200 on `/login`           |
+| PostgreSQL  | 5432            | `pg_isready`                   |
+| Redis       | 6379            | authenticated `redis-cli ping` |
+| Caddy       | 80/443          | `caddy validate`               |

@@ -134,7 +134,20 @@ export function PosDraftWorkspace() {
         .then((value) => {
           if (!controller.signal.aborted) {
             setSelected(value);
-            requestAnimationFrame(() => inspector.current?.focus());
+            requestAnimationFrame(() => {
+              const pane = inspector.current;
+              const frame = pane?.closest('.desktop-window');
+              // Restored background details must not take focus from an explicit route.
+              if (
+                controller.signal.aborted ||
+                !pane ||
+                (frame &&
+                  (frame.getAttribute('data-active') !== 'true' ||
+                    frame.getAttribute('aria-hidden') === 'true'))
+              )
+                return;
+              pane.focus();
+            });
           }
         })
         .catch((e) => {

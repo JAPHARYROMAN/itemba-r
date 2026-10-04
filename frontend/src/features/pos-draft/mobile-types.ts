@@ -20,6 +20,8 @@ export type EnrollmentProfile = {
   status: string;
   role: PosRole;
   name: string;
+  requestedRole?: PosRole;
+  adminLinked?: boolean;
   company: { id: string; name: string };
   division: { id: string; name: string };
   branch: { id: string; name: string };

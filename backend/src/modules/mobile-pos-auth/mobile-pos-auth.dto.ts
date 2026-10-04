@@ -15,6 +15,8 @@ import { Type } from 'class-transformer';
 export class MobilePosRegistrationDto {
   @IsString() @MinLength(2) @MaxLength(120) name!: string;
   @IsIn(['CASHIER', 'STOCKIST', 'ADMIN']) role!: 'CASHIER' | 'STOCKIST' | 'ADMIN';
+  @IsOptional() @IsUUID() requestId?: string;
+  @IsOptional() @IsString() @Matches(/^[A-Za-z0-9_-]{32}$/) claimToken?: string;
 }
 export class MobilePosSetupDto {
   @IsString() @Matches(/^[A-Za-z0-9_-]{32}$/) claimToken!: string;
@@ -57,7 +59,7 @@ export class MobilePosInviteDto {
   @IsUUID() branchSetupId!: string;
 }
 export class MobilePosApproveDto {
-  @IsIn(['CASHIER', 'STOCKIST']) role!: 'CASHIER' | 'STOCKIST';
+  @IsIn(['CASHIER', 'STOCKIST', 'ADMIN']) role!: 'CASHIER' | 'STOCKIST' | 'ADMIN';
 }
 export class MobilePosReasonDto {
   @IsString() @MinLength(2) @MaxLength(500) reason!: string;

@@ -13,6 +13,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { MobilePosRole } from '../../common/decorators/mobile-pos-session.decorator';
@@ -64,6 +65,7 @@ export class MobilePosAuthService {
     private readonly audit: AuditLogsService,
     private readonly companies: CompanyScopeService,
     private readonly organization: OrganizationScopeService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async assertManager(
@@ -74,6 +76,7 @@ export class MobilePosAuthService {
   ) {
     if (
       user.tokenUse === 'mobile-pos' ||
+      !!user.principalType ||
       !user.permissions.includes('mobile_pos_onboarding.manage')
     ) {
       throw new ForbiddenException('Existing administrator access is required');
@@ -316,25 +319,149 @@ export class MobilePosAuthService {
       throw new BadRequestException('Enter a name and requested role');
     const invite = await this.findInvite(rawToken);
     const setup = invite.branchSetup;
-    const claimToken = token();
-    const row = await this.prisma.mobilePosEnrollment.create({
-      data: {
-        branchSetupId: setup.id,
-        companyId: setup.companyId,
-        divisionId: setup.divisionId,
-        branchId: setup.branchId,
-        name: dto.name.trim(),
-        requestedRole: dto.role,
-        claimTokenHash: mobilePosHash(claimToken),
-        claimExpiresAt: new Date(Date.now() + CLAIM_TTL_MS),
-      },
+    if (!!dto.requestId !== !!dto.claimToken)
+      throw new BadRequestException('A retry identity requires both requestId and claimToken');
+    const claimToken = dto.claimToken ?? token();
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (dto.requestId) {
+        await tx.$executeRaw(
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`MobilePosEnrollment:${dto.requestId}`}, 0))`,
+        );
+        const existing = await tx.mobilePosEnrollment.findUnique({ where: { id: dto.requestId } });
+        if (existing) {
+          if (
+            !mobilePosHashMatches(existing.claimTokenHash, claimToken) ||
+            existing.branchSetupId !== setup.id ||
+            existing.companyId !== setup.companyId ||
+            existing.divisionId !== setup.divisionId ||
+            existing.branchId !== setup.branchId ||
+            existing.name !== dto.name.trim() ||
+            existing.requestedRole !== dto.role
+          )
+            throw new ConflictException('Registration retry does not match the original request');
+          return existing;
+        }
+      }
+      const created = await tx.mobilePosEnrollment.create({
+        data: {
+          ...(dto.requestId ? { id: dto.requestId } : {}),
+          branchSetupId: setup.id,
+          companyId: setup.companyId,
+          divisionId: setup.divisionId,
+          branchId: setup.branchId,
+          name: dto.name.trim(),
+          requestedRole: dto.role,
+          claimTokenHash: mobilePosHash(claimToken),
+          claimExpiresAt: new Date(Date.now() + CLAIM_TTL_MS),
+        },
+      });
+      await this.notifications.notifyMobilePosEnrollmentRequested(
+        tx,
+        created,
+        await this.enrollmentManagers(tx, created),
+      );
+      await this.audit.logStrictInTransaction(tx, {
+        action: 'MOBILE_POS_ENROLLMENT_REQUESTED',
+        entityType: 'MobilePosEnrollment',
+        entityId: created.id,
+        companyId: created.companyId,
+        metadata: { requestedRole: created.requestedRole },
+      });
+      return created;
     });
     return {
       enrollmentId: row.id,
       claimToken,
       status: row.status,
+      role: row.approvedRole ?? row.requestedRole,
+      requestedRole: row.requestedRole,
+      adminLinked: row.approvedRole === 'ADMIN' && !!row.userId,
       ...(await this.scopeProfile(setup)),
     };
+  }
+  private async enrollmentManagers(tx: Prisma.TransactionClient, row: MobilePosEnrollment) {
+    const candidates = await tx.user.findMany({
+      where: {
+        status: 'ACTIVE',
+        authKind: 'PASSWORD',
+        deletedAt: null,
+        OR: [
+          { companyId: row.companyId },
+          {
+            companyAccess: {
+              some: {
+                companyId: row.companyId,
+                accessLevel: { in: [AccessLevel.WRITE, AccessLevel.MANAGE] },
+              },
+            },
+          },
+        ],
+        userRoles: {
+          some: {
+            role: {
+              rolePermissions: {
+                some: {
+                  permission: { code: 'mobile_pos_onboarding.manage' },
+                },
+              },
+            },
+          },
+        },
+        AND: [
+          {
+            userRoles: {
+              some: {
+                role: {
+                  rolePermissions: {
+                    some: {
+                      permission: { code: 'notifications.view' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        email: true,
+        companyId: true,
+        userRoles: {
+          select: {
+            role: {
+              select: {
+                name: true,
+                scope: true,
+                rolePermissions: { select: { permission: { select: { code: true } } } },
+              },
+            },
+          },
+        },
+        companyAccess: { select: { companyId: true, accessLevel: true } },
+        divisionAccess: { select: { divisionId: true, accessLevel: true } },
+        branchAccess: { select: { branchId: true, accessLevel: true } },
+      },
+    });
+    const recipients: string[] = [];
+    for (const candidate of candidates) {
+      const actor: AuthUser = {
+        ...candidate,
+        roles: candidate.userRoles.map((entry) => entry.role.name),
+        roleScopes: candidate.userRoles.map((entry) => entry.role.scope),
+        permissions: candidate.userRoles.flatMap((entry) =>
+          entry.role.rolePermissions.map((grant) => grant.permission.code),
+        ),
+      };
+      if (!actor.permissions.includes('notifications.view')) continue;
+      try {
+        await this.assertManager(actor, row.companyId, row.divisionId, row.branchId);
+        recipients.push(actor.id);
+      } catch (error) {
+        if (!(error instanceof ForbiddenException)) throw error;
+      }
+    }
+    return recipients;
   }
   private async findClaim(claimToken: string) {
     if (!/^[A-Za-z0-9_-]{32}$/.test(claimToken))
@@ -359,6 +486,8 @@ export class MobilePosAuthService {
       name: row.name,
       status: row.status,
       role: row.approvedRole ?? row.requestedRole,
+      requestedRole: row.requestedRole,
+      adminLinked: row.approvedRole === 'ADMIN' && !!row.userId,
       pinReady: !!row.pinHash && !resetRequired,
       resetRequired,
       ...(await this.scopeProfile(row)),
@@ -370,6 +499,7 @@ export class MobilePosAuthService {
       name: row.name,
       requestedRole: row.requestedRole,
       approvedRole: row.approvedRole,
+      adminLinked: row.approvedRole === 'ADMIN' && !!row.userId,
       status: row.status,
       companyId: row.companyId,
       divisionId: row.divisionId,
@@ -410,16 +540,21 @@ export class MobilePosAuthService {
     return row;
   }
   async approve(id: string, dto: MobilePosApproveDto, actor: AuthUser) {
-    if (!['CASHIER', 'STOCKIST'].includes(dto.role))
+    if (!['CASHIER', 'STOCKIST', 'ADMIN'].includes(dto.role))
       throw new ForbiddenException('PIN enrollment cannot grant administrator access');
     const current = await this.manageable(id, actor);
-    if (current.status !== 'PENDING' || current.requestedRole === 'ADMIN') {
-      throw new BadRequestException('Admin registration requires that administrator to sign in');
+    if (
+      current.status !== 'PENDING' ||
+      (current.requestedRole === 'ADMIN') !== (dto.role === 'ADMIN')
+    ) {
+      throw new BadRequestException(
+        'Review an administrator request as ADMIN before account linkage',
+      );
     }
     if (!current.branchSetup.enabled || !current.branchSetup.approvalRequired)
       throw new BadRequestException('Branch setup is disabled');
-    const userId = randomUUID();
-    const passwordHash = await argon2.hash(randomBytes(32).toString('hex'));
+    const passwordHash =
+      dto.role === 'ADMIN' ? undefined : await argon2.hash(randomBytes(32).toString('hex'));
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.mobilePosEnrollment.updateMany({
         where: { id, status: 'PENDING' },
@@ -431,12 +566,30 @@ export class MobilePosAuthService {
         },
       });
       if (claimed.count !== 1) throw new ConflictException('Registration has already been decided');
+      if (dto.role === 'ADMIN') {
+        const row = await tx.mobilePosEnrollment.findUniqueOrThrow({ where: { id } });
+        await this.notifications.notifyMobilePosEnrollmentDecision(
+          tx,
+          row,
+          await this.enrollmentManagers(tx, row),
+        );
+        await this.audit.logStrictInTransaction(tx, {
+          action: 'MOBILE_POS_ENROLLMENT_APPROVED',
+          entityType: 'MobilePosEnrollment',
+          entityId: id,
+          userId: actor.id,
+          companyId: row.companyId,
+          metadata: { approvedRole: 'ADMIN', requiresExistingOfficeAccount: true },
+        });
+        return this.safe(row);
+      }
+      const userId = randomUUID();
       await tx.user.create({
         data: {
           id: userId,
           email: userId + '@pos.invalid',
           authKind: 'POS_PIN',
-          passwordHash,
+          passwordHash: passwordHash!,
           fullName: current.name,
           companyId: current.companyId,
           companyAccess: {
@@ -474,6 +627,11 @@ export class MobilePosAuthService {
         where: { id },
         data: { userId, terminalId: terminal.id },
       });
+      await this.notifications.notifyMobilePosEnrollmentDecision(
+        tx,
+        row,
+        await this.enrollmentManagers(tx, row),
+      );
       await this.audit.logStrictInTransaction(tx, {
         action: 'MOBILE_POS_ENROLLMENT_APPROVED',
         entityType: 'MobilePosEnrollment',
@@ -487,24 +645,44 @@ export class MobilePosAuthService {
   }
   async adminLink(id: string, claimToken: string, actor: AuthUser) {
     const row = await this.findClaim(claimToken);
-    if (row.id !== id || row.requestedRole !== 'ADMIN' || row.status !== 'PENDING')
+    if (
+      row.id !== id ||
+      row.requestedRole !== 'ADMIN' ||
+      row.approvedRole !== 'ADMIN' ||
+      row.status !== 'APPROVED'
+    )
       throw new ForbiddenException('Admin registration does not match this claim');
     await this.assertManager(actor, row.companyId, row.divisionId, row.branchId);
     const existing = await this.prisma.user.findUnique({ where: { id: actor.id } });
-    if (!existing || existing.authKind === 'POS_PIN' || existing.status !== 'ACTIVE')
+    if (
+      !existing ||
+      existing.authKind !== 'PASSWORD' ||
+      existing.status !== 'ACTIVE' ||
+      existing.deletedAt
+    )
       throw new ForbiddenException('Sign in with your existing administrator account');
+    if (row.userId) {
+      if (row.userId !== actor.id)
+        throw new ForbiddenException('Registration is linked to another administrator');
+      return this.safe(row);
+    }
     return this.prisma.$transaction(async (tx) => {
       const changed = await tx.mobilePosEnrollment.updateMany({
-        where: { id, status: 'PENDING' },
+        where: { id, status: 'APPROVED', approvedRole: 'ADMIN', userId: null },
         data: {
-          status: 'APPROVED',
-          approvedRole: 'ADMIN',
           userId: actor.id,
-          approvedById: actor.id,
-          approvedAt: new Date(),
         },
       });
-      if (changed.count !== 1) throw new ConflictException('Registration has already been decided');
+      if (changed.count !== 1) {
+        const linked = await tx.mobilePosEnrollment.findUniqueOrThrow({ where: { id } });
+        if (
+          linked.status === 'APPROVED' &&
+          linked.approvedRole === 'ADMIN' &&
+          linked.userId === actor.id
+        )
+          return this.safe(linked);
+        throw new ConflictException('Registration has already been decided');
+      }
       await this.audit.logStrictInTransaction(tx, {
         action: 'MOBILE_POS_ADMIN_LINKED',
         entityType: 'MobilePosEnrollment',
@@ -523,6 +701,12 @@ export class MobilePosAuthService {
         data: { status: 'REJECTED', rejectedReason: reason.trim() },
       });
       if (changed.count !== 1) throw new ConflictException('Registration has already been decided');
+      const decided = await tx.mobilePosEnrollment.findUniqueOrThrow({ where: { id } });
+      await this.notifications.notifyMobilePosEnrollmentDecision(
+        tx,
+        decided,
+        await this.enrollmentManagers(tx, decided),
+      );
       await this.audit.logStrictInTransaction(tx, {
         action: 'MOBILE_POS_ENROLLMENT_REJECTED',
         entityType: 'MobilePosEnrollment',

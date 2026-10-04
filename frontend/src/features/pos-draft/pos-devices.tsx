@@ -7,6 +7,7 @@ import { useDraftScopes } from './use-draft-scopes';
 import { InstallQrCode } from '@/components/westsides/mobile-pos-install/InstallQrCode';
 import type { PosRole } from './types';
 import { LegacyQuarantine } from './legacy-quarantine';
+import { useWorkspaceSearchParams } from '@/components/workspace/workspace-navigation';
 type BranchSetup = {
   id: string;
   companyId: string;
@@ -32,10 +33,12 @@ type Enrollment = {
   approvedRole: PosRole | null;
   status: string;
   branchId: string;
+  adminLinked?: boolean;
 };
 type Invite = { id: string; token: string; path: string; expiresAt: string };
 export function PosDevices() {
   const { hasPermission } = useAuth();
+  const targetEnrollment = useWorkspaceSearchParams().get('enrollmentId');
   const canManage = hasPermission('mobile_pos_onboarding.manage');
   const [setups, setSetups] = useState<BranchSetup[]>([]),
     [enrollments, setEnrollments] = useState<Enrollment[]>([]);
@@ -159,7 +162,12 @@ export function PosDevices() {
       const value = await backendPost<{ resetToken?: string }>(
         `/mobile-pos-onboarding/enrollments/${row.id}/${action}`,
         action === 'approve'
-          ? { role: roles[row.id] ?? (row.requestedRole === 'STOCKIST' ? 'STOCKIST' : 'CASHIER') }
+          ? {
+              role:
+                row.requestedRole === 'ADMIN'
+                  ? 'ADMIN'
+                  : (roles[row.id] ?? (row.requestedRole === 'STOCKIST' ? 'STOCKIST' : 'CASHIER')),
+            }
           : ['reject', 'revoke'].includes(action)
             ? { reason: reasons[row.id].trim() }
             : {},
@@ -434,8 +442,18 @@ export function PosDevices() {
           <h3>Team access</h3>
           <div className="pd-enrollments">
             {enrollments.map((row) => (
-              <article className="pd-enrollment" key={row.id}>
-                <h4>{row.name}</h4>
+              <article
+                className="pd-enrollment"
+                key={row.id}
+                aria-labelledby={`enrollment-${row.id}-name`}
+                aria-current={targetEnrollment === row.id ? 'true' : undefined}
+                style={
+                  targetEnrollment === row.id
+                    ? { outline: '2px solid var(--desktop-accent, #1e3a5f)', outlineOffset: 3 }
+                    : undefined
+                }
+              >
+                <h4 id={`enrollment-${row.id}-name`}>{row.name}</h4>
                 <p>
                   {(row.approvedRole ?? row.requestedRole).toLowerCase()} ·{' '}
                   <span className="pd-status">{row.status.toLowerCase().replaceAll('_', ' ')}</span>
@@ -470,8 +488,25 @@ export function PosDevices() {
                   </>
                 )}
                 {row.requestedRole === 'ADMIN' && row.status === 'PENDING' && (
+                  <>
+                    <p className="pd-notice">
+                      Approve this admin request first. The person then links an existing authorized
+                      OS account on the phone.
+                    </p>
+                    <button
+                      className="pd-button pd-primary"
+                      disabled={!!busy}
+                      onClick={() => void act(row, 'approve')}
+                    >
+                      Approve access
+                    </button>
+                  </>
+                )}
+                {row.approvedRole === 'ADMIN' && row.status === 'APPROVED' && (
                   <p className="pd-notice">
-                    Admin access is linked on the phone with an existing authorized OS account.
+                    {row.adminLinked
+                      ? 'Existing authorized OS account linked.'
+                      : 'Approved. Waiting for the person to link an existing authorized OS account on the phone.'}
                   </p>
                 )}
                 {!['REJECTED', 'REVOKED'].includes(row.status) && (

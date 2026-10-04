@@ -1,11 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PosDraftWorkspace } from './pos-draft-workspace';
 import { contextFixture, draftFixture } from './test-fixtures';
 const h = vi.hoisted(() => ({
   params: new URLSearchParams(),
   getDrafts: vi.fn(),
+  getDraft: vi.fn(),
   get: vi.fn(),
   permissions: ['pos_drafts.view'],
   devices: vi.fn(),
@@ -23,7 +24,7 @@ vi.mock('@/lib/api-client', () => ({
 }));
 vi.mock('./api', () => ({
   getDrafts: (...args: unknown[]) => h.getDrafts(...args),
-  getDraft: vi.fn(),
+  getDraft: (...args: unknown[]) => h.getDraft(...args),
   getDraftContext: vi.fn(async () => contextFixture),
   decideDraft: vi.fn(),
   submitDraft: vi.fn(),
@@ -59,6 +60,7 @@ beforeEach(() => {
     ],
   });
   h.getDrafts.mockReset();
+  h.getDraft.mockReset();
   h.getDrafts.mockImplementation(async (query: { page: number }) => ({
     data: [draftFixture],
     total: 101,
@@ -68,6 +70,7 @@ beforeEach(() => {
     summary: { pendingMoney: 100, awaitingApproval: 1, awaitingStockist: 0, readyFinal: 0 },
   }));
 });
+afterEach(() => vi.restoreAllMocks());
 describe('scoped POS Draft review', () => {
   it('loads its own authorized company choices without unrelated master permissions', async () => {
     render(<PosDraftWorkspace />);
@@ -117,4 +120,75 @@ describe('scoped POS Draft review', () => {
     render(<PosDraftWorkspace />);
     expect(await screen.findByText('Rejected · funds to return')).toBeVisible();
   });
+  it.each([false, true])(
+    'keeps the requested Sales Desk focused when a restored POS detail finishes loading (initially active: %s)',
+    async (initiallyActive) => {
+      h.params = new URLSearchParams({ record: draftFixture.id, view: 'history' });
+      let complete!: (draft: typeof draftFixture) => void;
+      h.getDraft.mockReturnValue(new Promise((resolve) => (complete = resolve)));
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      const activatePos = vi.fn(() =>
+        history.replaceState({}, '', `/pos-draft/sales/${draftFixture.id}?view=history`),
+      );
+      history.replaceState({}, '', '/sales-desk/sales/canonical');
+      render(
+        <>
+          <button>Current Sales Desk</button>
+          <section
+            className="desktop-window"
+            data-active={initiallyActive}
+            aria-hidden="false"
+            onFocusCapture={activatePos}
+          >
+            <PosDraftWorkspace />
+          </section>
+        </>,
+      );
+      const foreground = screen.getByRole('button', { name: 'Current Sales Desk' });
+      foreground.focus();
+      await act(async () => complete(draftFixture));
+      expect(await screen.findByRole('region', { name: 'Request details' })).toBeVisible();
+      await waitFor(() => expect(frames).toHaveLength(1));
+      // The explicit route can take focus after the response, before its queued frame.
+      screen
+        .getByRole('region', { name: 'Request details' })
+        .closest('.desktop-window')!
+        .setAttribute('data-active', 'false');
+      act(() => frames.shift()!(0));
+      expect(foreground).toHaveFocus();
+      expect(activatePos).not.toHaveBeenCalled();
+      expect(location.pathname).toBe('/sales-desk/sales/canonical');
+    },
+  );
+  it.each(['foreground window', 'standalone'])(
+    'focuses a loaded detail in the %s',
+    async (mode) => {
+      h.params = new URLSearchParams({ record: draftFixture.id });
+      let complete!: (draft: typeof draftFixture) => void;
+      h.getDraft.mockReturnValue(new Promise((resolve) => (complete = resolve)));
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      const { container } = render(
+        mode === 'foreground window' ? (
+          <section className="desktop-window" data-active="true" aria-hidden="false">
+            <PosDraftWorkspace />
+          </section>
+        ) : (
+          <PosDraftWorkspace />
+        ),
+      );
+      await act(async () => complete(draftFixture));
+      await screen.findByRole('region', { name: 'Request details' });
+      await waitFor(() => expect(frames).toHaveLength(1));
+      act(() => frames.shift()!(0));
+      expect(container.querySelector('.pd-detail-pane')).toHaveFocus();
+    },
+  );
 });

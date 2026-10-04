@@ -89,6 +89,8 @@ function fixture(overrides: Record<string, unknown> = {}) {
       update: jest.fn(),
     },
     user: {
+      findMany: jest.fn(async () => []),
+      create: jest.fn(),
       findUnique: jest.fn(async () => ({
         id: 'operator-a',
         authKind: 'POS_PIN',
@@ -122,6 +124,10 @@ function fixture(overrides: Record<string, unknown> = {}) {
   const audit = { logStrictInTransaction: jest.fn(), log: jest.fn() };
   const companyScope = { assertCanAccessCompany: jest.fn() };
   const organization = { assertCanAccessScope: jest.fn() };
+  const notifications = {
+    notifyMobilePosEnrollmentRequested: jest.fn(),
+    notifyMobilePosEnrollmentDecision: jest.fn(),
+  };
   const service = new MobilePosAuthService(
     prisma,
     jwt as any,
@@ -129,8 +135,20 @@ function fixture(overrides: Record<string, unknown> = {}) {
     audit as any,
     companyScope as any,
     organization as any,
+    notifications as never,
   );
-  return { service, prisma, jwt, audit, config, terminal, state: () => state };
+  return {
+    service,
+    prisma,
+    jwt,
+    audit,
+    config,
+    terminal,
+    notifications,
+    companyScope,
+    organization,
+    state: () => state,
+  };
 }
 const manager: any = {
   id: 'admin-a',
@@ -145,15 +163,22 @@ describe('approved mobile PIN identity', () => {
       f.service.saveBranchSetup({ approvalRequired: false } as any, manager),
     ).rejects.toThrow(BadRequestException);
   });
-  it('requires admin linkage rather than approving an ADMIN role', async () => {
-    const f = fixture({ status: 'PENDING', requestedRole: 'ADMIN' });
+  it('requires ADMIN review for an ADMIN request without changing it to a PIN identity', async () => {
+    const f = fixture({
+      status: 'PENDING',
+      requestedRole: 'ADMIN',
+      approvedRole: null,
+      userId: null,
+      terminalId: null,
+      pinHash: null,
+    });
     await expect(f.service.approve('enrollment-a', { role: 'CASHIER' }, manager)).rejects.toThrow(
       BadRequestException,
     );
-    await expect(
-      f.service.approve('enrollment-a', { role: 'ADMIN' } as any, manager),
-    ).rejects.toThrow(ForbiddenException);
-    expect(f.prisma.mobilePosEnrollment.updateMany).not.toHaveBeenCalled();
+    const result = await f.service.approve('enrollment-a', { role: 'ADMIN' }, manager);
+    expect(result).toMatchObject({ status: 'APPROVED', approvedRole: 'ADMIN', adminLinked: false });
+    expect(f.prisma.user.create).not.toHaveBeenCalled();
+    expect(f.prisma.mobilePosEnrollment.update).not.toHaveBeenCalled();
   });
 
   it('does not bind a pending registration', async () => {

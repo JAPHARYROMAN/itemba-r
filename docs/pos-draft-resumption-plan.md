@@ -2,7 +2,7 @@
 
 Reviewed 4 October 2026 at approximately 11:55 East Africa Time. This extends the owner's supplied **ITEMBA POS remake and POS Draft** plan against the recovered implementation. The product direction remains approval before posting, simple phone enrolment, six-digit PINs, offline capture only, complete sales and full supplier-order receipts, and no cashier shifts.
 
-Most of the requested implementation already exists in an isolated candidate. Resume its integration and acceptance work; do not restart it from the older main checkout. The candidate is not release-ready because full CI has failures and staging and physical-phone acceptance remain outstanding.
+Most of the requested implementation already exists in an isolated candidate. Resume its integration and acceptance work; do not restart it from the older main checkout. The initial recovery review found CI and staging acceptance outstanding. Exact-source CI and staging workflow evidence subsequently passed for 8afa7e1a. On 4 October 2026 the owner waived remaining phone tests and pre-deployment pilot selection, requested the simple OS notification/approve/reject flow, and authorised completion and production deployment. That instruction supersedes the physical-device completion gates below; new implementation changes still require automated checks and focused staging verification.
 
 ## Recovered implementation and interruption point
 
@@ -132,21 +132,21 @@ Observe snapshots before capture, after submission, after first approval, after 
 
 Completion: a reviewer can trace each stage to draft decisions, reservation, original recorder and final canonical record, with amounts/quantities reconciled.
 
-### 5 Accept the installed app on Android
+### 5 Record the owner's physical-device waiver
 
-The owner confirmed the Samsung Galaxy A57 5G as the Android test phone and removed iPhone testing from this release on 4 October 2026. That scope change supersedes the supplied plan's two-platform acceptance gate.
+The owner confirmed the Samsung Galaxy A57 5G, then removed iPhone testing and waived the remaining phone tests as deployment gates on 4 October 2026. The user reported that the installed app reopened its pending request; later staging inspection matched Japhary Mwampuwa requesting Admin in Synthetic UAT source. The user had not completed Admin linking. Preserve this partial evidence without declaring the unperformed checks passed.
 
-Test QR installation, name/role enrolment, pending approval restart, PIN setup/login/reset, revoked/lost phone and browser-to-installed-app context. Verify offline capture, force-close/reopen, uncertain submission, explicit reconnect, held captures after reset, old-outbox reconciliation and operator/device isolation. Inspect readable themes, keyboard access, 390px/768px/desktop layouts and separate OS windows in the production bundle.
+QR installation, PIN recovery, offline restart, service-worker updates and owner/device isolation remain useful optional follow-up checks. They no longer block this authorised deployment. Automated security and workflow evidence and readable staged layouts remain required for the implemented changes.
 
-Completion: actual device/browser versions and pass/fail results are recorded, with unresolved device failures fixed or kept outside pilot activation. Browser simulation is supporting evidence only.
+Completion: record physical acceptance as **OWNER-WAIVED**, with partial user reports separately; the owner will report live misbehaviour. Browser and API results must retain their own evidence labels.
 
 ### 6 Promote the accepted candidate and retain governed rollback
 
-After exact-source CI, staging reconciliation and physical-device acceptance, promote through normal reviewed production backup/migration controls. Start with the accepted branch, verify real pending/posting records and then expand deliberately. Check old phone queues before enabling the new workflow on each device.
+After exact-source CI and focused staging verification, promote through normal reviewed production backup/migration controls. Real branch setup uses deliberate customer/account mappings after publishing; it no longer delays deployment for pilot selection. Check old phone queues before enabling the new workflow on each device.
 
 Pause a branch to stop affected staff writes while keeping captures, decisions, reservations and pending-money tasks. Keep the new approval guard in any backend recovery build. A frontend rollback must not reinstate immediate staff posting. Preserve original transactions and resolve posted corrections through canonical workflows.
 
-Completion: production runtime matches the accepted source, the pilot reconciles, and the governed pause/recovery procedure is proven. No cashier shifts are added.
+Completion: production runtime matches the verified source, notification-driven approval/rejection works, and the governed pause/recovery procedure preserves drafts and staff restrictions. No cashier shifts are added.
 
 ## Source map for continuation
 
