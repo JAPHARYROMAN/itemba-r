@@ -23,7 +23,9 @@ function lockedPayable(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(opts: { locked?: Record<string, unknown>; invoices?: any[]; existing?: any } = {}) {
+function setup(
+  opts: { locked?: Record<string, unknown>; invoices?: any[]; orders?: any[]; existing?: any } = {},
+) {
   const locked = lockedPayable(opts.locked);
   let payable = { ...locked };
   const tx: any = {
@@ -48,6 +50,7 @@ function setup(opts: { locked?: Record<string, unknown>; invoices?: any[]; exist
       findMany: jest.fn(async () => opts.invoices ?? []),
       update: jest.fn(async ({ data }: any) => data),
     },
+    purchaseOrder: { findMany: jest.fn(async () => opts.orders ?? []), update: jest.fn() },
     supplierPayment: {
       findUnique: jest.fn(async () => opts.existing ?? null),
       findFirst: jest.fn(),
@@ -110,6 +113,38 @@ const baseInput = () => ({
 });
 
 describe('SupplierPaymentsService.createInTransaction', () => {
+  it('keeps received purchase-order balances and payment status in step with the payable', async () => {
+    const { service, tx } = setup({ orders: [{ id: 'po-1', totalAmount: d(500) }] });
+    await service.createInTransaction(tx, user, baseInput());
+    expect(tx.purchaseOrder.update).toHaveBeenCalledWith({
+      where: { id: 'po-1' },
+      data: { paidAmount: d(200), outstandingAmount: d(300), paymentStatus: 'PARTIALLY_PAID' },
+    });
+    expect(tx.purchaseOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          payableId: 'pay-1',
+          companyId: 'company-1',
+          currency: 'TZS',
+          status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] },
+        }),
+      }),
+    );
+  });
+  it('suppresses only its internal Cash Desk mirror when the caller owns that movement', async () => {
+    const { service, tx } = setup();
+    const cashBook = { recordInTransaction: jest.fn(async () => ({ id: 'cash-book-movement' })) };
+    (service as any).cashBook = cashBook;
+    await service.createInTransaction(tx, user, baseInput(), { cashDeskOwnsMovement: true });
+    expect(cashBook.recordInTransaction).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledTimes(1);
+    await service.createInTransaction(tx, user, {
+      ...baseInput(),
+      amount: 50,
+      allocations: [{ payableId: 'pay-1', amount: 50 }],
+    });
+    expect(cashBook.recordInTransaction).toHaveBeenCalledTimes(1);
+  });
   it('reduces the payable, posts DR AP / CR the mapped cash ledger account, relieves cash and records the payment', async () => {
     const { service, tx, postLines, readPayable } = setup();
     const { payment, payables } = await service.createInTransaction(tx, user, baseInput());
@@ -266,6 +301,44 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
       ...overrides,
     };
   }
+  it('preserves Cash Desk ownership, uses its reversal date, and restores purchase-order balances once', async () => {
+    const { service, tx, postLines } = setup({
+      locked: { paidAmount: d(200), outstandingAmount: d(300), status: 'PARTIALLY_PAID' },
+      orders: [{ id: 'po-1', totalAmount: d(500) }],
+    });
+    tx.supplierPayment.findFirst.mockResolvedValue(
+      reversible({ sourceType: 'CashDesk', sourceId: 'movement', cashDeskMovementId: 'movement' }),
+    );
+    tx.cashDeskMovement = {
+      findUnique: jest.fn(async () => ({ id: 'movement', journalEntryId: 'je-1' })),
+    };
+    tx.journalEntry.findFirst.mockResolvedValue({
+      id: 'je-1',
+      companyId: 'company-1',
+      lines: [
+        { accountId: 'AP_CONTROL-acc', debit: d(200), credit: d(0) },
+        { accountId: 'ledger-bank', debit: d(0), credit: d(200) },
+      ],
+    });
+    const cashBook = { reverseInTransaction: jest.fn() };
+    (service as any).cashBook = cashBook;
+    await expect(
+      service.reverseInTransaction(tx, user, 'spay-1', 'Correction', {}),
+    ).rejects.toThrow('in Cash Desk');
+    const date = new Date('2026-10-02');
+    await service.reverseInTransaction(tx, user, 'spay-1', 'Correction', {
+      fromCashDesk: true,
+      cashDeskOwnsMovement: true,
+      businessDate: date,
+    });
+    expect(postLines).toHaveBeenCalledWith(expect.objectContaining({ transactionDate: date }), tx);
+    expect(tx.purchaseOrder.update).toHaveBeenCalledWith({
+      where: { id: 'po-1' },
+      data: { paidAmount: d(0), outstandingAmount: d(500), paymentStatus: 'UNPAID' },
+    });
+    expect(cashBook.reverseInTransaction).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).toHaveBeenCalledTimes(1);
+  });
 
   it('restores the payable, mirrors the journal and gives the cash back', async () => {
     const { service, tx, postLines, readPayable } = setup({

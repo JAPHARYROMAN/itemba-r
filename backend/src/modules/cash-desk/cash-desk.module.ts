@@ -10,6 +10,8 @@ import { DeskReportsModule } from '../desk-reports/desk-reports.module';
 import { LoanLifecycleModule } from '../loans/loan-lifecycle.module';
 import { CashSalesConnectionService } from './cash-sales-connection.service';
 import { PartyExistsService } from '../../common/services/party-exists.service';
+import { SupplierPaymentsModule } from '../supplier-payments/supplier-payments.module';
+import { CashPurchasesService } from './cash-purchases.service';
 @Module({
   imports: [
     PrismaModule,
@@ -17,11 +19,13 @@ import { PartyExistsService } from '../../common/services/party-exists.service';
     InvoiceDeskModule,
     DeskReportsModule,
     LoanLifecycleModule,
+    SupplierPaymentsModule,
   ],
   controllers: [CashDeskController],
   exports: [CashDeskService],
   providers: [
     CashDeskService,
+    CashPurchasesService,
     CashSalesConnectionService,
     CompanyScopeService,
     OrganizationScopeService,

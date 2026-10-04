@@ -7,7 +7,7 @@ import { getApp } from '@/lib/apps';
 import { useDeskRecordSelection } from '@/components/workspace/desk-record-selection';
 import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
-import { useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
+import { useWorkspaceRouter, WorkspaceLink } from '@/components/workspace/workspace-navigation';
 import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
 import {
   ArrowDownLeft,
@@ -84,6 +84,11 @@ export function CashDesk({
     reverse = hasPermission('cash_desk.reverse');
   const invoiceAccess = hasPermission('invoice_desk.view'),
     pay = record && hasPermission('invoice_desk.payments');
+  const canReversePurchase = [
+    'supplier-payments.view',
+    'supplier-payments.manage',
+    'payables.view',
+  ].every((p) => hasPermission(p));
   const [section, setSection] = useDeskSection(
       'cash-desk',
       sections.map((item) => item.id),
@@ -251,10 +256,16 @@ export function CashDesk({
       throw new Error('This draft cannot be opened in Cash Desk.');
     if (kind === 'account' ? !manage : kind === 'reverse' ? !reverse : !record)
       throw new Error('Your role cannot continue this draft.');
-    if (draft.context.invoiceId && !pay)
+    if (
+      draft.context.purchaseSource &&
+      (!hasPermission('suppliers.view') ||
+        (draft.context.purchaseSource === 'PAYABLE' ? !canReversePurchase : !pay || !invoiceAccess))
+    )
+      throw new Error('Purchase payment access is required to continue this draft.');
+    if (draft.context.invoiceId && !draft.context.purchaseSource && !pay)
       throw new Error('Invoice payment access is required to continue this draft.');
     const [invoice, loan, movement] = await Promise.all([
-      draft.context.invoiceId
+      draft.context.invoiceId && !draft.context.purchaseSource
         ? backendGet<Invoice>(
             `/invoice-desk/invoices/${encodeURIComponent(draft.context.invoiceId)}`,
           )
@@ -900,6 +911,10 @@ export function CashDesk({
                 !selected.loanFinancialEvent &&
                 !selected.payrollRunId &&
                 !selected.fuelReportPostingId &&
+                (!selected.journalEntryId ||
+                  (selected.supplierPayment?.sourceType === 'CashDesk' &&
+                    selected.supplierPayment.sourceId === selected.id &&
+                    canReversePurchase)) &&
                 selected.kind !== 'REVERSAL' &&
                 (!selected.invoicePaymentId ||
                   (invoiceAccess && hasPermission('invoice_desk.payments'))) &&
@@ -1165,9 +1180,9 @@ function MovementLinks({
   if (!party && !documents.length) return null;
   const render = (link: MovementLink) =>
     link.href ? (
-      <Link href={link.href} className="text-blue-600">
+      <WorkspaceLink href={link.href} className="text-blue-600">
         {link.text} →
-      </Link>
+      </WorkspaceLink>
     ) : (
       link.text
     );

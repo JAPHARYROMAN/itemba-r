@@ -59,6 +59,8 @@ export function erpMirror(account: Account) {
   }
 }
 export type Movement = {
+  journalEntryId?: string | null;
+  journalEntry?: { id: string; journalNumber: string } | null;
   fuelReportPostingId?: string | null;
   payrollRunId?: string | null;
   loanFinancialEvent?: { loanId: string; id: string } | null;
@@ -85,11 +87,26 @@ export type Movement = {
   customerId?: string | null;
   supplier?: { id: string; name: string } | null;
   customer?: { id: string; name: string } | null;
-  payable?: { id: string; payableNumber: string } | null;
+  payable?: {
+    id: string;
+    payableNumber: string;
+    supplierInvoices?: {
+      id: string;
+      supplierInvoiceNumber: string;
+      purchaseOrder?: { id: string; purchaseOrderNumber: string } | null;
+      goodsReceivedNote?: { id: string; grnNumber: string } | null;
+    }[];
+    purchaseOrders?: { id: string; purchaseOrderNumber: string }[];
+  } | null;
   receivable?: { id: string; receivableNumber: string } | null;
   expense?: { id: string; expenseNumber: string } | null;
   refund?: { id: string; refundNumber: string } | null;
-  supplierPayment?: { id: string; paymentNumber: string } | null;
+  supplierPayment?: {
+    id: string;
+    paymentNumber: string;
+    sourceType?: string | null;
+    sourceId?: string | null;
+  } | null;
   customerPayment?: { id: string; paymentNumber: string } | null;
   invoicePayment?: { id: string; invoiceId: string; invoice: { invoiceNumber: string } } | null;
   salesPayment?: { id: string; saleId: string; sale: { saleNumber: string } } | null;
@@ -147,7 +164,7 @@ export const movementLabels: Record<string, string> = {
   TRANSFER: 'Account transfer',
   LOAN: 'Intercompany loan',
   LOAN_REPAYMENT: 'Loan repayment',
-  SUPPLIER_PAYMENT: 'Supplier payment',
+  SUPPLIER_PAYMENT: 'Purchases',
   CUSTOMER_RECEIPT: 'Customer collection',
   REFUND: 'Customer refund',
   OPENING: 'Opening balance',
@@ -171,3 +188,38 @@ export type Editor = {
   invoice?: import('../invoice-desk/types').Invoice;
   loan?: Loan;
 };
+export type PurchaseOption = {
+  source: 'PAYABLE' | 'INVOICE_DESK';
+  id: string;
+  number: string;
+  supplierId: string;
+  supplierName: string;
+  currency: string;
+  outstanding: string;
+  version?: number;
+  status: string;
+  canPay: boolean;
+  businessDate?: string;
+  purchaseInvoiceId?: string;
+  purchaseInvoiceNumber?: string;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  goodsReceivedNoteId?: string;
+  goodsReceivedNoteNumber?: string;
+  payableNumber?: string;
+};
+export type PurchaseOptions = Page<PurchaseOption> & { totalPages: number };
+export function exactAmount(value: string): bigint | null {
+  if (!/^\d{1,16}(?:\.\d{1,2})?$/.test(value)) return null;
+  return cents(value);
+}
+export function purchaseSnapshot(value: PurchaseOption) {
+  return JSON.stringify([
+    value.source,
+    value.id,
+    value.outstanding,
+    value.version ?? null,
+    value.status,
+    value.canPay ?? null,
+  ]);
+}

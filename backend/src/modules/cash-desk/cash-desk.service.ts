@@ -18,6 +18,7 @@ import {
   CashExpenseQuery,
   CashMovementDto,
   CashQuery,
+  CashPurchaseQuery,
   CashReverseDto,
 } from './cash-desk.dto';
 import { cashDate, checkDailyBalances, payloadKey } from './cash-desk.domain';
@@ -25,6 +26,8 @@ import { PartyExistsService } from '../../common/services/party-exists.service';
 import { CashConnectionsService } from '../desk-reports/cash-connections.service';
 import { IntercompanyLoanLedgerService } from '../loans/intercompany-loan-ledger.service';
 import { allocateLoanPayment } from '../loans/loan-allocation';
+import { CashPurchasesService, purchaseRelations } from './cash-purchases.service';
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 
 const names = {
   company: { select: { name: true } },
@@ -46,11 +49,30 @@ const party = {
 const linkage = {
   supplier: { select: { id: true, name: true } },
   customer: { select: { id: true, name: true } },
-  payable: { select: { id: true, payableNumber: true } },
+  payable: {
+    select: {
+      id: true,
+      payableNumber: true,
+      sourceType: true,
+      sourceId: true,
+      supplierInvoices: purchaseRelations.supplierInvoices,
+      purchaseOrders: purchaseRelations.purchaseOrders,
+    },
+  },
   receivable: { select: { id: true, receivableNumber: true } },
   expense: { select: { id: true, expenseNumber: true } },
   refund: { select: { id: true, refundNumber: true } },
-  supplierPayment: { select: { id: true, paymentNumber: true } },
+  journalEntry: { select: { id: true, journalNumber: true } },
+  supplierPayment: {
+    select: {
+      id: true,
+      paymentNumber: true,
+      sourceType: true,
+      sourceId: true,
+      journalEntryId: true,
+      reversalJournalEntryId: true,
+    },
+  },
   customerPayment: { select: { id: true, paymentNumber: true } },
   invoicePayment: {
     select: { id: true, invoiceId: true, invoice: { select: { invoiceNumber: true } } },
@@ -80,7 +102,13 @@ export class CashDeskService {
     private readonly connections?: CashConnectionsService,
     private readonly intercompany?: IntercompanyLoanLedgerService,
     private readonly parties?: PartyExistsService,
+    private readonly purchases?: CashPurchasesService,
   ) {}
+
+  purchaseOptions(user: AuthUser, q: CashPurchaseQuery) {
+    if (!this.purchases) throw new BadRequestException('Purchase payments are unavailable.');
+    return this.purchases.options(user, q);
+  }
 
   async directory(user: AuthUser, companyId?: string) {
     const directory = await this.invoices.directory(user, companyId);
@@ -283,6 +311,8 @@ export class CashDeskService {
     const key = payloadKey(d),
       two = ['TRANSFER', 'LOAN', 'LOAN_REPAYMENT'].includes(d.kind);
     if (!d.description.trim()) throw new BadRequestException('Describe this movement.');
+    if (d.kind === 'SUPPLIER_PAYMENT' && d.customerId)
+      throw new BadRequestException('A purchase payment must name only its supplier.');
     if (
       d.kind !== 'LOAN_REPAYMENT' &&
       [
@@ -315,7 +345,10 @@ export class CashDeskService {
     if (
       two !== !!d.targetAccountId ||
       (d.kind === 'LOAN_REPAYMENT') !== !!d.loanId ||
-      (d.kind === 'SUPPLIER_PAYMENT') !== !!d.invoiceId ||
+      (d.kind === 'SUPPLIER_PAYMENT') !== !!(d.invoiceId || d.payableId) ||
+      (!!d.invoiceId && !!d.payableId) ||
+      (!!d.payableId &&
+        (!d.supplierId || d.invoiceVersion !== undefined || !!d.existingInvoicePaymentId)) ||
       (d.kind !== 'LOAN' && !!d.dueDate) ||
       (d.kind !== 'SUPPLIER_PAYMENT' &&
         (d.invoiceVersion !== undefined || !!d.existingInvoicePaymentId))
@@ -340,11 +373,25 @@ export class CashDeskService {
       if (d.dueDate && new Date(d.dueDate) < date)
         throw new BadRequestException('Repayment due date cannot precede the loan date.');
     }
-    if (d.kind === 'SUPPLIER_PAYMENT') this.invoicePermission(user);
+    const canonicalPurchase = d.kind === 'SUPPLIER_PAYMENT' && !!d.payableId;
+    if (d.kind === 'SUPPLIER_PAYMENT' && !canonicalPurchase) this.invoicePermission(user);
+    if (canonicalPurchase) {
+      if (!this.purchases) throw new BadRequestException('Purchase payments are unavailable.');
+      this.purchases.permission(user);
+    }
     return this.transaction(async (tx) => {
+      if (canonicalPurchase)
+        await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`CashDesk:${d.requestId}`}, 0))`;
+      if (d.kind === 'SUPPLIER_PAYMENT')
+        await assertLegacyPosWriteAllowed(tx, user, account.companyId, account.branchId);
       const existing = await this.existing(tx, d.requestId, key, user);
       if (existing) return existing;
       const accounts = target ? [account, target] : [account];
+      // Canonical payments lock purchase/payable and ERP cash before the desk drawer,
+      // matching the ordinary supplier-payment path and keeping every effect atomic.
+      const purchase = canonicalPurchase
+        ? await this.purchases!.settle(tx, user, account, d, date, amount)
+        : null;
       await this.lockAccounts(tx, accounts);
       if (
         d.kind === 'DAILY_SALES' &&
@@ -362,7 +409,7 @@ export class CashDeskService {
         );
       let loanId = d.loanId,
         invoicePaymentId: string | undefined,
-        supplierPaymentId: string | null = null,
+        supplierPaymentId: string | null = purchase?.payment.id ?? null,
         movementSupplierId: string | null = null;
       let loanAllocation: ReturnType<typeof allocateLoanPayment> | undefined;
       if (d.kind === 'LOAN') {
@@ -401,12 +448,14 @@ export class CashDeskService {
         if (changed.count !== 1)
           throw new ConflictException('This loan changed. Refresh and try again.');
       }
-      if (d.kind === 'SUPPLIER_PAYMENT') {
+      if (d.kind === 'SUPPLIER_PAYMENT' && !canonicalPurchase) {
         const invoice = await this.invoices.detail(user, d.invoiceId!);
         if (invoice.companyId !== account.companyId || invoice.currency !== account.currency)
           throw new BadRequestException(
             'The invoice and paying account must use the same company and currency.',
           );
+        if (d.supplierId && invoice.supplier.canonicalSupplierId !== d.supplierId)
+          throw new BadRequestException('The selected invoice belongs to a different supplier.');
         if (d.existingInvoicePaymentId) {
           await this.companies.assertCanAccessCompany(user, invoice.companyId, AccessLevel.WRITE);
           await this.org.assertCanAccessScope(
@@ -466,7 +515,10 @@ export class CashDeskService {
       let movementCustomerId: string | null = null,
         payee = d.kind === 'EXPENSE' ? d.payee?.trim() || null : null;
       if (d.supplierId || d.customerId) {
-        if (d.kind === 'EXPENSE' && d.supplierId && !d.customerId) {
+        if (d.kind === 'SUPPLIER_PAYMENT' && d.supplierId && !d.customerId) {
+          if (movementSupplierId !== d.supplierId)
+            throw new BadRequestException('The selected purchase belongs to a different supplier.');
+        } else if (d.kind === 'EXPENSE' && d.supplierId && !d.customerId) {
           await this.parties?.assertSupplier(account.companyId, d.supplierId, tx);
           movementSupplierId = d.supplierId;
           if (!payee)
@@ -505,6 +557,9 @@ export class CashDeskService {
           loanInterest: loanAllocation?.interest,
           loanFees: loanAllocation?.fees,
           invoicePaymentId,
+          payableId: purchase?.payableId,
+          journalEntryId: purchase?.payment.journalEntryId,
+          journalReferenceType: purchase ? 'SupplierPayment' : undefined,
           supplierPaymentId,
           supplierId: movementSupplierId,
           customerId: movementCustomerId,
@@ -515,7 +570,7 @@ export class CashDeskService {
       if (supplierPaymentId)
         await tx.supplierPayment.update({
           where: { id: supplierPaymentId },
-          data: { cashDeskMovementId: movement.id },
+          data: { cashDeskMovementId: movement.id, ...(purchase ? { sourceId: movement.id } : {}) },
         });
       const incoming = ['DAILY_SALES', 'OTHER_IN'].includes(d.kind);
       await this.entries(tx, movement.id, date, [
@@ -746,6 +801,7 @@ export class CashDeskService {
         invoicePayment: true,
         salesPayment: true,
         loanFinancialEvent: true,
+        supplierPayment: { select: { id: true, sourceType: true, sourceId: true } },
       },
     });
     if (!original) throw new NotFoundException('Movement not found.');
@@ -761,7 +817,12 @@ export class CashDeskService {
       throw new BadRequestException(
         'Reverse this payment from the loan financial history so principal, schedules, cash and accounting stay together.',
       );
-    if (original.journalEntryId)
+    const canonicalPurchase =
+      original.kind === 'SUPPLIER_PAYMENT' &&
+      !!original.journalEntryId &&
+      original.supplierPayment?.sourceType === 'CashDesk' &&
+      original.supplierPayment.sourceId === original.id;
+    if (original.journalEntryId && !canonicalPurchase)
       throw new BadRequestException(
         'This movement was written by its payment. Reverse the payment in Payables, Receivables, Expenses or Refunds so cash and accounting stay together.',
       );
@@ -779,6 +840,10 @@ export class CashDeskService {
       original.entries.map((e) => this.writable(user, e.accountId)),
     );
     if (original.invoicePaymentId) this.invoicePermission(user);
+    if (canonicalPurchase) {
+      if (!this.purchases) throw new BadRequestException('Purchase payments are unavailable.');
+      this.purchases.permission(user);
+    }
     let salesRecord: { id: string; companyId: string; version: number } | null = null;
     if (original.salesPayment) {
       if (!['sales_desk.view', 'sales_desk.payments'].every((p) => user.permissions.includes(p)))
@@ -798,8 +863,22 @@ export class CashDeskService {
       salesRecord = sale;
     }
     return this.transaction(async (tx) => {
+      if (canonicalPurchase)
+        await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`CashDesk:${d.requestId}`}, 0))`;
+      if (original.kind === 'SUPPLIER_PAYMENT')
+        await assertLegacyPosWriteAllowed(tx, user, accounts[0].companyId, accounts[0].branchId);
       const existing = await this.existing(tx, d.requestId, key, user);
       if (existing) return existing;
+      const purchaseReversal = canonicalPurchase
+        ? await this.purchases!.reverse(
+            tx,
+            user,
+            original.id,
+            original.supplierPayment!.id,
+            d.reason.trim(),
+            date,
+          )
+        : null;
       // Sales payments and reversals lock the sale before its cash account.
       if (salesRecord && original.salesPayment) {
         const changed = await tx.salesDeskSale.updateMany({
@@ -893,6 +972,11 @@ export class CashDeskService {
           createdBy: user.id,
           actorName: user.fullName || user.email,
           reversalOfId: id,
+          supplierId: canonicalPurchase ? original.supplierId : undefined,
+          partyType: canonicalPurchase ? 'SUPPLIER' : undefined,
+          payableId: canonicalPurchase ? original.payableId : undefined,
+          journalEntryId: purchaseReversal?.id,
+          journalReferenceType: purchaseReversal ? 'SupplierPayment' : undefined,
         },
       });
       await this.entries(
@@ -905,14 +989,15 @@ export class CashDeskService {
         })),
       );
       await this.auditMovement(tx, user, reversal.id, accounts, 'REVERSED');
-      await this.connections?.reverseInTransaction(
-        tx,
-        user,
-        id,
-        reversal.id,
-        date,
-        d.reason.trim(),
-      );
+      if (!canonicalPurchase)
+        await this.connections?.reverseInTransaction(
+          tx,
+          user,
+          id,
+          reversal.id,
+          date,
+          d.reason.trim(),
+        );
       if (original.loanId) {
         if (!this.intercompany)
           throw new BadRequestException('Intercompany accounting is unavailable.');

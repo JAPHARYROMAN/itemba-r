@@ -262,7 +262,12 @@ export class SupplierPaymentsService {
    * Settle one or more payables with one payment, inside the caller's transaction.
    * Returns the payment (with scope) and the updated payable rows.
    */
-  async createInTransaction(tx: Tx, user: AuthUser, input: SupplierPaymentInput) {
+  async createInTransaction(
+    tx: Tx,
+    user: AuthUser,
+    input: SupplierPaymentInput,
+    opts: { cashDeskOwnsMovement?: boolean } = {},
+  ) {
     const amount = new Prisma.Decimal(input.amount).toDecimalPlaces(2);
     if (amount.lte(0)) throw new BadRequestException('Payment amount must be greater than zero');
     if (!input.allocations?.length)
@@ -343,6 +348,7 @@ export class SupplierPaymentsService {
         },
       });
       await this.syncSupplierInvoices(tx, updated);
+      await this.syncPurchaseOrders(tx, updated);
       payables.push(updated);
     }
 
@@ -433,25 +439,26 @@ export class SupplierPaymentsService {
 
     // Cash book (W4): the same payment is one Cash Desk movement carrying the supplier,
     // the payable it settled and the journal that already explains it.
-    const movement = input.cashAccountId
-      ? await this.cashBook?.recordInTransaction(tx, user, {
-          kind: 'SUPPLIER_PAYMENT',
-          companyId: input.companyId,
-          cashAccountId: input.cashAccountId,
-          amount,
-          currency,
-          businessDate: input.paymentDate,
-          description: `Supplier payment ${payment.paymentNumber} · ${supplier.name}`,
-          reference: input.reference ?? payment.paymentNumber,
-          requestId: `SupplierPayment:${payment.id}`,
-          partyType: 'SUPPLIER',
-          supplierId: input.supplierId,
-          payableId: ordered.length === 1 ? ordered[0].payableId : null,
-          supplierPaymentId: payment.id,
-          journalEntryId: journalEntry.id,
-          journalReferenceType: 'SupplierPayment',
-        })
-      : null;
+    const movement =
+      input.cashAccountId && !opts.cashDeskOwnsMovement
+        ? await this.cashBook?.recordInTransaction(tx, user, {
+            kind: 'SUPPLIER_PAYMENT',
+            companyId: input.companyId,
+            cashAccountId: input.cashAccountId,
+            amount,
+            currency,
+            businessDate: input.paymentDate,
+            description: `Supplier payment ${payment.paymentNumber} · ${supplier.name}`,
+            reference: input.reference ?? payment.paymentNumber,
+            requestId: `SupplierPayment:${payment.id}`,
+            partyType: 'SUPPLIER',
+            supplierId: input.supplierId,
+            payableId: ordered.length === 1 ? ordered[0].payableId : null,
+            supplierPaymentId: payment.id,
+            journalEntryId: journalEntry.id,
+            journalReferenceType: 'SupplierPayment',
+          })
+        : null;
     const final = movement
       ? await tx.supplierPayment.update({
           where: { id: payment.id },
@@ -563,7 +570,12 @@ export class SupplierPaymentsService {
     user: AuthUser,
     id: string,
     reason: string | null,
-    opts: { fromDesk?: boolean; fromCashDesk?: boolean },
+    opts: {
+      fromDesk?: boolean;
+      fromCashDesk?: boolean;
+      cashDeskOwnsMovement?: boolean;
+      businessDate?: Date;
+    },
   ) {
     const claim = await tx.supplierPayment.updateMany({
       where: { id, status: SupplierPaymentStatus.COMPLETED, deletedAt: null },
@@ -582,6 +594,10 @@ export class SupplierPaymentsService {
     if (claim.count !== 1)
       throw new ConflictException(
         `Supplier payment cannot be reversed from status ${current.status}; only COMPLETED payments can be reversed`,
+      );
+    if (current.sourceType === 'CashDesk' && !opts.fromCashDesk)
+      throw new ConflictException(
+        'Reverse this purchase payment in Cash Desk so its cash balance is restored with the payable and journal.',
       );
     if (current.deskPayment && !opts.fromDesk && !opts.fromCashDesk)
       throw new ConflictException(
@@ -622,20 +638,25 @@ export class SupplierPaymentsService {
         },
       });
       await this.syncSupplierInvoices(tx, updated);
+      await this.syncPurchaseOrders(tx, updated);
     }
 
-    const reversalJe = await this.reversePaymentJournal(tx, current, user.id);
+    const reversalJe = await this.reversePaymentJournal(tx, current, user.id, opts.businessDate);
     if (!reversalJe && current.journalEntryId)
       throw new ConflictException(
         'Supplier payment reversal could not be posted; reversal aborted to avoid an unbalanced ledger',
       );
     if (reversalJe && current.cashAccountId) {
-      await tx.cashAccount.updateMany({
+      const cashRestored = await tx.cashAccount.updateMany({
         where: { id: current.cashAccountId, companyId: current.companyId, deletedAt: null },
         data: { currentBalance: { increment: new Prisma.Decimal(current.amount) } },
       });
+      if (opts.cashDeskOwnsMovement && cashRestored.count !== 1)
+        throw new ConflictException(
+          'The linked ERP cash account is unavailable; purchase reversal was aborted.',
+        );
     }
-    if (carried?.journalEntryId)
+    if (carried?.journalEntryId && !opts.cashDeskOwnsMovement)
       await this.cashBook?.reverseInTransaction(
         tx,
         user,
@@ -743,6 +764,36 @@ export class SupplierPaymentsService {
     }
   }
 
+  /** Received purchase orders display the same settlement as their canonical payable. */
+  private async syncPurchaseOrders(
+    tx: Tx,
+    payable: { id: string; companyId: string; paidAmount: Prisma.Decimal; currency: string | null },
+  ) {
+    const orders = await tx.purchaseOrder.findMany({
+      where: {
+        payableId: payable.id,
+        companyId: payable.companyId,
+        deletedAt: null,
+        currency: payable.currency as CurrencyCode,
+        status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] },
+      },
+      select: { id: true, totalAmount: true },
+    });
+    for (const order of orders) {
+      const total = new Prisma.Decimal(order.totalAmount);
+      const paid = Prisma.Decimal.min(new Prisma.Decimal(payable.paidAmount), total);
+      const outstanding = total.minus(paid);
+      await tx.purchaseOrder.update({
+        where: { id: order.id },
+        data: {
+          paidAmount: paid,
+          outstandingAmount: outstanding,
+          paymentStatus: outstanding.isZero() ? 'PAID' : paid.gt(0) ? 'PARTIALLY_PAID' : 'UNPAID',
+        },
+      });
+    }
+  }
+
   /**
    * Refresh Supplier.currentBalance from open payables in the company's base currency
    * (same rule as payables.service; the single resolver replaces both in W5).
@@ -765,6 +816,7 @@ export class SupplierPaymentsService {
       journalEntryId: string | null;
     },
     userId: string,
+    businessDate?: Date,
   ): Promise<{ id: string; journalNumber: string } | null> {
     const original = payment.journalEntryId
       ? await tx.journalEntry.findFirst({
@@ -783,7 +835,7 @@ export class SupplierPaymentsService {
         companyId: original.companyId,
         divisionId: original.divisionId,
         branchId: original.branchId,
-        transactionDate: new Date(),
+        transactionDate: businessDate ?? new Date(),
         description: `Reversal of supplier payment ${payment.paymentNumber}`,
         referenceType: 'SupplierPayment',
         referenceId: payment.id,

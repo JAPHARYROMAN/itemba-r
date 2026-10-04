@@ -61,6 +61,7 @@ function makeService(
       })),
     },
     supplierInvoice: { findMany: jest.fn().mockResolvedValue([]) },
+    purchaseOrder: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
     cashAccount: {
       // Default: an active CASH_ON_HAND till in the same company and currency.
       // Individual tests override for BANK / cross-company / cross-currency

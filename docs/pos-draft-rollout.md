@@ -4,6 +4,8 @@
 
 This release replaces the counter landing page with native OS POS Draft and a role-based installable phone app. Existing customers, products, prices, supplier orders and accounting remain canonical. No cashier shifts, fictitious employees, automatic staff posting, automatic offline replay or data seed are introduced.
 
+The owner also requested **Purchases** in Cash Desk movement types before deployment. It pays an existing supplier purchase or invoice, links the shared supplier and related documents, and updates the selected cash account and outstanding balance atomically. Business purchase payments also keep the connected cash account and payment journal in step. See [Cash Desk](design/itemba-os/cash-desk.md#purchases-in-movements) for the entry and reversal workflow.
+
 Build the candidate from `codex/pos-draft-remake`, based on deployed revision `6fa821b92df2c5065fb25964e39e4cae711044b2`. Preserve other checkouts and all existing database, uploads, website enquiry and backup volumes. The migrations create onboarding/draft records, physical stock revisions and permissions, and align invoice match number uniqueness with its company-scoped sequence. They do not migrate or delete posted sales or old outboxes.
 
 ## Deployment and branch setup

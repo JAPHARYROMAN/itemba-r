@@ -261,6 +261,13 @@ async function fixtures() {
     'sales.view',
     'sales_desk.view',
     'cash_desk.view',
+    'cash_desk.record',
+    'cash_desk.reverse',
+    'payables.view',
+    'supplier-payments.view',
+    'supplier-payments.manage',
+    'invoice_desk.view',
+    'invoice_desk.payments',
     'cash_accounts.view',
     'inventory.view',
     'operations.reports.view',
@@ -1957,6 +1964,7 @@ async function main() {
     check,
     fixture: f,
   });
+  await require('./verify-cash-purchases.cjs').verifyCashPurchases({ db, check, fixture: f, call });
 }
 
 main()
