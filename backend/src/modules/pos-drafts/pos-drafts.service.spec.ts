@@ -701,7 +701,7 @@ describe('office legacy terminal references', () => {
       await expect(
         f.service.legacyTerminals(
           {},
-          { ...manager, permissions: manager.permissions.filter((p) => p !== missing) },
+          { ...manager, permissions: manager.permissions.filter((p: string) => p !== missing) },
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(f.prisma.mobilePosTerminal.findMany).not.toHaveBeenCalled();
