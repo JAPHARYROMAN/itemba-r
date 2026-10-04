@@ -62,6 +62,12 @@ export class PosDraftsController {
   outcome(@Param('requestId') requestId: string, @CurrentUser() user: AuthUser) {
     return this.service.outcome(requestId, user);
   }
+  @Get('legacy-terminals')
+  @AgentExcluded('pos_draft_workflow_not_represented')
+  @RequirePermissions('pos_drafts.view', 'mobile_pos_lite.manage')
+  legacyTerminals(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
+    return this.service.legacyTerminals(query, user);
+  }
   @Get('legacy-outcome')
   @AgentExcluded('pos_draft_workflow_not_represented')
   @RequirePermissions('pos_drafts.view', 'mobile_pos_lite.manage')

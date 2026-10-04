@@ -1,6 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
+import { Reflector } from '@nestjs/core';
 import { PosDraftsService } from './pos-drafts.service';
+import { PosDraftsController } from './pos-drafts.controller';
+import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
+import { MobilePosSessionGuard } from '../../common/guards/mobile-pos-session.guard';
+import { AGENT_EXCLUDED_KEY } from '../../common/decorators/agent-excluded.decorator';
+import { PERMISSIONS_KEY } from '../../common/decorators/require-permissions.decorator';
+import { MOBILE_POS_SESSION_ROLES } from '../../common/decorators/mobile-pos-session.decorator';
 import { decimal, digest, eatDay, saleSignature } from './pos-drafts.types';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 
@@ -608,6 +615,120 @@ describe('POS scoped metadata', () => {
     await f.service.scopes(pin);
     expect(f.prisma.branch.findMany.mock.calls[1][0].where.id).toBe('branch');
     expect(f.service.scope).toHaveBeenCalledWith({}, pin);
+  });
+});
+
+describe('office legacy terminal references', () => {
+  const manager = {
+    ...administrator,
+    companyId: 'company',
+    companyAccess: [{ companyId: 'company', accessLevel: AccessLevel.READ }],
+    permissions: ['pos_drafts.view', 'mobile_pos_lite.manage'],
+  };
+  const branchManager = {
+    ...manager,
+    roleScopes: ['BRANCH'],
+    divisionAccess: [],
+    branchAccess: [{ branchId: 'branch', accessLevel: AccessLevel.READ }],
+  };
+  function references() {
+    const f = fixture();
+    f.service.companyScope = new CompanyScopeService(f.prisma);
+    f.service.organizationScope = new OrganizationScopeService(f.prisma);
+    f.prisma.mobilePosTerminal = {
+      findMany: jest.fn(async () => [
+        { id: 'paused', terminalCode: 'MPL-PAUSED', name: 'Earlier till', status: 'SUSPENDED' },
+        { id: 'revoked', terminalCode: 'MPL-REVOKED', name: 'Replaced till', status: 'REVOKED' },
+      ]),
+    };
+    f.prisma.branch = {
+      findUnique: jest.fn(async () => ({
+        divisionId: 'division',
+        division: { companyId: 'company' },
+      })),
+    };
+    return f;
+  }
+  it('lets a company manager reconcile suspended/revoked terminals using only minimal read references', async () => {
+    const f = references();
+    await expect(f.service.legacyTerminals({}, manager)).resolves.toEqual([
+      { id: 'paused', code: 'MPL-PAUSED', name: 'Earlier till' },
+      { id: 'revoked', code: 'MPL-REVOKED', name: 'Replaced till' },
+    ]);
+    expect(f.prisma.mobilePosTerminal.findMany).toHaveBeenCalledWith({
+      where: { AND: [{ companyId: { in: ['company'] } }, {}] },
+      select: { id: true, terminalCode: true, name: true },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    });
+    expect(f.prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it('narrows a branch manager to their READ branch grant without requiring an active terminal', async () => {
+    const f = references();
+    await f.service.legacyTerminals({ companyId: 'company', branchId: 'branch' }, branchManager);
+    expect(f.prisma.mobilePosTerminal.findMany.mock.calls[0][0].where).toEqual({
+      AND: [
+        { companyId: 'company' },
+        { OR: [{ branchId: { in: ['branch'] } }] },
+        { branchId: 'branch' },
+      ],
+    });
+    expect(f.prisma.branch.findUnique).toHaveBeenCalledWith({
+      where: { id: 'branch' },
+      select: { divisionId: true, division: { select: { companyId: true } } },
+    });
+  });
+  it('rejects an explicitly requested foreign company before reading any terminal references', async () => {
+    const f = references();
+    await expect(
+      f.service.legacyTerminals({ companyId: 'foreign-company' }, manager),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(f.prisma.mobilePosTerminal.findMany).not.toHaveBeenCalled();
+  });
+  it('rejects an explicitly requested ungranted branch before reading terminal references', async () => {
+    const f = references();
+    await expect(
+      f.service.legacyTerminals(
+        { companyId: 'company', branchId: 'foreign-branch' },
+        branchManager,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(f.prisma.mobilePosTerminal.findMany).not.toHaveBeenCalled();
+  });
+  it.each(['pos_drafts.view', 'mobile_pos_lite.manage'])(
+    'requires %s for the read',
+    async (missing) => {
+      const f = references();
+      await expect(
+        f.service.legacyTerminals(
+          {},
+          { ...manager, permissions: manager.permissions.filter((p) => p !== missing) },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(f.prisma.mobilePosTerminal.findMany).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['CASHIER', 'STOCKIST'])(
+    'denies a %s PIN principal at both the global guard and service',
+    async (role) => {
+      const f = references();
+      const pin = { ...manager, tokenUse: 'mobile-pos', mobilePosRole: role };
+      await expect(f.service.legacyTerminals({}, pin)).rejects.toBeInstanceOf(ForbiddenException);
+      const guard = new MobilePosSessionGuard(new Reflector(), f.prisma);
+      await expect(
+        guard.canActivate({
+          getHandler: () => PosDraftsController.prototype.legacyTerminals,
+          getClass: () => PosDraftsController,
+          switchToHttp: () => ({ getRequest: () => ({ method: 'GET', user: pin }) }),
+        } as any),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(f.prisma.mobilePosTerminal.findMany).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps the route office-only, excluded from agents and behind both existing permissions', () => {
+    const handler = PosDraftsController.prototype.legacyTerminals;
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual(manager.permissions);
+    expect(Reflect.getMetadata(AGENT_EXCLUDED_KEY, handler)).toBe(true);
+    expect(Reflect.getMetadata(MOBILE_POS_SESSION_ROLES, handler)).toBeUndefined();
   });
 });
 

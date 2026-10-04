@@ -1477,6 +1477,13 @@ async function main() {
     fixture: f,
     call,
   });
+  await require('./verify-pos-legacy-reconciliation.cjs').verifyPosLegacyReconciliation({
+    db,
+    check,
+    fixture: f,
+    call,
+    cashier,
+  });
   await check('Approval rechecks the origin recorder company access after capture', async () => {
     const draft = await call(
       f.reviewer.token,

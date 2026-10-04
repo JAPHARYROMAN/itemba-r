@@ -43,6 +43,8 @@ After a PIN reset, the same operator on the same approved phone can review held 
 
 Five incorrect PIN attempts lock the device PIN for 15 minutes. An administrator can issue a reset in Devices; it immediately revokes previous credentials and the reset must be completed on the originally approved phone. A lost setup response can be recovered only with the same saved device secret and correct PIN. If a PIN reset was saved but its response was lost, retrying verifies the newly chosen PIN on that same phone without changing the PIN again. Reloading the consumed reset link offers **Open POS to recover sign-in**; enter the new PIN there. If the reset was never saved or its link expired, request a fresh administrator reset. A late response cannot overwrite a changed operator/device binding. Device replacement requires a new approved enrolment.
 
+Legacy reconciliation uses an office-only POS Draft terminal-reference read with the existing view and legacy-management permissions. Company/branch scope is enforced, and suspended/revoked terminal identities remain available for original-request lookup. This read does not grant GROUP provisioning privileges, expose device/activation hashes or submit an old capture.
+
 ## Pause and rollback
 
 Disable the affected branch setup to stop its staff capture/session access while preserving its drafts, reservations and decisions. The historical staff guard remains effective even after pause or revocation; disabling a setup does not give a worker ordinary ERP write access. Keep the security-capable backend running when rolling back a frontend image. Do not switch back to an earlier backend that lacks the new guard: old staff password sessions could regain immediate posting.

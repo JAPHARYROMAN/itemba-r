@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { WorkspaceLink } from '@/components/workspace/workspace-navigation';
 import { backendGet, backendList } from '@/lib/api-client';
 import type { PendingMobilePosLiteSale } from '@/lib/mobile-pos-lite-store';
 import { money } from './types';
@@ -51,7 +52,7 @@ export function LegacyQuarantine() {
   >({});
   useEffect(() => {
     const controller = new AbortController();
-    void backendList<{ id: string; code: string; name: string }>('/mobile-pos-lite/terminals', {
+    void backendList<{ id: string; code: string; name: string }>('/pos-drafts/legacy-terminals', {
       signal: controller.signal,
     })
       .then((terminals) => {
@@ -143,9 +144,9 @@ export function LegacyQuarantine() {
             <button className="pd-button" disabled={!!busy} onClick={() => void check(row)}>
               {busy === row.id ? 'Checking…' : 'Check original request'}
             </button>
-            <a href="/sales-desk?view=sales" className="pd-button">
+            <WorkspaceLink href="/sales-desk?view=sales" className="pd-button">
               Review existing sales
-            </a>
+            </WorkspaceLink>
           </article>
         ))
       )}

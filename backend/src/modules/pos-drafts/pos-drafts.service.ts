@@ -606,6 +606,39 @@ export class PosDraftsService {
       postedEntityId: draft.postedEntityId,
     };
   }
+  async legacyTerminals(query: Record<string, string>, user: AuthUser) {
+    this.assertPermission(user, 'pos_drafts.view');
+    this.assertPermission(user, 'mobile_pos_lite.manage');
+    if (user.tokenUse === 'mobile-pos') throw new ForbiddenException('Office access is required');
+    const filters: Prisma.MobilePosTerminalWhereInput[] = [
+      (await this.companyScope.companyWhereFor(
+        user,
+        query.companyId,
+      )) as Prisma.MobilePosTerminalWhereInput,
+      (await this.organizationScope.recordWhereFor(user)) as Prisma.MobilePosTerminalWhereInput,
+    ];
+    if (query.branchId) {
+      const branchId = identifier(query.branchId, 'Branch');
+      const branch = await this.prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch) throw new NotFoundException('Branch not found');
+      await this.companyScope.assertCanAccessCompany(user, branch.division.companyId);
+      await this.organizationScope.assertCanAccessScope(user, branch.divisionId, branchId);
+      if (query.companyId && query.companyId !== branch.division.companyId)
+        throw new BadRequestException('Invalid branch scope');
+      filters.push({ branchId });
+    }
+    // Reconciliation is a read of historical identities, independent of the
+    // GROUP-only provisioning surface and a terminal's current operating state.
+    const rows = await this.prisma.mobilePosTerminal.findMany({
+      where: { AND: filters },
+      select: { id: true, terminalCode: true, name: true },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(({ id, terminalCode, name }) => ({ id, code: terminalCode, name }));
+  }
   async legacyOutcome(query: Record<string, string>, user: AuthUser) {
     this.assertPermission(user, 'mobile_pos_lite.manage');
     if (user.tokenUse === 'mobile-pos') throw new ForbiddenException('Office access is required');
