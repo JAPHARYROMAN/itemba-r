@@ -72,6 +72,66 @@ export async function getCaptures(partition: string) {
     .filter((value) => value.partition === partition)
     .sort((a, b) => b.submission.capturedAt.localeCompare(a.submission.capturedAt));
 }
+function partitionIdentity(partition: string) {
+  const [enrollmentId, ownerId, version, deviceHash, extra] = partition.split(':');
+  const credentialVersion = Number(version);
+  return enrollmentId &&
+    ownerId &&
+    !extra &&
+    /^[a-f0-9]{64}$/.test(deviceHash ?? '') &&
+    Number.isSafeInteger(credentialVersion) &&
+    credentialVersion >= 1
+    ? { enrollmentId, ownerId, credentialVersion, deviceHash }
+    : null;
+}
+export function isEarlierCapture(capture: LocalCapture, currentPartition: string) {
+  const current = partitionIdentity(currentPartition);
+  const earlier = partitionIdentity(capture.partition);
+  return !!(
+    current &&
+    earlier &&
+    earlier.enrollmentId === current.enrollmentId &&
+    earlier.ownerId === current.ownerId &&
+    earlier.deviceHash === current.deviceHash &&
+    earlier.credentialVersion < current.credentialVersion &&
+    capture.state !== 'SUBMITTED'
+  );
+}
+export function heldCapturesForPartition(rows: LocalCapture[], currentPartition: string) {
+  const current = partitionIdentity(currentPartition);
+  if (!current) return [];
+  const sameDevice = rows.filter((capture) => {
+    const identity = partitionIdentity(capture.partition);
+    return (
+      identity?.enrollmentId === current.enrollmentId &&
+      identity.ownerId === current.ownerId &&
+      identity.deviceHash === current.deviceHash
+    );
+  });
+  // A recovered or acknowledged identity must never become a second held request.
+  const known = new Set(
+    sameDevice
+      .filter((capture) => capture.partition === currentPartition || capture.state === 'SUBMITTED')
+      .map((capture) => capture.requestId),
+  );
+  const held = new Map<string, LocalCapture>();
+  for (const capture of sameDevice) {
+    if (!isEarlierCapture(capture, currentPartition) || known.has(capture.requestId)) continue;
+    const previous = held.get(capture.requestId);
+    if (
+      !previous ||
+      partitionIdentity(previous.partition)!.credentialVersion <
+        partitionIdentity(capture.partition)!.credentialVersion
+    )
+      held.set(capture.requestId, capture);
+  }
+  return [...held.values()].sort((a, b) =>
+    b.submission.capturedAt.localeCompare(a.submission.capturedAt),
+  );
+}
+export async function getHeldCaptures(currentPartition: string) {
+  return heldCapturesForPartition(await read<LocalCapture[]>('captures'), currentPartition);
+}
 export async function cacheMobileSession(
   partition: string,
   profile: MobileProfile,

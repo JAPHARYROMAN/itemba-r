@@ -1,5 +1,5 @@
-import type { LocalCapture } from './capture-store';
-import type { Draft, DraftOutcome, Submission } from './types';
+import { isEarlierCapture, type LocalCapture } from './capture-store';
+import { submissionEnvelope, type Draft, type DraftOutcome, type Submission } from './types';
 export class SessionChangedError extends Error {
   constructor() {
     super('The signed-in operator changed. Open the request in the current workspace.');
@@ -42,4 +42,47 @@ export async function reconcileCapture(
     });
     throw error;
   }
+}
+export async function recoverHeldCapture(
+  capture: LocalCapture,
+  currentPartition: string,
+  currentScope: { companyId: string; branchId: string },
+  transport: Parameters<typeof reconcileCapture>[1],
+  store: {
+    readCurrent: () => Promise<LocalCapture[]>;
+    save: (value: LocalCapture) => Promise<void>;
+  },
+  isCurrent: () => boolean,
+) {
+  if (!isCurrent()) throw new SessionChangedError();
+  if (!isEarlierCapture(capture, currentPartition))
+    throw new Error('This held capture does not belong to this approved operator and device.');
+  if (
+    capture.submission.companyId !== currentScope.companyId ||
+    capture.submission.branchId !== currentScope.branchId
+  )
+    throw new Error(
+      'This capture belongs to an earlier branch. Ask an administrator to reconcile it.',
+    );
+  const current = (await store.readCurrent()).find((row) => row.requestId === capture.requestId);
+  if (!isCurrent()) throw new SessionChangedError();
+  if (current?.state === 'SUBMITTED') {
+    if (current.draft) return current.draft;
+    throw new Error('This request was already acknowledged. Review its server status in Requests.');
+  }
+  if (
+    current &&
+    JSON.stringify(submissionEnvelope(current.submission)) !==
+      JSON.stringify(submissionEnvelope(capture.submission))
+  )
+    throw new Error(
+      'This request already has different saved details. Ask an administrator to reconcile it.',
+    );
+  const recovered = current ?? {
+    ...capture,
+    key: `${currentPartition}:${capture.requestId}`,
+    partition: currentPartition,
+  };
+  // Store only the recovered copy; the earlier capture remains intact for reconciliation.
+  return reconcileCapture(recovered, transport, store.save, isCurrent);
 }

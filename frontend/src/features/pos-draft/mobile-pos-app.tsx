@@ -24,11 +24,12 @@ import {
   clearCachedSession,
   getCachedSession,
   getCaptures,
+  getHeldCaptures,
   saveCapture,
   updateCapture,
   type LocalCapture,
 } from './capture-store';
-import { reconcileCapture, SessionChangedError } from './mobile-outbox';
+import { reconcileCapture, recoverHeldCapture, SessionChangedError } from './mobile-outbox';
 import { DraftCapture } from './draft-capture';
 import { DraftInspector } from './draft-inspector';
 import { PosDevices } from './pos-devices';
@@ -50,6 +51,19 @@ import '@/features/pos/ui/pos-app.css';
 
 type AdminUser = { id: string; fullName?: string; permissions: string[] };
 type MobileView = 'capture' | 'requests' | 'prepare' | 'stock' | 'devices';
+type HeldCapture = LocalCapture & { serverOutcome?: DraftOutcome };
+function capturedMoney(capture: LocalCapture) {
+  const { kind, payload } = capture.submission;
+  return kind === 'COLLECTION'
+    ? Number(payload.amount ?? 0)
+    : kind === 'SALE' && payload.paymentMethod !== 'CREDIT'
+      ? payload.paymentMethod === 'MIXED' && payload.payments
+        ? payload.payments
+            .filter((payment) => payment.method !== 'CREDIT')
+            .reduce((total, payment) => total + Number(payment.amount), 0)
+        : Number(payload.expectedTotal ?? 0)
+      : 0;
+}
 export function MobilePosApp() {
   const router = useRouter();
   const [device, setDevice] = useState<DeviceIdentity | null>(null),
@@ -57,7 +71,8 @@ export function MobilePosApp() {
     [admin, setAdmin] = useState<AdminUser | null>(null);
   const [context, setContext] = useState<DraftContext | null>(null),
     [result, setResult] = useState<DraftPage | null>(null),
-    [local, setLocal] = useState<LocalCapture[]>([]);
+    [local, setLocal] = useState<LocalCapture[]>([]),
+    [held, setHeld] = useState<HeldCapture[]>([]);
   const [requestPage, setRequestPage] = useState(1),
     [overview, setOverview] = useState<DraftPage['summary'] | null>(null);
   const [scope, setScope] = useState({ companyId: '', branchId: '' });
@@ -91,6 +106,30 @@ export function MobilePosApp() {
     persona.current = profile?.user.id ?? admin?.id ?? null;
   }, [profile?.user.id, admin?.id]);
   const role = profile?.role ?? 'ADMIN';
+  const refreshDeviceCaptures = useCallback(async (owner: string, epoch: number) => {
+    const [current, earlier] = await Promise.all([getCaptures(owner), getHeldCaptures(owner)]);
+    if (epoch !== generation.current || partition.current !== owner) return;
+    // Read-only identity checks prevent a lost response before reset from counting server money twice.
+    const checked = await Promise.all(
+      earlier.map(async (capture): Promise<HeldCapture> => {
+        if (epoch !== generation.current || partition.current !== owner) return capture;
+        try {
+          return {
+            ...capture,
+            serverOutcome: await mobileApi<DraftOutcome>(
+              `/pos-drafts/outcome/${capture.requestId}`,
+            ),
+          };
+        } catch {
+          return capture;
+        }
+      }),
+    );
+    if (epoch === generation.current && partition.current === owner) {
+      setLocal(current);
+      setHeld(checked);
+    }
+  }, []);
   const phoneTransport = {
     outcome: (requestId: string) => mobileApi<DraftOutcome>(`/pos-drafts/outcome/${requestId}`),
     submit: (body: Submission) =>
@@ -153,8 +192,7 @@ export function MobilePosApp() {
           setContext(branch);
           setOffline(false);
           await cacheMobileSession(partition.current, user, branch);
-          const captures = await getCaptures(partition.current);
-          if (epoch === generation.current) setLocal(captures);
+          await refreshDeviceCaptures(nextPartition, epoch);
           return;
         }
         throw new ApiError('Enter your device PIN to continue.', 401, null);
@@ -168,8 +206,7 @@ export function MobilePosApp() {
             setContext(saved.context);
             setAdmin(null);
             setOffline(true);
-            const captures = await getCaptures(ownPartition);
-            if (epoch === generation.current) setLocal(captures);
+            await refreshDeviceCaptures(ownPartition, epoch);
             return;
           }
         }
@@ -179,6 +216,7 @@ export function MobilePosApp() {
         setAdmin(null);
         setContext(null);
         setLocal([]);
+        setHeld([]);
         setResult(null);
         setOverview(null);
         setSelected(null);
@@ -230,7 +268,7 @@ export function MobilePosApp() {
       controller.abort();
       invalidate();
     };
-  }, [revision, adminMode]);
+  }, [revision, adminMode, refreshDeviceCaptures]);
   useEffect(() => {
     if (!admin) return;
     const controller = new AbortController();
@@ -312,17 +350,15 @@ export function MobilePosApp() {
         );
       }
       if (partition.current === owner && epoch === generation.current) {
-        const captures = await getCaptures(owner);
+        await refreshDeviceCaptures(owner, epoch);
         if (partition.current !== owner || epoch !== generation.current) return;
-        setLocal(captures);
         await refreshRequests();
         if (manual) setNotice('Device requests checked. Posted status comes from the server.');
       }
     } catch (e) {
       if (partition.current !== owner || epoch !== generation.current) return;
       setError(e instanceof Error ? e.message : 'Could not check pending requests.');
-      const captures = await getCaptures(owner);
-      if (partition.current === owner && epoch === generation.current) setLocal(captures);
+      await refreshDeviceCaptures(owner, epoch);
     } finally {
       synchronizing.current = false;
       if (epoch === generation.current) setBusy(false);
@@ -340,6 +376,7 @@ export function MobilePosApp() {
       setAdmin(null);
       setContext(null);
       setLocal([]);
+      setHeld([]);
       setResult(null);
       setOverview(null);
       setRequestPage(1);
@@ -398,6 +435,7 @@ export function MobilePosApp() {
         setProfile(null);
         setContext(null);
         setLocal([]);
+        setHeld([]);
         setResult(null);
         setOverview(null);
         setRequestPage(1);
@@ -410,6 +448,7 @@ export function MobilePosApp() {
         setProfile(null);
         setContext(null);
         setLocal([]);
+        setHeld([]);
         setSelected(null);
         setNotice('Signed out. Saved captures remain on this approved device.');
       } else router.push('/desktop');
@@ -476,9 +515,8 @@ export function MobilePosApp() {
     const capture = await saveCapture(owner, body);
     guard();
     if (offline) {
-      const captures = await getCaptures(owner);
+      await refreshDeviceCaptures(owner, epoch);
       guard();
-      setLocal(captures);
       return { ...body, local: true, state: 'LOCAL' };
     }
     try {
@@ -488,17 +526,48 @@ export function MobilePosApp() {
         updateCapture,
         () => epoch === generation.current && partition.current === owner,
       );
-      const captures = await getCaptures(owner);
+      await refreshDeviceCaptures(owner, epoch);
       guard();
-      setLocal(captures);
       return draft;
     } catch (e) {
       if (epoch === generation.current && partition.current === owner) {
-        const captures = await getCaptures(owner);
+        await refreshDeviceCaptures(owner, epoch);
         guard();
-        setLocal(captures);
       }
       throw e;
+    }
+  }
+  async function recover(capture: LocalCapture) {
+    if (synchronizing.current || !profile || !context || !partition.current || offline) return;
+    const owner = partition.current;
+    const epoch = generation.current;
+    synchronizing.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const draft = await recoverHeldCapture(
+        capture,
+        owner,
+        context.scope,
+        phoneTransport,
+        { readCurrent: () => getCaptures(owner), save: updateCapture },
+        () => epoch === generation.current && partition.current === owner,
+      );
+      if (epoch !== generation.current || partition.current !== owner) return;
+      await refreshDeviceCaptures(owner, epoch);
+      if (epoch !== generation.current || partition.current !== owner) return;
+      setNotice(
+        'Earlier capture recovered with its original request identity. Its server status is shown below.',
+      );
+      await refreshRequests();
+      if (epoch === generation.current && partition.current === owner) await open(draft);
+    } catch (error) {
+      if (epoch !== generation.current || partition.current !== owner) return;
+      setError(error instanceof Error ? error.message : 'Could not recover the earlier capture.');
+      await refreshDeviceCaptures(owner, epoch);
+    } finally {
+      synchronizing.current = false;
+      if (epoch === generation.current) setBusy(false);
     }
   }
   async function open(draft: Draft) {
@@ -574,18 +643,15 @@ export function MobilePosApp() {
   const serverRequests = result?.data ?? [];
   const displayed = serverRequests;
   const unsent = local.filter((row) => row.state !== 'SUBMITTED');
+  const heldUnsent = held.filter(
+    (row) => !row.serverOutcome || row.serverOutcome.state === 'not_found',
+  );
+  const serverRequestIds = new Set(serverRequests.map((draft) => draft.requestId));
   const pendingMoney =
     Number(overview?.pendingMoney ?? 0) +
-    unsent.reduce(
-      (sum, row) =>
-        sum +
-        (row.submission.kind === 'COLLECTION'
-          ? Number(row.submission.payload.amount ?? 0)
-          : row.submission.kind === 'SALE' && row.submission.payload.paymentMethod !== 'CREDIT'
-            ? Number(row.submission.payload.expectedTotal ?? 0)
-            : 0),
-      0,
-    );
+    [...unsent, ...heldUnsent]
+      .filter((row) => !serverRequestIds.has(row.requestId))
+      .reduce((sum, row) => sum + capturedMoney(row), 0);
   return (
     <main className="pd-mobile">
       <header className="pd-mobile-top">
@@ -661,6 +727,7 @@ export function MobilePosApp() {
                 partition.current = null;
                 persona.current = null;
                 setLocal([]);
+                setHeld([]);
                 setSelected(null);
                 setResult(null);
                 setOverview(null);
@@ -759,7 +826,8 @@ export function MobilePosApp() {
             <span>Pending money</span>
             <strong>{money(pendingMoney)}</strong>
             <small>
-              {unsent.length} on device · money remains pending until completed or returned
+              {unsent.length} on device · {heldUnsent.length} held from an earlier PIN · money
+              remains pending until completed or returned
             </small>
           </div>
           <nav className="pd-mobile-tabs" aria-label="Mobile POS views">
@@ -889,6 +957,59 @@ export function MobilePosApp() {
                 />
               ) : (
                 <>
+                  {view === 'requests' && held.length > 0 && (
+                    <section aria-label="Earlier PIN captures held for review">
+                      <h3>Earlier captures · held for review</h3>
+                      <p className="pd-notice">
+                        These unsent captures belong to you on this device from before a PIN reset.
+                        Review each original request before recovery. Recovery checks its server
+                        status before submission; approvals and posting remain separate.
+                      </p>
+                      {held.map((capture) => (
+                        <article className="pd-local-request" key={capture.key}>
+                          <strong>{KIND_LABELS[capture.submission.kind]}</strong>
+                          <span className="pd-status">
+                            {capture.serverOutcome && capture.serverOutcome.state !== 'not_found'
+                              ? 'Recorded on server · no recovery needed'
+                              : 'Held · earlier PIN'}
+                          </span>
+                          {capturedMoney(capture) > 0 && (
+                            <strong>{money(capturedMoney(capture))} captured</strong>
+                          )}
+                          <small>{new Date(capture.submission.capturedAt).toLocaleString()}</small>
+                          <small>Request · {capture.requestId}</small>
+                          <p className="pd-muted">
+                            {capture.submission.businessDate} · no final receipt or completed
+                            transaction is assumed.
+                          </p>
+                          {capture.serverOutcome && capture.serverOutcome.state !== 'not_found' ? (
+                            capture.serverOutcome.draft ? (
+                              <button
+                                className="pd-button"
+                                disabled={offline || busy}
+                                onClick={() => void open(capture.serverOutcome!.draft!)}
+                              >
+                                Open recorded request
+                              </button>
+                            ) : (
+                              <p className="pd-notice">
+                                The server recorded this original identity. Review its history; do
+                                not submit it again.
+                              </p>
+                            )
+                          ) : (
+                            <button
+                              className="pd-button"
+                              disabled={offline || busy || !context}
+                              onClick={() => void recover(capture)}
+                            >
+                              Recover and check original request
+                            </button>
+                          )}
+                        </article>
+                      ))}
+                    </section>
+                  )}
                   {view === 'requests' &&
                     unsent.map((capture) => (
                       <article className="pd-local-request" key={capture.key}>

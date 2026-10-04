@@ -48,7 +48,7 @@ export function OsLogin() {
         <section className="os-login-panel" aria-label="Sign in to ITEMBA OS">
           <SignInForm defaultTarget="/desktop" />
           <div className="os-login-help">
-            <Link href="/forgot-password">Forgot your password?</Link>
+            <span>For a password reset, contact your administrator.</span>
             <span>
               Need access? <Link href="/signup">Request an account</Link>
             </span>

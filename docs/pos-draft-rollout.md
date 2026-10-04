@@ -37,6 +37,8 @@ Build the candidate from `codex/pos-draft-remake`, based on deployed revision `6
 
 Offline work is a provisional capture, never a final receipt or authoritative balance. Reconnect and select **Check and submit safely** to observe the original identity and revalidate server access/prices. Device entries are partitioned by operator, approved device and credential version. Account changes hide previous private entries and cannot silently submit them. Saved server drafts and decision history remain authoritative.
 
+After a PIN reset, the same operator on the same approved phone can review held unsent captures from earlier credential versions. Recovery keeps the original request identity, checks its server outcome first and requires the current branch scope. The earlier copy remains available for reconciliation. Captures from another operator or device stay inaccessible, and acknowledged requests are never offered for replay.
+
 Five incorrect PIN attempts lock the device PIN for 15 minutes. An administrator can issue a reset in Devices; it immediately revokes previous credentials and the reset must be completed on the originally approved phone. A lost setup response can be recovered only with the same saved device secret and correct PIN. Device replacement requires a new approved enrolment.
 
 ## Pause and rollback

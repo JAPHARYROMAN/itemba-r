@@ -24,10 +24,9 @@ describe('OS sign-in', () => {
       '/desktop',
     );
     expect(screen.getByLabelText('Email')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Forgot your password?' })).toHaveAttribute(
-      'href',
-      '/forgot-password',
-    );
+    expect(screen.getByText('For a password reset, contact your administrator.')).toBeVisible();
+    expect(screen.queryByRole('link', { name: /forgot.*password/i })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/forgot-password"]')).toBeNull();
     expect(screen.queryByRole('img', { name: /QR/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/terminal activation|install.*POS/i)).not.toBeInTheDocument();
   });

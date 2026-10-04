@@ -261,7 +261,7 @@ describe('LAUNCH-2 · Ctrl/Cmd+J follows the command-palette precedent', () => {
  * ------------------------------------------------------------------------ */
 
 describe('LAUNCH-3 · the POS shell never gets a launcher', () => {
-  it.each(['/mobile-pos', '/westsides/mobile-pos'])(
+  it.each(['/mobile-pos', '/mobile-pos/activate', '/westsides/mobile-pos/install'])(
     'mounts no assistant button at %s',
     async (pathname) => {
       h.pathname.current = pathname;
@@ -284,6 +284,11 @@ describe('LAUNCH-3 · the POS shell never gets a launcher', () => {
 
   it('mounts it again in the ERP shell, so the exclusion is the branch and not the feature', async () => {
     h.pathname.current = '/dashboard';
+    await renderShell();
+    expect(screen.getByTestId('msaidizi-launcher-button')).toBeInTheDocument();
+  });
+  it('keeps historical mobile day reports in the authenticated office shell', async () => {
+    h.pathname.current = '/westsides/mobile-pos/day-reports';
     await renderShell();
     expect(screen.getByTestId('msaidizi-launcher-button')).toBeInTheDocument();
   });

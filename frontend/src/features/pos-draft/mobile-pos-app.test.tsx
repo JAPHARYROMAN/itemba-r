@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/api-client';
 import { contextFixture, draftFixture } from './test-fixtures';
 import { MobilePosApp } from './mobile-pos-app';
+import type { LocalCapture } from './capture-store';
+import { money } from './types';
 const h = vi.hoisted(() => ({
   api: vi.fn(),
   get: vi.fn(),
@@ -14,7 +16,8 @@ const h = vi.hoisted(() => ({
     ownerId: 'operator',
     credentialVersion: 1,
   },
-  local: [] as unknown[],
+  local: [] as LocalCapture[],
+  held: [] as LocalCapture[],
   profile: null as any,
 }));
 vi.mock('./mobile-api', () => ({
@@ -37,16 +40,24 @@ vi.mock('@/lib/api-client', async () => {
     backendList: (...args: unknown[]) => h.list(...args),
   };
 });
-vi.mock('./capture-store', () => ({
-  capturePartition: async (device: typeof h.device) =>
-    `${device.enrollmentId}:${device.ownerId}:${device.credentialVersion}`,
-  getCaptures: async () => h.local,
-  getCachedSession: async () => undefined,
-  cacheMobileSession: async () => undefined,
-  clearCachedSession: async () => undefined,
-  saveCapture: vi.fn(),
-  updateCapture: vi.fn(),
-}));
+vi.mock('./capture-store', async () => {
+  const actual = await vi.importActual<typeof import('./capture-store')>('./capture-store');
+  return {
+    ...actual,
+    capturePartition: async (device: typeof h.device) =>
+      `${device.enrollmentId}:${device.ownerId}:${device.credentialVersion}:${'c'.repeat(64)}`,
+    getCaptures: async () => h.local,
+    getHeldCaptures: async (partition: string) =>
+      actual.heldCapturesForPartition([...h.local, ...h.held], partition),
+    getCachedSession: async () => undefined,
+    cacheMobileSession: async () => undefined,
+    clearCachedSession: async () => undefined,
+    saveCapture: vi.fn(),
+    updateCapture: async (value: LocalCapture) => {
+      h.local = [...h.local.filter((row) => row.key !== value.key), value];
+    },
+  };
+});
 vi.mock('@/features/pos/hardware/use-pos-printer', () => ({
   usePosPrinter: () => ({ settings: { paper: '80' }, print: vi.fn() }),
 }));
@@ -89,6 +100,7 @@ beforeEach(() => {
   };
   h.profile = profile;
   h.local = [];
+  h.held = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(
@@ -224,5 +236,86 @@ describe('mobile session boundaries', () => {
       }),
     );
     expect(screen.getByText(/999/)).toBeVisible();
+  });
+  it('holds money from before a PIN reset and recovers only after an explicit original-identity check', async () => {
+    h.device.credentialVersion = 2;
+    h.profile = { ...profile, operator: { ...profile.operator, credentialVersion: 2 } };
+    const source: LocalCapture = {
+      key: `enrollment:operator:1:${'c'.repeat(64)}:original-request`,
+      partition: `enrollment:operator:1:${'c'.repeat(64)}`,
+      requestId: 'original-request',
+      submission: draftFixture,
+      state: 'LOCAL',
+    };
+    h.held = [source];
+    const before = structuredClone(source);
+    let submitted = false;
+    h.api.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path.endsWith('/me')) return h.profile;
+      if (path.endsWith('/context')) return contextFixture;
+      if (path.includes('/outcome/'))
+        return {
+          state: submitted ? 'pending' : 'not_found',
+          ...(submitted ? { draft: draftFixture } : {}),
+        };
+      if (path === '/pos-drafts' && options?.method === 'POST') {
+        submitted = true;
+        return draftFixture;
+      }
+      if (path === '/pos-drafts')
+        return { ...page, summary: { ...page.summary, pendingMoney: submitted ? 100 : 0 } };
+      return draftFixture;
+    });
+    const user = userEvent.setup();
+    const { container } = render(<MobilePosApp />);
+    await screen.findByText('Operator A');
+    await user.click(screen.getByRole('button', { name: 'Requests', exact: true }));
+    expect(await screen.findByText('Held · earlier PIN')).toBeVisible();
+    expect(screen.getByText('Request · original-request')).toBeVisible();
+    expect(container.querySelector('.pd-mobile-money strong')).toHaveTextContent(money(100));
+    expect(h.api.mock.calls.some((call) => call[1]?.method === 'POST')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Recover and check original request' }));
+    await screen.findByRole('region', { name: 'Request details' });
+    expect(h.api).toHaveBeenCalledWith(
+      '/pos-drafts',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.objectContaining({ requestId: 'original-request' }),
+      }),
+    );
+    expect(h.api.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    expect(source).toEqual(before);
+    expect(container.querySelector('.pd-mobile-money strong')).toHaveTextContent(money(100));
+  });
+  it('excludes a held capture already recorded on the server from recovery and duplicate pending money', async () => {
+    h.device.credentialVersion = 2;
+    h.profile = { ...profile, operator: { ...profile.operator, credentialVersion: 2 } };
+    h.held = [
+      {
+        key: 'earlier',
+        partition: `enrollment:operator:1:${'c'.repeat(64)}`,
+        requestId: draftFixture.requestId,
+        submission: draftFixture,
+        state: 'ATTENTION',
+      },
+    ];
+    h.api.mockImplementation(async (path: string) =>
+      path.endsWith('/me')
+        ? h.profile
+        : path.endsWith('/context')
+          ? contextFixture
+          : path.includes('/outcome/')
+            ? { state: 'pending', draft: draftFixture }
+            : { ...page, data: [draftFixture], summary: { ...page.summary, pendingMoney: 100 } },
+    );
+    const { container } = render(<MobilePosApp />);
+    await screen.findByText('Operator A');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Requests', exact: true }));
+    expect(await screen.findByText('Recorded on server · no recovery needed')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Recover and check original request' }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector('.pd-mobile-money strong')).toHaveTextContent(money(100));
+    expect(h.api.mock.calls.some((call) => call[1]?.method === 'POST')).toBe(false);
   });
 });
