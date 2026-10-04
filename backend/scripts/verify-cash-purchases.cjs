@@ -20,6 +20,9 @@ const { InvoiceDeskService } = require('../dist/modules/invoice-desk/invoice-des
 const { CashPurchasesService } = require('../dist/modules/cash-desk/cash-purchases.service');
 const { CashDeskService } = require('../dist/modules/cash-desk/cash-desk.service');
 const num = (value) => Number(value);
+const posDraftDenied = (error) =>
+  error?.getStatus?.() === 403 &&
+  error.message === 'Submit this transaction to POS Draft for approval.';
 
 async function verifyCashPurchases({ db, check, fixture: f, call }) {
   assert.ok(f.company.code.startsWith('POS-'), 'Purchase proof requires owned synthetic fixture');
@@ -44,6 +47,33 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
       'mobile_pos_lite.manage',
     ],
   };
+  async function legacyPasswordActor() {
+    const terminal = await db.mobilePosTerminal.findFirstOrThrow({
+      where: { ...scope, assignedUserId: f.legacyStaff.user.id },
+    });
+    const setup = await db.mobilePosBranchSetup.findFirstOrThrow({
+      where: { ...scope, approvalRequired: true },
+    });
+    assert.equal(
+      terminal.branchId,
+      scope.branchId,
+      'Legacy password actor owns this drawer branch',
+    );
+    assert.equal(
+      setup.branchId,
+      scope.branchId,
+      'Legacy terminal branch requires POS Draft approval',
+    );
+    assert.equal(f.legacyStaff.user.authKind, 'PASSWORD');
+    return {
+      ...user,
+      id: f.legacyStaff.user.id,
+      email: f.legacyStaff.user.email,
+      permissions: user.permissions.filter(
+        (code) => !['mobile_pos_lite.manage', 'mobile_pos_onboarding.manage'].includes(code),
+      ),
+    };
+  }
   const invoice = await db.supplierInvoice.findFirst({
     where: {
       ...scope,
@@ -337,7 +367,11 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
           'supplier',
         ])
           assert.equal(restored[key], before[key], key + ' restored');
-        assert.equal(restored.orderStatus, 'UNPAID');
+        assert.equal(
+          restored.orderStatus,
+          before.orderStatus,
+          'Original order payment status restored',
+        );
         assert.equal(restored.entries, before.entries + 2);
         assert.equal(restored.journals, before.journals + 2);
         assert.equal(restored.payments, before.payments + 1);
@@ -403,15 +437,32 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
           const worker = await db.mobilePosEnrollment.findFirstOrThrow({
             where: {
               companyId: f.company.id,
+              branchId: scope.branchId,
               approvedRole: { in: ['CASHIER', 'STOCKIST'] },
               approvedAt: { not: null },
-              userId: { not: null },
+              userId: f.reviewer.user.id,
+              branchSetup: { approvalRequired: true },
             },
           });
-          for (const actor of [
-            { ...user, tokenUse: 'mobile-pos' },
-            { ...user, mobilePosRole: 'STOCKIST' },
-            { ...user, id: worker.userId },
+          // Exact historical reviewer avoids choosing a same-company destination worker on fresh DBs.
+          assert.equal(
+            worker.branchId,
+            desk.branchId,
+            'Historical reversal actor owns the drawer branch',
+          );
+          assert.equal(worker.companyId, desk.companyId);
+          assert.equal(worker.userId, f.reviewer.user.id);
+          assert.equal(
+            worker.status,
+            'REVOKED',
+            'Earlier password guard proof retains revoked history',
+          );
+          assert.equal(f.reviewer.user.authKind, 'PASSWORD');
+          for (const [description, actor] of [
+            ['mobile POS credential', { ...user, tokenUse: 'mobile-pos' }],
+            ['stockist claim', { ...user, mobilePosRole: 'STOCKIST' }],
+            ['same-branch revoked password reviewer', { ...user, id: worker.userId }],
+            ['same-branch legacy password terminal', await legacyPasswordActor()],
           ])
             await assert.rejects(
               service.reverse(actor, paid.id, {
@@ -419,6 +470,8 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
                 businessDate: date,
                 reason: 'Worker reversal bypass',
               }),
+              posDraftDenied,
+              description + ' must require POS Draft approval before reversing a purchase',
             );
           assert.deepEqual(await snapshot(), beforeStaffReverse);
           assert.equal(
@@ -461,18 +514,41 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
           ])
             await assert.rejects(
               service.record({ ...user, ...claims }, { ...input, requestId: randomUUID() }),
+              posDraftDenied,
+              'Mobile POS claims must require POS Draft approval before recording a purchase',
             );
           const staff = await db.mobilePosEnrollment.findFirstOrThrow({
             where: {
               companyId: f.company.id,
+              branchId: scope.branchId,
               approvedRole: { in: ['CASHIER', 'STOCKIST'] },
               approvedAt: { not: null },
-              userId: { not: null },
+              userId: f.reviewer.user.id,
+              branchSetup: { approvalRequired: true },
             },
           });
-          await assert.rejects(
-            service.record({ ...user, id: staff.userId }, { ...input, requestId: randomUUID() }),
+          assert.equal(
+            staff.branchId,
+            desk.branchId,
+            'Historical posting actor owns the drawer branch',
           );
+          assert.equal(staff.companyId, desk.companyId);
+          assert.equal(staff.userId, f.reviewer.user.id);
+          assert.equal(
+            staff.status,
+            'REVOKED',
+            'Revoked approval history remains subject to the branch policy',
+          );
+          assert.equal(f.reviewer.user.authKind, 'PASSWORD');
+          for (const [description, actor] of [
+            ['same-branch revoked password reviewer', { ...user, id: staff.userId }],
+            ['same-branch legacy password terminal', await legacyPasswordActor()],
+          ])
+            await assert.rejects(
+              service.record(actor, { ...input, requestId: randomUUID() }),
+              posDraftDenied,
+              description + ' must require POS Draft approval before recording a purchase',
+            );
           assert.deepEqual(await snapshot(), stable);
         },
       );
