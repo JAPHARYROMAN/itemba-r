@@ -362,8 +362,8 @@
   font-size: 12px;
   margin-top: 3px;
 }
-.pd-inspector a {
-  color: var(--pd-accent);
+.pd-inspector a:not(.pd-button) {
+  color: var(--aurora-primary-text, var(--pd-text));
   display: inline-flex;
   align-items: center;
   gap: 4px;
