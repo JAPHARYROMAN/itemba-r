@@ -1,11 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import type { ReactNode } from 'react';
-import { InstallQrCode } from '@/components/westsides/mobile-pos-install/InstallQrCode';
-import {
-  WESTSIDES_MOBILE_POS_INSTALL_PATH,
-  WESTSIDES_MOBILE_POS_NAME,
-} from '@/components/westsides/mobile-pos-install/routes';
 
 interface AuthShellProps {
   eyebrow: string;
@@ -19,9 +14,6 @@ const ACCESS_POINTS = ['Governance', 'Operations', 'Finance', 'Documents'];
 const WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL ?? 'https://itembagrouptz.com';
 
 export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthShellProps) {
-  const showMobilePosInstall =
-    eyebrow.toLowerCase().includes('secure workspace') || title.toLowerCase().includes('sign in');
-
   return (
     <main className="auth-light min-h-screen bg-[#eef1ed] text-[#071321]">
       <div className="grid min-h-screen lg:grid-cols-[minmax(460px,0.95fr)_minmax(460px,1.05fr)]">
@@ -79,34 +71,6 @@ export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthSh
           </div>
 
           <div className="relative mt-10 space-y-5">
-            {showMobilePosInstall && (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_14px_40px_rgba(0,0,0,0.25)] backdrop-blur-sm">
-                <div className="flex items-start gap-4">
-                  <span className="flex-shrink-0 rounded-xl bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
-                    <InstallQrCode size={92} className="h-[92px] w-[92px]" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-amber-300">
-                      Counter install
-                    </div>
-                    <div className="mt-1 text-base font-semibold text-white">
-                      {WESTSIDES_MOBILE_POS_NAME}
-                    </div>
-                    <p className="mt-1 text-sm leading-6 text-slate-300">
-                      Scan this code or open the gateway to install the mobile POS, then sign in and
-                      launch the counter sale screen.
-                    </p>
-                    <Link
-                      href={WESTSIDES_MOBILE_POS_INSTALL_PATH}
-                      className="mt-2 inline-flex rounded-full border border-white/20 px-3 py-1 text-xs font-semibold text-amber-200 transition hover:border-amber-300/60 hover:bg-white/5"
-                    >
-                      Open install gateway
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
               {ACCESS_POINTS.map((item) => (
                 <div

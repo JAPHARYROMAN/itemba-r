@@ -17,6 +17,9 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
   }
 
   async validate(req: Request, payload: JwtPayload) {
+    if (payload.tokenUse === 'mobile-pos' || payload.tokenUse === 'mobile-pos-refresh') {
+      throw new UnauthorizedException('Use the approved device refresh endpoint');
+    }
     const rawToken = (req.headers['authorization'] ?? '').replace(/^Bearer\s+/i, '');
     if (!rawToken) throw new UnauthorizedException('Refresh token missing');
     return {

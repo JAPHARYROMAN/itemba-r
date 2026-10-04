@@ -2649,6 +2649,8 @@ model User {
   fuelReportRevisions FuelReportRevision[]
   id                  String               @id @default(uuid())
   email               String               @unique
+  /// POS_PIN accounts authenticate only through an approved device credential.
+  authKind            String               @default("PASSWORD")
   passwordHash        String
   fullName            String
   phoneNumber         String?
@@ -5336,6 +5338,8 @@ model Product {
 }
 
 model InventoryBalance {
+  /// Physical stock changes increment this independently of draft reservations.
+  physicalRevision Int @default(0)
   id               String    @id @default(uuid())
   companyId        String
   divisionId       String?
@@ -13675,7 +13679,7 @@ model MobilePosTerminal {
   divisionId          String
   branchId            String
   assignedUserId      String
-  salespersonId       String
+  salespersonId       String?
   generalCustomerId   String
   status              MobilePosTerminalStatus @default(ACTIVE)
   creditEnabled       Boolean                 @default(false)
@@ -13701,7 +13705,7 @@ model MobilePosTerminal {
   division        Division                   @relation(fields: [divisionId], references: [id], onDelete: Restrict)
   branch          Branch                     @relation(fields: [branchId], references: [id], onDelete: Restrict)
   assignedUser    User                       @relation("MobilePosTerminalAssignedUser", fields: [assignedUserId], references: [id], onDelete: Restrict)
-  salesperson     Employee                   @relation("MobilePosTerminalSalesperson", fields: [salespersonId], references: [id], onDelete: Restrict)
+  salesperson     Employee?                  @relation("MobilePosTerminalSalesperson", fields: [salespersonId], references: [id], onDelete: Restrict)
   generalCustomer Customer                   @relation("MobilePosTerminalGeneralCustomer", fields: [generalCustomerId], references: [id], onDelete: Restrict)
   paymentMethods  MobilePosTerminalPayment[]
   salesOrders     SalesOrder[]
@@ -15901,7 +15905,7 @@ model SupplierInvoiceLine {
 
 model ThreeWayMatch {
   id                  String              @id @default(uuid())
-  matchNumber         String              @unique
+  matchNumber         String
   companyId           String
   purchaseOrderId     String
   goodsReceivedNoteId String?
@@ -15924,6 +15928,7 @@ model ThreeWayMatch {
   matchedBy         User               @relation("ThreeWayMatchedBy", fields: [matchedById], references: [id])
   approvedBy        User?              @relation("ThreeWayApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
 
+  @@unique([companyId, matchNumber])
   @@index([companyId, purchaseOrderId, matchStatus])
   @@map("three_way_matches")
 }
@@ -17911,4 +17916,131 @@ model PosTransactionAction {
   @@unique([companyId, requestId])
   @@index([companyId, terminalId, saleId])
   @@map("pos_transaction_actions")
+}
+model MobilePosBranchSetup {
+  id String @id @default(uuid())
+  companyId String
+  divisionId String
+  branchId String @unique
+  generalCustomerId String
+  paymentMappings Json
+  approvalRequired Boolean @default(true)
+  enabled Boolean @default(true)
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  invites MobilePosInvite[]
+  enrollments MobilePosEnrollment[]
+  @@index([companyId, branchId])
+  @@map("mobile_pos_branch_setups")
+}
+
+model MobilePosInvite {
+  id String @id @default(uuid())
+  branchSetupId String
+  tokenHash String @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdById String
+  createdAt DateTime @default(now())
+  branchSetup MobilePosBranchSetup @relation(fields: [branchSetupId], references: [id], onDelete: Restrict)
+  @@index([branchSetupId, expiresAt])
+  @@map("mobile_pos_invites")
+}
+
+model MobilePosEnrollment {
+  id String @id @default(uuid())
+  branchSetupId String
+  companyId String
+  divisionId String
+  branchId String
+  name String
+  requestedRole String
+  status String @default("PENDING")
+  approvedRole String?
+  userId String?
+  terminalId String?
+  claimTokenHash String @unique
+  claimExpiresAt DateTime
+  setupTokenHash String?
+  setupExpiresAt DateTime?
+  deviceSecretHash String?
+  pinHash String?
+  credentialVersion Int @default(1)
+  failedPinAttempts Int @default(0)
+  lockedUntil DateTime?
+  approvedById String?
+  approvedAt DateTime?
+  rejectedReason String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  branchSetup MobilePosBranchSetup @relation(fields: [branchSetupId], references: [id], onDelete: Restrict)
+  @@index([companyId, branchId, status])
+  @@index([userId, status])
+  @@map("mobile_pos_enrollments")
+}
+
+model PosDraft {
+  id String @id @default(uuid())
+  companyId String
+  divisionId String?
+  branchId String
+  originUserId String
+  originRole String
+  terminalId String?
+  requestId String
+  revision Int @default(1)
+  kind String
+  status String @default("SUBMITTED")
+  businessDate DateTime @db.Date
+  capturedAt DateTime
+  payload Json
+  amount Decimal @db.Decimal(18, 2)
+  pendingMoney Decimal @default(0) @db.Decimal(18, 2)
+  currency String @default("TZS")
+  duplicateSignature String?
+  blockingReason String?
+  reservedUntil DateTime?
+  postedEntityType String?
+  postedEntityId String?
+  postedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reservations PosDraftReservation[]
+  decisions PosDraftDecision[]
+  @@unique([companyId, requestId])
+  @@index([companyId, branchId, status, businessDate])
+  @@index([originUserId, status])
+  @@index([status, reservedUntil])
+  @@map("pos_drafts")
+}
+
+model PosDraftReservation {
+  id String @id @default(uuid())
+  draftId String
+  companyId String
+  branchId String
+  productId String
+  quantity Decimal @db.Decimal(18, 4)
+  expiresAt DateTime
+  releasedAt DateTime?
+  draft PosDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  @@unique([draftId, productId, branchId])
+  @@index([companyId, branchId, productId, releasedAt, expiresAt])
+  @@index([releasedAt, expiresAt])
+  @@map("pos_draft_reservations")
+}
+
+model PosDraftDecision {
+  id String @id @default(uuid())
+  draftId String
+  revision Int
+  action String
+  actorUserId String
+  reason String?
+  createdAt DateTime @default(now())
+  metadata Json?
+  draft PosDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  @@index([draftId, createdAt])
+  @@map("pos_draft_decisions")
 }

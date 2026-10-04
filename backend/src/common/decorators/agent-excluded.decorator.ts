@@ -13,6 +13,8 @@ export type AgentExclusionReason =
   | 'filesystem_materialization_not_represented'
   | 'asynchronous_effect_not_represented'
   | 'recent_human_auth_required'
+  | 'pos_draft_workflow_not_represented'
+  | 'mobile_pos_onboarding_not_represented'
   | 'company_scope_not_enforced'
   | 'query_schema_not_strict';
 

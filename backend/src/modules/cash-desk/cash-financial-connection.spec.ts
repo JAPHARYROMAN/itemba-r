@@ -24,6 +24,8 @@ function setup() {
     entries: [{ accountId: 'a1', amount: d(-25) }],
   };
   const tx: any = {
+    mobilePosEnrollment: { findFirst: jest.fn(async () => null) },
+    mobilePosTerminal: { findMany: jest.fn(async () => []) },
     $queryRaw: jest.fn(),
     cashDeskMovement: {
       findFirst: jest.fn(async () => original),
@@ -55,7 +57,7 @@ function setup() {
   jest.spyOn(service as any, 'lockAccounts').mockResolvedValue(undefined);
   const entries = jest.spyOn(service as any, 'entries').mockResolvedValue(undefined);
   jest.spyOn(service as any, 'auditMovement').mockResolvedValue(undefined);
-  return { service, tx, invoices, connections, entries };
+  return { service, tx, invoices, connections, entries, original };
 }
 describe('Cash operational and financial connection', () => {
   const input: any = {
@@ -107,5 +109,21 @@ describe('Cash operational and financial connection', () => {
     );
     connections.reverseInTransaction.mockRejectedValue(new Error('Period is closed'));
     await expect(service.reverse(user, 'm1', request)).rejects.toThrow('Period is closed');
+  });
+  it('blocks an enrolled legacy worker from reversing an operational invoice purchase', async () => {
+    const { service, tx, entries, original } = setup();
+    original.kind = 'SUPPLIER_PAYMENT';
+    original.invoicePaymentId = 'p1';
+    tx.mobilePosEnrollment.findFirst.mockResolvedValue({ id: 'staff-enrollment' });
+    await expect(
+      service.reverse(user, 'm1', {
+        requestId: 'reverse-staff',
+        businessDate: '2026-09-19',
+        reason: 'Attempted bypass',
+      }),
+    ).rejects.toThrow('POS Draft');
+    expect(tx.cashDeskMovement.create).not.toHaveBeenCalled();
+    expect(tx.cashDeskMovement.updateMany).not.toHaveBeenCalled();
+    expect(entries).not.toHaveBeenCalled();
   });
 });

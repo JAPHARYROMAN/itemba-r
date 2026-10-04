@@ -16,6 +16,11 @@ export interface AuthUser {
   rawRefreshToken?: string;
   /** Active session id, if the access token was issued with one (P1-01). */
   sid?: string;
+  tokenUse?: 'mobile-pos';
+  mobilePosRole?: 'CASHIER' | 'STOCKIST' | 'ADMIN';
+  mobilePosEnrollmentId?: string;
+  mobilePosTerminalId?: string;
+  mobilePosCredentialVersion?: number;
   /** Present only for a short-lived autonomous task token. */
   principalType?: string;
   principalId?: string;

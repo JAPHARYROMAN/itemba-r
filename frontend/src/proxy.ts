@@ -10,11 +10,13 @@ const PUBLIC_PATHS = [
   '/signup',
   '/api/auth/',
   '/api/backend/',
+  '/api/mobile-pos/',
   '/api/health',
   '/brand/',
   '/mobile-pos-sw.js',
   '/westsides-mobile-pos.webmanifest',
   '/westsides/mobile-pos/install',
+  '/mobile-pos',
 ];
 
 export function proxy(req: NextRequest) {

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { releaseExpiredPosReservations } from '../../common/services/pos-draft-reservations';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { QueryInventoryMovementDto } from './dto/query-inventory-movement.dto';
@@ -200,8 +201,12 @@ export class InventoryMovementsService {
     unitCost?: number;
     /** Exact supplier invoice value for a costed receipt owned by a larger transaction. */
     receiptValue?: Prisma.Decimal;
+    /** Paired transfers carry the same exact value out and in, inside one transaction. */
+    transferValue?: Prisma.Decimal;
     movementDate: Date;
     createdById: string;
+    /** Approval actor when the movement retains a different original recorder. */
+    auditActorUserId?: string;
     referenceType?: string;
     referenceId?: string;
     batchNumber?: string;
@@ -243,6 +248,9 @@ export class InventoryMovementsService {
         throw new BadRequestException(
           'An exact receipt value requires a costed purchase receipt in its owning transaction.',
         );
+      if (data.transferValue && (!data.tx || !['TRANSFER_IN', 'TRANSFER_OUT'].includes(data.movementType) || data.unitCost == null || data.transferValue.lt(0) || data.transferValue.decimalPlaces() > 2)) {
+        throw new BadRequestException('An exact transfer value requires a paired, costed transfer in its owning transaction.');
+      }
       const movementNumber = await this.codes.next({
         entityType: 'InventoryMovement',
         companyId: data.companyId,
@@ -258,7 +266,7 @@ export class InventoryMovementsService {
           unitId: data.unitId,
           unitCost: data.unitCost,
           totalCost:
-            data.receiptValue ??
+            data.transferValue ?? data.receiptValue ??
             (data.unitCost != null ? data.quantity * data.unitCost : undefined),
           movementDate: data.movementDate,
           createdById: data.createdById,
@@ -275,6 +283,7 @@ export class InventoryMovementsService {
       await this.applyMovementToBalance(movement, db, {
         allowNegativeOnHand: data.allowNegativeOnHand,
         receiptValue: data.receiptValue,
+        transferValue: data.transferValue,
       });
       return movement;
     };
@@ -286,7 +295,7 @@ export class InventoryMovementsService {
       action: 'INVENTORY_MOVEMENT_CREATE',
       entityType: 'InventoryMovement',
       entityId: movement.id,
-      userId: data.createdById,
+      userId: data.auditActorUserId ?? data.createdById,
       companyId: data.companyId,
       newValue: {
         movementNumber: movement.movementNumber,
@@ -307,7 +316,7 @@ export class InventoryMovementsService {
   private async applyMovementToBalance(
     movement: InventoryMovement,
     db: Prisma.TransactionClient,
-    opts?: { allowNegativeOnHand?: boolean; receiptValue?: Prisma.Decimal },
+    opts?: { allowNegativeOnHand?: boolean; receiptValue?: Prisma.Decimal; transferValue?: Prisma.Decimal },
   ) {
     const isInbound = INBOUND_TYPES.includes(movement.movementType);
     const isOutbound = OUTBOUND_TYPES.includes(movement.movementType);
@@ -357,6 +366,15 @@ export class InventoryMovementsService {
       throw new BadRequestException('Inventory balance row could not be locked');
     }
 
+    // The balance lock serializes expiry with final approval and competing issues.
+    // Releasing expired holds here also protects ordinary ERP sales from stale holds.
+    existing.quantityReserved = await releaseExpiredPosReservations(db, {
+      ...existing,
+      companyId: movement.companyId,
+      branchId: movement.branchId,
+      productId: movement.productId,
+    });
+
     const currentQty = Number(existing.quantityOnHand);
     const reservedQty = Number(existing.quantityReserved);
     const delta = isInbound ? quantity : -quantity;
@@ -374,13 +392,10 @@ export class InventoryMovementsService {
         `Insufficient stock at branch/location ${movement.branchId}: requested ${quantity}, available ${currentQty}`,
       );
     }
-    // Reserved-availability guard applies ONLY to sales issues. quantityReserved
-    // earmarks stock for open sales orders, so a SALE_ISSUE must not draw against
-    // it. Non-sale relief movements (DAMAGE, WASTAGE, INTERNAL_USE,
-    // ADJUSTMENT_OUT, TRANSFER_OUT, PRODUCTION_OUT, PURCHASE_RETURN) represent
-    // real physical depletion and may draw against on-hand even when reserved —
-    // they are only bounded by the negative-stock guard above.
-    if (movement.movementType === 'SALE_ISSUE' && currentQty - reservedQty < quantity) {
+    // Sales and planned transfers cannot consume another transaction's hold.
+    // Physical loss/correction may still deplete held units; final sale approval
+    // then rechecks availability rather than pretending those goods still exist.
+    if (['SALE_ISSUE', 'TRANSFER_OUT'].includes(movement.movementType) && currentQty - reservedQty < quantity) {
       throw new BadRequestException(
         `Insufficient available stock at branch/location ${movement.branchId}: requested ${quantity}, available ${Math.max(0, currentQty - reservedQty)} after reservations`,
       );
@@ -406,13 +421,19 @@ export class InventoryMovementsService {
     let newTotalValueDec: Prisma.Decimal;
     if (isInbound && movement.unitCost != null) {
       const totalCost = existingTotalValue.plus(
-        opts?.receiptValue ?? qtyDec.times(movement.unitCost),
+        opts?.transferValue ?? opts?.receiptValue ?? qtyDec.times(movement.unitCost),
       );
       newAvgCostDec = newQtyDec.gt(0) ? totalCost.dividedBy(newQtyDec) : new Prisma.Decimal(0);
       newTotalValueDec = totalCost;
     } else if (isInbound) {
       // Cost-less inbound: averageCost stays as-is; totalValue is held.
       newTotalValueDec = existingTotalValue;
+    } else if (opts?.transferValue) {
+      if (opts.transferValue.gt(existingTotalValue) || (newQtyDec.eq(0) && !opts.transferValue.eq(existingTotalValue))) {
+        throw new BadRequestException('Transfer value must equal the inventory value actually removed.');
+      }
+      newTotalValueDec = existingTotalValue.minus(opts.transferValue);
+      newAvgCostDec = newQtyDec.gt(0) ? newTotalValueDec.dividedBy(newQtyDec) : new Prisma.Decimal(0);
     } else {
       // Outbound: relieve at the current average, additively.
       if (newQtyDec.gt(0)) {
@@ -431,6 +452,7 @@ export class InventoryMovementsService {
         averageCost: newAvgCostDec,
         totalValue: newTotalValueDec,
         lastMovementAt: movement.movementDate,
+        physicalRevision: { increment: 1 },
       },
     });
   }

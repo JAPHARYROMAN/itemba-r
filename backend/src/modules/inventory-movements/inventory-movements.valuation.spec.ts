@@ -10,8 +10,8 @@ import { InventoryMovementsService } from './inventory-movements.service';
  *       recompute that can INCREASE value once the qty*avg invariant is broken.
  * #13 — all WAC math is done in Prisma.Decimal and written into the Decimal
  *       columns, so successive movements do not accumulate IEEE-754 drift.
- * #25 — the reserved-availability guard applies to SALE_ISSUE only; other
- *       outbound types (DAMAGE, WASTAGE, ADJUSTMENT_OUT, TRANSFER_OUT, ...) may
+ * #25 — sales and planned transfers protect reservations; physical corrections
+ *       (DAMAGE, WASTAGE, ADJUSTMENT_OUT, ...) may
  *       draw against on-hand even when stock is reserved.
  *
  * The tests drive createMovement with an injected transaction client so the
@@ -264,7 +264,92 @@ describe('InventoryMovementsService WAC valuation (#3, #13)', () => {
   });
 });
 
+describe('Exact transfer valuation', () => {
+  it('carries the remaining rounded value when the last units leave a branch', async () => {
+    const { service } = makeService();
+    const { tx, updateCalls } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(3),
+        averageCost: new Prisma.Decimal('3.3333'),
+        totalValue: new Prisma.Decimal(10),
+      }),
+    );
+    const movement = await service.createMovement({
+      ...base,
+      movementType: 'TRANSFER_OUT',
+      quantity: 3,
+      unitCost: 3.3333,
+      transferValue: new Prisma.Decimal(10),
+      tx,
+    });
+    expect(movement.totalCost?.toNumber()).toBe(10);
+    expect(updateCalls.at(-1).data.totalValue.toNumber()).toBe(0);
+    expect(updateCalls.at(-1).data.physicalRevision).toEqual({ increment: 1 });
+  });
+  it('adds the exact source value at the destination rather than a rounded average times quantity', async () => {
+    const { service } = makeService();
+    const { tx, updateCalls } = makeTx(row());
+    await service.createMovement({
+      ...base,
+      movementType: 'TRANSFER_IN',
+      quantity: 3,
+      unitCost: 3.3333,
+      transferValue: new Prisma.Decimal(10),
+      tx,
+    });
+    expect(updateCalls.at(-1).data.totalValue.toNumber()).toBe(10);
+  });
+  it('rejects leaving a residual value behind after transferring all units', async () => {
+    const { service } = makeService();
+    const { tx } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(3),
+        averageCost: new Prisma.Decimal('3.3333'),
+        totalValue: new Prisma.Decimal(10),
+      }),
+    );
+    await expect(
+      service.createMovement({
+        ...base,
+        movementType: 'TRANSFER_OUT',
+        quantity: 3,
+        unitCost: 3.3333,
+        transferValue: new Prisma.Decimal('9.99'),
+        tx,
+      }),
+    ).rejects.toThrow('Transfer value');
+  });
+});
+
 describe('InventoryMovementsService reserved-stock guard (#25)', () => {
+  it('blocks a planned transfer from consuming another sale reservation', async () => {
+    const { service } = makeService();
+    const { tx } = makeTx(
+      row({ quantityOnHand: new Prisma.Decimal(10), quantityReserved: new Prisma.Decimal(8) }),
+    );
+    await expect(
+      service.createMovement({ ...base, quantity: 3, movementType: 'TRANSFER_OUT', tx }),
+    ).rejects.toThrow('Insufficient available stock');
+  });
+
+  it('releases only expired holds under the balance lock before an ordinary sale', async () => {
+    const { service } = makeService();
+    const { tx, updateCalls } = makeTx(row());
+    tx.$queryRaw
+      .mockResolvedValueOnce([
+        row({
+          quantityOnHand: new Prisma.Decimal(10),
+          quantityReserved: new Prisma.Decimal(10),
+          averageCost: new Prisma.Decimal(5),
+          totalValue: new Prisma.Decimal(50),
+        }),
+      ])
+      .mockResolvedValueOnce([{ releasedQuantity: new Prisma.Decimal(5) }]);
+    await service.createMovement({ ...base, quantity: 5, movementType: 'SALE_ISSUE', tx });
+    expect(updateCalls[0].data.quantityReserved.decrement.toNumber()).toBe(5);
+    expect(updateCalls[1].data.quantityOnHand).toBe(5);
+    expect(updateCalls[1].data.physicalRevision).toEqual({ increment: 1 });
+  });
   it('blocks a SALE_ISSUE that draws against reserved stock', async () => {
     const { service } = makeService();
     const { tx } = makeTx(
@@ -309,7 +394,7 @@ describe('InventoryMovementsService reserved-stock guard (#25)', () => {
     expect(Number(written.totalValue)).toBe(25); // 50 - 5*5, additive relief
   });
 
-  it('allows ADJUSTMENT_OUT / TRANSFER_OUT against reserved stock but still enforces negative-stock', async () => {
+  it('allows physical corrections against reserved stock but still enforces negative-stock', async () => {
     const { service } = makeService();
     const { tx } = makeTx(
       row({

@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState } from 'react';
+import { useDeferredValue, useId, useRef, useState } from 'react';
 import {
   Btn,
   CustomerPicker,
@@ -15,6 +15,8 @@ import { useAuth } from '@/hooks/use-auth';
 import { DraftFormNotice, useWorkspaceDraftForm } from '@/components/workspace/workspace-drafts';
 import { useLoanOptions, LoanLedgerChoice } from '@/features/loans/loan-finance';
 import { backendPost } from '@/lib/api-client';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import { WorkspaceLink } from '@/components/workspace/workspace-navigation';
 import {
   Account,
   Directory,
@@ -24,6 +26,10 @@ import {
   money,
   movementLabels,
   expenseCategories,
+  exactAmount,
+  purchaseSnapshot,
+  PurchaseOptions,
+  PurchaseOption,
 } from './types';
 
 export function CashEditor({
@@ -71,6 +77,11 @@ export function CashEditor({
       payee: '',
       expenseNotes: '',
       supplierId: '',
+      purchaseSource: '',
+      purchaseId: '',
+      purchaseVersion: '',
+      purchaseSnapshot: '',
+      purchaseNumber: '',
       customerId: '',
       reason: '',
       principal: '',
@@ -92,17 +103,27 @@ export function CashEditor({
             ? 'Reverse movement'
             : 'Cash movement',
       describe: (values) => values.description || values.name,
-      context: {
+      context: (values) => ({
         kind: editor.kind,
-        movementKind: editor.movementKind ?? '',
-        invoiceId: editor.invoice?.id ?? '',
-        version: editor.invoice ? String(editor.invoice.version) : '',
+        movementKind: values.kind,
+        invoiceId:
+          editor.invoice?.id ?? (values.purchaseSource === 'INVOICE_DESK' ? values.purchaseId : ''),
+        version: editor.invoice ? String(editor.invoice.version) : (values.purchaseVersion ?? ''),
+        payableId: values.purchaseSource === 'PAYABLE' ? values.purchaseId : '',
+        supplierId: values.supplierId,
+        accountId: values.accountId,
         loanId: editor.loan?.id ?? '',
         loanBalance: editor.loan?.outstanding ?? '',
         loanVoided: editor.loan?.voidedAt ?? '',
         movementId: editor.movement?.id ?? '',
         movementReversed: editor.movement?.reversedAt ?? '',
-      },
+        purchaseSource: values.purchaseSource ?? '',
+        purchaseId: values.purchaseId ?? '',
+        purchaseVersion: values.purchaseVersion ?? '',
+        purchaseSnapshot: values.purchaseSnapshot ?? '',
+        purchaseAccountId: values.accountId,
+        purchaseSupplierId: values.supplierId,
+      }),
       draftId: editor.draftId,
       needsReview: editor.needsReview,
       busy,
@@ -112,7 +133,11 @@ export function CashEditor({
   const { form, setForm, guard, requestId: request } = draft;
   const pending = useRef(false),
     id = useId();
-  const set = (key: keyof typeof form, value: string) =>
+  const set = (key: keyof typeof form, value: string) => {
+    if (key === 'accountId') {
+      setPurchasePage(1);
+      setPurchaseSearch('');
+    }
     setForm((f) => ({
       ...f,
       [key]: value,
@@ -121,10 +146,91 @@ export function CashEditor({
         : key === 'divisionId'
           ? { branchId: '' }
           : key === 'accountId'
-            ? { targetAccountId: '' }
+            ? {
+                targetAccountId: '',
+                supplierId: '',
+                purchaseSource: '',
+                purchaseId: '',
+                purchaseVersion: '',
+                purchaseSnapshot: '',
+                purchaseNumber: '',
+              }
             : {}),
     }));
+  };
   const account = accounts.find((a) => a.id === form.accountId);
+  const purchase =
+    editor.kind === 'movement' && !editor.invoice && form.kind === 'SUPPLIER_PAYMENT';
+  const canDeskPurchase =
+    hasPermission('invoice_desk.view') && hasPermission('invoice_desk.payments');
+  const canCanonicalPurchase =
+    hasPermission('supplier-payments.view') &&
+    hasPermission('supplier-payments.manage') &&
+    hasPermission('payables.view');
+  const canPurchase = hasPermission('suppliers.view') && (canDeskPurchase || canCanonicalPurchase);
+  const [purchaseSearch, setPurchaseSearch] = useState('');
+  const [purchasePage, setPurchasePage] = useState(1);
+  const [purchaseReviewed, setPurchaseReviewed] = useState('');
+  const deferredPurchaseSearch = useDeferredValue(purchaseSearch);
+  const purchaseEnabled = purchase && canPurchase && !!account && !!form.supplierId;
+  const purchaseOptions = useWorkspaceResource<PurchaseOptions>(
+    '/cash-desk/purchase-options',
+    {
+      accountId: form.accountId,
+      supplierId: form.supplierId,
+      search: deferredPurchaseSearch,
+      page: purchasePage,
+      pageSize: 20,
+    },
+    purchaseEnabled,
+  );
+  const purchaseDetail = useWorkspaceResource<PurchaseOptions>(
+    '/cash-desk/purchase-options',
+    {
+      accountId: form.accountId,
+      supplierId: form.supplierId,
+      source: form.purchaseSource ?? '',
+      id: form.purchaseId ?? '',
+    },
+    purchaseEnabled && !!form.purchaseId && !!form.purchaseSource,
+  );
+  const allowedPurchase = (row: PurchaseOption) =>
+    row.supplierId === form.supplierId &&
+    row.currency === account?.currency &&
+    (row.source === 'PAYABLE'
+      ? canCanonicalPurchase
+      : row.source === 'INVOICE_DESK' && canDeskPurchase);
+  const currentPurchase = purchaseDetail.data?.rows.find(
+    (row) =>
+      row.id === form.purchaseId && row.source === form.purchaseSource && allowedPurchase(row),
+  );
+  const currentSnapshot = currentPurchase ? purchaseSnapshot(currentPurchase) : '';
+  const purchaseChanged =
+    purchase &&
+    !!form.purchaseSnapshot &&
+    !!currentSnapshot &&
+    form.purchaseSnapshot !== currentSnapshot;
+  const purchaseReviewKey = JSON.stringify([
+    currentSnapshot,
+    form.amount,
+    form.businessDate,
+    form.accountId,
+    form.supplierId,
+  ]);
+  const purchaseLocked = purchase && !!request.current;
+  const choosePurchase = (row: PurchaseOption) => {
+    setForm((f) => ({
+      ...f,
+      purchaseSource: row.source,
+      purchaseId: row.id,
+      purchaseVersion: row.version ? String(row.version) : '',
+      purchaseSnapshot: purchaseSnapshot(row),
+      purchaseNumber: row.number,
+      amount: row.outstanding,
+      description: `Payment · ${row.number}`,
+    }));
+    setError('');
+  };
   const two = ['TRANSFER', 'LOAN', 'LOAN_REPAYMENT'].includes(form.kind);
   const target = accounts.find((a) => a.id === form.targetAccountId);
   const intercompany = editor.kind === 'movement' && ['LOAN', 'LOAN_REPAYMENT'].includes(form.kind);
@@ -177,6 +283,65 @@ export function CashEditor({
     setBusy(true);
     setError('');
     try {
+      if (purchase) {
+        if (!canPurchase) throw new Error('Purchase payment access is required.');
+        if (
+          !account ||
+          !form.supplierId ||
+          !currentPurchase ||
+          purchaseDetail.loading ||
+          purchaseDetail.error
+        )
+          throw new Error('Choose an available paying account, supplier and purchase or invoice.');
+        const prior = draft.requestContext.current;
+        if (
+          request.current &&
+          (!prior ||
+            prior.purchaseSource !== form.purchaseSource ||
+            prior.purchaseId !== form.purchaseId ||
+            prior.purchaseAccountId !== form.accountId ||
+            prior.purchaseSupplierId !== form.supplierId)
+        )
+          throw new Error(
+            'This submitted request belongs to another purchase. Reopen its saved draft to retry it.',
+          );
+        if (!request.current) {
+          if (
+            currentPurchase.source === 'INVOICE_DESK' &&
+            (!Number.isSafeInteger(currentPurchase.version) || (currentPurchase.version ?? 0) < 1)
+          )
+            throw new Error(
+              'The selected invoice version is unavailable. Retry the purchase read.',
+            );
+          const amount = exactAmount(form.amount),
+            outstanding = exactAmount(currentPurchase.outstanding);
+          if (
+            currentPurchase.canPay !== true ||
+            ['PAID', 'VOID', 'VOIDED', 'CANCELLED', 'WRITTEN_OFF'].includes(
+              currentPurchase.status.toUpperCase(),
+            ) ||
+            outstanding === null ||
+            outstanding <= 0n
+          )
+            throw new Error(
+              'This purchase is no longer available for payment. Choose another open record.',
+            );
+          if (amount === null || amount <= 0n || amount > outstanding)
+            throw new Error('Enter a positive amount no greater than the outstanding balance.');
+          if (
+            form.businessDate < account.openingDate.slice(0, 10) ||
+            (currentPurchase.businessDate &&
+              form.businessDate < currentPurchase.businessDate.slice(0, 10))
+          )
+            throw new Error(
+              'The payment date cannot precede the account opening or purchase date.',
+            );
+          if (purchaseChanged && purchaseReviewed !== purchaseReviewKey)
+            throw new Error(
+              'Review the latest purchase balance and confirm your draft before saving.',
+            );
+        }
+      }
       draft.validateReview();
       await draft.beginRequest();
       await draft.saveNow();
@@ -214,6 +379,19 @@ export function CashEditor({
                 invoiceVersion: Number(
                   draft.requestContext.current?.version || editor.invoice.version,
                 ),
+              }
+            : {}),
+          ...(purchase
+            ? {
+                supplierId: form.supplierId,
+                ...(form.purchaseSource === 'PAYABLE'
+                  ? { payableId: form.purchaseId }
+                  : {
+                      invoiceId: form.purchaseId,
+                      invoiceVersion: Number(
+                        draft.requestContext.current?.purchaseVersion || form.purchaseVersion,
+                      ),
+                    }),
               }
             : {}),
           ...(form.kind === 'LOAN' && form.dueDate ? { dueDate: form.dueDate } : {}),
@@ -294,7 +472,31 @@ export function CashEditor({
       }
     >
       <form id={id} className="desk-form" onSubmit={submit} {...guard.capture}>
-        <DraftFormNotice draft={draft}>
+        <DraftFormNotice
+          draft={{
+            ...draft,
+            needsReview: draft.needsReview || purchaseChanged,
+            reviewed:
+              draft.reviewed && (!purchaseChanged || purchaseReviewed === purchaseReviewKey),
+            setReviewed: (value) => {
+              draft.setReviewed(value);
+              setPurchaseReviewed(value ? purchaseReviewKey : '');
+              if (value && currentPurchase && !request.current)
+                setForm((f) => ({
+                  ...f,
+                  purchaseVersion: currentPurchase.version ? String(currentPurchase.version) : '',
+                  purchaseSnapshot: currentSnapshot,
+                }));
+            },
+          }}
+        >
+          {currentPurchase && (
+            <p>
+              Latest purchase balance:{' '}
+              {money(currentPurchase.outstanding, currentPurchase.currency)} ·{' '}
+              {currentPurchase.status}
+            </p>
+          )}
           {editor.invoice && (
             <p>
               Latest invoice balance: {money(editor.invoice.outstanding, editor.invoice.currency)}
@@ -426,7 +628,10 @@ export function CashEditor({
               <SelectField
                 label="Movement type"
                 value={form.kind}
+                disabled={purchaseLocked}
                 onChange={(value) => {
+                  setPurchasePage(1);
+                  setPurchaseSearch('');
                   setForm((f) => ({
                     ...f,
                     kind: value,
@@ -434,11 +639,21 @@ export function CashEditor({
                     dueDate: '',
                     supplierId: '',
                     customerId: '',
+                    purchaseSource: '',
+                    purchaseId: '',
+                    purchaseVersion: '',
+                    purchaseSnapshot: '',
+                    purchaseNumber: '',
                   }));
                 }}
-                options={['DAILY_SALES', 'OTHER_IN', 'EXPENSE', 'TRANSFER', 'LOAN'].map(
-                  (value) => ({ value, label: movementLabels[value] }),
-                )}
+                options={[
+                  'DAILY_SALES',
+                  'OTHER_IN',
+                  'EXPENSE',
+                  ...(canPurchase ? ['SUPPLIER_PAYMENT'] : []),
+                  'TRANSFER',
+                  'LOAN',
+                ].map((value) => ({ value, label: movementLabels[value] }))}
               />
             )}
             <SelectField
@@ -448,11 +663,191 @@ export function CashEditor({
                   : 'Paying account'
               }
               required
-              disabled={!!editor.loan}
+              disabled={!!editor.loan || purchaseLocked}
               value={form.accountId}
               onChange={(value) => set('accountId', value)}
               options={accountChoices(eligible)}
             />
+            {purchase && (
+              <>
+                <SupplierPicker
+                  label="Supplier"
+                  required
+                  value={form.supplierId}
+                  companyId={account?.companyId}
+                  disabled={!account || !canPurchase || purchaseLocked}
+                  onChange={(supplierId) => {
+                    setForm((f) => ({
+                      ...f,
+                      supplierId,
+                      purchaseSource: '',
+                      purchaseId: '',
+                      purchaseVersion: '',
+                      purchaseSnapshot: '',
+                      purchaseNumber: '',
+                    }));
+                    setPurchasePage(1);
+                    setPurchaseSearch('');
+                  }}
+                  placeholder={
+                    account ? 'Choose the supplier being paid' : 'Choose the paying account first'
+                  }
+                />
+                {purchaseEnabled && (
+                  <>
+                    <FormInput
+                      label="Search purchases or invoices"
+                      value={purchaseSearch}
+                      disabled={purchaseLocked}
+                      onChange={(e) => {
+                        setPurchaseSearch(e.target.value);
+                        setPurchasePage(1);
+                      }}
+                    />
+                    {purchaseOptions.error && (
+                      <p role="alert" className="desk-error">
+                        {purchaseOptions.error}{' '}
+                        <Btn variant="secondary" onClick={purchaseOptions.reload}>
+                          Retry purchases
+                        </Btn>
+                      </p>
+                    )}
+                    {purchaseOptions.loading ? (
+                      <p role="status">Loading purchases…</p>
+                    ) : (
+                      <SelectField
+                        label="Purchase or invoice"
+                        required
+                        disabled={purchaseLocked}
+                        value={form.purchaseId ? `${form.purchaseSource}:${form.purchaseId}` : ''}
+                        onChange={(value) => {
+                          const row = purchaseOptions.data?.rows.find(
+                            (r) => `${r.source}:${r.id}` === value && allowedPurchase(r),
+                          );
+                          if (row) choosePurchase(row);
+                        }}
+                        options={[
+                          { value: '', label: 'Choose an existing purchase or invoice' },
+                          ...[
+                            ...(currentPurchase ? [currentPurchase] : []),
+                            ...(purchaseOptions.data?.rows ?? []),
+                          ]
+                            .filter(
+                              (row, index, rows) =>
+                                allowedPurchase(row) &&
+                                rows.findIndex(
+                                  (other) => other.source === row.source && other.id === row.id,
+                                ) === index,
+                            )
+                            .map((row) => ({
+                              value: `${row.source}:${row.id}`,
+                              label: `${row.number} · ${row.source === 'PAYABLE' ? 'Purchase payable' : 'Invoice Desk'} · ${money(row.outstanding, row.currency)} outstanding`,
+                            })),
+                        ]}
+                      />
+                    )}
+                    {!purchaseOptions.loading &&
+                      !purchaseOptions.error &&
+                      !purchaseOptions.data?.rows.length && (
+                        <p className="desk-muted">
+                          No open purchases or invoices match this supplier and account.
+                        </p>
+                      )}
+                    {(purchaseOptions.data?.totalPages ?? 0) > 1 && (
+                      <div className="desk-form-pair">
+                        <Btn
+                          variant="secondary"
+                          disabled={purchasePage <= 1 || purchaseOptions.loading || purchaseLocked}
+                          onClick={() => setPurchasePage((p) => p - 1)}
+                        >
+                          Previous purchases
+                        </Btn>
+                        <span>
+                          Page {purchasePage} of {purchaseOptions.data?.totalPages}
+                        </span>
+                        <Btn
+                          variant="secondary"
+                          disabled={
+                            purchasePage >= (purchaseOptions.data?.totalPages ?? 1) ||
+                            purchaseOptions.loading ||
+                            purchaseLocked
+                          }
+                          onClick={() => setPurchasePage((p) => p + 1)}
+                        >
+                          Next purchases
+                        </Btn>
+                      </div>
+                    )}
+                    {form.purchaseId && purchaseDetail.loading && (
+                      <p role="status">Checking the selected purchase…</p>
+                    )}
+                    {purchaseDetail.error && (
+                      <p role="alert" className="desk-error">
+                        {purchaseDetail.error}{' '}
+                        <Btn variant="secondary" onClick={purchaseDetail.reload}>
+                          Retry selected purchase
+                        </Btn>
+                      </p>
+                    )}
+                    {form.purchaseId &&
+                      !purchaseDetail.loading &&
+                      !purchaseDetail.error &&
+                      !currentPurchase && (
+                        <p role="alert" className="desk-error">
+                          The selected purchase is unavailable for this account and supplier.
+                        </p>
+                      )}
+                  </>
+                )}
+                {form.supplierId && hasPermission('suppliers.view') && (
+                  <WorkspaceLink
+                    href={`/invoice-desk/suppliers/${encodeURIComponent(form.supplierId)}`}
+                  >
+                    View supplier
+                  </WorkspaceLink>
+                )}
+                {currentPurchase?.source === 'INVOICE_DESK' &&
+                  hasPermission('invoice_desk.view') && (
+                    <WorkspaceLink
+                      href={`/invoice-desk?record=${encodeURIComponent(currentPurchase.id)}`}
+                    >
+                      View invoice
+                    </WorkspaceLink>
+                  )}
+                {currentPurchase?.source === 'PAYABLE' && hasPermission('payables.view') && (
+                  <WorkspaceLink
+                    href={`/cash-desk/payables?search=${encodeURIComponent(currentPurchase.payableNumber ?? currentPurchase.number)}`}
+                  >
+                    View payable
+                  </WorkspaceLink>
+                )}
+                {currentPurchase?.purchaseOrderId && hasPermission('purchases.view') && (
+                  <WorkspaceLink
+                    href={`/operations/purchase-orders/${encodeURIComponent(currentPurchase.purchaseOrderId)}`}
+                  >
+                    View purchase order
+                  </WorkspaceLink>
+                )}
+                {currentPurchase?.purchaseInvoiceId && hasPermission('supplier_invoices.view') && (
+                  <WorkspaceLink
+                    href={`/invoice-desk?view=invoices&businessRecord=${encodeURIComponent(currentPurchase.purchaseInvoiceId)}`}
+                  >
+                    View supplier invoice
+                  </WorkspaceLink>
+                )}
+                {currentPurchase?.goodsReceivedNoteId && hasPermission('grn.list') && (
+                  <WorkspaceLink href="/invoice-desk?view=receiving">
+                    View goods received {currentPurchase.goodsReceivedNoteNumber}
+                  </WorkspaceLink>
+                )}
+                {purchaseLocked && (
+                  <p className="desk-muted">
+                    Retry this submitted request with its saved details to confirm the payment
+                    outcome.
+                  </p>
+                )}
+              </>
+            )}
             {two && (
               <SelectField
                 label={form.kind === 'LOAN' ? 'Borrower account' : 'Receiving account'}
@@ -469,6 +864,7 @@ export function CashEditor({
               inputMode="decimal"
               pattern="\d{1,16}(\.\d{1,2})?"
               value={form.amount}
+              readOnly={purchaseLocked}
               onChange={(e) => set('amount', e.target.value)}
             />
             {intercompany && (
@@ -628,12 +1024,14 @@ export function CashEditor({
                 form.kind === 'DAILY_SALES' ? 'Daily cash sales' : 'What was this money for?'
               }
               value={form.description}
+              readOnly={purchaseLocked}
               onChange={(e) => set('description', e.target.value)}
             />
             <FormInput
               label="Reference (optional)"
               maxLength={160}
               value={form.reference}
+              readOnly={purchaseLocked}
               onChange={(e) => set('reference', e.target.value)}
             />
             {form.kind === 'EXPENSE' && (
@@ -671,6 +1069,7 @@ export function CashEditor({
           required
           max={localToday()}
           value={form.businessDate}
+          disabled={purchaseLocked}
           onChange={(value) => set('businessDate', value)}
         />
         {editor.kind === 'movement' && form.kind === 'LOAN' && (

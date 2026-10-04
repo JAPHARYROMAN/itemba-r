@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AccessLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -227,8 +228,13 @@ export class StockDamageService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
-    const record = await this.prisma.stockDamage.findFirst({
+  async findOne(
+    id: string,
+    user?: AuthUser,
+    minimum: AccessLevel = AccessLevel.READ,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const record = await (transaction ?? this.prisma).stockDamage.findFirst({
       where: { id, deletedAt: null },
       include: damageWorkspaceInclude,
     });
@@ -335,9 +341,11 @@ export class StockDamageService {
     return record;
   }
 
-  async post(id: string, user: AuthUser) {
+  async post(id: string, user: AuthUser, transaction?: Prisma.TransactionClient) {
     const userId = user.id;
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
+    const existing = await this.findOne(id, user, AccessLevel.WRITE, transaction);
+    if (!transaction)
+      await assertLegacyPosWriteAllowed(this.prisma, user, existing.companyId, existing.branchId);
     if (existing.status !== 'APPROVED')
       throw new BadRequestException('Only APPROVED records can be posted');
 
@@ -353,7 +361,7 @@ export class StockDamageService {
     // so they commit or roll back together. Claim the document atomically (guarded on
     // status === APPROVED) so concurrent/retried posts cannot remove stock twice, and gate
     // the batch decrement on availability so remainingQuantity can never go negative.
-    const record = await this.prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient) => {
       const claimed = await tx.stockDamage.updateMany({
         where: { id, status: 'APPROVED' },
         data: { status: 'POSTED' },
@@ -384,7 +392,8 @@ export class StockDamageService {
         quantity: damageQty,
         unitId,
         movementDate,
-        createdById: userId,
+        createdById: existing.reportedById ?? userId,
+        auditActorUserId: userId,
         referenceType: 'StockDamage',
         referenceId: id,
         tx,
@@ -483,9 +492,10 @@ export class StockDamageService {
         data: { status: 'POSTED' },
       });
       return { updated, journalEntryId };
-    });
+    };
+    const record = transaction ? await run(transaction) : await this.prisma.$transaction(run);
 
-    await this.auditLogs.log({
+    const audit = {
       action: 'STOCK_DAMAGE_POST',
       entityType: 'StockDamage',
       entityId: id,
@@ -495,7 +505,9 @@ export class StockDamageService {
       // record the posted JE id in the audit trail so the GL entry stays
       // traceable to the source document.
       newValue: { status: 'POSTED', journalEntryId: record.journalEntryId } as any,
-    });
+    };
+    if (transaction) await this.auditLogs.logStrictInTransaction(transaction, audit);
+    else await this.auditLogs.log(audit);
     return record.updated;
   }
 

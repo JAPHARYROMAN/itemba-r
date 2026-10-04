@@ -237,6 +237,20 @@ describe('standalone administrative/operations positive mutation evidence tranch
     }
   });
 
+  it('proves ordinary user creation retains password authentication after POS PIN accounts were added', () => {
+    expect(CRUD_ADMIN_OPERATIONS_POSITIVE_EVIDENCE_PACK.packVersion).toBe(1);
+    expect(
+      fixtures.find((fixture) => fixture.capabilityId === 'UsersController.create'),
+    ).toMatchObject({
+      fixtureVersion: 2,
+      effect: {
+        kind: 'create',
+        model: 'User',
+        generatedFields: { authKind: { kind: 'exact', value: { literal: 'PASSWORD' } } },
+      },
+    });
+  });
+
   it('pins exact attributable audits and deterministic child-before-parent recovery', () => {
     for (const candidate of fixtures) {
       const id = candidate.capabilityId as ExpectedId;

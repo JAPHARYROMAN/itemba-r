@@ -28,6 +28,119 @@ describe('unrepresented read authorization/query contracts', () => {
     ).map((blocker) => blocker.capabilityId),
   } as const;
 
+  const posWorkflowByReason = {
+    pos_draft_workflow_not_represented: [
+      'PosDraftsController.list',
+      'PosDraftsController.scopes',
+      'PosDraftsController.context',
+      'PosDraftsController.baseline',
+      'PosDraftsController.outcome',
+      'PosDraftsController.legacyTerminals',
+      'PosDraftsController.legacyOutcome',
+      'PosDraftsController.detail',
+      'PosDraftsController.receipt',
+      'PosDraftsController.submit',
+      'PosDraftsController.correct',
+      'PosDraftsController.prepare',
+    ],
+    mobile_pos_onboarding_not_represented: [
+      'MobilePosOnboardingController.branchOptions',
+      'MobilePosOnboardingController.setups',
+      'MobilePosOnboardingController.enrollments',
+    ],
+    agent_excluded: [
+      'PosDraftsController.approve',
+      'PosDraftsController.reject',
+      'PosDraftsController.confirmReturn',
+      'PosDraftsController.direct',
+      'MobilePosOnboardingController.setup',
+      'MobilePosOnboardingController.invite',
+      'MobilePosOnboardingController.approve',
+      'MobilePosOnboardingController.adminLink',
+      'MobilePosOnboardingController.reject',
+      'MobilePosOnboardingController.reset',
+      'MobilePosOnboardingController.revoke',
+      'MobilePosAuthController.invite',
+      'MobilePosAuthController.register',
+      'MobilePosAuthController.enrollment',
+      'MobilePosAuthController.setup',
+      'MobilePosAuthController.login',
+      'MobilePosAuthController.refresh',
+      'MobilePosAuthController.reset',
+      'MobilePosAuthController.me',
+      'MobilePosAuthController.logout',
+    ],
+  } as const;
+
+  it('keeps the exact POS workflow, credentials and human decisions outside the agent envelope', () => {
+    const expectedIds = Object.values(posWorkflowByReason).flat();
+    const posIds = new Set<string>(expectedIds);
+    expect(
+      manifest
+        .filter((capability) =>
+          [
+            'PosDraftsController',
+            'MobilePosAuthController',
+            'MobilePosOnboardingController',
+          ].includes(capability.controller),
+        )
+        .map((capability) => capability.id)
+        .sort(),
+    ).toEqual([...expectedIds].sort());
+    const reportById = new Map(
+      buildCrudCoverageReport(manifest).capabilities.map((capability) => [
+        capability.capabilityId,
+        capability,
+      ]),
+    );
+    for (const [reason, capabilityIds] of Object.entries(posWorkflowByReason)) {
+      for (const capabilityId of capabilityIds) {
+        expect(manifest.find((capability) => capability.id === capabilityId)).toMatchObject({
+          agentExcluded: true,
+          agentExclusionReason: reason,
+        });
+        expect(reportById.get(capabilityId)).toMatchObject({
+          discoveryEligibility: { status: 'ineligible', reason },
+          inclusion: { status: 'excluded', reason },
+          testedExecution: { status: 'not_applicable', unverifiedReason: 'capability_excluded' },
+        });
+      }
+    }
+    expect(
+      capabilitiesFor(manifest, everyPermission).filter((item) => posIds.has(item.id)),
+    ).toEqual([]);
+    expect(
+      buildRegistry(manifest, everyPermission, ['green', 'amber', 'red']).filter((item) =>
+        posIds.has(item.capability.id),
+      ),
+    ).toEqual([]);
+    expect(fixtures.filter((item) => posIds.has(item.capabilityId))).toEqual([]);
+  });
+
+  it('preserves the permission gates on POS financial decisions and device administration', () => {
+    const permissions = {
+      'PosDraftsController.approve': 'pos_drafts.approve',
+      'PosDraftsController.reject': 'pos_drafts.reject',
+      'PosDraftsController.confirmReturn': 'pos_drafts.approve',
+      'PosDraftsController.direct': 'pos_drafts.direct_post',
+      'MobilePosOnboardingController.setup': 'mobile_pos_onboarding.manage',
+      'MobilePosOnboardingController.invite': 'mobile_pos_onboarding.manage',
+      'MobilePosOnboardingController.approve': 'mobile_pos_onboarding.manage',
+      'MobilePosOnboardingController.adminLink': 'mobile_pos_onboarding.manage',
+      'MobilePosOnboardingController.reject': 'mobile_pos_onboarding.manage',
+      'MobilePosOnboardingController.reset': 'mobile_pos_onboarding.manage',
+      'MobilePosOnboardingController.revoke': 'mobile_pos_onboarding.manage',
+    };
+    for (const [id, permission] of Object.entries(permissions)) {
+      expect(manifest.find((capability) => capability.id === id)).toMatchObject({
+        guard: 'permission',
+        permissions: [permission],
+        agentExcluded: true,
+        agentExclusionReason: 'agent_excluded',
+      });
+    }
+  });
+
   it('keeps the exact 21 unsafe-scope and three free-form-query reads excluded', () => {
     // 25 before the ITEMBA OS redesign (4a155f19). It moved four reads onto
     // actor company scoping (CcmNoticesController.cmaReferral / .termination,

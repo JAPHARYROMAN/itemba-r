@@ -148,6 +148,20 @@ export default function DashboardClientLayout({
     else document.title = label ? `${label} · Itemba` : 'Itemba OS';
   }, [pathname]);
 
+  // The standalone phone manages its own restricted PIN session. Mounting the
+  // office AuthProvider here would redirect an approved phone to ERP sign-in
+  // and start unrelated private-workspace requests with the wrong identity.
+  if (mobilePosStandalone) {
+    return (
+      <CsrfFetchProvider>
+        <ToastProvider />
+        <main className="min-h-screen overflow-auto" style={{ background: 'var(--aurora-bg)' }}>
+          {children}
+        </main>
+      </CsrfFetchProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <AuthGate>

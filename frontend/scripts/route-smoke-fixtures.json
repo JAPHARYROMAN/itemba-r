@@ -1,5 +1,7 @@
 {
   "/pos/[[...path]]": "/pos",
+  "/pos-draft/[[...path]]": "/pos-draft",
+  "/mobile-pos/join/[token]": "/mobile-pos/join/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   "/apps/[appId]": "/apps/fuel-grid",
   "/companies/[id]": "/companies/e2e-company",
   "/group-control/contracts/[id]": "/group-control/contracts/e2e-contract",

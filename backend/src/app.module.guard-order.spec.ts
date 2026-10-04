@@ -2,6 +2,7 @@ import { MODULE_METADATA } from '@nestjs/common/constants';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { MobilePosSessionGuard } from './common/guards/mobile-pos-session.guard';
 import { MsaidiziTaskScopeGuard } from './common/guards/msaidizi-task-scope.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -43,7 +44,7 @@ for (const [key, prior] of priorEnvironment) {
 }
 
 describe('AppModule global guard order', () => {
-  it('keeps permission evaluation after authentication, task scope, and roles', () => {
+  it('confines mobile principals immediately after authentication, before task scope, roles, and permissions', () => {
     const providers = (Reflect.getMetadata(MODULE_METADATA.PROVIDERS, AppModule) ?? []) as Array<{
       provide?: unknown;
       useClass?: unknown;
@@ -55,6 +56,7 @@ describe('AppModule global guard order', () => {
     expect(guardOrder).toEqual([
       ThrottlerGuard,
       JwtAuthGuard,
+      MobilePosSessionGuard,
       MsaidiziTaskScopeGuard,
       RolesGuard,
       PermissionsGuard,

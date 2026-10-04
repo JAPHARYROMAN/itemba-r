@@ -427,7 +427,8 @@ export interface CrudMutationFixtureRegistration<
   TEffect extends CrudMutationEffect = CrudMutationSingularEffect,
 > {
   fixtureId: string;
-  fixtureVersion: 1;
+  /** Positive revision of this exact signed request/effect proof, independent of pack format. */
+  fixtureVersion: number;
   capabilityId: string;
   controlKind: 'positive';
   description: string;
@@ -698,6 +699,9 @@ export function validateCrudMutationFixtureContract(
   fixture: CrudMutationAnyFixtureRegistration,
 ): readonly string[] {
   const errors: string[] = [];
+  if (!Number.isSafeInteger(fixture.fixtureVersion) || fixture.fixtureVersion < 1) {
+    errors.push('fixtureVersion must be a positive safe integer');
+  }
   if (fixture.preStates && fixture.preStates.length === 0) {
     errors.push('preStates must not be empty when declared');
   }

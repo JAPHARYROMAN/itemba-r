@@ -325,6 +325,44 @@ export class SupplierInvoicesService {
     return outcome.match;
   }
 
+  /** Receiving and invoice approval share the PO lock and its existing financial coverage. */
+  private async resolvePurchaseOrderPayable(invoice: any, tx: Prisma.TransactionClient) {
+    if (!invoice.purchaseOrderId) return invoice.payableId ?? null;
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM "purchase_orders" WHERE id = ${invoice.purchaseOrderId} FOR UPDATE
+    `);
+    const order = await tx.purchaseOrder.findFirst({
+      where: { id: invoice.purchaseOrderId, companyId: invoice.companyId, deletedAt: null },
+    });
+    if (!order || order.supplierId !== invoice.supplierId || order.currency !== invoice.currency) {
+      throw new ConflictException('The purchase order changed; review its supplier and currency before approval.');
+    }
+    if (order.purchaseType === 'CASH_PURCHASE') {
+      throw new BadRequestException('This cash purchase is already settled through receiving; do not create another supplier payable.');
+    }
+    if (order.payableId && invoice.payableId && order.payableId !== invoice.payableId) {
+      throw new ConflictException('The purchase order and invoice have conflicting payables; reconcile them in the office.');
+    }
+    const payableId = order.payableId ?? invoice.payableId ?? null;
+    if (!order.payableId) return payableId;
+    const covered = await tx.payable.findUnique({
+      where: { id: order.payableId }, include: { journalEntry: true },
+    });
+    if (!covered || covered.deletedAt || covered.status === 'CANCELLED' ||
+        covered.companyId !== invoice.companyId || covered.supplierId !== invoice.supplierId ||
+        covered.currency !== invoice.currency ||
+        !new Prisma.Decimal(covered.amount).eq(new Prisma.Decimal(invoice.totalAmount).toDecimalPlaces(2)) ||
+        new Prisma.Decimal(covered.paidAmount).gt(invoice.totalAmount) ||
+        (covered.sourceType === 'SupplierInvoice' && covered.sourceId !== invoice.id)) {
+      throw new ConflictException('Existing purchase coverage differs from this invoice; reconcile the amount or payable in the office.');
+    }
+    if (covered.journalEntryId && (!covered.journalEntry || covered.journalEntry.status !== 'POSTED' ||
+        covered.journalEntry.companyId !== invoice.companyId)) {
+      throw new ConflictException('The existing purchase journal is not posted; reconcile its accounting coverage before approval.');
+    }
+    return payableId;
+  }
+
   async approve(id: string, dto: ApproveSupplierInvoiceDto | undefined, user: AuthUser) {
     const existing = await this.findOne(id, user, AccessLevel.WRITE);
     if (!['DRAFT', 'RECEIVED', 'MATCHED', 'DISPUTED'].includes(existing.status)) {
@@ -342,6 +380,7 @@ export class SupplierInvoicesService {
 
     let match: any = null;
     const updated = await this.prisma.$transaction(async (tx) => {
+      const payableId = await this.resolvePurchaseOrderPayable(existing, tx);
       // Claim the exact invoice version evaluated above. Matching and editing both
       // advance updatedAt, so neither a runMatch() nor an update() that wins after
       // findOne() can be silently posted from this stale snapshot.
@@ -389,16 +428,16 @@ export class SupplierInvoicesService {
         }
       }
 
-      const oldPayable = existing.payableId
+      const oldPayable = payableId
         ? await tx.payable.findUnique({
-            where: { id: existing.payableId },
+            where: { id: payableId },
             select: { companyId: true, supplierId: true, paidAmount: true },
           })
         : null;
 
-      const payable = existing.payableId
+      const payable = payableId
         ? await tx.payable.update({
-            where: { id: existing.payableId },
+            where: { id: payableId },
             data: {
               supplierId: supplier.id,
               supplierName: supplier.name,
@@ -475,7 +514,11 @@ export class SupplierInvoicesService {
       // set by the claim and are intentionally left intact.
       const invoice = await tx.supplierInvoice.update({
         where: { id },
-        data: { status: 'APPROVED', payableId: payable.id },
+        data: {
+          status: 'APPROVED', payableId: payable.id,
+          paidAmount: payable.paidAmount,
+          outstandingAmount: payable.outstandingAmount,
+        },
         include: { lines: true },
       });
 

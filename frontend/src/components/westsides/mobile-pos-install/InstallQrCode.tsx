@@ -14,11 +14,11 @@ interface InstallQrCodeProps {
   size?: number;
 }
 
-const QR_VERSION = 5;
+const QR_VERSION = 9;
 const QR_SIZE = QR_VERSION * 4 + 17;
-const DATA_CODEWORDS = 108;
-const ERROR_CODEWORDS = 26;
-const ALIGNMENT_CENTERS = [6, 30];
+const DATA_CODEWORDS = 232;
+const ERROR_CODEWORDS = 30;
+const ALIGNMENT_CENTERS = [6, 26, 46];
 const LOW_ERROR_CORRECTION_FORMAT_BITS = 1;
 const MASK_PATTERN = 0;
 const QUIET_ZONE = 4;
@@ -29,7 +29,9 @@ export function InstallQrCode({
   path = WESTSIDES_MOBILE_POS_INSTALL_PATH,
   size = 112,
 }: InstallQrCodeProps) {
-  const [installUrl, setInstallUrl] = useState(() => getMobilePosInstallUrl());
+  const [installUrl, setInstallUrl] = useState(() =>
+    new URL(path, getMobilePosInstallUrl()).toString(),
+  );
 
   useEffect(() => {
     setInstallUrl(new URL(path, window.location.origin).toString());
@@ -84,10 +86,15 @@ function buildQrSvgPath(data: string) {
   return commands.join('');
 }
 
-function createQrMatrix(data: string) {
+export function createQrMatrix(data: string) {
   const dataCodewords = encodeDataCodewords(data);
-  const errorCodewords = reedSolomonComputeRemainder(dataCodewords, ERROR_CODEWORDS);
-  const codewords = [...dataCodewords, ...errorCodewords];
+  // Version 9-L has two equal blocks; data and correction bytes interleave.
+  const blocks = [dataCodewords.slice(0, 116), dataCodewords.slice(116)];
+  const corrections = blocks.map((block) => reedSolomonComputeRemainder(block, ERROR_CODEWORDS));
+  const codewords = [];
+  for (let i = 0; i < 116; i += 1) for (const block of blocks) codewords.push(block[i]);
+  for (let i = 0; i < ERROR_CODEWORDS; i += 1)
+    for (const block of corrections) codewords.push(block[i]);
   const modules = makeMatrix(false);
   const isFunction = makeMatrix(false);
 
@@ -103,10 +110,25 @@ function createQrMatrix(data: string) {
   drawAlignmentPatterns(setFunctionModule);
   drawTimingPatterns(isFunction, setFunctionModule);
   drawFormatBits(setFunctionModule);
+  drawVersionBits(setFunctionModule);
   setFunctionModule(8, QR_SIZE - 8, true);
   drawCodewords(codewords, modules, isFunction);
 
   return modules;
+}
+
+function drawVersionBits(setFunctionModule: (x: number, y: number, dark: boolean) => void) {
+  let remainder = QR_VERSION;
+  for (let i = 0; i < 12; i += 1)
+    remainder = (remainder << 1) ^ (((remainder >>> 11) & 1) * 0x1f25);
+  const bits = (QR_VERSION << 12) | remainder;
+  for (let i = 0; i < 18; i += 1) {
+    const a = QR_SIZE - 11 + (i % 3);
+    const b = Math.floor(i / 3);
+    const dark = ((bits >>> i) & 1) !== 0;
+    setFunctionModule(a, b, dark);
+    setFunctionModule(b, a, dark);
+  }
 }
 
 function makeMatrix(value: boolean) {
@@ -206,7 +228,7 @@ function drawCodewords(codewords: number[], modules: boolean[][], isFunction: bo
 
 function encodeDataCodewords(data: string) {
   const bytes = Array.from(new TextEncoder().encode(data));
-  const maxBytes = 106;
+  const maxBytes = 230;
 
   if (bytes.length > maxBytes) {
     throw new Error(`QR payload is too long for this install code: ${bytes.length} bytes`);

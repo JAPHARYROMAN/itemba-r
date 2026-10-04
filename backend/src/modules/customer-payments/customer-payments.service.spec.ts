@@ -180,6 +180,12 @@ function makeService(
   };
 
   const prisma: any = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosTerminal: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     customerPayment: {
       findFirst: jest.fn(async () => paymentRow()),
       findMany: jest.fn(async () => [paymentRow()]),

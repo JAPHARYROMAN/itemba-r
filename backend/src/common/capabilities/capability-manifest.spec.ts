@@ -60,6 +60,19 @@ const PERMISSIONLESS_BY_DESIGN: Record<string, string> = {
   GeneratedDocumentsController: 'stateless render of caller-supplied content, auth-only by design',
 };
 
+// Mobile PIN credentials are checked by MobilePosAuthService before a normal
+// permission grant exists. Keep this exemption at exact route IDs so a future
+// business-data write on the same controller cannot inherit it accidentally.
+const MOBILE_POS_CREDENTIAL_ROUTES: Record<string, { path: string; guard: string }> = {
+  'MobilePosAuthController.register': { path: 'mobile-pos-auth/invite/:token', guard: 'public' },
+  'MobilePosAuthController.setup': { path: 'mobile-pos-auth/setup', guard: 'public' },
+  'MobilePosAuthController.login': { path: 'mobile-pos-auth/login', guard: 'public' },
+  'MobilePosAuthController.refresh': { path: 'mobile-pos-auth/refresh', guard: 'public' },
+  'MobilePosAuthController.reset': { path: 'mobile-pos-auth/reset-pin', guard: 'public' },
+  // Logout revokes only the authenticated mobile session/device credential.
+  'MobilePosAuthController.logout': { path: 'mobile-pos-auth/logout', guard: 'authenticated' },
+};
+
 let manifest: Capability[];
 
 beforeAll(() => {
@@ -125,21 +138,44 @@ describe('capability manifest', () => {
       // client TLS socket and are never offered as agent tools.
       .filter((c) => c.guard !== 'mutual-tls')
       .filter((c) => !(c.controller in PERMISSIONLESS_BY_DESIGN))
+      .filter((c) => !(c.id in MOBILE_POS_CREDENTIAL_ROUTES))
       .map((c) => `${c.verb} ${c.path} (${c.id}) guard=${c.guard}`);
 
     expect(offenders).toEqual([]);
   });
 
-  it('leaves no genuinely unauthenticated write', () => {
-    // A write reaching `public` means neither JWT, nor permissions, nor an API
-    // scope gates it. There should be none: @Public on a write is only correct
-    // when paired with @RequireApiScope, which classifies as `api-key` instead.
+  it('leaves no public write outside the exact credential ceremonies', () => {
+    // Public credential ceremonies validate their own PIN/device/invite proof.
+    // Every other write needs JWT permissions or an API scope; merely marking
+    // a business operation @Public must never silently widen this exemption.
     const unauthenticated = manifest
       .filter((c) => c.tier !== 'green' && c.guard === 'public')
       .filter((c) => c.controller !== 'AuthController')
+      .filter((c) => !(c.id in MOBILE_POS_CREDENTIAL_ROUTES))
       .map((c) => `${c.verb} ${c.path} (${c.id})`);
 
     expect(unauthenticated).toEqual([]);
+  });
+
+  it('pins every mobile credential exemption to its exact route and excludes it from agents', () => {
+    for (const [id, expected] of Object.entries(MOBILE_POS_CREDENTIAL_ROUTES)) {
+      expect(manifest.find((capability) => capability.id === id)).toMatchObject({
+        ...expected,
+        verb: 'POST',
+        permissions: [],
+        anyPermissions: [],
+        agentExcluded: true,
+        agentExclusionReason: 'agent_excluded',
+      });
+    }
+    const everyCode = [
+      ...new Set(manifest.flatMap((c) => [...c.permissions, ...c.anyPermissions])),
+    ];
+    expect(
+      capabilitiesFor(manifest, everyCode).filter(
+        (capability) => capability.id in MOBILE_POS_CREDENTIAL_ROUTES,
+      ),
+    ).toEqual([]);
   });
 
   it('scope-gates every API-key route', () => {

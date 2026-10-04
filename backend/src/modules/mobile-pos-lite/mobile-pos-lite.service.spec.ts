@@ -119,11 +119,14 @@ function countAdjustment(overrides: Record<string, unknown> = {}) {
 
 function makeService() {
   const prisma: any = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
     paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
     refund: { findMany: jest.fn().mockResolvedValue([]) },
     creditNote: { findMany: jest.fn().mockResolvedValue([]) },
     mobilePosTerminal: {
       findFirst: jest.fn().mockResolvedValue(terminalRow()),
+      findMany: jest.fn().mockResolvedValue([terminalRow()]),
       update: jest.fn().mockResolvedValue({}),
     },
     supplier: {

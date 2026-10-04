@@ -41,12 +41,44 @@ export function movementParty(m: Movement, can: Can = none): MovementLink | null
  */
 export function movementDocuments(m: Movement, can: Can = none): MovementLink[] {
   const docs: MovementLink[] = [];
+  if (m.journalEntry)
+    docs.push({
+      label: 'Payment journal',
+      text: m.journalEntry.journalNumber,
+      href: can('journal_entries.view') ? '/finance/journal-entries' : null,
+    });
   const register = (path: string, number: string) => `${path}?search=${encodeURIComponent(number)}`;
   if (m.payable)
     docs.push({
       label: 'Payable',
       text: m.payable.payableNumber,
       href: can('payables.view') ? register('/cash-desk/payables', m.payable.payableNumber) : null,
+    });
+  const orders = new Map<string, { id: string; purchaseOrderNumber: string }>();
+  for (const invoice of m.payable?.supplierInvoices ?? []) {
+    docs.push({
+      label: 'Purchase invoice',
+      text: invoice.supplierInvoiceNumber,
+      href: can('supplier_invoices.view')
+        ? `/invoice-desk?view=invoices&businessRecord=${encodeURIComponent(invoice.id)}`
+        : null,
+    });
+    if (invoice.purchaseOrder) orders.set(invoice.purchaseOrder.id, invoice.purchaseOrder);
+    if (invoice.goodsReceivedNote)
+      docs.push({
+        label: 'Goods received',
+        text: invoice.goodsReceivedNote.grnNumber,
+        href: can('grn.list') ? '/invoice-desk?view=receiving' : null,
+      });
+  }
+  for (const order of m.payable?.purchaseOrders ?? []) orders.set(order.id, order);
+  for (const order of orders.values())
+    docs.push({
+      label: 'Purchase order',
+      text: order.purchaseOrderNumber,
+      href: can('purchases.view')
+        ? `/operations/purchase-orders/${encodeURIComponent(order.id)}`
+        : null,
     });
   if (m.receivable)
     docs.push({

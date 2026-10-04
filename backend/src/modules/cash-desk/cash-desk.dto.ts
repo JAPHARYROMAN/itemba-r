@@ -71,6 +71,15 @@ export class CashAccountDto {
   @IsDateString({ strict: true }) @Matches(/^\d{4}-\d{2}-\d{2}$/) openingDate!: string;
   @Matches(/^\d{1,16}(\.\d{1,2})?$/) openingBalance!: string;
 }
+export class CashPurchaseQuery {
+  @IsUUID() accountId!: string;
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsString() @MaxLength(100) search?: string;
+  @IsOptional() @IsIn(['PAYABLE', 'INVOICE_DESK']) source?: 'PAYABLE' | 'INVOICE_DESK';
+  @IsOptional() @IsUUID() id?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100000) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) pageSize = 20;
+}
 export class CashMovementDto {
   @IsOptional() @Matches(/^\d{1,16}(\.\d{1,2})?$/) principal?: string;
   @IsOptional() @Matches(/^\d{1,16}(\.\d{1,2})?$/) interest?: string;
@@ -102,6 +111,7 @@ export class CashMovementDto {
   @IsOptional() @IsUUID() targetAccountId?: string;
   @IsOptional() @IsUUID() loanId?: string;
   @IsOptional() @IsUUID() invoiceId?: string;
+  @IsOptional() @IsUUID() payableId?: string;
   @IsOptional() @IsUUID() existingInvoicePaymentId?: string;
   @IsOptional() @IsInt() @Min(1) invoiceVersion?: number;
   @Matches(/^\d{1,16}(\.\d{1,2})?$/) amount!: string;

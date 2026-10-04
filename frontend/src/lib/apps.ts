@@ -32,7 +32,11 @@ export interface WorkspaceApp {
 
 /** These routes replace the OS shell, so mounted companion apps cannot survive them. */
 export function usesStandalonePosShell(pathname: string) {
-  return pathname.startsWith('/mobile-pos') || pathname.startsWith('/westsides/mobile-pos');
+  return (
+    pathname === '/mobile-pos' ||
+    pathname.startsWith('/mobile-pos/') ||
+    pathname === '/westsides/mobile-pos/install'
+  );
 }
 
 export const INVENTORY_APP_PERMISSIONS = [
@@ -189,16 +193,16 @@ const APP_DEFINITIONS: readonly Omit<WorkspaceApp, 'hosting'>[] = [
     launch: { kind: 'route' },
   },
   {
-    id: 'pos',
-    href: '/pos',
-    label: 'Point of Sale',
-    description: 'Your terminal, counter sales and daily operations.',
+    id: 'pos-draft',
+    href: '/pos-draft',
+    label: 'POS Draft',
+    description: 'Review sales, prepare stock and manage your mobile team.',
     category: 'Operations',
     icon: 'sale',
     iconKey: 'grid',
     appearance: 'default',
-    permission: 'mobile_pos_lite.use',
-    keywords: ['pos', 'terminal', 'counter', 'kaunta', 'sales'],
+    permissionsAny: ['pos_drafts.view', 'pos_drafts.approve', 'mobile_pos_onboarding.manage'],
+    keywords: ['pos', 'draft', 'pending', 'approval', 'cashier', 'stockist', 'devices'],
     launch: { kind: 'route' },
   },
   {

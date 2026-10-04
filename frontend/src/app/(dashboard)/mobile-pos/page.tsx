@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { MobilePosLite } from '@/components/westsides/mobile-pos-lite/mobile-pos-lite';
+import { MobilePosApp } from '@/features/pos-draft/mobile-pos-app';
 
 export const metadata: Metadata = {
   title: 'Itemba POS',
@@ -14,5 +14,5 @@ export const viewport: Viewport = {
 };
 
 export default function MobilePosLitePage() {
-  return <MobilePosLite />;
+  return <MobilePosApp />;
 }

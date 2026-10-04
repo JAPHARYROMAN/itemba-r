@@ -390,7 +390,7 @@ describe('Cash Desk', () => {
       path === '/cash-desk/movements/target' ? Promise.resolve(movement) : fallback(path, ...args),
     );
     render(<CashDesk targetRecordId="target" />);
-    await screen.findByRole('dialog', { name: 'Supplier payment' });
+    await screen.findByRole('dialog', { name: 'Purchases' });
     expect(screen.getByRole('link', { name: /Mwanjalisi Station/ })).toHaveAttribute(
       'href',
       '/invoice-desk/suppliers/sup-1',

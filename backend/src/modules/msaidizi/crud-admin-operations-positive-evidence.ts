@@ -960,6 +960,7 @@ const definitions: readonly FixtureDefinition[] = [
         companyId: companyA,
       },
       generatedFields: {
+        authKind: { kind: 'exact', value: literal('PASSWORD') },
         passwordHash: {
           kind: 'request-secret-hash',
           requestPath: ['password'],
@@ -1134,7 +1135,7 @@ export const CRUD_ADMIN_OPERATIONS_POSITIVE_EVIDENCE_PACK: CrudMutationAnyFixtur
           }),
           controlKind: 'positive' as const,
           fixtureId: fixtureId(definition.capabilityId),
-          fixtureVersion: 1 as const,
+          fixtureVersion: definition.capabilityId === 'UsersController.create' ? 2 : 1,
           governance: CRUD_MUTATION_GOVERNANCE,
           packId: PACK_ID,
         });

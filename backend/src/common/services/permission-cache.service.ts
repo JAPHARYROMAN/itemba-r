@@ -19,6 +19,11 @@ export type CachedAuthPayload = {
   divisionAccess?: Array<{ divisionId: string; accessLevel: string }>;
   branchAccess?: Array<{ branchId: string; accessLevel: string }>;
   principalType?: string;
+  tokenUse?: 'mobile-pos';
+  mobilePosRole?: 'CASHIER' | 'STOCKIST' | 'ADMIN';
+  mobilePosEnrollmentId?: string;
+  mobilePosTerminalId?: string;
+  mobilePosCredentialVersion?: number;
   principalId?: string;
   mandateId?: string;
   initiatedByUserId?: string;

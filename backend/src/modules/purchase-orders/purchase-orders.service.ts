@@ -1,3 +1,4 @@
+import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -403,8 +404,13 @@ export class PurchaseOrdersService {
     };
   }
 
-  async findOne(id: string, user?: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
-    const record = await this.prisma.purchaseOrder.findFirst({
+  async findOne(
+    id: string,
+    user?: AuthUser,
+    minimum: AccessLevel = AccessLevel.READ,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const record = await (transaction ?? this.prisma).purchaseOrder.findFirst({
       where: { id, deletedAt: null },
       include: {
         company: {
@@ -1096,33 +1102,44 @@ export class PurchaseOrdersService {
     }
   }
 
-  async receive(id: string, user: AuthUser, dto: ReceivePurchaseOrderDto = {}) {
+  async receive(
+    id: string,
+    user: AuthUser,
+    dto: ReceivePurchaseOrderDto = {},
+    transaction?: Prisma.TransactionClient,
+    context?: { originUserId?: string },
+  ) {
     const userId = user.id;
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    // Audit finding #20: this Operations receive path has no per-line received
-    // quantity input — it posts a PURCHASE_RECEIPT for the FULL ordered quantity
-    // of every line and flips the PO straight to RECEIVED. It is therefore a
-    // full-receipt-only path. Partial / multi-shipment receipts must go through
-    // the GRN flow (goods-received-notes), which tracks received-to-date per
-    // product/unit and only marks the PO RECEIVED once every line is satisfied.
-    // Accepting PARTIALLY_RECEIVED here would let this path post the full
-    // quantity again on top of an earlier partial GRN, overstating inventory.
-    if (existing.status !== 'CONFIRMED') {
-      throw new BadRequestException(
-        'Only CONFIRMED purchase orders can be received here; record partial receipts through the goods-received-note (GRN) flow',
+    const run = async (tx: Prisma.TransactionClient) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM purchase_orders WHERE id=${id} FOR UPDATE`);
+      const existing = await this.findOne(id, user, AccessLevel.WRITE, tx);
+      if (!transaction)
+        await assertLegacyPosWriteAllowed(tx, user, existing.companyId, existing.branchId);
+      // Audit finding #20: this Operations receive path has no per-line received
+      // quantity input — it posts a PURCHASE_RECEIPT for the FULL ordered quantity
+      // of every line and flips the PO straight to RECEIVED. It is therefore a
+      // full-receipt-only path. Partial / multi-shipment receipts must go through
+      // the GRN flow (goods-received-notes), which tracks received-to-date per
+      // product/unit and only marks the PO RECEIVED once every line is satisfied.
+      // Accepting PARTIALLY_RECEIVED here would let this path post the full
+      // quantity again on top of an earlier partial GRN, overstating inventory.
+      if (existing.status !== 'CONFIRMED') {
+        throw new BadRequestException(
+          'Only CONFIRMED purchase orders can be received here; record partial receipts through the goods-received-note (GRN) flow',
+        );
+      }
+      if (!existing.branchId) {
+        throw new BadRequestException(
+          'Purchase order branch/location is required to receive stock',
+        );
+      }
+      const receivingBranchId = existing.branchId;
+      const requestedFuelAllocations = dto.fuelTankAllocations ?? [];
+      this.assertFuelTankAllocationsReferenceOrderLines(
+        existing.lines as any[],
+        requestedFuelAllocations,
       );
-    }
-    if (!existing.branchId) {
-      throw new BadRequestException('Purchase order branch/location is required to receive stock');
-    }
-    const receivingBranchId = existing.branchId;
-    const requestedFuelAllocations = dto.fuelTankAllocations ?? [];
-    this.assertFuelTankAllocationsReferenceOrderLines(
-      existing.lines as any[],
-      requestedFuelAllocations,
-    );
 
-    const record = await this.prisma.$transaction(async (tx) => {
       const receivedAt = new Date();
       const fuelReceipts = new Map<string, FuelPurchaseReceipt>();
       const claim = await tx.purchaseOrder.updateMany({
@@ -1222,7 +1239,8 @@ export class PurchaseOrdersService {
             unitId: line.unitId,
             unitCost,
             movementDate: receivedAt,
-            createdById: userId,
+            createdById: context?.originUserId ?? userId,
+            auditActorUserId: userId,
             referenceType: 'PurchaseOrder',
             referenceId: id,
             batchNumber: line.batchNumber ?? undefined,
@@ -1253,7 +1271,53 @@ export class PurchaseOrdersService {
       // instead of creating a second one for the same purchase order.
       let journalEntry: { id: string } | null = null;
       let payable: { id: string; journalEntryId: string | null } | null = null;
-      if (existing.purchaseType === PurchaseType.CASH_PURCHASE) {
+      if (existing.payableId) {
+        const covered = await tx.payable.findFirst({
+          where: { id: existing.payableId, deletedAt: null },
+        });
+        if (
+          !covered ||
+          covered.companyId !== existing.companyId ||
+          covered.supplierId !== existing.supplierId ||
+          covered.currency !== existing.currency ||
+          !new Prisma.Decimal(covered.amount).eq(existing.totalAmount) ||
+          !covered.journalEntryId ||
+          (existing.journalEntryId && existing.journalEntryId !== covered.journalEntryId)
+        )
+          throw new BadRequestException(
+            'Existing invoice/payable coverage does not match this full purchase order. Resolve it in office receiving.',
+          );
+        const journal = await tx.journalEntry.findFirst({
+          where: {
+            id: covered.journalEntryId,
+            companyId: existing.companyId,
+            status: 'POSTED',
+            deletedAt: null,
+          },
+        });
+        if (!journal || !new Prisma.Decimal(journal.totalDebit).eq(existing.totalAmount))
+          throw new BadRequestException(
+            'Existing purchase payable has no matching posted accounting coverage',
+          );
+      }
+      if (existing.purchaseType === PurchaseType.CASH_PURCHASE && existing.journalEntryId) {
+        const journal = await tx.journalEntry.findFirst({
+          where: {
+            id: existing.journalEntryId,
+            companyId: existing.companyId,
+            status: 'POSTED',
+            deletedAt: null,
+            referenceType: 'PurchaseOrder',
+            referenceId: existing.id,
+          },
+        });
+        if (!journal || !new Prisma.Decimal(journal.totalDebit).eq(existing.totalAmount))
+          throw new BadRequestException(
+            'Existing cash purchase journal does not cover this full order',
+          );
+        journalEntry = { id: journal.id };
+      }
+      if (existing.purchaseType === PurchaseType.CASH_PURCHASE && !journalEntry) {
         journalEntry = await this.postPurchaseOrderCashReceiptLedger({
           order: existing as any,
           transactionDate: receivedAt,
@@ -1303,7 +1367,8 @@ export class PurchaseOrdersService {
       });
 
       return updated;
-    });
+    };
+    const record = transaction ? await run(transaction) : await this.prisma.$transaction(run);
 
     return record;
   }

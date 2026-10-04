@@ -12,6 +12,7 @@ const scope = (value: unknown) => {
   );
 };
 const fields: Record<string, string[]> = {
+  'pos-draft': ['section', 'scope', 'status', 'search', 'page'],
   'invoice-desk': ['section', 'scope', 'status', 'search', 'page', 'supplierId', 'currency'],
   'cash-desk': ['section', 'scope', 'date', 'currency', 'search', 'kind', 'accountId', 'page'],
   'sales-desk': [

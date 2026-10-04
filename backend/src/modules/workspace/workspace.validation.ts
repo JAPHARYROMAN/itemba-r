@@ -65,6 +65,7 @@ const hosts: Record<string, RegExp> = {
   reports: /^\/(reports|accounting-engine|finance\/bank-reconciliations)(?:\/|$)/,
   documents: /^\/(documents|group-control\/documents)(?:\/|$)/,
   pos: /^\/pos(?:\/activate)?$/,
+  'pos-draft': /^\/pos-draft(?:\/(?:requests|sales|stock)\/[\w-]+)?$/,
   records: /^\/(records|record-book)(?:\/|$)/,
   petrodollar: /^\/petrodollar(?:\/|$)/,
   settings: /^\/(settings|apps)(?:\/|$)/,

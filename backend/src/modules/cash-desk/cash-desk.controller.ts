@@ -9,6 +9,7 @@ import {
   CashExpenseQuery,
   CashMovementDto,
   CashQuery,
+  CashPurchaseQuery,
   CashReverseDto,
 } from './cash-desk.dto';
 
@@ -41,6 +42,10 @@ export class CashDeskController {
   }
   @Get('movements') movements(@CurrentUser() u: AuthUser, @Query() q: CashQuery) {
     return this.service.movements(u, q);
+  }
+  @Get('purchase-options')
+  purchaseOptions(@CurrentUser() u: AuthUser, @Query() q: CashPurchaseQuery) {
+    return this.service.purchaseOptions(u, q);
   }
   @Get('movements/:id') movement(
     @CurrentUser() u: AuthUser,

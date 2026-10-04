@@ -2,6 +2,12 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 
 function makeService() {
   const prisma = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosTerminal: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     $queryRaw: jest.fn().mockResolvedValue([]),
@@ -29,6 +35,7 @@ function makeService() {
       update: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
       aggregate: jest.fn().mockResolvedValue({ _sum: { outstandingAmount: 0 } }),
     },
+    journalEntry: { findFirst: jest.fn().mockResolvedValue(null) },
     purchaseOrderLine: {
       deleteMany: jest.fn(),
     },
@@ -655,6 +662,15 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
     prisma.purchaseOrder.findFirst.mockResolvedValue(
       creditOrder({ payableId: 'payable-existing' }),
     );
+    prisma.payable.findFirst.mockResolvedValue({
+      id: 'payable-existing',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
+      amount: 1000000,
+      journalEntryId: 'covered-je',
+    });
+    prisma.journalEntry.findFirst.mockResolvedValue({ id: 'covered-je', totalDebit: 1000000 });
 
     await service.receive('po-1', user);
 
@@ -687,6 +703,61 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
       prisma,
     );
     expect(prisma.payable.create).not.toHaveBeenCalled();
+  });
+  it('refreshes invoice coverage after locking the PO and preserves the stockist recorder in a caller-owned transaction', async () => {
+    const { service, prisma, postingEngine, inventoryMovements } = makeService();
+    let payableId: string | null = null;
+    prisma.$queryRaw.mockImplementation(async () => {
+      payableId = 'covered-payable';
+      return [];
+    });
+    prisma.purchaseOrder.findFirst.mockImplementation(async () => creditOrder({ payableId }));
+    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
+    prisma.payable.findFirst.mockResolvedValue({
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
+      amount: 1000000,
+      journalEntryId: 'covered-je',
+    });
+    prisma.journalEntry.findFirst.mockResolvedValue({ id: 'covered-je', totalDebit: 1000000 });
+    await service.receive('po-1', user, {}, prisma, { originUserId: 'stockist' });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.purchaseOrder.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        createdById: 'stockist',
+        auditActorUserId: 'user-1',
+        tx: prisma,
+      }),
+    );
+  });
+  it.each([
+    ['companyId', 'other-company'],
+    ['supplierId', 'other-supplier'],
+    ['currency', 'USD'],
+    ['amount', 500000],
+    ['journalEntryId', null],
+  ])('rejects incompatible existing payable coverage for %s', async (field, value) => {
+    const { service, prisma, postingEngine } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder({ payableId: 'covered-payable' }));
+    prisma.payable.findFirst.mockResolvedValue({
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
+      amount: 1000000,
+      journalEntryId: 'covered-je',
+      [field]: value,
+    });
+    await expect(service.receive('po-1', user)).rejects.toThrow('coverage does not match');
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.update).not.toHaveBeenCalled();
   });
 });
 

@@ -2,6 +2,12 @@ import { StockAdjustmentsService } from './stock-adjustments.service';
 
 function makeService() {
   const prisma = {
+    mobilePosEnrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosBranchSetup: { findFirst: jest.fn().mockResolvedValue(null) },
+    mobilePosTerminal: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     stockAdjustment: {
       create: jest.fn(async ({ data }: any) => ({ id: 'sa-1', ...data, lines: [] })),
       findFirst: jest.fn(async () => ({
