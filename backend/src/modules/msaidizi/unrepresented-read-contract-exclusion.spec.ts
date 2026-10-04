@@ -35,6 +35,7 @@ describe('unrepresented read authorization/query contracts', () => {
       'PosDraftsController.context',
       'PosDraftsController.baseline',
       'PosDraftsController.outcome',
+      'PosDraftsController.legacyTerminals',
       'PosDraftsController.legacyOutcome',
       'PosDraftsController.detail',
       'PosDraftsController.receipt',
