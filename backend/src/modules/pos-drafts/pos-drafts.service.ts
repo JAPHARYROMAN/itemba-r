@@ -456,7 +456,6 @@ export class PosDraftsService {
       if (
         ['SUBMITTED', 'READY_FINAL', 'NEEDS_ATTENTION'].includes(draft.status) &&
         draft.originUserId !== user.id &&
-        !object(draft.payload)._continuesDraftId &&
         this.has(user, 'pos_drafts.approve') &&
         user.tokenUse !== 'mobile-pos'
       )
@@ -1262,16 +1261,13 @@ export class PosDraftsService {
           continuation = await tx.posDraft.findFirst({
             where: {
               companyId: scope.companyId,
+              branchId: scope.branchId,
               duplicateSignature: normalized.duplicateSignature,
               originRole: 'CASHIER',
               status: { in: ['SUBMITTED', 'AWAITING_STOCKIST', 'READY_FINAL', 'POSTED'] },
             },
             orderBy: { createdAt: 'asc' },
           });
-        if (continuation && continuation.branchId !== scope.branchId)
-          throw new ConflictException(
-            'A matching cashier transaction already exists in another branch. Ask an administrator to review it.',
-          );
         const provisional = {
           ...scope,
           ...normalized,
@@ -1585,10 +1581,13 @@ export class PosDraftsService {
     if ((await this.roleFor(user, visible.branchId)) !== 'ADMIN')
       throw new ForbiddenException('Cashier and stockist accounts cannot approve');
     let acceptedAction = false;
+    let reviewedContinuation:
+      | { payload: Prisma.InputJsonObject; pendingMoney: Prisma.Decimal; metadata: JsonRecord }
+      | undefined;
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const draft = await this.lockDraft(tx, id, user, dto.revision);
+          let draft = await this.lockDraft(tx, id, user, dto.revision);
           if (draft.status === 'POSTED') return this.present(draft, user);
           if (
             ['AWAITING_STOCKIST', 'READY_FINAL'].includes(draft.status) &&
@@ -1609,11 +1608,19 @@ export class PosDraftsService {
             await this.decision(tx, expired, user, 'EXPIRE');
             return this.present(expired, user);
           }
-          if (
-            !['SUBMITTED', 'READY_FINAL', 'NEEDS_ATTENTION'].includes(draft.status) ||
-            object(draft.payload)._continuesDraftId
-          )
+          if (!['SUBMITTED', 'READY_FINAL', 'NEEDS_ATTENTION'].includes(draft.status))
             throw new BadRequestException('This draft is not awaiting approval');
+          const continuedDraftId = object(draft.payload)._continuesDraftId;
+          if (
+            continuedDraftId &&
+            (draft.kind !== 'SALE' ||
+              draft.originRole !== 'STOCKIST' ||
+              (dto.duplicateReason?.trim().length ?? 0) < 5 ||
+              !dto.reviewedCandidateIds?.includes(continuedDraftId))
+          )
+            throw new BadRequestException(
+              'Continue the cashier transaction, or review every match and explain this separate genuine purchase',
+            );
           if (
             direct &&
             (draft.originRole !== 'ADMIN' ||
@@ -1630,6 +1637,39 @@ export class PosDraftsService {
           acceptedAction = true;
           if (draft.kind === 'SALE') await lockPosSalePosting(tx, draft.companyId);
           await this.expire(tx, draft.companyId, draft.branchId);
+          let metadata: JsonRecord | undefined;
+          if (continuedDraftId) {
+            // Matching captures continue the cashier sale by default. Only a
+            // fresh, complete administrator review may establish a second sale.
+            metadata = await this.checkDuplicates(tx, draft, dto, user);
+            if (!metadata.reviewedCandidateIds.includes(continuedDraftId))
+              throw new ConflictException(
+                'The cashier transaction changed. Review the matching capture before treating it as a separate purchase.',
+              );
+            const payload = { ...object(draft.payload) };
+            delete payload._continuesDraftId;
+            reviewedContinuation = {
+              payload: { ...payload, _separateRepeatOfDraftId: continuedDraftId },
+              pendingMoney:
+                payload.paymentMethod === 'CREDIT' ? new Prisma.Decimal(0) : draft.amount,
+              metadata: { ...metadata, continuedDraftId, resolution: 'GENUINE_REPEAT' },
+            };
+            draft = await tx.posDraft.update({
+              where: { id },
+              data: {
+                payload: reviewedContinuation.payload,
+                pendingMoney: reviewedContinuation.pendingMoney,
+              },
+            });
+            await this.decision(
+              tx,
+              draft,
+              user,
+              'REPEAT_REVIEW',
+              dto.duplicateReason?.trim(),
+              reviewedContinuation.metadata,
+            );
+          }
           const origin = await this.assertOriginActive(tx, draft);
           if (draft.kind === 'SALE') {
             await this.accountingControl.assertPostingAllowed(
@@ -1644,7 +1684,7 @@ export class PosDraftsService {
             );
             await this.validateCapturedSale(tx, draft, origin);
           }
-          const metadata = await this.checkDuplicates(tx, draft, dto, user);
+          metadata ??= await this.checkDuplicates(tx, draft, dto, user);
           if (
             draft.kind === 'SALE' &&
             draft.originRole === 'CASHIER' &&
@@ -1699,10 +1739,14 @@ export class PosDraftsService {
       // and a visible reconciliation task without inventing canonical records.
       if (
         !acceptedAction ||
-        !(error instanceof BadRequestException || error instanceof ConflictException)
+        (!(error instanceof BadRequestException || error instanceof ConflictException) &&
+          !reviewedContinuation)
       )
         throw error;
-      const message = error.message;
+      const message =
+        error instanceof BadRequestException || error instanceof ConflictException
+          ? error.message
+          : 'Posting failed after the genuine repeat review. Retain collected funds for office reconciliation.';
       await this.prisma.$transaction(
         async (tx) => {
           await tx.$queryRaw(Prisma.sql`SELECT id FROM pos_drafts WHERE id = ${id} FOR UPDATE`);
@@ -1720,8 +1764,23 @@ export class PosDraftsService {
                 status: 'NEEDS_ATTENTION',
                 blockingReason: message,
                 reservedUntil: null,
+                ...(reviewedContinuation
+                  ? {
+                      payload: reviewedContinuation.payload,
+                      pendingMoney: reviewedContinuation.pendingMoney,
+                    }
+                  : {}),
               },
             });
+            if (reviewedContinuation)
+              await this.decision(
+                tx,
+                updated,
+                user,
+                'REPEAT_REVIEW',
+                dto.duplicateReason?.trim(),
+                reviewedContinuation.metadata,
+              );
             await this.decision(tx, updated, user, 'POST_BLOCKED', message);
           }
         },

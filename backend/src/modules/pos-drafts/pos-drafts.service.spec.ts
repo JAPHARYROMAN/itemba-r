@@ -225,6 +225,108 @@ describe('POS Draft approval boundaries', () => {
     expect(f.service.reserve).not.toHaveBeenCalled();
     expect(f.sales.createAndConfirmInTransaction).toHaveBeenCalledTimes(1);
   });
+  describe('reviewing a matching stockist capture as a genuine second purchase', () => {
+    const continuation = () =>
+      fixture({
+        originRole: 'STOCKIST',
+        originUserId: 'stockist',
+        status: 'NEEDS_ATTENTION',
+        pendingMoney: new Prisma.Decimal(0),
+        payload: {
+          customerId: 'customer',
+          paymentMethod: 'CASH',
+          lines: [{ productId: 'product', quantity: 1, unitPrice: 100 }],
+          _sale: {
+            lines: [{ productId: 'product', quantity: 1, unitPrice: 100, unitId: 'unit' }],
+            cashAccountId: 'cash',
+          },
+          _captureDigest: 'capture',
+          _continuesDraftId: 'cashier-draft',
+        },
+      });
+    const review = {
+      revision: 1,
+      duplicateReason: 'The customer made a separate second purchase',
+      reviewedCandidateIds: ['cashier-draft'],
+    };
+    it('keeps default continuation and its single money claim until an explicit office review', async () => {
+      const f = continuation();
+      expect(f.service.present(f.getDraft(), administrator).allowedActions).toContain('approve');
+      await expect(f.service.approve('draft', { revision: 1 }, administrator)).rejects.toThrow(
+        'Continue the cashier transaction',
+      );
+      expect(f.getDraft().payload._continuesDraftId).toBe('cashier-draft');
+      expect(Number(f.getDraft().pendingMoney)).toBe(0);
+      expect(f.tx.posDraft.update).not.toHaveBeenCalled();
+      expect(f.service.release).not.toHaveBeenCalled();
+      expect(f.sales.createAndConfirmInTransaction).not.toHaveBeenCalled();
+    });
+    it('posts a fully reviewed stockist repeat once without using the cashier draft hold', async () => {
+      const f = continuation();
+      f.service.checkDuplicates.mockResolvedValue({ ...review, captureDigest: 'capture' });
+      const posted = await f.service.approve('draft', review, administrator);
+      expect(posted.status).toBe('POSTED');
+      expect(posted.pendingMoney).toBe(0);
+      expect(f.getDraft().payload._continuesDraftId).toBeUndefined();
+      expect(f.getDraft().payload._separateRepeatOfDraftId).toBe('cashier-draft');
+      expect(f.service.reserve).not.toHaveBeenCalled();
+      expect(f.service.release).toHaveBeenCalledTimes(1);
+      expect(f.service.release).toHaveBeenCalledWith(
+        f.tx,
+        expect.objectContaining({ id: 'draft', originUserId: 'stockist' }),
+      );
+      expect(f.sales.createAndConfirmInTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        administrator,
+        f.tx,
+        expect.objectContaining({ originUserId: 'stockist' }),
+      );
+      expect(f.tx.posDraftDecision.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'REPEAT_REVIEW',
+          actorUserId: 'admin',
+          metadata: expect.objectContaining({
+            continuedDraftId: 'cashier-draft',
+            resolution: 'GENUINE_REPEAT',
+            reviewedCandidateIds: ['cashier-draft'],
+          }),
+        }),
+      });
+    });
+    it('cannot promote an alias after the administrator omits another current matching purchase', async () => {
+      const f = continuation();
+      f.service.checkDuplicates = (PosDraftsService.prototype as any).checkDuplicates;
+      f.service.candidates = jest.fn(async () => [
+        { id: 'cashier-draft', reviewable: true },
+        { id: 'another-current-match', reviewable: true },
+      ]);
+      f.service.reviewableCandidates = jest.fn(async (candidates) => candidates);
+      await expect(f.service.approve('draft', review, administrator)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(f.getDraft().payload._continuesDraftId).toBe('cashier-draft');
+      expect(Number(f.getDraft().pendingMoney)).toBe(0);
+      expect(f.sales.createAndConfirmInTransaction).not.toHaveBeenCalled();
+    });
+    it.each([
+      { label: 'stock shortage', error: new BadRequestException('Not enough unreserved stock') },
+      { label: 'unexpected posting failure', error: new Error('Posting failed') },
+    ])(
+      'retains reviewed repeat funds and identity after a posting failure ($label)',
+      async ({ error }) => {
+        const f = continuation();
+        f.service.checkDuplicates.mockResolvedValue({ ...review, captureDigest: 'capture' });
+        f.sales.createAndConfirmInTransaction.mockRejectedValueOnce(error);
+        await expect(f.service.approve('draft', review, administrator)).rejects.toThrow(error);
+        expect(f.getDraft().status).toBe('NEEDS_ATTENTION');
+        expect(Number(f.getDraft().pendingMoney)).toBe(100);
+        expect(f.getDraft().requestId).toBe('capture-request-123456');
+        expect(f.getDraft().payload._continuesDraftId).toBeUndefined();
+        expect(f.getDraft().payload._separateRepeatOfDraftId).toBe('cashier-draft');
+        expect(f.getDraft().postedEntityId).toBeUndefined();
+      },
+    );
+  });
   it('canonical failure rolls back final state and retains the pending money for reconciliation', async () => {
     const f = fixture({ originRole: 'STOCKIST' });
     f.sales.createAndConfirmInTransaction.mockRejectedValueOnce(

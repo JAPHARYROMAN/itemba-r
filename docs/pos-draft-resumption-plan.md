@@ -6,30 +6,30 @@ Most of the requested implementation already exists in an isolated candidate. Re
 
 ## Recovered implementation and interruption point
 
-| Item | Verified state |
-| --- | --- |
-| Previous chat | **Add apps module and landing page**, interrupted during release preparation |
-| Active candidate checkout | `C:/Users/user/.codex/worktrees/pos-draft-remake/itemba-r` |
-| Branch | `codex/pos-draft-remake` |
-| Base | `6fa821b92df2c5065fb25964e39e4cae711044b2`, recorded by the previous work as the deployed baseline; deployment was not independently reread in this audit |
-| Main implementation | `877995f0`, committed 4 October at 11:14 EAT |
-| Recovery and verification fixes | `0410dcef6a6ace100e8ad5cef93a1b9cb98cd26b`, committed at 11:28 EAT |
-| Review | [PR 99](https://github.com/JAPHARYROMAN/itemba-r/pull/99), open, targeting `main`, with the same candidate head at review time |
-| Candidate working tree | Clean before this documentation addition |
-| Main workspace | Still on `codex/native-select-contrast` at `395026f6`, with unrelated fuel and procurement changes; it does not contain this candidate |
-| Release preparation | Committed source archive, candidate metadata and staging helpers exist; the last backend image build log ends during `nest build`. These artifacts do not establish completed images or deployment |
+| Item                            | Verified state                                                                                                                                                                                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Previous chat                   | **Add apps module and landing page**, interrupted during release preparation                                                                                                                       |
+| Active candidate checkout       | `C:/Users/user/.codex/worktrees/pos-draft-remake/itemba-r`                                                                                                                                         |
+| Branch                          | `codex/pos-draft-remake`                                                                                                                                                                           |
+| Base                            | `6fa821b92df2c5065fb25964e39e4cae711044b2`, recorded by the previous work as the deployed baseline; deployment was not independently reread in this audit                                          |
+| Main implementation             | `877995f0`, committed 4 October at 11:14 EAT                                                                                                                                                       |
+| Recovery and verification fixes | `0410dcef6a6ace100e8ad5cef93a1b9cb98cd26b`, committed at 11:28 EAT                                                                                                                                 |
+| Review                          | [PR 99](https://github.com/JAPHARYROMAN/itemba-r/pull/99), open, targeting `main`, with the same candidate head at review time                                                                     |
+| Candidate working tree          | Clean before this documentation addition                                                                                                                                                           |
+| Main workspace                  | Still on `codex/native-select-contrast` at `395026f6`, with unrelated fuel and procurement changes; it does not contain this candidate                                                             |
+| Release preparation             | Committed source archive, candidate metadata and staging helpers exist; the last backend image build log ends during `nest build`. These artifacts do not establish completed images or deployment |
 
 The candidate changes 109 files relative to its base. Its scope includes frontend, authentication, canonical posting services, schema/migrations, permissions, workflow proofs and rollout documentation. The older `codex/pos-remake-foundation` checkout contains a separate native POS foundation and historical staging evidence; do not mistake that staging release for POS Draft acceptance.
 
 ## Product rules to preserve
 
-| Transaction | Required stages |
-| --- | --- |
-| Cashier sale | Capture → administrator approves sale and reserves stock → stockist prepares the same sale → administrator approves dispatch → post |
-| Stockist customer sale | Capture complete sale → administrator approves → post |
-| Full supplier-order receipt, transfer, count or damage | Stockist captures → administrator approves → post |
-| Collection against existing debt | Cashier captures → administrator approves → post payment |
-| Authorised administrator transaction | Explicit direct-post action → validate → post |
+| Transaction                                            | Required stages                                                                                                                     |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Cashier sale                                           | Capture → administrator approves sale and reserves stock → stockist prepares the same sale → administrator approves dispatch → post |
+| Stockist customer sale                                 | Capture complete sale → administrator approves → post                                                                               |
+| Full supplier-order receipt, transfer, count or damage | Stockist captures → administrator approves → post                                                                                   |
+| Collection against existing debt                       | Cashier captures → administrator approves → post payment                                                                            |
+| Authorised administrator transaction                   | Explicit direct-post action → validate → post                                                                                       |
 
 Pending work remains outside canonical sales, cash, debt, stock movements and posted report totals. Collected funds remain visible as a pending claim. No sale, payment or stock issue is created merely because a phone saved or submitted a capture.
 
@@ -39,30 +39,30 @@ Use shared customers, suppliers, products, prices and accounts. Retain original 
 
 “Implemented” below means present in the candidate with supporting code or automated evidence. It does not mean accepted on physical devices or deployed.
 
-| Requirement | Current evidence | Remaining acceptance |
-| --- | --- | --- |
-| Redesigned OS sign-in | Updated `os-login.tsx`, CSS and tests; installation promotion removed from `AuthShell` | Password change, expired session and deep-link continuation in the staged production bundle |
-| Install on desktop and Devices | Desktop install widget, QR component and Devices workspace | Actual Android installation and iPhone Add to Home Screen, including setup context across browser/app storage boundaries |
-| Name and requested role registration | `mobile-join.tsx` and invite/enrolment service | Repeat QR scans, expired invitations, pending approval across app restarts and conflicting approvals |
-| Approval without required employee/email | Canonical user and assigned terminal creation; optional employee linkage | Representative existing users and custom roles; verify no accidental identity merge |
-| Six-digit PIN and device security | PIN hashing, lockout, refresh rotation, reset and revocation in `mobile-pos-auth` | Lost/replaced phone, interrupted PIN setup/reset and real-device credential continuity |
-| Branch defaults | Branch setup and account/customer configuration in Devices | Review actual branch account mappings; do not infer them from names |
-| Native OS POS Draft | Pending, Sales, Stock, History and Devices; inspector, capture form and workspace navigation | Multiple independent windows, record links, search and Back/Forward on staging |
-| Role-based phone app | `mobile-pos-app.tsx`, capture forms, requests and dispatch preparation | Full cashier, stockist and existing-admin journeys on phones |
-| Draft persistence and identity | `PosDraft`, decisions, owned reservations, company/request uniqueness and revision checks | Interrupted submissions, conflicting reviewers and migrations on a representative staging backup |
-| Two-stage cashier posting | `submit`, `approve`, `prepare`, then final posting; compiled workflow proof | End-to-end staging sale with exact records and balances at each stage |
-| Stockist single approval and admin direct posting | Implemented for supported transactions and included in the workflow proof | Authority/branch checks on real pilot roles |
-| Duplicate comparison | Normalised same-business-day signatures, company-wide candidates, canonical-sale comparison and advisory locks | Cross-branch concurrent captures, genuine repeats, ordinary office sales racing approval, midnight boundary |
-| Reservations | 24-hour ownership, availability reduction, release/renewal and final posting under stock locks | Idle expiry outside POS requests and races with other stock writers; see hardening below |
-| Pending collected money | Separate pending amount, rejection/blocked state and explicit return confirmation decision | Cashier and reviewer can find unresolved funds; no official ledger entry fabricated by a return declaration |
-| Debt collection | Approved collection delegates to canonical customer payments with sale/debt locking | Competing partial collections and current outstanding balance in linked desks |
-| Full purchase-order receipt | Confirmed-order fingerprint, complete receipt and prior-receipt rejection; canonical receiving reuse | Cash and credit orders, existing invoices, conflicts and partial orders routed to office |
-| Supplier invoice financial coverage | Existing payable/journal reuse and company-scoped match number uniqueness | Migration preserves existing matches; receipt/invoice orderings reconcile once |
-| Counts, damage and transfers | Physical-stock revision, stale-count checks, available-stock checks and shared-transaction transfers | All physical stock writers advance revision; competing reservations/movements; posted corrections |
-| Staff cannot bypass approval | Global mobile session guard plus canonical legacy-write policy; password and historical terminal routes covered by proof | Close capability/guard CI failures without weakening the restriction |
-| Offline capture and reset recovery | Device/operator/credential partitioning; explicit outcome-before-submit; same-phone held-capture recovery | Real offline restart, device reassignment, service-worker update and lost-response acceptance |
-| Legacy queue cutover | Quarantine UI and original-identity outcome lookup; no automatic old-queue replay | Inventory every affected phone's queue and reconcile individually before pilot cutover |
-| Release and rollback | CI proof runner, rollout document and private staging helpers | Complete exact-revision CI, images, backup restore rehearsal, staging UAT and device acceptance |
+| Requirement                                       | Current evidence                                                                                                         | Remaining acceptance                                                                                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Redesigned OS sign-in                             | Updated `os-login.tsx`, CSS and tests; installation promotion removed from `AuthShell`                                   | Password change, expired session and deep-link continuation in the staged production bundle                                                   |
+| Install on desktop and Devices                    | Desktop install widget, QR component and Devices workspace                                                               | Actual Samsung Galaxy A57 5G installation, including setup context across browser/app storage boundaries; the owner removed iPhone acceptance |
+| Name and requested role registration              | `mobile-join.tsx` and invite/enrolment service                                                                           | Repeat QR scans, expired invitations, pending approval across app restarts and conflicting approvals                                          |
+| Approval without required employee/email          | Canonical user and assigned terminal creation; optional employee linkage                                                 | Representative existing users and custom roles; verify no accidental identity merge                                                           |
+| Six-digit PIN and device security                 | PIN hashing, lockout, refresh rotation, reset and revocation in `mobile-pos-auth`                                        | Lost/replaced phone, interrupted PIN setup/reset and real-device credential continuity                                                        |
+| Branch defaults                                   | Branch setup and account/customer configuration in Devices                                                               | Review actual branch account mappings; do not infer them from names                                                                           |
+| Native OS POS Draft                               | Pending, Sales, Stock, History and Devices; inspector, capture form and workspace navigation                             | Multiple independent windows, record links, search and Back/Forward on staging                                                                |
+| Role-based phone app                              | `mobile-pos-app.tsx`, capture forms, requests and dispatch preparation                                                   | Full cashier, stockist and existing-admin journeys on phones                                                                                  |
+| Draft persistence and identity                    | `PosDraft`, decisions, owned reservations, company/request uniqueness and revision checks                                | Interrupted submissions, conflicting reviewers and migrations on a representative staging backup                                              |
+| Two-stage cashier posting                         | `submit`, `approve`, `prepare`, then final posting; compiled workflow proof                                              | End-to-end staging sale with exact records and balances at each stage                                                                         |
+| Stockist single approval and admin direct posting | Implemented for supported transactions and included in the workflow proof                                                | Authority/branch checks on real pilot roles                                                                                                   |
+| Duplicate comparison                              | Normalised same-business-day signatures, company-wide candidates, canonical-sale comparison and advisory locks           | Cross-branch concurrent captures, genuine repeats, ordinary office sales racing approval, midnight boundary                                   |
+| Reservations                                      | 24-hour ownership, availability reduction, release/renewal and final posting under stock locks                           | Idle expiry outside POS requests and races with other stock writers; see hardening below                                                      |
+| Pending collected money                           | Separate pending amount, rejection/blocked state and explicit return confirmation decision                               | Cashier and reviewer can find unresolved funds; no official ledger entry fabricated by a return declaration                                   |
+| Debt collection                                   | Approved collection delegates to canonical customer payments with sale/debt locking                                      | Competing partial collections and current outstanding balance in linked desks                                                                 |
+| Full purchase-order receipt                       | Confirmed-order fingerprint, complete receipt and prior-receipt rejection; canonical receiving reuse                     | Cash and credit orders, existing invoices, conflicts and partial orders routed to office                                                      |
+| Supplier invoice financial coverage               | Existing payable/journal reuse and company-scoped match number uniqueness                                                | Migration preserves existing matches; receipt/invoice orderings reconcile once                                                                |
+| Counts, damage and transfers                      | Physical-stock revision, stale-count checks, available-stock checks and shared-transaction transfers                     | All physical stock writers advance revision; competing reservations/movements; posted corrections                                             |
+| Staff cannot bypass approval                      | Global mobile session guard plus canonical legacy-write policy; password and historical terminal routes covered by proof | Close capability/guard CI failures without weakening the restriction                                                                          |
+| Offline capture and reset recovery                | Device/operator/credential partitioning; explicit outcome-before-submit; same-phone held-capture recovery                | Real offline restart, device reassignment, service-worker update and lost-response acceptance                                                 |
+| Legacy queue cutover                              | Quarantine UI and original-identity outcome lookup; no automatic old-queue replay                                        | Inventory every affected phone's queue and reconcile individually before pilot cutover                                                        |
+| Release and rollback                              | CI proof runner, rollout document and private staging helpers                                                            | Complete exact-revision CI, images, backup restore rehearsal, staging UAT and device acceptance                                               |
 
 ## Current verification and concrete blockers
 
@@ -164,4 +164,8 @@ The recovery audit above describes the state at resumption. Subsequent implement
 
 Phone recovery now tolerates a lost successful PIN-reset response through same-device/new-PIN login, and late setup/login responses cannot overwrite a reassigned device. Captures retain the original East Africa business date across midnight. Office confirmation and POS approval share company sale-posting and duplicate-identity locks; office sales matching active POS work require administrator review. Proof artifacts now record source revision, clean-tree status and the compiled entry hash.
 
-Before the final concurrency integration, the rebuilt backend passed 29/29 compiled workflow checks against 176 isolated migrations. The API read smoke passed 414/414 checks with real mobile setup. Focused backend suites passed 165 assertions and the phone recovery suites passed 34 assertions. These are local implementation evidence, not final exact-source CI, deployment or physical acceptance. See the proof record for final results and outstanding release gates.
+The final browser review found that ordinary inspector anchors reloaded the desktop. Canonical references now use existing workspace navigation, so Sales Desk opens while the POS Draft review window remains available. The service worker also retains exact original invitation and pending-claim pages across updates, fetching the new page's public dependencies before replacing a working offline page; failed downloads or storage writes retain the earlier public cache. API responses and private work are excluded.
+
+Exact stockist matches continue a same-branch cashier sale by default. An administrator can classify a capture as a separate genuine purchase only after reviewing every current company-wide match and supplying a fresh explanation. That purchase uses its own stock availability; it cannot consume the cashier's reservation. A failed post retains its separate collected funds for reconciliation. Cross-branch matches remain independent captured requests awaiting review rather than attempting to open another branch's cashier record.
+
+The final local production backend build passed 38/38 compiled workflow checks against 176 isolated migrations, including separate-repeat concurrency and cross-branch review. POS Draft passed 32 focused unit tests. The API read smoke passed 414/414 checks with real mobile setup, and the final service-worker/join/app run passed 26/26 tests. These are local implementation evidence, not final exact-source CI, deployment or physical acceptance. See the proof record for results and outstanding release gates.

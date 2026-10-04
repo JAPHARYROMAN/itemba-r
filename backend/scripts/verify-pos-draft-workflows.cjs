@@ -1459,6 +1459,12 @@ async function main() {
   );
   // These acceptance cases need the office reviewer before the later security
   // cases deliberately enroll, revoke and log out that same password account.
+  await require('./verify-pos-reviewed-repeat.cjs').verifyPosReviewedRepeat({
+    db,
+    check,
+    fixture: f,
+    call,
+  });
   await require('./verify-pos-validation-boundaries.cjs').verifyPosValidationBoundaries({
     db,
     check,

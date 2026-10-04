@@ -1,6 +1,7 @@
 'use client';
 import { useState, type ReactNode } from 'react';
 import { ArrowUpRight, Check, PackageCheck, X } from 'lucide-react';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import type { Draft, DraftAction, DraftContext } from './types';
 import { KIND_LABELS, STATUS_LABELS, money, postedHref } from './types';
 
@@ -13,7 +14,7 @@ function OfficeReference({
   href: string;
   children: ReactNode;
 }) {
-  return enabled ? <a href={href}>{children}</a> : <span>{children}</span>;
+  return enabled ? <Link href={href}>{children}</Link> : <span>{children}</span>;
 }
 
 export function DraftInspector({
@@ -368,9 +369,9 @@ export function DraftInspector({
         </section>
       ) : null}
       {officeLinks && link && (
-        <a className="pd-button pd-primary" href={link}>
+        <Link className="pd-button pd-primary" href={link}>
           Open posted document <ArrowUpRight size={16} />
-        </a>
+        </Link>
       )}
       {draft.status === 'POSTED' && draft.kind === 'SALE' && onReceipt && (
         <button
