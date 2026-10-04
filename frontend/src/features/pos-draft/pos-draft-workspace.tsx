@@ -373,8 +373,10 @@ export function PosDraftWorkspace() {
                     <span className="pd-request-title">
                       <strong>{KIND_LABELS[draft.kind]}</strong>
                       <small>
-                        {draft.branch?.name ?? 'Assigned branch'} · {draft.businessDate} ·{' '}
-                        {draft.originRole.toLowerCase()}
+                        {draft.branch?.name ??
+                          org.branches.find((branch) => branch.id === draft.branchId)?.name ??
+                          'Assigned branch'}{' '}
+                        · {draft.businessDate} · {draft.originRole.toLowerCase()}
                       </small>
                       <span className="pd-status" data-status={draft.status}>
                         {STATUS_LABELS[draft.status] ?? draft.status}

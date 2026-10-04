@@ -15,6 +15,7 @@ import { InventoryMovementsModule } from '../inventory-movements/inventory-movem
 import { MobilePosLiteModule } from '../mobile-pos-lite/mobile-pos-lite.module';
 import { PosDraftsController } from './pos-drafts.controller';
 import { PosDraftsService } from './pos-drafts.service';
+import { PosDraftReservationExpiryService } from './pos-draft-reservation-expiry.service';
 @Module({
   imports: [
     PrismaModule,
@@ -30,6 +31,7 @@ import { PosDraftsService } from './pos-drafts.service';
   controllers: [PosDraftsController],
   providers: [
     PosDraftsService,
+    PosDraftReservationExpiryService,
     AccountingControlService,
     CompanyScopeService,
     OrganizationScopeService,

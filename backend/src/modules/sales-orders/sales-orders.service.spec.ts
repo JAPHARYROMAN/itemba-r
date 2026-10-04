@@ -1,5 +1,9 @@
 import { SalesOrdersService } from './sales-orders.service';
 import { AccessLevel, Prisma } from '@prisma/client';
+import {
+  canonicalSaleSignature,
+  posDraftSaleRequestKey,
+} from '../../common/services/pos-sale-duplicates';
 
 function persistedOrder(overrides: Record<string, unknown> = {}) {
   return {
@@ -54,6 +58,9 @@ function makeService() {
     },
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $queryRaw: jest.fn(async () => [{ id: 'so-1' }]),
+    $executeRaw: jest.fn(async () => 1),
+    posDraft: { findMany: jest.fn(async () => []) },
     salesOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'so-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'so-1', companyId: 'company-1', ...data })),
@@ -127,7 +134,10 @@ function makeService() {
       findMany: jest.fn(async () => []),
     },
   } as any;
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const inventoryMovements = { createMovement: jest.fn().mockResolvedValue(undefined) } as any;
   const taxAutoApply = { applyForSalesOrder: jest.fn().mockResolvedValue({}) } as any;
   const codes = {
@@ -170,11 +180,124 @@ function makeService() {
     profit,
   );
 
-  return { service, prisma, auditLogs, companyScope };
+  return { service, prisma, auditLogs, companyScope, inventoryMovements };
 }
 
 const user = { id: 'user-1', permissions: ['sales.create'] } as any;
 const posOnlyUser = { id: 'pos-user-1', permissions: ['pos.create'] } as any;
+
+describe('SalesOrdersService confirmation against POS captures', () => {
+  const officeOrder = (overrides: Record<string, unknown> = {}) =>
+    persistedOrder({
+      status: 'DRAFT',
+      customerId: 'customer-1',
+      createdById: 'operator-1',
+      ...overrides,
+    });
+  const capture = (overrides: Record<string, unknown> = {}) => ({
+    id: 'pos-draft-1',
+    requestId: 'pos-request-1',
+    originUserId: 'operator-1',
+    status: 'SUBMITTED',
+    payload: {},
+    ...overrides,
+  });
+
+  it.each([false, true])(
+    'blocks an office match before effects even with an ordinary transaction (%s)',
+    async (withTransaction) => {
+      const { service, prisma, inventoryMovements } = makeService();
+      prisma.salesOrder.findFirst.mockResolvedValue(officeOrder());
+      prisma.posDraft.findMany.mockResolvedValue([capture()]);
+      await expect(
+        service.confirm('so-1', user, withTransaction ? prisma : undefined),
+      ).rejects.toThrow('administrator review in POS Draft');
+      expect(prisma.salesOrder.updateMany).not.toHaveBeenCalled();
+      expect(prisma.cashAccount.update).not.toHaveBeenCalled();
+      expect(prisma.receivable.create).not.toHaveBeenCalled();
+      expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+      expect(prisma.posDraft.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            companyId: 'company-1',
+            kind: 'SALE',
+            duplicateSignature: canonicalSaleSignature(officeOrder()),
+            status: { not: 'REJECTED' },
+          },
+        }),
+      );
+    },
+  );
+
+  it('reloads edited lines and totals after the order row lock and checks that current signature', async () => {
+    const { service, prisma } = makeService();
+    const current = officeOrder({
+      totalAmount: 350,
+      lines: [{ ...officeOrder().lines[0], lineTotal: 350 }],
+    });
+    prisma.salesOrder.findFirst.mockResolvedValueOnce(officeOrder()).mockResolvedValue(current);
+    prisma.posDraft.findMany.mockResolvedValue([capture()]);
+    await expect(service.confirm('so-1', user)).rejects.toThrow(
+      'administrator review in POS Draft',
+    );
+    expect(prisma.posDraft.findMany.mock.calls[0][0].where.duplicateSignature).toBe(
+      canonicalSaleSignature(current),
+    );
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.salesOrder.findFirst.mock.invocationCallOrder[1],
+    );
+    expect(prisma.salesOrder.findFirst.mock.invocationCallOrder[1]).toBeLessThan(
+      prisma.posDraft.findMany.mock.invocationCallOrder[0],
+    );
+    expect(prisma.$executeRaw.mock.calls[0][0].values).toEqual(['PosSalePosting:company-1']);
+    expect(prisma.$executeRaw.mock.calls[1][0].values).toEqual([
+      `POSDraft:company-1:${canonicalSaleSignature(current)}`,
+    ]);
+    expect(prisma.salesOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows the explicitly bound internal draft after its owning approval reviewed genuine repeats', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      officeOrder({ idempotencyKey: posDraftSaleRequestKey('company-1', 'pos-request-1') }),
+    );
+    prisma.posDraft.findMany.mockResolvedValue([
+      capture(),
+      capture({ id: 'reviewed-repeat', requestId: 'repeat-request', status: 'POSTED' }),
+    ]);
+    jest.spyOn(service as any, 'postSalesOrderLedger').mockResolvedValue({ id: 'je-1' });
+    await service.confirm('so-1', user, prisma, 'pos-draft-1');
+    expect(prisma.salesOrder.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.cashAccount.update).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { idempotencyKey: 'office-key', createdById: 'operator-1' },
+    {
+      idempotencyKey: posDraftSaleRequestKey('company-1', 'pos-request-1'),
+      createdById: 'other-operator',
+    },
+  ])('rejects a forged internal origin binding (%s)', async (binding) => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(officeOrder(binding));
+    prisma.posDraft.findMany.mockResolvedValue([capture()]);
+    await expect(service.confirm('so-1', user, prisma, 'pos-draft-1')).rejects.toThrow(
+      'identity does not match',
+    );
+    expect(prisma.salesOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a continuation alias as another sale', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(officeOrder());
+    prisma.posDraft.findMany.mockResolvedValue([
+      capture({ payload: { _continuesDraftId: 'original-draft' } }),
+    ]);
+    jest.spyOn(service as any, 'postSalesOrderLedger').mockResolvedValue({ id: 'je-1' });
+    await service.confirm('so-1', user);
+    expect(prisma.salesOrder.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
 
 function createDto(overrides: Record<string, unknown> = {}) {
   return {

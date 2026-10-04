@@ -1,4 +1,4 @@
-const CACHE_NAME = 'itemba-mobile-pos-draft-v2';
+const CACHE_NAME = 'itemba-mobile-pos-draft-v3';
 const setup = new URL(self.location.href).searchParams.get('setup');
 const setupPath =
   setup && /^[A-Za-z0-9_-]{20,128}$/.test(setup) ? `/mobile-pos/join/${setup}` : null;
@@ -53,20 +53,26 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/brand/');
   if (!isPosDocument && !isStaticAsset) return;
 
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        }
-        return response;
-      })
-      .catch(async () => {
+  const network = fetch(request);
+  // Register the cache work while the event is active. The worker must stay
+  // alive until this asset is saved for a later offline restart; quota/storage
+  // failures must never turn a healthy online response into a failed request.
+  event.waitUntil(
+    network
+      .then(async (response) => {
+        if (!response.ok) return;
+        const copy = response.clone();
         const cache = await caches.open(CACHE_NAME);
-        const cached =
-          (await cache.match(request)) || (isPosDocument ? await cache.match(url.pathname) : null);
-        return cached || Response.error();
-      }),
+        await cache.put(request, copy);
+      })
+      .catch(() => undefined),
+  );
+  event.respondWith(
+    network.catch(async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const cached =
+        (await cache.match(request)) || (isPosDocument ? await cache.match(url.pathname) : null);
+      return cached || Response.error();
+    }),
   );
 });

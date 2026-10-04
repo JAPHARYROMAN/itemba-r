@@ -1,8 +1,20 @@
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowUpRight, Check, PackageCheck, X } from 'lucide-react';
 import type { Draft, DraftAction, DraftContext } from './types';
 import { KIND_LABELS, STATUS_LABELS, money, postedHref } from './types';
+
+function OfficeReference({
+  enabled,
+  href,
+  children,
+}: {
+  enabled: boolean;
+  href: string;
+  children: ReactNode;
+}) {
+  return enabled ? <a href={href}>{children}</a> : <span>{children}</span>;
+}
 
 export function DraftInspector({
   draft,
@@ -12,6 +24,7 @@ export function DraftInspector({
   onClose,
   onCorrect,
   onReceipt,
+  officeLinks = true,
 }: {
   draft: Draft;
   context?: DraftContext | null;
@@ -31,6 +44,7 @@ export function DraftInspector({
   onClose: () => void;
   onCorrect?: (draft: Draft) => void;
   onReceipt?: (draft: Draft) => Promise<void>;
+  officeLinks?: boolean;
 }) {
   const [reason, setReason] = useState('');
   const [returnReason, setReturnReason] = useState(''),
@@ -48,7 +62,7 @@ export function DraftInspector({
   const order = context?.purchaseOrders.find((item) => item.id === draft.payload.purchaseOrderId);
   const duplicateChecked =
     !candidates.length ||
-    (reviewed.length === candidates.length && duplicateReason.trim().length >= 3);
+    (reviewed.length === candidates.length && duplicateReason.trim().length >= 5);
   const label = (action: Exclude<DraftAction, 'correct'>) =>
     action === 'approve'
       ? draft.status === 'SUBMITTED' && draft.originRole === 'CASHIER' && draft.kind === 'SALE'
@@ -68,7 +82,7 @@ export function DraftInspector({
       setError('Enter a rejection reason.');
       return;
     }
-    if (action === 'confirm-return' && (!fundsReturned || returnReason.trim().length < 3)) {
+    if (action === 'confirm-return' && (!fundsReturned || returnReason.trim().length < 5)) {
       setError('Confirm the full funds were returned and explain how the return was verified.');
       return;
     }
@@ -175,9 +189,13 @@ export function DraftInspector({
       {draft.payload.customerId && (
         <p>
           <span className="pd-muted">Customer · </span>
-          <a href={`/sales-desk/customers/${encodeURIComponent(draft.payload.customerId)}`}>
-            {customer?.name ?? 'Open customer'} <ArrowUpRight size={12} />
-          </a>
+          <OfficeReference
+            enabled={officeLinks}
+            href={`/sales-desk/customers/${encodeURIComponent(draft.payload.customerId)}`}
+          >
+            {customer?.name ?? (officeLinks ? 'Open customer' : 'Customer')}{' '}
+            {officeLinks && <ArrowUpRight size={12} />}
+          </OfficeReference>
         </p>
       )}
       {draft.payload.paymentMethod && (
@@ -194,19 +212,24 @@ export function DraftInspector({
       )}
       {draft.payload.salesOrderId && (
         <p>
-          <a href={`/sales-desk/sales/${encodeURIComponent(draft.payload.salesOrderId)}`}>
-            Open sale <ArrowUpRight size={12} />
-          </a>{' '}
+          <OfficeReference
+            enabled={officeLinks}
+            href={`/sales-desk/sales/${encodeURIComponent(draft.payload.salesOrderId)}`}
+          >
+            {officeLinks ? 'Open sale' : 'Sale'} {officeLinks && <ArrowUpRight size={12} />}
+          </OfficeReference>{' '}
           · {money(draft.payload.amount, draft.currency)}
         </p>
       )}
       {draft.payload.purchaseOrderId && (
         <p>
-          <a
+          <OfficeReference
+            enabled={officeLinks}
             href={`/operations/purchase-orders/${encodeURIComponent(draft.payload.purchaseOrderId)}`}
           >
-            {order?.purchaseOrderNumber ?? 'Open purchase order'} <ArrowUpRight size={12} />
-          </a>
+            {order?.purchaseOrderNumber ?? (officeLinks ? 'Open purchase order' : 'Purchase order')}{' '}
+            {officeLinks && <ArrowUpRight size={12} />}
+          </OfficeReference>
           {order?.supplierName && ` · ${order.supplierName}`}
         </p>
       )}
@@ -248,9 +271,12 @@ export function DraftInspector({
             const product = context?.products.find((item) => item.id === line.productId);
             return (
               <div key={line.productId}>
-                <a href={`/inventory/products/${encodeURIComponent(line.productId)}`}>
-                  {product?.name ?? 'Open product'}
-                </a>
+                <OfficeReference
+                  enabled={officeLinks}
+                  href={`/inventory/products/${encodeURIComponent(line.productId)}`}
+                >
+                  {product?.name ?? (officeLinks ? 'Open product' : 'Product')}
+                </OfficeReference>
                 <strong>
                   {line.countedQuantity !== undefined
                     ? `Counted ${line.countedQuantity} · baseline ${line.baselineQuantity}`
@@ -272,10 +298,13 @@ export function DraftInspector({
       ) : null}
       {draft.payload.productId && (
         <p>
-          <a href={`/inventory/products/${encodeURIComponent(draft.payload.productId)}`}>
+          <OfficeReference
+            enabled={officeLinks}
+            href={`/inventory/products/${encodeURIComponent(draft.payload.productId)}`}
+          >
             {context?.products.find((item) => item.id === draft.payload.productId)?.name ??
-              'Open product'}
-          </a>{' '}
+              (officeLinks ? 'Open product' : 'Product')}
+          </OfficeReference>{' '}
           · {draft.payload.quantity} ·{' '}
           {draft.payload.damageType?.toLowerCase().replaceAll('_', ' ')}
         </p>
@@ -299,9 +328,12 @@ export function DraftInspector({
                 }
               />
               <span>
-                <a href={`/pos-draft/requests/${encodeURIComponent(candidate.id)}`}>
+                <OfficeReference
+                  enabled={officeLinks}
+                  href={`/pos-draft/requests/${encodeURIComponent(candidate.id)}`}
+                >
                   {candidate.businessDate} · {money(candidate.amount, draft.currency)}
-                </a>
+                </OfficeReference>
                 <small>
                   {STATUS_LABELS[candidate.status as keyof typeof STATUS_LABELS] ??
                     candidate.status}
@@ -326,14 +358,16 @@ export function DraftInspector({
             <div key={decision.id}>
               <strong>{decision.action.toLowerCase().replaceAll('_', ' ')}</strong>
               <small>
-                {decision.actor?.fullName ?? ''} · {new Date(decision.createdAt).toLocaleString()}
+                {decision.actor?.fullName ??
+                  (decision.actorId === 'system:pos-draft-reservation-expiry' ? 'System' : '')}{' '}
+                · {new Date(decision.createdAt).toLocaleString()}
               </small>
               {decision.reason && <p>{decision.reason}</p>}
             </div>
           ))}
         </section>
       ) : null}
-      {link && (
+      {officeLinks && link && (
         <a className="pd-button pd-primary" href={link}>
           Open posted document <ArrowUpRight size={16} />
         </a>

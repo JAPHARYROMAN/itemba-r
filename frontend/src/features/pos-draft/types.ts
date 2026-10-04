@@ -232,13 +232,13 @@ export const STATUS_LABELS: Record<DraftStatus, string> = {
 };
 export const money = (value: number | string | null | undefined, currency = 'TZS') =>
   `${currency} ${Number(value ?? 0).toLocaleString('en', { maximumFractionDigits: 2 })}`;
-export const businessDate = () =>
+export const businessDate = (capturedAt: Date | string = new Date()) =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Dar_es_Salaam',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(new Date(capturedAt));
 export function postedHref(draft: Draft): string | null {
   if (!draft.postedEntityId) return null;
   const id = encodeURIComponent(draft.postedEntityId);

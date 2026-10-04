@@ -43,6 +43,7 @@ export function MobileJoin({ token }: { token: string }) {
     [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
   const [claimToken, setClaimToken] = useState(token);
+  const [resetRecovery, setResetRecovery] = useState(false);
   useEffect(() => {
     setInstalled(isInstalled());
     if ('serviceWorker' in navigator)
@@ -91,6 +92,7 @@ export function MobileJoin({ token }: { token: string }) {
     if (resumed !== token) router.replace(`/mobile-pos/join/${encodeURIComponent(resumed)}`);
     setLoading(true);
     setError('');
+    setResetRecovery(false);
     void mobileApi<InviteProfile>(`/mobile-pos-auth/invite/${encodeURIComponent(resumed)}`, {
       signal: controller.signal,
     })
@@ -117,12 +119,23 @@ export function MobileJoin({ token }: { token: string }) {
         }
       })
       .catch((e) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          // Completing a reset consumes its link. A lost response can leave
+          // this phone with the old local credential version, but its bound
+          // device and the newly chosen PIN still authorize ordinary sign-in.
+          if (
+            bound &&
+            readSetupBinding(bound.enrollmentId) === bound.deviceSecret &&
+            e instanceof ApiError &&
+            [404, 410].includes(e.status)
+          )
+            setResetRecovery(true);
           setError(
             e instanceof Error
               ? e.message
               : 'This installation link is unavailable. Ask your administrator for a new link.',
           );
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -191,6 +204,18 @@ export function MobileJoin({ token }: { token: string }) {
       return;
     }
     const previous = readDevice();
+    const assertSameDevice = () => {
+      const current = readDevice();
+      if (
+        previous
+          ? current?.enrollmentId !== previous.enrollmentId ||
+            current.ownerId !== previous.ownerId ||
+            current.deviceSecret !== previous.deviceSecret ||
+            current.credentialVersion !== previous.credentialVersion
+          : !!current
+      )
+        throw new Error('The approved device changed. Open POS again before continuing.');
+    };
     if (
       enrollment.resetRequired &&
       (!previous || previous.enrollmentId !== enrollment.enrollmentId)
@@ -205,12 +230,38 @@ export function MobileJoin({ token }: { token: string }) {
         ? previous!.deviceSecret
         : (readSetupBinding(enrollment.enrollmentId) ?? createDeviceSecret());
       saveSetupBinding(enrollment.enrollmentId, secret);
-      const value = await mobileApi<MobileProfile>('/mobile-pos-auth/setup', {
-        method: 'POST',
-        body: { claimToken, deviceSecret: secret, pin },
-        public: true,
-        deviceSecret: secret,
-      });
+      let value: MobileProfile;
+      try {
+        value = await mobileApi<MobileProfile>('/mobile-pos-auth/setup', {
+          method: 'POST',
+          body: { claimToken, deviceSecret: secret, pin },
+          public: true,
+          deviceSecret: secret,
+        });
+      } catch (error) {
+        if (
+          !enrollment.resetRequired ||
+          !previous ||
+          !(error instanceof ApiError) ||
+          ![404, 410].includes(error.status)
+        )
+          throw error;
+        assertSameDevice();
+        // Retry only the credential check. A consumed or expired reset link
+        // never authorizes another PIN change.
+        value = await mobileApi<MobileProfile>('/mobile-pos-auth/login', {
+          method: 'POST',
+          body: { enrollmentId: previous.enrollmentId, deviceSecret: secret, pin },
+          public: true,
+          deviceSecret: secret,
+        });
+      }
+      assertSameDevice();
+      if (
+        value.enrollmentId !== enrollment.enrollmentId ||
+        (enrollment.resetRequired && value.user.id !== previous!.ownerId)
+      )
+        throw new Error('This sign-in does not match the approved device.');
       saveDevice({
         deviceSecret: secret,
         enrollmentId: value.enrollmentId,
@@ -438,6 +489,17 @@ export function MobileJoin({ token }: { token: string }) {
           <p className="pd-error" role="alert">
             {error}
           </p>
+        )}
+        {installed && resetRecovery && (
+          <>
+            <p className="pd-muted">
+              If your new PIN was saved before the connection was lost, sign in with it to recover
+              this device. Otherwise ask your administrator for a new reset link.
+            </p>
+            <a className="pd-button pd-primary" href="/mobile-pos">
+              Open POS to recover sign-in
+            </a>
+          </>
         )}
       </section>
       <footer className="pd-mobile-footer">ITEMBA GROUP · A device for your work.</footer>

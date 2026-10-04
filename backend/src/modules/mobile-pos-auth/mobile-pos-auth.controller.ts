@@ -24,6 +24,7 @@ export class MobilePosAuthController {
   constructor(private readonly service: MobilePosAuthService) {}
   @Public()
   @Get('invite/:token')
+  @AgentExcluded()
   invite(@Param('token') token: string) {
     return this.service.inviteInfo(token);
   }
@@ -36,6 +37,7 @@ export class MobilePosAuthController {
   }
   @Public()
   @Get('enrollment/:claimToken')
+  @AgentExcluded()
   enrollment(@Param('claimToken') claimToken: string) {
     return this.service.enrollmentInfo(claimToken);
   }
@@ -68,6 +70,7 @@ export class MobilePosAuthController {
     return this.service.resetPin(dto);
   }
   @Get('me')
+  @AgentExcluded()
   @MobilePosSessionAllowed('CASHIER', 'STOCKIST')
   me(@CurrentUser() user: AuthUser) {
     return this.service.me(user);
@@ -84,7 +87,10 @@ export class MobilePosAuthController {
 @RequirePermissions('mobile_pos_onboarding.manage')
 export class MobilePosOnboardingController {
   constructor(private readonly service: MobilePosAuthService) {}
+  // These reads are part of a human device-enrollment ceremony. Its branch
+  // custody and enrollment scope have no reviewed agent execution contract.
   @Get('branch-options')
+  @AgentExcluded('mobile_pos_onboarding_not_represented')
   branchOptions(
     @CurrentUser() user: AuthUser,
     @Query('companyId') companyId: string,
@@ -94,6 +100,7 @@ export class MobilePosOnboardingController {
     return this.service.branchOptions(user, companyId, divisionId, branchId);
   }
   @Get('branch-setups')
+  @AgentExcluded('mobile_pos_onboarding_not_represented')
   setups(@CurrentUser() user: AuthUser, @Query('companyId') companyId?: string) {
     return this.service.listBranchSetups(user, companyId);
   }
@@ -108,6 +115,7 @@ export class MobilePosOnboardingController {
     return this.service.createInvite(dto.branchSetupId, user);
   }
   @Get('enrollments')
+  @AgentExcluded('mobile_pos_onboarding_not_represented')
   enrollments(
     @CurrentUser() user: AuthUser,
     @Query('companyId') companyId?: string,

@@ -383,6 +383,10 @@ export function MobilePosApp() {
       setSelected(null);
       setCorrecting(undefined);
       setPrintJob(null);
+      setPin('');
+      setError('');
+      setNotice('');
+      setBusy(false);
       setRevision((value) => value + 1);
     };
     window.addEventListener('online', online);
@@ -406,21 +410,32 @@ export function MobilePosApp() {
     }
     setBusy(true);
     setError('');
+    const epoch = generation.current;
     try {
       const user = await mobileApi<MobileProfile>('/mobile-pos-auth/login', {
         method: 'POST',
         body: { enrollmentId: device.enrollmentId, deviceSecret: device.deviceSecret, pin },
         public: true,
       });
-      if (user.user.id !== device.ownerId)
+      if (epoch !== generation.current) return;
+      const current = readDevice();
+      if (
+        current?.enrollmentId !== device.enrollmentId ||
+        current.ownerId !== device.ownerId ||
+        current.deviceSecret !== device.deviceSecret ||
+        current.credentialVersion !== device.credentialVersion
+      )
+        throw new SessionChangedError();
+      if (user.enrollmentId !== device.enrollmentId || user.user.id !== device.ownerId)
         throw new Error('This sign-in does not match the approved device.');
       saveDevice({ ...device, credentialVersion: user.operator.credentialVersion });
       setPin('');
       setRevision((v) => v + 1);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not sign in.');
+      if (epoch === generation.current)
+        setError(e instanceof Error ? e.message : 'Could not sign in.');
     } finally {
-      setBusy(false);
+      if (epoch === generation.current) setBusy(false);
     }
   }
   async function logout() {
@@ -943,6 +958,7 @@ export function MobilePosApp() {
                   key={`${selected.id}:${selected.revision}`}
                   draft={selected}
                   context={context}
+                  officeLinks={!profile}
                   decide={decide}
                   onClose={() => setSelected(null)}
                   onChanged={(draft) => {

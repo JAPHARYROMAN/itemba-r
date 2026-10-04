@@ -1,4 +1,10 @@
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
+import {
+  canonicalSaleSignature,
+  lockPosDuplicateIdentity,
+  lockPosSalePosting,
+  posDraftSaleRequestKey,
+} from '../../common/services/pos-sale-duplicates';
 import { readPosTenders, tenderTotal, type PosTender } from './pos-tenders';
 import {
   BadRequestException,
@@ -73,6 +79,8 @@ type MobilePosPriceOverrideRecord = {
 
 export type SalesOrderCreateContext = {
   originUserId?: string;
+  /** Internal approval context; never accepted from the canonical HTTP DTO. */
+  originatingPosDraftId?: string;
   posTenders?: PosTender[];
   mobilePosTerminalId?: string;
   /**
@@ -2148,26 +2156,39 @@ export class SalesOrdersService {
     }
   }
 
-  async confirm(id: string, user: AuthUser, transaction?: Prisma.TransactionClient) {
+  async confirm(
+    id: string,
+    user: AuthUser,
+    transaction?: Prisma.TransactionClient,
+    originatingPosDraftId?: string,
+  ) {
     const userId = user.id;
-    const existing = await this.findOne(id, user, AccessLevel.WRITE, transaction);
+    const visible = await this.findOne(id, user, AccessLevel.WRITE, transaction);
     if (!transaction)
-      await assertLegacyPosWriteAllowed(this.prisma, user, existing.companyId, existing.branchId);
-    if (existing.status !== 'DRAFT') {
-      throw new BadRequestException('Only DRAFT sales orders can be confirmed');
-    }
-    if (!existing.branchId) {
-      throw new BadRequestException('Sales order branch/location is required to issue stock');
-    }
-    const issuingBranchId = existing.branchId;
+      await assertLegacyPosWriteAllowed(this.prisma, user, visible.companyId, visible.branchId);
+    if (originatingPosDraftId && !transaction)
+      throw new BadRequestException(
+        'POS Draft confirmation requires its owning approval transaction',
+      );
 
     const run = async (tx: Prisma.TransactionClient) => {
+      // POS final approval acquires this before expiry/reservation stock locks.
+      // Office confirms must use the same order before numbering and stock.
+      await lockPosSalePosting(tx, visible.companyId);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM sales_orders WHERE id=${id} FOR UPDATE`);
+      // A draft can be edited while an earlier findOne() waits. Posting and its
+      // fingerprint must use the current persisted lines and totals under lock.
+      const existing = await this.findOne(id, user, AccessLevel.WRITE, tx);
+      if (existing.status !== 'DRAFT')
+        throw new BadRequestException('Only DRAFT sales orders can be confirmed');
+      if (!existing.branchId)
+        throw new BadRequestException('Sales order branch/location is required to issue stock');
+      const issuingBranchId = existing.branchId;
+      await this.assertPosDraftDuplicateReview(tx, existing, originatingPosDraftId);
+
       // Atomically claim the order: flip DRAFT -> CONFIRMED in one guarded write
-      // BEFORE doing any of the posting work. The status check above happened
-      // outside the transaction, so two concurrent confirms could both pass it;
-      // this updateMany takes the row lock and a second confirm matches 0 rows
-      // (status already CONFIRMED) -> it throws and rolls back instead of
-      // double-issuing stock, double-creating the receivable, and double-posting.
+      // before posting. Keep the guarded claim alongside the locked reload so
+      // every confirmation path rejects an order that is no longer DRAFT.
       const claim = await tx.salesOrder.updateMany({
         where: { id, status: 'DRAFT' },
         data: { status: 'CONFIRMED' },
@@ -2479,8 +2500,53 @@ export class SalesOrdersService {
     tx: Prisma.TransactionClient,
     context: SalesOrderCreateContext = {},
   ) {
+    await lockPosSalePosting(tx, dto.companyId);
     const order = await this.create(dto, user, context, tx);
-    return this.confirm(order.id, user, tx);
+    return this.confirm(order.id, user, tx, context.originatingPosDraftId);
+  }
+
+  private async assertPosDraftDuplicateReview(
+    tx: Prisma.TransactionClient,
+    order: Awaited<ReturnType<SalesOrdersService['findOne']>>,
+    originatingPosDraftId?: string,
+  ) {
+    const signature = canonicalSaleSignature(order);
+    if (!signature) {
+      if (originatingPosDraftId)
+        throw new ConflictException('POS Draft sale identity does not match');
+      return;
+    }
+    await lockPosDuplicateIdentity(tx, order.companyId, signature);
+    const matches = await tx.posDraft.findMany({
+      where: {
+        companyId: order.companyId,
+        kind: 'SALE',
+        duplicateSignature: signature,
+        status: { not: 'REJECTED' },
+      },
+      select: { id: true, requestId: true, originUserId: true, status: true, payload: true },
+    });
+    const captures = matches.filter((draft) => {
+      const payload = draft.payload as Prisma.JsonObject;
+      return !payload?._continuesDraftId;
+    });
+    if (originatingPosDraftId) {
+      const origin = captures.find((draft) => draft.id === originatingPosDraftId);
+      if (
+        !origin ||
+        !['SUBMITTED', 'READY_FINAL', 'NEEDS_ATTENTION'].includes(origin.status) ||
+        origin.originUserId !== order.createdById ||
+        order.idempotencyKey !== posDraftSaleRequestKey(order.companyId, origin.requestId)
+      )
+        throw new ConflictException('POS Draft sale identity does not match');
+      // The owning approval path has already rechecked and explicitly reviewed
+      // every candidate under this same signature lock. Preserve genuine repeats.
+      return;
+    }
+    if (captures.length)
+      throw new ConflictException(
+        'A matching POS transaction requires administrator review in POS Draft before this sale can be confirmed.',
+      );
   }
 
   /**

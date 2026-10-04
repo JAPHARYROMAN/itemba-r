@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   api: vi.fn(),
   get: vi.fn(),
   list: vi.fn(),
+  saveDevice: vi.fn(),
   device: {
     enrollmentId: 'enrollment',
     deviceSecret: 'a'.repeat(64),
@@ -24,7 +25,7 @@ vi.mock('./mobile-api', () => ({
   mobileApi: (...args: unknown[]) => h.api(...args),
   isInstalled: () => true,
   readDevice: () => h.device,
-  saveDevice: vi.fn(),
+  saveDevice: (...args: unknown[]) => h.saveDevice(...args),
   readPendingEnrollment: () => null,
   readAdminInstallation: () => null,
 }));
@@ -91,6 +92,7 @@ beforeEach(() => {
   h.api.mockReset();
   h.get.mockReset();
   h.list.mockReset();
+  h.saveDevice.mockReset();
   h.list.mockResolvedValue([]);
   h.device = {
     enrollmentId: 'enrollment',
@@ -200,6 +202,61 @@ describe('mobile session boundaries', () => {
     });
     expect(screen.queryByText('Sale', { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText('Collection')).toBeVisible();
+  });
+  it('cannot overwrite a reassigned device with a late successful PIN login', async () => {
+    let finishLogin: (value: unknown) => void = () => undefined;
+    const pending = new Promise((resolve) => {
+      finishLogin = resolve;
+    });
+    h.api.mockImplementation(async (path: string) => {
+      if (path.endsWith('/login')) return pending;
+      throw new ApiError('Device PIN required', 401, null);
+    });
+    const user = userEvent.setup();
+    render(<MobilePosApp />);
+    await screen.findByLabelText('Six-digit PIN');
+    await user.type(screen.getByLabelText('Six-digit PIN'), '123456');
+    await user.click(screen.getByRole('button', { name: 'Open POS', exact: true }));
+    await waitFor(() =>
+      expect(h.api).toHaveBeenCalledWith('/mobile-pos-auth/login', expect.anything()),
+    );
+    h.device = { ...h.device, ownerId: 'other', enrollmentId: 'new-enrollment' };
+    await act(async () => {
+      finishLogin(profile);
+      await pending;
+    });
+    expect(h.saveDevice).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('signed-in operator changed');
+    expect(h.device.ownerId).toBe('other');
+  });
+  it('keeps a PIN cashier request and its final receipt inside the mobile workspace', async () => {
+    const posted = {
+      ...draftFixture,
+      status: 'POSTED',
+      pendingMoney: 0,
+      allowedActions: [],
+      postedEntityType: 'SalesOrder',
+      postedEntityId: 'posted-sale',
+    };
+    h.api.mockImplementation(async (path: string) =>
+      path.endsWith('/me')
+        ? profile
+        : path.endsWith('/context')
+          ? contextFixture
+          : path === '/pos-drafts'
+            ? { ...page, data: [posted], total: 1 }
+            : posted,
+    );
+    const user = userEvent.setup();
+    render(<MobilePosApp />);
+    await screen.findByText('Operator A');
+    await user.click(screen.getByRole('button', { name: 'Requests', exact: true }));
+    await user.click(await screen.findByRole('button', { name: /Sale.*Posted/ }));
+    await screen.findByRole('region', { name: 'Request details' });
+    expect(screen.getByText('Customer A')).toBeVisible();
+    expect(screen.getByText('Cement')).toBeVisible();
+    expect(screen.queryAllByRole('link')).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Print posted receipt' })).toBeEnabled();
   });
   it('loads every preparation page from the server while retaining the full pending-money summary', async () => {
     h.profile = { ...profile, role: 'STOCKIST' };

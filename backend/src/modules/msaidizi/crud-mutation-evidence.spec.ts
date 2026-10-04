@@ -120,6 +120,22 @@ function fixture(effect = compoundEffect()): CrudMutationAnyFixtureRegistration 
 }
 
 describe('compound CRUD mutation evidence contract', () => {
+  it('binds a revised fixture proof without changing the mutation pack format', () => {
+    const original = fixture();
+    const revised: CrudMutationAnyFixtureRegistration = { ...original, fixtureVersion: 2 };
+    expect(validateCrudMutationFixtureContract(revised)).toEqual([]);
+    expect(fixtureContractDigest(revised)).not.toBe(fixtureContractDigest(original));
+  });
+
+  it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid fixture revision %s',
+    (fixtureVersion) => {
+      expect(validateCrudMutationFixtureContract({ ...fixture(), fixtureVersion })).toContain(
+        'fixtureVersion must be a positive safe integer',
+      );
+    },
+  );
+
   it('requires a signed exact AuditLog company binding', () => {
     const governed = fixture();
     const missingCompany = {

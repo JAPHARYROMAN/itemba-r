@@ -77,7 +77,10 @@ function fixture(overrides: Record<string, unknown> = {}) {
         };
         return { ...state };
       }),
-      updateMany: jest.fn(async () => ({ count: 1 })),
+      updateMany: jest.fn(async ({ data }: any) => {
+        state = { ...state, ...data };
+        return { count: 1 };
+      }),
     },
     mobilePosBranchSetup: { findUnique: jest.fn(async () => setup) },
     mobilePosTerminal: {
@@ -269,6 +272,49 @@ describe('approved mobile PIN identity', () => {
     ).rejects.toThrow(UnauthorizedException);
     expect(f.prisma.activeSession.create).not.toHaveBeenCalled();
   });
+
+  it('recovers a completed PIN reset through new-PIN login without reusing the reset token', async () => {
+    const f = fixture();
+    const { resetToken } = await f.service.issueReset('enrollment-a', manager);
+    await expect(
+      f.service.resetPin({
+        enrollmentId: 'enrollment-a',
+        resetToken,
+        deviceSecret: 'b'.repeat(64),
+        pin: '654321',
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(f.state().pinHash).toBe('hashed:123456');
+    await f.service.resetPin({
+      enrollmentId: 'enrollment-a',
+      resetToken,
+      deviceSecret: SECRET,
+      pin: '654321',
+    });
+    expect(f.state()).toMatchObject({
+      pinHash: 'hashed:654321',
+      setupTokenHash: null,
+      credentialVersion: 2,
+    });
+    await expect(
+      f.service.resetPin({
+        enrollmentId: 'enrollment-a',
+        resetToken,
+        deviceSecret: SECRET,
+        pin: '999999',
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+    await expect(
+      f.service.login({ enrollmentId: 'enrollment-a', deviceSecret: SECRET, pin: '123456' }),
+    ).rejects.toThrow(UnauthorizedException);
+    const recovered = await f.service.login({
+      enrollmentId: 'enrollment-a',
+      deviceSecret: SECRET,
+      pin: '654321',
+    });
+    expect(recovered.operator).toMatchObject({ id: 'operator-a', credentialVersion: 2 });
+    expect(f.state().pinHash).toBe('hashed:654321');
+  });
 });
 
 describe('mobile session API confinement', () => {
@@ -412,6 +458,49 @@ describe('mobile session API confinement', () => {
         { headers: { authorization: 'Bearer test-only' } } as any,
         { sub: 'operator-a', email: '', tokenUse: 'mobile-pos-refresh' } as any,
       ),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it.each([
+    ['session belongs to another operator', 'activeSession', { userId: 'operator-b' }],
+    ['session belongs to another enrollment', 'activeSession', { deviceId: 'enrollment-b' }],
+    ['ordinary session is not a POS session', 'activeSession', { sessionType: 'WEB' }],
+    ['session is revoked', 'activeSession', { status: 'REVOKED' }],
+    ['enrollment is revoked', 'mobilePosEnrollment', { status: 'REVOKED' }],
+    ['enrollment changes owner', 'mobilePosEnrollment', { userId: 'operator-b' }],
+    ['PIN reset is pending', 'mobilePosEnrollment', { setupTokenHash: mobilePosHash(CLAIM) }],
+    [
+      'branch is paused',
+      'mobilePosEnrollment',
+      { branchSetup: { enabled: false, approvalRequired: true } },
+    ],
+    ['terminal changes owner', 'mobilePosTerminal', { assignedUserId: 'operator-b' }],
+    ['terminal changes branch', 'mobilePosTerminal', { branchId: 'branch-b' }],
+    [
+      'terminal changes device',
+      'mobilePosTerminal',
+      { deviceSecretHash: mobilePosHash('b'.repeat(64)) },
+    ],
+  ])('rejects live binding change: %s', async (_reason, model, overrides) => {
+    const f = fixture();
+    const original = await f.prisma[model as string].findUnique();
+    f.prisma[model as string].findUnique.mockResolvedValue({ ...original, ...overrides });
+    const strategy = new JwtStrategy(
+      f.config as any,
+      f.prisma,
+      { get: jest.fn(), set: jest.fn() } as any,
+      f.audit as any,
+    );
+    await expect(
+      strategy.validate({
+        sub: 'operator-a',
+        email: '',
+        sid: 'session-a',
+        tokenUse: 'mobile-pos',
+        mobilePosEnrollmentId: 'enrollment-a',
+        mobilePosTerminalId: 'terminal-a',
+        mobilePosCredentialVersion: 1,
+      }),
     ).rejects.toThrow(UnauthorizedException);
   });
 });

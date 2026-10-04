@@ -18011,6 +18011,7 @@ model PosDraft {
   @@unique([companyId, requestId])
   @@index([companyId, branchId, status, businessDate])
   @@index([originUserId, status])
+  @@index([status, reservedUntil])
   @@map("pos_drafts")
 }
 
@@ -18026,6 +18027,7 @@ model PosDraftReservation {
   draft PosDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
   @@unique([draftId, productId, branchId])
   @@index([companyId, branchId, productId, releasedAt, expiresAt])
+  @@index([releasedAt, expiresAt])
   @@map("pos_draft_reservations")
 }
 

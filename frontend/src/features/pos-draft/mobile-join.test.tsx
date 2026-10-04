@@ -251,4 +251,146 @@ describe('installed mobile onboarding', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('expired');
     expect(screen.queryByLabelText('Full name')).not.toBeInTheDocument();
   });
+  it('recovers a completed reset after its response is lost using the same device and new PIN', async () => {
+    h.installed = true;
+    h.device = {
+      enrollmentId: 'enrollment',
+      deviceSecret: 'b'.repeat(64),
+      ownerId: 'operator',
+      credentialVersion: 1,
+    };
+    let resetCompleted = false;
+    h.api.mockImplementation(async (path: string) => {
+      if (path.includes('/invite/')) throw new ApiError('No invite', 404, null);
+      if (path.endsWith('/setup')) {
+        if (resetCompleted) throw new ApiError('Registration is unavailable', 404, null);
+        resetCompleted = true;
+        throw new TypeError('Response lost');
+      }
+      if (path.endsWith('/login'))
+        return {
+          ...scope,
+          user: { id: 'operator' },
+          operator: { credentialVersion: 2 },
+          enrollmentId: 'enrollment',
+        };
+      return {
+        ...scope,
+        enrollmentId: 'enrollment',
+        name: 'Operator A',
+        role: 'CASHIER',
+        status: 'APPROVED',
+        pinReady: false,
+        resetRequired: true,
+      };
+    });
+    const user = userEvent.setup();
+    render(<MobileJoin token="reset" />);
+    await screen.findByLabelText('Six-digit PIN');
+    await user.type(screen.getByLabelText('Six-digit PIN'), '654321');
+    await user.type(screen.getByLabelText('Confirm PIN'), '654321');
+    await user.click(screen.getByRole('button', { name: 'Set PIN and open POS' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Response lost');
+    expect(h.save).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Set PIN and open POS' }));
+    await waitFor(() => expect(h.replace).toHaveBeenCalledWith('/mobile-pos'));
+    expect(h.api).toHaveBeenCalledWith(
+      '/mobile-pos-auth/login',
+      expect.objectContaining({
+        body: { enrollmentId: 'enrollment', deviceSecret: 'b'.repeat(64), pin: '654321' },
+        public: true,
+      }),
+    );
+    expect(h.save).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: 'operator', credentialVersion: 2 }),
+    );
+    expect(h.provisional).toBeNull();
+  });
+  it('offers new-PIN sign-in when reloading a consumed reset link on its original phone', async () => {
+    h.installed = true;
+    h.device = {
+      enrollmentId: 'enrollment',
+      deviceSecret: 'b'.repeat(64),
+      ownerId: 'operator',
+      credentialVersion: 1,
+    };
+    h.provisional = { enrollmentId: 'enrollment', deviceSecret: 'b'.repeat(64) };
+    h.api.mockRejectedValue(new ApiError('Registration is unavailable', 404, null));
+    render(<MobileJoin token="used-reset" />);
+    expect(
+      await screen.findByRole('link', { name: 'Open POS to recover sign-in' }),
+    ).toHaveAttribute('href', '/mobile-pos');
+    expect(h.save).not.toHaveBeenCalled();
+    expect(h.api.mock.calls.every((call) => !call[1]?.method)).toBe(true);
+  });
+  it('does not reset from another approved phone', async () => {
+    h.installed = true;
+    h.device = {
+      enrollmentId: 'another-enrollment',
+      deviceSecret: 'b'.repeat(64),
+      ownerId: 'operator',
+      credentialVersion: 1,
+    };
+    h.api.mockImplementation(async (path: string) => {
+      if (path.includes('/invite/')) throw new ApiError('No invite', 404, null);
+      return {
+        ...scope,
+        enrollmentId: 'enrollment',
+        name: 'Operator A',
+        role: 'CASHIER',
+        status: 'APPROVED',
+        pinReady: false,
+        resetRequired: true,
+      };
+    });
+    const user = userEvent.setup();
+    render(<MobileJoin token="reset" />);
+    await screen.findByLabelText('Six-digit PIN');
+    await user.type(screen.getByLabelText('Six-digit PIN'), '654321');
+    await user.type(screen.getByLabelText('Confirm PIN'), '654321');
+    await user.click(screen.getByRole('button', { name: 'Set PIN and open POS' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('originally approved device');
+    expect(h.save).not.toHaveBeenCalled();
+    expect(h.api.mock.calls.every((call) => !call[1]?.method)).toBe(true);
+  });
+  it('keeps a changed device binding when a late PIN setup response arrives', async () => {
+    h.installed = true;
+    h.device = {
+      enrollmentId: 'enrollment',
+      deviceSecret: 'b'.repeat(64),
+      ownerId: 'operator',
+      credentialVersion: 1,
+    };
+    h.api.mockImplementation(async (path: string) => {
+      if (path.includes('/invite/')) throw new ApiError('No invite', 404, null);
+      if (path.endsWith('/setup')) {
+        h.device = { ...h.device!, ownerId: 'another-operator' };
+        return {
+          ...scope,
+          user: { id: 'operator' },
+          operator: { credentialVersion: 2 },
+          enrollmentId: 'enrollment',
+        };
+      }
+      return {
+        ...scope,
+        enrollmentId: 'enrollment',
+        name: 'Operator A',
+        role: 'CASHIER',
+        status: 'APPROVED',
+        pinReady: false,
+        resetRequired: true,
+      };
+    });
+    const user = userEvent.setup();
+    render(<MobileJoin token="reset" />);
+    await screen.findByLabelText('Six-digit PIN');
+    await user.type(screen.getByLabelText('Six-digit PIN'), '654321');
+    await user.type(screen.getByLabelText('Confirm PIN'), '654321');
+    await user.click(screen.getByRole('button', { name: 'Set PIN and open POS' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('approved device changed');
+    expect(h.save).not.toHaveBeenCalled();
+    expect(h.replace).not.toHaveBeenCalled();
+    expect(h.device.ownerId).toBe('another-operator');
+  });
 });

@@ -541,6 +541,40 @@ async function main() {
     await db.accountingPeriod.update({ where: { id: period.id }, data: { status: 'OPEN' } });
     assert.equal(await db.cashDeskMovement.count(), 0, 'Period failure rolls back cash');
     assert.equal(await db.inventoryMovement.count(), 0, 'Period failure rolls back stock');
+    // Posting captures this historical hold before canonical movement expiry
+    // releases it. Reversal must restore stock value without resurrecting it.
+    const expiredHold = await db.posDraft.create({
+      data: {
+        companyId: company.id,
+        divisionId: division.id,
+        branchId: branch.id,
+        originUserId: user.id,
+        originRole: 'CASHIER',
+        requestId: randomUUID(),
+        kind: 'SALE',
+        status: 'AWAITING_STOCKIST',
+        businessDate: new Date(day),
+        capturedAt: new Date(),
+        payload: { lines: [{ productId: product.id, quantity: 5 }] },
+        amount: 100,
+        pendingMoney: 100,
+        reservedUntil: new Date(Date.now() - 60_000),
+        reservations: {
+          create: {
+            companyId: company.id,
+            branchId: branch.id,
+            productId: product.id,
+            quantity: 5,
+            expiresAt: new Date(Date.now() - 60_000),
+          },
+        },
+      },
+      include: { reservations: true },
+    });
+    await db.inventoryBalance.updateMany({
+      where: { branchId: branch.id, productId: product.id },
+      data: { quantityReserved: 5 },
+    });
     const races = await Promise.all([
       api(`reports/${closed.id}/posting`, request),
       api(`reports/${closed.id}/posting`, request),
@@ -590,6 +624,18 @@ async function main() {
       where: { branchId: branch.id, productId: product.id },
     });
     assert.equal(balance.quantityOnHand.toString(), '999');
+    assert.equal(balance.quantityReserved.toNumber(), 0);
+    assert.ok(
+      (
+        await db.posDraftReservation.findUniqueOrThrow({
+          where: { id: expiredHold.reservations[0].id },
+        })
+      ).releasedAt,
+    );
+    assert.equal(
+      posted.evidence.beforeStock.find((row) => row.productId === product.id).reserved,
+      '5',
+    );
     const saleRows = await salesService.list(manager, { companyId: company.id, page: 1 });
     assert.equal(saleRows.total, 2);
     const invoiceRows = await invoices.list(manager, { companyId: company.id, page: 1 });
@@ -711,6 +757,15 @@ async function main() {
     assert.equal(restored.quantityOnHand.toString(), '1000');
     assert.equal(restored.averageCost.toString(), '2000');
     assert.equal(restored.totalValue.toString(), '2000000');
+    assert.equal(
+      restored.quantityReserved.toNumber(),
+      0,
+      'Reversal cannot recreate an expired, unowned hold',
+    );
+    assert.ok(
+      restored.physicalRevision > balance.physicalRevision,
+      'Out-and-back stock still invalidates earlier physical counts',
+    );
     const journalNet = await db.journalEntryLine.aggregate({ _sum: { debit: true, credit: true } });
     assert(journalNet._sum.debit.eq(journalNet._sum.credit));
     const zeroed = await db.journalEntryLine.groupBy({

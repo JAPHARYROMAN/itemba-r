@@ -310,7 +310,7 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
           branchId: context.scope.branchId,
           requestId: request.current,
           capturedAt: capturedAt.current,
-          businessDate: initial?.businessDate ?? businessDate(),
+          businessDate: initial?.businessDate ?? businessDate(capturedAt.current),
           kind,
           payload,
         },

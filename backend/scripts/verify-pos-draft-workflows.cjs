@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const argon2 = require('argon2');
 const { PrismaClient } = require('@prisma/client');
 
@@ -20,7 +21,24 @@ const api = 'http://127.0.0.1:28001/api/v1';
 const db = new PrismaClient({ datasourceUrl: env.DATABASE_URL, log: [] });
 const stamp = Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
 const password = env.RELEASE_PROOF_USER_PASSWORD || crypto.randomBytes(24).toString('base64url');
-const report = { startedAt: new Date().toISOString(), fixture: null, checks: [] };
+const report = {
+  sourceRevision: execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim(),
+  sourceTreeClean:
+    execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim() === '',
+  compiledEntrySha256: crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(path.join(root, 'backend/dist/main.js')))
+    .digest('hex'),
+  startedAt: new Date().toISOString(),
+  fixture: null,
+  checks: [],
+};
 let failures = 0;
 
 async function request(token, method, route, body, expected, deviceSecret, rateRetries = 0) {
@@ -214,6 +232,7 @@ async function fixtures() {
     'mobile_pos_onboarding.manage',
     'mobile_pos_lite.access',
     'mobile_pos_lite.manage',
+    'mobile_pos_lite.view',
     'pos_drafts.view',
     'pos_drafts.create',
     'pos_drafts.dispatch',
@@ -246,6 +265,7 @@ async function fixtures() {
     'operations.reports.view',
     'grn.post',
     'sales.create',
+    'sales.confirm',
     'inventory.adjustments.create',
   ];
   for (const code of permissions)
@@ -713,6 +733,11 @@ async function main() {
         revision: posted[0].revision,
       });
       assert.equal(retry.postedEntityId, posted[0].postedEntityId);
+      const details = await call(f.admin.token, 'GET', `/pos-drafts/${cashierDraft.id}`);
+      assert.ok(
+        details.duplicateCandidates.every((candidate) => candidate.id !== posted[0].postedEntityId),
+        'A posted sale must not list its own canonical document as a suspected duplicate',
+      );
       assert.equal(
         await db.salesOrder.count({
           where: { companyId: f.company.id, id: posted[0].postedEntityId },
@@ -814,6 +839,63 @@ async function main() {
       });
       assert.equal(approved.status, 'POSTED');
       assert.equal((await financial()).sales, before.sales + 1);
+    },
+  );
+  await check(
+    'Approved corrections release their own hold, preserve collected funds and require review again',
+    async () => {
+      const before = await financial();
+      const capture = envelope('SALE', sale(19));
+      const draft = await call(cashier.accessToken, 'POST', '/pos-drafts', capture);
+      const approved = await call(f.admin.token, 'POST', `/pos-drafts/${draft.id}/approve`, {
+        revision: 1,
+      });
+      assert.equal(n((await balance()).quantityReserved), 19);
+      await call(
+        cashier.accessToken,
+        'PATCH',
+        `/pos-drafts/${draft.id}/correct`,
+        {
+          ...capture,
+          revision: approved.revision,
+          payload: sale(18),
+        },
+        409,
+      );
+      assert.equal(n((await balance()).quantityReserved), 19);
+      assert.equal(
+        n((await db.posDraft.findUniqueOrThrow({ where: { id: draft.id } })).pendingMoney),
+        1900,
+      );
+      const corrected = await call(
+        cashier.accessToken,
+        'PATCH',
+        `/pos-drafts/${draft.id}/correct`,
+        {
+          ...capture,
+          revision: approved.revision,
+        },
+      );
+      assert.equal(corrected.status, 'SUBMITTED');
+      assert.equal(corrected.pendingMoney, 1900);
+      assert.equal(n((await balance()).quantityReserved), 0);
+      await call(
+        stockist.accessToken,
+        'POST',
+        `/pos-drafts/${draft.id}/prepare`,
+        { revision: corrected.revision },
+        404,
+      );
+      const renewed = await call(f.admin.token, 'POST', `/pos-drafts/${draft.id}/approve`, {
+        revision: corrected.revision,
+      });
+      assert.equal(renewed.status, 'AWAITING_STOCKIST');
+      await call(f.admin.token, 'POST', `/pos-drafts/${draft.id}/reject`, {
+        revision: renewed.revision,
+        reason: 'Customer cancelled; return collected funds',
+      });
+      assert.equal(n((await balance()).quantityReserved), 0);
+      assert.deepEqual(await financial(), before);
     },
   );
   await check(
@@ -1375,6 +1457,20 @@ async function main() {
       await call(f.admin.token, 'GET', `/three-way-matching/${otherMatch.id}`, undefined, 403);
     },
   );
+  // These acceptance cases need the office reviewer before the later security
+  // cases deliberately enroll, revoke and log out that same password account.
+  await require('./verify-pos-validation-boundaries.cjs').verifyPosValidationBoundaries({
+    db,
+    check,
+    fixture: f,
+    call,
+  });
+  await require('./verify-pos-canonical-duplicates.cjs').verifyPosCanonicalDuplicates({
+    db,
+    check,
+    fixture: f,
+    call,
+  });
   await check('Approval rechecks the origin recorder company access after capture', async () => {
     const draft = await call(
       f.reviewer.token,
@@ -1639,6 +1735,26 @@ async function main() {
       await call(
         null,
         'POST',
+        '/mobile-pos-auth/setup',
+        {
+          claimToken: reset.resetToken,
+          deviceSecret: cashier.secret,
+          pin: '456789',
+        },
+        404,
+      );
+      const lostResponseRecovery = await call(null, 'POST', '/mobile-pos-auth/login', {
+        enrollmentId: cashier.enrollmentId,
+        deviceSecret: cashier.secret,
+        pin: '456789',
+      });
+      assert.equal(
+        lostResponseRecovery.operator.credentialVersion,
+        recovered.operator.credentialVersion,
+      );
+      await call(
+        null,
+        'POST',
         '/mobile-pos-auth/reset-pin',
         {
           enrollmentId: cashier.enrollmentId,
@@ -1648,7 +1764,7 @@ async function main() {
         },
         401,
       );
-      Object.assign(cashier, recovered);
+      Object.assign(cashier, lostResponseRecovery);
     },
   );
   await check(
@@ -1677,6 +1793,11 @@ async function main() {
       await call(f.admin.token, 'GET', '/auth/me');
     },
   );
+  await require('./verify-pos-reservation-hardening.cjs').verifyPosReservationHardening({
+    db,
+    check,
+    fixture: f,
+  });
 }
 
 main()

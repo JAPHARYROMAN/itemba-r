@@ -17,6 +17,11 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { releaseExpiredPosReservations } from '../../common/services/pos-draft-reservations';
+import {
+  lockPosDuplicateIdentity,
+  lockPosSalePosting,
+} from '../../common/services/pos-sale-duplicates';
 import {
   AccountResolverService,
   AccountingControlService,
@@ -441,7 +446,7 @@ export class PosDraftsService {
     );
     const actions: string[] = [];
     if (
-      ['SUBMITTED', 'NEEDS_ATTENTION'].includes(draft.status) &&
+      ['SUBMITTED', 'NEEDS_ATTENTION', 'AWAITING_STOCKIST', 'READY_FINAL'].includes(draft.status) &&
       draft.originUserId === user.id &&
       !object(draft.payload)._continuesDraftId &&
       this.has(user, 'pos_drafts.create')
@@ -1319,9 +1324,7 @@ export class PosDraftsService {
     );
   }
   private lockIdentity(tx: Db, companyId: string, identity: string) {
-    return tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`POSDraft:${companyId}:${identity}`}, 0))`,
-    );
+    return lockPosDuplicateIdentity(tx, companyId, identity);
   }
   private async lockDraft(
     tx: Db,
@@ -1347,21 +1350,47 @@ export class PosDraftsService {
         const old = await this.lockDraft(tx, id, user, dto.revision, AccessLevel.READ);
         if (
           old.originUserId !== user.id ||
-          !['SUBMITTED', 'NEEDS_ATTENTION'].includes(old.status) ||
+          !['SUBMITTED', 'NEEDS_ATTENTION', 'AWAITING_STOCKIST', 'READY_FINAL'].includes(
+            old.status,
+          ) ||
           object(old.payload)._continuesDraftId
         )
-          throw new ForbiddenException('Only the origin recorder may correct an unapproved draft');
+          throw new ForbiddenException('Only the origin recorder may correct an unposted draft');
         if (
           old.requestId !== dto.requestId ||
           old.companyId !== scope.companyId ||
           old.branchId !== scope.branchId ||
-          old.kind !== dto.kind
+          old.kind !== dto.kind ||
+          old.businessDate.toISOString().slice(0, 10) !== dto.businessDate ||
+          old.capturedAt.getTime() !== new Date(dto.capturedAt).getTime()
         )
           throw new BadRequestException(
-            'A correction cannot change transaction identity, kind, or branch',
+            'A correction cannot change transaction identity, kind, branch, or original capture date',
           );
-        await this.release(tx, old);
         const normalized = await this.normalize(dto, user, scope, role, tx);
+        if (old.pendingMoney.gt(0)) {
+          const paymentShape = (payload: JsonRecord) => ({
+            method: payload.paymentMethod ?? payload.method,
+            payments: (payload.payments ?? [])
+              .map((payment: JsonRecord) => ({
+                method: payment.method,
+                amount: new Prisma.Decimal(payment.amount).toFixed(2),
+              }))
+              .sort((a: JsonRecord, b: JsonRecord) => a.method.localeCompare(b.method)),
+          });
+          if (
+            !old.pendingMoney.eq(normalized.pendingMoney) ||
+            digest(paymentShape(object(old.payload))) !==
+              digest(paymentShape(object(normalized.payload)))
+          )
+            throw new ConflictException(
+              'Collected funds cannot change during correction. Ask an administrator to reject and reconcile the funds before a new capture.',
+            );
+        }
+        // A correction invalidates all prior sale/dispatch approvals. Release
+        // only this draft's hold after validation succeeds in the same transaction.
+        await this.lockIdentity(tx, scope.companyId, normalized.duplicateSignature);
+        await this.release(tx, old);
         const { revision: ignored, ...capture } = dto;
         const draft = await tx.posDraft.update({
           where: { id },
@@ -1448,6 +1477,7 @@ export class PosDraftsService {
       const start = new Date(`${day}T00:00:00+03:00`),
         end = new Date(start.getTime() + 86400000);
       const represented = new Set(records.map((r) => r.postedEntityId).filter(Boolean));
+      if (draft.postedEntityId) represented.add(draft.postedEntityId);
       const sales = await db.salesOrder.findMany({
         where: {
           companyId: draft.companyId,
@@ -1598,6 +1628,7 @@ export class PosDraftsService {
               'Another administrator must approve this draft. Use authorized direct posting for your own transaction.',
             );
           acceptedAction = true;
+          if (draft.kind === 'SALE') await lockPosSalePosting(tx, draft.companyId);
           await this.expire(tx, draft.companyId, draft.branchId);
           const origin = await this.assertOriginActive(tx, draft);
           if (draft.kind === 'SALE') {
@@ -2079,21 +2110,15 @@ export class PosDraftsService {
     });
   }
   private async expire(tx: Db, companyId: string, branchId: string) {
-    const expired = await tx.posDraftReservation.findMany({
+    const products = await tx.posDraftReservation.findMany({
       where: { companyId, branchId, releasedAt: null, expiresAt: { lte: new Date() } },
+      select: { productId: true },
+      distinct: ['productId'],
       orderBy: { productId: 'asc' },
     });
-    for (const r of expired) {
-      await this.balance(tx, companyId, branchId, r.productId);
-      const claimed = await tx.posDraftReservation.updateMany({
-        where: { id: r.id, releasedAt: null },
-        data: { releasedAt: new Date() },
-      });
-      if (claimed.count)
-        await tx.inventoryBalance.update({
-          where: { companyId_productId_branchId: { companyId, productId: r.productId, branchId } },
-          data: { quantityReserved: { decrement: r.quantity } },
-        });
+    for (const product of products) {
+      const locked = await this.balance(tx, companyId, branchId, product.productId);
+      await releaseExpiredPosReservations(tx, { ...locked, branchId });
     }
   }
   /** Release stock first, then lock draft rows in a separate transaction. */
@@ -2207,7 +2232,7 @@ export class PosDraftsService {
       const snap = object(p._sale);
       // Compare stored list prices against the current master; approval cannot
       // silently replace the customer's captured price or grant an override.
-      for (const line of p.lines) {
+      for (const line of [...p.lines].sort((a, b) => a.productId.localeCompare(b.productId))) {
         const product = await tx.product.findFirst({
           where: {
             id: line.productId,
@@ -2247,6 +2272,7 @@ export class PosDraftsService {
         user,
         tx,
         {
+          originatingPosDraftId: draft.id,
           originUserId: draft.originUserId,
           mobilePosTerminalId: draft.terminalId ?? undefined,
           posTenders: snap.tenders,

@@ -58,25 +58,4 @@ export function digest(value: any): string {
 export function eatDay(value: Date | string): string {
   return new Date(new Date(value).getTime() + 3 * 3600000).toISOString().slice(0, 10);
 }
-export function saleSignature(
-  companyId: string,
-  day: string,
-  customerId: string,
-  lines: JsonRecord[],
-  total: unknown,
-): string {
-  const quantities = new Map<string, Prisma.Decimal>();
-  for (const line of lines) {
-    const key = `${line.productId}:${new Prisma.Decimal(line.unitPrice).toFixed(2)}`;
-    quantities.set(key, (quantities.get(key) ?? new Prisma.Decimal(0)).plus(line.quantity));
-  }
-  return digest({
-    companyId,
-    day,
-    customerId,
-    lines: [...quantities.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, qty]) => [key, qty.toFixed(4)]),
-    total: new Prisma.Decimal(total as any).toFixed(2),
-  });
-}
+export { saleSignature } from '../../common/services/pos-sale-duplicates';

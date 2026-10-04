@@ -318,6 +318,100 @@ describe('POS Draft approval boundaries', () => {
   });
 });
 
+describe('POS correction custody', () => {
+  const recorder = { ...administrator, id: 'cashier' };
+  const capture = {
+    revision: 2,
+    requestId: 'capture-request-123456',
+    companyId: 'company',
+    divisionId: 'division',
+    branchId: 'branch',
+    kind: 'SALE' as const,
+    businessDate: '2026-10-04',
+    capturedAt: '2026-10-04T06:00:00Z',
+    payload: { customerId: 'customer', paymentMethod: 'CASH', expectedTotal: 100, lines: [] },
+  };
+  function correctionFixture(stage = 'AWAITING_STOCKIST') {
+    const f = fixture({
+      status: stage,
+      revision: 2,
+      reservedUntil: new Date(Date.now() + 86400000),
+    });
+    f.service.normalize = jest.fn(async () => ({
+      payload: capture.payload,
+      pendingMoney: new Prisma.Decimal(100),
+      amount: new Prisma.Decimal(100),
+      duplicateSignature: 'new-sale-signature',
+    }));
+    return f;
+  }
+  it.each(['AWAITING_STOCKIST', 'READY_FINAL'])(
+    'returns a corrected %s sale to review and releases its old dispatch hold',
+    async (stage) => {
+      const f = correctionFixture(stage);
+      const result = await f.service.correct('draft', capture, recorder);
+      expect(result.status).toBe('SUBMITTED');
+      expect(result.pendingMoney).toBe(100);
+      expect(result.reservedUntil).toBeNull();
+      expect(result.revision).toBe(3);
+      expect(f.service.release).toHaveBeenCalledWith(
+        f.tx,
+        expect.objectContaining({ id: 'draft' }),
+      );
+      expect(f.tx.posDraftDecision.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ action: 'CORRECT', actorUserId: 'cashier' }),
+      });
+      expect(f.sales.createAndConfirmInTransaction).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses to replace already collected funds and leaves the approved reservation intact', async () => {
+    const f = correctionFixture();
+    f.service.normalize.mockResolvedValue({
+      payload: { ...capture.payload, expectedTotal: 80 },
+      amount: new Prisma.Decimal(80),
+      pendingMoney: new Prisma.Decimal(80),
+    });
+    await expect(f.service.correct('draft', capture, recorder)).rejects.toThrow(
+      'Collected funds cannot change',
+    );
+    expect(f.service.release).not.toHaveBeenCalled();
+    expect(f.getDraft().pendingMoney.toString()).toBe('100');
+    expect(f.getDraft().status).toBe('AWAITING_STOCKIST');
+  });
+  it('refuses to relabel cash already collected as another tender', async () => {
+    const f = correctionFixture();
+    f.service.normalize.mockResolvedValue({
+      payload: { ...capture.payload, paymentMethod: 'BANK_TRANSFER', paymentReference: 'new' },
+      amount: new Prisma.Decimal(100),
+      pendingMoney: new Prisma.Decimal(100),
+    });
+    await expect(f.service.correct('draft', capture, recorder)).rejects.toThrow(
+      'Collected funds cannot change',
+    );
+    expect(f.service.release).not.toHaveBeenCalled();
+  });
+  it('cannot move a correction to another capture day to escape the duplicate window', async () => {
+    const f = correctionFixture();
+    await expect(
+      f.service.correct('draft', { ...capture, businessDate: '2026-10-05' }, recorder),
+    ).rejects.toThrow('original capture date');
+    expect(f.service.normalize).not.toHaveBeenCalled();
+    expect(f.service.release).not.toHaveBeenCalled();
+  });
+  it('cannot correct another recorder or a posted sale', async () => {
+    const f = correctionFixture('POSTED');
+    await expect(f.service.correct('draft', capture, recorder)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(f.service.release).not.toHaveBeenCalled();
+    const other = correctionFixture();
+    await expect(other.service.correct('draft', capture, administrator)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(other.service.release).not.toHaveBeenCalled();
+  });
+});
+
 describe('POS rejected funds reconciliation', () => {
   const confirmation = {
     revision: 1,

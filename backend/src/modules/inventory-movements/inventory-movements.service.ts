@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { releaseExpiredPosReservations } from '../../common/services/pos-draft-reservations';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { QueryInventoryMovementDto } from './dto/query-inventory-movement.dto';
@@ -367,25 +368,12 @@ export class InventoryMovementsService {
 
     // The balance lock serializes expiry with final approval and competing issues.
     // Releasing expired holds here also protects ordinary ERP sales from stale holds.
-    const expired = await db.$queryRaw<{ releasedQuantity: Prisma.Decimal | null }[]>(Prisma.sql`
-      WITH released AS (
-        UPDATE "pos_draft_reservations" SET "releasedAt" = CURRENT_TIMESTAMP
-        WHERE "companyId" = ${movement.companyId} AND "branchId" = ${movement.branchId}
-          AND "productId" = ${movement.productId} AND "releasedAt" IS NULL
-          AND "expiresAt" <= CURRENT_TIMESTAMP
-        RETURNING quantity
-      ) SELECT SUM(quantity) AS "releasedQuantity" FROM released
-    `);
-    const releasedQuantity = new Prisma.Decimal(expired[0]?.releasedQuantity ?? 0);
-    if (releasedQuantity.gt(0)) {
-      if (releasedQuantity.gt(existing.quantityReserved)) {
-        throw new BadRequestException('Inventory reservations require reconciliation before issuing stock.');
-      }
-      await db.inventoryBalance.update({
-        where: { id: existing.id }, data: { quantityReserved: { decrement: releasedQuantity } },
-      });
-      existing.quantityReserved = new Prisma.Decimal(existing.quantityReserved).minus(releasedQuantity);
-    }
+    existing.quantityReserved = await releaseExpiredPosReservations(db, {
+      ...existing,
+      companyId: movement.companyId,
+      branchId: movement.branchId,
+      productId: movement.productId,
+    });
 
     const currentQty = Number(existing.quantityOnHand);
     const reservedQty = Number(existing.quantityReserved);

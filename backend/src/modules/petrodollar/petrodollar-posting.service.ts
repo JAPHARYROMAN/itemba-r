@@ -1134,9 +1134,11 @@ export class PetroDollarPostingService {
             },
             data: {
               quantityOnHand: decimal(before.quantity),
-              quantityReserved: decimal(before.reserved),
+              // Holds are owned by their reservation records. Movement expiry
+              // may have released one since the snapshot; never resurrect it.
               averageCost: decimal(before.averageCost),
               totalValue: decimal(before.value),
+              physicalRevision: { increment: 1 },
             },
           });
         for (const journalId of e.journalIds) {
