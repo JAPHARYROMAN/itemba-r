@@ -94,6 +94,14 @@ describe('N-S mutation evidence against the live capability manifest', () => {
     (fixture) => REMEDIATED_BODY_SCHEMA_IDS.includes(fixture.capabilityId),
   );
 
+  it('keeps draft conversion outside agent execution until its compound effects are represented', () => {
+    expect(capabilityById.get('PurchaseOrdersController.convertDraft')).toMatchObject({
+      agentExcluded: true,
+      agentExclusionReason: 'supplier_draft_conversion_not_represented',
+      permissions: ['purchases.create', 'supplier_order_drafts.view'],
+    });
+  });
+
   it('partitions the exact live N-S mutation inventory across 50 controllers', () => {
     const registered = fixtures.map((fixture) => fixture.capabilityId);
     const blocked = blockers.map((blocker) => blocker.capabilityId);
