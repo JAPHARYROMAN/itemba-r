@@ -41,6 +41,9 @@ const draftInclude = Prisma.validator<Prisma.SupplierOrderDraftInclude>()({
   branch: { select: { id: true, name: true, code: true, address: true } },
   supplier: { select: { id: true, name: true, supplierCode: true, status: true } },
   createdBy: { select: { id: true, fullName: true, email: true } },
+  convertedPurchaseOrder: {
+    select: { id: true, purchaseOrderNumber: true, internalInvoiceNumber: true, status: true },
+  },
   lines: { orderBy: { lineNumber: 'asc' as const } },
 });
 
@@ -193,6 +196,7 @@ export class SupplierOrderDraftsService {
     const totals = this.calculateLines(dto.lines);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertUnconverted(tx, id);
       await tx.supplierOrderDraftLine.deleteMany({ where: { draftId: id } });
       return tx.supplierOrderDraft.update({
         where: { id },
@@ -321,7 +325,10 @@ export class SupplierOrderDraftsService {
   async remove(id: string, user: AuthUser) {
     const draft = await this.findOne(id, user, AccessLevel.WRITE);
     this.requireDraft(draft.status, 'delete');
-    await this.prisma.supplierOrderDraft.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await this.assertUnconverted(tx, id);
+      await tx.supplierOrderDraft.update({ where: { id }, data: { deletedAt: new Date() } });
+    });
     await this.audit('SUPPLIER_ORDER_DRAFT_DELETE', draft, user);
     return { success: true };
   }
@@ -348,10 +355,13 @@ export class SupplierOrderDraftsService {
     user: AuthUser,
     data: Prisma.SupplierOrderDraftUpdateInput,
   ) {
-    const updated = await this.prisma.supplierOrderDraft.update({
-      where: { id: draft.id },
-      data: { ...data, status },
-      include: draftInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertUnconverted(tx, draft.id);
+      return tx.supplierOrderDraft.update({
+        where: { id: draft.id },
+        data: { ...data, status },
+        include: draftInclude,
+      });
     });
     await this.audit(
       'SUPPLIER_ORDER_DRAFT_STATUS_CHANGE',
@@ -381,6 +391,18 @@ export class SupplierOrderDraftsService {
       });
       if (!branch) throw new BadRequestException('Branch does not belong to the selected company');
     }
+  }
+
+  private async assertUnconverted(tx: Prisma.TransactionClient, id: string) {
+    await tx.$queryRaw`SELECT "id" FROM "supplier_order_drafts" WHERE "id" = ${id} FOR UPDATE`;
+    const order = await tx.purchaseOrder.findFirst({
+      where: { sourceDraftId: id },
+      select: { id: true },
+    });
+    if (order)
+      throw new BadRequestException(
+        'This draft has been converted; make further changes on its purchase order',
+      );
   }
 
   private async resolveSupplier(dto: CreateSupplierOrderDraftDto) {

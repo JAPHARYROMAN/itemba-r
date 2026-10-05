@@ -168,6 +168,7 @@ export class PurchaseOrdersService {
     if (search) {
       where.OR = [
         { purchaseOrderNumber: { contains: search, mode: 'insensitive' } },
+        { internalInvoiceNumber: { contains: search, mode: 'insensitive' } },
         { supplierName: { contains: search, mode: 'insensitive' } },
         { supplierInvoiceNumber: { contains: search, mode: 'insensitive' } },
         {
@@ -186,6 +187,7 @@ export class PurchaseOrdersService {
         {
           OR: [
             { supplierInvoiceNumber: { equals: invoiceNumber.trim(), mode: 'insensitive' } },
+            { internalInvoiceNumber: { equals: invoiceNumber.trim(), mode: 'insensitive' } },
             {
               supplierInvoices: {
                 some: {
@@ -300,6 +302,7 @@ export class PurchaseOrdersService {
       const term = search.trim();
       baseWhere.OR = [
         { purchaseOrderNumber: { contains: term, mode: 'insensitive' } },
+        { internalInvoiceNumber: { contains: term, mode: 'insensitive' } },
         { supplierName: { contains: term, mode: 'insensitive' } },
         { supplier: { name: { contains: term, mode: 'insensitive' } } },
         { supplierInvoiceNumber: { contains: term, mode: 'insensitive' } },
@@ -319,6 +322,7 @@ export class PurchaseOrdersService {
         {
           OR: [
             { supplierInvoiceNumber: { equals: term, mode: 'insensitive' } },
+            { internalInvoiceNumber: { equals: term, mode: 'insensitive' } },
             {
               supplierInvoices: {
                 some: {
@@ -487,6 +491,7 @@ export class PurchaseOrdersService {
         confirmedBy: { select: { id: true, fullName: true } },
         receivedBy: { select: { id: true, fullName: true } },
         createdBy: { select: { id: true, fullName: true } },
+        sourceDraft: { select: { id: true, draftNumber: true } },
       },
     });
     if (!record) throw new NotFoundException('Purchase order not found');
@@ -494,7 +499,114 @@ export class PurchaseOrdersService {
     return this.decorateInvoiceReference(record);
   }
 
-  async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
+  async convertDraft(id: string, dto: CreatePurchaseOrderDto, user: AuthUser) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Serialize retries against the source; the unique sourceDraftId index
+        // also enforces one purchase order per draft at the database boundary.
+        await tx.$queryRaw`SELECT "id" FROM "supplier_order_drafts" WHERE "id" = ${id} FOR UPDATE`;
+        const draft = await tx.supplierOrderDraft.findFirst({
+          where: { id, deletedAt: null },
+          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        });
+        if (!draft) throw new NotFoundException('Supplier order draft not found');
+        await this.companyScope.assertCanAccessCompany(user, draft.companyId, AccessLevel.WRITE);
+        if (dto.companyId !== draft.companyId) {
+          throw new BadRequestException('Purchase order must use the draft company');
+        }
+        const existing = await tx.purchaseOrder.findFirst({ where: { sourceDraftId: id } });
+        if (existing) {
+          if (existing.deletedAt) {
+            throw new ConflictException(
+              'This draft already has a deleted purchase order; restore it rather than converting again',
+            );
+          }
+          return existing;
+        }
+        if (!['DRAFT', 'SENT', 'ACCEPTED'].includes(draft.status)) {
+          throw new BadRequestException('Cancelled or declined drafts cannot be converted');
+        }
+        if (
+          dto.currency !== draft.currency ||
+          (draft.divisionId && dto.divisionId !== draft.divisionId) ||
+          (draft.branchId && dto.branchId !== draft.branchId) ||
+          (draft.supplierId && dto.supplierId !== draft.supplierId)
+        ) {
+          throw new BadRequestException(
+            'Keep the draft currency, supplier and location when converting',
+          );
+        }
+        const mappings = new Map(dto.lines.map((line) => [line.sourceDraftLineId, line]));
+        if (
+          !draft.lines.length ||
+          mappings.size !== draft.lines.length ||
+          dto.lines.length !== draft.lines.length ||
+          draft.lines.some((line) => !mappings.has(line.id))
+        ) {
+          throw new BadRequestException(
+            'Match every draft line exactly once to a product and unit',
+          );
+        }
+        const lines = draft.lines.map((line) => {
+          const mapping = mappings.get(line.id)!;
+          const cost = line.unitPrice === null ? mapping.unitCost : Number(line.unitPrice);
+          if (
+            mapping.quantity !== Number(line.quantity) ||
+            mapping.unitCost !== cost ||
+            Number(mapping.discountAmount ?? 0) !== Number(line.discountAmount) ||
+            Number(mapping.taxAmount ?? 0) !== Number(line.taxAmount)
+          ) {
+            throw new BadRequestException(
+              'Keep draft quantities, priced amounts, discounts and tax; enter costs for unpriced lines',
+            );
+          }
+          return { ...mapping, description: line.description, unitCost: cost };
+        });
+        const notes = [
+          `Converted from ${draft.draftNumber}`,
+          draft.title,
+          draft.deliveryInstructions && `Delivery: ${draft.deliveryInstructions}`,
+          draft.terms && `Terms: ${draft.terms}`,
+          draft.notes,
+          dto.notes,
+        ]
+          .filter(Boolean)
+          .join('\n');
+        const record = await this.create(
+          {
+            ...dto,
+            supplierId: draft.supplierId ?? dto.supplierId,
+            supplierName: draft.supplierName,
+            expectedDate: draft.neededBy?.toISOString() ?? dto.expectedDate,
+            notes,
+            lines,
+          },
+          user,
+          { tx, sourceDraftId: id },
+        );
+        await this.auditLogs.logStrictInTransaction(tx, {
+          action: 'SUPPLIER_ORDER_DRAFT_CONVERT',
+          entityType: 'SupplierOrderDraft',
+          entityId: id,
+          companyId: draft.companyId,
+          userId: user.id,
+          newValue: {
+            purchaseOrderId: record.id,
+            purchaseOrderNumber: record.purchaseOrderNumber,
+            internalInvoiceNumber: record.internalInvoiceNumber,
+          },
+        });
+        return record;
+      },
+      { timeout: 15000 },
+    );
+  }
+
+  async create(
+    dto: CreatePurchaseOrderDto,
+    user: AuthUser,
+    conversion?: { tx: Prisma.TransactionClient; sourceDraftId: string },
+  ) {
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
     const supplierName = await this.resolveSupplierName(
@@ -512,6 +624,7 @@ export class PurchaseOrdersService {
       });
     }
     await this.profit.assertPurchaseLinesHaveCost(dto.companyId, dto.lines);
+    if (!dto.lines.length) throw new BadRequestException('Add at least one purchase order line');
     const userId = user.id;
     let subtotal = 0;
     let totalDiscount = 0;
@@ -539,15 +652,22 @@ export class PurchaseOrdersService {
     const totalAmount = subtotal - totalDiscount + totalTax;
     const paymentState = paymentStateForPurchaseType(dto.purchaseType, totalAmount);
 
-    const record = await this.prisma.$transaction(async (tx) => {
+    const persist = async (tx: Prisma.TransactionClient) => {
       const purchaseOrderNumber = await this.codes.next({
         entityType: 'PurchaseOrder',
+        companyId: dto.companyId,
+        tx,
+      });
+      const internalInvoiceNumber = await this.codes.next({
+        entityType: 'PurchaseInvoice',
         companyId: dto.companyId,
         tx,
       });
       return tx.purchaseOrder.create({
         data: {
           purchaseOrderNumber,
+          internalInvoiceNumber,
+          sourceDraftId: conversion?.sourceDraftId,
           companyId: dto.companyId,
           divisionId: dto.divisionId,
           branchId: dto.branchId,
@@ -575,16 +695,21 @@ export class PurchaseOrdersService {
         },
         include: { lines: true },
       });
-    });
+    };
+    const record = conversion
+      ? await persist(conversion.tx)
+      : await this.prisma.$transaction(persist);
 
-    await this.auditLogs.log({
+    const audit = {
       action: 'PURCHASE_ORDER_CREATE',
       entityType: 'PurchaseOrder',
       entityId: record.id,
       userId,
       companyId: record.companyId,
       newValue: record as any,
-    });
+    };
+    if (conversion) await this.auditLogs.logStrictInTransaction(conversion.tx, audit);
+    else await this.auditLogs.log(audit);
 
     return record;
   }

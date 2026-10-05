@@ -41,6 +41,12 @@ export interface SupplierOrderDraft {
   totalAmount: number | string;
   hasUnpricedLines: boolean;
   status: SupplierOrderDraftStatus;
+  convertedPurchaseOrder?: {
+    id: string;
+    purchaseOrderNumber: string;
+    internalInvoiceNumber?: string | null;
+    status: string;
+  } | null;
   sentAt?: string | null;
   acceptedAt?: string | null;
   declinedAt?: string | null;

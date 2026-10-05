@@ -105,6 +105,7 @@ interface PurchaseOrderLine {
 interface PurchaseOrder {
   id: string;
   purchaseOrderNumber?: string;
+  internalInvoiceNumber?: string | null;
   orderDate: string;
   expectedDate?: string | null;
   supplierInvoiceNumber?: string | null;
@@ -668,7 +669,7 @@ function PurchaseOrderModal({
             label="Supplier Invoice #"
             value={form.supplierInvoiceNumber}
             onChange={(e) => setField('supplierInvoiceNumber', e.target.value)}
-            placeholder="Supplier-issued invoice number"
+            placeholder="Optional supplier number; internal invoice number is automatic"
           />
           <FormDateField
             label="Invoice Date"
@@ -1108,7 +1109,7 @@ export default function PurchaseOrdersPage() {
 
     const rows = orders.map((o) => ({
       'PO #': o.purchaseOrderNumber ?? o.id,
-      'Invoice #': o.displayInvoiceNumber ?? '',
+      'Invoice #': o.displayInvoiceNumber ?? o.internalInvoiceNumber ?? '',
       'Invoice Date': formatDateOnly(o.displayInvoiceDate),
       Date: formatDateOnly(o.orderDate),
       Expected: formatDateOnly(o.expectedDate),
@@ -1631,7 +1632,10 @@ export default function PurchaseOrdersPage() {
             { label: 'Supplier', value: (o) => o.supplier?.name ?? o.supplierName ?? '—' },
             { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
             { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
-            { label: 'Supplier invoice', value: (o) => o.displayInvoiceNumber || 'Not recorded' },
+            {
+              label: 'Supplier invoice',
+              value: (o) => o.displayInvoiceNumber || o.internalInvoiceNumber || 'Not recorded',
+            },
             { label: 'Notes', value: (o) => o.notes || '—' },
           ]}
           actions={renderOrderActions}
@@ -1722,14 +1726,20 @@ export default function PurchaseOrdersPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {o.displayInvoiceNumber ? (
+                          {o.displayInvoiceNumber || o.internalInvoiceNumber ? (
                             <div>
-                              <p className="font-mono text-xs">{o.displayInvoiceNumber}</p>
+                              <p className="font-mono text-xs">
+                                {o.displayInvoiceNumber || o.internalInvoiceNumber}
+                              </p>
                               <p
                                 className="mt-0.5 text-[10px] uppercase"
                                 style={{ color: 'var(--aurora-text-muted)' }}
                               >
-                                {o.invoiceSource === 'PROCUREMENT_INVOICE' ? 'Linked' : 'Recorded'}
+                                {o.invoiceSource === 'PROCUREMENT_INVOICE'
+                                  ? 'Linked'
+                                  : o.displayInvoiceNumber
+                                    ? 'Supplier reference'
+                                    : 'Automatic internal number'}
                               </p>
                             </div>
                           ) : (

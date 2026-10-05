@@ -475,6 +475,14 @@ export default function SupplierOrderDraftsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={draft.status} />
+                      {draft.convertedPurchaseOrder && (
+                        <Link
+                          className="mt-1 block text-xs text-brand-600"
+                          href={`/operations/purchase-orders/${draft.convertedPurchaseOrder.id}`}
+                        >
+                          Converted � {draft.convertedPurchaseOrder.purchaseOrderNumber}
+                        </Link>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap justify-end gap-1.5">
@@ -485,7 +493,7 @@ export default function SupplierOrderDraftsPage() {
                         >
                           View
                         </Link>
-                        {draft.status === 'DRAFT' && canUpdate && (
+                        {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canUpdate && (
                           <button
                             className="rounded-md border px-2.5 py-1 text-[11px]"
                             style={{ borderColor: 'var(--aurora-border)' }}
@@ -504,7 +512,7 @@ export default function SupplierOrderDraftsPage() {
                             <Copy className="h-3.5 w-3.5" />
                           </button>
                         )}
-                        {draft.status === 'DRAFT' && canSend && (
+                        {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canSend && (
                           <button
                             title="Mark sent"
                             className="rounded-md bg-brand-600 p-1.5 text-white"
@@ -513,7 +521,7 @@ export default function SupplierOrderDraftsPage() {
                             <Send className="h-3.5 w-3.5" />
                           </button>
                         )}
-                        {draft.status === 'DRAFT' && canManage && (
+                        {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canManage && (
                           <button
                             title="Delete draft"
                             className="rounded-md bg-red-600 p-1.5 text-white"

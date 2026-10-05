@@ -11,6 +11,7 @@ function makeService() {
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     $queryRaw: jest.fn().mockResolvedValue([]),
+    supplierOrderDraft: { findFirst: jest.fn() },
     purchaseOrder: {
       create: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data, lines: [] })),
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
@@ -80,7 +81,11 @@ function makeService() {
   const taxAutoApply = { applyForPurchaseOrder: jest.fn().mockResolvedValue({}) } as any;
   const codes = {
     next: jest.fn(async ({ entityType }: any) =>
-      entityType === 'Payable' ? 'AP-2026-000001' : 'PO-2026-000001',
+      entityType === 'Payable'
+        ? 'AP-2026-000001'
+        : entityType === 'PurchaseInvoice'
+          ? 'PINV-2026-000001'
+          : 'PO-2026-000001',
     ),
   } as any;
   const companyScope = {
@@ -115,6 +120,125 @@ function makeService() {
 
 const user = { id: 'user-1', permissions: ['purchases.create'] } as any;
 
+describe('Supplier draft conversion', () => {
+  function setup() {
+    const context = makeService();
+    const source = {
+      id: 'draft-1',
+      draftNumber: 'SOD-2026-000001',
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      supplierId: null,
+      supplierName: 'Supplier Ltd',
+      status: 'ACCEPTED',
+      currency: 'TZS',
+      neededBy: new Date('2026-10-10'),
+      deliveryInstructions: 'Main store',
+      terms: 'Net 30',
+      notes: 'Original notes',
+      lines: [
+        {
+          id: 'draft-line-1',
+          description: 'Original item',
+          quantity: 2,
+          unitPrice: 100,
+          discountAmount: 0,
+          taxAmount: 0,
+        },
+      ],
+    };
+    context.prisma.supplierOrderDraft.findFirst.mockResolvedValue(source);
+    const dto = createDto('CREDIT_PURCHASE');
+    dto.lines[0].sourceDraftLineId = 'draft-line-1';
+    return { ...context, source, dto };
+  }
+  it('copies the source snapshot, supplier and delivery details without financial posting', async () => {
+    const { service, prisma, dto, postingEngine, inventoryMovements, auditLogs } = setup();
+    const result = await service.convertDraft('draft-1', dto, user);
+    expect(result.sourceDraftId).toBe('draft-1');
+    expect(result.internalInvoiceNumber).toBe('PINV-2026-000001');
+    expect(prisma.purchaseOrder.create.mock.calls[0][0].data).toMatchObject({
+      status: 'DRAFT',
+      supplierName: 'Supplier Ltd',
+      expectedDate: new Date('2026-10-10'),
+      lines: {
+        create: [
+          expect.objectContaining({ description: 'Original item', quantity: 2, unitCost: 100 }),
+        ],
+      },
+    });
+    expect(result.notes).toContain('SOD-2026-000001');
+    expect(result.notes).toContain('Delivery: Main store');
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledTimes(2);
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+  });
+  it('returns the same order on a retry without consuming new numbers', async () => {
+    const { service, prisma, dto, codes } = setup();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'existing-po',
+      sourceDraftId: 'draft-1',
+      deletedAt: null,
+    });
+    expect((await service.convertDraft('draft-1', dto, user)).id).toBe('existing-po');
+    expect(codes.next).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+  });
+  it.each(['CANCELLED', 'DECLINED'])('rejects %s source drafts', async (status) => {
+    const { service, source, dto, prisma } = setup();
+    source.status = status;
+    await expect(service.convertDraft('draft-1', dto, user)).rejects.toThrow('cannot be converted');
+    expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
+  });
+  it.each(['companyId', 'divisionId', 'branchId', 'currency'])(
+    'rejects changed %s',
+    async (field) => {
+      const { service, dto, prisma } = setup();
+      dto[field] = 'different';
+      await expect(service.convertDraft('draft-1', dto, user)).rejects.toThrow();
+      expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
+    },
+  );
+  it('requires every source line exactly once', async () => {
+    const { service, dto } = setup();
+    dto.lines.push({ ...dto.lines[0] });
+    await expect(service.convertDraft('draft-1', dto, user)).rejects.toThrow('exactly once');
+  });
+  it.each(['quantity', 'unitCost', 'discountAmount', 'taxAmount'])(
+    'rejects tampered %s',
+    async (field) => {
+      const { service, dto } = setup();
+      dto.lines[0][field] = 999;
+      await expect(service.convertDraft('draft-1', dto, user)).rejects.toThrow(
+        'Keep draft quantities',
+      );
+    },
+  );
+  it('allows entering a cost for an unpriced line', async () => {
+    const { service, dto, source, prisma } = setup();
+    (source.lines[0] as any).unitPrice = null;
+    dto.lines[0].unitCost = 75;
+    await service.convertDraft('draft-1', dto, user);
+    expect(prisma.purchaseOrder.create.mock.calls[0][0].data.totalAmount).toBe(150);
+  });
+  it('retains the saved supplier and rejects another supplier', async () => {
+    const { service, dto, source } = setup();
+    (source as any).supplierId = 'source-supplier';
+    dto.supplierId = 'another-supplier';
+    await expect(service.convertDraft('draft-1', dto, user)).rejects.toThrow('Keep the draft');
+  });
+  it('checks company write scope even when returning an existing conversion', async () => {
+    const { service, dto, prisma } = setup();
+    const scope = (service as any).companyScope;
+    scope.assertCanAccessCompany.mockRejectedValue(new Error('Forbidden'));
+    await expect(service.convertDraft('draft-1', dto, user)).rejects.toThrow('Forbidden');
+    expect(prisma.purchaseOrder.findFirst).not.toHaveBeenCalled();
+  });
+});
+
 function createDto(purchaseType: 'CASH_PURCHASE' | 'CREDIT_PURCHASE') {
   return {
     companyId: 'company-1',
@@ -139,6 +263,16 @@ function createDto(purchaseType: 'CASH_PURCHASE' | 'CREDIT_PURCHASE') {
 }
 
 describe('PurchaseOrdersService payment state', () => {
+  it('generates an internal invoice number without inventing a supplier invoice or posting', async () => {
+    const { service, prisma, postingEngine, inventoryMovements } = makeService();
+    const result = await service.create(createDto('CREDIT_PURCHASE'), user);
+    expect(result.internalInvoiceNumber).toBe('PINV-2026-000001');
+    expect(result.supplierInvoiceNumber).toBeNull();
+    expect(result.status).toBe('DRAFT');
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+  });
   it('stores an optional supplier-issued invoice reference without changing purchase state', async () => {
     const { service, prisma } = makeService();
     const dto = createDto('CREDIT_PURCHASE');

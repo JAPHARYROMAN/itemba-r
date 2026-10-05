@@ -1,5 +1,6 @@
 import {
   IsArray,
+  ArrayMinSize,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -13,6 +14,10 @@ import { Type } from 'class-transformer';
 import { CurrencyCode, PurchaseType } from '@prisma/client';
 
 export class PurchaseOrderLineDto {
+  @IsOptional()
+  @IsString()
+  sourceDraftLineId?: string;
+
   @IsNotEmpty()
   @IsString()
   productId!: string;
@@ -103,6 +108,7 @@ export class CreatePurchaseOrderDto {
   notes?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderLineDto)
   lines!: PurchaseOrderLineDto[];

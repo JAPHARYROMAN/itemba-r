@@ -12,6 +12,7 @@ import { downloadTablePdf } from '@/lib/export-download';
 import { downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
+import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { PurchaseOrderTabs } from '../_components/PurchaseOrderTabs';
 
 type AnyRecord = Record<string, any>;
@@ -408,6 +409,22 @@ export default function PurchaseOrderDetailPage() {
                   <span className="font-mono">{order.displayInvoiceNumber}</span>
                 ) : (
                   <span className="text-amber-600">Missing</span>
+                )
+              }
+            />
+            <InfoRow label="Internal Invoice #" value={order.internalInvoiceNumber} />
+            <InfoRow
+              label="Source Order Draft"
+              value={
+                order.sourceDraft ? (
+                  <Link
+                    className="text-brand-600"
+                    href={`/operations/purchase-orders/order-drafts/${order.sourceDraft.id}`}
+                  >
+                    {order.sourceDraft.draftNumber}
+                  </Link>
+                ) : (
+                  '-'
                 )
               }
             />
