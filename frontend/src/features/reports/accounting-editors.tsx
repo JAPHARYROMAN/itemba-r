@@ -363,12 +363,19 @@ function AccountConnection({
   const { hasPermission } = useAuth();
   const readAllowed = hasPermission('cash_desk.view') && hasPermission('journal_entries.view');
   const writeAllowed = hasPermission('cash_desk.manage') && hasPermission('cash_accounts.manage');
-  const form = useAccountingReview<Connections, { bankId: string; ledgerId: string }>({
+  const form = useAccountingReview<
+    Connections,
+    { bankId: string; ledgerId: string; initializeBalance: boolean }
+  >({
     path: '/cash-connections/accounts',
     query: target.query,
     readAllowed,
     writeAllowed,
-    initial: { bankId: target.accountKind === 'bank' ? target.id : '', ledgerId: '' },
+    initial: {
+      bankId: target.accountKind === 'bank' ? target.id : '',
+      ledgerId: '',
+      initializeBalance: false,
+    },
     title: 'Account connection',
     summary: (data) =>
       target.accountKind === 'desk'
@@ -390,6 +397,7 @@ function AccountConnection({
           r.currency,
           r.canConnect,
           r.erpCashAccountId,
+          r.recordedBalance,
         ]),
         data.bank.map((r) => [
           r.id,
@@ -400,6 +408,7 @@ function AccountConnection({
           r.canConnect,
           r.ledgerAccountId,
           r.recordedBalance,
+          r.canInitializeBalance,
           r.ledgerBalance,
         ]),
         data.ledger.map((r) => [
@@ -473,6 +482,13 @@ function AccountConnection({
               throw new Error(
                 'Choose available, compatible accounts and check current write access before saving.',
               );
+            if (
+              values.initializeBalance &&
+              (!latest.selected?.canInitializeBalance || latest.desk?.recordedBalance == null)
+            )
+              throw new Error(
+                'Balance setup is only available for an unused ERP account. Refresh and review the connection.',
+              );
           },
           async (value) => {
             const latest = choices(value);
@@ -480,8 +496,13 @@ function AccountConnection({
               deskAccountId: latest.desk?.id,
               cashAccountId: values.bankId,
               ledgerAccountId: latest.ledgerId,
+              ...(values.initializeBalance && {
+                confirmedDeskBalance: latest.desk!.recordedBalance,
+              }),
             });
-            return 'Connection saved. Review cash movements to post their journals.';
+            return values.initializeBalance
+              ? 'Connection saved with the verified Cash Desk balance. Review ledger differences separately.'
+              : 'Connection saved. Review cash movements to post their journals.';
           },
         )
       }
@@ -500,7 +521,13 @@ function AccountConnection({
               disabled={target.accountKind === 'bank' || form.busy}
               placeholder="Choose the matching account"
               options={banks}
-              onChange={(e) => form.draft.setForm({ bankId: e.target.value, ledgerId: '' })}
+              onChange={(e) =>
+                form.draft.setForm({
+                  bankId: e.target.value,
+                  ledgerId: '',
+                  initializeBalance: false,
+                })
+              }
             />
             <FormSelect
               label="Dedicated asset ledger account"
@@ -528,12 +555,37 @@ function AccountConnection({
               <p>
                 {selected.recordedBalance == null
                   ? 'Reload account connections to compare the recorded balance.'
-                  : selected.recordedBalance === ledgerBalance
-                    ? 'The amounts match. Check the underlying entries before connecting.'
-                    : 'The balances differ. Review the opening balances and underlying entries; saving a connection will not adjust either balance.'}
+                  : values.initializeBalance
+                    ? 'The verified Cash Desk balance will initialize this ERP account. Ledger entries remain unchanged; any difference needs accounting review.'
+                    : selected.recordedBalance === ledgerBalance
+                      ? 'The amounts match. Check the underlying entries before connecting.'
+                      : 'The balances differ. Review the opening balances and underlying entries; saving a connection will not adjust either balance.'}
               </p>
             </FormSection>
           )}
+          {canSave &&
+            selected?.canInitializeBalance &&
+            current.desk?.kind === 'CASH' &&
+            current.desk?.recordedBalance != null && (
+              <FormSection title="Cash Desk balance setup">
+                <p>
+                  Cash Desk records {money(current.desk.recordedBalance, current.desk.currency)}.
+                  This ERP account has no previous transactions and records zero.
+                </p>
+                <AccountingAcknowledgement
+                  label={`I verified the Cash Desk balance of ${money(current.desk.recordedBalance, current.desk.currency)}. Use it as this ERP account's recorded balance.`}
+                  checked={values.initializeBalance}
+                  disabled={form.busy}
+                  onChange={(initializeBalance) =>
+                    form.draft.setForm((v) => ({ ...v, initializeBalance }))
+                  }
+                />
+                <p>
+                  This identifies existing cash. It does not add a receipt or change ledger entries.
+                  Any ledger difference still needs accounting review.
+                </p>
+              </FormSection>
+            )}
           {canSave ? (
             <AccountingAcknowledgement
               label="These accounts represent the same cash box or bank account, and the ledger is not shared with another account."

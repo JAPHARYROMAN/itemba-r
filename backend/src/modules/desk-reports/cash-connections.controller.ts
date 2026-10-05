@@ -9,6 +9,10 @@ export class ConnectionDto {
   @IsOptional() @IsUUID() deskAccountId?: string;
   @IsString() @Length(1, 128) cashAccountId!: string;
   @IsString() @Length(1, 128) ledgerAccountId!: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^(0|[1-9]\d{0,15})(\.\d{1,2})?$/)
+  confirmedDeskBalance?: string;
 }
 export class CashPostDto {
   @Matches(/^[a-f0-9]{64}$/) fingerprint!: string;

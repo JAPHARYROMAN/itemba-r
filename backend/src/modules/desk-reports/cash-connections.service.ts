@@ -31,6 +31,31 @@ const include = {
 } satisfies Prisma.CashDeskMovementInclude;
 type Movement = Prisma.CashDeskMovementGetPayload<{ include: typeof include }>;
 type Tx = Prisma.TransactionClient;
+const cashHistory = {
+  _count: {
+    select: {
+      expenses: true,
+      fuelShiftCollections: true,
+      salesOrders: true,
+      refunds: true,
+      customerPayments: true,
+      supplierPayments: true,
+      mobilePosPayments: true,
+      bankReconciliations: true,
+    },
+  },
+} as const;
+function canInitializeBalance(bank: Prisma.CashAccountGetPayload<{ include: typeof cashHistory }>) {
+  return (
+    !!bank._count &&
+    ['CASH_ON_HAND', 'PETTY_CASH'].includes(bank.accountType) &&
+    !bank.ledgerAccountId &&
+    bank.openingBalance?.isZero() === true &&
+    bank.currentBalance?.isZero() === true &&
+    Object.values(bank._count).every((count) => count === 0)
+  );
+}
+
 const compatible = (
   a: { companyId: string; divisionId: string | null; branchId: string | null },
   b: { companyId: string; divisionId: string | null; branchId: string | null },
@@ -88,7 +113,7 @@ export class CashConnectionsService {
           deletedAt: null,
           isActive: true,
         },
-        include: { ledgerAccount: true },
+        include: { ledgerAccount: true, ...cashHistory },
         orderBy: { accountName: 'asc' },
       }),
       this.db.chartOfAccount.findMany({
@@ -154,14 +179,23 @@ export class CashConnectionsService {
       return writeAccess.get(key)!;
     };
     const [deskWithAccess, bankWithAccess] = await Promise.all([
-      Promise.all(desk.map(async (d) => ({ ...d, canConnect: await canConnect(d) }))),
+      Promise.all(
+        desk.map(async (d) => ({
+          ...d,
+          recordedBalance: d.balance.toFixed(2),
+          canConnect: await canConnect(d),
+        })),
+      ),
       Promise.all(
         bank.map(async (b) => {
           const ledgerBalance = b.ledgerAccountId
             ? (totals.get(b.ledgerAccountId) ?? '0.00')
             : null;
+          const { _count, ...account } = b;
+          void _count;
           return {
-            ...b,
+            ...account,
+            canInitializeBalance: canInitializeBalance(b),
             canConnect: await canConnect(b),
             recordedBalance: b.currentBalance.toFixed(2),
             ledgerBalance,
@@ -209,7 +243,12 @@ export class CashConnectionsService {
   }
   async connect(
     user: AuthUser,
-    input: { deskAccountId?: string; cashAccountId: string; ledgerAccountId: string },
+    input: {
+      deskAccountId?: string;
+      cashAccountId: string;
+      ledgerAccountId: string;
+      confirmedDeskBalance?: string;
+    },
   ) {
     this.permission(
       user,
@@ -224,7 +263,10 @@ export class CashConnectionsService {
         if (input.deskAccountId)
           await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${input.deskAccountId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${input.cashAccountId} FOR UPDATE`;
-        const bank = await tx.cashAccount.findUnique({ where: { id: input.cashAccountId } });
+        const bank = await tx.cashAccount.findUnique({
+          where: { id: input.cashAccountId },
+          include: cashHistory,
+        });
         const ledger = await tx.chartOfAccount.findUnique({ where: { id: input.ledgerAccountId } });
         const desk = input.deskAccountId
           ? await tx.cashDeskAccount.findUnique({ where: { id: input.deskAccountId } })
@@ -275,9 +317,49 @@ export class CashConnectionsService {
           throw new ConflictException(
             'Each cash account needs its own ledger account and Cash Desk connection.',
           );
+        let baseline: Prisma.Decimal | undefined;
+        if (input.confirmedDeskBalance !== undefined) {
+          if (!/^(0|[1-9]\d{0,15})(\.\d{1,2})?$/.test(input.confirmedDeskBalance))
+            throw new BadRequestException(
+              'Confirm the exact non-negative Cash Desk balance, with at most two decimals.',
+            );
+          // Configuration of a mirror of the existing cash book, not a new receipt.
+          // An exact retry may acknowledge the saved connection, never reset a spent balance.
+          if (
+            desk?.erpCashAccountId === bank.id &&
+            bank.ledgerAccountId === ledger.id &&
+            bank.currentBalance.eq(input.confirmedDeskBalance)
+          )
+            return { connected: true };
+          if (!desk || desk.kind !== 'CASH' || desk.erpCashAccountId || !canInitializeBalance(bank))
+            throw new ConflictException(
+              'Balance setup is only available when first connecting an unused, zero-balance ERP cash account.',
+            );
+          baseline = new Prisma.Decimal(input.confirmedDeskBalance);
+          if (!baseline.eq(desk.balance))
+            throw new ConflictException(
+              'The Cash Desk balance changed. Refresh and confirm its current balance.',
+            );
+          const entries = await tx.cashDeskEntry.aggregate({
+            where: { accountId: desk.id },
+            _sum: { amount: true },
+          });
+          if (!baseline.eq(entries._sum.amount ?? 0))
+            throw new ConflictException(
+              'The Cash Desk balance does not agree with its recorded movements. Reconcile it before connecting.',
+            );
+        }
         await tx.cashAccount.update({
           where: { id: bank.id },
-          data: { ledgerAccountId: ledger.id },
+          data: {
+            ledgerAccountId: ledger.id,
+            ...(baseline !== undefined &&
+              desk && {
+                currentBalance: baseline,
+                divisionId: bank.divisionId ?? desk.divisionId,
+                branchId: bank.branchId ?? desk.branchId,
+              }),
+          },
         });
         if (desk)
           await tx.cashDeskAccount.update({
@@ -290,11 +372,27 @@ export class CashConnectionsService {
           entityId: bank.id,
           companyId: bank.companyId,
           userId: user.id,
-          metadata: input,
+          metadata: {
+            ...input,
+            ...(baseline !== undefined &&
+              desk && {
+                balanceSetup: {
+                  source: 'CashDesk',
+                  deskAccountId: desk.id,
+                  previousBalance: bank.currentBalance.toFixed(2),
+                  recordedBalance: baseline.toFixed(2),
+                  previousDivisionId: bank.divisionId,
+                  previousBranchId: bank.branchId,
+                  divisionId: bank.divisionId ?? desk.divisionId,
+                  branchId: bank.branchId ?? desk.branchId,
+                  ledgerHistoryUnchanged: true,
+                },
+              }),
+          },
         });
         return { connected: true };
       },
-      { timeout: 30000 },
+      { timeout: 30000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
   private async source(tx: Tx, user: AuthUser, id: string) {
