@@ -17,6 +17,7 @@ function makeService() {
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(async () => ({ id: 'po-1', companyId: 'company-1' })),
       groupBy: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
@@ -37,6 +38,9 @@ function makeService() {
       aggregate: jest.fn().mockResolvedValue({ _sum: { outstandingAmount: 0 } }),
     },
     journalEntry: { findFirst: jest.fn().mockResolvedValue(null) },
+    supplierPayment: {
+      aggregate: jest.fn().mockResolvedValue({ _sum: { unappliedAmount: 0 } }),
+    },
     purchaseOrderLine: {
       deleteMany: jest.fn(),
     },
@@ -951,6 +955,7 @@ describe('PurchaseOrdersService.cancel outstanding reset (finding #19)', () => {
       outstandingAmount: 1000000,
       payableId: null,
     });
+    prisma.purchaseOrder.findUnique.mockResolvedValue({ id: 'po-1', status: 'CONFIRMED' });
 
     await service.cancel('po-1', user);
 
@@ -970,6 +975,7 @@ describe('PurchaseOrdersService.cancel outstanding reset (finding #19)', () => {
       outstandingAmount: 1000000,
       payableId: 'payable-1',
     });
+    prisma.purchaseOrder.findUnique.mockResolvedValue({ id: 'po-1', status: 'CONFIRMED' });
     prisma.payable.aggregate = jest.fn().mockResolvedValue({ _sum: { outstandingAmount: 0 } });
     prisma.supplier.updateMany = jest.fn().mockResolvedValue({ count: 1 });
 
@@ -981,6 +987,24 @@ describe('PurchaseOrdersService.cancel outstanding reset (finding #19)', () => {
     });
     const poUpdate = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
     expect(poUpdate.data).toEqual({ status: 'CANCELLED', outstandingAmount: 0 });
+  });
+
+  it('rejects cancellation if the order was received before its transaction lock', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue({
+      id: 'po-1',
+      companyId: 'company-1',
+      status: 'CONFIRMED',
+      payableId: 'payable-1',
+    });
+    prisma.purchaseOrder.findUnique.mockResolvedValue({ id: 'po-1', status: 'RECEIVED' });
+
+    await expect(service.cancel('po-1', user)).rejects.toThrow('Purchase order changed');
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.purchaseOrder.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.update).not.toHaveBeenCalled();
   });
 });
 
