@@ -16,6 +16,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { DeskReportQuery } from './desk-reports.dto';
 import { reportPeriod } from './desk-reports.domain';
 import { cashFingerprint, cashLines, cashOffsetTypes } from './cash-posting.domain';
+import { baseCurrencyFor } from '../party-balance/party-balance.helper';
 import { DeskPostingSource, postingStatus } from './desk-posting.domain';
 
 const include = {
@@ -286,12 +287,9 @@ export class CashConnectionsService {
           throw new BadRequestException(
             'Choose an active asset ledger account in the same company and organisation.',
           );
-        const profile = await tx.companyProfile.findUnique({
-          where: { companyId: bank.companyId },
-        });
+        const accountingCurrency = await baseCurrencyFor(tx, bank.companyId);
         if (
-          !profile ||
-          bank.currency !== profile.currency ||
+          bank.currency !== accountingCurrency ||
           (desk &&
             (desk.currency !== bank.currency ||
               !compatible(bank, desk) ||
@@ -642,8 +640,8 @@ export class CashConnectionsService {
       )
     )
       issues.push('Loan and intercompany posting needs the next financial connection.');
-    const profile = await tx.companyProfile.findUnique({ where: { companyId: first.companyId } });
-    if (!profile || profile.currency !== row.currency)
+    const accountingCurrency = await baseCurrencyFor(tx, first.companyId);
+    if (accountingCurrency !== row.currency)
       issues.push('Movement currency must match the company accounting currency.');
     for (const entry of row.entries) {
       const a = entry.account,

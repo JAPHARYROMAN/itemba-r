@@ -103,16 +103,6 @@ async function fixtures() {
   const company = await db.company.create({
     data: { groupId: group.id, code: 'POS-' + stamp, name: 'Synthetic POS ' + stamp },
   });
-  await db.companyProfile.create({
-    data: {
-      companyId: company.id,
-      registeredName: company.name,
-      brelaRegNumber: stamp,
-      tin: stamp,
-      registeredAddress: 'Private rehearsal fixture',
-      currency: 'TZS',
-    },
-  });
   const division = await db.division.create({
     data: { companyId: company.id, name: 'Proof division', code: 'POS', type: 'OTHER' },
   });
@@ -378,8 +368,12 @@ async function main() {
   const scope = { companyId: f.company.id, divisionId: f.division.id, branchId: f.branch.id };
   const query = '?companyId=' + f.company.id + '&branchId=' + f.branch.id;
   await check(
-    'Verified cash setup adopts existing movements once, audits the baseline and preserves ledger history',
+    'Verified cash setup works without a legal profile, adopts existing movements once and preserves ledger history',
     async () => {
+      assert.equal(
+        await db.companyProfile.findUnique({ where: { companyId: f.company.id } }),
+        null,
+      );
       const desk = await call(f.admin.token, 'POST', '/cash-desk/accounts', {
         ...scope,
         requestId: crypto.randomUUID(),
@@ -457,8 +451,23 @@ async function main() {
       assert.equal(audits[0].metadata.balanceSetup.recordedBalance, '167693000.01');
       assert.equal(audits[0].metadata.balanceSetup.previousBalance, '0.00');
       assert.equal(audits[0].metadata.balanceSetup.ledgerHistoryUnchanged, true);
+      assert.equal(
+        await db.companyProfile.findUnique({ where: { companyId: f.company.id } }),
+        null,
+      );
     },
   );
+
+  await db.companyProfile.create({
+    data: {
+      companyId: f.company.id,
+      registeredName: f.company.name,
+      brelaRegNumber: stamp,
+      tin: stamp,
+      registeredAddress: 'Private rehearsal fixture',
+      currency: 'TZS',
+    },
+  });
 
   const balance = () =>
     db.inventoryBalance.findUniqueOrThrow({
