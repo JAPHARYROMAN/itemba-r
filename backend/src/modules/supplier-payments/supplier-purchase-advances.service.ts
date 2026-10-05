@@ -360,7 +360,8 @@ export class SupplierPurchaseAdvancesService {
         data: { reversalJournalEntryId: reversal.id },
       });
     }
-    await tx.supplierPayment.update({ where: { id: paymentId }, data: { unappliedAmount: 0 } });
+    // Preserve the original applied/unapplied split. The payment's REVERSED status
+    // removes its credit from active balances without breaking amount = applied + unapplied.
   }
 
   async syncAfterReverse(tx: Tx, paymentId: string) {

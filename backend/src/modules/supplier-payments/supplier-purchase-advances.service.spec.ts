@@ -166,4 +166,55 @@ describe('supplier purchase advances', () => {
     expect(posting.postLines).not.toHaveBeenCalled();
     expect(tx.cashAccount.update).not.toHaveBeenCalled();
   });
+  it.each([false, true])(
+    'preserves payment amounts when undoing application %s and allows reversal on the application business date',
+    async (applied) => {
+      const { service, tx, posting } = setup();
+      tx.supplierPurchaseAdvance.findUnique = jest.fn(async () => ({
+        id: 'advance',
+        purchaseOrderId: 'po',
+      }));
+      tx.supplierPayment.findUniqueOrThrow = jest.fn(async () => ({
+        id: 'payment',
+        paymentNumber: 'SP-1',
+        status: 'COMPLETED',
+        paymentDate: new Date('2026-10-01'),
+        amount: d(25),
+        appliedAmount: d(applied ? 25 : 0),
+        unappliedAmount: d(applied ? 0 : 25),
+      }));
+      tx.supplierPurchaseAdvanceApplication = {
+        findMany: jest.fn(async () =>
+          applied
+            ? [
+                {
+                  id: 'application',
+                  payable: { status: 'PARTIALLY_PAID' },
+                  journalEntry: {
+                    id: 'application-journal',
+                    ...drawer,
+                    transactionDate: new Date('2026-10-01T14:00:00Z'),
+                    lines: [
+                      { accountId: 'ap', debit: d(25), credit: d(0) },
+                      { accountId: 'advance-asset', debit: d(0), credit: d(25) },
+                    ],
+                  },
+                },
+              ]
+            : [],
+        ),
+        update: jest.fn(),
+      };
+      tx.journalEntry = { updateMany: jest.fn(async () => ({ count: 1 })) };
+      await service.reverseApplications(tx, user, 'payment', new Date('2026-10-01'));
+      expect(tx.supplierPayment.update).not.toHaveBeenCalled();
+      expect(tx.cashAccount.update).not.toHaveBeenCalled();
+      expect(posting.postLines).toHaveBeenCalledTimes(applied ? 1 : 0);
+      if (applied)
+        expect(posting.postLines.mock.calls[0][0].lines).toEqual([
+          expect.objectContaining({ accountId: 'ap', debit: d(0), credit: d(25) }),
+          expect.objectContaining({ accountId: 'advance-asset', debit: d(25), credit: d(0) }),
+        ]);
+    },
+  );
 });
