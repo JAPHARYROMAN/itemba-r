@@ -6,6 +6,7 @@ import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { UpdatePurchaseInvoiceReferenceDto } from './dto/update-purchase-invoice-reference.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { AgentExcluded } from '../../common/decorators/agent-excluded.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('purchase-orders')
@@ -37,6 +38,9 @@ export class PurchaseOrdersController {
   }
 
   @Post('from-draft/:id')
+  // Source-line mapping, draft freezing and the second conversion audit need
+  // their own exact-effect and recovery contract before agent execution.
+  @AgentExcluded('supplier_draft_conversion_not_represented')
   @RequirePermissions('purchases.create', 'supplier_order_drafts.view')
   convertDraft(
     @Param('id') id: string,
