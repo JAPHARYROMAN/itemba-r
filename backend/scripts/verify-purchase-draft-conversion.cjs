@@ -12,7 +12,9 @@ exports.verifyPurchaseDraftConversion = async ({ db, check, fixture: f, call }) 
       db.inventoryMovement.count({ where: { companyId: f.company.id } }),
       db.payable.count({ where: { companyId: f.company.id } }),
       db.journalEntry.count({ where: { companyId: f.company.id } }),
-      db.cashDeskMovement.count({ where: { companyId: f.company.id } }),
+      db.cashDeskMovement.count({
+        where: { entries: { some: { account: { companyId: f.company.id } } } },
+      }),
     ]);
   let draft, converted;
   const body = () => ({
