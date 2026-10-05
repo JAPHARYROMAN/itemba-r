@@ -231,6 +231,9 @@ async function fixtures() {
   const permissions = [
     'purchases.create',
     'purchases.view',
+    'purchases.confirm',
+    'purchases.receive',
+    'purchases.cancel',
     'supplier_order_drafts.view',
     'supplier_order_drafts.create',
     'supplier_order_drafts.send',
@@ -2010,6 +2013,12 @@ async function main() {
   });
   await require('./verify-cash-purchases.cjs').verifyCashPurchases({ db, check, fixture: f, call });
   await require('./verify-purchase-draft-conversion.cjs').verifyPurchaseDraftConversion({
+    db,
+    check,
+    fixture: f,
+    call,
+  });
+  await require('./verify-supplier-purchase-advances.cjs').verifySupplierPurchaseAdvances({
     db,
     check,
     fixture: f,

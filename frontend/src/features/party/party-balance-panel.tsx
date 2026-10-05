@@ -51,6 +51,11 @@ export function PartyBalancePanel({
             {money(e.over90, e.currency)}
           </em>
         ))}
+        {(b.advances ?? []).map((a) => (
+          <em key={`advance:${a.currency}`}>
+            Supplier advance credit {money(a.amount, a.currency)}
+          </em>
+        ))}
         {(b.desk ?? []).map((d) => (
           <em key={`desk:${d.currency}`}>
             {desk} {money(d.outstanding, d.currency)} · overdue {money(d.overdue, d.currency)}

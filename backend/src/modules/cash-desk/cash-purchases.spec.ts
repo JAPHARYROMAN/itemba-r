@@ -89,6 +89,7 @@ function setup() {
       count: jest.fn(async () => 0),
       findMany: jest.fn(async () => []),
     },
+    purchaseOrder: { count: jest.fn(async () => 0), findMany: jest.fn(async () => []) },
     supplierPayment: {
       findUnique: jest.fn(async ({ where }: any) => (where.id ? { supplierId: 'supplier' } : null)),
       update: jest.fn(),
@@ -274,5 +275,69 @@ describe('Cash Desk existing purchase settlements', () => {
     );
     expect(tx.payable.count).not.toHaveBeenCalled();
     expect(tx.payable.findMany).not.toHaveBeenCalled();
+  });
+  it('exposes existing PO and invoice identities while retaining the payable as the payment target', async () => {
+    const { purchases, payable } = setup();
+    payable.supplierInvoices = [];
+    payable.purchaseOrders = [
+      {
+        id: 'order',
+        purchaseOrderNumber: 'PO-1',
+        internalInvoiceNumber: 'PINV-2026-000001',
+        supplierInvoiceNumber: 'SUP-1',
+      },
+    ];
+    const page = await purchases.options(user, {
+      accountId: 'desk',
+      search: 'PINV-2026-000001',
+      page: 1,
+      pageSize: 20,
+    });
+    expect(page.rows[0]).toMatchObject({
+      id: 'payable',
+      source: 'PAYABLE',
+      number: 'SUP-1',
+      internalInvoiceNumber: 'PINV-2026-000001',
+      supplierInvoiceNumber: 'SUP-1',
+      purchaseOrderNumber: 'PO-1',
+    });
+  });
+  it('returns bounded scoped pending-order matches only with purchase view permission', async () => {
+    const { purchases, tx } = setup();
+    tx.payable.count.mockResolvedValue(0);
+    tx.payable.findMany.mockResolvedValue([]);
+    tx.purchaseOrder.findMany.mockResolvedValue([{ id: 'pending', status: 'CONFIRMED' }]);
+    const query = {
+      accountId: 'desk',
+      supplierId: 'supplier',
+      search: 'PINV-2026-000001',
+      page: 1,
+      pageSize: 20,
+    };
+    const page = await purchases.options(
+      { ...user, permissions: [...user.permissions, 'purchases.view'] },
+      query,
+    );
+    expect(page.rows).toEqual([]);
+    expect(page.orderMatches).toEqual([{ id: 'pending', status: 'CONFIRMED' }]);
+    expect(tx.purchaseOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 5,
+        where: {
+          AND: expect.arrayContaining([
+            { branchId: 'branch' },
+            expect.objectContaining({
+              companyId: 'company',
+              supplierId: 'supplier',
+              currency: 'TZS',
+              NOT: expect.any(Array),
+            }),
+          ]),
+        },
+      }),
+    );
+    tx.purchaseOrder.findMany.mockClear();
+    await purchases.options(user, query);
+    expect(tx.purchaseOrder.findMany).not.toHaveBeenCalled();
   });
 });

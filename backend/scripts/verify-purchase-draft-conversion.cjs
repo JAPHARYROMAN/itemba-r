@@ -196,4 +196,62 @@ exports.verifyPurchaseDraftConversion = async ({ db, check, fixture: f, call }) 
       assert.equal(await db.purchaseOrder.count({ where: { companyId: company.id } }), 2);
     },
   );
+  await check(
+    'Cash Desk finds pending and payable purchases by internal, supplier invoice and PO numbers without posting money',
+    async () => {
+      assert.ok(converted, 'Conversion proof dependency must succeed');
+      const desk = await db.cashDeskAccount.findFirstOrThrow({
+        where: { companyId: f.company.id, erpCashAccountId: f.cash.id },
+      });
+      const options = (search) =>
+        call(
+          f.admin.token,
+          'GET',
+          `/cash-desk/purchase-options?accountId=${desk.id}&supplierId=${f.supplier.id}&search=${encodeURIComponent(search)}`,
+        );
+      const before = await counters();
+      const pending = await options(` ${converted.internalInvoiceNumber.toLowerCase()} `);
+      assert.ok(
+        pending.orderMatches.some((row) => row.id === converted.id && row.status === 'DRAFT'),
+      );
+      assert.ok(!pending.rows.some((row) => row.purchaseOrderId === converted.id));
+      const invoice = await db.supplierInvoice.findFirstOrThrow({
+        where: {
+          companyId: f.company.id,
+          supplierId: f.supplier.id,
+          status: 'APPROVED',
+          deletedAt: null,
+          purchaseOrderId: { not: null },
+          payable: {
+            status: { in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] },
+            outstandingAmount: { gt: 0 },
+            deletedAt: null,
+          },
+        },
+        include: { purchaseOrder: true },
+      });
+      const order = await db.purchaseOrder.update({
+        where: { id: invoice.purchaseOrderId },
+        data: {
+          internalInvoiceNumber: `PINV-SEARCH-${f.company.id}`,
+          supplierInvoiceNumber: `SUP-SEARCH-${f.company.id}`,
+        },
+      });
+      for (const search of [
+        order.internalInvoiceNumber,
+        order.supplierInvoiceNumber,
+        order.purchaseOrderNumber,
+        invoice.supplierInvoiceNumber,
+      ]) {
+        const result = await options(search);
+        const row = result.rows.find((candidate) => candidate.id === invoice.payableId);
+        assert.ok(row, `Existing payable must resolve by ${search}`);
+        assert.equal(row.purchaseOrderId, order.id);
+        assert.equal(row.internalInvoiceNumber, order.internalInvoiceNumber);
+        assert.equal(row.canPay, true);
+        assert.ok(!result.orderMatches.some((match) => match.id === order.id));
+      }
+      assert.deepEqual(await counters(), before);
+    },
+  );
 };

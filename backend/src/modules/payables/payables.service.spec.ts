@@ -48,6 +48,8 @@ function makeService(
         .mockResolvedValue({ id: 'supplier-1', name: 'Acme', divisionId: null, branchId: null }),
     },
     supplierPayment: {
+      aggregate: jest.fn(async () => ({ _sum: { unappliedAmount: new Prisma.Decimal(0) } })),
+
       findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn(async ({ data }: any) => ({
         id: 'spay-1',
@@ -655,7 +657,7 @@ describe('PayablesService.syncSupplierBalance mixed-currency (#22)', () => {
 
     expect(tx.supplier.updateMany).toHaveBeenCalledWith({
       where: { id: 'supplier-1', companyId: 'company-1', deletedAt: null },
-      data: { currentBalance: 0 },
+      data: { currentBalance: new Prisma.Decimal(0) },
     });
   });
 });

@@ -1,3 +1,4 @@
+import { SupplierPurchaseAdvancesService } from '../supplier-payments/supplier-purchase-advances.service';
 import {
   BadRequestException,
   ConflictException,
@@ -38,6 +39,7 @@ export class SupplierInvoicesService {
     private readonly accountResolver: AccountResolverService,
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
+    private readonly advances?: SupplierPurchaseAdvancesService,
   ) {}
 
   async findAll(query: QuerySupplierInvoiceDto, user: AuthUser) {
@@ -335,30 +337,52 @@ export class SupplierInvoicesService {
       where: { id: invoice.purchaseOrderId, companyId: invoice.companyId, deletedAt: null },
     });
     if (!order || order.supplierId !== invoice.supplierId || order.currency !== invoice.currency) {
-      throw new ConflictException('The purchase order changed; review its supplier and currency before approval.');
+      throw new ConflictException(
+        'The purchase order changed; review its supplier and currency before approval.',
+      );
     }
     if (order.purchaseType === 'CASH_PURCHASE') {
-      throw new BadRequestException('This cash purchase is already settled through receiving; do not create another supplier payable.');
+      throw new BadRequestException(
+        'This cash purchase is already settled through receiving; do not create another supplier payable.',
+      );
     }
     if (order.payableId && invoice.payableId && order.payableId !== invoice.payableId) {
-      throw new ConflictException('The purchase order and invoice have conflicting payables; reconcile them in the office.');
+      throw new ConflictException(
+        'The purchase order and invoice have conflicting payables; reconcile them in the office.',
+      );
     }
     const payableId = order.payableId ?? invoice.payableId ?? null;
     if (!order.payableId) return payableId;
     const covered = await tx.payable.findUnique({
-      where: { id: order.payableId }, include: { journalEntry: true },
+      where: { id: order.payableId },
+      include: { journalEntry: true },
     });
-    if (!covered || covered.deletedAt || covered.status === 'CANCELLED' ||
-        covered.companyId !== invoice.companyId || covered.supplierId !== invoice.supplierId ||
-        covered.currency !== invoice.currency ||
-        !new Prisma.Decimal(covered.amount).eq(new Prisma.Decimal(invoice.totalAmount).toDecimalPlaces(2)) ||
-        new Prisma.Decimal(covered.paidAmount).gt(invoice.totalAmount) ||
-        (covered.sourceType === 'SupplierInvoice' && covered.sourceId !== invoice.id)) {
-      throw new ConflictException('Existing purchase coverage differs from this invoice; reconcile the amount or payable in the office.');
+    if (
+      !covered ||
+      covered.deletedAt ||
+      covered.status === 'CANCELLED' ||
+      covered.companyId !== invoice.companyId ||
+      covered.supplierId !== invoice.supplierId ||
+      covered.currency !== invoice.currency ||
+      !new Prisma.Decimal(covered.amount).eq(
+        new Prisma.Decimal(invoice.totalAmount).toDecimalPlaces(2),
+      ) ||
+      new Prisma.Decimal(covered.paidAmount).gt(invoice.totalAmount) ||
+      (covered.sourceType === 'SupplierInvoice' && covered.sourceId !== invoice.id)
+    ) {
+      throw new ConflictException(
+        'Existing purchase coverage differs from this invoice; reconcile the amount or payable in the office.',
+      );
     }
-    if (covered.journalEntryId && (!covered.journalEntry || covered.journalEntry.status !== 'POSTED' ||
-        covered.journalEntry.companyId !== invoice.companyId)) {
-      throw new ConflictException('The existing purchase journal is not posted; reconcile its accounting coverage before approval.');
+    if (
+      covered.journalEntryId &&
+      (!covered.journalEntry ||
+        covered.journalEntry.status !== 'POSTED' ||
+        covered.journalEntry.companyId !== invoice.companyId)
+    ) {
+      throw new ConflictException(
+        'The existing purchase journal is not posted; reconcile its accounting coverage before approval.',
+      );
     }
     return payableId;
   }
@@ -515,13 +539,21 @@ export class SupplierInvoicesService {
       const invoice = await tx.supplierInvoice.update({
         where: { id },
         data: {
-          status: 'APPROVED', payableId: payable.id,
+          status: 'APPROVED',
+          payableId: payable.id,
           paidAmount: payable.paidAmount,
           outstandingAmount: payable.outstandingAmount,
         },
         include: { lines: true },
       });
 
+      if (existing.purchaseOrderId && this.advances) {
+        await this.advances.apply(tx, user, existing.purchaseOrderId, payable.id, new Date());
+        Object.assign(
+          invoice,
+          await tx.supplierInvoice.findUnique({ where: { id }, include: { lines: true } }),
+        );
+      }
       await this.auditLogs.logStrictInTransaction(tx, {
         action: 'SUPPLIER_INVOICE_APPROVE',
         entityType: 'SupplierInvoice',
@@ -597,6 +629,9 @@ export class SupplierInvoicesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (existing.purchaseOrderId) {
+        await tx.$queryRaw`SELECT id FROM purchase_orders WHERE id = ${existing.purchaseOrderId} FOR UPDATE`;
+      }
       // Atomic claim pinned to the exact version findOne() read: flip
       // APPROVED -> CANCELLED under a guarded write so a concurrent void (or a
       // payment that just moved the invoice) can't race this one into posting a

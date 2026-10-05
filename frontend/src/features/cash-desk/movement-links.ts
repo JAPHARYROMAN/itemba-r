@@ -55,6 +55,8 @@ export function movementDocuments(m: Movement, can: Can = none): MovementLink[] 
       href: can('payables.view') ? register('/cash-desk/payables', m.payable.payableNumber) : null,
     });
   const orders = new Map<string, { id: string; purchaseOrderNumber: string }>();
+  const advanceOrder = m.supplierPayment?.purchaseAdvance?.purchaseOrder;
+  if (advanceOrder) orders.set(advanceOrder.id, advanceOrder);
   for (const invoice of m.payable?.supplierInvoices ?? []) {
     docs.push({
       label: 'Purchase invoice',

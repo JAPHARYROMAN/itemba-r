@@ -1,3 +1,4 @@
+import { SupplierPaymentsModule } from '../supplier-payments/supplier-payments.module';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
@@ -6,7 +7,7 @@ import { SupplierInvoicesService } from './supplier-invoices.service';
 import { CompanyScopeService } from '../../common/services';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule],
+  imports: [SupplierPaymentsModule, PrismaModule, AuditLogsModule],
   controllers: [SupplierInvoicesController],
   providers: [SupplierInvoicesService, CompanyScopeService],
   exports: [SupplierInvoicesService],

@@ -11,7 +11,13 @@ import { WorkspaceDraftsProvider } from '@/components/workspace/workspace-drafts
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
 import { CashEditor } from './cash-editor';
 import { CashDesk } from './cash-desk';
-import { exactAmount, type Account, type Movement, type PurchaseOption } from './types';
+import {
+  exactAmount,
+  type Account,
+  type Movement,
+  type PurchaseOption,
+  type PurchaseOptions,
+} from './types';
 const h = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
@@ -20,6 +26,7 @@ const h = vi.hoisted(() => ({
   permissions: new Set<string>(),
   rows: [] as PurchaseOption[],
   current: null as PurchaseOption | null,
+  orderMatches: [] as NonNullable<PurchaseOptions['orderMatches']>,
   navigation: { push: vi.fn(), replace: vi.fn() },
 }));
 vi.mock('next/navigation', () => ({
@@ -108,6 +115,7 @@ beforeEach(() => {
   ]);
   h.rows = [purchase, desk];
   h.current = null;
+  h.orderMatches = [];
   h.post.mockReset();
   h.post.mockResolvedValue({ id: 'saved' });
   h.list.mockResolvedValue([supplier, { id: 'supplier-b', name: 'Supplier B' }]);
@@ -120,7 +128,20 @@ beforeEach(() => {
           ? ([h.current ?? h.rows.find((row) => row.id === q.id && row.source === q.source)].filter(
               Boolean,
             ) as PurchaseOption[])
-          : h.rows.filter((row) => row.supplierId === q.supplierId && row.canPay);
+          : h.rows.filter(
+              (row) =>
+                row.supplierId === q.supplierId &&
+                row.canPay &&
+                (!q.search ||
+                  [
+                    row.number,
+                    row.purchaseOrderNumber,
+                    row.internalInvoiceNumber,
+                    row.supplierInvoiceNumber,
+                  ].some((number) =>
+                    number?.toLowerCase().includes(String(q.search).trim().toLowerCase()),
+                  )),
+            );
         const page = Number(q.page ?? 1),
           pageSize = 20;
         return {
@@ -129,6 +150,7 @@ beforeEach(() => {
           page,
           pageSize,
           totalPages: Math.ceil(rows.length / pageSize),
+          orderMatches: q.search ? h.orderMatches : [],
         };
       }
       if (path.startsWith('/suppliers/'))
@@ -192,6 +214,96 @@ async function start() {
   );
 }
 describe('Cash Desk purchase payments', () => {
+  it.each(['PINV-2026-000001', 'PO-001', 'SUP-123'])(
+    'finds an existing purchase by %s and pays its linked payable',
+    async (search) => {
+      h.rows = [
+        {
+          ...purchase,
+          internalInvoiceNumber: 'PINV-2026-000001',
+          supplierInvoiceNumber: 'SUP-123',
+        },
+      ];
+      render(<Editor />);
+      await chooseSelectOption('Paying account', 'till');
+      await pickSupplier();
+      fireEvent.change(screen.getByLabelText('Invoice number or PO number'), {
+        target: { value: search },
+      });
+      await waitFor(() =>
+        expect(h.get).toHaveBeenCalledWith(
+          '/cash-desk/purchase-options',
+          expect.objectContaining({ query: expect.objectContaining({ search }) }),
+        ),
+      );
+      await findSelectField('Purchase or invoice');
+      expect(selectFieldOptions(getSelectField('Purchase or invoice')).join(' ')).toContain(
+        'PINV-2026-000001',
+      );
+      await chooseSelectOption('Purchase or invoice', 'PAYABLE:payable');
+      await waitFor(() =>
+        expect(screen.queryByText('Checking the selected purchase…')).not.toBeInTheDocument(),
+      );
+      submit();
+      await waitFor(() => expect(h.post).toHaveBeenCalledOnce());
+      expect(h.post.mock.calls[0][1]).toMatchObject({
+        payableId: 'payable',
+        supplierId: 'supplier',
+      });
+    },
+  );
+  it('finds a draft PO and explains confirmation without posting payment', async () => {
+    h.rows = [];
+    h.orderMatches = [
+      {
+        id: 'pending-order',
+        purchaseOrderNumber: 'PO-58',
+        internalInvoiceNumber: 'PINV-2026-000001',
+        status: 'DRAFT',
+        paymentStatus: 'UNPAID',
+        purchaseType: 'STOCK_PURCHASE',
+      },
+    ];
+    render(<Editor />);
+    await chooseSelectOption('Paying account', 'till');
+    await pickSupplier();
+    fireEvent.change(screen.getByLabelText('Invoice number or PO number'), {
+      target: { value: 'PINV-2026-000001' },
+    });
+    expect(
+      await screen.findByText(/Confirm this purchase order before recording a supplier advance/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /PO-58/ })).toHaveAttribute(
+      'href',
+      '/operations/purchase-orders/pending-order',
+    );
+    expect(screen.queryByText(/No open purchases or invoices match/)).not.toBeInTheDocument();
+    expect(h.post).not.toHaveBeenCalled();
+  });
+  it('records a confirmed PO as an advance without creating an invoice or payable target', async () => {
+    const advance: PurchaseOption = {
+      ...purchase,
+      source: 'PURCHASE_ORDER',
+      id: 'pending-order',
+      number: 'PINV-2026-000001',
+      purchaseOrderId: 'pending-order',
+      status: 'CONFIRMED',
+      outstanding: '1000.00',
+    };
+    h.rows = [advance];
+    render(<Editor />);
+    await selectPurchase(advance);
+    expect(screen.getByText(/Supplier advance: cash is paid now/)).toBeInTheDocument();
+    submit();
+    await waitFor(() => expect(h.saved).toHaveBeenCalledOnce());
+    expect(h.post.mock.calls[0][1]).toMatchObject({
+      purchaseOrderId: 'pending-order',
+      supplierId: 'supplier',
+      amount: '1000.00',
+    });
+    expect(h.post.mock.calls[0][1]).not.toHaveProperty('payableId');
+    expect(h.post.mock.calls[0][1]).not.toHaveProperty('invoiceId');
+  });
   it.each([purchase, desk])(
     'pays existing $source from the chosen desk account with exact decimal strings',
     async (row) => {
@@ -298,9 +410,9 @@ describe('Cash Desk purchase payments', () => {
     );
     await findSelectField('Purchase or invoice');
     expect(selectFieldOptions(getSelectField('Purchase or invoice'))).toContain(
-      'PUR-21 · Purchase payable · TZS 9,999,999,999,999,999.99 outstanding',
+      'PUR-21 · PO-001 · Purchase payable · TZS 9,999,999,999,999,999.99 outstanding',
     );
-    fireEvent.change(screen.getByLabelText('Search purchases or invoices'), {
+    fireEvent.change(screen.getByLabelText('Invoice number or PO number'), {
       target: { value: 'PUR' },
     });
     await waitFor(() =>
@@ -346,10 +458,10 @@ describe('Cash Desk purchase payments', () => {
       await late;
     });
     expect(selectFieldOptions(getSelectField('Purchase or invoice'))).toContain(
-      'B-001 · Purchase payable · TZS 9,999,999,999,999,999.99 outstanding',
+      'B-001 · PO-001 · Purchase payable · TZS 9,999,999,999,999,999.99 outstanding',
     );
     expect(selectFieldOptions(getSelectField('Purchase or invoice'))).not.toContain(
-      'PUR-001 · Purchase payable · TZS 9,999,999,999,999,999.99 outstanding',
+      'PUR-001 · PO-001 · Purchase payable · TZS 9,999,999,999,999,999.99 outstanding',
     );
   });
   it('keeps a selected invoice, re-reads its balance on actual Cash Desk resume, and reviews its current version before a first payment', async () => {

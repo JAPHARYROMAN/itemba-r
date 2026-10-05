@@ -110,6 +110,7 @@ export function CashEditor({
           editor.invoice?.id ?? (values.purchaseSource === 'INVOICE_DESK' ? values.purchaseId : ''),
         version: editor.invoice ? String(editor.invoice.version) : (values.purchaseVersion ?? ''),
         payableId: values.purchaseSource === 'PAYABLE' ? values.purchaseId : '',
+        purchaseOrderId: values.purchaseSource === 'PURCHASE_ORDER' ? values.purchaseId : '',
         supplierId: values.supplierId,
         accountId: values.accountId,
         loanId: editor.loan?.id ?? '',
@@ -197,8 +198,8 @@ export function CashEditor({
   const allowedPurchase = (row: PurchaseOption) =>
     row.supplierId === form.supplierId &&
     row.currency === account?.currency &&
-    (row.source === 'PAYABLE'
-      ? canCanonicalPurchase
+    (row.source === 'PAYABLE' || row.source === 'PURCHASE_ORDER'
+      ? canCanonicalPurchase && (row.source !== 'PURCHASE_ORDER' || hasPermission('purchases.view'))
       : row.source === 'INVOICE_DESK' && canDeskPurchase);
   const currentPurchase = purchaseDetail.data?.rows.find(
     (row) =>
@@ -386,12 +387,14 @@ export function CashEditor({
                 supplierId: form.supplierId,
                 ...(form.purchaseSource === 'PAYABLE'
                   ? { payableId: form.purchaseId }
-                  : {
-                      invoiceId: form.purchaseId,
-                      invoiceVersion: Number(
-                        draft.requestContext.current?.purchaseVersion || form.purchaseVersion,
-                      ),
-                    }),
+                  : form.purchaseSource === 'PURCHASE_ORDER'
+                    ? { purchaseOrderId: form.purchaseId }
+                    : {
+                        invoiceId: form.purchaseId,
+                        invoiceVersion: Number(
+                          draft.requestContext.current?.purchaseVersion || form.purchaseVersion,
+                        ),
+                      }),
               }
             : {}),
           ...(form.kind === 'LOAN' && form.dueDate ? { dueDate: form.dueDate } : {}),
@@ -696,12 +699,16 @@ export function CashEditor({
                 {purchaseEnabled && (
                   <>
                     <FormInput
-                      label="Search purchases or invoices"
+                      label="Invoice number or PO number"
+                      placeholder="Enter an existing supplier invoice, PINV or PO number"
                       value={purchaseSearch}
                       disabled={purchaseLocked}
                       onChange={(e) => {
                         setPurchaseSearch(e.target.value);
                         setPurchasePage(1);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.preventDefault();
                       }}
                     />
                     {purchaseOptions.error && (
@@ -741,18 +748,55 @@ export function CashEditor({
                             )
                             .map((row) => ({
                               value: `${row.source}:${row.id}`,
-                              label: `${row.number} · ${row.source === 'PAYABLE' ? 'Purchase payable' : 'Invoice Desk'} · ${money(row.outstanding, row.currency)} outstanding`,
+                              label: `${[row.number, row.purchaseOrderNumber, row.internalInvoiceNumber, row.supplierInvoiceNumber].filter((number, index, numbers) => !!number && numbers.indexOf(number) === index).join(' · ')} · ${row.source === 'PAYABLE' ? 'Purchase payable' : row.source === 'PURCHASE_ORDER' ? 'Supplier advance' : 'Invoice Desk'} · ${money(row.outstanding, row.currency)} outstanding`,
                             })),
                         ]}
                       />
                     )}
                     {!purchaseOptions.loading &&
                       !purchaseOptions.error &&
-                      !purchaseOptions.data?.rows.length && (
+                      !purchaseOptions.data?.rows.length &&
+                      !purchaseOptions.data?.orderMatches?.length && (
                         <p className="desk-muted">
-                          No open purchases or invoices match this supplier and account.
+                          No open purchases or invoices match this supplier and account. Search by
+                          the supplier invoice number, internal invoice number or PO number.
                         </p>
                       )}
+                    {!purchaseOptions.loading &&
+                      !purchaseOptions.error &&
+                      hasPermission('purchases.view') &&
+                      purchaseOptions.data?.orderMatches?.map((order) => (
+                        <div key={order.id} className="desk-muted">
+                          <WorkspaceLink
+                            href={`/operations/purchase-orders/${encodeURIComponent(order.id)}`}
+                          >
+                            {[
+                              order.purchaseOrderNumber,
+                              order.internalInvoiceNumber,
+                              order.supplierInvoiceNumber,
+                            ]
+                              .filter(
+                                (number, index, numbers) =>
+                                  !!number && numbers.indexOf(number) === index,
+                              )
+                              .join(' · ')}
+                          </WorkspaceLink>
+                          <p>
+                            {order.status.replaceAll('_', ' ')} ·{' '}
+                            {order.paymentStatus === 'PAID'
+                              ? 'This purchase is already paid.'
+                              : order.status === 'CANCELLED'
+                                ? 'This purchase order is cancelled.'
+                                : ['DRAFT', 'CONFIRMED'].includes(order.status)
+                                  ? order.purchaseType === 'CASH_PURCHASE'
+                                    ? 'Payment is recorded when this cash purchase is received.'
+                                    : order.status === 'DRAFT'
+                                      ? 'Confirm this purchase order before recording a supplier advance.'
+                                      : 'Choose this PO above to record a supplier advance before receiving.'
+                                  : 'This purchase order has no open posted balance for this account.'}
+                          </p>
+                        </div>
+                      ))}
                     {(purchaseOptions.data?.totalPages ?? 0) > 1 && (
                       <div className="desk-form-pair">
                         <Btn
@@ -777,6 +821,12 @@ export function CashEditor({
                           Next purchases
                         </Btn>
                       </div>
+                    )}
+                    {currentPurchase?.source === 'PURCHASE_ORDER' && (
+                      <p className="desk-muted">
+                        Supplier advance: cash is paid now and applied to this PO when its purchase
+                        is posted.
+                      </p>
                     )}
                     {form.purchaseId && purchaseDetail.loading && (
                       <p role="status">Checking the selected purchase…</p>

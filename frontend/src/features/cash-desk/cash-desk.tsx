@@ -951,6 +951,14 @@ export function CashDesk({
                 can={hasPermission}
                 onPeek={(kind, id) => setPeek({ kind, id })}
               />
+              {selected.supplierPayment?.purchaseAdvance && !selected.reversedAt && (
+                <p className="desk-muted">
+                  Supplier advance · Applied{' '}
+                  {money(selected.supplierPayment.appliedAmount ?? '0', selected.currency)}
+                  {' · '}Advance credit{' '}
+                  {money(selected.supplierPayment.unappliedAmount ?? '0', selected.currency)}
+                </p>
+              )}
               {selected.fuelReportPostingId && (
                 <p className="desk-muted">
                   Posted from PetroDollar. Reverse the entire shift posting there to keep cash,
@@ -1253,6 +1261,11 @@ function SupplierBalanceRow({
           ))}
           {balance.desk.map((b) => (
             <em key={`desk:${b.currency}`}>Invoice Desk {money(b.outstanding, b.currency)}</em>
+          ))}
+          {(balance.advances ?? []).map((a) => (
+            <em key={`advance:${a.currency}`}>
+              Supplier advance credit {money(a.amount, a.currency)}
+            </em>
           ))}
           {balance.notebook.map((b) => (
             <em key={`notebook:${b.currency}`}>

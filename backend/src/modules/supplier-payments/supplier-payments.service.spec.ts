@@ -52,6 +52,8 @@ function setup(
     },
     purchaseOrder: { findMany: jest.fn(async () => opts.orders ?? []), update: jest.fn() },
     supplierPayment: {
+      aggregate: jest.fn(async () => ({ _sum: { unappliedAmount: new Prisma.Decimal(0) } })),
+
       findUnique: jest.fn(async () => opts.existing ?? null),
       findFirst: jest.fn(),
       create: jest.fn(async ({ data }: any) => ({
@@ -437,7 +439,12 @@ describe('SupplierPaymentsService.remittance', () => {
     ],
   };
   function remittanceService(documents?: any) {
-    const prisma: any = { supplierPayment: { findFirst: jest.fn(async () => payment) } };
+    const prisma: any = {
+      supplierPayment: {
+        aggregate: jest.fn(async () => ({ _sum: { unappliedAmount: new Prisma.Decimal(0) } })),
+        findFirst: jest.fn(async () => payment),
+      },
+    };
     const companyScope = { assertCanAccessCompany: jest.fn() } as any;
     const service = new SupplierPaymentsService(
       prisma,

@@ -249,6 +249,10 @@ export class SupplierPaymentsService {
 
   /** Read + row-lock a payable inside the transaction (mirrors payables.recordPayment). */
   async lockPayable(tx: Tx, id: string): Promise<LockedPayable | undefined> {
+    await tx.$queryRaw`SELECT po.id FROM purchase_orders po
+      WHERE po."payableId" = ${id} OR po.id IN
+        (SELECT "purchaseOrderId" FROM supplier_invoices WHERE "payableId" = ${id} AND "purchaseOrderId" IS NOT NULL)
+      ORDER BY po.id FOR UPDATE`;
     const [locked] = await tx.$queryRaw<LockedPayable[]>`
       SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName",
              "payableNumber", "sourceType", "outstandingAmount", "paidAmount", "status", "currency"
@@ -736,7 +740,7 @@ export class SupplierPaymentsService {
    * nothing wrote SupplierInvoice.paidAmount after a payment, so invoice outstanding
    * figures went stale the moment the payable was paid.
    */
-  private async syncSupplierInvoices(
+  async syncSupplierInvoices(
     tx: Tx,
     payable: { id: string; companyId: string; paidAmount: Prisma.Decimal },
   ) {
@@ -765,7 +769,7 @@ export class SupplierPaymentsService {
   }
 
   /** Received purchase orders display the same settlement as their canonical payable. */
-  private async syncPurchaseOrders(
+  async syncPurchaseOrders(
     tx: Tx,
     payable: { id: string; companyId: string; paidAmount: Prisma.Decimal; currency: string | null },
   ) {
@@ -857,6 +861,18 @@ export class SupplierPaymentsService {
 
   private includeScope() {
     return {
+      purchaseAdvance: {
+        select: {
+          purchaseOrder: {
+            select: {
+              id: true,
+              purchaseOrderNumber: true,
+              internalInvoiceNumber: true,
+              supplierInvoiceNumber: true,
+            },
+          },
+        },
+      },
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },

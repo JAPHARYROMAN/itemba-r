@@ -23,7 +23,11 @@ function db(overrides: Record<string, unknown> = {}) {
     invoiceDeskInvoice: { findMany: jest.fn(async () => []) },
     salesDeskSale: { findMany: jest.fn(async () => []) },
     recordEntry: { findMany: jest.fn(async () => []) },
-    supplierPayment: { findFirst: jest.fn(async () => null) },
+    supplierPayment: {
+      groupBy: jest.fn(async () => []),
+      aggregate: jest.fn(async () => ({ _sum: { unappliedAmount: new Prisma.Decimal(0) } })),
+      findFirst: jest.fn(async () => null),
+    },
     customerPayment: { findFirst: jest.fn(async () => null) },
     supplier: { updateMany: jest.fn(async () => ({ count: 1 })) },
     customer: { updateMany: jest.fn(async () => ({ count: 1 })) },
@@ -32,6 +36,26 @@ function db(overrides: Record<string, unknown> = {}) {
 }
 
 describe('computePartyBalance', () => {
+  it('shows unapplied supplier advances as credit without adding them to payable aging', async () => {
+    const prisma = db();
+    prisma.supplierPayment.groupBy.mockResolvedValue([
+      { currency: 'TZS', _sum: { unappliedAmount: d(300) } },
+    ]);
+    const balance = await computePartyBalance(
+      prisma,
+      'supplier',
+      { id: 'sup-1', companyId: 'company-1', creditLimit: d(0), currentBalance: d(-300) },
+      asOf,
+    );
+    expect(balance.total).toEqual([{ currency: 'TZS', amount: '-300.00' }]);
+    expect(balance.advances).toEqual([{ currency: 'TZS', amount: '300.00' }]);
+    expect(balance.erp).toEqual([]);
+    prisma.supplierPayment.aggregate.mockResolvedValue({ _sum: { unappliedAmount: d(300) } });
+    await refreshCachedPartyBalance(prisma, 'supplier', 'company-1', 'sup-1');
+    expect(prisma.supplier.updateMany.mock.calls[0][0].data.currentBalance.toFixed(2)).toBe(
+      '-300.00',
+    );
+  });
   it('splits a supplier balance by currency with date-based overdue and aging, desk and notebook buckets', async () => {
     const prisma = db({
       payable: {
@@ -57,6 +81,9 @@ describe('computePartyBalance', () => {
         ]),
       },
       supplierPayment: {
+        groupBy: jest.fn(async () => []),
+        aggregate: jest.fn(async () => ({ _sum: { unappliedAmount: new Prisma.Decimal(0) } })),
+
         findFirst: jest.fn(async () => ({ paymentDate: new Date('2026-09-30T00:00:00.000Z') })),
       },
     });
