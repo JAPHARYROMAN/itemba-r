@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   linked: false,
   canConnect: true,
   legacyPayload: false,
+  baseline: false,
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
@@ -32,10 +33,28 @@ function resource(path: string) {
       ? { companies: [], divisions: [], branches: [] }
       : path.endsWith('/accounts')
         ? {
-            desk: [],
+            desk: mocks.baseline
+              ? [
+                  {
+                    id: 'desk',
+                    companyId: 'c1',
+                    divisionId: 'd1',
+                    branchId: 'b1',
+                    kind: 'CASH',
+                    name: 'Till',
+                    currency: 'TZS',
+                    recordedBalance: '167693000.01',
+                    canConnect: true,
+                    erpCashAccountId: null,
+                    company: { name: 'Company' },
+                    branch: { name: 'Central' },
+                  },
+                ]
+              : [],
             bank: [
               {
                 id: 'bank-cash-legacy',
+                canInitializeBalance: mocks.baseline,
                 companyId: 'c1',
                 divisionId: null,
                 branchId: null,
@@ -113,6 +132,7 @@ describe('Cash accounting review', () => {
     mocks.linked = false;
     mocks.canConnect = true;
     mocks.legacyPayload = false;
+    mocks.baseline = false;
   });
   it('keeps cached older responses reviewable without assuming missing balances or write access', async () => {
     mocks.legacyPayload = true;
@@ -156,6 +176,33 @@ describe('Cash accounting review', () => {
       }),
     );
   });
+  it.each([false, true])(
+    'sets up the exact Cash Desk balance only after an explicit selection: %s',
+    async (initialize) => {
+      mocks.baseline = true;
+      mocks.post.mockResolvedValue({});
+      render(<CashAccounting connections />);
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Till' }));
+      await screen.findByRole('dialog');
+      changeSelectField('Cash / bank account', 'bank-cash-legacy');
+      changeSelectField('Dedicated asset ledger account', 'legacy-ledger');
+      const setup = screen.getByRole('checkbox', { name: /I verified the Cash Desk balance/ });
+      expect(setup).not.toBeChecked();
+      if (initialize) fireEvent.click(setup);
+      fireEvent.click(
+        screen.getByRole('checkbox', { name: /These accounts represent the same cash box/ }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Save connection' }));
+      await waitFor(() =>
+        expect(mocks.post).toHaveBeenCalledWith('/cash-connections/accounts', {
+          deskAccountId: 'desk',
+          cashAccountId: 'bank-cash-legacy',
+          ledgerAccountId: 'legacy-ledger',
+          ...(initialize && { confirmedDeskBalance: '167693000.01' }),
+        }),
+      );
+    },
+  );
   it('uses the linked payable account and requires explicit duplicate review', async () => {
     mocks.post.mockResolvedValue({ journalNumber: 'JE-CASH-1' });
     render(<CashAccounting connections={false} />);

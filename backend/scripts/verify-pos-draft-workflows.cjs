@@ -271,6 +271,9 @@ async function fixtures() {
     'sales_desk.view',
     'cash_desk.view',
     'cash_desk.record',
+    'cash_desk.manage',
+    'cash_accounts.manage',
+    'journal_entries.view',
     'cash_desk.reverse',
     'payables.view',
     'supplier-payments.view',
@@ -374,6 +377,89 @@ async function main() {
   const f = await fixtures();
   const scope = { companyId: f.company.id, divisionId: f.division.id, branchId: f.branch.id };
   const query = '?companyId=' + f.company.id + '&branchId=' + f.branch.id;
+  await check(
+    'Verified cash setup adopts existing movements once, audits the baseline and preserves ledger history',
+    async () => {
+      const desk = await call(f.admin.token, 'POST', '/cash-desk/accounts', {
+        ...scope,
+        requestId: crypto.randomUUID(),
+        name: 'Balance setup proof',
+        kind: 'CASH',
+        currency: 'TZS',
+        openingDate: eastAfricaDay(new Date()),
+        openingBalance: '167693000.01',
+      });
+      const bank = await db.cashAccount.create({
+        data: {
+          companyId: f.company.id,
+          accountName: 'Unused balance setup proof',
+          accountType: 'CASH_ON_HAND',
+          currency: 'TZS',
+        },
+      });
+      const ledger = await db.chartOfAccount.create({
+        data: {
+          companyId: f.company.id,
+          accountCode: '1011',
+          accountName: 'Dedicated balance setup proof',
+          accountType: 'ASSET',
+        },
+      });
+      const before = {
+        entries: await db.cashDeskEntry.count({ where: { accountId: desk.id } }),
+        journals: await db.journalEntry.count({ where: { companyId: f.company.id } }),
+      };
+      const body = {
+        deskAccountId: desk.id,
+        cashAccountId: bank.id,
+        ledgerAccountId: ledger.id,
+        confirmedDeskBalance: '167693000.00',
+      };
+      await call(f.admin.token, 'POST', '/cash-connections/accounts', body, 409);
+      assert.equal(
+        (await db.cashAccount.findUniqueOrThrow({ where: { id: bank.id } })).ledgerAccountId,
+        null,
+      );
+      assert.equal(
+        (await db.cashDeskAccount.findUniqueOrThrow({ where: { id: desk.id } })).erpCashAccountId,
+        null,
+      );
+      body.confirmedDeskBalance = '167693000.01';
+      const accounts = await call(
+        f.admin.token,
+        'GET',
+        '/cash-connections/accounts?companyId=' + f.company.id,
+      );
+      assert.equal(accounts.bank.find((b) => b.id === bank.id).canInitializeBalance, true);
+      assert.equal(accounts.desk.find((d) => d.id === desk.id).recordedBalance, '167693000.01');
+      await call(f.admin.token, 'POST', '/cash-connections/accounts', body);
+      await call(f.admin.token, 'POST', '/cash-connections/accounts', body);
+      const saved = await db.cashAccount.findUniqueOrThrow({ where: { id: bank.id } });
+      assert.equal(saved.currentBalance.toFixed(2), '167693000.01');
+      assert.equal(saved.openingBalance.toFixed(2), '0.00');
+      assert.equal(saved.branchId, f.branch.id);
+      assert.equal(saved.divisionId, f.division.id);
+      assert.equal(saved.ledgerAccountId, ledger.id);
+      assert.equal(
+        (await db.cashDeskAccount.findUniqueOrThrow({ where: { id: desk.id } })).balance.toFixed(2),
+        '167693000.01',
+      );
+      assert.equal(await db.cashDeskEntry.count({ where: { accountId: desk.id } }), before.entries);
+      assert.equal(
+        await db.journalEntry.count({ where: { companyId: f.company.id } }),
+        before.journals,
+      );
+      const audits = await db.auditLog.findMany({
+        where: { entityId: bank.id, entityType: 'CashLedgerConnection', action: 'CONNECT' },
+      });
+      assert.equal(audits.length, 1);
+      assert.equal(audits[0].userId, f.admin.user.id);
+      assert.equal(audits[0].metadata.balanceSetup.recordedBalance, '167693000.01');
+      assert.equal(audits[0].metadata.balanceSetup.previousBalance, '0.00');
+      assert.equal(audits[0].metadata.balanceSetup.ledgerHistoryUnchanged, true);
+    },
+  );
+
   const balance = () =>
     db.inventoryBalance.findUniqueOrThrow({
       where: {

@@ -27,6 +27,7 @@ export type Ledger = Scope & {
   ledgerBalance?: string;
 };
 export type Bank = Scope & {
+  canInitializeBalance?: boolean;
   canConnect?: boolean;
   recordedBalance?: string;
   balanceDifference: string | null;
@@ -38,6 +39,8 @@ export type Bank = Scope & {
   ledgerAccount: Ledger | null;
 };
 export type Desk = Scope & {
+  kind?: string;
+  recordedBalance?: string;
   canConnect: boolean;
   id: string;
   name: string;

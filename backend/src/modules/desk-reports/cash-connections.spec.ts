@@ -400,3 +400,146 @@ describe('Cash connection workflow', () => {
     });
   });
 });
+
+describe('Verified Cash Desk balance setup', () => {
+  function initial() {
+    const result = setup();
+    Object.assign(result.bank, {
+      ledgerAccountId: null,
+      divisionId: null,
+      branchId: null,
+      openingBalance: d(0),
+      currentBalance: d(0),
+      _count: {
+        expenses: 0,
+        fuelShiftCollections: 0,
+        salesOrders: 0,
+        refunds: 0,
+        customerPayments: 0,
+        supplierPayments: 0,
+        mobilePosPayments: 0,
+        bankReconciliations: 0,
+      },
+    });
+    Object.assign(result.gl, { divisionId: null, branchId: null });
+    Object.assign(result.account, {
+      erpCashAccountId: null,
+      kind: 'CASH',
+      balance: d('167693000.01'),
+    });
+    result.db.cashAccount.findUnique.mockImplementation(async ({ where }: any) =>
+      where.id ? result.bank : null,
+    );
+    result.db.cashDeskAccount.findUnique.mockImplementation(async ({ where }: any) =>
+      where.id ? result.account : null,
+    );
+    result.db.cashDeskEntry = {
+      aggregate: jest.fn(async () => ({ _sum: { amount: d('167693000.01') } })),
+    };
+    return result;
+  }
+  const input = {
+    deskAccountId: 'a1',
+    cashAccountId: 'bank1',
+    ledgerAccountId: 'cash-gl',
+    confirmedDeskBalance: '167693000.01',
+  };
+  it('adopts the exact movement-backed balance and branch, with audit, without touching cash movements or journals', async () => {
+    const { service, db, audit, engine } = initial();
+    await expect(service.connect(user, input)).resolves.toEqual({ connected: true });
+    expect(db.cashAccount.update).toHaveBeenCalledWith({
+      where: { id: 'bank1' },
+      data: {
+        ledgerAccountId: 'cash-gl',
+        currentBalance: d('167693000.01'),
+        divisionId: 'd1',
+        branchId: 'b1',
+      },
+    });
+    expect(db.cashDeskAccount.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { erpCashAccountId: 'bank1' },
+    });
+    expect(audit.logStrictInTransaction).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        userId: 'u1',
+        metadata: expect.objectContaining({
+          balanceSetup: expect.objectContaining({
+            previousBalance: '0.00',
+            recordedBalance: '167693000.01',
+            ledgerHistoryUnchanged: true,
+          }),
+        }),
+      }),
+    );
+    expect(engine.postLines).not.toHaveBeenCalled();
+    expect(db.$transaction.mock.calls[0][1].isolationLevel).toBe('Serializable');
+  });
+  it('keeps normal connection behavior when balance setup is not selected', async () => {
+    const { service, db } = initial();
+    const { confirmedDeskBalance, ...normal } = input;
+    void confirmedDeskBalance;
+    await service.connect(user, normal);
+    expect(db.cashAccount.update).toHaveBeenCalledWith({
+      where: { id: 'bank1' },
+      data: { ledgerAccountId: 'cash-gl' },
+    });
+    expect(db.cashDeskEntry.aggregate).not.toHaveBeenCalled();
+  });
+  it.each([
+    'cash history',
+    'balance',
+    'opening',
+    'ledger',
+    'desk',
+    'bank kind',
+    'desk kind',
+    'stale',
+    'movements',
+    'scope',
+    'permission',
+    'precision',
+  ])('rejects %s before any balance or mapping is written', async (issue) => {
+    const { service, db, bank, account, gl } = initial();
+    const b = bank as any,
+      a = account as any;
+    const payload = { ...input };
+    let actor = user;
+    if (issue === 'cash history') b._count.customerPayments = 1;
+    if (issue === 'balance') b.currentBalance = d(1);
+    if (issue === 'opening') b.openingBalance = d(1);
+    if (issue === 'ledger') b.ledgerAccountId = gl.id;
+    if (issue === 'desk') a.erpCashAccountId = 'other-bank';
+    if (issue === 'bank kind') b.accountType = 'BANK';
+    if (issue === 'desk kind') a.kind = 'BANK';
+    if (issue === 'stale') a.balance = d(42);
+    if (issue === 'movements')
+      db.cashDeskEntry.aggregate.mockResolvedValue({ _sum: { amount: d(42) } });
+    if (issue === 'scope') b.companyId = 'other-company';
+    if (issue === 'permission') actor = { ...user, permissions: ['cash_desk.view'] };
+    if (issue === 'precision') payload.confirmedDeskBalance = '167693000.001';
+    await expect(service.connect(actor, payload)).rejects.toThrow();
+    expect(db.cashAccount.update).not.toHaveBeenCalled();
+    expect(db.cashDeskAccount.update).not.toHaveBeenCalled();
+  });
+  it('recognizes an exact retry without writing a second baseline and refuses to reset a spent balance', async () => {
+    const { service, bank, account, db } = initial();
+    Object.assign(bank, {
+      ledgerAccountId: 'cash-gl',
+      currentBalance: d(input.confirmedDeskBalance),
+    });
+    Object.assign(account, { erpCashAccountId: 'bank1' });
+    db.cashAccount.findUnique.mockImplementation(async () => bank);
+    await expect(service.connect(user, input)).resolves.toEqual({ connected: true });
+    expect(db.cashAccount.update).not.toHaveBeenCalled();
+    (bank as any).currentBalance = d(12);
+    await expect(service.connect(user, input)).rejects.toThrow('first connecting');
+    expect(db.cashAccount.update).not.toHaveBeenCalled();
+  });
+  it('propagates audit failure so the enclosing transaction rolls back the setup', async () => {
+    const { service, audit } = initial();
+    audit.logStrictInTransaction.mockRejectedValue(new Error('Audit unavailable'));
+    await expect(service.connect(user, input)).rejects.toThrow('Audit unavailable');
+  });
+});

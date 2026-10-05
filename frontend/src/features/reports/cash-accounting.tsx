@@ -77,8 +77,9 @@ function AccountConnections({ query }: { query: Record<string, string> }) {
     <>
       <p className="accounting-note">
         Connections identify the same physical cash box or bank account. They do not move money,
-        copy opening balances or post old records. Each bank account uses a separate asset ledger
-        account. Saved connections cannot be reassigned here.
+        post old records. When first connecting an unused ERP cash account, you can explicitly
+        verify and adopt the existing Cash Desk balance. Each bank account uses a separate asset
+        ledger account. Saved connections cannot be reassigned here.
       </p>
       {resource.loading && <p role="status">Loading account connections…</p>}
       {resource.error && <p role="alert">{resource.error}</p>}
