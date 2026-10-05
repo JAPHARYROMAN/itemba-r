@@ -11,6 +11,7 @@ import { assertCashAccountScopeCompatible } from '../../common/services/cash-acc
 import { CompanyScopeService } from '../../common/services/company-scope.service';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SupplierPurchaseAdvancesService } from '../supplier-payments/supplier-purchase-advances.service';
 import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
 import { toPaymentMethodGeneral } from '../supplier-payments/payment-method';
 import { CashMovementDto, CashPurchaseQuery } from './cash-desk.dto';
@@ -27,6 +28,12 @@ const purchaseBacking: Prisma.PayableWhereInput = {
     { purchaseOrders: { some: { deletedAt: null, status: { in: [...orderStatuses] } } } },
   ],
 };
+const openPurchaseBalance: Prisma.PayableWhereInput = {
+  ...purchaseBacking,
+  deletedAt: null,
+  status: { in: [...openStatuses] },
+  outstandingAmount: { gt: 0 },
+};
 export const purchaseRelations = {
   supplier: { select: { id: true, name: true } },
   supplierInvoices: {
@@ -40,7 +47,14 @@ export const purchaseRelations = {
       currency: true,
       purchaseOrderId: true,
       goodsReceivedNoteId: true,
-      purchaseOrder: { select: { id: true, purchaseOrderNumber: true } },
+      purchaseOrder: {
+        select: {
+          id: true,
+          purchaseOrderNumber: true,
+          internalInvoiceNumber: true,
+          supplierInvoiceNumber: true,
+        },
+      },
       goodsReceivedNote: { select: { id: true, grnNumber: true } },
     },
   },
@@ -49,6 +63,8 @@ export const purchaseRelations = {
     select: {
       id: true,
       purchaseOrderNumber: true,
+      internalInvoiceNumber: true,
+      supplierInvoiceNumber: true,
       orderDate: true,
       companyId: true,
       supplierId: true,
@@ -64,6 +80,7 @@ export class CashPurchasesService {
     private readonly companies: CompanyScopeService,
     private readonly org: OrganizationScopeService,
     private readonly payments: SupplierPaymentsService,
+    private readonly advances?: SupplierPurchaseAdvancesService,
   ) {}
 
   permission(user: AuthUser) {
@@ -91,6 +108,16 @@ export class CashPurchasesService {
     if (!account) throw new NotFoundException('Cash account not found.');
     const scope = await this.org.recordWhereFor(user);
     const search = q.search?.trim();
+    const orderReference: Prisma.PurchaseOrderWhereInput | undefined = search
+      ? {
+          deletedAt: null,
+          OR: [
+            { purchaseOrderNumber: { contains: search, mode: 'insensitive' as const } },
+            { internalInvoiceNumber: { contains: search, mode: 'insensitive' as const } },
+            { supplierInvoiceNumber: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }
+      : undefined;
     const payableWhere: Prisma.PayableWhereInput = {
       AND: [
         purchaseBacking,
@@ -117,14 +144,25 @@ export class CashPurchasesService {
                   {
                     supplierInvoices: {
                       some: {
-                        supplierInvoiceNumber: { contains: search, mode: 'insensitive' as const },
+                        deletedAt: null,
+                        status: { in: [...invoiceStatuses] },
+                        OR: [
+                          {
+                            supplierInvoiceNumber: {
+                              contains: search,
+                              mode: 'insensitive' as const,
+                            },
+                          },
+                          { purchaseOrder: orderReference },
+                        ],
                       },
                     },
                   },
                   {
                     purchaseOrders: {
                       some: {
-                        purchaseOrderNumber: { contains: search, mode: 'insensitive' as const },
+                        ...orderReference,
+                        status: { in: [...orderStatuses] },
                       },
                     },
                   },
@@ -132,6 +170,35 @@ export class CashPurchasesService {
               },
             ]
           : []),
+      ],
+    };
+    const canAdvance = user.permissions.includes('purchases.view');
+    const advanceWhere: Prisma.PurchaseOrderWhereInput = {
+      AND: [
+        scope,
+        {
+          companyId: account.companyId,
+          currency: account.currency as CurrencyCode,
+          supplierId: q.supplierId ?? { not: null },
+          supplier: { deletedAt: null, status: 'ACTIVE' },
+          deletedAt: null,
+          status: 'CONFIRMED',
+          purchaseType: { not: 'CASH_PURCHASE' },
+          payableId: null,
+          NOT: {
+            supplierInvoices: {
+              some: {
+                deletedAt: null,
+                status: { in: [...invoiceStatuses] },
+                payableId: { not: null },
+              },
+            },
+          },
+          ...(q.id
+            ? { id: q.source === 'PURCHASE_ORDER' ? q.id : '__other_source__' }
+            : { outstandingAmount: { gt: 0 } }),
+        },
+        ...(orderReference ? [orderReference] : []),
       ],
     };
     const deskWhere: Prisma.InvoiceDeskInvoiceWhereInput = {
@@ -185,9 +252,10 @@ export class CashPurchasesService {
       skip = (page - 1) * pageSize;
     return this.db.$transaction(
       async (tx) => {
-        const [payableTotal, deskTotal] = await Promise.all([
+        const [payableTotal, deskTotal, advanceTotal] = await Promise.all([
           canCanonical ? tx.payable.count({ where: payableWhere }) : 0,
           canDesk ? tx.invoiceDeskInvoice.count({ where: deskWhere }) : 0,
+          canCanonical && canAdvance ? tx.purchaseOrder.count({ where: advanceWhere }) : 0,
         ]);
         // Stable source ordering keeps every query bounded to one page, even on high pages.
         const payables =
@@ -214,7 +282,36 @@ export class CashPurchasesService {
                 take: pageSize - payables.length,
               })
             : [];
+        const advanceOrders =
+          canCanonical &&
+          canAdvance &&
+          skip < payableTotal + deskTotal + advanceTotal &&
+          payables.length + desks.length < pageSize
+            ? await tx.purchaseOrder.findMany({
+                where: advanceWhere,
+                include: { supplier: { select: { name: true } } },
+                orderBy: [{ orderDate: 'desc' }, { id: 'asc' }],
+                skip: Math.max(0, skip - payableTotal - deskTotal),
+                take: pageSize - payables.length - desks.length,
+              })
+            : [];
         const rows = [
+          ...advanceOrders.map((o) => ({
+            source: 'PURCHASE_ORDER' as const,
+            id: o.id,
+            number: o.supplierInvoiceNumber ?? o.internalInvoiceNumber ?? o.purchaseOrderNumber,
+            supplierId: o.supplierId,
+            supplierName: o.supplier!.name,
+            currency: o.currency,
+            outstanding: o.outstandingAmount.toFixed(2),
+            businessDate: o.orderDate.toISOString().slice(0, 10),
+            status: o.status,
+            canPay: o.outstandingAmount.gt(0),
+            purchaseOrderId: o.id,
+            purchaseOrderNumber: o.purchaseOrderNumber,
+            internalInvoiceNumber: o.internalInvoiceNumber,
+            supplierInvoiceNumber: o.supplierInvoiceNumber,
+          })),
           ...payables.map((p) => {
             const invoice = p.supplierInvoices[0],
               order = invoice?.purchaseOrder ?? p.purchaseOrders[0];
@@ -222,7 +319,11 @@ export class CashPurchasesService {
               source: 'PAYABLE' as const,
               id: p.id,
               number:
-                invoice?.supplierInvoiceNumber ?? order?.purchaseOrderNumber ?? p.payableNumber,
+                invoice?.supplierInvoiceNumber ??
+                order?.supplierInvoiceNumber ??
+                order?.internalInvoiceNumber ??
+                order?.purchaseOrderNumber ??
+                p.payableNumber,
               supplierId: p.supplierId!,
               supplierName: p.supplier!.name,
               currency: p.currency,
@@ -236,6 +337,8 @@ export class CashPurchasesService {
               purchaseInvoiceNumber: invoice?.supplierInvoiceNumber,
               purchaseOrderId: order?.id,
               purchaseOrderNumber: order?.purchaseOrderNumber,
+              internalInvoiceNumber: order?.internalInvoiceNumber,
+              supplierInvoiceNumber: order?.supplierInvoiceNumber,
               goodsReceivedNoteId: invoice?.goodsReceivedNoteId,
               goodsReceivedNoteNumber: invoice?.goodsReceivedNote?.grnNumber,
             };
@@ -254,12 +357,66 @@ export class CashPurchasesService {
             canPay: !p.voidedAt && p.paidAmount.lt(p.totalAmount),
           })),
         ];
+        // A found order may still be awaiting receipt or already settled. Show
+        // its identity/status without treating an unposted order as a payable.
+        const orderMatches =
+          search && canCanonical && user.permissions.includes('purchases.view') && !q.id
+            ? await tx.purchaseOrder.findMany({
+                where: {
+                  AND: [
+                    scope,
+                    orderReference!,
+                    {
+                      companyId: account.companyId,
+                      currency: account.currency as CurrencyCode,
+                      supplierId: q.supplierId ?? { not: null },
+                      supplier: { deletedAt: null, status: 'ACTIVE' },
+                      NOT: [
+                        { payable: openPurchaseBalance },
+                        {
+                          supplierInvoices: {
+                            some: {
+                              deletedAt: null,
+                              status: { in: [...invoiceStatuses] },
+                              payable: openPurchaseBalance,
+                            },
+                          },
+                        },
+                      ],
+                      ...(rows.some((row) => 'purchaseOrderId' in row && row.purchaseOrderId)
+                        ? {
+                            id: {
+                              notIn: rows.flatMap((row) =>
+                                'purchaseOrderId' in row && row.purchaseOrderId
+                                  ? [row.purchaseOrderId]
+                                  : [],
+                              ),
+                            },
+                          }
+                        : {}),
+                    },
+                  ],
+                },
+                select: {
+                  id: true,
+                  purchaseOrderNumber: true,
+                  internalInvoiceNumber: true,
+                  supplierInvoiceNumber: true,
+                  status: true,
+                  paymentStatus: true,
+                  purchaseType: true,
+                },
+                orderBy: [{ orderDate: 'desc' }, { id: 'asc' }],
+                take: 5,
+              })
+            : [];
         return {
           rows,
-          total: payableTotal + deskTotal,
+          orderMatches,
+          total: payableTotal + deskTotal + advanceTotal,
           page,
           pageSize,
-          totalPages: Math.ceil((payableTotal + deskTotal) / pageSize),
+          totalPages: Math.ceil((payableTotal + deskTotal + advanceTotal) / pageSize),
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
@@ -284,6 +441,10 @@ export class CashPurchasesService {
       throw new ConflictException(
         'This request reference already belongs to another supplier payment.',
       );
+    if (d.purchaseOrderId) {
+      if (!this.advances) throw new BadRequestException('Supplier advances are unavailable.');
+      return this.advances.pay(tx, user, account, d, date, amount);
+    }
     const locked = await this.payments.lockPayable(tx, d.payableId!);
     if (!locked) throw new NotFoundException('Purchase payable not found.');
     const payable = await tx.payable.findFirst({
@@ -430,11 +591,13 @@ export class CashPurchasesService {
       payment.branchId,
       AccessLevel.WRITE,
     );
+    await this.advances?.reverseApplications(tx, user, payment.id, date);
     const result = await this.payments.reverseInTransaction(tx, user, payment.id, reason, {
       fromCashDesk: true,
       cashDeskOwnsMovement: true,
       businessDate: date,
     });
+    await this.advances?.syncAfterReverse(tx, payment.id);
     return result.reversal;
   }
 }

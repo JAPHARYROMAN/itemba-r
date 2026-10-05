@@ -102,6 +102,16 @@ export type Movement = {
   expense?: { id: string; expenseNumber: string } | null;
   refund?: { id: string; refundNumber: string } | null;
   supplierPayment?: {
+    unappliedAmount?: string;
+    appliedAmount?: string;
+    purchaseAdvance?: {
+      purchaseOrder: {
+        id: string;
+        purchaseOrderNumber: string;
+        internalInvoiceNumber?: string | null;
+        supplierInvoiceNumber?: string | null;
+      };
+    } | null;
     id: string;
     paymentNumber: string;
     sourceType?: string | null;
@@ -189,7 +199,7 @@ export type Editor = {
   loan?: Loan;
 };
 export type PurchaseOption = {
-  source: 'PAYABLE' | 'INVOICE_DESK';
+  source: 'PAYABLE' | 'INVOICE_DESK' | 'PURCHASE_ORDER';
   id: string;
   number: string;
   supplierId: string;
@@ -204,11 +214,24 @@ export type PurchaseOption = {
   purchaseInvoiceNumber?: string;
   purchaseOrderId?: string;
   purchaseOrderNumber?: string;
+  internalInvoiceNumber?: string | null;
+  supplierInvoiceNumber?: string | null;
   goodsReceivedNoteId?: string;
   goodsReceivedNoteNumber?: string;
   payableNumber?: string;
 };
-export type PurchaseOptions = Page<PurchaseOption> & { totalPages: number };
+export type PurchaseOptions = Page<PurchaseOption> & {
+  totalPages: number;
+  orderMatches?: {
+    id: string;
+    purchaseOrderNumber: string;
+    internalInvoiceNumber?: string | null;
+    supplierInvoiceNumber?: string | null;
+    status: string;
+    paymentStatus: string;
+    purchaseType: string;
+  }[];
+};
 export function exactAmount(value: string): bigint | null {
   if (!/^\d{1,16}(?:\.\d{1,2})?$/.test(value)) return null;
   return cents(value);

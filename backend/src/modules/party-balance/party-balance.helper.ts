@@ -47,6 +47,7 @@ export interface PartyBalance {
   baseCurrency: string;
   /** ERP sub-ledger: payables (supplier) or receivables (customer). */
   erp: PartyBalanceErpBucket[];
+  advances: Array<{ currency: string; amount: string }>;
   /** Desk ledger: unpromoted Invoice Desk invoices or Sales Desk sales for the canonical party. */
   desk: PartyBalanceDeskBucket[];
   /** NoteBook creditor / debtor records linked to the party. Informal; never part of `total`. */
@@ -90,9 +91,24 @@ export async function refreshCachedPartyBalance(
       where: { companyId, supplierId: partyId, deletedAt: null, currency, status },
       _sum: { outstandingAmount: true },
     });
+    const advances = await db.supplierPayment.aggregate({
+      where: {
+        companyId,
+        supplierId: partyId,
+        currency,
+        status: 'COMPLETED',
+        deletedAt: null,
+        purchaseAdvance: { isNot: null },
+      },
+      _sum: { unappliedAmount: true },
+    });
     await db.supplier.updateMany({
       where: { id: partyId, companyId, deletedAt: null },
-      data: { currentBalance: sum._sum.outstandingAmount ?? 0 },
+      data: {
+        currentBalance: new Prisma.Decimal(sum._sum.outstandingAmount ?? 0).minus(
+          advances._sum.unappliedAmount ?? 0,
+        ),
+      },
     });
     return;
   }
@@ -260,10 +276,31 @@ export async function computePartyBalance(
     notebook.set(row.currency, bucket);
   }
 
-  const currencies = new Set([...erp.keys(), ...desk.keys()]);
+  const advances = new Map<string, Prisma.Decimal>();
+  if (kind === 'supplier') {
+    const groups = await db.supplierPayment.groupBy({
+      by: ['currency'],
+      where: {
+        companyId,
+        supplierId: id,
+        status: 'COMPLETED',
+        deletedAt: null,
+        purchaseAdvance: { isNot: null },
+        unappliedAmount: { gt: 0 },
+      },
+      _sum: { unappliedAmount: true },
+    });
+    for (const g of groups)
+      advances.set(g.currency, new Prisma.Decimal(g._sum.unappliedAmount ?? 0));
+  }
+  const currencies = new Set([...erp.keys(), ...desk.keys(), ...advances.keys()]);
   const total = [...currencies].sort().map((currency) => ({
     currency,
-    amount: money((erp.get(currency)?.open ?? ZERO).plus(desk.get(currency)?.outstanding ?? ZERO)),
+    amount: money(
+      (erp.get(currency)?.open ?? ZERO)
+        .plus(desk.get(currency)?.outstanding ?? ZERO)
+        .minus(advances.get(currency) ?? ZERO),
+    ),
   }));
   const creditLimit = new Prisma.Decimal(party.creditLimit ?? 0);
   const baseTotal = new Prisma.Decimal(total.find((t) => t.currency === baseCurrency)?.amount ?? 0);
@@ -274,6 +311,9 @@ export async function computePartyBalance(
     companyId,
     asOf: asOf.toISOString(),
     baseCurrency,
+    advances: [...advances]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([currency, amount]) => ({ currency, amount: money(amount) })),
     erp: [...erp.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([currency, b]) => ({
@@ -321,6 +361,7 @@ export interface PartyBalanceSummary {
   code: string;
   baseCurrency: string;
   erp: Array<{ currency: string; open: string; overdue: string; documents: number }>;
+  advances: Array<{ currency: string; amount: string }>;
   desk: Array<{ currency: string; outstanding: string; overdue: string; documents: number }>;
   notebook: PartyBalanceNotebookBucket[];
   /** erp.open + desk.outstanding, per currency. */
@@ -606,6 +647,28 @@ export async function computePartyBalanceList(
   });
   const baseCurrencies = new Map(profiles.map((p) => [p.companyId, p.currency as string]));
 
+  const advanceRows: Grouped[] =
+    kind === 'supplier'
+      ? (
+          await db.supplierPayment.groupBy({
+            by: ['supplierId', 'currency'],
+            where: {
+              ...companyWhere,
+              status: 'COMPLETED',
+              deletedAt: null,
+              purchaseAdvance: { isNot: null },
+              unappliedAmount: { gt: 0 },
+            },
+            _sum: { unappliedAmount: true },
+          })
+        ).map((g) => ({
+          partyId: g.supplierId,
+          currency: g.currency,
+          amount: decimal(g._sum.unappliedAmount),
+          count: 0,
+        }))
+      : [];
+  const advancesBy = bucket(advanceRows);
   const erpOpenBy = bucket(erpOpen),
     erpOverdueBy = bucket(erpOverdue),
     deskOpenBy = bucket(deskCanonical(false)),
@@ -615,14 +678,21 @@ export async function computePartyBalanceList(
   for (const party of parties) {
     const erp = erpOpenBy.get(party.id),
       desk = deskOpenBy.get(party.id),
-      notebook = notebookBy.get(party.id);
-    if (!erp && !desk && !notebook) continue;
+      notebook = notebookBy.get(party.id),
+      advances = advancesBy.get(party.id);
+    if (!erp && !desk && !notebook && !advances) continue;
     const erpLate = erpOverdueBy.get(party.id),
       deskLate = deskOverdueBy.get(party.id);
-    const currencies = [...new Set([...(erp?.keys() ?? []), ...(desk?.keys() ?? [])])].sort();
+    const currencies = [
+      ...new Set([...(erp?.keys() ?? []), ...(desk?.keys() ?? []), ...(advances?.keys() ?? [])]),
+    ].sort();
     const total = currencies.map((currency) => ({
       currency,
-      amount: money((erp?.get(currency)?.amount ?? ZERO).plus(desk?.get(currency)?.amount ?? ZERO)),
+      amount: money(
+        (erp?.get(currency)?.amount ?? ZERO)
+          .plus(desk?.get(currency)?.amount ?? ZERO)
+          .minus(advances?.get(currency)?.amount ?? ZERO),
+      ),
     }));
     const overdue = currencies.map((currency) => ({
       currency,
@@ -640,6 +710,10 @@ export async function computePartyBalanceList(
       name: party.name,
       code: party.code,
       baseCurrency,
+      advances: sortedEntries(advances).map(([currency, b]) => ({
+        currency,
+        amount: money(b.amount),
+      })),
       erp: sortedEntries(erp).map(([currency, b]) => ({
         currency,
         open: money(b.amount),

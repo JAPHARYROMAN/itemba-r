@@ -3814,6 +3814,7 @@ enum InterCompanyTxStatus {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model ChartOfAccount {
+  supplierAdvances SupplierPurchaseAdvance[]
   loanPrincipals    Loan[]       @relation("LoanPrincipalLedger")
   mappedCashAccount CashAccount?
   id                String       @id @default(uuid())
@@ -3905,6 +3906,8 @@ model AccountingPeriod {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model JournalEntry {
+  advanceApplications SupplierPurchaseAdvanceApplication[] @relation("AdvanceApplicationJournal")
+  advanceApplicationsReversed SupplierPurchaseAdvanceApplication[] @relation("AdvanceApplicationReversal")
   payrollCashMovement CashDeskMovement?   @relation("PayrollCashJournal")
   cashDeskMovements   CashDeskMovement[]  @relation("CashDeskMovementJournal")
   loanFinancialEvent  LoanFinancialEvent?
@@ -4321,6 +4324,7 @@ model Receivable {
 }
 
 model Payable {
+  advanceApplications SupplierPurchaseAdvanceApplication[]
   id                String        @id @default(uuid())
   payableNumber     String
   companyId         String
@@ -4633,6 +4637,7 @@ model PaymentAllocation {
 /// carry their desk invoice as the applied document). Posting DR AP control / CR cash
 /// happens here for ERP payments; desk payments are posted later in Accounting connections.
 model SupplierPayment {
+  purchaseAdvance SupplierPurchaseAdvance?
   id                     String                @id @default(uuid())
   paymentNumber          String
   /// Client idempotency key; a repeat with the same key returns the original payment.
@@ -5685,6 +5690,7 @@ model SalesOrderLine {
 }
 
 model PurchaseOrder {
+  supplierAdvances SupplierPurchaseAdvance[]
   id                    String              @id @default(uuid())
   purchaseOrderNumber   String
   internalInvoiceNumber String?
@@ -18048,4 +18054,38 @@ model PosDraftDecision {
   draft PosDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
   @@index([draftId, createdAt])
   @@map("pos_draft_decisions")
+}
+
+/// A supplier payment held against a confirmed PO until its payable is posted.
+model SupplierPurchaseAdvance {
+  id                String                               @id @default(uuid())
+  supplierPaymentId String                               @unique
+  purchaseOrderId   String
+  advanceAccountId  String
+  createdAt         DateTime                             @default(now())
+  supplierPayment   SupplierPayment                      @relation(fields: [supplierPaymentId], references: [id], onDelete: Restrict)
+  purchaseOrder     PurchaseOrder                        @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  advanceAccount    ChartOfAccount                       @relation(fields: [advanceAccountId], references: [id], onDelete: Restrict)
+  applications      SupplierPurchaseAdvanceApplication[]
+
+  @@index([purchaseOrderId])
+  @@map("supplier_purchase_advances")
+}
+
+/// Non-cash application journals are preserved separately from the original payment.
+model SupplierPurchaseAdvanceApplication {
+  id                     String                  @id @default(uuid())
+  advanceId              String
+  payableId              String
+  amount                 Decimal                 @db.Decimal(18, 2)
+  journalEntryId         String                  @unique
+  reversalJournalEntryId String?                 @unique
+  createdAt              DateTime                @default(now())
+  advance                SupplierPurchaseAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+  payable                Payable                 @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  journalEntry           JournalEntry            @relation("AdvanceApplicationJournal", fields: [journalEntryId], references: [id], onDelete: Restrict)
+  reversalJournalEntry   JournalEntry?           @relation("AdvanceApplicationReversal", fields: [reversalJournalEntryId], references: [id], onDelete: Restrict)
+
+  @@index([advanceId, payableId])
+  @@map("supplier_purchase_advance_applications")
 }

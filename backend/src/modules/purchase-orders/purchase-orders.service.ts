@@ -1,3 +1,4 @@
+import { SupplierPurchaseAdvancesService } from '../supplier-payments/supplier-purchase-advances.service';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
@@ -129,6 +130,7 @@ export class PurchaseOrdersService {
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
     private readonly profit: ProfitService,
+    private readonly advances?: SupplierPurchaseAdvancesService,
   ) {}
 
   async findAll(query: QueryPurchaseOrderDto, user: AuthUser) {
@@ -1484,6 +1486,15 @@ export class PurchaseOrdersService {
       // Receiving can move stock, fuel, cash/AP, and the PO lifecycle. Bind the
       // immutable audit row to that exact transaction so an audit-store failure
       // cannot leave any of those effects committed without attribution.
+      if (payable?.id ?? existing.payableId) {
+        await this.advances?.apply(
+          tx,
+          user,
+          existing.id,
+          (payable?.id ?? existing.payableId)!,
+          new Date(),
+        );
+      }
       await this.auditLogs.logStrictInTransaction(tx, {
         action: 'PURCHASE_ORDER_RECEIVE',
         entityType: 'PurchaseOrder',
@@ -1927,6 +1938,11 @@ export class PurchaseOrdersService {
     }
 
     const record = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
+      const current = await tx.purchaseOrder.findUnique({ where: { id } });
+      if (!current || !['DRAFT', 'CONFIRMED'].includes(current.status))
+        throw new ConflictException('Purchase order changed. Refresh before cancelling.');
+      if (this.advances) await this.advances.assertCanCancel(tx, id);
       if (existing.payableId) {
         const cancelledPayable = await tx.payable.update({
           where: { id: existing.payableId },

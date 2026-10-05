@@ -71,6 +71,20 @@ const linkage = {
       sourceId: true,
       journalEntryId: true,
       reversalJournalEntryId: true,
+      appliedAmount: true,
+      unappliedAmount: true,
+      purchaseAdvance: {
+        select: {
+          purchaseOrder: {
+            select: {
+              id: true,
+              purchaseOrderNumber: true,
+              internalInvoiceNumber: true,
+              supplierInvoiceNumber: true,
+            },
+          },
+        },
+      },
     },
   },
   customerPayment: { select: { id: true, paymentNumber: true } },
@@ -345,9 +359,9 @@ export class CashDeskService {
     if (
       two !== !!d.targetAccountId ||
       (d.kind === 'LOAN_REPAYMENT') !== !!d.loanId ||
-      (d.kind === 'SUPPLIER_PAYMENT') !== !!(d.invoiceId || d.payableId) ||
-      (!!d.invoiceId && !!d.payableId) ||
-      (!!d.payableId &&
+      (d.kind === 'SUPPLIER_PAYMENT') !== !!(d.invoiceId || d.payableId || d.purchaseOrderId) ||
+      [d.invoiceId, d.payableId, d.purchaseOrderId].filter(Boolean).length > 1 ||
+      (!!(d.payableId || d.purchaseOrderId) &&
         (!d.supplierId || d.invoiceVersion !== undefined || !!d.existingInvoicePaymentId)) ||
       (d.kind !== 'LOAN' && !!d.dueDate) ||
       (d.kind !== 'SUPPLIER_PAYMENT' &&
@@ -373,7 +387,7 @@ export class CashDeskService {
       if (d.dueDate && new Date(d.dueDate) < date)
         throw new BadRequestException('Repayment due date cannot precede the loan date.');
     }
-    const canonicalPurchase = d.kind === 'SUPPLIER_PAYMENT' && !!d.payableId;
+    const canonicalPurchase = d.kind === 'SUPPLIER_PAYMENT' && !!(d.payableId || d.purchaseOrderId);
     if (d.kind === 'SUPPLIER_PAYMENT' && !canonicalPurchase) this.invoicePermission(user);
     if (canonicalPurchase) {
       if (!this.purchases) throw new BadRequestException('Purchase payments are unavailable.');

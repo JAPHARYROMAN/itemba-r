@@ -95,9 +95,13 @@ function db(overrides: Record<string, unknown> = {}) {
       ]),
     },
     supplierPayment: {
-      groupBy: jest.fn(async () => [
-        { supplierId: 'sup-1', _max: { paymentDate: new Date('2026-09-30T00:00:00.000Z') } },
-      ]),
+      aggregate: jest.fn(async () => ({ _sum: { unappliedAmount: new Prisma.Decimal(0) } })),
+
+      groupBy: jest.fn(async (args: any) =>
+        args._sum
+          ? []
+          : [{ supplierId: 'sup-1', _max: { paymentDate: new Date('2026-09-30T00:00:00.000Z') } }],
+      ),
     },
     customerPayment: { groupBy: jest.fn(async () => []) },
     companyProfile: {
@@ -108,6 +112,24 @@ function db(overrides: Record<string, unknown> = {}) {
 }
 
 describe('computePartyBalanceList', () => {
+  it('includes a supplier who only has an unapplied advance credit', async () => {
+    const prisma = db();
+    prisma.supplierPayment.groupBy.mockImplementation(async (args: any) =>
+      args._sum
+        ? [{ supplierId: 'sup-2', currency: 'TZS', _sum: { unappliedAmount: d(300) } }]
+        : [],
+    );
+    const list = await computePartyBalanceList(
+      prisma,
+      'supplier',
+      { companyId: 'company-1' },
+      asOf,
+    );
+    const supplier = list.find((row) => row.partyId === 'sup-2')!;
+    expect(supplier.total).toEqual([{ currency: 'TZS', amount: '-300.00' }]);
+    expect(supplier.advances).toEqual([{ currency: 'TZS', amount: '300.00' }]);
+    expect(supplier.erp).toEqual([]);
+  });
   it('lists only parties with a balance, merges desk parties into the canonical one and keeps NoteBook out of the total', async () => {
     const prisma = db();
     const list = await computePartyBalanceList(

@@ -6,6 +6,7 @@
 export type MoneyByCurrency = { currency: string; amount: string };
 
 export type PartyBalanceSummary = {
+  advances?: MoneyByCurrency[];
   kind: 'supplier' | 'customer';
   partyId: string;
   companyId: string;
@@ -34,6 +35,7 @@ export const partyProfileHref = (kind: 'supplier' | 'customer', id: string) =>
 
 /** The per-party resolver (`/party-balance/suppliers/:id`, `/customers/:id`), with aging. */
 export type PartyBalance = {
+  advances?: MoneyByCurrency[];
   kind: 'supplier' | 'customer';
   partyId: string;
   companyId: string;
