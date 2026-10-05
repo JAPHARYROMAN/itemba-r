@@ -223,6 +223,14 @@ describe('Cash ledger rules', () => {
   });
 });
 describe('Cash connection workflow', () => {
+  it('reviews and posts default-currency cash movements without a legal profile', async () => {
+    const { service, db, engine } = setup();
+    db.companyProfile.findUnique.mockResolvedValue(null);
+    const review = await service.review(user, 'm1');
+    expect(review.issues).toEqual([]);
+    await service.post(user, 'm1', { fingerprint: review.fingerprint, offsetAccountId: 'offset' });
+    expect(engine.postLines).toHaveBeenCalledTimes(1);
+  });
   it('posts one expense journal with original date, source, organisation and audit in the transaction', async () => {
     const { service, engine, audit, db } = setup();
     const review = await service.review(user, 'm1');
@@ -444,6 +452,44 @@ describe('Verified Cash Desk balance setup', () => {
     ledgerAccountId: 'cash-gl',
     confirmedDeskBalance: '167693000.01',
   };
+  it('connects and adopts verified TZS cash without creating a legal profile', async () => {
+    const { service, db, audit } = initial();
+    db.companyProfile.findUnique.mockResolvedValue(null);
+    await expect(service.connect(user, input)).resolves.toEqual({ connected: true });
+    expect(db.cashAccount.update).toHaveBeenCalledWith({
+      where: { id: 'bank1' },
+      data: expect.objectContaining({ currentBalance: d(input.confirmedDeskBalance) }),
+    });
+    expect(audit.logStrictInTransaction).toHaveBeenCalledTimes(1);
+    expect(db.companyProfile.findUnique).toHaveBeenCalledWith({
+      where: { companyId: 'c1' },
+      select: { currency: true },
+    });
+  });
+  it.each(['missing profile', 'configured currency', 'account mismatch'])(
+    'rejects currency mismatch before writing the connection: %s',
+    async (issue) => {
+      const { service, db, bank, account } = initial();
+      if (issue === 'missing profile') {
+        db.companyProfile.findUnique.mockResolvedValue(null);
+        bank.currency = 'USD';
+        account.currency = 'USD';
+      } else {
+        db.companyProfile.findUnique.mockResolvedValue({ currency: 'USD' });
+        if (issue === 'account mismatch') bank.currency = 'USD';
+      }
+      await expect(service.connect(user, input)).rejects.toThrow('accounting currency');
+      expect(db.cashAccount.update).not.toHaveBeenCalled();
+      expect(db.cashDeskAccount.update).not.toHaveBeenCalled();
+    },
+  );
+  it('honors an explicitly configured non-default company currency', async () => {
+    const { service, db, bank, account } = initial();
+    db.companyProfile.findUnique.mockResolvedValue({ currency: 'USD' });
+    bank.currency = 'USD';
+    account.currency = 'USD';
+    await expect(service.connect(user, input)).resolves.toEqual({ connected: true });
+  });
   it('adopts the exact movement-backed balance and branch, with audit, without touching cash movements or journals', async () => {
     const { service, db, audit, engine } = initial();
     await expect(service.connect(user, input)).resolves.toEqual({ connected: true });
