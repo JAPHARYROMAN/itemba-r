@@ -68,7 +68,7 @@ export function salesOrderLineBudget(hasNotes: boolean) {
 
 export function purchaseOrderLineBudget(hasNotes: boolean) {
   return {
-    preambleMm: shellPreambleMm({ metaItems: 6, detailItems: 18, detailSections: 1 }),
+    preambleMm: shellPreambleMm({ metaItems: 7, detailItems: 18, detailSections: 1 }),
     tailMm: shellTailMm({ totalRows: 6, hasNotes }),
   };
 }
