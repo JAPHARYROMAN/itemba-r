@@ -121,4 +121,79 @@ exports.verifyPurchaseDraftConversion = async ({ db, check, fixture: f, call }) 
       assert.ok(found.data.some((row) => row.id === results[1].id));
     },
   );
+  await check(
+    'The first two purchases in a new company allocate both number sequences safely',
+    async () => {
+      const company = await db.company.create({
+        data: {
+          groupId: f.company.groupId,
+          code: `${f.company.code}-FIRST`,
+          name: 'Synthetic first purchase company',
+        },
+      });
+      await db.companyProfile.create({
+        data: {
+          companyId: company.id,
+          registeredName: company.name,
+          brelaRegNumber: company.id,
+          tin: company.id,
+          registeredAddress: 'Private rehearsal fixture',
+          currency: 'TZS',
+        },
+      });
+      const category = await db.productCategory.create({
+        data: { companyId: company.id, name: 'First purchase category' },
+      });
+      const unit = await db.unitOfMeasure.create({
+        data: { companyId: company.id, name: 'Piece', symbol: 'pc' },
+      });
+      const product = await db.product.create({
+        data: {
+          companyId: company.id,
+          productCode: 'FIRST',
+          name: 'First purchase product',
+          categoryId: category.id,
+          baseUnitId: unit.id,
+          defaultPurchasePrice: 1000,
+        },
+      });
+      const role = await db.role.create({
+        data: {
+          name: `PO-FIRST-${company.id}`,
+          displayName: 'Synthetic first purchase officer',
+          scope: 'COMPANY',
+          rolePermissions: { create: [{ permission: { connect: { code: 'purchases.create' } } }] },
+        },
+      });
+      const user = await db.user.create({
+        data: {
+          companyId: company.id,
+          fullName: 'Synthetic first purchase officer',
+          email: `first-purchase-${company.id}@example.invalid`,
+          passwordHash: f.admin.user.passwordHash,
+          status: 'ACTIVE',
+          userRoles: { create: { roleId: role.id } },
+          companyAccess: { create: { companyId: company.id, accessLevel: 'MANAGE' } },
+        },
+      });
+      const session = await call(null, 'POST', '/auth/login', {
+        email: user.email,
+        password: process.env.RELEASE_PROOF_USER_PASSWORD,
+      });
+      const direct = {
+        companyId: company.id,
+        supplierName: 'Synthetic first supplier',
+        purchaseType: 'STOCK_PURCHASE',
+        orderDate: new Date().toISOString(),
+        currency: 'TZS',
+        lines: [{ productId: product.id, unitId: unit.id, quantity: 1, unitCost: 1000 }],
+      };
+      const results = await Promise.all(
+        [0, 1].map(() => call(session.accessToken, 'POST', '/purchase-orders', direct)),
+      );
+      assert.notEqual(results[0].purchaseOrderNumber, results[1].purchaseOrderNumber);
+      assert.notEqual(results[0].internalInvoiceNumber, results[1].internalInvoiceNumber);
+      assert.equal(await db.purchaseOrder.count({ where: { companyId: company.id } }), 2);
+    },
+  );
 };

@@ -215,7 +215,10 @@ export function ConvertSupplierOrderDraft({
           companyId={draft.companyId}
           divisionId={form.divisionId || undefined}
           disabled={Boolean(draft.supplierId)}
-          onChange={(supplierId) => setForm((f) => ({ ...f, supplierId }))}
+          onChange={(supplierId) => {
+            guard.touch();
+            setForm((f) => ({ ...f, supplierId }));
+          }}
         />
         <FormSelect
           label="Purchase Type"

@@ -653,6 +653,10 @@ export class PurchaseOrdersService {
     const paymentState = paymentStateForPurchaseType(dto.purchaseType, totalAmount);
 
     const persist = async (tx: Prisma.TransactionClient) => {
+      // Serialize first-time sequence creation as well as counter increments.
+      // Both references belong to the same company purchase namespace.
+      const namespace = `purchase-orders:${dto.companyId}`;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${namespace}, 0))`;
       const purchaseOrderNumber = await this.codes.next({
         entityType: 'PurchaseOrder',
         companyId: dto.companyId,
