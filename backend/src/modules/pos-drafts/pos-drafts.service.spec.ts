@@ -158,6 +158,106 @@ function fixture(overrides: Record<string, any> = {}) {
   return { service, tx, prisma, sales, audit, getDraft: () => draft };
 }
 
+describe('reason-free sale price capture', () => {
+  function capture(price = 90) {
+    const f = fixture();
+    const capturedAt = new Date().toISOString();
+    const dto = {
+      companyId: 'company',
+      divisionId: 'division',
+      branchId: 'branch',
+      requestId: 'reason-free-sale-capture',
+      capturedAt,
+      businessDate: eatDay(capturedAt),
+      kind: 'SALE',
+      payload: {
+        paymentMethod: 'CASH',
+        expectedTotal: price,
+        lines: [{ productId: 'product', quantity: 1, unitPrice: price }],
+      },
+    };
+    const scope = { companyId: 'company', divisionId: 'division', branchId: 'branch' };
+    const user = {
+      ...administrator,
+      id: 'cashier',
+      permissions: ['pos_drafts.create', 'mobile_pos_lite.edit_price'],
+    };
+    const db: any = {
+      mobilePosBranchSetup: {
+        findUnique: jest.fn(async () => ({ enabled: true, approvalRequired: true })),
+      },
+      mobilePosEnrollment: { findFirst: jest.fn(async () => ({ terminalId: 'terminal' })) },
+      mobilePosTerminal: {
+        findUnique: jest.fn(async () => ({
+          id: 'terminal',
+          status: 'ACTIVE',
+          assignedUserId: 'cashier',
+          generalCustomerId: 'customer',
+          maxPriceDropPct: 10,
+          paymentMethods: [{ paymentMethod: 'CASH', isEnabled: true, cashAccountId: 'cash' }],
+        })),
+      },
+      product: {
+        findMany: jest.fn(async () => [
+          { id: 'product', name: 'Cement', baseUnitId: 'unit', defaultSellingPrice: 100 },
+        ]),
+      },
+      customer: { findFirst: jest.fn(async () => ({ id: 'customer' })) },
+      cashAccount: {
+        findFirst: jest.fn(async () => ({
+          id: 'cash',
+          currency: 'TZS',
+          accountType: 'CASH_ON_HAND',
+        })),
+      },
+    };
+    return { ...f, dto, scope, user, db };
+  }
+  it('accepts no explanation, retains prices and attribution, and exposes the captured list price to review', async () => {
+    const f = capture();
+    const normalized = await f.service.normalize(f.dto, f.user, f.scope, 'CASHIER', f.db);
+    expect(normalized.payload.customerId).toBe('customer');
+    expect(normalized.payload.lines).toEqual([
+      { productId: 'product', quantity: 1, unitPrice: 90 },
+    ]);
+    expect(normalized.payload._sale.overrides).toEqual([
+      expect.objectContaining({
+        productId: 'product',
+        userId: 'cashier',
+        listUnitPrice: 100,
+        chargedUnitPrice: 90,
+        reasonCode: null,
+      }),
+    ]);
+    const reviewed = f.service.present(
+      { ...f.getDraft(), payload: normalized.payload },
+      administrator,
+    );
+    expect(reviewed.payload.lines[0]).toMatchObject({ unitPrice: 90, listUnitPrice: 100 });
+    expect(reviewed.payload._sale).toBeUndefined();
+    expect(f.sales.assertDraftSaleProfitable).toHaveBeenCalled();
+    expect(f.sales.createAndConfirmInTransaction).not.toHaveBeenCalled();
+  });
+  it('still refuses a price change without editing access', async () => {
+    const f = capture();
+    await expect(
+      f.service.normalize(
+        f.dto,
+        { ...f.user, permissions: ['pos_drafts.create'] },
+        f.scope,
+        'CASHIER',
+        f.db,
+      ),
+    ).rejects.toThrow('You cannot change selling prices');
+  });
+  it('still enforces the allowed discount without requesting a reason', async () => {
+    const f = capture(80);
+    await expect(f.service.normalize(f.dto, f.user, f.scope, 'CASHIER', f.db)).rejects.toThrow(
+      'below the allowed selling price',
+    );
+  });
+});
+
 describe('POS Draft approval boundaries', () => {
   it('first cashier approval reserves and audits without creating a canonical sale', async () => {
     const f = fixture();

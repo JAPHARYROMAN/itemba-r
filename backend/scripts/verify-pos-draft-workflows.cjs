@@ -234,6 +234,7 @@ async function fixtures() {
     'mobile_pos_lite.access',
     'mobile_pos_lite.manage',
     'mobile_pos_lite.view',
+    'mobile_pos_lite.edit_price',
     'pos_drafts.view',
     'pos_drafts.create',
     'pos_drafts.dispatch',
@@ -1194,6 +1195,44 @@ async function main() {
         40,
       );
       assert.equal((await financial()).money, before.money + 60);
+    },
+  );
+  await check(
+    'A changed sale price needs no reason and still waits for a separate admin decision',
+    async () => {
+      const before = await financial();
+      const draft = await call(
+        f.admin.token,
+        'POST',
+        '/pos-drafts',
+        envelope('SALE', {
+          customerId: f.customer.id,
+          paymentMethod: 'CASH',
+          cashAccountId: f.cash.id,
+          expectedTotal: 111,
+          lines: [{ productId: f.product.id, quantity: 1, unitPrice: 111 }],
+        }),
+      );
+      assert.equal(draft.status, 'SUBMITTED');
+      assert.equal(draft.payload.lines[0].listUnitPrice, 100);
+      assert.equal(draft.payload.lines[0].unitPrice, 111);
+      assert.ok(!('priceReason' in draft.payload.lines[0]));
+      const stored = await db.posDraft.findUniqueOrThrow({ where: { id: draft.id } });
+      assert.deepEqual(stored.payload._sale.priceEdits, [
+        {
+          productId: f.product.id,
+          listUnitPrice: 100,
+          chargedUnitPrice: 111,
+          reasonCode: null,
+        },
+      ]);
+      assert.deepEqual(await financial(), before);
+      const rejected = await call(f.reviewer.token, 'POST', `/pos-drafts/${draft.id}/reject`, {
+        revision: draft.revision,
+        reason: 'Synthetic price rejected by reviewer',
+      });
+      assert.equal(rejected.status, 'REJECTED');
+      assert.deepEqual(await financial(), before);
     },
   );
   await check(

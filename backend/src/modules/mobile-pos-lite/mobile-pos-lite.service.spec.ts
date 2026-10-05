@@ -5323,17 +5323,17 @@ describe('MobilePosLiteService createSale price editing', () => {
     expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
   });
 
-  it('requires a reason for a changed price', async () => {
+  it('accepts a permitted price change without a reason and records the exact prices', async () => {
     const { service, salesOrders } = setup({ maxPriceDropPct: '10' });
-    await expect(
-      service.createSale(
-        TERMINAL_CODE,
-        DEVICE_SECRET,
-        edited(4800, { priceReason: undefined }),
-        priceUser('mobile_pos_lite.edit_price'),
-      ),
-    ).rejects.toThrow('Choose a reason for the changed price');
-    expect(salesOrders.mobilePosLiteQuickSale).not.toHaveBeenCalled();
+    await service.createSale(
+      TERMINAL_CODE,
+      DEVICE_SECRET,
+      edited(4800, { priceReason: undefined }),
+      priceUser('mobile_pos_lite.edit_price'),
+    );
+    expect(salesOrders.mobilePosLiteQuickSale.mock.calls[0][4]).toEqual([
+      expect.objectContaining({ listUnitPrice: 5000, chargedUnitPrice: 4800, reasonCode: null }),
+    ]);
   });
 
   it('lets a rep raise a price with a reason, with no upper limit, and records it', async () => {

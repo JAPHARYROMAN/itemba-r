@@ -292,6 +292,9 @@ export function DraftInspector({
                   </small>
                 )}
                 {line.priceNote && <small>{line.priceNote}</small>}
+                {line.listUnitPrice !== undefined && line.listUnitPrice !== line.unitPrice && (
+                  <small>List price {money(line.listUnitPrice, draft.currency)} each</small>
+                )}
               </div>
             );
           })}

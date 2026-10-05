@@ -23,7 +23,7 @@ export type Session = {
    * the Hesabu count flow it will gate ships in Phase 5.
    */
   stockCountsEnabled?: boolean;
-  /** mobile_pos_lite.edit_price: may change a price, with a reason. */
+  /** mobile_pos_lite.edit_price: may change a price. */
   priceEditEnabled?: boolean;
   /** mobile_pos_lite.edit_price_unlimited: no terminal cap on a price drop. */
   priceEditUnlimited?: boolean;
@@ -44,8 +44,8 @@ export type Supplier = {
   phone?: string | null;
 };
 export type PosPriceReason = 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
-/** A price the rep changed, with why. Absent = the product's list price. */
-export type CartLinePrice = { unitPrice: number; reason: PosPriceReason; note?: string };
+/** A changed price; historical reason metadata is optional. Absent = the list price. */
+export type CartLinePrice = { unitPrice: number; reason?: PosPriceReason; note?: string };
 export type CartLine = {
   product: MobilePosLiteProduct;
   quantity: number;

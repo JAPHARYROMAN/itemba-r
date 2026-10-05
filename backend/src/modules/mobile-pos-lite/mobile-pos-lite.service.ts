@@ -679,7 +679,7 @@ export type MobilePosPriceOverrideInput = {
   listUnitPrice: number;
   chargedUnitPrice: number;
   quantity: number;
-  reasonCode: MobilePosPriceReason;
+  reasonCode: MobilePosPriceReason | null;
   note: string | null;
 };
 
@@ -3856,12 +3856,8 @@ export class MobilePosLiteService {
         if (!canEdit) {
           throw new ForbiddenException('You cannot change prices on this terminal');
         }
-        if (!edit.reason) {
-          throw new BadRequestException('Choose a reason for the changed price');
-        }
         const dropPct = ((listPrice - edit.unitPrice) / listPrice) * 100;
-        // Raising a price needs only the permission and a reason (owner
-        // decision D2). Lowering it is capped by the terminal unless the user
+        // Raising a price needs the permission. Lowering it is capped by the terminal unless the user
         // holds edit_price_unlimited; the below-cost guard applies either way.
         if (dropPct > 0 && !unlimited && dropPct > maxDropPct + 1e-9) {
           throw new BadRequestException(MOBILE_POS_PRICE_BELOW_ALLOWED);
@@ -3875,7 +3871,7 @@ export class MobilePosLiteService {
           listUnitPrice: listPrice,
           chargedUnitPrice: edit.unitPrice,
           quantity,
-          reasonCode: edit.reason,
+          reasonCode: edit.reason ?? null,
           note: edit.note?.trim() || null,
         });
       }

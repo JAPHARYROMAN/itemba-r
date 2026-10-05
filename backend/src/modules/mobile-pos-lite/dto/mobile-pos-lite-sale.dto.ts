@@ -51,7 +51,7 @@ export class MobilePosLiteSaleLineDto {
   @Max(1000000000)
   unitPrice?: number;
 
-  /** Required whenever unitPrice differs from the list price. */
+  /** Optional historical metadata accepted from older clients. */
   @IsOptional()
   @IsIn(MOBILE_POS_PRICE_REASONS)
   priceReason?: MobilePosPriceReason;

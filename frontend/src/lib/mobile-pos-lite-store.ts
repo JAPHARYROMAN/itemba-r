@@ -45,7 +45,7 @@ export type PendingMobilePosLiteSale = {
       quantity: number;
       price?: {
         unitPrice: number;
-        reason: 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
+        reason?: 'REGULAR_CUSTOMER' | 'BULK_OFFER' | 'DAMAGED' | 'OTHER';
         note?: string;
       };
     }>;

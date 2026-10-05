@@ -86,6 +86,8 @@ export type DraftLine = {
   productId: string;
   quantity?: number;
   unitPrice?: number;
+  /** Captured list price supplied by the server for administrator review. */
+  listUnitPrice?: number;
   priceReason?: string;
   priceNote?: string;
   countedQuantity?: number;
