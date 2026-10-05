@@ -444,6 +444,15 @@ export class PosDraftsService {
     const payload = Object.fromEntries(
       Object.entries(object(draft.payload)).filter(([key]) => !key.startsWith('_')),
     );
+    if (draft.kind === 'SALE' && Array.isArray(payload.lines)) {
+      const sale = object(draft.payload)._sale;
+      const edits = sale?.priceEdits ?? sale?.overrides;
+      const priceEdits = Array.isArray(edits) ? edits : [];
+      payload.lines = payload.lines.map((line: JsonRecord) => {
+        const edit = priceEdits.find((value: JsonRecord) => value.productId === line.productId);
+        return edit ? { ...line, listUnitPrice: edit.listUnitPrice } : line;
+      });
+    }
     const actions: string[] = [];
     if (
       ['SUBMITTED', 'NEEDS_ATTENTION', 'AWAITING_STOCKIST', 'READY_FINAL'].includes(draft.status) &&
@@ -959,8 +968,6 @@ export class PosDraftsService {
         if (!price.eq(list)) {
           if (!this.has(user, 'mobile_pos_lite.edit_price'))
             throw new ForbiddenException('You cannot change selling prices');
-          if (!PRICE_REASONS.includes(l.priceReason))
-            throw new BadRequestException('Choose a valid price change reason');
           const drop = new Prisma.Decimal(list).minus(price).div(list).times(100);
           if (
             !this.has(user, 'mobile_pos_lite.edit_price_unlimited') &&
@@ -971,7 +978,7 @@ export class PosDraftsService {
             productId: product.id,
             listUnitPrice: list,
             chargedUnitPrice: Number(price),
-            reasonCode: l.priceReason,
+            reasonCode: l.priceReason ?? null,
           });
           if (terminal)
             overrides.push({
@@ -982,7 +989,7 @@ export class PosDraftsService {
               listUnitPrice: list,
               chargedUnitPrice: Number(price),
               quantity: Number(quantity),
-              reasonCode: l.priceReason,
+              reasonCode: l.priceReason ?? null,
               note: typeof l.priceNote === 'string' ? l.priceNote.trim().slice(0, 120) : null,
             });
         }

@@ -73,7 +73,7 @@ type MobilePosPriceOverrideRecord = {
   listUnitPrice: number;
   chargedUnitPrice: number;
   quantity: number;
-  reasonCode: string;
+  reasonCode: string | null;
   note: string | null;
 };
 
@@ -85,7 +85,7 @@ export type SalesOrderCreateContext = {
   mobilePosTerminalId?: string;
   /**
    * Written in the same insert as the order, so a POS sale can never exist
-   * without the record of who changed which price and why.
+   * without the record of who changed which price. Historical reasons remain optional.
    */
   mobilePosPriceOverrides?: MobilePosPriceOverrideRecord[];
 };

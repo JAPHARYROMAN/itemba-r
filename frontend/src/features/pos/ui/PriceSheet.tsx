@@ -1,28 +1,14 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { POS_PRICE_REASONS, checkPrice, formatPct, lineUnitPrice } from '../core/pos-price';
-import type {
-  CartLine,
-  CartLinePrice,
-  PosPriceReason,
-  PosTranslate,
-  Session,
-} from '../core/pos-types';
-import type { PosStringKey } from '../core/pos-i18n';
+import { checkPrice, formatPct, lineUnitPrice } from '../core/pos-price';
+import type { CartLine, CartLinePrice, PosTranslate, Session } from '../core/pos-types';
 import { money } from '../core/pos-utils';
-
-const REASON_KEYS: Record<PosPriceReason, PosStringKey> = {
-  REGULAR_CUSTOMER: 'posReasonREGULAR_CUSTOMER',
-  BULK_OFFER: 'posReasonBULK_OFFER',
-  DAMAGED: 'posReasonDAMAGED',
-  OTHER: 'posReasonOTHER',
-};
 
 /**
  * Change one cart line's price (approved canvas, "Phone · edit a price").
  * Shows the list price and the change as a percentage, never a cost: the
- * phone does not know one. Saving needs a reason; a drop past the terminal
+ * phone does not know one. A drop past the terminal
  * limit cannot be saved (the server would refuse it anyway).
  */
 export function PriceSheet({
@@ -42,8 +28,6 @@ export function PriceSheet({
   const inputRef = useRef<HTMLInputElement>(null);
   const listPrice = line.product.sellingPrice;
   const [value, setValue] = useState(String(Math.round(lineUnitPrice(line))));
-  const [reason, setReason] = useState<PosPriceReason | null>(line.price?.reason ?? null);
-  const [note, setNote] = useState(line.price?.note ?? '');
 
   useEffect(() => {
     inputRef.current?.select();
@@ -57,7 +41,7 @@ export function PriceSheet({
   const charged = Number(value);
   const check = checkPrice(session, listPrice, charged);
   const changed = check.kind === 'rise' || check.kind === 'drop';
-  const canSave = check.kind === 'same' || (changed && reason !== null);
+  const canSave = check.kind === 'same' || changed;
   const noDropAllowed = !session.priceEditUnlimited && (session.maxPriceDropPct ?? 0) <= 0;
 
   let status: { tone: 'ok' | 'warn' | 'bad'; text: string } | null = null;
@@ -85,11 +69,7 @@ export function PriceSheet({
       onSave(null);
       return;
     }
-    onSave({
-      unitPrice: charged,
-      reason: reason as PosPriceReason,
-      ...(note.trim() ? { note: note.trim() } : {}),
-    });
+    onSave({ unitPrice: charged });
   }
 
   return (
@@ -131,36 +111,6 @@ export function PriceSheet({
             </p>
           )}
         </div>
-        {changed && (
-          <fieldset className="pos-reasons">
-            <legend className="pos-field-label">{t('posReason')}</legend>
-            <div>
-              {POS_PRICE_REASONS.map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  className="pos-reason"
-                  aria-pressed={reason === code}
-                  onClick={() => setReason(code)}
-                >
-                  {t(REASON_KEYS[code])}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-        )}
-        {changed && (
-          <div className="pos-field">
-            <label htmlFor={`${titleId}-note`}>{t('posPriceNote')}</label>
-            <input
-              id={`${titleId}-note`}
-              className="pos-input"
-              maxLength={120}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </div>
-        )}
         <p className="pos-hint">{t('posPriceRecorded')}</p>
         <div className="pos-actions">
           <button type="button" className="pos-btn" onClick={() => onSave(null)}>

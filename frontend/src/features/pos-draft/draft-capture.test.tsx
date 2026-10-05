@@ -7,6 +7,67 @@ import { DraftInspector } from './draft-inspector';
 import { contextFixture, draftFixture } from './test-fixtures';
 vi.mock('@/features/pos/hardware/scanner', () => ({ useScanner: () => undefined }));
 describe('role-specific approval capture', () => {
+  it('submits a cash sale with an edited price in one tap without reason or customer fields', async () => {
+    const user = userEvent.setup(),
+      send = vi.fn(async () => draftFixture);
+    render(<DraftCapture context={contextFixture} role="CASHIER" send={send} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /Cement/ }));
+    await user.clear(screen.getByLabelText('Unit price'));
+    await user.type(screen.getByLabelText('Unit price'), '90');
+    expect(screen.queryByLabelText('Price reason')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Price note')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Customer/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review request' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Submit sale for review' }));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'SALE',
+        payload: expect.objectContaining({
+          customerId: undefined,
+          paymentMethod: 'CASH',
+          expectedTotal: 90,
+          lines: [{ productId: 'product', quantity: 1, unitPrice: 90 }],
+        }),
+      }),
+      undefined,
+    );
+  });
+  it('reveals the customer when requested and requires one for credit', async () => {
+    const user = userEvent.setup(),
+      send = vi.fn(async () => draftFixture);
+    render(
+      <DraftCapture
+        context={{ ...contextFixture, creditEnabled: true }}
+        role="CASHIER"
+        send={send}
+        onSaved={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /Cement/ }));
+    await user.selectOptions(screen.getByLabelText('Payment method'), 'CREDIT');
+    await user.click(screen.getByRole('button', { name: 'Submit sale for review' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a customer');
+    expect(send).not.toHaveBeenCalled();
+    await user.selectOptions(screen.getByLabelText('Customer'), 'customer');
+    await user.click(screen.getByRole('button', { name: 'Submit sale for review' }));
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ customerId: 'customer', paymentMethod: 'CREDIT' }),
+      }),
+      undefined,
+    );
+  });
+  it('keeps electronic payment references mandatory for review and reconciliation', async () => {
+    const user = userEvent.setup(),
+      send = vi.fn(async () => draftFixture);
+    render(<DraftCapture context={contextFixture} role="CASHIER" send={send} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /Cement/ }));
+    await user.selectOptions(screen.getByLabelText('Payment method'), 'MOBILE_MONEY');
+    await user.click(screen.getByRole('button', { name: 'Submit sale for review' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('payment reference');
+    expect(send).not.toHaveBeenCalled();
+  });
   it('shows only sale and collection to a cashier, using configured payment methods', () => {
     render(
       <DraftCapture context={contextFixture} role="CASHIER" send={vi.fn()} onSaved={vi.fn()} />,

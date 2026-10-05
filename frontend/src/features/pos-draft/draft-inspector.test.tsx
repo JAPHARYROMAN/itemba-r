@@ -37,6 +37,25 @@ const callbacks = () => ({
 });
 
 describe('staff request references', () => {
+  it('shows the captured list and charged prices without removing administrator decisions', () => {
+    render(
+      <DraftInspector
+        draft={{
+          ...draftFixture,
+          payload: {
+            ...draftFixture.payload,
+            lines: [{ productId: 'product', quantity: 1, unitPrice: 90, listUnitPrice: 100 }],
+          },
+        }}
+        context={contextFixture}
+        {...callbacks()}
+      />,
+    );
+    expect(screen.getByText('TZS 90 each')).toBeVisible();
+    expect(screen.getByText('List price TZS 100 each')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Approve and send to stockist' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reject request' })).toBeVisible();
+  });
   it('keeps canonical names and the posted receipt without office-only links', async () => {
     const events = callbacks();
     render(

@@ -19,8 +19,6 @@ type CaptureLine = {
   productId: string;
   quantity: string;
   price: string;
-  priceReason: string;
-  priceNote: string;
 };
 const DAMAGE_TYPES = [
   'BREAKAGE',
@@ -68,12 +66,11 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
             context.products.find((p) => p.id === line.productId)?.sellingPrice ??
             '',
         ),
-        priceReason: line.priceReason ?? '',
-        priceNote: line.priceNote ?? '',
       })) ?? [],
   );
   const [search, setSearch] = useState('');
   const [customerId, setCustomerId] = useState(initial?.payload.customerId ?? '');
+  const [showCustomer, setShowCustomer] = useState(!!initial?.payload.customerId);
   const [method, setMethod] = useState<PaymentMethod>(
     initial?.payload.paymentMethod ?? initial?.payload.method ?? paymentMethods[0] ?? 'CASH',
   );
@@ -142,8 +139,6 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
               productId,
               quantity: kind === 'COUNT' ? '' : '1',
               price: String(product.sellingPrice ?? ''),
-              priceReason: '',
-              priceNote: '',
             },
           ],
     );
@@ -195,17 +190,10 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
       const price = Number(line.price);
       if (line.price === '' || !Number.isFinite(price) || price < 0)
         throw new Error('Enter a valid selling price.');
-      const changed = price !== Number(product.sellingPrice);
-      if (changed && !line.priceReason) throw new Error('Choose a reason for every changed price.');
-      if (changed && line.priceReason === 'OTHER' && !line.priceNote.trim())
-        throw new Error('Describe the reason for this price.');
       return {
         productId: line.productId,
         quantity,
         unitPrice: price,
-        ...(changed
-          ? { priceReason: line.priceReason, priceNote: line.priceNote.trim() || undefined }
-          : {}),
       };
     });
     if (kind === 'SALE') {
@@ -298,7 +286,7 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
     setError('');
     try {
       const payload = makePayload();
-      if (!review) {
+      if (kind !== 'SALE' && !review) {
         setReview(true);
         return;
       }
@@ -439,31 +427,6 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
                     </label>
                   )}
                 </div>
-                {kind === 'SALE' && Number(line.price) !== Number(product?.sellingPrice) && (
-                  <div className="pd-form-grid">
-                    <label className="pd-field">
-                      Price reason
-                      <select
-                        value={line.priceReason}
-                        onChange={(e) => patchLine(index, 'priceReason', e.target.value)}
-                      >
-                        <option value="">Choose a reason</option>
-                        {['REGULAR_CUSTOMER', 'BULK_OFFER', 'DAMAGED', 'OTHER'].map((value) => (
-                          <option key={value} value={value}>
-                            {value.toLowerCase().replaceAll('_', ' ')}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="pd-field">
-                      Price note
-                      <input
-                        value={line.priceNote}
-                        onChange={(e) => patchLine(index, 'priceNote', e.target.value)}
-                      />
-                    </label>
-                  </div>
-                )}
                 {kind === 'COUNT' && (
                   <p className="pd-muted">
                     Baseline: {product?.quantityOnHand} {product?.unitSymbol}. Variance:{' '}
@@ -477,7 +440,12 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
           })}
         </>
       )}
-      {kind === 'SALE' && (
+      {kind === 'SALE' && !showCustomer && method !== 'CREDIT' && (
+        <button type="button" className="pd-button" onClick={() => setShowCustomer(true)}>
+          Choose customer · optional
+        </button>
+      )}
+      {kind === 'SALE' && (showCustomer || method === 'CREDIT') && (
         <label className="pd-field">
           Customer {method !== 'CREDIT' && <span className="pd-muted">· optional</span>}
           <select
@@ -821,11 +789,15 @@ export function DraftCapture<Result extends Draft | LocalAcknowledgement>({
       >
         {busy
           ? 'Submitting…'
-          : review
+          : kind === 'SALE'
             ? initial
               ? 'Submit correction'
-              : 'Submit request'
-            : 'Review request'}
+              : 'Submit sale for review'
+            : review
+              ? initial
+                ? 'Submit correction'
+                : 'Submit request'
+              : 'Review request'}
       </button>
     </form>
   );

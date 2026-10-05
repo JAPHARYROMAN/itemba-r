@@ -818,7 +818,7 @@ describe('price editing on the new POS', () => {
     expect(screen.queryByRole('button', { name: 'Badilisha bei ya Soda Baridi' })).toBeNull();
   });
 
-  it('lowers a price within the limit only with a reason, and sends it with the line', async () => {
+  it('lowers a price within the limit without a reason and sends the entered price', async () => {
     h.state.session = priceSession();
     const user = userEvent.setup();
     await boot();
@@ -829,8 +829,8 @@ describe('price editing on the new POS', () => {
     await user.clear(input);
     await user.type(input, '1100');
     expect(sheet.getByRole('status')).toHaveTextContent('Punguzo 8.3% · ndani ya kiwango cha 10%');
-    expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeDisabled();
-    await user.click(sheet.getByRole('button', { name: 'Mteja wa kudumu' }));
+    expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeEnabled();
+    expect(sheet.queryByRole('group')).toBeNull();
     await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
 
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -840,7 +840,13 @@ describe('price editing on the new POS', () => {
     await screen.findByRole('heading', { name: 'Mauzo yamekamilika' });
     const [, payload] = salesPosts()[0];
     expect(payload.lines).toEqual([
-      { productId: 'p-soda', quantity: 1, unitPrice: 1100, priceReason: 'REGULAR_CUSTOMER' },
+      {
+        productId: 'p-soda',
+        quantity: 1,
+        unitPrice: 1100,
+        priceReason: undefined,
+        priceNote: undefined,
+      },
     ]);
   });
 
@@ -857,7 +863,7 @@ describe('price editing on the new POS', () => {
     expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeDisabled();
   });
 
-  it('lets a price go up with a reason', async () => {
+  it('lets a price go up without a reason', async () => {
     h.state.session = priceSession();
     const user = userEvent.setup();
     await boot();
@@ -866,7 +872,6 @@ describe('price editing on the new POS', () => {
     await user.clear(input);
     await user.type(input, '1500');
     expect(sheet.getByRole('status')).toHaveTextContent('Ongezeko 25%');
-    await user.click(sheet.getByRole('button', { name: 'Ofa ya jumla' }));
     expect(sheet.getByRole('button', { name: 'Hifadhi' })).toBeEnabled();
   });
 
@@ -877,7 +882,6 @@ describe('price editing on the new POS', () => {
     let sheet = await openPriceSheet(user);
     await user.clear(sheet.getByLabelText('Bei mpya'));
     await user.type(sheet.getByLabelText('Bei mpya'), '1100');
-    await user.click(sheet.getByRole('button', { name: 'Nyingine' }));
     await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
 
     await user.click(screen.getByRole('button', { name: 'Badilisha bei ya Soda Baridi' }));
@@ -903,7 +907,6 @@ describe('price editing on the new POS', () => {
     const sheet = await openPriceSheet(user);
     await user.clear(sheet.getByLabelText('Bei mpya'));
     await user.type(sheet.getByLabelText('Bei mpya'), '1100');
-    await user.click(sheet.getByRole('button', { name: 'Mteja wa kudumu' }));
     await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
     await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
     await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
@@ -935,7 +938,6 @@ describe('price editing on the new POS', () => {
     const sheet = await openPriceSheet(user);
     await user.clear(sheet.getByLabelText('Bei mpya'));
     await user.type(sheet.getByLabelText('Bei mpya'), '1150');
-    await user.click(sheet.getByRole('button', { name: 'Mteja wa kudumu' }));
     await user.click(sheet.getByRole('button', { name: 'Hifadhi' }));
     await user.click(screen.getAllByRole('button', { name: 'Lipa' })[0]);
     await user.click(screen.getByRole('button', { name: /Maliza Mauzo/ }));
@@ -944,9 +946,7 @@ describe('price editing on the new POS', () => {
     expect(h.state.outbox[0]).toMatchObject({
       totalAmount: 1150,
       payload: {
-        lines: [
-          { productId: 'p-soda', quantity: 1, unitPrice: 1150, priceReason: 'REGULAR_CUSTOMER' },
-        ],
+        lines: [{ productId: 'p-soda', quantity: 1, unitPrice: 1150 }],
       },
     });
   });

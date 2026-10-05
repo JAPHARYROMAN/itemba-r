@@ -17885,7 +17885,7 @@ model MobilePosPriceOverride {
   listUnitPrice    Decimal  @db.Decimal(18, 4)
   chargedUnitPrice Decimal  @db.Decimal(18, 4)
   quantity         Decimal  @db.Decimal(18, 4)
-  reasonCode       String
+  reasonCode       String?
   note             String?
   createdAt        DateTime @default(now())
 
