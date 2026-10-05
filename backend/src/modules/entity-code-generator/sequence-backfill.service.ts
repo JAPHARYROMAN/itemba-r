@@ -97,6 +97,11 @@ export const BACKFILL_TARGETS: readonly BackfillTarget[] = [
   { entityType: 'ProjectBilling', prismaModel: 'projectBilling', numberField: 'billingNumber' },
   { entityType: 'SalesOrder', prismaModel: 'salesOrder', numberField: 'salesOrderNumber' },
   { entityType: 'PurchaseOrder', prismaModel: 'purchaseOrder', numberField: 'purchaseOrderNumber' },
+  {
+    entityType: 'PurchaseInvoice',
+    prismaModel: 'purchaseOrder',
+    numberField: 'internalInvoiceNumber',
+  },
   { entityType: 'JournalEntry', prismaModel: 'journalEntry', numberField: 'journalNumber' },
   { entityType: 'Receivable', prismaModel: 'receivable', numberField: 'receivableNumber' },
   { entityType: 'Payable', prismaModel: 'payable', numberField: 'payableNumber' },

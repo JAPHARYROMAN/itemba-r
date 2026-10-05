@@ -229,6 +229,11 @@ async function fixtures() {
     },
   });
   const permissions = [
+    'purchases.create',
+    'purchases.view',
+    'supplier_order_drafts.view',
+    'supplier_order_drafts.create',
+    'supplier_order_drafts.send',
     'notifications.view',
     'mobile_pos_onboarding.manage',
     'mobile_pos_lite.access',
@@ -2004,6 +2009,12 @@ async function main() {
     fixture: f,
   });
   await require('./verify-cash-purchases.cjs').verifyCashPurchases({ db, check, fixture: f, call });
+  await require('./verify-purchase-draft-conversion.cjs').verifyPurchaseDraftConversion({
+    db,
+    check,
+    fixture: f,
+    call,
+  });
 }
 
 main()

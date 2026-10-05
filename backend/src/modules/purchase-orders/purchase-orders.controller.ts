@@ -36,6 +36,16 @@ export class PurchaseOrdersController {
     return this.service.create(dto, user);
   }
 
+  @Post('from-draft/:id')
+  @RequirePermissions('purchases.create', 'supplier_order_drafts.view')
+  convertDraft(
+    @Param('id') id: string,
+    @Body() dto: CreatePurchaseOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.convertDraft(id, dto, user);
+  }
+
   @Patch(':id')
   @RequirePermissions('purchases.create')
   update(

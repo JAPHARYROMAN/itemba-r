@@ -736,6 +736,7 @@ export class GeneratedDocumentsService {
         kv('Purchase Order', reference),
         kv('Order Date', date(record.orderDate)),
         kv('Expected Date', date(record.expectedDate)),
+        kv('Internal Invoice #', value(record.internalInvoiceNumber)),
         kv('Supplier Invoice #', value(supplierInvoiceNumber)),
         kv('Invoice Date', date(supplierInvoiceDate)),
         kv('Payment Status', label(record.paymentStatus)),

@@ -48,6 +48,7 @@ interface PurchaseOrder {
   orderDate: string;
   expectedDate?: string | null;
   displayInvoiceNumber?: string | null;
+  internalInvoiceNumber?: string | null;
   displayInvoiceDate?: string | null;
   invoiceSource?: string | null;
   purchaseType: string;
@@ -151,6 +152,7 @@ export default function PurchaseOrderPrintPage() {
         { label: 'Purchase Order', value: number },
         { label: 'Order Date', value: formatDocumentDate(record.orderDate) },
         { label: 'Expected Date', value: formatDocumentDate(record.expectedDate) },
+        { label: 'Internal Invoice #', value: valueOrNA(record.internalInvoiceNumber) },
         { label: 'Supplier Invoice #', value: valueOrNA(record.displayInvoiceNumber) },
         { label: 'Invoice Date', value: formatDocumentDate(record.displayInvoiceDate) },
         { label: 'Payment Status', value: labelDocumentValue(record.paymentStatus) },

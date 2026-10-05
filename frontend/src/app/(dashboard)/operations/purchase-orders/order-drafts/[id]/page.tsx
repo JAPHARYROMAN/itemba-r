@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { PurchaseOrderTabs } from '../../_components/PurchaseOrderTabs';
 import { SupplierOrderDraftForm } from '../../_components/SupplierOrderDraftForm';
+import { ConvertSupplierOrderDraft } from '../../_components/ConvertSupplierOrderDraft';
 import { SupplierOrderDraftShareDialog } from '../../_components/SupplierOrderDraftShareDialog';
 import type {
   CompanyOption,
@@ -61,6 +62,7 @@ export default function SupplierOrderDraftDetailPage() {
   const [pending, setPending] = useState<Action | null>(null);
   const [acting, setActing] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [converting, setConverting] = useState(false);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -158,12 +160,29 @@ export default function SupplierOrderDraftDetailPage() {
       </div>
     );
 
-  const canUpdate = draft.status === 'DRAFT' && hasPermission('supplier_order_drafts.update');
-  const canManage = hasPermission('supplier_order_drafts.manage');
-  const canSend = draft.status === 'DRAFT' && hasPermission('supplier_order_drafts.send');
+  const converted = draft.convertedPurchaseOrder;
+  const canUpdate =
+    !converted && draft.status === 'DRAFT' && hasPermission('supplier_order_drafts.update');
+  const canManage = !converted && hasPermission('supplier_order_drafts.manage');
+  const canSend =
+    !converted && draft.status === 'DRAFT' && hasPermission('supplier_order_drafts.send');
 
   return (
     <div className="space-y-5 p-6">
+      {converting && (
+        <ConvertSupplierOrderDraft
+          draft={draft}
+          onClose={() => setConverting(false)}
+          onConverted={(order) => {
+            showToast(
+              'success',
+              `Created ${order.purchaseOrderNumber}`,
+              `Internal invoice: ${order.internalInvoiceNumber}`,
+            );
+            router.push(`/operations/purchase-orders/${order.id}`);
+          }}
+        />
+      )}
       {editing && (
         <SupplierOrderDraftForm
           open
@@ -195,6 +214,18 @@ export default function SupplierOrderDraftDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader title={draft.draftNumber} subtitle="Independent supplier planning document" />
         <div className="flex flex-wrap gap-2">
+          {converted ? (
+            <Link href={`/operations/purchase-orders/${converted.id}`}>
+              <Btn size="sm">Open {converted.purchaseOrderNumber}</Btn>
+            </Link>
+          ) : (
+            hasPermission('purchases.create') &&
+            ['DRAFT', 'SENT', 'ACCEPTED'].includes(draft.status) && (
+              <Btn size="sm" onClick={() => setConverting(true)}>
+                Convert to Purchase Order
+              </Btn>
+            )
+          )}
           {canUpdate && (
             <Btn
               size="sm"

@@ -63,7 +63,7 @@ function makeService() {
     inventoryMovement: { create: jest.fn() },
     payable: { create: jest.fn() },
     journalEntry: { create: jest.fn() },
-    purchaseOrder: { create: jest.fn() },
+    purchaseOrder: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
   };
   const prisma: any = {
     supplier: { findFirst: jest.fn() },
@@ -74,6 +74,8 @@ function makeService() {
     ...sideEffects,
     $transaction: jest.fn(async (callback) =>
       callback({
+        $queryRaw: jest.fn().mockResolvedValue([]),
+        purchaseOrder: sideEffects.purchaseOrder,
         supplierOrderDraft: { create, update },
         supplierOrderDraftLine: { deleteMany: jest.fn() },
       }),
@@ -107,6 +109,13 @@ function makeService() {
 }
 
 describe('SupplierOrderDraftsService', () => {
+  it('keeps a converted source fixed and directs later changes to its purchase order', async () => {
+    const { service, findFirst, sideEffects, update } = makeService();
+    findFirst.mockResolvedValue(draft());
+    sideEffects.purchaseOrder.findFirst.mockResolvedValue({ id: 'converted-po' });
+    await expect(service.send('draft-1', user)).rejects.toThrow('This draft has been converted');
+    expect(update).not.toHaveBeenCalled();
+  });
   it('creates an entirely manual unpriced request without transactional side effects', async () => {
     const { service, create, sideEffects } = makeService();
     await service.create(
