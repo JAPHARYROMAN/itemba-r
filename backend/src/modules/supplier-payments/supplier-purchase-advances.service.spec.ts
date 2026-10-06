@@ -92,7 +92,9 @@ describe('supplier purchase advances', () => {
     order.purchaseType = 'CASH_PURCHASE';
     order.paidAmount = d(100);
     order.outstandingAmount = d(0);
-    tx.supplierPayment.aggregate.mockResolvedValue({ _sum: { amount: d(25), unappliedAmount: d(50) } });
+    tx.supplierPayment.aggregate.mockResolvedValue({
+      _sum: { amount: d(25), unappliedAmount: d(50) },
+    });
     await expect(pay('25.00')).resolves.toBeDefined();
     await expect(pay('75.01')).rejects.toThrow('remaining');
     expect(tx.supplierPayment.create).toHaveBeenCalledTimes(1);
