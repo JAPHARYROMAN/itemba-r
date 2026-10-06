@@ -226,11 +226,18 @@ describe('PayablesService.recordPayment cash subledger + role (cashAccountId)', 
     // Subledger: the chosen CashAccount is decremented by the payment amount,
     // company-scoped, in the same transaction.
     expect(tx.cashAccount.updateMany).toHaveBeenCalledWith({
-      where: { id: 'bank-1', companyId: 'company-1', deletedAt: null },
+      where: {
+        id: 'bank-1',
+        companyId: 'company-1',
+        deletedAt: null,
+        isActive: true,
+        currentBalance: { gte: expect.anything() },
+      },
       data: { currentBalance: { decrement: expect.anything() } },
     });
-    const [{ data }] = tx.cashAccount.updateMany.mock.calls[0];
+    const [{ data, where }] = tx.cashAccount.updateMany.mock.calls[0];
     expect(Number(data.currentBalance.decrement)).toBe(200);
+    expect(Number(where.currentBalance.gte)).toBe(200);
   });
 
   it('credits CASH_ON_HAND and decrements the till for a cash payment', async () => {
@@ -254,7 +261,13 @@ describe('PayablesService.recordPayment cash subledger + role (cashAccountId)', 
     const cashLine = postingInput.lines.find((l: any) => l.accountId === 'cash-acc');
     expect(Number(cashLine.credit)).toBe(100);
     expect(tx.cashAccount.updateMany).toHaveBeenCalledWith({
-      where: { id: 'till-1', companyId: 'company-1', deletedAt: null },
+      where: {
+        id: 'till-1',
+        companyId: 'company-1',
+        deletedAt: null,
+        isActive: true,
+        currentBalance: { gte: expect.anything() },
+      },
       data: { currentBalance: { decrement: expect.anything() } },
     });
   });
@@ -332,7 +345,13 @@ describe('PayablesService.recordPayment cash subledger + role (cashAccountId)', 
 
     expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
     expect(tx.cashAccount.updateMany).toHaveBeenCalledWith({
-      where: { id: 'bank-usd', companyId: 'company-1', deletedAt: null },
+      where: {
+        id: 'bank-usd',
+        companyId: 'company-1',
+        deletedAt: null,
+        isActive: true,
+        currentBalance: { gte: expect.anything() },
+      },
       data: { currentBalance: { decrement: expect.anything() } },
     });
   });

@@ -2692,7 +2692,6 @@ const exactEffectBlockers = blockers(
     'ProformaInvoicesController.create',
     'ProformaInvoicesController.convertToSalesOrder',
     'PurchaseOrdersController.create',
-    'PurchaseOrdersController.receive',
     'QuotationsController.create',
     'QuotationsController.convertToSalesOrder',
     'ReceivablesController.create',
