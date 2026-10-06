@@ -253,6 +253,8 @@ async function fixtures() {
     'stock_damage.post',
     'inventory_movements.create',
     'journal_entries.post',
+    'journal_entries.create',
+    'journal_entries.reverse',
     'supplier_invoices.create',
     'supplier_invoices.approve',
     'three_way_match.create',
@@ -2114,6 +2116,12 @@ async function main() {
     call,
   });
   await require('./verify-supplier-purchase-advances.cjs').verifySupplierPurchaseAdvances({
+    db,
+    check,
+    fixture: f,
+    call,
+  });
+  await require('./verify-cash-purchase-funding.cjs').verifyCashPurchaseFunding({
     db,
     check,
     fixture: f,

@@ -58,9 +58,9 @@ const dayUtc = (value: Date) =>
  * so cash never lands in a book nobody can see. ERP CashAccount.currentBalance keeps being
  * maintained by the callers as a derived cache.
  *
- * Switched by CASH_BOOK_UNIFIED (default off). While off this service records nothing, so
- * the schema can ship before every ERP cash account has a Cash Desk connection
- * (`node backend/scripts/cash-book-preflight.cjs` lists the gaps).
+ * Connected accounts always mirror into Cash Desk. CASH_BOOK_UNIFIED additionally
+ * requires a connection for every ERP account; unmapped legacy accounts can still
+ * operate while that stricter rollout is off.
  */
 @Injectable()
 export class CashBookService {
@@ -75,9 +75,12 @@ export class CashBookService {
     return this.config.get<string>('CASH_BOOK_UNIFIED', 'false') === 'true';
   }
 
-  /** Mirror one ERP cash effect into the cash book. Returns null while the flag is off. */
+  /** Mirror connected accounts even when the strict global rollout is off. */
   async recordInTransaction(tx: Tx, user: AuthUser, input: CashBookMovementInput) {
-    if (!this.enabled()) return null;
+    const mapped = await tx.cashDeskAccount.findUnique({
+      where: { erpCashAccountId: input.cashAccountId },
+    });
+    if (!mapped && !this.enabled()) return null;
     const amount = new Prisma.Decimal(input.amount).toDecimalPlaces(2);
     if (amount.lte(0))
       throw new BadRequestException('Cash movement amount must be greater than zero');
@@ -101,7 +104,7 @@ export class CashBookService {
       return existing;
     }
 
-    const account = await this.requireMappedAccount(tx, input);
+    const account = await this.requireMappedAccount(tx, input, mapped);
     await this.lockAccount(tx, account);
     const signed = INCOMING.has(input.kind) ? amount : amount.negated();
     const movement = await tx.cashDeskMovement.create({
@@ -152,7 +155,6 @@ export class CashBookService {
     reason: string | null,
     reversalJournalEntryId?: string | null,
   ) {
-    if (!this.enabled()) return null;
     const original = await tx.cashDeskMovement.findUnique({
       where: { id: movementId },
       include: { entries: { include: { account: true } } },
@@ -276,10 +278,11 @@ export class CashBookService {
 
   // ── helpers ───────────────────────────────────────────────────────────────────
 
-  private async requireMappedAccount(tx: Tx, input: CashBookMovementInput) {
-    const account = await tx.cashDeskAccount.findUnique({
-      where: { erpCashAccountId: input.cashAccountId },
-    });
+  private async requireMappedAccount(
+    tx: Tx,
+    input: CashBookMovementInput,
+    account: CashDeskAccount | null,
+  ) {
     if (!account) {
       const erp = await tx.cashAccount.findUnique({
         where: { id: input.cashAccountId },
@@ -335,7 +338,13 @@ export class CashBookService {
       amount,
     );
     await tx.cashDeskEntry.create({
-      data: { movementId, accountId: account.id, businessDate: date, amount },
+      data: {
+        movementId,
+        accountId: account.id,
+        businessDate: date,
+        amount,
+        erpBalanceApplied: true,
+      },
     });
     await tx.cashDeskAccount.update({ where: { id: account.id }, data: { balance } });
   }

@@ -748,7 +748,7 @@ export function CashEditor({
                             )
                             .map((row) => ({
                               value: `${row.source}:${row.id}`,
-                              label: `${[row.number, row.purchaseOrderNumber, row.internalInvoiceNumber, row.supplierInvoiceNumber].filter((number, index, numbers) => !!number && numbers.indexOf(number) === index).join(' · ')} · ${row.source === 'PAYABLE' ? 'Purchase payable' : row.source === 'PURCHASE_ORDER' ? 'Supplier advance' : 'Invoice Desk'} · ${money(row.outstanding, row.currency)} outstanding`,
+                              label: `${[row.number, row.purchaseOrderNumber, row.internalInvoiceNumber, row.supplierInvoiceNumber].filter((number, index, numbers) => !!number && numbers.indexOf(number) === index).join(' · ')} · ${row.source === 'PAYABLE' ? 'Purchase payable' : row.source === 'PURCHASE_ORDER' ? (row.purpose === 'CASH_PURCHASE_SETTLEMENT' ? 'Cash payment not recorded' : 'Supplier advance') : 'Invoice Desk'} · ${money(row.outstanding, row.currency)} outstanding`,
                             })),
                         ]}
                       />
@@ -824,8 +824,9 @@ export function CashEditor({
                     )}
                     {currentPurchase?.source === 'PURCHASE_ORDER' && (
                       <p className="desk-muted">
-                        Supplier advance: cash is paid now and applied to this PO when its purchase
-                        is posted.
+                        {currentPurchase.purpose === 'CASH_PURCHASE_SETTLEMENT'
+                          ? 'Goods are already received. Record the actual cash payment here; the purchase and stock will not be posted again.'
+                          : 'Supplier advance: cash is paid now and applied to this PO when its purchase is posted.'}
                       </p>
                     )}
                     {form.purchaseId && purchaseDetail.loading && (

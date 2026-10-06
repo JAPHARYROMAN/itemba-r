@@ -5,6 +5,7 @@ import { payloadKey } from '../../cash-desk/cash-desk.domain';
 import { PayPayrollRunDto } from './dto/payroll-run-action.dto';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { Prisma } from '@prisma/client';
 
 const permissions = [
   'payroll.pay',
@@ -17,6 +18,102 @@ const actor = { id: 'payer', permissions, roleScopes: ['COMPANY'] };
 const dto = { requestId: 'request', cashDeskAccountId: 'cash', businessDate: '2026-01-01' };
 const run = { id: 'run', status: 'PAID' };
 describe('Payroll cash payment controls', () => {
+  it('deducts both cash balances for an owned payroll payment and restores only recorded ERP effects', async () => {
+    const decimal = (value: number) => new Prisma.Decimal(value);
+    const account: any = {
+      id: 'desk',
+      erpCashAccountId: 'erp',
+      companyId: 'company',
+      currency: 'TZS',
+      divisionId: null,
+      branchId: null,
+      openingDate: new Date('2026-01-01'),
+    };
+    let erp = decimal(100),
+      desk = decimal(100),
+      originalApplied = true;
+    const entries: any[] = [];
+    const tx: any = {
+      cashAccount: {
+        findFirst: jest.fn(async () => ({
+          id: 'erp',
+          companyId: 'company',
+          currency: 'TZS',
+          divisionId: null,
+          branchId: null,
+          ledgerAccount: {
+            companyId: 'company',
+            isActive: true,
+            accountType: 'ASSET',
+            divisionId: null,
+            branchId: null,
+          },
+        })),
+        updateMany: jest.fn(async ({ data }: any) => {
+          erp = erp.plus(data.currentBalance.increment);
+          return { count: 1 };
+        }),
+      },
+      cashDeskEntry: {
+        groupBy: jest.fn(async () => [
+          { businessDate: new Date('2026-01-01'), _sum: { amount: desk } },
+        ]),
+        findFirst: jest.fn(async () => ({ erpBalanceApplied: originalApplied })),
+      },
+      cashDeskMovement: {
+        create: jest.fn(async ({ data }: any) => {
+          entries.push(data.entries.create);
+          return { id: 'movement' };
+        }),
+      },
+      cashDeskAccount: {
+        update: jest.fn(async ({ data }: any) => {
+          desk = data.balance;
+        }),
+      },
+    };
+    const cash = new PayrollCashService(
+      {} as never,
+      {} as never,
+      { logStrictInTransaction: jest.fn() } as never,
+      {} as never,
+    );
+    const input = {
+      requestId: 'payment',
+      key: 'key',
+      date: new Date('2026-01-02'),
+      amount: decimal(-30),
+      journalId: 'journal',
+    };
+    await (cash as any).movement(
+      tx,
+      { id: 'run', companyId: 'company', payrollRunNumber: 'PAY' },
+      actor,
+      account,
+      input,
+    );
+    expect([erp.toString(), desk.toString()]).toEqual(['70', '70']);
+    expect(entries[0].erpBalanceApplied).toBe(true);
+    await (cash as any).movement(
+      tx,
+      { id: 'run', companyId: 'company', payrollRunNumber: 'PAY' },
+      actor,
+      account,
+      { ...input, amount: decimal(30), reversalOfId: 'payment' },
+    );
+    expect([erp.toString(), desk.toString()]).toEqual(['100', '100']);
+    originalApplied = false;
+    desk = decimal(70);
+    await (cash as any).movement(
+      tx,
+      { id: 'run', companyId: 'company', payrollRunNumber: 'PAY' },
+      actor,
+      account,
+      { ...input, amount: decimal(30), reversalOfId: 'old-payment' },
+    );
+    expect([erp.toString(), desk.toString()]).toEqual(['100', '100']);
+    expect(entries[2].erpBalanceApplied).toBe(false);
+  });
   const service = new PayrollCashService(
     new OrganizationScopeService({} as never),
     {} as never,

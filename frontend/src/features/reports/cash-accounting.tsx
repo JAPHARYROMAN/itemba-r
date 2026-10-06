@@ -1,4 +1,6 @@
 'use client';
+import { useState } from 'react';
+import { CashBalanceRepair } from './cash-balance-repair';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import {
   AccountingDraftBoundary,
@@ -67,6 +69,7 @@ function CashAccountingWorkspace({ connections }: { connections: boolean }) {
   );
 }
 function AccountConnections({ query }: { query: Record<string, string> }) {
+  const [repair, setRepair] = useState<{ id: string; name: string } | null>(null);
   const { hasPermission } = useAuth();
   const resource = useWorkspaceResource<Connections>('/cash-connections/accounts', query);
   const open = useAccountingEditor();
@@ -75,6 +78,16 @@ function AccountConnections({ query }: { query: Record<string, string> }) {
   const data = resource.data;
   return (
     <>
+      {repair && (
+        <CashBalanceRepair
+          {...repair}
+          onClose={() => setRepair(null)}
+          onSaved={() => {
+            setRepair(null);
+            resource.reload();
+          }}
+        />
+      )}
       <p className="accounting-note">
         Connections identify the same physical cash box or bank account. They do not move money,
         post old records. When first connecting an unused ERP cash account, you can explicitly
@@ -130,6 +143,15 @@ function AccountConnections({ query }: { query: Record<string, string> }) {
                       : 'Not connected'}
                   </td>
                   <td>
+                    {d.erpCashAccountId &&
+                      bank &&
+                      canManage &&
+                      d.canConnect &&
+                      d.recordedBalance !== bank.recordedBalance && (
+                        <button onClick={() => setRepair({ id: d.id, name: d.name })}>
+                          Review cash deductions
+                        </button>
+                      )}
                     {!d.erpCashAccountId && (
                       <button
                         onClick={() =>

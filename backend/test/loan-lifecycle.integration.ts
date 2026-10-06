@@ -499,6 +499,11 @@ async function main() {
     const balance = (await db.cashDeskAccount.findUniqueOrThrow({ where: { id: side.till.id } }))
       .balance;
     equal(entries._sum.amount, balance);
+    equal(
+      (await db.cashAccount.findUniqueOrThrow({ where: { id: side.till.erpCashAccountId! } }))
+        .currentBalance,
+      balance,
+    );
     equal((lines._sum.debit || D(0)).minus(lines._sum.credit || D(0)), balance);
   }
   console.log(

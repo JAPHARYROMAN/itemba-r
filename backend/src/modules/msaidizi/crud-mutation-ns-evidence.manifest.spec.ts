@@ -112,13 +112,15 @@ describe('N-S mutation evidence against the live capability manifest', () => {
     // exact-effect blocker PayrollRunsController.pay (its contract changed); the
     // redesign's new N-S writes (PayrollRunsController.reversePayment and the
     // SalesDeskController writes) are agent-excluded and never entered.
-    expect(tranche).toHaveLength(222);
+    // Cash-funded purchase receipt is also excluded until its financial effects
+    // have a complete agent contract.
+    expect(tranche).toHaveLength(221);
     expect(controllers.size).toBe(50);
     expect(CRUD_MUTATION_NS_EVIDENCE_PACKS.map((pack) => pack.fixtures.length)).toEqual([
       48, 27, 29, 44, 28,
     ]);
     expect(registered).toHaveLength(176);
-    expect(blocked).toHaveLength(44);
+    expect(blocked).toHaveLength(43);
     expect(remediated.sort()).toEqual([...REMEDIATED_BODY_SCHEMA_IDS].sort());
     expect(blockers.filter((blocker) => blocker.reason === 'body_schema_not_strict')).toHaveLength(
       0,
@@ -131,7 +133,7 @@ describe('N-S mutation evidence against the live capability manifest', () => {
     ).toHaveLength(5);
     expect(
       blockers.filter((blocker) => blocker.reason === 'exact_effect_not_represented'),
-    ).toHaveLength(39);
+    ).toHaveLength(38);
     expect(new Set(registered).size).toBe(registered.length);
     expect(new Set(blocked).size).toBe(blocked.length);
     expect(new Set(remediated).size).toBe(remediated.length);

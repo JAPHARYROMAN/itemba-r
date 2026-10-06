@@ -341,9 +341,9 @@ export class SupplierInvoicesService {
         'The purchase order changed; review its supplier and currency before approval.',
       );
     }
-    if (order.purchaseType === 'CASH_PURCHASE') {
+    if (order.purchaseType === 'CASH_PURCHASE' && !order.payableId) {
       throw new BadRequestException(
-        'This cash purchase is already settled through receiving; do not create another supplier payable.',
+        'This cash purchase has no canonical payable. Receive it with a recorded payment or review its legacy cash posting before linking an invoice.',
       );
     }
     if (order.payableId && invoice.payableId && order.payableId !== invoice.payableId) {
@@ -1365,19 +1365,18 @@ export class SupplierInvoicesService {
           branchId: true,
           currency: true,
           purchaseType: true,
+          payableId: true,
         },
       });
       if (!po) throw new BadRequestException('Purchase order does not belong to this company');
       if (po.supplierId && po.supplierId !== refs.supplierId) {
         throw new BadRequestException('Purchase order supplier does not match invoice supplier');
       }
-      // A cash purchase settles in full at receipt (DR Inventory / CR Cash) and has
-      // no accounts-payable leg. Linking a supplier invoice to it would make the
-      // invoice approve flow post a second inventory debit + a phantom AP credit,
-      // double-counting the goods. Cash purchases never flow through AP.
-      if (po.purchaseType === 'CASH_PURCHASE') {
+      // New cash receipts share the canonical payable and payment. Legacy cash
+      // journals need review before invoice approval can reuse their coverage.
+      if (po.purchaseType === 'CASH_PURCHASE' && !po.payableId) {
         throw new BadRequestException(
-          'Cannot link a supplier invoice to a cash-purchase order; it settles at receipt and carries no accounts payable',
+          'Receive this cash purchase with a recorded payment or review its legacy cash posting before linking an invoice.',
         );
       }
       // Currency lock: the invoice must be denominated in the same currency as its

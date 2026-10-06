@@ -77,6 +77,8 @@ export class PurchaseOrdersController {
   }
 
   @Patch(':id/receive')
+  // The agent proposal contract does not yet describe the cash payment added by receiving.
+  @AgentExcluded()
   @RequirePermissions('purchases.receive')
   receive(
     @Param('id') id: string,
@@ -84,6 +86,13 @@ export class PurchaseOrdersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.receive(id, user, dto);
+  }
+
+  @Get(':id/cash-funding')
+  @AgentExcluded()
+  @RequirePermissions('purchases.receive', 'supplier-payments.manage', 'cash_accounts.view')
+  cashFunding(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.cashFunding(id, user);
   }
 
   @Patch(':id/cancel')

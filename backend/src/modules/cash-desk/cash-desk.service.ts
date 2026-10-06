@@ -28,6 +28,7 @@ import { IntercompanyLoanLedgerService } from '../loans/intercompany-loan-ledger
 import { allocateLoanPayment } from '../loans/loan-allocation';
 import { CashPurchasesService, purchaseRelations } from './cash-purchases.service';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
+import { applyDeskCashEffect } from './cash-balance-effect';
 
 const names = {
   company: { select: { name: true } },
@@ -218,6 +219,10 @@ export class CashDeskService {
     return row;
   }
   private async lockAccounts(tx: Prisma.TransactionClient, accounts: CashDeskAccount[]) {
+    for (const id of [
+      ...new Set(accounts.flatMap((a) => (a.erpCashAccountId ? [a.erpCashAccountId] : []))),
+    ].sort())
+      await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${id} FOR UPDATE`;
     for (const account of [...accounts].sort((a, b) => a.id.localeCompare(b.id))) {
       const locked = await tx.cashDeskAccount.updateMany({
         where: { id: account.id, version: account.version },
@@ -231,9 +236,14 @@ export class CashDeskService {
     tx: Prisma.TransactionClient,
     movementId: string,
     date: Date,
-    deltas: { account: CashDeskAccount; amount: Prisma.Decimal }[],
+    deltas: {
+      account: CashDeskAccount;
+      amount: Prisma.Decimal;
+      erpAlreadyApplied?: boolean;
+      skipErp?: boolean;
+    }[],
   ) {
-    for (const { account, amount } of deltas) {
+    for (const { account, amount, erpAlreadyApplied, skipErp } of deltas) {
       if (date < account.openingDate)
         throw new BadRequestException('A movement cannot precede the account opening date.');
       const daily = await tx.cashDeskEntry.groupBy({
@@ -246,8 +256,11 @@ export class CashDeskService {
         date,
         amount,
       );
+      const erpBalanceApplied =
+        erpAlreadyApplied === true ||
+        (!skipErp && (await applyDeskCashEffect(tx, account, amount)));
       await tx.cashDeskEntry.create({
-        data: { movementId, accountId: account.id, businessDate: date, amount },
+        data: { movementId, accountId: account.id, businessDate: date, amount, erpBalanceApplied },
       });
       await tx.cashDeskAccount.update({ where: { id: account.id }, data: { balance } });
     }
@@ -588,7 +601,11 @@ export class CashDeskService {
         });
       const incoming = ['DAILY_SALES', 'OTHER_IN'].includes(d.kind);
       await this.entries(tx, movement.id, date, [
-        { account, amount: incoming ? amount : amount.negated() },
+        {
+          account,
+          amount: incoming ? amount : amount.negated(),
+          erpAlreadyApplied: canonicalPurchase,
+        },
         ...(target ? [{ account: target, amount }] : []),
       ]);
       await this.auditMovement(tx, user, movement.id, accounts, d.kind);
@@ -1000,6 +1017,8 @@ export class CashDeskService {
         original.entries.map((e) => ({
           account: accounts.find((a) => a.id === e.accountId)!,
           amount: e.amount.negated(),
+          erpAlreadyApplied: canonicalPurchase,
+          skipErp: !e.erpBalanceApplied,
         })),
       );
       await this.auditMovement(tx, user, reversal.id, accounts, 'REVERSED');

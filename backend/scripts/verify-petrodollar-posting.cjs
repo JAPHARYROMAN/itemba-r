@@ -660,6 +660,17 @@ async function main() {
       'Inventory and journal valuation agree',
     );
     assert.equal(net('cash'), '90000.00');
+    for (const account of Object.values(cash)) {
+      const pair = await db.cashDeskAccount.findUniqueOrThrow({
+        where: { id: account.id },
+        include: { erpCashAccount: true },
+      });
+      assert.equal(
+        pair.erpCashAccount.currentBalance.toFixed(2),
+        pair.balance.toFixed(2),
+        'Shift cash affects both connected balances once',
+      );
+    }
     assert.equal(net('expense'), '10000.00');
     await check(
       `reports/${closed.id}/reopen`,
@@ -749,6 +760,18 @@ async function main() {
       reason: 'Correct paper reading',
     });
     assert(reversed.reversedAt);
+    for (const account of Object.values(cash)) {
+      const pair = await db.cashDeskAccount.findUniqueOrThrow({
+        where: { id: account.id },
+        include: { erpCashAccount: true },
+      });
+      assert.equal(
+        pair.erpCashAccount.currentBalance.toFixed(2),
+        '0.00',
+        'Whole-shift reversal restores ERP cash',
+      );
+      assert.equal(pair.balance.toFixed(2), '0.00', 'Whole-shift reversal restores desk cash');
+    }
     assert.equal(
       (await db.cashDeskAccount.findUnique({ where: { id: cash.cash.id } })).balance.toFixed(2),
       '0.00',

@@ -14,6 +14,7 @@ import { PostingEngineService } from '../../accounting-engine/posting-engine.ser
 import { EntityCodeGeneratorService } from '../../entity-code-generator/entity-code-generator.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { cashDate, checkDailyBalances, payloadKey } from '../../cash-desk/cash-desk.domain';
+import { applyDeskCashEffect, lockDeskCashAccount } from '../../cash-desk/cash-balance-effect';
 import { PayPayrollRunDto, ReversePayrollPaymentDto } from './dto/payroll-run-action.dto';
 
 type Tx = Prisma.TransactionClient;
@@ -307,8 +308,7 @@ export class PayrollCashService {
   }
 
   private async account(tx: Tx, companyId: string, id: string, user: AuthUser) {
-    await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${id} FOR UPDATE`;
-    const account = await tx.cashDeskAccount.findUnique({ where: { id } });
+    const account = await lockDeskCashAccount(tx, id);
     if (!account || account.companyId !== companyId || !account.erpCashAccountId)
       throw new BadRequestException(
         'Choose a connected Cash Desk account belonging to the payroll company.',
@@ -365,6 +365,12 @@ export class PayrollCashService {
       input.date,
       input.amount,
     );
+    const erpBalanceApplied = await applyDeskCashEffect(
+      tx,
+      account,
+      input.amount,
+      input.reversalOfId,
+    );
     const movement = await tx.cashDeskMovement.create({
       data: {
         requestId: input.requestId,
@@ -385,7 +391,12 @@ export class PayrollCashService {
         actorName: user.fullName || user.email,
         reversalOfId: input.reversalOfId,
         entries: {
-          create: { accountId: account.id, businessDate: input.date, amount: input.amount },
+          create: {
+            accountId: account.id,
+            businessDate: input.date,
+            amount: input.amount,
+            erpBalanceApplied,
+          },
         },
       },
     });

@@ -1,4 +1,5 @@
 import { SupplierPurchaseAdvancesService } from './supplier-purchase-advances.service';
+import { CashPurchasePaymentsService } from './cash-purchase-payments.service';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
@@ -20,11 +21,12 @@ import { GeneratedDocumentsModule } from '../generated-documents/generated-docum
   imports: [PrismaModule, AuditLogsModule, CashBookModule, GeneratedDocumentsModule],
   controllers: [SupplierPaymentsController],
   providers: [
+    CashPurchasePaymentsService,
     SupplierPurchaseAdvancesService,
     SupplierPaymentsService,
     CompanyScopeService,
     OrganizationScopeService,
   ],
-  exports: [SupplierPurchaseAdvancesService, SupplierPaymentsService],
+  exports: [SupplierPurchaseAdvancesService, SupplierPaymentsService, CashPurchasePaymentsService],
 })
 export class SupplierPaymentsModule {}

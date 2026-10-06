@@ -16,6 +16,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
 import { CashDeskService } from '../cash-desk/cash-desk.service';
 import { checkDailyBalances, payloadKey } from '../cash-desk/cash-desk.domain';
+import { applyDeskCashEffect } from '../cash-desk/cash-balance-effect';
 import { CashConnectionsService } from '../desk-reports/cash-connections.service';
 import { DeskPostingSource, sourceFingerprint } from '../desk-reports/desk-posting.domain';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
@@ -974,9 +975,17 @@ export class PetroDollarPostingService {
           movements.map((m) => m.invoicePaymentId).filter(Boolean),
         );
         // Lock documents and reread before checking downstream payments.
-        for (const accountId of [
+        const accountIds = [
           ...new Set(movements.flatMap((m) => m.entries.map((x) => x.accountId))),
+        ].sort();
+        const cashAccounts = await tx.cashDeskAccount.findMany({
+          where: { id: { in: accountIds } },
+        });
+        for (const erpId of [
+          ...new Set(cashAccounts.flatMap((a) => (a.erpCashAccountId ? [a.erpCashAccountId] : []))),
         ].sort())
+          await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${erpId} FOR UPDATE`;
+        for (const accountId of accountIds)
           await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${accountId} FOR UPDATE`;
         for (const invoice of invoices.sort((a, b) => a.id.localeCompare(b.id)))
           await tx.$queryRaw`SELECT id FROM invoice_desk_invoices WHERE id = ${invoice.id} FOR UPDATE`;
@@ -1055,6 +1064,13 @@ export class PetroDollarPostingService {
             const account = await tx.cashDeskAccount.findUniqueOrThrow({
               where: { id: entry.accountId },
             });
+            if (
+              account.erpCashAccountId !==
+              cashAccounts.find((a) => a.id === account.id)?.erpCashAccountId
+            )
+              throw new ConflictException(
+                'The cash account connection changed. Review the shift again.',
+              );
             const daily = await tx.cashDeskEntry.groupBy({
               by: ['businessDate'],
               where: { accountId: account.id },
@@ -1066,12 +1082,14 @@ export class PetroDollarPostingService {
               reversalDate,
               amount,
             );
+            const erpBalanceApplied = await applyDeskCashEffect(tx, account, amount, movement.id);
             await tx.cashDeskEntry.create({
               data: {
                 movementId: reversal.id,
                 accountId: account.id,
                 businessDate: reversalDate,
                 amount,
+                erpBalanceApplied,
               },
             });
             await tx.cashDeskAccount.update({

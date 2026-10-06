@@ -23,7 +23,6 @@ const EXPECTED_IDS = [
   'DisbursementsController.generate',
   'FixedAssetsController.dispose',
   'PayablesController.writeOff',
-  'PurchaseOrdersController.receive',
   'ReceivablesController.writeOff',
 ] as const;
 
@@ -32,7 +31,6 @@ const EXPECTED_PERMISSIONS: Readonly<Record<(typeof EXPECTED_IDS)[number], strin
   'DisbursementsController.generate': 'payroll.pay',
   'FixedAssetsController.dispose': 'fixed-assets.update',
   'PayablesController.writeOff': 'payables.manage',
-  'PurchaseOrdersController.receive': 'purchases.receive',
   'ReceivablesController.writeOff': 'receivables.manage',
 };
 
@@ -41,12 +39,12 @@ describe('next bounded finance and operations mutation evidence', () => {
   const byId = new Map(manifest.map((capability) => [capability.id, capability]));
   const fixtures = CRUD_NEXT_ACTION_EVIDENCE_PACK.fixtures;
 
-  it('registers exactly the six reserved operations as action controls', () => {
+  it('registers exactly the five reserved operations as action controls', () => {
     expect([...CRUD_NEXT_ACTION_CLOSED_IDS].sort()).toEqual([...EXPECTED_IDS].sort());
     expect(fixtures.map((fixture) => fixture.capabilityId).sort()).toEqual(
       [...EXPECTED_IDS].sort(),
     );
-    expect(new Set(fixtures.map((fixture) => fixture.fixtureId)).size).toBe(6);
+    expect(new Set(fixtures.map((fixture) => fixture.fixtureId)).size).toBe(5);
     expect(fixtures.every((fixture) => fixture.operation === 'action')).toBe(true);
     const coverageOperations = new Map(
       buildCrudCoverageReport(manifest).capabilities.map((entry) => [
@@ -114,25 +112,6 @@ describe('next bounded finance and operations mutation evidence', () => {
         ]);
         expect([...crudMutationBusinessDeltaModels(fixture.effect)]).toEqual([]);
         expect(crudMutationRecoveryPlan(fixture.effect)).toEqual([]);
-        continue;
-      }
-
-      if (fixture.effect.kind === 'compound') {
-        expect(fixture.capabilityId).toBe('PurchaseOrdersController.receive');
-        for (const effect of fixture.effect.effects) {
-          const fields =
-            effect.kind === 'scoped-row-create'
-              ? [
-                  ...Object.keys(effect.expectedFields),
-                  ...Object.keys(effect.generatedFields),
-                  ...(effect.allowedFields ?? []),
-                ]
-              : effect.kind === 'row-update' || effect.kind === 'row-delete'
-                ? Object.keys(effect.expectedFields)
-                : [];
-          assertScalarFields(effect.model, fields);
-        }
-        expect(crudMutationRecoveryPlan(fixture.effect)).toHaveLength(4);
         continue;
       }
 
@@ -239,68 +218,6 @@ describe('next bounded finance and operations mutation evidence', () => {
       });
     }
 
-    expect(fixture('PurchaseOrdersController.receive')).toMatchObject({
-      setupModels: [
-        'Branch',
-        'InventoryBalance',
-        'Product',
-        'PurchaseOrder',
-        'PurchaseOrderLine',
-        'UnitOfMeasure',
-      ],
-      request: { path: { id: { binding: 'model:PurchaseOrder' } }, body: {} },
-      effect: {
-        kind: 'compound',
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            effectId: 'movement',
-            kind: 'scoped-row-create',
-            model: 'InventoryMovement',
-            recovery: 'restore-scope',
-          }),
-          expect.objectContaining({
-            effectId: 'inventoryBalance',
-            kind: 'row-update',
-            model: 'InventoryBalance',
-            recovery: 'restore-row',
-          }),
-          expect.objectContaining({
-            effectId: 'order',
-            kind: 'row-update',
-            model: 'PurchaseOrder',
-            recovery: 'restore-row',
-          }),
-          expect.objectContaining({
-            effectId: 'movementSequence',
-            kind: 'scoped-row-create',
-            model: 'DocumentNumberSequence',
-            recovery: 'restore-scope',
-          }),
-        ]),
-      },
-      audit: {
-        additionalAudits: [
-          expect.objectContaining({
-            action: 'INVENTORY_MOVEMENT_CREATE',
-            entityType: 'InventoryMovement',
-          }),
-        ],
-      },
-    });
-    const receive = fixture('PurchaseOrdersController.receive');
-    expect([...crudMutationBusinessDeltaModels(receive.effect)].sort()).toEqual([
-      'DocumentNumberSequence',
-      'InventoryBalance',
-      'InventoryMovement',
-      'PurchaseOrder',
-    ]);
-    expect(crudMutationRecoveryPlan(receive.effect).map((entry) => entry.model)).toEqual([
-      'InventoryMovement',
-      'InventoryBalance',
-      'PurchaseOrder',
-      'DocumentNumberSequence',
-    ]);
-
     const forbiddenModels = new Set([
       'Customer',
       'DocumentNumberSequence',
@@ -313,10 +230,6 @@ describe('next bounded finance and operations mutation evidence', () => {
       'Supplier',
     ]);
     for (const candidate of fixtures) {
-      if (candidate.capabilityId === 'PurchaseOrdersController.receive') {
-        expect(candidate.effect.kind).toBe('compound');
-        continue;
-      }
       if (candidate.effect.kind === 'audit-only') {
         expect([...crudMutationAllowedModels(candidate.effect)].sort()).toEqual([
           'AuditLog',
@@ -331,6 +244,22 @@ describe('next bounded finance and operations mutation evidence', () => {
         (model) => forbiddenModels.has(model) && model !== primaryModel,
       );
       expect(unexpected).toEqual([]);
+    }
+  });
+
+  it('excludes purchase receipt and funding until their cash effects have an agent contract', () => {
+    const aggregateFixtures = mutationEvidencePacksForManifest(manifest).flatMap(
+      (pack) => pack.fixtures,
+    );
+    for (const capabilityId of [
+      'PurchaseOrdersController.receive',
+      'PurchaseOrdersController.cashFunding',
+    ]) {
+      expect(byId.get(capabilityId)).toMatchObject({ agentExcluded: true });
+      expect(fixtures.some((candidate) => candidate.capabilityId === capabilityId)).toBe(false);
+      expect(aggregateFixtures.some((candidate) => candidate.capabilityId === capabilityId)).toBe(
+        false,
+      );
     }
   });
 

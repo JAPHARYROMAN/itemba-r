@@ -199,6 +199,7 @@ export type Editor = {
   loan?: Loan;
 };
 export type PurchaseOption = {
+  purpose?: 'CASH_PURCHASE_SETTLEMENT' | 'SUPPLIER_ADVANCE';
   source: 'PAYABLE' | 'INVOICE_DESK' | 'PURCHASE_ORDER';
   id: string;
   number: string;
