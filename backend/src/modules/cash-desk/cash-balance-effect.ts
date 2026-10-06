@@ -1,13 +1,36 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { CashDeskAccount, Prisma } from '@prisma/client';
 import { assertCashAccountScopeCompatible } from '../../common/services/cash-account-scope.helper';
+
+/** All owned cash writers lock the ERP account before its drawer. */
+export async function lockDeskCashAccount(tx: Prisma.TransactionClient, id: string) {
+  const before = await tx.cashDeskAccount.findUnique({ where: { id } });
+  if (before?.erpCashAccountId)
+    await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${before.erpCashAccountId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${id} FOR UPDATE`;
+  const account = await tx.cashDeskAccount.findUnique({ where: { id } });
+  if (account?.erpCashAccountId !== before?.erpCashAccountId)
+    throw new ConflictException(
+      'The cash account connection changed. Refresh before trying again.',
+    );
+  return account;
+}
 
 /** Apply a new signed desk entry to its ERP mirror, once, in the same transaction. */
 export async function applyDeskCashEffect(
   tx: Prisma.TransactionClient,
   desk: CashDeskAccount,
   amount: Prisma.Decimal,
+  reversalOfId?: string,
 ) {
+  if (reversalOfId) {
+    const original = await tx.cashDeskEntry.findFirst({
+      where: { movementId: reversalOfId, accountId: desk.id },
+      select: { erpBalanceApplied: true },
+    });
+    if (!original) throw new BadRequestException('The original cash entry is missing.');
+    if (!original.erpBalanceApplied) return false;
+  }
   if (!desk.erpCashAccountId) return false;
   const cash = await tx.cashAccount.findFirst({
     where: {

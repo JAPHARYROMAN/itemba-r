@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { applyDeskCashEffect } from './cash-balance-effect';
+import { applyDeskCashEffect, lockDeskCashAccount } from './cash-balance-effect';
 
 const d = (value: number) => new Prisma.Decimal(value);
 function setup() {
@@ -29,6 +29,9 @@ function setup() {
     },
   };
   const tx: any = {
+    cashDeskEntry: { findFirst: jest.fn().mockResolvedValue({ erpBalanceApplied: true }) },
+    cashDeskAccount: { findUnique: jest.fn().mockResolvedValue(desk) },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     cashAccount: {
       findFirst: jest.fn(async () => cash),
       updateMany: jest.fn(async () => ({ count: 1 })),
@@ -43,6 +46,23 @@ it('deducts an expense from the connected balance with an atomic sufficient-fund
     where: { id: 'cash', currentBalance: { gte: d(30) } },
     data: { currentBalance: { increment: d(-30) } },
   });
+});
+it('restores a recorded owned payment but leaves an old unapplied reversal out of ERP cash', async () => {
+  const { tx, desk } = setup();
+  await expect(applyDeskCashEffect(tx, desk, d(30), 'original')).resolves.toBe(true);
+  expect(tx.cashAccount.updateMany).toHaveBeenCalledTimes(1);
+  tx.cashDeskEntry.findFirst.mockResolvedValue({ erpBalanceApplied: false });
+  await expect(applyDeskCashEffect(tx, desk, d(30), 'old-original')).resolves.toBe(false);
+  expect(tx.cashAccount.updateMany).toHaveBeenCalledTimes(1);
+  tx.cashDeskEntry.findFirst.mockResolvedValue(null);
+  await expect(applyDeskCashEffect(tx, desk, d(30), 'missing-original')).rejects.toThrow('missing');
+});
+it('refuses a cash mapping changed while acquiring the account locks', async () => {
+  const { tx, desk } = setup();
+  tx.cashDeskAccount.findUnique
+    .mockResolvedValueOnce(desk)
+    .mockResolvedValueOnce({ ...desk, erpCashAccountId: 'other' });
+  await expect(lockDeskCashAccount(tx, desk.id)).rejects.toThrow('connection changed');
 });
 it('adds incoming cash or a reversal to the same connected account', async () => {
   const { tx, desk } = setup();

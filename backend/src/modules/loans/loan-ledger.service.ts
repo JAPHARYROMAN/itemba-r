@@ -13,6 +13,7 @@ import { PostingEngineService, PostingLine } from '../accounting-engine/posting-
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { mappedCashAccount } from '../../common/services/mapped-cash-account';
 import { checkDailyBalances, payloadKey } from '../cash-desk/cash-desk.domain';
+import { applyDeskCashEffect, lockDeskCashAccount } from '../cash-desk/cash-balance-effect';
 
 type Tx = Prisma.TransactionClient;
 type Scope = { companyId: string; divisionId: string | null; branchId: string | null };
@@ -90,8 +91,7 @@ export class LoanLedgerService {
   }
   async cash(tx: Tx, user: AuthUser, scope: Scope, currency: string, accountId: string) {
     if (!accountId) throw new BadRequestException('Choose a connected Cash Desk account.');
-    await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${accountId} FOR UPDATE`;
-    const account = await tx.cashDeskAccount.findUnique({ where: { id: accountId } });
+    const account = await lockDeskCashAccount(tx, accountId);
     if (!account) throw new NotFoundException('Cash Desk account not found.');
     await this.scope(user, account);
     if (
@@ -159,12 +159,19 @@ export class LoanLedgerService {
         reversalOfId: input.reversalOfId,
       },
     });
+    const erpBalanceApplied = await applyDeskCashEffect(
+      tx,
+      cash.account,
+      input.amount,
+      input.reversalOfId,
+    );
     await tx.cashDeskEntry.create({
       data: {
         movementId: movement.id,
         accountId: cash.account.id,
         businessDate: input.date,
         amount: input.amount,
+        erpBalanceApplied,
       },
     });
     await tx.cashDeskAccount.update({

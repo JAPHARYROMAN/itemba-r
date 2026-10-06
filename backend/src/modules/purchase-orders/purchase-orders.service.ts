@@ -818,7 +818,6 @@ export class PurchaseOrdersService {
       if (linesData) {
         await tx.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: id } });
       }
-      const nextPurchaseType = dto.purchaseType ?? existing.purchaseType;
       const nextTotalAmount = totalAmount ?? Number(existing.totalAmount);
       const nextPaymentState =
         dto.purchaseType !== undefined || totalAmount !== undefined
