@@ -87,6 +87,16 @@ function setup() {
   return { service, tx, order, cash, posting, org, pay };
 }
 describe('supplier purchase advances', () => {
+  it('uses actual advances for a cash PO instead of its old inferred PAID flag', async () => {
+    const { pay, tx, order } = setup();
+    order.purchaseType = 'CASH_PURCHASE';
+    order.paidAmount = d(100);
+    order.outstandingAmount = d(0);
+    tx.supplierPayment.aggregate.mockResolvedValue({ _sum: { amount: d(25), unappliedAmount: d(50) } });
+    await expect(pay('25.00')).resolves.toBeDefined();
+    await expect(pay('75.01')).rejects.toThrow('remaining');
+    expect(tx.supplierPayment.create).toHaveBeenCalledTimes(1);
+  });
   it('posts an advance asset and cash payment with no premature payable allocation', async () => {
     const { pay, tx, posting } = setup();
     await pay();

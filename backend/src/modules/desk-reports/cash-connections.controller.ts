@@ -47,6 +47,26 @@ export class CashConnectionsController {
   connect(@CurrentUser() user: AuthUser, @Body() dto: ConnectionDto) {
     return this.service.connect(user, dto);
   }
+  @Get('accounts/:id/balance-repair')
+  @RequirePermissions('cash_desk.view', 'cash_accounts.view', 'journal_entries.view')
+  balanceRepairReview(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.balanceRepairReview(user, id);
+  }
+  @Post('accounts/:id/balance-repair')
+  @RequirePermissions(
+    'cash_desk.view',
+    'cash_desk.manage',
+    'cash_accounts.view',
+    'cash_accounts.manage',
+    'journal_entries.view',
+  )
+  repairRecordedBalance(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CashPostDto,
+  ) {
+    return this.service.repairRecordedBalance(user, id, dto.fingerprint);
+  }
   @Get('movements')
   list(@CurrentUser() user: AuthUser, @Query() q: DeskReportQuery) {
     return this.service.list(user, q);

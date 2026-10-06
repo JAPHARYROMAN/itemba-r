@@ -1,4 +1,5 @@
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { Prisma } from '@prisma/client';
 
 function makeService() {
   const prisma = {
@@ -32,6 +33,7 @@ function makeService() {
       findFirst: jest.fn().mockResolvedValue(null),
     },
     payable: {
+      findUniqueOrThrow: jest.fn(async () => ({ outstandingAmount: new Prisma.Decimal(200) })),
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'payable-1', ...data })),
@@ -107,6 +109,11 @@ function makeService() {
   const profit = {
     assertPurchaseLinesHaveCost: jest.fn().mockResolvedValue(undefined),
   } as any;
+  const payments = {
+    createInTransaction: jest.fn(async () => ({ payment: { id: 'payment-1' } })),
+    syncPurchaseOrders: jest.fn(),
+  } as any;
+  const cashPurchases = { fundingAccount: jest.fn(async () => ({ id: 'connected-cash' })) } as any;
   const service = new PurchaseOrdersService(
     prisma,
     auditLogs,
@@ -117,9 +124,22 @@ function makeService() {
     postingEngine,
     accountResolver,
     profit,
+    undefined,
+    payments,
+    cashPurchases,
   );
 
-  return { service, prisma, postingEngine, accountResolver, inventoryMovements, codes, auditLogs };
+  return {
+    service,
+    prisma,
+    postingEngine,
+    accountResolver,
+    inventoryMovements,
+    codes,
+    auditLogs,
+    payments,
+    cashPurchases,
+  };
 }
 
 const user = { id: 'user-1', permissions: ['purchases.create'] } as any;
@@ -311,7 +331,7 @@ describe('PurchaseOrdersService payment state', () => {
     expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
   });
 
-  it('marks cash purchases paid immediately', async () => {
+  it('keeps cash purchases unpaid until an actual payment is recorded', async () => {
     const { service, prisma } = makeService();
 
     await service.create(createDto('CASH_PURCHASE'), user);
@@ -320,9 +340,9 @@ describe('PurchaseOrdersService payment state', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           totalAmount: 200,
-          paidAmount: 200,
-          outstandingAmount: 0,
-          paymentStatus: 'PAID',
+          paidAmount: 0,
+          outstandingAmount: 200,
+          paymentStatus: 'UNPAID',
         }),
       }),
     );
@@ -356,13 +376,18 @@ describe('PurchaseOrdersService payment state', () => {
   });
 
   it('repairs cash payment state when a cash purchase is received', async () => {
-    const { service, prisma, postingEngine, accountResolver } = makeService();
+    const { service, prisma, postingEngine, accountResolver, payments } = makeService();
+    prisma.payable.findUniqueOrThrow.mockResolvedValue({
+      outstandingAmount: new Prisma.Decimal(9400000),
+    });
     prisma.purchaseOrder.findFirst.mockResolvedValue({
       id: 'po-1',
       companyId: 'company-1',
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 9400000,
       status: 'CONFIRMED',
       lines: [],
@@ -375,25 +400,35 @@ describe('PurchaseOrdersService payment state', () => {
         where: { id: 'po-1' },
         data: expect.objectContaining({
           status: 'RECEIVED',
-          paidAmount: 9400000,
-          outstandingAmount: 0,
-          paymentStatus: 'PAID',
+          paidAmount: 0,
+          outstandingAmount: 9400000,
+          paymentStatus: 'UNPAID',
           journalEntryId: 'je-1',
         }),
       }),
     );
     expect(accountResolver.resolveMany).toHaveBeenCalledWith(
       'company-1',
-      ['INVENTORY_ASSET', 'CASH_ON_HAND'],
+      ['INVENTORY_ASSET', 'AP_CONTROL'],
       prisma,
     );
     expect(postingEngine.postLines).toHaveBeenCalledWith(
       expect.objectContaining({
         companyId: 'company-1',
-        referenceType: 'PurchaseOrder',
-        referenceId: 'po-1',
+        referenceType: 'Payable',
+        referenceId: 'payable-1',
       }),
       prisma,
+    );
+    expect(payments.createInTransaction).toHaveBeenCalledWith(
+      prisma,
+      user,
+      expect.objectContaining({
+        source: { type: 'PurchaseOrder', id: 'po-1' },
+        cashAccountId: 'connected-cash',
+        amount: new Prisma.Decimal(9400000),
+        allocations: [{ payableId: 'payable-1', amount: new Prisma.Decimal(9400000) }],
+      }),
     );
   });
 
@@ -406,6 +441,8 @@ describe('PurchaseOrdersService payment state', () => {
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 200,
       status: 'CONFIRMED',
       lines: [],
@@ -444,6 +481,8 @@ describe('PurchaseOrdersService payment state', () => {
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 200,
       status: 'CONFIRMED',
       lines: [],
@@ -487,6 +526,8 @@ describe('PurchaseOrdersService payment state', () => {
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 200,
       status: 'CONFIRMED',
       lines: [
@@ -515,6 +556,8 @@ describe('PurchaseOrdersService payment state', () => {
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 200,
       status: 'CONFIRMED',
       lines: [
@@ -819,8 +862,8 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
     expect(prisma.payable.update).not.toHaveBeenCalled();
   });
 
-  it('still posts the cash/inventory ledger for a CASH purchase receipt', async () => {
-    const { service, prisma, postingEngine, accountResolver } = makeService();
+  it('uses an AP receipt and a canonical cash payment for a CASH purchase', async () => {
+    const { service, prisma, postingEngine, accountResolver, payments } = makeService();
     prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
     prisma.purchaseOrder.findFirst.mockResolvedValue(
       creditOrder({ purchaseType: 'CASH_PURCHASE' }),
@@ -830,17 +873,12 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
 
     expect(accountResolver.resolveMany).toHaveBeenCalledWith(
       'company-1',
-      ['INVENTORY_ASSET', 'CASH_ON_HAND'],
+      ['INVENTORY_ASSET', 'AP_CONTROL'],
       prisma,
     );
     expect(postingEngine.postLines).toHaveBeenCalledTimes(1);
-    // Never resolves AP_CONTROL on the cash path.
-    expect(accountResolver.resolveMany).not.toHaveBeenCalledWith(
-      'company-1',
-      expect.arrayContaining(['AP_CONTROL']),
-      prisma,
-    );
-    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.create).toHaveBeenCalledTimes(1);
+    expect(payments.createInTransaction).toHaveBeenCalledTimes(1);
   });
   it('refreshes invoice coverage after locking the PO and preserves the stockist recorder in a caller-owned transaction', async () => {
     const { service, prisma, postingEngine, inventoryMovements } = makeService();
@@ -908,6 +946,8 @@ describe('PurchaseOrdersService.receive full-receipt-only (finding #20)', () => 
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 200,
       status: 'PARTIALLY_RECEIVED',
       lines: [],
@@ -930,6 +970,8 @@ describe('PurchaseOrdersService.receive full-receipt-only (finding #20)', () => 
       branchId: 'branch-1',
       divisionId: 'division-1',
       purchaseType: 'CASH_PURCHASE',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
       totalAmount: 200,
       status: 'CONFIRMED',
       lines: [],

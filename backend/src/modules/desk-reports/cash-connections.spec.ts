@@ -443,6 +443,7 @@ describe('Verified Cash Desk balance setup', () => {
     );
     result.db.cashDeskEntry = {
       aggregate: jest.fn(async () => ({ _sum: { amount: d('167693000.01') } })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     };
     return result;
   }

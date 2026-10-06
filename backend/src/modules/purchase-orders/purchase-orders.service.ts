@@ -1,4 +1,6 @@
 import { SupplierPurchaseAdvancesService } from '../supplier-payments/supplier-purchase-advances.service';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import { CashPurchasePaymentsService } from '../supplier-payments/cash-purchase-payments.service';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
@@ -84,15 +86,7 @@ function calcLineTotals(line: {
   };
 }
 
-function paymentStateForPurchaseType(purchaseType: PurchaseType, totalAmount: number) {
-  if (purchaseType === PurchaseType.CASH_PURCHASE) {
-    return {
-      paidAmount: totalAmount,
-      outstandingAmount: 0,
-      paymentStatus: 'PAID' as const,
-    };
-  }
-
+function paymentStateForNewPurchase(totalAmount: number) {
   return {
     paidAmount: 0,
     outstandingAmount: totalAmount,
@@ -131,7 +125,33 @@ export class PurchaseOrdersService {
     private readonly accountResolver: AccountResolverService,
     private readonly profit: ProfitService,
     private readonly advances?: SupplierPurchaseAdvancesService,
+    private readonly payments?: SupplierPaymentsService,
+    private readonly cashPurchases?: CashPurchasePaymentsService,
   ) {}
+
+  async cashFunding(id: string, user: AuthUser) {
+    const order = await this.findOne(id, user, AccessLevel.WRITE);
+    if (!this.cashPurchases || order.purchaseType !== 'CASH_PURCHASE')
+      throw new BadRequestException('Choose a cash purchase order.');
+    const accounts = await this.cashPurchases.fundingAccounts(this.prisma, user, order);
+    const advances = await this.prisma.supplierPayment.aggregate({
+      where: { status: 'COMPLETED', deletedAt: null, purchaseAdvance: { purchaseOrderId: id } },
+      _sum: { amount: true },
+    });
+    return {
+      amount: Prisma.Decimal.max(
+        0,
+        new Prisma.Decimal(order.totalAmount).minus(advances._sum.amount ?? 0),
+      ).toFixed(2),
+      accounts: accounts.map((a) => ({
+        id: a.id,
+        name: a.deskAccount!.name,
+        erpName: a.accountName,
+        balance: a.deskAccount!.balance.toFixed(2),
+        currency: a.currency,
+      })),
+    };
+  }
 
   async findAll(query: QueryPurchaseOrderDto, user: AuthUser) {
     const {
@@ -652,7 +672,7 @@ export class PurchaseOrdersService {
     });
 
     const totalAmount = subtotal - totalDiscount + totalTax;
-    const paymentState = paymentStateForPurchaseType(dto.purchaseType, totalAmount);
+    const paymentState = paymentStateForNewPurchase(totalAmount);
 
     const persist = async (tx: Prisma.TransactionClient) => {
       // Serialize first-time sequence creation as well as counter increments.
@@ -802,7 +822,7 @@ export class PurchaseOrdersService {
       const nextTotalAmount = totalAmount ?? Number(existing.totalAmount);
       const nextPaymentState =
         dto.purchaseType !== undefined || totalAmount !== undefined
-          ? paymentStateForPurchaseType(nextPurchaseType, nextTotalAmount)
+          ? paymentStateForNewPurchase(nextTotalAmount)
           : null;
 
       return tx.purchaseOrder.update({
@@ -1395,11 +1415,9 @@ export class PurchaseOrdersService {
         tx,
       });
 
-      // Operations is the primary purchase workflow for Itemba-R. A credit purchase
-      // received here must therefore create the AP subledger record immediately;
-      // otherwise Finance > Payables shows nothing even though stock was received
-      // on supplier credit. Supplier-invoice flows must link to this payable
-      // instead of creating a second one for the same purchase order.
+      // Cash and credit receipts share one purchase accrual. Cash purchases then
+      // settle it through a real funded supplier payment in this transaction.
+      // Supplier invoices reuse this coverage instead of posting goods twice.
       let journalEntry: { id: string } | null = null;
       let payable: { id: string; journalEntryId: string | null } | null = null;
       if (existing.payableId) {
@@ -1431,32 +1449,21 @@ export class PurchaseOrdersService {
             'Existing purchase payable has no matching posted accounting coverage',
           );
       }
-      if (existing.purchaseType === PurchaseType.CASH_PURCHASE && existing.journalEntryId) {
-        const journal = await tx.journalEntry.findFirst({
-          where: {
-            id: existing.journalEntryId,
-            companyId: existing.companyId,
-            status: 'POSTED',
-            deletedAt: null,
-            referenceType: 'PurchaseOrder',
-            referenceId: existing.id,
-          },
-        });
-        if (!journal || !new Prisma.Decimal(journal.totalDebit).eq(existing.totalAmount))
-          throw new BadRequestException(
-            'Existing cash purchase journal does not cover this full order',
-          );
-        journalEntry = { id: journal.id };
-      }
-      if (existing.purchaseType === PurchaseType.CASH_PURCHASE && !journalEntry) {
-        journalEntry = await this.postPurchaseOrderCashReceiptLedger({
-          order: existing as any,
-          transactionDate: receivedAt,
-          userId,
-          tx,
-        });
-      } else if (existing.purchaseType === PurchaseType.CREDIT_PURCHASE && !existing.payableId) {
-        payable = await this.createCreditPurchasePayable({
+      if (
+        existing.purchaseType === PurchaseType.CASH_PURCHASE &&
+        existing.journalEntryId &&
+        !existing.payableId
+      )
+        throw new BadRequestException(
+          'This order already has a legacy cash journal. Review its accounting coverage before receiving.',
+        );
+      if (
+        [PurchaseType.CASH_PURCHASE, PurchaseType.CREDIT_PURCHASE].includes(
+          existing.purchaseType as any,
+        ) &&
+        !existing.payableId
+      ) {
+        payable = await this.createPurchasePayable({
           order: existing as any,
           transactionDate: receivedAt,
           userId,
@@ -1467,7 +1474,7 @@ export class PurchaseOrdersService {
         }
       }
 
-      const updated = await tx.purchaseOrder.update({
+      let updated = await tx.purchaseOrder.update({
         where: { id },
         data: {
           status: 'RECEIVED',
@@ -1476,9 +1483,9 @@ export class PurchaseOrdersService {
           ...(journalEntry ? { journalEntryId: journalEntry.id } : {}),
           ...(payable ? { payableId: payable.id } : {}),
           ...(existing.purchaseType === PurchaseType.CASH_PURCHASE && {
-            paidAmount: existing.totalAmount,
-            outstandingAmount: 0,
-            paymentStatus: 'PAID',
+            paidAmount: 0,
+            outstandingAmount: existing.totalAmount,
+            paymentStatus: 'UNPAID',
           }),
         },
       });
@@ -1495,6 +1502,43 @@ export class PurchaseOrdersService {
           new Date(),
         );
       }
+      if (existing.purchaseType === PurchaseType.CASH_PURCHASE) {
+        if (!this.payments || !this.cashPurchases || !existing.supplierId)
+          throw new BadRequestException(
+            'Select an existing supplier and a connected cash account for a cash purchase.',
+          );
+        const payableId = (payable?.id ?? existing.payableId)!;
+        const balance = await tx.payable.findUniqueOrThrow({ where: { id: payableId } });
+        await this.payments.syncPurchaseOrders(tx, balance);
+        if (balance.outstandingAmount.gt(0)) {
+          const cash = await this.cashPurchases.fundingAccount(
+            tx,
+            user,
+            existing,
+            dto.cashAccountId,
+          );
+          await this.payments.createInTransaction(tx, user, {
+            companyId: existing.companyId,
+            divisionId: existing.divisionId,
+            branchId: existing.branchId,
+            supplierId: existing.supplierId,
+            cashAccountId: cash.id,
+            currency: existing.currency,
+            amount: balance.outstandingAmount,
+            paymentDate: receivedAt,
+            method: 'CASH',
+            requestId: `PurchaseOrderReceive:${id}`,
+            source: { type: 'PurchaseOrder', id },
+            reference:
+              existing.supplierInvoiceNumber ??
+              existing.internalInvoiceNumber ??
+              existing.purchaseOrderNumber,
+            notes: `Cash purchase ${existing.purchaseOrderNumber}`,
+            allocations: [{ payableId, amount: balance.outstandingAmount }],
+          });
+        }
+        updated = await tx.purchaseOrder.findUniqueOrThrow({ where: { id } });
+      }
       await this.auditLogs.logStrictInTransaction(tx, {
         action: 'PURCHASE_ORDER_RECEIVE',
         entityType: 'PurchaseOrder',
@@ -1508,7 +1552,9 @@ export class PurchaseOrdersService {
 
       return updated;
     };
-    const record = transaction ? await run(transaction) : await this.prisma.$transaction(run);
+    const record = transaction
+      ? await run(transaction)
+      : await this.prisma.$transaction(run, { timeout: 30000 });
 
     return record;
   }
@@ -1747,78 +1793,7 @@ export class PurchaseOrdersService {
     }
   }
 
-  /**
-   * Cash-purchase receipt ledger: DR Inventory/Asset/Expense, CR Cash-on-hand for
-   * the full order total. Only ever called for CASH_PURCHASE — a cash purchase
-   * settles at receipt and is never carried through the supplier-invoice/AP flow,
-   * so this posting is owned solely by the PO. Credit purchases post NO ledger here
-   * (AP and the matching inventory debit are owned by the supplier-invoice approve
-   * flow); see the AP-ownership note in receive() and audit findings #1/#7.
-   */
-  private async postPurchaseOrderCashReceiptLedger(input: {
-    order: {
-      id: string;
-      purchaseOrderNumber: string;
-      companyId: string;
-      divisionId: string | null;
-      branchId: string | null;
-      purchaseType: PurchaseType;
-      totalAmount: Prisma.Decimal | number | string;
-    };
-    transactionDate: Date;
-    userId: string;
-    tx: Prisma.TransactionClient;
-  }) {
-    const amount = roundMoney(Number(input.order.totalAmount));
-    if (amount <= 0) {
-      throw new BadRequestException('Purchase order total must be greater than zero to post');
-    }
-
-    const debitRole = purchaseDebitRole(input.order.purchaseType);
-    const creditRole: AccountRole = 'CASH_ON_HAND';
-    const accounts = await this.accountResolver.resolveMany(
-      input.order.companyId,
-      [debitRole, creditRole],
-      input.tx,
-    );
-    const description = `Purchase order ${input.order.purchaseOrderNumber}`;
-
-    return this.postingEngine.postLines(
-      {
-        companyId: input.order.companyId,
-        divisionId: input.order.divisionId,
-        branchId: input.order.branchId,
-        transactionDate: input.transactionDate,
-        description,
-        referenceType: 'PurchaseOrder',
-        referenceId: input.order.id,
-        moduleName: 'purchase-orders',
-        userId: input.userId,
-        lines: [
-          {
-            accountId: accounts[debitRole].id,
-            description:
-              debitRole === 'INVENTORY_ASSET'
-                ? 'Inventory received'
-                : debitRole === 'FIXED_ASSET'
-                  ? 'Asset purchased'
-                  : 'Purchase expense',
-            debit: amount,
-            credit: 0,
-          },
-          {
-            accountId: accounts[creditRole].id,
-            description: 'Cash paid',
-            debit: 0,
-            credit: amount,
-          },
-        ],
-      },
-      input.tx,
-    );
-  }
-
-  private async createCreditPurchasePayable(input: {
+  private async createPurchasePayable(input: {
     order: {
       id: string;
       purchaseOrderNumber: string;
@@ -1838,9 +1813,7 @@ export class PurchaseOrdersService {
   }) {
     const amount = new Prisma.Decimal(input.order.totalAmount).toDecimalPlaces(2);
     if (amount.lte(0)) {
-      throw new BadRequestException(
-        'Credit purchase total must be greater than zero to create a payable',
-      );
+      throw new BadRequestException('Purchase total must be greater than zero to create a payable');
     }
 
     const existingPayable = await input.tx.payable.findFirst({
@@ -1876,7 +1849,7 @@ export class PurchaseOrdersService {
         issueDate: input.transactionDate,
         dueDate: input.order.expectedDate ?? undefined,
         status: 'OPEN',
-        notes: `Auto-created from credit purchase ${input.order.purchaseOrderNumber}`,
+        notes: `Auto-created from purchase ${input.order.purchaseOrderNumber}`,
       },
     });
 
@@ -1892,7 +1865,7 @@ export class PurchaseOrdersService {
         divisionId: input.order.divisionId,
         branchId: input.order.branchId,
         transactionDate: input.transactionDate,
-        description: `Credit purchase payable ${input.order.purchaseOrderNumber}`,
+        description: `Purchase payable ${input.order.purchaseOrderNumber}`,
         referenceType: 'Payable',
         referenceId: created.id,
         moduleName: 'purchase-orders',

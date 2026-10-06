@@ -18,6 +18,8 @@ import { reportPeriod } from './desk-reports.domain';
 import { cashFingerprint, cashLines, cashOffsetTypes } from './cash-posting.domain';
 import { baseCurrencyFor } from '../party-balance/party-balance.helper';
 import { DeskPostingSource, postingStatus } from './desk-posting.domain';
+import { applyDeskCashEffect } from '../cash-desk/cash-balance-effect';
+import { payloadKey } from '../cash-desk/cash-desk.domain';
 
 const include = {
   payrollJournalEntry: { include: { lines: true } },
@@ -79,6 +81,123 @@ export class CashConnectionsService {
       throw new ForbiddenException(
         'Your role does not have permission for this financial connection.',
       );
+  }
+
+  private async missingExpenseEffects(tx: Tx, deskId: string) {
+    const desk = await tx.cashDeskAccount.findUniqueOrThrow({
+      where: { id: deskId },
+      include: { erpCashAccount: true },
+    });
+    const bank = desk.erpCashAccount;
+    if (!bank)
+      throw new BadRequestException('Connect this Cash Desk account before reviewing its balance.');
+    const entries = await tx.cashDeskEntry.findMany({
+      where: {
+        accountId: deskId,
+        erpBalanceApplied: false,
+        movement: {
+          kind: 'EXPENSE',
+          reversedAt: null,
+          expenseId: null,
+          supplierPaymentId: null,
+          customerPaymentId: null,
+          invoicePaymentId: null,
+          salesPaymentId: null,
+          loanId: null,
+        },
+      },
+      include: { movement: true },
+      orderBy: [{ businessDate: 'asc' }, { id: 'asc' }],
+    });
+    const delta = entries.reduce((sum, e) => sum.plus(e.amount), new Prisma.Decimal(0));
+    const deskBalance = desk.balance.toFixed(2),
+      erpBalance = bank.currentBalance.toFixed(2);
+    const canApply =
+      entries.length > 0 &&
+      entries.every((e) => e.amount.lt(0)) &&
+      bank.currentBalance.plus(delta).eq(desk.balance) &&
+      desk.balance.gte(0);
+    const rows = entries.map((e) => ({
+      id: e.id,
+      movementId: e.movementId,
+      amount: e.amount.toFixed(2),
+      description: e.movement.description,
+      businessDate: e.businessDate.toISOString().slice(0, 10),
+    }));
+    return {
+      deskId,
+      cashAccountId: bank.id,
+      currency: desk.currency,
+      deskBalance,
+      erpBalance,
+      delta: delta.toFixed(2),
+      rows,
+      canApply,
+      fingerprint: payloadKey({ deskId, cashAccountId: bank.id, deskBalance, erpBalance, rows }),
+    };
+  }
+
+  async balanceRepairReview(user: AuthUser, deskId: string) {
+    this.permission(user, 'cash_desk.view', 'cash_accounts.view');
+    const desk = await this.db.cashDeskAccount.findFirst({
+      where: { AND: [{ id: deskId }, await this.scope(user)] },
+    });
+    if (!desk) throw new NotFoundException('Cash Desk account not found.');
+    return this.db.$transaction((tx) => this.missingExpenseEffects(tx, deskId), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  /** Replay proven desk-only expenses into ERP. No new money movement or journal. */
+  async repairRecordedBalance(user: AuthUser, deskId: string, fingerprint: string) {
+    this.permission(user, 'cash_desk.manage', 'cash_accounts.manage', 'cash_accounts.view');
+    const desk = await this.db.cashDeskAccount.findFirst({
+      where: { AND: [{ id: deskId }, await this.scope(user)] },
+    });
+    if (!desk?.erpCashAccountId)
+      throw new NotFoundException('Connected Cash Desk account not found.');
+    await this.writeScope(user, desk);
+    return this.db.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${desk.erpCashAccountId!} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM cash_desk_accounts WHERE id = ${deskId} FOR UPDATE`;
+        const current = await tx.cashDeskAccount.findUniqueOrThrow({ where: { id: deskId } });
+        await this.writeScope(user, current);
+        if (current.erpCashAccountId !== desk.erpCashAccountId)
+          throw new ConflictException('The account connection changed. Review again.');
+        const review = await this.missingExpenseEffects(tx, deskId);
+        if (review.fingerprint !== fingerprint || !review.canApply)
+          throw new ConflictException(
+            'The balances or recorded expenses changed, or do not explain the difference. Review again.',
+          );
+        await applyDeskCashEffect(tx, current, new Prisma.Decimal(review.delta));
+        const applied = await tx.cashDeskEntry.updateMany({
+          where: { id: { in: review.rows.map((e) => e.id) }, erpBalanceApplied: false },
+          data: { erpBalanceApplied: true },
+        });
+        if (applied.count !== review.rows.length)
+          throw new ConflictException('Some entries were already applied. Review again.');
+        await this.audit.logStrictInTransaction(tx, {
+          action: 'CASH_DESK_BALANCE_REPAIR',
+          entityType: 'CashDeskAccount',
+          entityId: deskId,
+          companyId: current.companyId,
+          userId: user.id,
+          metadata: {
+            ...review,
+            resultingErpBalance: review.deskBalance,
+            cashDeskMovementsUnchanged: true,
+            ledgerUnchanged: true,
+          },
+        });
+        return {
+          applied: applied.count,
+          cashDeskBalance: review.deskBalance,
+          erpBalance: review.deskBalance,
+        };
+      },
+      { timeout: 30000 },
+    );
   }
   private async scope(user: AuthUser, q: DeskReportQuery = {}) {
     return {
@@ -363,6 +482,11 @@ export class CashConnectionsService {
           await tx.cashDeskAccount.update({
             where: { id: desk.id },
             data: { erpCashAccountId: bank.id },
+          });
+        if (baseline !== undefined && desk)
+          await tx.cashDeskEntry.updateMany({
+            where: { accountId: desk.id },
+            data: { erpBalanceApplied: true },
           });
         await this.audit.logStrictInTransaction(tx, {
           action: 'CONNECT',

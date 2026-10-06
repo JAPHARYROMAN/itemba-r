@@ -13,6 +13,7 @@ import { OrganizationScopeService } from '../../common/services/organization-sco
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupplierPurchaseAdvancesService } from '../supplier-payments/supplier-purchase-advances.service';
 import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import { CashPurchasePaymentsService } from '../supplier-payments/cash-purchase-payments.service';
 import { toPaymentMethodGeneral } from '../supplier-payments/payment-method';
 import { CashMovementDto, CashPurchaseQuery } from './cash-desk.dto';
 
@@ -81,6 +82,7 @@ export class CashPurchasesService {
     private readonly org: OrganizationScopeService,
     private readonly payments: SupplierPaymentsService,
     private readonly advances?: SupplierPurchaseAdvancesService,
+    private readonly cashPurchases?: CashPurchasePaymentsService,
   ) {}
 
   permission(user: AuthUser) {
@@ -182,8 +184,16 @@ export class CashPurchasesService {
           supplierId: q.supplierId ?? { not: null },
           supplier: { deletedAt: null, status: 'ACTIVE' },
           deletedAt: null,
-          status: 'CONFIRMED',
-          purchaseType: { not: 'CASH_PURCHASE' },
+          OR: [
+            { status: 'CONFIRMED', outstandingAmount: { gt: 0 } },
+            { status: 'CONFIRMED', purchaseType: 'CASH_PURCHASE', totalAmount: { gt: 0 } },
+            {
+              status: 'RECEIVED',
+              purchaseType: 'CASH_PURCHASE',
+              journalEntryId: { not: null },
+              supplierAdvances: { none: { supplierPayment: { status: 'COMPLETED' } } },
+            },
+          ],
           payableId: null,
           NOT: {
             supplierInvoices: {
@@ -194,9 +204,7 @@ export class CashPurchasesService {
               },
             },
           },
-          ...(q.id
-            ? { id: q.source === 'PURCHASE_ORDER' ? q.id : '__other_source__' }
-            : { outstandingAmount: { gt: 0 } }),
+          ...(q.id ? { id: q.source === 'PURCHASE_ORDER' ? q.id : '__other_source__' } : {}),
         },
         ...(orderReference ? [orderReference] : []),
       ],
@@ -289,29 +297,49 @@ export class CashPurchasesService {
           payables.length + desks.length < pageSize
             ? await tx.purchaseOrder.findMany({
                 where: advanceWhere,
-                include: { supplier: { select: { name: true } } },
+                include: {
+                  supplier: { select: { name: true } },
+                  supplierAdvances: {
+                    where: { supplierPayment: { status: 'COMPLETED', deletedAt: null } },
+                    include: { supplierPayment: { select: { amount: true } } },
+                  },
+                },
                 orderBy: [{ orderDate: 'desc' }, { id: 'asc' }],
                 skip: Math.max(0, skip - payableTotal - deskTotal),
                 take: pageSize - payables.length - desks.length,
               })
             : [];
         const rows = [
-          ...advanceOrders.map((o) => ({
-            source: 'PURCHASE_ORDER' as const,
-            id: o.id,
-            number: o.supplierInvoiceNumber ?? o.internalInvoiceNumber ?? o.purchaseOrderNumber,
-            supplierId: o.supplierId,
-            supplierName: o.supplier!.name,
-            currency: o.currency,
-            outstanding: o.outstandingAmount.toFixed(2),
-            businessDate: o.orderDate.toISOString().slice(0, 10),
-            status: o.status,
-            canPay: o.outstandingAmount.gt(0),
-            purchaseOrderId: o.id,
-            purchaseOrderNumber: o.purchaseOrderNumber,
-            internalInvoiceNumber: o.internalInvoiceNumber,
-            supplierInvoiceNumber: o.supplierInvoiceNumber,
-          })),
+          ...advanceOrders.map((o) => {
+            const outstanding =
+              o.purchaseType === 'CASH_PURCHASE'
+                ? o.totalAmount.minus(
+                    (o.supplierAdvances ?? []).reduce(
+                      (sum, a) => sum.plus(a.supplierPayment.amount),
+                      new Prisma.Decimal(0),
+                    ),
+                  )
+                : o.outstandingAmount;
+            return {
+              source: 'PURCHASE_ORDER' as const,
+              id: o.id,
+              number: o.supplierInvoiceNumber ?? o.internalInvoiceNumber ?? o.purchaseOrderNumber,
+              supplierId: o.supplierId,
+              supplierName: o.supplier!.name,
+              currency: o.currency,
+              purpose: o.status === 'RECEIVED' ? 'CASH_PURCHASE_SETTLEMENT' : 'SUPPLIER_ADVANCE',
+              outstanding: outstanding.toFixed(2),
+              businessDate: (o.status === 'RECEIVED' ? (o.receivedAt ?? o.orderDate) : o.orderDate)
+                .toISOString()
+                .slice(0, 10),
+              status: o.status,
+              canPay: outstanding.gt(0),
+              purchaseOrderId: o.id,
+              purchaseOrderNumber: o.purchaseOrderNumber,
+              internalInvoiceNumber: o.internalInvoiceNumber,
+              supplierInvoiceNumber: o.supplierInvoiceNumber,
+            };
+          }),
           ...payables.map((p) => {
             const invoice = p.supplierInvoices[0],
               order = invoice?.purchaseOrder ?? p.purchaseOrders[0];
@@ -441,11 +469,34 @@ export class CashPurchasesService {
       throw new ConflictException(
         'This request reference already belongs to another supplier payment.',
       );
+    let payableId = d.payableId;
     if (d.purchaseOrderId) {
-      if (!this.advances) throw new BadRequestException('Supplier advances are unavailable.');
-      return this.advances.pay(tx, user, account, d, date, amount);
+      if (!user.permissions.includes('purchases.view'))
+        throw new ForbiddenException('Purchase view permission is required.');
+      const order = await tx.purchaseOrder.findFirst({
+        where: {
+          id: d.purchaseOrderId,
+          deletedAt: null,
+          companyId: account.companyId,
+          supplierId: d.supplierId,
+        },
+      });
+      if (order?.status === 'RECEIVED' && order.purchaseType === 'CASH_PURCHASE') {
+        if (!this.cashPurchases || !d.supplierId)
+          throw new BadRequestException('Cash purchase payments are unavailable.');
+        payableId = await this.cashPurchases.prepareLegacyPayable(
+          tx,
+          user,
+          order.id,
+          { ...account, supplierId: d.supplierId },
+          date,
+        );
+      } else {
+        if (!this.advances) throw new BadRequestException('Supplier advances are unavailable.');
+        return this.advances.pay(tx, user, account, d, date, amount);
+      }
     }
-    const locked = await this.payments.lockPayable(tx, d.payableId!);
+    const locked = await this.payments.lockPayable(tx, payableId!);
     if (!locked) throw new NotFoundException('Purchase payable not found.');
     const payable = await tx.payable.findFirst({
       where: {

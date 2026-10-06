@@ -435,10 +435,18 @@ export class SupplierPaymentsService {
 
     // Keep the denormalised CashAccount.currentBalance in step with the CR cash leg.
     if (input.cashAccountId) {
-      await tx.cashAccount.updateMany({
-        where: { id: input.cashAccountId, companyId: input.companyId, deletedAt: null },
+      const deducted = await tx.cashAccount.updateMany({
+        where: {
+          id: input.cashAccountId,
+          companyId: input.companyId,
+          deletedAt: null,
+          isActive: true,
+          currentBalance: { gte: amount },
+        },
         data: { currentBalance: { decrement: amount } },
       });
+      if (deducted.count !== 1)
+        throw new BadRequestException('Insufficient funds in the selected cash account.');
     }
 
     // Cash book (W4): the same payment is one Cash Desk movement carrying the supplier,

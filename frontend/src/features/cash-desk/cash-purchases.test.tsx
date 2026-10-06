@@ -195,6 +195,32 @@ async function selectPurchase(row = purchase) {
 function submit() {
   fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
 }
+
+it('offers a received legacy cash PO as an unrecorded payment and explains that its stock is already received', async () => {
+  const legacy: PurchaseOption = {
+    ...purchase,
+    source: 'PURCHASE_ORDER',
+    id: 'cash-order',
+    purpose: 'CASH_PURCHASE_SETTLEMENT',
+    status: 'RECEIVED',
+    outstanding: '9880000.00',
+    number: 'ITEMBA-INV-005',
+  };
+  h.permissions.add('purchases.view');
+  h.rows = [legacy];
+  h.current = legacy;
+  render(<Editor />);
+  await selectPurchase(legacy);
+  expect(
+    screen.getByText(/Goods are already received. Record the actual cash payment here/),
+  ).toBeInTheDocument();
+  expect(
+    selectFieldOptions(getSelectField('Purchase or invoice')).some((label) =>
+      label.includes('Cash payment not recorded'),
+    ),
+  ).toBe(true);
+  expect(h.post).not.toHaveBeenCalled();
+});
 function App() {
   return (
     <UnsavedWorkProvider>

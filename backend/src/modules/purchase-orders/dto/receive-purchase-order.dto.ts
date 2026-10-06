@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -29,6 +30,10 @@ export class ReceiveFuelTankAllocationDto {
 }
 
 export class ReceivePurchaseOrderDto {
+  @IsOptional()
+  @IsUUID()
+  cashAccountId?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

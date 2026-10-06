@@ -75,10 +75,23 @@ const input = () => ({
 });
 
 describe('CashBookService.recordInTransaction', () => {
-  it('records nothing while CASH_BOOK_UNIFIED is off', async () => {
-    const { service, tx } = setup({ enabled: false });
+  it('preserves unmapped legacy accounts while the strict flag is off', async () => {
+    const { service, tx } = setup({ enabled: false, account: null });
     await expect(service.recordInTransaction(tx, user, input())).resolves.toBeNull();
     expect(tx.cashDeskMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('mirrors a connected account even while the strict flag is off', async () => {
+    const { service, tx } = setup({ enabled: false });
+    await service.recordInTransaction(tx, user, input());
+    expect(tx.cashDeskEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accountId: 'desk-1',
+        amount: d(-250),
+        erpBalanceApplied: true,
+      }),
+    });
+    expect(tx.cashAccount.findUnique).not.toHaveBeenCalled();
   });
 
   it('writes one outgoing movement on the mapped Cash Desk account with party, document and journal', async () => {
@@ -187,56 +200,59 @@ describe('CashBookService.recordInTransaction', () => {
 });
 
 describe('CashBookService.reverseInTransaction', () => {
-  it('marks the original reversed and writes a mirror REVERSAL carrying the party and the reversal journal', async () => {
-    const { service, tx } = setup();
-    const account = {
-      id: 'desk-1',
-      companyId: 'company-1',
-      currency: 'TZS',
-      version: 3,
-      openingDate: new Date('2026-01-01'),
-    };
-    tx.cashDeskMovement.findUnique = jest.fn(async () => ({
-      id: 'mv-1',
-      requestId: 'SupplierPayment:spay-1',
-      kind: 'SUPPLIER_PAYMENT',
-      amount: d('250'),
-      currency: 'TZS',
-      businessDate: new Date('2026-10-01T00:00:00.000Z'),
-      description: 'Supplier payment SPAY-1 · Acme',
-      reference: 'SPAY-1',
-      reversedAt: null,
-      partyType: 'SUPPLIER',
-      supplierId: 'supplier-1',
-      customerId: null,
-      payableId: 'pay-1',
-      receivableId: null,
-      expenseId: null,
-      refundId: null,
-      journalEntryId: 'je-1',
-      journalReferenceType: 'SupplierPayment',
-      entries: [{ accountId: 'desk-1', amount: d('-250'), account }],
-    }));
-    const reversal = await service.reverseInTransaction(
-      tx,
-      user,
-      'mv-1',
-      'wrong supplier',
-      'je-rev',
-    );
-    expect(reversal).toMatchObject({
-      kind: 'REVERSAL',
-      reversalOfId: 'mv-1',
-      partyType: 'SUPPLIER',
-      supplierId: 'supplier-1',
-      payableId: 'pay-1',
-      journalEntryId: 'je-rev',
-    });
-    expect(tx.cashDeskMovement.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'mv-1', reversedAt: null } }),
-    );
-    expect(tx.cashDeskEntry.create.mock.calls[0][0].data.amount.eq(250)).toBe(true);
-  });
+  it.each([true, false])(
+    'restores the mapped book on reversal with strict rollout %s',
+    async (enabled) => {
+      const { service, tx } = setup({ enabled });
+      const account = {
+        id: 'desk-1',
+        companyId: 'company-1',
+        currency: 'TZS',
+        version: 3,
+        openingDate: new Date('2026-01-01'),
+      };
+      tx.cashDeskMovement.findUnique = jest.fn(async () => ({
+        id: 'mv-1',
+        requestId: 'SupplierPayment:spay-1',
+        kind: 'SUPPLIER_PAYMENT',
+        amount: d('250'),
+        currency: 'TZS',
+        businessDate: new Date('2026-10-01T00:00:00.000Z'),
+        description: 'Supplier payment SPAY-1 · Acme',
+        reference: 'SPAY-1',
+        reversedAt: null,
+        partyType: 'SUPPLIER',
+        supplierId: 'supplier-1',
+        customerId: null,
+        payableId: 'pay-1',
+        receivableId: null,
+        expenseId: null,
+        refundId: null,
+        journalEntryId: 'je-1',
+        journalReferenceType: 'SupplierPayment',
+        entries: [{ accountId: 'desk-1', amount: d('-250'), account }],
+      }));
+      const reversal = await service.reverseInTransaction(
+        tx,
+        user,
+        'mv-1',
+        'wrong supplier',
+        'je-rev',
+      );
+      expect(reversal).toMatchObject({
+        kind: 'REVERSAL',
+        reversalOfId: 'mv-1',
+        partyType: 'SUPPLIER',
+        supplierId: 'supplier-1',
+        payableId: 'pay-1',
+        journalEntryId: 'je-rev',
+      });
+      expect(tx.cashDeskMovement.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'mv-1', reversedAt: null } }),
+      );
+      expect(tx.cashDeskEntry.create.mock.calls[0][0].data.amount.eq(250)).toBe(true);
+    },
+  );
 
   it('is a no-op for an already reversed movement and refuses a Cash Desk-recorded one', async () => {
     const done = setup();

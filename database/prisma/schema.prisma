@@ -17594,6 +17594,8 @@ model CashDeskEntry {
   accountId    String
   businessDate DateTime         @db.Date
   amount       Decimal          @db.Decimal(18, 2)
+  /// True when this entry is included in the connected ERP account's balance.
+  erpBalanceApplied Boolean     @default(false)
   movement     CashDeskMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
   account      CashDeskAccount  @relation(fields: [accountId], references: [id], onDelete: Restrict)
 

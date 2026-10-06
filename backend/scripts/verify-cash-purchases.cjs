@@ -390,7 +390,7 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
     );
     if (!enabled)
       await check(
-        'Existing Invoice Desk purchase payments remain linked, debit desk once and reverse without a second canonical purchase',
+        'Existing Invoice Desk purchase payments remain linked, debit connected ERP and desk once and reverse without a second canonical purchase',
         async () => {
           const deskSupplier = await db.invoiceDeskSupplier.create({
             data: {
@@ -431,7 +431,7 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
           assert.ok(paid.supplierPaymentId);
           assert.equal(paid.supplierId, f.supplier.id);
           assert.equal(paid.journalEntryId, null);
-          assert.equal((await snapshot()).cash, state.cash);
+          assert.equal((await snapshot()).cash, state.cash - 10);
           assert.equal((await snapshot()).desk, state.desk - 10);
           const beforeStaffReverse = await snapshot();
           const worker = await db.mobilePosEnrollment.findFirstOrThrow({
@@ -499,6 +499,7 @@ async function verifyCashPurchases({ db, check, fixture: f, call }) {
             0,
           );
           assert.equal((await snapshot()).desk, state.desk);
+          assert.equal((await snapshot()).cash, state.cash);
           assert.equal((await snapshot()).outstanding, state.outstanding);
         },
       );

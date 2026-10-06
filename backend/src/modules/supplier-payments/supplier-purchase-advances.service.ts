@@ -65,7 +65,6 @@ export class SupplierPurchaseAdvancesService {
       !order ||
       !order.supplierId ||
       order.status !== 'CONFIRMED' ||
-      order.purchaseType === 'CASH_PURCHASE' ||
       order.payableId ||
       order.supplierInvoices.some((i) => i.payableId)
     )
@@ -75,7 +74,21 @@ export class SupplierPurchaseAdvancesService {
     await this.org.assertCanAccessScope(user, order.divisionId, order.branchId, AccessLevel.WRITE);
     if (date < new Date(order.orderDate.toISOString().slice(0, 10)) || date < drawer.openingDate)
       throw new BadRequestException('Payment cannot precede the PO or cash account opening date.');
-    if (amount.lte(0) || amount.gt(order.outstandingAmount))
+    const existingCashAdvances =
+      order.purchaseType === 'CASH_PURCHASE'
+        ? await tx.supplierPayment.aggregate({
+            where: {
+              deletedAt: null,
+              status: 'COMPLETED',
+              purchaseAdvance: { purchaseOrderId: order.id },
+            },
+            _sum: { amount: true },
+          })
+        : null;
+    const outstanding = existingCashAdvances
+      ? order.totalAmount.minus(existingCashAdvances._sum.amount ?? 0)
+      : order.outstandingAmount;
+    if (amount.lte(0) || amount.gt(outstanding))
       throw new BadRequestException('Advance exceeds the remaining purchase order balance.');
     await tx.$queryRaw`SELECT id FROM cash_accounts WHERE id = ${drawer.erpCashAccountId!} FOR UPDATE`;
     const cash = await tx.cashAccount.findFirst({

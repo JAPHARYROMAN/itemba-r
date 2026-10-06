@@ -884,12 +884,41 @@ function ReceiveOrderModal({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const isCash = order.purchaseType === 'CASH_PURCHASE';
+  const [funding, setFunding] = useState<{
+    amount: string;
+    accounts: { id: string; name: string; balance: string; currency: string }[];
+  } | null>(null);
+  const [cashAccountId, setCashAccountId] = useState('');
+  const [fundingLoading, setFundingLoading] = useState(isCash);
+  useEffect(() => {
+    if (!isCash) return;
+    let active = true;
+    backendGet<typeof funding>(`/purchase-orders/${order.id}/cash-funding`)
+      .then((data) => {
+        if (!active || !data) return;
+        setFunding(data);
+        setCashAccountId(data.accounts.length === 1 ? data.accounts[0].id : '');
+      })
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : 'Could not load cash accounts.');
+      })
+      .finally(() => {
+        if (active) setFundingLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [order.id, isCash]);
 
   const handleReceive = async () => {
     setSaving(true);
     setError('');
     try {
-      await backendPatch(`/purchase-orders/${order.id}/receive`, {});
+      await backendPatch(
+        `/purchase-orders/${order.id}/receive`,
+        isCash ? { cashAccountId: cashAccountId || undefined } : {},
+      );
       showToast('success', 'Purchase order received', order.purchaseOrderNumber ?? order.id);
       onReceived();
     } catch (err: unknown) {
@@ -912,8 +941,16 @@ function ReceiveOrderModal({
           <Btn variant="secondary" onClick={onClose}>
             Cancel
           </Btn>
-          <Btn variant="success" onClick={handleReceive} loading={saving}>
-            Receive
+          <Btn
+            variant="success"
+            onClick={handleReceive}
+            loading={saving}
+            disabled={
+              isCash &&
+              (fundingLoading || !funding || (Number(funding.amount) > 0 && !cashAccountId))
+            }
+          >
+            {isCash ? 'Receive and pay' : 'Receive'}
           </Btn>
         </>
       }
@@ -937,6 +974,41 @@ function ReceiveOrderModal({
           </div>
           <div>Inventory will be received into this order&apos;s branch/location.</div>
         </div>
+        {isCash && (
+          <div className="space-y-3">
+            {fundingLoading ? (
+              <p role="status">Loading paying accounts…</p>
+            ) : (
+              funding && (
+                <>
+                  <FormSelect
+                    label="Paying cash account"
+                    value={cashAccountId}
+                    onChange={(e) => setCashAccountId(e.target.value)}
+                  >
+                    <option value="">Choose a cash account</option>
+                    {funding.accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} · {a.currency} {Number(a.balance).toLocaleString()} available
+                      </option>
+                    ))}
+                  </FormSelect>
+                  <p className="text-sm">
+                    Cash payment: {order.currency} {Number(funding.amount).toLocaleString()}. This
+                    deducts the paying account and records the supplier payment. Confirm only if
+                    this cash is being paid.
+                  </p>
+                  {!funding.accounts.length && Number(funding.amount) > 0 && (
+                    <p role="alert">
+                      Connect the branch cash account in Cash Desk before receiving this cash
+                      purchase.
+                    </p>
+                  )}
+                </>
+              )
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );
