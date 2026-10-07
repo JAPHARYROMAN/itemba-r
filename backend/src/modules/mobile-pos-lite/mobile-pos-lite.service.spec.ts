@@ -5317,7 +5317,17 @@ describe('MobilePosLiteService createSale price editing', () => {
         roles: [role],
         permissions: ALL_PERMISSIONS.filter(definition.filter).map((entry) => entry.code),
       };
-      const { service, salesOrders } = setup({ maxPriceDropPct: '0' });
+      const { service, salesOrders } = setup({
+        maxPriceDropPct: '0',
+        paymentMethods: [
+          {
+            paymentMethod: 'CASH',
+            isEnabled: true,
+            cashAccountId: 'cash-1',
+            cashAccount: { isActive: true },
+          },
+        ],
+      });
       const session = await service.session(TERMINAL_CODE, DEVICE_SECRET, user);
       expect(session).toMatchObject({ priceEditEnabled: true, priceEditUnlimited: true });
       await service.createSale(
