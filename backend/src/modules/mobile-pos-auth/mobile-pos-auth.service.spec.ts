@@ -5,7 +5,11 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { MobilePosAuthService, mobilePosHash } from './mobile-pos-auth.service';
+import {
+  MobilePosAuthService,
+  mobilePosHash,
+  mobilePosPermissions,
+} from './mobile-pos-auth.service';
 import { MobilePosSessionGuard } from '../../common/guards/mobile-pos-session.guard';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { JwtRefreshStrategy } from '../auth/strategies/jwt-refresh.strategy';
@@ -266,6 +270,8 @@ describe('approved mobile PIN identity', () => {
       'mobile_pos_lite.access',
       'pos_drafts.view',
       'pos_drafts.create',
+      'mobile_pos_lite.edit_price',
+      'mobile_pos_lite.edit_price_unlimited',
     ]);
     expect(result.user.email).toBe('');
   });
@@ -464,6 +470,7 @@ describe('mobile session API confinement', () => {
       mobilePosCredentialVersion: 1,
     };
     const user = await strategy.validate(claims);
+    expect(user.permissions).toEqual(mobilePosPermissions('CASHIER'));
     expect(user.permissions).not.toContain('users.assign_roles');
     expect(cache.get).not.toHaveBeenCalled();
     expect(user.branchAccess).toEqual([{ branchId: 'branch-a', accessLevel: 'READ' }]);

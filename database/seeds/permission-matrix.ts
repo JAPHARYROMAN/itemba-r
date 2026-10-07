@@ -1289,7 +1289,13 @@ const BASE_ROLES: RoleDef[] = [
     description: 'Captures own branch sales for review from an approved PIN device.',
     scope: RoleScope.BRANCH,
     filter: (p) =>
-      ['mobile_pos_lite.access', 'pos_drafts.view', 'pos_drafts.create'].includes(p.code),
+      [
+        'mobile_pos_lite.access',
+        'pos_drafts.view',
+        'pos_drafts.create',
+        'mobile_pos_lite.edit_price',
+        'mobile_pos_lite.edit_price_unlimited',
+      ].includes(p.code),
   },
   {
     name: 'MOBILE_POS_STOCKIST',
@@ -1675,7 +1681,8 @@ const BASE_ROLES: RoleDef[] = [
       (p.module === 'retail_sales' && p.action === 'view') ||
       (p.module === 'westsides' && p.action === 'dashboard.view') ||
       p.code === 'mobile_pos_lite.use' ||
-      p.code === 'mobile_pos_lite.edit_price',
+      p.code === 'mobile_pos_lite.edit_price' ||
+      p.code === 'mobile_pos_lite.edit_price_unlimited',
   },
   {
     name: 'INVENTORY_OFFICER',
@@ -1710,7 +1717,8 @@ const BASE_ROLES: RoleDef[] = [
       (p.module === 'price_lists' && p.action === 'view') ||
       (p.module === 'westsides' && p.action === 'dashboard.view') ||
       p.code === 'mobile_pos_lite.use' ||
-      p.code === 'mobile_pos_lite.edit_price',
+      p.code === 'mobile_pos_lite.edit_price' ||
+      p.code === 'mobile_pos_lite.edit_price_unlimited',
   },
 
   // ── Itemba Enterprises Roles (Milestone 7) ──────────────────────────────────

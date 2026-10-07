@@ -41,6 +41,9 @@ export const mobilePosPermissions = (role: MobilePosRole): string[] => [
   'mobile_pos_lite.access',
   'pos_drafts.view',
   'pos_drafts.create',
+  ...(role === 'CASHIER'
+    ? ['mobile_pos_lite.edit_price', 'mobile_pos_lite.edit_price_unlimited']
+    : []),
   ...(role === 'STOCKIST' ? ['pos_drafts.dispatch'] : []),
 ];
 

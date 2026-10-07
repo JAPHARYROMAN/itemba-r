@@ -829,7 +829,13 @@ async function main() {
       const profile = await call(cashier.accessToken, 'GET', '/mobile-pos-auth/me');
       assert.deepEqual(
         profile.user.permissions.sort(),
-        ['mobile_pos_lite.access', 'pos_drafts.create', 'pos_drafts.view'].sort(),
+        [
+          'mobile_pos_lite.access',
+          'mobile_pos_lite.edit_price',
+          'mobile_pos_lite.edit_price_unlimited',
+          'pos_drafts.create',
+          'pos_drafts.view',
+        ].sort(),
       );
       assert.equal(profile.user.email, '');
       await call(cashier.accessToken, 'GET', '/auth/me', undefined, 403);
@@ -1303,40 +1309,73 @@ async function main() {
     },
   );
   await check(
-    'A changed sale price needs no reason and still waits for a separate admin decision',
+    'A PIN cashier can lower and raise prices without a reason or terminal cap, subject to separate admin review',
     async () => {
       const before = await financial();
-      const draft = await call(
-        f.admin.token,
+      const terminal = await db.mobilePosTerminal.findUniqueOrThrow({
+        where: { terminalCode: cashier.terminalCode },
+      });
+      assert.equal(n(terminal.maxPriceDropPct), 0);
+      for (const price of [80, 111]) {
+        const draft = await call(
+          cashier.accessToken,
+          'POST',
+          '/pos-drafts',
+          envelope('SALE', {
+            customerId: f.customer.id,
+            paymentMethod: 'CASH',
+            cashAccountId: f.cash.id,
+            expectedTotal: price,
+            lines: [{ productId: f.product.id, quantity: 1, unitPrice: price }],
+          }),
+        );
+        assert.equal(draft.status, 'SUBMITTED');
+        assert.equal(draft.payload.lines[0].listUnitPrice, 100);
+        assert.equal(draft.payload.lines[0].unitPrice, price);
+        assert.ok(!('priceReason' in draft.payload.lines[0]));
+        const stored = await db.posDraft.findUniqueOrThrow({ where: { id: draft.id } });
+        assert.deepEqual(stored.payload._sale.priceEdits, [
+          {
+            productId: f.product.id,
+            listUnitPrice: 100,
+            chargedUnitPrice: price,
+            reasonCode: null,
+          },
+        ]);
+        assert.deepEqual(await financial(), before);
+        await call(
+          cashier.accessToken,
+          'POST',
+          `/pos-drafts/${draft.id}/approve`,
+          {
+            revision: draft.revision,
+          },
+          403,
+        );
+        const approved = await call(f.reviewer.token, 'POST', `/pos-drafts/${draft.id}/approve`, {
+          revision: draft.revision,
+        });
+        assert.equal(approved.status, 'AWAITING_STOCKIST');
+        assert.deepEqual(await financial(), before);
+        const rejected = await call(f.reviewer.token, 'POST', `/pos-drafts/${draft.id}/reject`, {
+          revision: approved.revision,
+          reason: 'Synthetic price rejected by reviewer',
+        });
+        assert.equal(rejected.status, 'REJECTED');
+        assert.deepEqual(await financial(), before);
+      }
+      await call(
+        cashier.accessToken,
         'POST',
         '/pos-drafts',
         envelope('SALE', {
           customerId: f.customer.id,
           paymentMethod: 'CASH',
-          cashAccountId: f.cash.id,
-          expectedTotal: 111,
-          lines: [{ productId: f.product.id, quantity: 1, unitPrice: 111 }],
+          expectedTotal: 1,
+          lines: [{ productId: f.product.id, quantity: 1, unitPrice: 1 }],
         }),
+        400,
       );
-      assert.equal(draft.status, 'SUBMITTED');
-      assert.equal(draft.payload.lines[0].listUnitPrice, 100);
-      assert.equal(draft.payload.lines[0].unitPrice, 111);
-      assert.ok(!('priceReason' in draft.payload.lines[0]));
-      const stored = await db.posDraft.findUniqueOrThrow({ where: { id: draft.id } });
-      assert.deepEqual(stored.payload._sale.priceEdits, [
-        {
-          productId: f.product.id,
-          listUnitPrice: 100,
-          chargedUnitPrice: 111,
-          reasonCode: null,
-        },
-      ]);
-      assert.deepEqual(await financial(), before);
-      const rejected = await call(f.reviewer.token, 'POST', `/pos-drafts/${draft.id}/reject`, {
-        revision: draft.revision,
-        reason: 'Synthetic price rejected by reviewer',
-      });
-      assert.equal(rejected.status, 'REJECTED');
       assert.deepEqual(await financial(), before);
     },
   );

@@ -13,6 +13,13 @@ describe('Mobile POS price-edit permissions', () => {
     'utf8',
   );
   const codes = ['mobile_pos_lite.edit_price', 'mobile_pos_lite.edit_price_unlimited'];
+  const salesCashierMigration = readFileSync(
+    join(
+      __dirname,
+      '../../../../database/prisma/migrations/20261007100000_mobile_sales_cashier_price_edit/migration.sql',
+    ),
+    'utf8',
+  );
 
   it.each(codes)('%s is created by a migration with the matrix description', (code) => {
     const permission = ALL_PERMISSIONS.find((entry) => entry.code === code);
@@ -21,7 +28,7 @@ describe('Mobile POS price-edit permissions', () => {
     expect(migration).toContain(`'${permission.description}'`);
   });
 
-  it.each(codes)('%s is granted by the migration to exactly the matrix roles', (code) => {
+  it.each(codes)('%s is granted by the migrations to exactly the matrix roles', (code) => {
     const permission = ALL_PERMISSIONS.find((entry) => entry.code === code);
     if (!permission) throw new Error(`${code} is missing from the matrix`);
     const holders = ROLES.filter((role) => role.filter(permission)).map((role) => role.name);
@@ -31,6 +38,10 @@ describe('Mobile POS price-edit permissions', () => {
       .find((part) => part.includes('INTO "role_permissions"') && part.includes(`= '${code}'`));
     const roleList = statement?.slice(statement.indexOf('role.name IN ('));
     const granted = roleList?.slice(0, roleList.indexOf(')')).match(/'[A-Z_]+'/g) ?? [];
-    expect(granted.map((name) => name.slice(1, -1)).sort()).toEqual([...holders].sort());
+    expect(salesCashierMigration).toContain(`'${code}'`);
+    const additional = salesCashierMigration.match(/role.name IN \(([^)]+)\)/)?.[1];
+    const additionalRoles = additional?.match(/'[A-Z_]+'/g) ?? [];
+    const combined = new Set([...granted, ...additionalRoles].map((name) => name.slice(1, -1)));
+    expect([...combined].sort()).toEqual([...holders].sort());
   });
 });
