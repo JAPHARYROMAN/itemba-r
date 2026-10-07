@@ -10,6 +10,8 @@ import { PERMISSIONS_KEY } from '../../common/decorators/require-permissions.dec
 import { MOBILE_POS_SESSION_ROLES } from '../../common/decorators/mobile-pos-session.decorator';
 import { decimal, digest, eatDay, saleSignature } from './pos-drafts.types';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
+import { mobilePosPermissions } from '../mobile-pos-auth/mobile-pos-auth.service';
+import { ALL_PERMISSIONS, ROLES } from '../../../../database/seeds/permission-matrix';
 
 const administrator: any = {
   id: 'admin',
@@ -256,6 +258,90 @@ describe('reason-free sale price capture', () => {
       'below the allowed selling price',
     );
   });
+  it.each(['MOBILE_POS_CASHIER', 'CASHIER', 'SALESPERSON'])(
+    'lets %s lower and raise prices without an explanation or terminal cap, retaining admin review',
+    async (role) => {
+      const definition = ROLES.find((entry) => entry.name === role)!;
+      const permissions =
+        role === 'MOBILE_POS_CASHIER'
+          ? mobilePosPermissions('CASHIER')
+          : ALL_PERMISSIONS.filter(definition.filter).map((entry) => entry.code);
+      for (const price of [80, 120]) {
+        const f = capture(price);
+        f.db.mobilePosTerminal.findUnique.mockImplementation(async () => ({
+          id: 'terminal',
+          status: 'ACTIVE',
+          companyId: 'company',
+          branchId: 'branch',
+          assignedUserId: 'cashier',
+          generalCustomerId: 'customer',
+          maxPriceDropPct: 0,
+          paymentMethods: [{ paymentMethod: 'CASH', isEnabled: true, cashAccountId: 'cash' }],
+        }));
+        const user = { ...f.user, permissions: [...permissions, 'pos_drafts.create'] };
+        const normalized = await f.service.normalize(f.dto, user, f.scope, 'CASHIER', f.db);
+        const draft = { ...f.getDraft(), payload: normalized.payload };
+        expect(f.service.present(draft, administrator).payload.lines[0]).toMatchObject({
+          unitPrice: price,
+          listUnitPrice: 100,
+        });
+        f.db.$queryRaw = jest.fn(async () => []);
+        f.db.product.findFirst = jest.fn(async () => ({
+          id: 'product',
+          defaultSellingPrice: 100,
+        }));
+        delete f.service.validateCapturedSale;
+        await expect(f.service.validateCapturedSale(f.db, draft, user)).resolves.toBeUndefined();
+        expect(f.sales.assertDraftSaleProfitable).toHaveBeenCalledTimes(2);
+        expect(f.sales.createAndConfirmInTransaction).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it('retains the below-cost check for an approved cashier price change', async () => {
+    const f = capture(80);
+    f.sales.assertDraftSaleProfitable.mockRejectedValue(new BadRequestException('Below cost'));
+    await expect(
+      f.service.normalize(
+        f.dto,
+        { ...f.user, permissions: mobilePosPermissions('CASHIER') },
+        f.scope,
+        'CASHIER',
+        f.db,
+      ),
+    ).rejects.toThrow('Below cost');
+    expect(f.sales.createAndConfirmInTransaction).not.toHaveBeenCalled();
+  });
+  it.each(['CASHIER', 'STOCKIST'] as const)(
+    'rechecks live %s approval using the same permissions as its device session',
+    async (role) => {
+      const f = fixture({ originRole: role });
+      delete f.service.assertOriginActive;
+      f.tx.user = {
+        findFirst: jest.fn(async () => ({
+          id: 'cashier',
+          authKind: 'POS_PIN',
+          userRoles: [],
+          companyAccess: [],
+          divisionAccess: [],
+          branchAccess: [],
+        })),
+      };
+      f.tx.mobilePosEnrollment.findFirst.mockResolvedValue({
+        companyId: 'company',
+        branchId: 'branch',
+      });
+      f.service.companyScope = { assertCanAccessCompany: jest.fn() };
+      f.service.organizationScope = { assertCanAccessScope: jest.fn() };
+      const origin = await f.service.assertOriginActive(f.tx, f.getDraft());
+      expect(origin.permissions).toEqual(mobilePosPermissions(role));
+      expect(origin.permissions).not.toContain('pos_drafts.approve');
+      expect(origin.permissions).not.toContain('pos_drafts.direct_post');
+      f.tx.mobilePosEnrollment.findFirst.mockResolvedValue(null);
+      await expect(f.service.assertOriginActive(f.tx, f.getDraft())).rejects.toThrow(
+        'no longer approved',
+      );
+    },
+  );
 });
 
 describe('POS Draft approval boundaries', () => {

@@ -40,6 +40,7 @@ import {
   effectiveSellingPrice,
 } from '../mobile-pos-lite/mobile-pos-lite.service';
 import { PostingEngineService } from '../accounting-engine/posting-engine.service';
+import { mobilePosPermissions } from '../mobile-pos-auth/mobile-pos-auth.service';
 import {
   ApprovePosDraftDto,
   ConfirmReturnPosDraftDto,
@@ -1858,12 +1859,15 @@ export class PosDraftsService {
       branchAccess: user.branchAccess,
     };
     if (draft.originRole !== 'ADMIN') {
+      const role = draft.originRole;
+      if (role !== 'CASHIER' && role !== 'STOCKIST')
+        throw new BadRequestException('Invalid origin POS role');
       const enrolled = await tx.mobilePosEnrollment.findFirst({
         where: {
           userId: draft.originUserId,
           companyId: draft.companyId,
           branchId: draft.branchId,
-          approvedRole: draft.originRole,
+          approvedRole: role,
           status: 'APPROVED',
           terminalId: draft.terminalId,
           branchSetup: { enabled: true, approvalRequired: true },
@@ -1876,7 +1880,7 @@ export class PosDraftsService {
           ...origin,
           companyId: enrolled.companyId,
           roleScopes: ['BRANCH'],
-          permissions: ['pos_drafts.view', 'pos_drafts.create'],
+          permissions: mobilePosPermissions(role),
           companyAccess: [{ companyId: enrolled.companyId, accessLevel: 'READ' }],
           divisionAccess: [],
           branchAccess: [{ branchId: enrolled.branchId, accessLevel: 'READ' }],

@@ -12,6 +12,7 @@ import { MobilePosLiteService } from './mobile-pos-lite.service';
 import { MobilePosLiteController } from './mobile-pos-lite.controller';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS_KEY } from '../../common/decorators/require-permissions.decorator';
+import { ALL_PERMISSIONS, ROLES } from '../../../../database/seeds/permission-matrix';
 
 const DEVICE_SECRET = 'device-secret-device-secret-0001';
 const TERMINAL_CODE = 'MPL-TEST0001';
@@ -5306,6 +5307,30 @@ describe('MobilePosLiteService createSale price editing', () => {
     return harness;
   }
   const refusal = /^This price is below the allowed level for this product$/;
+
+  it.each(['CASHIER', 'SALESPERSON'])(
+    'offers and accepts negotiated prices for %s without a terminal discount cap',
+    async (role) => {
+      const definition = ROLES.find((entry) => entry.name === role)!;
+      const user = {
+        ...repUser(),
+        roles: [role],
+        permissions: ALL_PERMISSIONS.filter(definition.filter).map((entry) => entry.code),
+      };
+      const { service, salesOrders } = setup({ maxPriceDropPct: '0' });
+      const session = await service.session(TERMINAL_CODE, DEVICE_SECRET, user);
+      expect(session).toMatchObject({ priceEditEnabled: true, priceEditUnlimited: true });
+      await service.createSale(
+        TERMINAL_CODE,
+        DEVICE_SECRET,
+        edited(4500, { priceReason: undefined }),
+        user,
+      );
+      expect(salesOrders.mobilePosLiteQuickSale.mock.calls[0][4]).toEqual([
+        expect.objectContaining({ listUnitPrice: 5000, chargedUnitPrice: 4500, reasonCode: null }),
+      ]);
+    },
+  );
 
   it('sells at the list price and records nothing when the sent price equals the list', async () => {
     const { service, salesOrders } = setup();
