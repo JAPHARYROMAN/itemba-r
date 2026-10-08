@@ -77,7 +77,7 @@ describe('supplier statement export', () => {
     expect(supplierStatementPdf(s).subtitle).toBe('All suppliers');
   });
 
-  it('writes a CSV with the recorded opening and closing around the activity, escaping cells', () => {
+  it('writes a CSV with the dated opening and closing around the activity, escaping cells', () => {
     const s = buildSupplierStatement(
       run,
       supplier,
@@ -87,7 +87,7 @@ describe('supplier statement export', () => {
     const csv = supplierStatementCsv(s);
     const rows = csv.trim().split('\n');
     expect(rows[0]).toBe('Date,Type,Reference,Description,Debit,Credit,Balance');
-    expect(rows[1]).toBe('2026-09-01,OPENING,SSTAT-1,Opening balance (recorded),,,100.00');
+    expect(rows[1]).toBe('2026-09-01,OPENING,SSTAT-1,Opening balance (dated activity),,,100.00');
     expect(rows[2]).toBe('2026-09-05,PAYABLE,PAY-1,Payable raised,100.00,0.00,200.00');
     expect(rows[3]).toBe(
       '2026-09-20,PAYMENT,SPAY-1,"Payment · BANK_TRANSFER · ref a,""b""",0.00,80.00,120.00',
