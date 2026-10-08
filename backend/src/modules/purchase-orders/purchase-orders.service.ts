@@ -2,6 +2,7 @@ import { SupplierPurchaseAdvancesService } from '../supplier-payments/supplier-p
 import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
 import { CashPurchasePaymentsService } from '../supplier-payments/cash-purchase-payments.service';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
+import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
 import {
   BadRequestException,
   ConflictException,
@@ -268,14 +269,35 @@ export class PurchaseOrdersService {
           },
         },
         orderBy: { orderDate: 'desc' },
-        skip,
-        take: limit,
+        ...(query.view === 'accounts' ? {} : { skip, take: limit }),
       }),
       this.prisma.purchaseOrder.count({ where }),
     ]);
 
+    const documents = data.map((order) => this.decorateInvoiceReference(order));
+    if (query.view === 'accounts') {
+      return accountPage(
+        consolidateAccounts(
+          documents.map((record) => ({
+            record,
+            id: record.id,
+            companyId: record.companyId,
+            company: record.company,
+            partyId: record.supplierId,
+            partyName: record.supplier?.name || record.supplierName,
+            currency: record.currency || 'TZS',
+            amount: record.totalAmount,
+            paidAmount: record.paidAmount,
+            outstandingAmount: record.outstandingAmount,
+            issueDate: record.orderDate,
+            inactive: ['CANCELLED', 'VOIDED'].includes(record.status),
+          })),
+        ),
+        query,
+      );
+    }
     return {
-      data: data.map((order) => this.decorateInvoiceReference(order)),
+      data: documents,
       total,
       page,
       limit,

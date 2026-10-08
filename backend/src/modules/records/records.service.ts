@@ -1,3 +1,4 @@
+import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
 import {
   BadRequestException,
   ConflictException,
@@ -142,13 +143,35 @@ export class RecordsService {
           where,
           include: names,
           orderBy: [{ recordDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-          skip: ((q.page || 1) - 1) * 25,
-          take: 25,
+          ...(q.view === 'accounts' ? {} : { skip: ((q.page || 1) - 1) * 25, take: 25 }),
         }),
         this.db.recordEntry.count({ where }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
+    if (q.view === 'accounts') {
+      const accounts = consolidateAccounts(
+        rows.map((row) => ({
+          record: presentRecord(row),
+          id: row.id,
+          companyId: row.companyId,
+          ownerId: row.ownerId,
+          company: row.company,
+          kind: row.kind,
+          partyId: row.supplierId ?? row.customerId,
+          partyName: row.counterparty,
+          currency: row.currency,
+          amount: row.amount,
+          paidAmount: isDebt(row.kind) ? row.settledAmount : 0,
+          outstandingAmount: isDebt(row.kind) ? row.amount.minus(row.settledAmount) : 0,
+          issueDate: row.recordDate,
+          dueDate: isDebt(row.kind) ? row.dueDate : null,
+          inactive: !!row.voidedAt,
+        })),
+      );
+      const page = accountPage(accounts, { page: q.page, limit: 25 });
+      return { rows: page.data, total: page.total, page: page.page, pageSize: 25 };
+    }
     return { rows: rows.map(presentRecord), total, page: q.page || 1, pageSize: 25 };
   }
   async summary(user: AuthUser, q: RecordsQuery) {

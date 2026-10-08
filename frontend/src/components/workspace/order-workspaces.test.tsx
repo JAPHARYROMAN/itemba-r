@@ -41,12 +41,38 @@ const record = {
   outstandingAmount: 120,
   currency: 'USD',
   lines: [],
+  supplierName: 'Creditor A',
+  customerName: 'Customer A',
 };
 beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
   state.page
     .mockReset()
-    .mockResolvedValue({ data: [record], total: 1, totalPages: 1, page: 1, limit: 20 });
+    .mockImplementation(async (path: string, { query }: { query?: { view?: string } } = {}) => ({
+      data:
+        query?.view === 'accounts'
+          ? [
+              {
+                accountKey: 'account-a',
+                partyName: path === '/sales-orders' ? 'Customer A' : 'Creditor A',
+                companyId: record.companyId,
+                currency: 'USD',
+                documentCount: 1,
+                openDocumentCount: 1,
+                amount: 120,
+                paidAmount: 0,
+                outstandingAmount: 120,
+                overdueAmount: 0,
+                status: 'OPEN',
+                documents: [record],
+              },
+            ]
+          : [record],
+      total: 1,
+      totalPages: 1,
+      page: 1,
+      limit: 20,
+    }));
   state.get.mockReset().mockResolvedValue({
     totalOrders: 1,
     confirmed: 0,
@@ -64,6 +90,11 @@ describe.each([
     state.permissions = new Set([`${permission}.view`]);
     const user = userEvent.setup();
     render(<Page />);
+    await user.click(
+      await screen.findByRole('button', {
+        name: `View transactions for ${permission === 'sales' ? 'Customer A' : 'Creditor A'}`,
+      }),
+    );
     await user.click(await screen.findByRole('button', { name: `Inspect ${name}` }));
     const inspector = screen.getByRole('complementary', { name: 'Record details' });
     expect(
@@ -80,6 +111,11 @@ describe.each([
     state.permissions = new Set([`${permission}.view`, `${permission}.confirm`]);
     const user = userEvent.setup();
     render(<Page />);
+    await user.click(
+      await screen.findByRole('button', {
+        name: `View transactions for ${permission === 'sales' ? 'Customer A' : 'Creditor A'}`,
+      }),
+    );
     await user.click(await screen.findByRole('button', { name: `Inspect ${name}` }));
     await user.click(screen.getByRole('button', { name: `Confirm order ${name}` }));
     const dialog = screen.getByRole('dialog');

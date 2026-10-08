@@ -1,8 +1,9 @@
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { SalesOrderStatus, SalesType, PaymentStatus, SalesPaymentMethod } from '@prisma/client';
 
 export class QuerySalesOrderDto {
+  @IsOptional() @IsIn(['accounts', 'documents']) view?: 'accounts' | 'documents';
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;

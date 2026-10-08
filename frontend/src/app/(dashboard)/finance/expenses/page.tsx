@@ -1,4 +1,7 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { useWorkspaceSearchReader } from '@/components/workspace/workspace-navigation';
@@ -1045,6 +1048,7 @@ function DeleteConfirm({
 export default function ExpensesPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const beginRequest = useRequestGuard();
+  const [consolidated, setConsolidated] = useWorkspaceState('expenses.consolidation', true);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [data, setData] = useState<Paginated<Expense> | null>(null);
@@ -1532,7 +1536,43 @@ export default function ExpensesPage() {
         <p>Select a record to review details and actions.</p>
         <WorkspaceViewSwitch value={layout} onChange={setLayout} />
       </div>
-      {layout === 'focus' ? (
+      <ConsolidationSwitch
+        value={consolidated}
+        onChange={(value) => {
+          setConsolidated(value);
+          setPage(1);
+        }}
+      />
+      {consolidated && scopeReady ? (
+        <PartyTransactionRegister<Expense>
+          endpoint="/expenses"
+          query={{
+            companyId,
+            status,
+            search: query.trim(),
+            expenseCategoryId: categoryId,
+            dateFrom,
+            dateTo,
+          }}
+          revision={data}
+          snapshot={businessTransactionSnapshot}
+          title="Expense accounts"
+          showSettlement={false}
+          page={page}
+          onPage={setPage}
+          documentName={(expense) => expense.expenseNumber || expense.id}
+          documentDate={(expense) => expense.expenseDate}
+          documentStatus={(expense) => expense.status}
+          documentFields={[
+            {
+              label: 'Amount',
+              value: (expense) => fmtMoney(String(expense.amount), expense.currency),
+            },
+            { label: 'Description', value: (expense) => expense.description },
+          ]}
+          documentActions={renderRecordActions}
+        />
+      ) : layout === 'focus' ? (
         <RecordBrowser
           title="Expenses"
           records={data?.data ?? []}

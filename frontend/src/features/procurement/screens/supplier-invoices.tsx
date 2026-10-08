@@ -1,4 +1,7 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
@@ -921,6 +924,10 @@ export function VoidInvoiceModal({
 export default function SupplierInvoicesPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const beginRequest = useRequestGuard();
+  const [consolidated, setConsolidated] = useWorkspaceState(
+    'supplier-invoices.consolidation',
+    true,
+  );
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<SupplierInvoice> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1273,229 +1280,285 @@ export default function SupplierInvoicesPage() {
         </div>
       )}
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <WorkspaceTable className="w-full min-w-[1100px] text-sm">
-            <caption className="sr-only">Supplier invoice register</caption>
-            <thead>
-              <tr
-                className="text-left text-xs uppercase"
-                style={{ color: 'var(--aurora-text-muted)' }}
-              >
-                <th scope="col" className="px-4 py-3">
-                  Tax Invoice #
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Supplier
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  PO / GRN
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Invoice Date
-                </th>
-                <th scope="col" className="px-4 py-3 text-right">
-                  Total
-                </th>
-                <th scope="col" className="px-4 py-3 text-right">
-                  Outstanding
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Status
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Match
-                </th>
-                <th scope="col" className="px-4 py-3">
-                  Payable
-                </th>
-                <th scope="col" className="px-4 py-3 text-right">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={10} className="p-0">
-                    <SkeletonTable rows={6} cols={10} />
-                  </td>
+      <ConsolidationSwitch
+        value={consolidated}
+        onChange={(value) => {
+          setConsolidated(value);
+          setPage(1);
+        }}
+      />
+      {consolidated ? (
+        <PartyTransactionRegister<SupplierInvoice>
+          endpoint="/supplier-invoices"
+          query={{ companyId, status, search: search.trim() }}
+          revision={data}
+          snapshot={businessTransactionSnapshot}
+          title="Supplier invoice accounts"
+          page={page}
+          onPage={setPage}
+          documentName={(invoice) => invoice.supplierInvoiceNumber}
+          documentDate={(invoice) => invoice.invoiceDate}
+          documentStatus={(invoice) => invoice.status}
+          documentFields={[
+            { label: 'Total', value: (invoice) => money(invoice.totalAmount, invoice.currency) },
+            { label: 'Paid', value: (invoice) => money(invoice.paidAmount, invoice.currency) },
+            {
+              label: 'Outstanding',
+              value: (invoice) => money(invoice.outstandingAmount, invoice.currency),
+            },
+            { label: 'Notes', value: (invoice) => invoice.notes || '—' },
+          ]}
+          documentActions={(invoice) => (
+            <>
+              <Link href={`/invoice-desk?view=invoices&businessRecord=${invoice.id}`}>
+                Open full invoice
+              </Link>
+              {canUpdate && ['DRAFT', 'DISPUTED'].includes(invoice.status) && (
+                <Btn variant="secondary" onClick={() => setEditing(invoice)}>
+                  Edit
+                </Btn>
+              )}
+              {canApprove && APPROVABLE_STATUSES.includes(invoice.status) && (
+                <Btn onClick={() => setPending({ invoice, action: 'approve' })}>Approve</Btn>
+              )}
+              {canVoid && invoice.status === 'APPROVED' && (
+                <Btn variant="danger" onClick={() => setVoiding(invoice)}>
+                  Void
+                </Btn>
+              )}
+            </>
+          )}
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <WorkspaceTable className="w-full min-w-[1100px] text-sm">
+              <caption className="sr-only">Supplier invoice register</caption>
+              <thead>
+                <tr
+                  className="text-left text-xs uppercase"
+                  style={{ color: 'var(--aurora-text-muted)' }}
+                >
+                  <th scope="col" className="px-4 py-3">
+                    Tax Invoice #
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Supplier
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    PO / GRN
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Invoice Date
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Total
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Outstanding
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Status
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Match
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Payable
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right">
+                    Actions
+                  </th>
                 </tr>
-              ) : !invoices.length ? (
-                <tr>
-                  <td colSpan={10}>
-                    <EmptyState
-                      title="No supplier invoices found"
-                      description="Adjust your filters or create a new supplier tax invoice to get started."
-                    />
-                  </td>
-                </tr>
-              ) : (
-                invoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">{invoice.supplierInvoiceNumber}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">
-                        {invoice.supplier?.name ?? invoice.supplierId}
-                      </div>
-                      <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                        {invoice.company?.name ?? invoice.companyId}
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={10} className="p-0">
+                      <SkeletonTable rows={6} cols={10} />
                     </td>
-                    <td className="px-4 py-3 text-xs">
-                      <div>
-                        {invoice.purchaseOrder?.id || invoice.purchaseOrderId ? (
-                          <Link
-                            href={`/operations/purchase-orders/${
-                              invoice.purchaseOrder?.id ?? invoice.purchaseOrderId
-                            }`}
-                            className="text-brand-600 hover:underline"
-                          >
-                            {invoice.purchaseOrder?.purchaseOrderNumber ?? invoice.purchaseOrderId}
-                          </Link>
-                        ) : (
-                          '-'
-                        )}
-                      </div>
-                      <div style={{ color: 'var(--aurora-text-muted)' }}>
-                        {invoice.goodsReceivedNote?.grnNumber ?? invoice.goodsReceivedNoteId ?? '-'}
-                      </div>
+                  </tr>
+                ) : !invoices.length ? (
+                  <tr>
+                    <td colSpan={10}>
+                      <EmptyState
+                        title="No supplier invoices found"
+                        description="Adjust your filters or create a new supplier tax invoice to get started."
+                      />
                     </td>
-                    <td className="px-4 py-3">
-                      {new Date(invoice.invoiceDate).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium">
-                      {money(invoice.totalAmount, invoice.currency)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium">
-                      {money(invoice.outstandingAmount, invoice.currency)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={invoice.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      {invoice.latestMatch ? (
-                        <div className="space-y-1">
-                          <StatusBadge status={invoice.latestMatch.matchStatus} />
-                          <div
-                            className="text-[11px]"
-                            style={{ color: 'var(--aurora-text-muted)' }}
-                          >
-                            Qty {asNumber(invoice.latestMatch.quantityVariance).toFixed(4)} / Amt{' '}
-                            {asNumber(invoice.latestMatch.amountVariance).toFixed(2)}
-                          </div>
+                  </tr>
+                ) : (
+                  invoices.map((invoice) => (
+                    <tr key={invoice.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {invoice.supplierInvoiceNumber}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">
+                          {invoice.supplier?.name ?? invoice.supplierId}
                         </div>
-                      ) : (
-                        <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                          Not run
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs">
-                      {invoice.payable ? (
+                        <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {invoice.company?.name ?? invoice.companyId}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs">
                         <div>
-                          <div className="font-mono">{invoice.payable.payableNumber}</div>
-                          <StatusBadge status={invoice.payable.status} />
-                        </div>
-                      ) : (
-                        <span style={{ color: 'var(--aurora-text-muted)' }}>Not posted</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        {canUpdate &&
-                          ['DRAFT', 'RECEIVED', 'DISPUTED'].includes(invoice.status) && (
-                            <Btn
-                              variant="ghost"
-                              size="xs"
-                              aria-label={`Edit invoice ${invoice.supplierInvoiceNumber}`}
-                              onClick={() => setEditing(invoice)}
+                          {invoice.purchaseOrder?.id || invoice.purchaseOrderId ? (
+                            <Link
+                              href={`/operations/purchase-orders/${
+                                invoice.purchaseOrder?.id ?? invoice.purchaseOrderId
+                              }`}
+                              className="text-brand-600 hover:underline"
                             >
-                              Edit
+                              {invoice.purchaseOrder?.purchaseOrderNumber ??
+                                invoice.purchaseOrderId}
+                            </Link>
+                          ) : (
+                            '-'
+                          )}
+                        </div>
+                        <div style={{ color: 'var(--aurora-text-muted)' }}>
+                          {invoice.goodsReceivedNote?.grnNumber ??
+                            invoice.goodsReceivedNoteId ??
+                            '-'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {new Date(invoice.invoiceDate).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {money(invoice.totalAmount, invoice.currency)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {money(invoice.outstandingAmount, invoice.currency)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={invoice.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {invoice.latestMatch ? (
+                          <div className="space-y-1">
+                            <StatusBadge status={invoice.latestMatch.matchStatus} />
+                            <div
+                              className="text-[11px]"
+                              style={{ color: 'var(--aurora-text-muted)' }}
+                            >
+                              Qty {asNumber(invoice.latestMatch.quantityVariance).toFixed(4)} / Amt{' '}
+                              {asNumber(invoice.latestMatch.amountVariance).toFixed(2)}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            Not run
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        {invoice.payable ? (
+                          <div>
+                            <div className="font-mono">{invoice.payable.payableNumber}</div>
+                            <StatusBadge status={invoice.payable.status} />
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--aurora-text-muted)' }}>Not posted</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          {canUpdate &&
+                            ['DRAFT', 'RECEIVED', 'DISPUTED'].includes(invoice.status) && (
+                              <Btn
+                                variant="ghost"
+                                size="xs"
+                                aria-label={`Edit invoice ${invoice.supplierInvoiceNumber}`}
+                                onClick={() => setEditing(invoice)}
+                              >
+                                Edit
+                              </Btn>
+                            )}
+                          {canApprove &&
+                            invoice.purchaseOrderId &&
+                            !['APPROVED', 'PAID'].includes(invoice.status) && (
+                              <Btn
+                                variant="secondary"
+                                size="xs"
+                                aria-label={`Run match for invoice ${invoice.supplierInvoiceNumber}`}
+                                loading={busyId === invoice.id}
+                                onClick={() => runAction(invoice, 'match')}
+                              >
+                                Match
+                              </Btn>
+                            )}
+                          {canApprove && APPROVABLE_STATUSES.includes(invoice.status) && (
+                            <Btn
+                              variant="primary"
+                              size="xs"
+                              aria-label={`Approve invoice ${invoice.supplierInvoiceNumber}`}
+                              loading={busyId === invoice.id}
+                              onClick={() => setPending({ invoice, action: 'approve' })}
+                            >
+                              Approve
                             </Btn>
                           )}
-                        {canApprove &&
-                          invoice.purchaseOrderId &&
-                          !['APPROVED', 'PAID'].includes(invoice.status) && (
+                          {canApprove && invoice.status === 'DISPUTED' && (
                             <Btn
                               variant="secondary"
                               size="xs"
-                              aria-label={`Run match for invoice ${invoice.supplierInvoiceNumber}`}
+                              aria-label={`Approve variance for invoice ${invoice.supplierInvoiceNumber}`}
                               loading={busyId === invoice.id}
-                              onClick={() => runAction(invoice, 'match')}
+                              onClick={() => setPending({ invoice, action: 'approveVariance' })}
                             >
-                              Match
+                              Approve Variance
                             </Btn>
                           )}
-                        {canApprove && APPROVABLE_STATUSES.includes(invoice.status) && (
-                          <Btn
-                            variant="primary"
-                            size="xs"
-                            aria-label={`Approve invoice ${invoice.supplierInvoiceNumber}`}
-                            loading={busyId === invoice.id}
-                            onClick={() => setPending({ invoice, action: 'approve' })}
-                          >
-                            Approve
-                          </Btn>
-                        )}
-                        {canApprove && invoice.status === 'DISPUTED' && (
-                          <Btn
-                            variant="secondary"
-                            size="xs"
-                            aria-label={`Approve variance for invoice ${invoice.supplierInvoiceNumber}`}
-                            loading={busyId === invoice.id}
-                            onClick={() => setPending({ invoice, action: 'approveVariance' })}
-                          >
-                            Approve Variance
-                          </Btn>
-                        )}
-                        {canVoid && invoice.status === 'APPROVED' && (
-                          <Btn
-                            variant="danger"
-                            size="xs"
-                            aria-label={`Void invoice ${invoice.supplierInvoiceNumber}`}
-                            onClick={() => setVoiding(invoice)}
-                          >
-                            Void
-                          </Btn>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </WorkspaceTable>
-        </div>
-        {data && data.totalPages > 1 && (
-          <div
-            className="flex items-center justify-between border-t px-5 py-3"
-            style={{ borderColor: 'var(--aurora-border)' }}
-          >
-            <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-              Page {data.page} of {data.totalPages} - {data.total} total
-            </span>
-            <div className="flex gap-2">
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Btn>
-              <Btn
-                variant="secondary"
-                size="xs"
-                disabled={page >= data.totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Btn>
-            </div>
+                          {canVoid && invoice.status === 'APPROVED' && (
+                            <Btn
+                              variant="danger"
+                              size="xs"
+                              aria-label={`Void invoice ${invoice.supplierInvoiceNumber}`}
+                              onClick={() => setVoiding(invoice)}
+                            >
+                              Void
+                            </Btn>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </WorkspaceTable>
           </div>
-        )}
-      </Card>
+          {data && data.totalPages > 1 && (
+            <div
+              className="flex items-center justify-between border-t px-5 py-3"
+              style={{ borderColor: 'var(--aurora-border)' }}
+            >
+              <span className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                Page {data.page} of {data.totalPages} - {data.total} total
+              </span>
+              <div className="flex gap-2">
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Previous
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  size="xs"
+                  disabled={page >= data.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

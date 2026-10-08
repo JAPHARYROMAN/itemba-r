@@ -1,4 +1,9 @@
 'use client';
+import {
+  ConsolidatedAccounts,
+  ConsolidationSwitch,
+  type ConsolidatedAccount,
+} from '@/components/workspace/consolidated-accounts';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
@@ -125,6 +130,7 @@ interface PurchaseOrder {
   purchaseType: string;
   totalAmount: number;
   outstandingAmount: number;
+  paidAmount?: number | string;
   status: string;
   paymentStatus: string;
   currency: string;
@@ -1019,6 +1025,10 @@ export default function PurchaseOrdersPage() {
   const beginRequest = useRequestGuard();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<Paginated<PurchaseOrder> | null>(null);
+  const [accounts, setAccounts] = useState<Paginated<ConsolidatedAccount<PurchaseOrder>> | null>(
+    null,
+  );
+  const [consolidated, setConsolidated] = useWorkspaceState('purchase-orders.consolidation', true);
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useWorkspaceLayout('/operations/purchase-orders');
@@ -1109,18 +1119,25 @@ export default function PurchaseOrdersPage() {
       delete summaryQuery.page;
       delete summaryQuery.limit;
       const [pageResult, summaryResult] = await Promise.all([
-        backendPage<PurchaseOrder>('/purchase-orders', { query, signal: request.signal }),
+        consolidated
+          ? backendPage<ConsolidatedAccount<PurchaseOrder>>('/purchase-orders', {
+              query: { ...query, view: 'accounts' },
+              signal: request.signal,
+            })
+          : backendPage<PurchaseOrder>('/purchase-orders', { query, signal: request.signal }),
         backendGet<PurchaseSummary>('/purchase-orders/summary', {
           query: summaryQuery,
           signal: request.signal,
         }),
       ]);
       if (!request.current()) return;
-      setData(pageResult);
+      if (consolidated) setAccounts(pageResult as Paginated<ConsolidatedAccount<PurchaseOrder>>);
+      else setData(pageResult as Paginated<PurchaseOrder>);
       setSummary(summaryResult);
     } catch (err: unknown) {
       if (!request.current()) return;
       const message = err instanceof Error ? err.message : 'Failed to load purchase orders';
+      setAccounts(emptyPaginated<ConsolidatedAccount<PurchaseOrder>>());
       setData(emptyPaginated<PurchaseOrder>());
       setLoadError(message);
       showToast('error', 'Could not load purchase orders', message);
@@ -1139,6 +1156,7 @@ export default function PurchaseOrdersPage() {
     filterInvoiceStatus,
     filterDateFrom,
     filterDateTo,
+    consolidated,
   ]);
 
   useEffect(() => {
@@ -1670,6 +1688,13 @@ export default function PurchaseOrdersPage() {
         }
         actions={
           <>
+            <ConsolidationSwitch
+              value={consolidated}
+              onChange={(value) => {
+                setConsolidated(value);
+                setPage(1);
+              }}
+            />
             <Btn variant="secondary" onClick={exportCsv} loading={exporting}>
               Export CSV
             </Btn>
@@ -1689,7 +1714,31 @@ export default function PurchaseOrdersPage() {
         <p>{'Select a record to review details and actions.'}</p>
         {<WorkspaceViewSwitch value={layout} onChange={setLayout} />}
       </div>
-      {layout === 'focus' ? (
+      {consolidated ? (
+        <ConsolidatedAccounts
+          accounts={accounts?.data ?? []}
+          title="Supplier accounts"
+          showAging={false}
+          documentName={(o) => o.purchaseOrderNumber ?? o.id}
+          documentDate={(o) => o.orderDate}
+          documentStatus={(o) => o.status}
+          documentFields={[
+            { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
+            { label: 'Paid', value: (o) => fmtMoney(Number(o.paidAmount ?? 0), o.currency) },
+            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Supplier invoice', value: (o) => o.displayInvoiceNumber || 'Not recorded' },
+            { label: 'Notes', value: (o) => o.notes || '—' },
+          ]}
+          documentActions={renderOrderActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={accounts?.total ?? 0}
+          onPage={setPage}
+        />
+      ) : layout === 'focus' ? (
         <RecordBrowser
           title="Purchase orders"
           records={data?.data ?? []}

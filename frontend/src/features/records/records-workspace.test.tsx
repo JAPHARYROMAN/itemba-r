@@ -123,6 +123,49 @@ function AppWindow({
   );
 }
 describe('Records Book inside Records', () => {
+  it('consolidates Money Out by recipient and retains all transaction IDs and full-record links', async () => {
+    const expenses = Array.from({ length: 7 }, (_, index) => ({
+      id: `expense-${index}`,
+      companyId: sale.companyId,
+      company: sale.company,
+      paidTo: 'Recipient A',
+      recordDate: '2026-10-01',
+      currency: 'USD',
+      amount: '10.10',
+      status: 'FINALIZED',
+      paymentMethod: 'CASH',
+      description: `Expense ${index}`,
+    }));
+    const result = { data: expenses, total: 7, page: 1, limit: 20, totalPages: 1 };
+    const read = state.get.getMockImplementation()!;
+    const page = state.page.getMockImplementation()!;
+    state.get.mockImplementation((path, options) =>
+      path === '/record-book/expenses' ? Promise.resolve(result) : read(path, options),
+    );
+    state.page.mockImplementation((path, options) =>
+      path === '/record-book/expenses' ? Promise.resolve(result) : page(path, options),
+    );
+    const user = userEvent.setup();
+    render(
+      <WorkspaceSessionProvider>
+        <AppWindow id="Recipients" href="/records/money-out" />
+      </WorkspaceSessionProvider>,
+    );
+    await screen.findByRole('heading', { name: 'Money out', exact: true }, { timeout: 5000 });
+    await user.click(
+      await screen.findByRole('button', { name: 'View transactions for Recipient A' }),
+    );
+    expect(screen.getByText('USD 70.70')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Outstanding' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Inspect Expense 6' }));
+    const detail = screen.getByRole('complementary', { name: 'Record details' });
+    expect(within(detail).getByText('expense-6', { selector: 'dd' })).toBeInTheDocument();
+    expect(within(detail).getByRole('link', { name: 'View' })).toHaveAttribute(
+      'href',
+      '/records/money-out/expense-6',
+    );
+    expect(within(detail).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
   it('returns an existing overview record link to the notebook after closing its detail', async () => {
     state.permissions = new Set(['records.view']);
     const read = state.get.getMockImplementation()!;

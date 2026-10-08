@@ -1,8 +1,27 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
-import { Btn, EmptyState, ErrorState, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, PageToolbar, PermissionDeniedState, showToast, StatusBadge, SupplierPicker } from '@/components/ui';
+import {
+  Btn,
+  EmptyState,
+  ErrorState,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageSpinner,
+  PageToolbar,
+  PermissionDeniedState,
+  showToast,
+  StatusBadge,
+  SupplierPicker,
+} from '@/components/ui';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
 import '@/components/workspace/workspace.css';
@@ -47,6 +66,7 @@ interface Loan {
 }
 
 interface Debt {
+  companyId?: string | null;
   id: string;
   creditorName: string;
   supplierId?: string | null;
@@ -918,6 +938,8 @@ export default function LoansDebtsPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const readLoans = hasPermission('loans.read');
   const readDebts = hasPermission('debts.read');
+  const [consolidated, setConsolidated] = useState(true);
+  const [groupedSelection, setGroupedSelection] = useState<Loan | Debt | null>(null);
   const [tab, setTab] = useState<'loans' | 'debts'>(readLoans ? 'loans' : 'debts');
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -952,7 +974,9 @@ export default function LoansDebtsPage() {
   const loanSummary = useWorkspaceResource<LoanSummary>('/loans/summary', {}, readLoans);
   const debtSummary = useWorkspaceResource<DebtSummary>('/debts/summary', {}, readDebts);
   const rows = records.data?.data ?? [];
-  const selected = rows.find((row) => row.id === selectedId);
+  const selected =
+    rows.find((row) => row.id === selectedId) ??
+    (groupedSelection?.id === selectedId ? groupedSelection : undefined);
   const loan = selected && tab === 'loans' ? (selected as Loan) : null;
   const debt = selected && tab === 'debts' ? (selected as Debt) : null;
   const canCreate = hasPermission(`${tab}.create`);
@@ -1211,116 +1235,186 @@ export default function LoansDebtsPage() {
           </>
         }
       />
+      <ConsolidationSwitch
+        value={consolidated}
+        onChange={(value) => {
+          setConsolidated(value);
+          setPage(1);
+          setSelectedId(null);
+        }}
+      />
+      {consolidated && (tab === 'loans' ? readLoans : readDebts) && (
+        <PartyTransactionRegister<Loan | Debt>
+          endpoint={`/${tab}`}
+          query={query}
+          revision={records.data}
+          snapshot={(record) => ({
+            ...businessTransactionSnapshot(record),
+            company: record.company ?? { name: 'Group' },
+          })}
+          title={tab === 'loans' ? 'Lender accounts' : 'Creditor accounts'}
+          showPaid={tab !== 'loans'}
+          totalLabel={tab === 'loans' ? 'Principal' : 'Total'}
+          page={page}
+          onPage={setPage}
+          documentName={(record) =>
+            ('lenderName' in record ? record.loanReference : record.invoiceNumber) || record.id
+          }
+          documentDate={(record) =>
+            ('lenderName' in record
+              ? record.disbursementDate || record.maturityDate
+              : record.dueDate) || ''
+          }
+          documentStatus={(record) => record.status}
+          documentFields={[
+            {
+              label: 'Amount',
+              value: (record) =>
+                `${record.currency} ${fmt('lenderName' in record ? record.principalAmount : record.amount)}`,
+            },
+            {
+              label: 'Due date',
+              value: (record) =>
+                fmtDate('lenderName' in record ? record.maturityDate : record.dueDate),
+            },
+            {
+              label: 'Notes / description',
+              value: (record) =>
+                ('lenderName' in record ? record.notes : record.description) || '—',
+            },
+          ]}
+          documentActions={(record) => (
+            <>
+              {'lenderName' in record && (
+                <Link href={`/group-control/loans-debts/loans/${record.id}`}>
+                  Open loan & payment history
+                </Link>
+              )}
+              <Btn
+                variant="secondary"
+                onClick={(event) => {
+                  setGroupedSelection(record);
+                  select(record, event.currentTarget);
+                }}
+              >
+                Open full obligation
+              </Btn>
+            </>
+          )}
+        />
+      )}
       <div className={`record-browser ${selected ? 'record-selected' : ''}`}>
-        <section
-          className="record-list"
-          aria-label={tab === 'loans' ? 'Loan register' : 'Debt register'}
-          aria-busy={records.loading}
-        >
-          <div className="record-list-heading">
-            <span>{tab === 'loans' ? 'Loan register' : 'Trade obligations'}</span>
-            <span aria-live="polite">
-              {records.loading ? 'Loading…' : `${records.data?.total ?? 0} records`}
-            </span>
-          </div>
-          {records.error ? (
-            <ErrorState message={records.error} onRetry={records.reload} />
-          ) : records.loading ? (
-            <PageSpinner />
-          ) : rows.length === 0 ? (
-            <EmptyState
-              title={search || activeFilters ? 'No matching obligations' : `No ${tab} recorded`}
-              description={
-                search || activeFilters
-                  ? 'Try another search or clear your filters.'
-                  : 'Add an obligation to keep its balance, due dates and history in one place.'
-              }
-              action={
-                search || activeFilters ? (
-                  <Btn variant="secondary" onClick={reset}>
-                    Clear filters
-                  </Btn>
-                ) : canCreate ? (
-                  <Btn
-                    onClick={() =>
-                      tab === 'loans' ? setCreatingLoan(true) : setCreatingDebt(true)
-                    }
-                  >
-                    Add {tab === 'loans' ? 'a loan' : 'a debt'}
-                  </Btn>
-                ) : undefined
-              }
-            />
-          ) : (
-            <ul className="obligation-list">
-              {rows.map((row) => {
-                const itemLoan = tab === 'loans' ? (row as Loan) : null;
-                const itemDebt = tab === 'debts' ? (row as Debt) : null;
-                const name = itemLoan?.lenderName ?? itemDebt?.creditorName ?? '';
-                const due = itemLoan?.maturityDate ?? itemDebt?.dueDate;
-                const amount =
-                  itemLoan?.outstandingBalance ??
-                  Number(itemDebt?.amount ?? 0) - Number(itemDebt?.amountPaid ?? 0);
-                return (
-                  <li key={row.id}>
-                    <button
-                      type="button"
-                      aria-pressed={selectedId === row.id}
-                      aria-label={`Review ${name}`}
-                      onClick={(event) => select(row, event.currentTarget)}
-                    >
-                      <div className="obligation-identity">
-                        <strong>{name}</strong>
-                        <span>
-                          {itemLoan?.loanReference ??
-                            itemDebt?.invoiceNumber ??
-                            row.company?.name ??
-                            'Group obligation'}
-                        </span>
-                        <small>
-                          {row.company?.name ?? 'Group'} ·{' '}
-                          {due ? `Due ${fmtDate(due)}` : 'No due date'}
-                        </small>
-                      </div>
-                      <div className="obligation-balance">
-                        <strong>
-                          {row.currency} {fmt(amount)}
-                        </strong>
-                        <span>Outstanding</span>
-                        <StatusBadge value={row.status} />
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {!!records.data && (
-            <div className="record-pagination">
-              <span>
-                Page {records.data.page} of {Math.max(1, records.data.totalPages)}
+        {!consolidated && (
+          <section
+            className="record-list"
+            aria-label={tab === 'loans' ? 'Loan register' : 'Debt register'}
+            aria-busy={records.loading}
+          >
+            <div className="record-list-heading">
+              <span>{tab === 'loans' ? 'Loan register' : 'Trade obligations'}</span>
+              <span aria-live="polite">
+                {records.loading ? 'Loading…' : `${records.data?.total ?? 0} records`}
               </span>
-              <button
-                disabled={page <= 1 || records.loading}
-                onClick={() => {
-                  setPage(page - 1);
-                  setSelectedId(null);
-                }}
-              >
-                Previous
-              </button>
-              <button
-                disabled={page >= records.data.totalPages || records.loading}
-                onClick={() => {
-                  setPage(page + 1);
-                  setSelectedId(null);
-                }}
-              >
-                Next
-              </button>
             </div>
-          )}
-        </section>
+            {records.error ? (
+              <ErrorState message={records.error} onRetry={records.reload} />
+            ) : records.loading ? (
+              <PageSpinner />
+            ) : rows.length === 0 ? (
+              <EmptyState
+                title={search || activeFilters ? 'No matching obligations' : `No ${tab} recorded`}
+                description={
+                  search || activeFilters
+                    ? 'Try another search or clear your filters.'
+                    : 'Add an obligation to keep its balance, due dates and history in one place.'
+                }
+                action={
+                  search || activeFilters ? (
+                    <Btn variant="secondary" onClick={reset}>
+                      Clear filters
+                    </Btn>
+                  ) : canCreate ? (
+                    <Btn
+                      onClick={() =>
+                        tab === 'loans' ? setCreatingLoan(true) : setCreatingDebt(true)
+                      }
+                    >
+                      Add {tab === 'loans' ? 'a loan' : 'a debt'}
+                    </Btn>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <ul className="obligation-list">
+                {rows.map((row) => {
+                  const itemLoan = tab === 'loans' ? (row as Loan) : null;
+                  const itemDebt = tab === 'debts' ? (row as Debt) : null;
+                  const name = itemLoan?.lenderName ?? itemDebt?.creditorName ?? '';
+                  const due = itemLoan?.maturityDate ?? itemDebt?.dueDate;
+                  const amount =
+                    itemLoan?.outstandingBalance ??
+                    Number(itemDebt?.amount ?? 0) - Number(itemDebt?.amountPaid ?? 0);
+                  return (
+                    <li key={row.id}>
+                      <button
+                        type="button"
+                        aria-pressed={selectedId === row.id}
+                        aria-label={`Review ${name}`}
+                        onClick={(event) => select(row, event.currentTarget)}
+                      >
+                        <div className="obligation-identity">
+                          <strong>{name}</strong>
+                          <span>
+                            {itemLoan?.loanReference ??
+                              itemDebt?.invoiceNumber ??
+                              row.company?.name ??
+                              'Group obligation'}
+                          </span>
+                          <small>
+                            {row.company?.name ?? 'Group'} ·{' '}
+                            {due ? `Due ${fmtDate(due)}` : 'No due date'}
+                          </small>
+                        </div>
+                        <div className="obligation-balance">
+                          <strong>
+                            {row.currency} {fmt(amount)}
+                          </strong>
+                          <span>Outstanding</span>
+                          <StatusBadge value={row.status} />
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {!!records.data && (
+              <div className="record-pagination">
+                <span>
+                  Page {records.data.page} of {Math.max(1, records.data.totalPages)}
+                </span>
+                <button
+                  disabled={page <= 1 || records.loading}
+                  onClick={() => {
+                    setPage(page - 1);
+                    setSelectedId(null);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  disabled={page >= records.data.totalPages || records.loading}
+                  onClick={() => {
+                    setPage(page + 1);
+                    setSelectedId(null);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </section>
+        )}
         <aside className="record-inspector" aria-label="Obligation details">
           {selected ? (
             <>

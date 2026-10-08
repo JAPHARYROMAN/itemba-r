@@ -6,6 +6,7 @@ import {
   posDraftSaleRequestKey,
 } from '../../common/services/pos-sale-duplicates';
 import { readPosTenders, tenderTotal, type PosTender } from './pos-tenders';
+import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
 import {
   BadRequestException,
   ConflictException,
@@ -599,8 +600,7 @@ export class SalesOrdersService {
           },
         },
         orderBy: { orderDate: 'desc' },
-        skip,
-        take: limit,
+        ...(query.view === 'accounts' ? {} : { skip, take: limit }),
       }),
       this.prisma.salesOrder.count({ where }),
     ]);
@@ -609,10 +609,33 @@ export class SalesOrdersService {
       data.map((order) => order.id),
     );
 
+    const documents = data.map((order) =>
+      this.withReceivablePaymentSnapshot(order, sourceReceivables.get(order.id)),
+    );
+    if (query.view === 'accounts') {
+      return accountPage(
+        consolidateAccounts(
+          documents.map((record) => ({
+            record,
+            id: record.id,
+            companyId: record.companyId,
+            company: record.company,
+            partyId: record.customerId,
+            partyName: record.customer?.name || record.customerName,
+            currency: record.currency || 'TZS',
+            amount: record.totalAmount,
+            paidAmount: record.paidAmount,
+            outstandingAmount: record.outstandingAmount,
+            issueDate: record.orderDate,
+            dueDate: record.dueDate,
+            inactive: ['CANCELLED', 'VOIDED'].includes(record.status),
+          })),
+        ),
+        query,
+      );
+    }
     return {
-      data: data.map((order) =>
-        this.withReceivablePaymentSnapshot(order, sourceReceivables.get(order.id)),
-      ),
+      data: documents,
       total,
       page,
       limit,
