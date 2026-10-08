@@ -23,6 +23,13 @@ vi.mock('@/lib/api-client', () => ({
   backendGet: api.get,
   backendPost: api.post,
   backendList: api.list,
+  buildQuery: (query: Record<string, unknown>) =>
+    '?' +
+    new URLSearchParams(
+      Object.entries(query)
+        .filter(([, value]) => value != null)
+        .map(([key, value]) => [key, String(value)]),
+    ).toString(),
 }));
 const scope = { companyId: 'company', divisionId: 'division', branchId: 'branch' };
 const directory = {
@@ -263,6 +270,7 @@ describe('Cash Desk', () => {
     );
     await screen.findByText('TZS 500.20');
     expect(screen.getAllByText('TZS 125,000.10')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
     expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
     await chooseSelectOption('Currency', 'USD');
     expect(screen.getAllByText('USD 10.10')).toHaveLength(2);

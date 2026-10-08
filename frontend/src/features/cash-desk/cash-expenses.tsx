@@ -3,6 +3,8 @@ import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ChevronRight, Receipt, Search } from 'lucide-react';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { Btn, FormDateField, SelectField } from '@/components/ui';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { CashMovementAccounts } from './cash-registers';
 import {
   Account,
   ExpenseReport,
@@ -38,19 +40,20 @@ export function CashExpenses({
     [page, setPage] = useState(1),
     [currency, setCurrency] = useState('');
   const deferred = useDeferredValue(search);
+  const [consolidated, setConsolidated] = useState(true);
   const invalid = !!from && !!to && from > to;
+  const registerQuery = {
+    ...Object.fromEntries(Object.entries(scope).filter(([, v]) => v)),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(category ? { expenseCategory: category } : {}),
+    ...(accountId ? { accountId } : {}),
+    status,
+    search: deferred,
+  };
   const report = useWorkspaceResource<ExpenseReport>(
     '/cash-desk/expenses',
-    {
-      ...Object.fromEntries(Object.entries(scope).filter(([, v]) => v)),
-      ...(from ? { from } : {}),
-      ...(to ? { to } : {}),
-      ...(category ? { expenseCategory: category } : {}),
-      ...(accountId ? { accountId } : {}),
-      status,
-      search: deferred,
-      page,
-    },
+    { ...registerQuery, page: consolidated ? 1 : page },
     !invalid,
   );
   const { reload } = report;
@@ -201,6 +204,13 @@ export function CashExpenses({
             <h2>Expense register</h2>
             <span className="desk-muted">{report.data?.total ?? 0} records</span>
           </div>
+          <ConsolidationSwitch
+            value={consolidated}
+            onChange={(value) => {
+              setConsolidated(value);
+              setPage(1);
+            }}
+          />
           {!report.data?.rows.length ? (
             <div className="cash-empty">
               <span>
@@ -219,33 +229,49 @@ export function CashExpenses({
               )}
             </div>
           ) : (
-            <div className="cash-movements cash-expense-register">
-              {report.data.rows.map((row) => (
-                <button key={row.id} onClick={() => onSelect(row)}>
-                  <span className="cash-movement-icon">
-                    <ArrowUpRight size={18} />
-                  </span>
-                  <span className="cash-movement-name">
-                    <strong>{row.payee || row.description}</strong>
-                    <small>
-                      {row.payee ? `${row.description} · ` : ''}
-                      {expenseCategories[row.expenseCategory ?? ''] ?? 'Uncategorized'} ·{' '}
-                      {row.entries.map((e) => e.account.name).join(', ')}
-                    </small>
-                  </span>
-                  <span className={`cash-expense-status ${row.reversedAt ? 'is-reversed' : ''}`}>
-                    {row.reversedAt ? 'Reversed' : 'Paid'}
-                  </span>
-                  <span className="cash-movement-date">{dateLabel(row.businessDate)}</span>
-                  <strong className="cash-movement-amount">
-                    {money(row.amount, row.currency)}
-                  </strong>
-                  <ChevronRight size={14} />
-                </button>
-              ))}
-            </div>
+            <>
+              {consolidated ? (
+                <CashMovementAccounts
+                  endpoint="/cash-desk/expenses"
+                  title="Expense payee accounts"
+                  query={registerQuery}
+                  revision={revision}
+                  page={page}
+                  onPage={setPage}
+                  onSelect={onSelect}
+                />
+              ) : (
+                <div className="cash-movements cash-expense-register">
+                  {report.data.rows.map((row) => (
+                    <button key={row.id} onClick={() => onSelect(row)}>
+                      <span className="cash-movement-icon">
+                        <ArrowUpRight size={18} />
+                      </span>
+                      <span className="cash-movement-name">
+                        <strong>{row.payee || row.description}</strong>
+                        <small>
+                          {row.payee ? `${row.description} · ` : ''}
+                          {expenseCategories[row.expenseCategory ?? ''] ?? 'Uncategorized'} ·{' '}
+                          {row.entries.map((e) => e.account.name).join(', ')}
+                        </small>
+                      </span>
+                      <span
+                        className={`cash-expense-status ${row.reversedAt ? 'is-reversed' : ''}`}
+                      >
+                        {row.reversedAt ? 'Reversed' : 'Paid'}
+                      </span>
+                      <span className="cash-movement-date">{dateLabel(row.businessDate)}</span>
+                      <strong className="cash-movement-amount">
+                        {money(row.amount, row.currency)}
+                      </strong>
+                      <ChevronRight size={14} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
-          {!!report.data && (report.data.total > 25 || page > 1) && (
+          {!consolidated && !!report.data && (report.data.total > 25 || page > 1) && (
             <div className="desk-pagination">
               <span>
                 Page {page} of {Math.max(1, Math.ceil(report.data.total / 25))}

@@ -42,6 +42,8 @@ vi.mock('@/lib/api-client', () => ({
   backendGet: h.get,
   backendPost: h.post,
   backendList: h.list,
+  buildQuery: (query: Record<string, unknown>) =>
+    `?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}`,
 }));
 const scope = { companyId: 'company', divisionId: 'division', branchId: 'branch' };
 const directory = {

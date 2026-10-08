@@ -76,6 +76,8 @@ export class CashSalesConnectionService {
         currency: true,
         receivableId: true,
         customerName: true,
+        customerId: true,
+        company: { select: { name: true } },
         paymentMethod: true,
         cashAccountId: true,
         paidAmount: true,
@@ -218,6 +220,9 @@ export class CashSalesConnectionService {
       date: Date;
       reference: string;
       customer: string;
+      customerId: string | null;
+      companyId: string;
+      company?: { name: string } | null;
       amount: string;
       currency: string;
       account: string | null;
@@ -275,6 +280,9 @@ export class CashSalesConnectionService {
           paymentNumber: true,
           paymentDate: true,
           currency: true,
+          companyId: true,
+          customerId: true,
+          company: { select: { name: true } },
           cashAccountId: true,
           allocations: {
             where: { receivableId: { in: receivables.map((r) => r.id) } },
@@ -304,6 +312,9 @@ export class CashSalesConnectionService {
               date: j.transactionDate,
               reference: j.journalNumber,
               customer: s.customerName ?? 'Customer',
+              customerId: s.customerId ?? null,
+              companyId: s.companyId,
+              company: s.company,
               amount: new Prisma.Decimal(p.amount).toFixed(2),
               currency: s.currency,
               saleId: s.id,
@@ -317,6 +328,9 @@ export class CashSalesConnectionService {
           date: j.transactionDate,
           reference: j.journalNumber,
           customer: r?.customerName ?? s.customerName ?? 'Customer',
+          customerId: r?.customerId ?? s.customerId ?? null,
+          companyId: r?.companyId ?? s.companyId,
+          company: r?.company ?? s.company,
           // The sales journal also includes COGS; its totalDebit is NOT the cash receipt.
           amount: (j.referenceType === 'SalesOrder' ? s.paidAmount : j.totalDebit).toFixed(2),
           currency: r?.currency ?? s.currency,
@@ -336,6 +350,9 @@ export class CashSalesConnectionService {
           date: p.paymentDate,
           reference: p.paymentNumber,
           customer: r?.customerName ?? 'Customer',
+          customerId: p.customerId ?? r?.customerId ?? null,
+          companyId: p.companyId,
+          company: p.company,
           // Only allocations to the visible sales, not advances or other invoices.
           amount: p.allocations
             .reduce((total, a) => total.plus(a.amount), new Prisma.Decimal(0))
