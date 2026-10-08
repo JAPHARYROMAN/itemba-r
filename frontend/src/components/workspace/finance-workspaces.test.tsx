@@ -12,6 +12,7 @@ vi.mock('@/hooks/use-auth', () => ({
 const cases = [
   {
     route: 'receivables',
+    transactionView: 'AR Documents',
     Page: Receivables,
     record: {
       id: 'record-1',
@@ -29,6 +30,7 @@ const cases = [
   },
   {
     route: 'payables',
+    transactionView: 'AP Documents',
     Page: Payables,
     record: {
       id: 'record-1',
@@ -46,6 +48,7 @@ const cases = [
   },
   {
     route: 'expenses',
+    transactionView: 'Individual transactions',
     Page: Expenses,
     record: {
       id: 'record-1',
@@ -68,21 +71,24 @@ afterEach(() => {
   window.history.replaceState({}, '', '/');
 });
 
-describe.each(cases)('$route focus workspace', ({ route, Page, record, name }) => {
+describe.each(cases)('$route focus workspace', ({ route, transactionView, Page, record, name }) => {
   it('preserves URL scope, searches on the server, and exposes only read actions to a viewer', async () => {
     auth.permissions = new Set([`${route}.view`]);
     window.history.replaceState({}, '', `/finance/${route}?companyId=co-1&status=${record.status}`);
     const fetcher = vi.fn(async (url: string) => ({
       ok: true,
       json: async () => ({
-        data: url.includes(`/api/backend/${route}?`)
-          ? { data: [record], total: 31, page: 1, totalPages: 2, limit: 20 }
-          : [],
+        data: url.includes(`/api/backend/${route}/accounts?`)
+          ? { data: [], total: 0, page: 1, totalPages: 0, limit: 20 }
+          : url.includes(`/api/backend/${route}?`)
+            ? { data: [record], total: 31, page: 1, totalPages: 2, limit: 20 }
+            : [],
       }),
     }));
     vi.stubGlobal('fetch', fetcher);
     const user = userEvent.setup();
     render(<Page />);
+    await user.click(screen.getByRole('button', { name: transactionView }));
     await user.click(await screen.findByRole('button', { name: `Inspect ${name}` }));
     const inspector = screen.getByRole('complementary', { name: 'Record details' });
     expect(within(inspector).getByRole('button', { name: 'View', exact: true })).toBeVisible();
@@ -115,9 +121,11 @@ describe.each(cases)('$route focus workspace', ({ route, Page, record, name }) =
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => ({
-        ok: !url.includes(`/api/backend/${route}?`),
+        ok:
+          !url.includes(`/api/backend/${route}?`) &&
+          !url.includes(`/api/backend/${route}/accounts?`),
         json: async () =>
-          url.includes(`/api/backend/${route}?`)
+          url.includes(`/api/backend/${route}?`) || url.includes(`/api/backend/${route}/accounts?`)
             ? { message: 'Service unavailable' }
             : { data: [] },
       })),
