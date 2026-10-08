@@ -1,7 +1,11 @@
 export type Choice = { id: string; name: string; companyId?: string; divisionId?: string };
 export type Directory = { companies: Choice[]; divisions: Choice[]; branches: Choice[] };
 export type Scope = { companyId: string; divisionId: string; branchId: string };
-export type Supplier = Choice & { email?: string | null; phone?: string | null };
+export type Supplier = Choice & {
+  email?: string | null;
+  phone?: string | null;
+  canonicalSupplierId?: string | null;
+};
 export type Invoice = Scope & {
   fuelReportPostingId?: string | null;
   canonicalInvoiceId?: string | null;

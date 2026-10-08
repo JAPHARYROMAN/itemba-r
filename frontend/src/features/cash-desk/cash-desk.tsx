@@ -31,6 +31,12 @@ import { backendGet } from '@/lib/api-client';
 import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
 import { CashSalesConnection } from './cash-sales-connection';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import {
+  CashMovementAccounts,
+  CashLoanAccounts,
+  CashSupplierInvoiceAccounts,
+} from './cash-registers';
 import {
   Account,
   CashOverview,
@@ -132,6 +138,7 @@ export function CashDesk({
   const selected = detail.data;
   const setSelected = (row: Movement | null) => selectRecord(row?.id ?? '');
   const [expenseRevision, setExpenseRevision] = useState(0);
+  const [consolidated, setConsolidated] = useState(true);
   const deferred = useDeferredValue(search),
     query = Object.fromEntries(Object.entries(scope).filter(([, v]) => v));
   const directory = useWorkspaceResource<Directory & { requiresCompanySelection?: boolean }>(
@@ -150,7 +157,7 @@ export function CashDesk({
     '/cash-desk/movements',
     {
       ...query,
-      page: section === 'overview' ? 1 : page,
+      page: section === 'overview' || consolidated ? 1 : page,
       ...(section === 'sales'
         ? { kind: 'SALES_INCOME', date }
         : section === 'movements'
@@ -172,7 +179,7 @@ export function CashDesk({
     : null;
   const loans = useWorkspaceResource<Page<Loan>>(
     '/cash-desk/loans',
-    { ...query, page },
+    { ...query, page: consolidated ? 1 : page },
     allowed && section === 'loans',
   );
   const supplierOverview = useWorkspaceResource<InvoiceOverview>(
@@ -182,7 +189,7 @@ export function CashDesk({
   );
   const invoices = useWorkspaceResource<Page<Invoice>>(
     '/invoice-desk/invoices',
-    { ...query, page, search: deferred, status: 'all' },
+    { ...query, page: consolidated ? 1 : page, search: deferred, status: 'all' },
     allowed && invoiceAccess && section === 'suppliers',
   );
   // Party linkage (Phase 2): Supplier balances come from the resolver, never from a desk-only
@@ -682,12 +689,43 @@ export function CashDesk({
                 </span>
               </p>
             )}
-            <MovementList
-              rows={movements.data?.rows ?? []}
-              loading={movements.loading}
-              onSelect={setSelected}
+            <ConsolidationSwitch
+              value={consolidated}
+              onChange={(value) => {
+                setConsolidated(value);
+                setPage(1);
+              }}
             />
-            <Pagination page={page} total={movements.data?.total ?? 0} onChange={setPage} />
+            {consolidated ? (
+              <CashMovementAccounts
+                query={{
+                  ...query,
+                  ...(section === 'sales'
+                    ? { kind: 'SALES_INCOME', date }
+                    : {
+                        ...(kind ? { kind } : {}),
+                        ...(accountId ? { accountId } : {}),
+                        ...(partyType ? { partyType } : {}),
+                        ...(partyTarget ?? {}),
+                        search: deferred,
+                      }),
+                }}
+                revision={expenseRevision}
+                page={page}
+                onPage={setPage}
+                onSelect={setSelected}
+                title={section === 'sales' ? 'Daily sales accounts' : 'Cash counterparty accounts'}
+              />
+            ) : (
+              <>
+                <MovementList
+                  rows={movements.data?.rows ?? []}
+                  loading={movements.loading}
+                  onSelect={setSelected}
+                />
+                <Pagination page={page} total={movements.data?.total ?? 0} onChange={setPage} />
+              </>
+            )}
           </>
         )}
         {section === 'expenses' && (
@@ -755,59 +793,78 @@ export function CashDesk({
             <Loading />
           ) : (
             <>
-              <div className="cash-loans">
-                {loans.data?.rows.map((l) => (
-                  <article key={l.id}>
-                    <div className="cash-loan-route">
-                      <span>
-                        {l.lender.company.name}
-                        <small>Lender · {l.lender.name}</small>
-                      </span>
-                      <ArrowRight />
-                      <span>
-                        {l.borrower.company.name}
-                        <small>Borrower · {l.borrower.name}</small>
-                      </span>
-                    </div>
-                    <h2>{l.description}</h2>
-                    <dl>
-                      <div>
-                        <dt>Amount lent</dt>
-                        <dd>{money(l.principal, l.currency)}</dd>
-                      </div>
-                      <div>
-                        <dt>Remaining</dt>
-                        <dd>{money(l.outstanding, l.currency)}</dd>
-                      </div>
-                      <div>
-                        <dt>Due</dt>
-                        <dd>
-                          {l.voidedAt
-                            ? 'Reversed'
-                            : l.dueDate
-                              ? dateLabel(l.dueDate)
-                              : 'No due date'}
-                        </dd>
-                      </div>
-                    </dl>
-                    {record && !l.voidedAt && !/^0(?:\.0+)?$/.test(l.outstanding) && (
-                      <Btn
-                        variant="secondary"
-                        onClick={() => setEditor({ kind: 'movement', loan: l })}
-                      >
-                        Record repayment
-                      </Btn>
-                    )}
-                  </article>
-                ))}
-              </div>
-              {!loans.data?.rows.length && (
-                <Empty
-                  title="No intercompany loans yet"
-                  description="Record money lent from one group company to another, and track each repayment."
+              <ConsolidationSwitch
+                value={consolidated}
+                onChange={(value) => {
+                  setConsolidated(value);
+                  setPage(1);
+                }}
+              />
+              {consolidated ? (
+                <CashLoanAccounts
+                  query={query}
+                  revision={expenseRevision}
+                  page={page}
+                  onPage={setPage}
+                  onRepay={record ? (loan) => setEditor({ kind: 'movement', loan }) : undefined}
                 />
+              ) : (
+                <>
+                  <div className="cash-loans">
+                    {loans.data?.rows.map((l) => (
+                      <article key={l.id}>
+                        <div className="cash-loan-route">
+                          <span>
+                            {l.lender.company.name}
+                            <small>Lender · {l.lender.name}</small>
+                          </span>
+                          <ArrowRight />
+                          <span>
+                            {l.borrower.company.name}
+                            <small>Borrower · {l.borrower.name}</small>
+                          </span>
+                        </div>
+                        <h2>{l.description}</h2>
+                        <dl>
+                          <div>
+                            <dt>Amount lent</dt>
+                            <dd>{money(l.principal, l.currency)}</dd>
+                          </div>
+                          <div>
+                            <dt>Remaining</dt>
+                            <dd>{money(l.outstanding, l.currency)}</dd>
+                          </div>
+                          <div>
+                            <dt>Due</dt>
+                            <dd>
+                              {l.voidedAt
+                                ? 'Reversed'
+                                : l.dueDate
+                                  ? dateLabel(l.dueDate)
+                                  : 'No due date'}
+                            </dd>
+                          </div>
+                        </dl>
+                        {record && !l.voidedAt && !/^0(?:\.0+)?$/.test(l.outstanding) && (
+                          <Btn
+                            variant="secondary"
+                            onClick={() => setEditor({ kind: 'movement', loan: l })}
+                          >
+                            Record repayment
+                          </Btn>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                  {!loans.data?.rows.length && (
+                    <Empty
+                      title="No intercompany loans yet"
+                      description="Record money lent from one group company to another, and track each repayment."
+                    />
+                  )}
+                  <Pagination page={page} total={loans.data?.total ?? 0} onChange={setPage} />
+                </>
               )}
-              <Pagination page={page} total={loans.data?.total ?? 0} onChange={setPage} />
             </>
           ))}
         {section === 'suppliers' &&
@@ -861,36 +918,55 @@ export function CashDesk({
                   />
                 </label>
               </div>
-              <div className="cash-invoices">
-                {invoices.loading ? (
-                  <Loading />
-                ) : (
-                  invoices.data?.rows.map((i) => (
-                    <div key={i.id}>
-                      <Receipt size={20} />
-                      <span>
-                        <strong>{i.supplier.name}</strong>
-                        <small>
-                          {i.invoiceNumber} · {i.branch.name} · Due {dateLabel(i.dueDate)}
-                        </small>
-                      </span>
-                      <span>
-                        <strong>{money(i.outstanding, i.currency)}</strong>
-                        <small>{i.status}</small>
-                      </span>
-                      {pay && !i.voidedAt && !/^0(?:\.0+)?$/.test(i.outstanding) && (
-                        <Btn
-                          variant="secondary"
-                          onClick={() => setEditor({ kind: 'movement', invoice: i })}
-                        >
-                          Record payment
-                        </Btn>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-              <Pagination page={page} total={invoices.data?.total ?? 0} onChange={setPage} />
+              <ConsolidationSwitch
+                value={consolidated}
+                onChange={(value) => {
+                  setConsolidated(value);
+                  setPage(1);
+                }}
+              />
+              {consolidated ? (
+                <CashSupplierInvoiceAccounts
+                  query={{ ...query, search: deferred, status: 'all' }}
+                  revision={expenseRevision}
+                  page={page}
+                  onPage={setPage}
+                  onPay={pay ? (invoice) => setEditor({ kind: 'movement', invoice }) : undefined}
+                />
+              ) : (
+                <>
+                  <div className="cash-invoices">
+                    {invoices.loading ? (
+                      <Loading />
+                    ) : (
+                      invoices.data?.rows.map((i) => (
+                        <div key={i.id}>
+                          <Receipt size={20} />
+                          <span>
+                            <strong>{i.supplier.name}</strong>
+                            <small>
+                              {i.invoiceNumber} · {i.branch.name} · Due {dateLabel(i.dueDate)}
+                            </small>
+                          </span>
+                          <span>
+                            <strong>{money(i.outstanding, i.currency)}</strong>
+                            <small>{i.status}</small>
+                          </span>
+                          {pay && !i.voidedAt && !/^0(?:\.0+)?$/.test(i.outstanding) && (
+                            <Btn
+                              variant="secondary"
+                              onClick={() => setEditor({ kind: 'movement', invoice: i })}
+                            >
+                              Record payment
+                            </Btn>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <Pagination page={page} total={invoices.data?.total ?? 0} onChange={setPage} />
+                </>
+              )}
             </>
           ))}
       </div>

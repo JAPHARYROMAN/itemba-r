@@ -23,6 +23,8 @@ function fixture() {
       cashAccountId: 'a',
       journalEntryId: 'cash-journal',
       customerName: 'Walk-in',
+      customerId: 'walk-in',
+      company: { name: 'Company' },
     },
     {
       id: 'credit',
@@ -33,12 +35,16 @@ function fixture() {
       paidAmount: D(0),
       receivableId: 'r',
       customerName: 'Customer',
+      customerId: 'customer',
+      company: { name: 'Company' },
     },
   ];
   const receivable = {
     id: 'r',
     companyId: 'c',
     customerName: 'Customer',
+    customerId: 'customer',
+    company: { name: 'Company' },
     currency: 'TZS',
     paidAmount: D(30),
     outstandingAmount: D(170),
@@ -83,6 +89,9 @@ function fixture() {
         {
           id: 'p',
           paymentNumber: 'PAY1',
+          companyId: 'c',
+          customerId: 'customer',
+          company: { name: 'Company' },
           currency: 'TZS',
           cashAccountId: 'a',
           paymentDate: new Date('2026-09-26'),
@@ -119,6 +128,17 @@ describe('Sales Desk → Cash Desk live projection', () => {
       salesOrderNumber: 'SO-CREDIT',
     });
     expect(result.receipts.rows).toHaveLength(3);
+    expect(result.receipts.rows.find((row) => row.id === 'cash-journal')).toMatchObject({
+      companyId: 'c',
+      customerId: 'walk-in',
+      company: { name: 'Company' },
+    });
+    for (const id of ['settlement', 'p'])
+      expect(result.receipts.rows.find((row) => row.id === id)).toMatchObject({
+        companyId: 'c',
+        customerId: 'customer',
+        company: { name: 'Company' },
+      });
   });
   it('scopes every source by company and branch and only reads unreversed receipts on the selected date', async () => {
     const { db, service } = fixture();
@@ -236,7 +256,7 @@ describe('Sales Desk → Cash Desk live projection', () => {
     expect(result.outstanding.rows.map((r) => [r.source, r.id, r.customerId])).toEqual([
       ['SALES_DESK', 'desk-sale', 'cus-1'],
       ['NOTEBOOK', 'note', 'cus-1'],
-      ['RECEIVABLE', 'r', null],
+      ['RECEIVABLE', 'r', 'customer'],
     ]);
     expect(result.outstanding.rows[0]).toMatchObject({
       deskSaleId: 'desk-sale',

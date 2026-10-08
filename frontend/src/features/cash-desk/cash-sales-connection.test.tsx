@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CashSalesConnection, type SalesConnection } from './cash-sales-connection';
 import { notifyDeskSaved } from '@/components/workspace/linked-desk-changes';
@@ -53,6 +53,7 @@ const response: SalesConnection = {
         salesOrderNumber: 'SO1',
         saleId: 's',
         currency: 'TZS',
+        amount: '200',
         outstandingAmount: '170',
         paidAmount: '30',
         dueDate: '2026-09-27',
@@ -68,6 +69,7 @@ const response: SalesConnection = {
         date: '2026-09-26',
         reference: 'JE1',
         customer: 'Test customer',
+        companyId: 'c',
         amount: '30',
         currency: 'TZS',
         account: null,
@@ -79,6 +81,10 @@ const response: SalesConnection = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({ matches: false })),
+  );
   api.permissions = new Set([
     'cash_desk.view',
     'sales.view',
@@ -87,10 +93,42 @@ beforeEach(() => {
   ]);
   api.get.mockResolvedValue(response);
 });
+async function individualTransactions() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Individual transactions' }));
+  await screen.findAllByText('Test customer');
+}
 describe('Business sales in Cash Desk', () => {
+  it('starts collected payments with one customer account and opens the original receipt details', async () => {
+    api.get.mockResolvedValue({
+      ...response,
+      receipts: {
+        total: 2,
+        rows: [
+          response.receipts.rows[0],
+          { ...response.receipts.rows[0], id: 'second', reference: 'JE2', amount: '40' },
+        ],
+      },
+    });
+    render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
+    await screen.findByText('Test customer');
+    fireEvent.click(screen.getByRole('button', { name: 'Collected payments' }));
+    const table = screen.getByRole('table', { name: 'Collected customer accounts' });
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
+    expect(within(table).getByText('TZS 70.00')).toBeInTheDocument();
+    fireEvent.click(
+      within(table).getByRole('button', { name: 'View transactions for Test customer' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect JE2' }));
+    expect(screen.getByRole('link', { name: 'View sale' })).toHaveAttribute(
+      'href',
+      '/sales-desk/sales/s',
+    );
+    expect(screen.getByText('second')).toBeInTheDocument();
+  });
   it('defers a parent refresh until the collection form closes', async () => {
     const view = render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     await screen.findByText('Test customer');
+    await individualTransactions();
     fireEvent.click(screen.getByRole('button', { name: 'Collect payment for SO1' }));
     const before = api.get.mock.calls.length;
     view.rerender(<CashSalesConnection scope={scope} date="2026-09-26" revision={1} />);
@@ -102,6 +140,7 @@ describe('Business sales in Cash Desk', () => {
   it('opens the same sale and collects against its existing receivable', async () => {
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     await screen.findByText('Test customer');
+    await individualTransactions();
     expect(screen.getByRole('link', { name: 'View sale' })).toHaveAttribute(
       'href',
       '/sales-desk/sales/s',
@@ -125,6 +164,7 @@ describe('Business sales in Cash Desk', () => {
   it('refreshes after Sales Desk changes but defers while a collection is being edited', async () => {
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     await screen.findByText('Test customer');
+    await individualTransactions();
     fireEvent.click(screen.getByRole('button', { name: 'Collect payment for SO1' }));
     const before = api.get.mock.calls.length;
     act(() => notifyDeskSaved('sales-desk'));
@@ -135,6 +175,7 @@ describe('Business sales in Cash Desk', () => {
   it('retains company/branch/date filters and shows real receipt accounts', async () => {
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     await screen.findByText('Test customer');
+    await individualTransactions();
     expect(api.get).toHaveBeenCalledWith(
       '/cash-desk/sales-connection',
       expect.objectContaining({ query: { ...scope, date: '2026-09-26', page: 1, search: '' } }),
@@ -149,6 +190,7 @@ describe('Business sales in Cash Desk', () => {
     api.permissions.delete('receivables.manage');
     const view = render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     await screen.findByText('Test customer');
+    await individualTransactions();
     expect(
       screen.queryByRole('button', { name: 'Collect payment for SO1' }),
     ).not.toBeInTheDocument();
@@ -193,6 +235,7 @@ describe('Business sales in Cash Desk', () => {
       },
     });
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
+    await individualTransactions();
     const customers = await screen.findAllByRole('link', { name: 'Test customer' });
     expect(customers).toHaveLength(2);
     expect(customers[0]).toHaveAttribute('href', '/sales-desk/customers/cus-1');
@@ -214,5 +257,49 @@ describe('Business sales in Cash Desk', () => {
     render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Connection unavailable');
     expect(screen.queryByText('TZS 0.00')).not.toBeInTheDocument();
+  });
+  it('starts with one KAMENDU account across result pages and retains every transaction and collection action', async () => {
+    const balances = ['620000', '85000', '160000', '725000'];
+    const rows = balances.map((amount, index) => ({
+      ...response.outstanding.rows[0],
+      id: `kamendu-${index}`,
+      customerId: 'kamendu',
+      customerName: 'KAMENDU HARDWARE',
+      salesOrderNumber: `SO-KAMENDU-${index}`,
+      amount,
+      outstandingAmount: amount,
+      paidAmount: '0',
+    }));
+    api.get.mockImplementation(async (_path, options) => ({
+      ...response,
+      page: options.query.page,
+      pageSize: 2,
+      outstanding: {
+        total: 4,
+        rows: rows.slice((options.query.page - 1) * 2, options.query.page * 2),
+      },
+      receipts: { total: 0, rows: [] },
+    }));
+    render(<CashSalesConnection scope={scope} date="2026-09-26" revision={0} />);
+    const account = await screen.findByRole('button', {
+      name: 'View transactions for KAMENDU HARDWARE',
+    });
+    expect(screen.getAllByText('KAMENDU HARDWARE')).toHaveLength(1);
+    expect(within(account.closest('tr')!).getAllByRole('cell')[5]).toHaveTextContent(
+      'TZS 1,590,000.00',
+    );
+    expect(screen.queryByRole('button', { name: /Collect payment for/ })).not.toBeInTheDocument();
+    fireEvent.click(account);
+    for (let index = 0; index < 4; index++)
+      expect(screen.getByText(`ID: kamendu-${index}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect SO-KAMENDU-3' }));
+    expect(screen.getByText('Transaction ID')).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('term').filter((term) => term.textContent === 'Customer'),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Collect payment for SO-KAMENDU-3' }));
+    expect(api.modal).toHaveBeenLastCalledWith(
+      expect.objectContaining({ receivableId: 'kamendu-3', outstanding: 725000 }),
+    );
   });
 });

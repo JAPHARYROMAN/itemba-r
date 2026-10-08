@@ -174,7 +174,7 @@ export function ConsolidatedAccounts<T extends { id: string }>({
                       ]}
                       details={[
                         { label: 'Transaction ID', value: (record) => record.id },
-                        ...documentFields,
+                        ...documentFields.slice(1),
                       ]}
                       actions={documentActions}
                     />
