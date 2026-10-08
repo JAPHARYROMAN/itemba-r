@@ -27,6 +27,56 @@ beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
 });
 describe('Account to transaction drill-down', () => {
+  it('shows an account when a restored transaction page exceeds the account count', async () => {
+    api.get.mockResolvedValue(rows);
+    render(
+      <PartyTransactionRegister
+        endpoint="/invoices"
+        query={{}}
+        page={7}
+        title="Creditor accounts"
+        snapshot={businessTransactionSnapshot}
+        documentName={(record: (typeof rows)[number]) => record.id}
+        documentDate={(record) => record.date}
+        documentStatus={(record) => record.status}
+      />,
+    );
+    expect(
+      await screen.findByRole('button', { name: 'View transactions for Creditor A' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('USD 70.00')).toBeInTheDocument();
+  });
+  it('uses the last valid account page and navigates from that page after totals shrink', async () => {
+    api.get.mockResolvedValue(
+      Array.from({ length: 45 }, (_, i) => ({
+        ...rows[0],
+        id: `r-${i}`,
+        supplierId: `s-${i}`,
+        supplierName: `Creditor ${i}`,
+      })),
+    );
+    const onPage = vi.fn();
+    render(
+      <PartyTransactionRegister
+        endpoint="/invoices"
+        query={{}}
+        page={9}
+        pageSize={20}
+        onPage={onPage}
+        title="Creditor accounts"
+        snapshot={businessTransactionSnapshot}
+        documentName={(record: (typeof rows)[number]) => record.id}
+        documentDate={(record) => record.date}
+        documentStatus={(record) => record.status}
+      />,
+    );
+    await screen.findByText('45 accounts · Page 3 of 3');
+    expect(screen.getAllByRole('button', { name: /View transactions for Creditor/ })).toHaveLength(
+      5,
+    );
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Previous' }));
+    expect(onPage).toHaveBeenCalledWith(2);
+  });
   it('loads all pages and opens an individual transaction with its full ID and actions', async () => {
     api.get.mockImplementation(async (_path, { query }) => ({
       data: query.page === 1 ? rows.slice(0, 3) : rows.slice(3),
