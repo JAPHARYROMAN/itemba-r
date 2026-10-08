@@ -109,11 +109,15 @@ export function PartyTransactionRegister<T extends { id: string }>({
       };
     }
   }, [result, snapshot]);
-  const page = props.page ?? 1;
   const pageSize = props.pageSize ?? 20;
+  const page = Math.max(
+    1,
+    Math.min(props.page ?? 1, Math.ceil(consolidated.accounts.length / pageSize) || 1),
+  );
   return (
     <ConsolidatedAccounts
       {...props}
+      page={page}
       accounts={current ? consolidated.accounts.slice((page - 1) * pageSize, page * pageSize) : []}
       loading={!current}
       error={current ? (result?.error ?? consolidated.error) : undefined}
