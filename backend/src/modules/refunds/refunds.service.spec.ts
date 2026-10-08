@@ -112,6 +112,7 @@ function makeService(
       ],
     })),
     updateMany: jest.fn(async () => ({ count: 1 })),
+    update: jest.fn(async ({ data }: any) => ({ id: 'reversal', ...data })),
     ...opts.journalEntry,
   };
 
@@ -509,6 +510,7 @@ describe('RefundsService.pay — balanced JE & DRAFT-only guard', () => {
 describe('RefundsService.void — reversing JE', () => {
   it('posts a reversal that swaps debit/credit on every original line', async () => {
     const { service, postLines, prisma } = makeService({
+      postLines: jest.fn(async () => ({ id: 'je-reversal', journalNumber: 'JE-REFUNDS-REVERSAL' })),
       refund: {
         updateMany: jest.fn(async () => ({ count: 1 })),
         findFirst: jest.fn(async () =>
@@ -532,6 +534,10 @@ describe('RefundsService.void — reversing JE', () => {
     expect(prisma.journalEntry.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'REVERSED' }) }),
     );
+    expect(prisma.journalEntry.update).toHaveBeenCalledWith({
+      where: { id: 'je-reversal' },
+      data: { reversalOfId: 'je-1' },
+    });
     // Reversal re-debits GL cash (money back in), so the subledger cache is
     // incremented back by the same amount.
     expect(prisma.cashAccount.update).toHaveBeenCalledWith(
@@ -573,6 +579,23 @@ describe('RefundsService.void — reversing JE', () => {
     const result = await service.void('refund-1', { reason: 'x' } as any, user);
     expect(postLines).not.toHaveBeenCalled();
     expect(result.status).toBe(RefundStatus.VOID);
+  });
+
+  it('rejects voiding a posted refund when its expected journal reversal is unavailable', async () => {
+    const { service, prisma, postLines } = makeService({
+      refund: {
+        findFirst: jest.fn(async () =>
+          draftRefund({ status: RefundStatus.PAID, journalEntryId: 'missing' }),
+        ),
+      },
+      journalEntry: { findFirst: jest.fn(async () => null) },
+    });
+    await expect(service.void('refund-1', { reason: 'x' } as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(postLines).not.toHaveBeenCalled();
+    expect(prisma.cashAccount.update).not.toHaveBeenCalled();
+    expect(prisma.refund.update).not.toHaveBeenCalled();
   });
 
   it('does NOT increment CashAccount.currentBalance when no reversal JE is posted', async () => {

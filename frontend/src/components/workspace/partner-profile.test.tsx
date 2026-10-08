@@ -289,6 +289,42 @@ function capture(name: string) {
   writeFileSync(join(dir, name + '.html'), document.body.innerHTML);
 }
 describe.each(['customer', 'supplier'] as const)('%s profile', (kind) => {
+  it('labels provisional saved statement balances and preserves their currency', async () => {
+    const profile = kind === 'customer' ? customer : supplier;
+    const incomplete = {
+      ...profile,
+      latestStatements: [
+        {
+          ...common.latestStatements[0],
+          currency: 'USD',
+          closingBalance: '123.45',
+          settlementHistory: {
+            status: 'INCOMPLETE',
+            recoveredLegacySettlements: 0,
+            unresolvedAmount: '12.34',
+            gaps: [
+              {
+                documentId: 'invoice',
+                reference: 'INV-0042',
+                amount: '12.34',
+                reason: 'Missing dated settlement',
+              },
+            ],
+          },
+        },
+      ],
+    };
+    state.get.mockImplementation(async (path: string) =>
+      path.startsWith('/financial-reports/') ? aging : incomplete,
+    );
+    mount(kind);
+    await ready();
+    await section('Statements');
+    expect(screen.getByText('USD 123.45')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Provisional balance · settlement history incomplete. Unresolved evidence: USD 12.34.',
+    );
+  });
   it('gates reads and destination actions by exact permissions', async () => {
     state.permissions.clear();
     const view = mount(kind);

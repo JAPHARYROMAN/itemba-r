@@ -20,6 +20,10 @@ import { PartyBalancePanel } from '@/features/party/party-balance-panel';
 import { SupplierAgingPanel } from '@/features/party/supplier-aging-panel';
 import { downloadBinaryGet } from '@/lib/export-download';
 import type { PartyBalance } from '@/features/party/party-balance';
+import {
+  StatementHistoryWarning,
+  type StatementSettlementHistory,
+} from '@/components/workspace/statement-history-warning';
 
 interface SupplierCategory {
   productCategory: { id: string; name: string; categoryType: string };
@@ -108,6 +112,8 @@ interface StatementRun {
   totalDebits: number | string;
   totalCredits: number | string;
   closingBalance: number | string;
+  currency: string;
+  settlementHistory?: StatementSettlementHistory;
   status: string;
   generatedAt?: string;
   generatedBy?: { fullName?: string | null; email?: string | null } | null;
@@ -745,8 +751,14 @@ export function SupplierProfile({
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <p className="font-semibold">{money(statement.closingBalance)}</p>
+                        <p className="font-semibold">
+                          {money(statement.closingBalance, statement.currency)}
+                        </p>
                         <StatusBadge status={statement.status} />
+                        <StatementHistoryWarning
+                          history={statement.settlementHistory}
+                          currency={statement.currency ?? 'TZS'}
+                        />
                       </div>
                       {hasPermission('supplier_statements.view') && (
                         <div className="flex gap-1">

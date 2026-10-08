@@ -1,4 +1,8 @@
 import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
+import {
+  settlementStatusFilter,
+  withSettlementLifecycle,
+} from '../../common/utils/source-settlement';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessLevel, CashAccountType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -52,7 +56,7 @@ export class PayablesService {
     ]);
 
     return {
-      data: data.map((record) => this.withResolvedSupplierName(record)),
+      data: data.map((record) => withSettlementLifecycle(this.withResolvedSupplierName(record))),
       total,
       page: paging.page,
       limit: paging.limit,
@@ -73,7 +77,7 @@ export class PayablesService {
 
     const accounts = consolidateAccounts(
       records.map((raw) => {
-        const record = this.withResolvedSupplierName(raw);
+        const record = withSettlementLifecycle(this.withResolvedSupplierName(raw));
         return {
           record,
           id: record.id,
@@ -131,10 +135,12 @@ export class PayablesService {
           },
         })
       : null;
-    return this.withResolvedSupplierName({
-      ...record,
-      supplier: supplier ?? record.supplier,
-    });
+    return withSettlementLifecycle(
+      this.withResolvedSupplierName({
+        ...record,
+        supplier: supplier ?? record.supplier,
+      }),
+    );
   }
 
   async create(dto: CreatePayableDto, user: AuthUser) {
@@ -322,7 +328,7 @@ export class PayablesService {
             'module (pay the expense). Paying it here would double-relieve AP and double-pay cash.',
         );
       }
-      if (!['OPEN', 'PARTIALLY_PAID'].includes(locked.status)) {
+      if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
         throw new BadRequestException(`Cannot record a payment against a ${locked.status} payable`);
       }
       if (!locked.supplierId) {
@@ -587,6 +593,8 @@ export class PayablesService {
           notes: dto.reason,
         },
       });
+      await this.supplierPayments.syncSupplierInvoices(tx, updated);
+      await this.supplierPayments.syncPurchaseOrders(tx, updated);
       await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
 
       // The write-off journal, AP subledger transition, supplier projection,
@@ -711,30 +719,59 @@ export class PayablesService {
   async remove(id: string, user: AuthUser) {
     const existing = await this.findOne(id);
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
-    // An Expense-sourced payable is a subledger mirror of an Expense; deleting
-    // it would hide the accrual from ExpensesService.pay(), which would then
-    // fall back to the legacy full cash-basis JE (double expense recognition)
-    // and strand the accrual's AP_CONTROL credit forever. Same guard as
-    // recordPayment / writeOff: the expense lifecycle is the single path.
-    if (existing.sourceType === 'Expense') {
-      throw new BadRequestException(
-        'This payable was raised from an expense and cannot be deleted here. ' +
-          'Manage it from the Expenses module.',
-      );
-    }
     const userId = user.id;
     await this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "payables" WHERE "id" = ${id} AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Payable not found');
+      const live = await tx.payable.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              purchaseOrders: true,
+              supplierInvoices: true,
+              fuelDeliveries: true,
+              cashDeskMovements: true,
+              paymentAllocations: true,
+              advanceApplications: true,
+            },
+          },
+        },
+      });
+      await this.companyScope.assertCanAccessCompany(user, live.companyId, AccessLevel.MANAGE);
+      if (
+        !withSettlementLifecycle(live).canDelete ||
+        Object.values(live._count ?? {}).some((count) => count > 0)
+      ) {
+        throw new BadRequestException(
+          'Posted, settled, or source-linked payables cannot be deleted. Use the source cancellation or reversal workflow.',
+        );
+      }
+      const posted = await tx.journalEntry.count({
+        where: {
+          OR: [
+            ...(live.journalEntryId ? [{ id: live.journalEntryId }] : []),
+            { referenceType: 'Payable', referenceId: id },
+          ],
+          status: { in: ['POSTED', 'REVERSED'] },
+        },
+      });
+      if (posted) {
+        throw new BadRequestException(
+          'Posted, settled, or source-linked payables cannot be deleted. Use the source cancellation or reversal workflow.',
+        );
+      }
       await tx.payable.update({ where: { id }, data: { deletedAt: new Date() } });
-      await this.syncSupplierBalance(tx, existing.companyId, existing.supplierId);
-    });
-
-    await this.auditLogs.log({
-      action: 'PAYABLE_DELETE',
-      entityType: 'Payable',
-      entityId: id,
-      userId,
-      companyId: existing.companyId,
-      oldValue: existing as any,
+      await this.syncSupplierBalance(tx, live.companyId, live.supplierId);
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'PAYABLE_DELETE',
+        entityType: 'Payable',
+        entityId: id,
+        userId,
+        companyId: live.companyId,
+        oldValue: live as any,
+      });
     });
 
     return { success: true };
@@ -753,7 +790,7 @@ export class PayablesService {
     }
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
-    if (status) where.status = status;
+    Object.assign(where, settlementStatusFilter(status));
     if (supplierId) where.supplierId = supplierId;
     if (dateFrom || dateTo) {
       where.issueDate = {};
@@ -778,6 +815,16 @@ export class PayablesService {
 
   private includeListScope() {
     return {
+      _count: {
+        select: {
+          purchaseOrders: true,
+          supplierInvoices: true,
+          fuelDeliveries: true,
+          cashDeskMovements: true,
+          paymentAllocations: true,
+          advanceApplications: true,
+        },
+      },
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },

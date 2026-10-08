@@ -6,12 +6,32 @@ import Link from 'next/link';
 import { ErrorState, PageSpinner } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
+import { formatAccountMoney } from '@/lib/account-consolidation';
+import {
+  StatementHistoryWarning,
+  type StatementSettlementHistory,
+} from '@/components/workspace/statement-history-warning';
+
+interface StatementRun {
+  id: string;
+  statementRunNumber: string;
+  companyId: string;
+  supplierId?: string | null;
+  supplier?: { name: string } | null;
+  periodStart: string;
+  periodEnd: string;
+  currency: string;
+  openingBalance: number | string;
+  closingBalance: number | string;
+  status: string;
+  settlementHistory?: StatementSettlementHistory;
+}
 
 export default function SupplierStatementsPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('supplier_statements.list');
   const beginRequest = useRequestGuard();
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<StatementRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -26,7 +46,9 @@ export default function SupplierStatementsPage() {
       if (!response.ok) throw new Error('Failed to load supplier statements');
       const body = await response.json();
       if (!request.current()) return;
-      setData(Array.isArray(body.data) ? body.data : Array.isArray(body.data?.data) ? body.data.data : []);
+      setData(
+        Array.isArray(body.data) ? body.data : Array.isArray(body.data?.data) ? body.data.data : [],
+      );
     } catch (err) {
       if (!request.current()) return;
       setData([]);
@@ -76,29 +98,55 @@ export default function SupplierStatementsPage() {
             </thead>
             <tbody>
               {data.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
-              ) : data.map((row: any) => (
-                <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{row.statementRunNumber}</td>
-                  <td className="px-4 py-3">{row.companyId}</td>
-                  <td className="px-4 py-3 font-medium">
-                    {row.supplierId ? (
-                      <Link href={`/invoice-desk/suppliers/${encodeURIComponent(row.supplierId)}`} className="text-brand-600 hover:underline" title="Open supplier profile">
-                        {row.supplier?.name ?? row.supplierId}
-                      </Link>
-                    ) : 'All suppliers'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-400">{row.periodStart ? new Date(row.periodStart).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3 text-gray-400">{row.periodEnd ? new Date(row.periodEnd).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3">{row.openingBalance}</td>
-                  <td className="px-4 py-3 font-medium">{row.closingBalance}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.status === 'SENT' ? 'bg-green-100 text-green-700' : row.status === 'DRAFT' ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}>
-                      {row.status}
-                    </span>
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                    No records found
                   </td>
                 </tr>
-              ))}
+              ) : (
+                data.map((row) => (
+                  <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs">{row.statementRunNumber}</td>
+                    <td className="px-4 py-3">{row.companyId}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {row.supplierId ? (
+                        <Link
+                          href={`/invoice-desk/suppliers/${encodeURIComponent(row.supplierId)}`}
+                          className="text-brand-600 hover:underline"
+                          title="Open supplier profile"
+                        >
+                          {row.supplier?.name ?? row.supplierId}
+                        </Link>
+                      ) : (
+                        'All suppliers'
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.periodStart ? new Date(row.periodStart).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.periodEnd ? new Date(row.periodEnd).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {formatAccountMoney(row.openingBalance, row.currency ?? 'TZS')}
+                    </td>
+                    <td className="px-4 py-3 font-medium">
+                      {formatAccountMoney(row.closingBalance, row.currency ?? 'TZS')}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${row.status === 'SENT' ? 'bg-green-100 text-green-700' : row.status === 'DRAFT' ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}
+                      >
+                        {row.status}
+                      </span>
+                      <StatementHistoryWarning
+                        history={row.settlementHistory}
+                        currency={row.currency ?? 'TZS'}
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </WorkspaceTable>
         </div>

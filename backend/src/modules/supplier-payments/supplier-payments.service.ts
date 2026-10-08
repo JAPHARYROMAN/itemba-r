@@ -27,6 +27,7 @@ import {
 } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
+import { sourceSettlement } from '../../common/utils/source-settlement';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
 import { remittancePdf } from './remittance-advice';
 import { pagination } from '../../common/utils/pagination';
@@ -631,8 +632,21 @@ export class SupplierPaymentsService {
     const ordered = [...current.allocations].sort((a, b) => (a.payableId < b.payableId ? -1 : 1));
     for (const alloc of ordered) {
       const locked = await this.lockPayable(tx, alloc.payableId);
-      if (!locked || locked.companyId !== current.companyId) continue;
-      if (locked.status === 'WRITTEN_OFF' || locked.status === 'CANCELLED') continue;
+      if (
+        !locked ||
+        locked.companyId !== current.companyId ||
+        locked.supplierId !== current.supplierId ||
+        locked.currency !== current.currency
+      ) {
+        throw new ConflictException(
+          'An allocated payable is missing or has different scope. Review the payment before reversing it.',
+        );
+      }
+      if (locked.status === 'WRITTEN_OFF' || locked.status === 'CANCELLED') {
+        throw new ConflictException(
+          'Reverse the write-off or source cancellation before reversing this allocated supplier payment.',
+        );
+      }
       const allocAmount = new Prisma.Decimal(alloc.amount).toDecimalPlaces(2);
       const restoredOutstanding = new Prisma.Decimal(locked.outstandingAmount)
         .plus(allocAmount)
@@ -750,27 +764,51 @@ export class SupplierPaymentsService {
    */
   async syncSupplierInvoices(
     tx: Tx,
-    payable: { id: string; companyId: string; paidAmount: Prisma.Decimal },
+    payable: {
+      id: string;
+      companyId: string;
+      paidAmount: Prisma.Decimal;
+      outstandingAmount?: Prisma.Decimal;
+      amount?: Prisma.Decimal;
+      status?: string;
+      currency?: string | null;
+      supplierId?: string | null;
+    },
   ) {
     const invoices = await tx.supplierInvoice.findMany({
       where: {
         payableId: payable.id,
-        companyId: payable.companyId,
         deletedAt: null,
         status: { in: [...SETTLING_INVOICE_STATUSES] },
       },
-      select: { id: true, totalAmount: true },
+      select: { id: true, totalAmount: true, companyId: true, supplierId: true, currency: true },
     });
     for (const invoice of invoices) {
       const total = new Prisma.Decimal(invoice.totalAmount);
-      const paid = Prisma.Decimal.min(new Prisma.Decimal(payable.paidAmount), total);
-      const outstanding = total.minus(paid);
+      if (
+        (invoice.companyId !== undefined && invoice.companyId !== payable.companyId) ||
+        (payable.supplierId !== undefined &&
+          invoice.supplierId !== undefined &&
+          invoice.supplierId !== payable.supplierId) ||
+        (payable.currency && invoice.currency && invoice.currency !== payable.currency) ||
+        (payable.amount && new Prisma.Decimal(payable.amount).gt(total.toDecimalPlaces(2)))
+      ) {
+        throw new BadRequestException(
+          'A linked supplier invoice has different accounting coverage. Review its linkage before settling this payable.',
+        );
+      }
+      const projection = sourceSettlement(total, {
+        ...payable,
+        outstandingAmount: payable.outstandingAmount ?? total.minus(payable.paidAmount),
+      });
+      const paid = projection.paidAmount;
+      const outstanding = projection.outstandingAmount;
       await tx.supplierInvoice.update({
         where: { id: invoice.id },
         data: {
           paidAmount: paid,
           outstandingAmount: outstanding,
-          status: outstanding.isZero() ? 'PAID' : paid.gt(0) ? 'PARTIALLY_PAID' : 'APPROVED',
+          status: paid.gte(total) ? 'PAID' : paid.gt(0) ? 'PARTIALLY_PAID' : 'APPROVED',
         },
       });
     }
@@ -779,28 +817,51 @@ export class SupplierPaymentsService {
   /** Received purchase orders display the same settlement as their canonical payable. */
   async syncPurchaseOrders(
     tx: Tx,
-    payable: { id: string; companyId: string; paidAmount: Prisma.Decimal; currency: string | null },
+    payable: {
+      id: string;
+      companyId: string;
+      paidAmount: Prisma.Decimal;
+      currency: string | null;
+      outstandingAmount?: Prisma.Decimal;
+      amount?: Prisma.Decimal;
+      status?: string;
+      supplierId?: string | null;
+    },
   ) {
     const orders = await tx.purchaseOrder.findMany({
       where: {
         payableId: payable.id,
-        companyId: payable.companyId,
         deletedAt: null,
-        currency: payable.currency as CurrencyCode,
         status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] },
       },
-      select: { id: true, totalAmount: true },
+      select: { id: true, totalAmount: true, companyId: true, supplierId: true, currency: true },
     });
     for (const order of orders) {
       const total = new Prisma.Decimal(order.totalAmount);
-      const paid = Prisma.Decimal.min(new Prisma.Decimal(payable.paidAmount), total);
-      const outstanding = total.minus(paid);
+      if (
+        (order.companyId !== undefined && order.companyId !== payable.companyId) ||
+        (payable.supplierId !== undefined &&
+          order.supplierId !== undefined &&
+          order.supplierId !== payable.supplierId) ||
+        (order.currency && payable.currency && order.currency !== payable.currency) ||
+        (payable.amount && new Prisma.Decimal(payable.amount).gt(total.toDecimalPlaces(2)))
+      ) {
+        throw new BadRequestException(
+          'A linked purchase order has different accounting coverage. Review its linkage before settling this payable.',
+        );
+      }
+      const projection = sourceSettlement(total, {
+        ...payable,
+        outstandingAmount: payable.outstandingAmount ?? total.minus(payable.paidAmount),
+      });
+      const paid = projection.paidAmount;
+      const outstanding = projection.outstandingAmount;
       await tx.purchaseOrder.update({
         where: { id: order.id },
         data: {
           paidAmount: paid,
           outstandingAmount: outstanding,
-          paymentStatus: outstanding.isZero() ? 'PAID' : paid.gt(0) ? 'PARTIALLY_PAID' : 'UNPAID',
+          paymentStatus: projection.paymentStatus,
         },
       });
     }

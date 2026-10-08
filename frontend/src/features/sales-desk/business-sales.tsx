@@ -51,6 +51,13 @@ import {
 import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
+import { usePartyCredit } from '@/hooks/use-party-credit';
+import {
+  currencySummaryValues,
+  formatFinancialTotals,
+  settlementLabel,
+  type CurrencySummary,
+} from '@/lib/financial-document';
 import { RecordSalesOrderPaymentModal } from '@/app/(dashboard)/operations/_components/record-sales-order-payment-modal';
 import {
   SALES_TYPES,
@@ -203,6 +210,8 @@ interface SalesOrder {
   } | null;
   deliveryNotes?: { id: string; deliveryNoteNumber?: string | null; status: string }[];
   paidAmount?: number | string | null;
+  settlementAdjustmentAmount?: number | string;
+  settlementStatus?: string;
   lines?: SalesOrderLine[];
 }
 
@@ -211,9 +220,10 @@ interface WorkbenchSummary {
   draft: number;
   confirmed: number;
   cancelled: number;
-  revenue: number;
-  outstanding: number;
-  paidAmount: number;
+  revenue: number | null;
+  outstanding: number | null;
+  paidAmount: number | null;
+  perCurrency?: CurrencySummary[];
   unpaidCount: number;
   overdueCreditOrders: number;
   blockedFailedActionCount: number;
@@ -556,6 +566,11 @@ function SalesOrderModal({
       : blankForm(),
   );
   const [selectedCustomer, setSelectedCustomer] = useState<BusinessPartyPickerOption | null>(null);
+  const { data: currentCredit, error: creditError } = usePartyCredit(
+    'customer',
+    form.customerId,
+    form.companyId,
+  );
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
@@ -1204,15 +1219,24 @@ function SalesOrderModal({
                   Credit limit
                 </p>
                 <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  {fmtMoney(selectedCustomer.creditLimit, form.currency)}
+                  {currentCredit
+                    ? fmtMoney(currentCredit.creditLimit, currentCredit.baseCurrency)
+                    : '—'}
                 </p>
               </div>
               <div>
                 <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
-                  Current balance
+                  Credit exposure
                 </p>
                 <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  {fmtMoney(selectedCustomer.currentBalance, form.currency)}
+                  {currentCredit
+                    ? fmtMoney(
+                        currentCredit.total.find(
+                          (row) => row.currency === currentCredit.baseCurrency,
+                        )?.amount ?? 0,
+                        currentCredit.baseCurrency,
+                      )
+                    : '—'}
                 </p>
               </div>
               <div>
@@ -1220,16 +1244,22 @@ function SalesOrderModal({
                   Available credit
                 </p>
                 <p className="font-semibold" style={{ color: 'var(--aurora-text)' }}>
-                  {fmtMoney(
-                    Math.max(
-                      0,
-                      Number(selectedCustomer.creditLimit ?? 0) -
-                        Number(selectedCustomer.currentBalance ?? 0),
-                    ),
-                    form.currency,
-                  )}
+                  {currentCredit
+                    ? currentCredit.creditAvailable === null
+                      ? 'No limit set'
+                      : fmtMoney(currentCredit.creditAvailable, currentCredit.baseCurrency)
+                    : '—'}
                 </p>
               </div>
+              {(creditError ||
+                (currentCredit &&
+                  Number(currentCredit.creditLimit) > 0 &&
+                  currentCredit.baseCurrency !== form.currency)) && (
+                <p className="col-span-2 sm:col-span-4 text-sm" role="status">
+                  {creditError ||
+                    `This customer’s credit limit is in ${currentCredit?.baseCurrency}. Credit sales in ${form.currency} require a currency conversion policy.`}
+                </p>
+              )}
               {selectedCustomer.paymentTerms ? (
                 <div className="col-span-2 sm:col-span-4">
                   <p className="text-xs uppercase" style={{ color: 'var(--aurora-text-muted)' }}>
@@ -1934,7 +1964,12 @@ export function BusinessSales() {
         <StatCard label="Total Orders" value={summary.totalOrders} />
         <StatCard label="Confirmed" value={summary.confirmed} />
         <StatCard label="Unpaid" value={summary.unpaidCount} />
-        <StatCard label="Revenue" value={fmtMoney(summary.revenue)} />
+        <StatCard
+          label="Order value"
+          value={formatFinancialTotals(
+            currencySummaryValues(summary.perCurrency ?? [], 'totalAmount'),
+          )}
+        />
       </div>
 
       {loadError && (
@@ -2127,14 +2162,25 @@ export function BusinessSales() {
         <ConsolidatedAccounts
           accounts={accounts?.data ?? []}
           title="Customer accounts"
+          totalLabel="Order value"
+          paidLabel="Cash collected"
+          outstandingLabel="Order balance"
+          documentAdjustment={(o) => o.settlementAdjustmentAmount ?? 0}
           documentName={(o) => o.salesOrderNumber ?? o.orderNumber ?? o.id}
           documentDate={(o) => o.orderDate}
           documentStatus={(o) => o.status}
           documentFields={[
             { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
-            { label: 'Paid', value: (o) => fmtMoney(Number(o.paidAmount ?? 0), o.currency) },
+            {
+              label: 'Cash collected',
+              value: (o) => fmtMoney(Number(o.paidAmount ?? 0), o.currency),
+            },
             { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
-            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            {
+              label: 'Non-cash settlement',
+              value: (o) => fmtMoney(o.settlementAdjustmentAmount ?? 0, o.currency),
+            },
+            { label: 'Settlement', value: (o) => <StatusBadge value={settlementLabel(o)} /> },
             { label: 'Notes', value: (o) => o.notes || '—' },
           ]}
           documentActions={renderOrderActions}
@@ -2159,7 +2205,12 @@ export function BusinessSales() {
           details={[
             { label: 'Customer', value: (o) => o.customer?.name ?? o.customerName ?? 'Walk-in' },
             { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
-            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Cash collected', value: (o) => fmtMoney(o.paidAmount ?? 0, o.currency) },
+            {
+              label: 'Non-cash settlement',
+              value: (o) => fmtMoney(o.settlementAdjustmentAmount ?? 0, o.currency),
+            },
+            { label: 'Settlement', value: (o) => <StatusBadge value={settlementLabel(o)} /> },
             { label: 'Notes', value: (o) => o.notes || '—' },
           ]}
           actions={renderOrderActions}
@@ -2314,7 +2365,7 @@ export function BusinessSales() {
                                         </div>
                                         <div className="flex flex-wrap items-center gap-1">
                                           <StatusBadge value={order.status} />
-                                          <StatusBadge value={order.paymentStatus} />
+                                          <StatusBadge value={settlementLabel(order)} />
                                           {canRecordPayment &&
                                             order.receivableId &&
                                             Number(order.outstandingAmount ?? 0) > 0 &&
@@ -2441,7 +2492,7 @@ export function BusinessSales() {
                             <StatusBadge value={o.status} />
                           </td>
                           <td className="px-4 py-3">
-                            <StatusBadge value={o.paymentStatus} />
+                            <StatusBadge value={settlementLabel(o)} />
                           </td>
                           <td className="px-4 py-3 text-right space-x-1">
                             {renderOrderActions(o)}

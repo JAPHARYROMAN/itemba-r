@@ -73,13 +73,91 @@ function setup(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Control by party', () => {
+  it.each(['AP', 'AR'] as const)(
+    'nets reversed payment originals against their posted mirrors in %s control',
+    async (role) => {
+      const supplier = role === 'AP';
+      const partyId = supplier ? 'sup-1' : 'cus-1';
+      const party = supplier
+        ? { partyType: 'SUPPLIER', supplierId: partyId, customerId: null }
+        : { partyType: 'CUSTOMER', supplierId: null, customerId: partyId };
+      const accountId = supplier ? 'ap' : 'ar';
+      const entry = (
+        status: string,
+        amount: number,
+        transactionDate: string,
+        deletedAt: Date | null = null,
+        companyId = 'c1',
+      ) => ({
+        companyId,
+        accountId,
+        debit: d(supplier ? Math.max(0, -amount) : Math.max(0, amount)),
+        credit: d(supplier ? Math.max(0, amount) : Math.max(0, -amount)),
+        journalEntry: { status, deletedAt, transactionDate: new Date(transactionDate) },
+      });
+      const entries = [
+        entry('POSTED', 100, '2026-01-01'),
+        entry('REVERSED', -40, '2026-01-02'), // Original cash payment retains its original date.
+        entry('POSTED', 40, '2026-02-02'), // Mirror restores the open liability/receivable.
+        entry('DRAFT', 500, '2026-01-03'),
+        entry('VOIDED', 500, '2026-01-03'),
+        entry('POSTED', 700, '2026-01-03', new Date('2026-01-04')),
+        entry('POSTED', 800, '2026-01-03', null, 'other-company'),
+        entry('POSTED', 900, '2026-03-01'),
+      ];
+      const groupBy = jest.fn(async ({ where }: any) => {
+        const filter = where.journalEntry;
+        const statuses = typeof filter.status === 'string' ? [filter.status] : filter.status.in;
+        const selected = entries.filter(
+          (line) =>
+            line.companyId === where.companyId &&
+            line.accountId === where.accountId &&
+            statuses.includes(line.journalEntry.status) &&
+            (filter.deletedAt === undefined || line.journalEntry.deletedAt === filter.deletedAt) &&
+            line.journalEntry.transactionDate <= filter.transactionDate.lte,
+        );
+        return [
+          {
+            ...party,
+            _sum: {
+              debit: selected.reduce((sum, line) => sum.plus(line.debit), d(0)),
+              credit: selected.reduce((sum, line) => sum.plus(line.credit), d(0)),
+            },
+          },
+        ];
+      });
+      const { service, user, partyBalance, companyScope } = setup({
+        journalEntryLine: { groupBy },
+      });
+      (supplier ? partyBalance.suppliers : partyBalance.customers).mockResolvedValue([
+        {
+          partyId,
+          name: 'Trading party',
+          code: 'PARTY-1',
+          erp: [{ currency: 'TZS', open: '100.00', overdue: '0.00', documents: 1 }],
+        },
+      ]);
+
+      const report = await service.getControlByParty('c1', role, '2026-02-28', user);
+      expect(report.totals).toEqual({ control: '100.00', subLedger: '100.00', difference: '0.00' });
+      expect(report.partiesWithDifference).toBe(0);
+      expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1');
+
+      // Before the later reversal, the original payment still reduced that dated GL balance.
+      const earlier = await service.getControlByParty('c1', role, '2026-01-31', user);
+      expect(earlier.totals.control).toBe('60.00');
+    },
+  );
   it('nets the AP control as credit minus debit per supplier, merges the sub-ledger and names control-only parties', async () => {
     const { service, user, prisma, companyScope } = setup();
     const report = await service.getControlByParty('c1', 'AP', '2026-10-03', user);
     expect(companyScope.assertCanAccessCompany).toHaveBeenCalledWith(user, 'c1');
     const { where } = prisma.journalEntryLine.groupBy.mock.calls[0][0];
     expect(where).toMatchObject({ companyId: 'c1', accountId: 'ap' });
-    expect(where.journalEntry.status).toBe('POSTED');
+    expect(where.journalEntry).toMatchObject({
+      status: { in: ['POSTED', 'REVERSED'] },
+      deletedAt: null,
+    });
     expect(report.controlAccount).toEqual({
       id: 'ap',
       accountCode: '2000',

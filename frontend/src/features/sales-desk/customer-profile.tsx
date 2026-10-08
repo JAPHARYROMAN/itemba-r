@@ -20,6 +20,10 @@ import { TradingPartnerEditor } from '@/components/workspace/trading-partner-edi
 import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
 import { PartyBalancePanel } from '@/features/party/party-balance-panel';
 import type { PartyBalance } from '@/features/party/party-balance';
+import {
+  StatementHistoryWarning,
+  type StatementSettlementHistory,
+} from '@/components/workspace/statement-history-warning';
 
 type Tab =
   | 'Overview'
@@ -118,6 +122,8 @@ interface StatementRun {
   totalDebits: number | string;
   totalCredits: number | string;
   closingBalance: number | string;
+  currency: string;
+  settlementHistory?: StatementSettlementHistory;
   status: string;
   generatedAt?: string;
   generatedBy?: { fullName?: string | null; email?: string | null } | null;
@@ -1025,8 +1031,14 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{money(statement.closingBalance)}</p>
+                      <p className="font-semibold">
+                        {money(statement.closingBalance, statement.currency)}
+                      </p>
                       <StatusBadge status={statement.status} />
+                      <StatementHistoryWarning
+                        history={statement.settlementHistory}
+                        currency={statement.currency ?? 'TZS'}
+                      />
                     </div>
                   </div>
                 ))

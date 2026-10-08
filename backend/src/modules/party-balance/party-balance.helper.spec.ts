@@ -36,6 +36,45 @@ function db(overrides: Record<string, unknown> = {}) {
 }
 
 describe('computePartyBalance', () => {
+  it('treats due dates consistently by UTC calendar day across ERP and desk aging', async () => {
+    const prisma = db();
+    prisma.receivable.findMany.mockResolvedValue([
+      { currency: 'TZS', outstandingAmount: d(100), dueDate: new Date('2026-10-02T00:00:00Z') },
+      { currency: 'TZS', outstandingAmount: d(40), dueDate: new Date('2026-10-01T23:59:00Z') },
+    ]);
+    prisma.salesDeskSale.findMany.mockResolvedValue([
+      {
+        currency: 'TZS',
+        totalAmount: d(10),
+        paidAmount: d(0),
+        dueDate: new Date('2026-10-02T00:00:00Z'),
+      },
+      {
+        currency: 'TZS',
+        totalAmount: d(20),
+        paidAmount: d(0),
+        dueDate: new Date('2026-10-01T23:59:00Z'),
+      },
+    ]);
+    const balance = await computePartyBalance(
+      prisma,
+      'customer',
+      {
+        id: 'cus-1',
+        companyId: 'company-1',
+        creditLimit: d(0),
+        currentBalance: d(140),
+      },
+      asOf,
+    );
+    expect(balance.erp[0]).toMatchObject({
+      overdue: '40.00',
+      current: '100.00',
+      days1to30: '40.00',
+    });
+    expect(balance.desk[0].overdue).toBe('20.00');
+  });
+
   it('shows unapplied supplier advances as credit without adding them to payable aging', async () => {
     const prisma = db();
     prisma.supplierPayment.groupBy.mockResolvedValue([
@@ -195,7 +234,7 @@ describe('refreshCachedPartyBalance', () => {
 });
 
 describe('liveCustomerExposure', () => {
-  it('adds open receivables and unpromoted Sales Desk sales', async () => {
+  it('adds only base-currency open receivables and unpromoted Sales Desk sales', async () => {
     const prisma = db({
       receivable: {
         findMany: jest.fn(),
@@ -206,5 +245,35 @@ describe('liveCustomerExposure', () => {
       },
     });
     await expect(liveCustomerExposure(prisma, 'company-1', 'cus-1')).resolves.toBe(145);
+    expect(prisma.receivable.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ currency: 'TZS' }) }),
+    );
+    expect(prisma.salesDeskSale.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ currency: 'TZS' }) }),
+    );
+  });
+
+  it('uses a USD base currency without adding foreign TZS exposure', async () => {
+    const prisma = db({
+      companyProfile: { findUnique: jest.fn(async () => ({ currency: 'USD' })) },
+    });
+    prisma.receivable.aggregate.mockImplementation(async ({ where }: any) => ({
+      _sum: { outstandingAmount: d(where.currency === 'USD' ? 30 : 900000) },
+    }));
+    prisma.salesDeskSale.findMany.mockImplementation(async ({ where }: any) =>
+      where.currency === 'USD'
+        ? [{ totalAmount: d(40), paidAmount: d(10) }]
+        : [{ totalAmount: d(500000), paidAmount: d(0) }],
+    );
+    await expect(liveCustomerExposure(prisma, 'company-1', 'cus-1', 'USD')).resolves.toBe(60);
+  });
+
+  it('rejects a credit-limit comparison in a different denomination before loading exposure', async () => {
+    const prisma = db();
+    await expect(liveCustomerExposure(prisma, 'company-1', 'cus-1', 'USD')).rejects.toThrow(
+      'denominated in TZS',
+    );
+    expect(prisma.receivable.aggregate).not.toHaveBeenCalled();
+    expect(prisma.salesDeskSale.findMany).not.toHaveBeenCalled();
   });
 });

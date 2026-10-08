@@ -8,6 +8,11 @@ import {
 import { readPosTenders, tenderTotal, type PosTender } from './pos-tenders';
 import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
 import {
+  canonicalSettlementSelect,
+  sourceSettlement,
+  utcToday,
+} from '../../common/utils/source-settlement';
+import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -97,6 +102,12 @@ type LinkedReceivableSnapshot = {
   paidAmount: Prisma.Decimal | number | string;
   outstandingAmount: Prisma.Decimal | number | string;
   status: string;
+  amount?: Prisma.Decimal | number | string;
+  companyId?: string;
+  customerId?: string | null;
+  currency?: string;
+  deletedAt?: Date | null;
+  journalEntryId?: string | null;
 };
 
 const RECEIPT_ACCOUNT_TYPES = [
@@ -551,7 +562,7 @@ export class SalesOrdersService {
   async findAll(query: QuerySalesOrderListDto, user: AuthUser) {
     const { page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
-    const where = await this.salesOrderWhere(query, user);
+    const where = await this.salesOrderWhere({ ...query, paymentStatus: undefined }, user);
 
     const [data, total] = await Promise.all([
       this.prisma.salesOrder.findMany({
@@ -578,6 +589,8 @@ export class SalesOrdersService {
           },
           receivable: {
             select: {
+              ...canonicalSettlementSelect,
+              customerId: true,
               id: true,
               receivableNumber: true,
               sourceId: true,
@@ -600,7 +613,7 @@ export class SalesOrdersService {
           },
         },
         orderBy: { orderDate: 'desc' },
-        ...(query.view === 'accounts' ? {} : { skip, take: limit }),
+        ...(query.view === 'accounts' || query.paymentStatus ? {} : { skip, take: limit }),
       }),
       this.prisma.salesOrder.count({ where }),
     ]);
@@ -609,9 +622,9 @@ export class SalesOrdersService {
       data.map((order) => order.id),
     );
 
-    const documents = data.map((order) =>
-      this.withReceivablePaymentSnapshot(order, sourceReceivables.get(order.id)),
-    );
+    const documents = data
+      .map((order) => this.withReceivablePaymentSnapshot(order, sourceReceivables.get(order.id)))
+      .filter((record) => !query.paymentStatus || record.paymentStatus === query.paymentStatus);
     if (query.view === 'accounts') {
       return accountPage(
         consolidateAccounts(
@@ -635,68 +648,99 @@ export class SalesOrdersService {
       );
     }
     return {
-      data: documents,
-      total,
+      data: query.paymentStatus ? documents.slice(skip, skip + limit) : documents,
+      total: query.paymentStatus ? documents.length : total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil((query.paymentStatus ? documents.length : total) / limit),
     };
   }
 
   async workbenchSummary(query: QuerySalesOrderDto, user: AuthUser) {
-    const where = await this.salesOrderWhere(query, user);
-    const today = new Date();
-
-    const confirmedStatuses: SalesOrderStatus[] = [
-      SalesOrderStatus.CONFIRMED,
-      SalesOrderStatus.PARTIALLY_PAID,
-      SalesOrderStatus.PAID,
-    ];
-    const deadStatuses: SalesOrderStatus[] = [SalesOrderStatus.CANCELLED, SalesOrderStatus.VOIDED];
-    // Live = everything except CANCELLED/VOIDED. Reused for every money rollup
-    // and the count predicates below so the exclusion stays consistent.
-    const liveWhere = { ...where, status: { notIn: deadStatuses } };
-
-    // Push the per-status counts and the money rollups into the database
-    // instead of loading every row and reducing in JS. groupBy gives us the
-    // status histogram (totalOrders/draft/confirmed/cancelled) in one query;
-    // _sum over the live subset gives revenue/outstanding/paidAmount.
-    const [statusGroups, liveTotals, unpaidCount, overdueCreditOrders] = await Promise.all([
-      this.prisma.salesOrder.groupBy({
-        by: ['status'],
-        where,
-        _count: { _all: true },
-      }),
-      this.prisma.salesOrder.aggregate({
-        where: liveWhere,
-        _sum: { totalAmount: true, outstandingAmount: true, paidAmount: true },
-      }),
-      this.prisma.salesOrder.count({
-        where: { ...liveWhere, paymentStatus: { not: PaymentStatus.PAID } },
-      }),
-      this.prisma.salesOrder.count({
-        where: {
-          ...liveWhere,
-          paymentMethod: SalesPaymentMethod.CREDIT,
-          outstandingAmount: { gt: 0 },
-          dueDate: { not: null, lt: today },
-        },
-      }),
-    ]);
-
-    const countByStatus = new Map(statusGroups.map((group) => [group.status, group._count._all]));
-    const sumStatuses = (statuses: SalesOrderStatus[]) =>
-      statuses.reduce((sum, status) => sum + (countByStatus.get(status) ?? 0), 0);
-    const totalOrders = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
-
+    const where = await this.salesOrderWhere({ ...query, paymentStatus: undefined }, user);
+    const records = await this.prisma.salesOrder.findMany({
+      where,
+      include: {
+        receivable: { select: { ...canonicalSettlementSelect, sourceId: true, customerId: true } },
+      },
+    });
+    const sourceReceivables = await this.findSalesOrderSourceReceivables(
+      records.map((record) => record.id),
+    );
+    const documents = records
+      .map((record) => this.withReceivablePaymentSnapshot(record, sourceReceivables.get(record.id)))
+      .filter((record) => !query.paymentStatus || record.paymentStatus === query.paymentStatus);
+    const amounts = new Map<
+      string,
+      {
+        currency: string;
+        revenue: Prisma.Decimal;
+        totalAmount: Prisma.Decimal;
+        outstanding: Prisma.Decimal;
+        outstandingAmount: Prisma.Decimal;
+        paidAmount: Prisma.Decimal;
+        overdueAmount: Prisma.Decimal;
+      }
+    >();
+    let unpaidCount = 0;
+    let overdueCreditOrders = 0;
+    const today = utcToday();
+    for (const record of documents) {
+      if (['CANCELLED', 'VOIDED'].includes(record.status)) continue;
+      const currency = record.currency || 'TZS';
+      const row = amounts.get(currency) ?? {
+        currency,
+        revenue: new Prisma.Decimal(0),
+        totalAmount: new Prisma.Decimal(0),
+        outstanding: new Prisma.Decimal(0),
+        outstandingAmount: new Prisma.Decimal(0),
+        paidAmount: new Prisma.Decimal(0),
+        overdueAmount: new Prisma.Decimal(0),
+      };
+      row.revenue = row.revenue.plus(record.totalAmount);
+      row.totalAmount = row.revenue;
+      row.outstanding = row.outstanding.plus(record.outstandingAmount);
+      row.outstandingAmount = row.outstanding;
+      row.paidAmount = row.paidAmount.plus(record.paidAmount);
+      if (new Prisma.Decimal(record.outstandingAmount).gt(0)) {
+        unpaidCount++;
+        if (
+          record.paymentMethod === SalesPaymentMethod.CREDIT &&
+          record.dueDate &&
+          record.dueDate < today
+        ) {
+          overdueCreditOrders++;
+          row.overdueAmount = row.overdueAmount.plus(record.outstandingAmount);
+        }
+      }
+      amounts.set(currency, row);
+    }
+    const perCurrency = [...amounts.values()]
+      .sort((a, b) => a.currency.localeCompare(b.currency))
+      .map((row) => ({
+        currency: row.currency,
+        revenue: row.revenue.toDecimalPlaces(2).toNumber(),
+        totalAmount: row.totalAmount.toDecimalPlaces(2).toNumber(),
+        outstanding: row.outstanding.toDecimalPlaces(2).toNumber(),
+        outstandingAmount: row.outstandingAmount.toDecimalPlaces(2).toNumber(),
+        paidAmount: row.paidAmount.toDecimalPlaces(2).toNumber(),
+        overdueAmount: row.overdueAmount.toDecimalPlaces(2).toNumber(),
+      }));
+    const single = perCurrency.length === 1 ? perCurrency[0] : null;
     return {
-      totalOrders,
-      draft: countByStatus.get(SalesOrderStatus.DRAFT) ?? 0,
-      confirmed: sumStatuses(confirmedStatuses),
-      cancelled: sumStatuses(deadStatuses),
-      revenue: roundMoney(moneyValue(liveTotals._sum.totalAmount)),
-      outstanding: roundMoney(moneyValue(liveTotals._sum.outstandingAmount)),
-      paidAmount: roundMoney(moneyValue(liveTotals._sum.paidAmount)),
+      totalOrders: documents.length,
+      draft: documents.filter((record) => record.status === 'DRAFT').length,
+      confirmed: documents.filter((record) =>
+        ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'].includes(record.status),
+      ).length,
+      cancelled: documents.filter((record) => ['CANCELLED', 'VOIDED'].includes(record.status))
+        .length,
+      revenue: single?.revenue ?? (perCurrency.length > 1 ? null : 0),
+      outstanding: single?.outstanding ?? (perCurrency.length > 1 ? null : 0),
+      paidAmount: single?.paidAmount ?? (perCurrency.length > 1 ? null : 0),
+      perCurrency,
+      currency: single?.currency ?? null,
+      mixedCurrencies: perCurrency.length > 1,
       unpaidCount,
       overdueCreditOrders,
       blockedFailedActionCount: 0,
@@ -706,7 +750,7 @@ export class SalesOrdersService {
   async customerDaySummary(query: QuerySalesOrderDto, user: AuthUser) {
     const { page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
-    const where = await this.salesOrderWhere(query, user);
+    const where = await this.salesOrderWhere({ ...query, paymentStatus: undefined }, user);
 
     const orders = await this.prisma.salesOrder.findMany({
       where,
@@ -720,6 +764,8 @@ export class SalesOrdersService {
         },
         receivable: {
           select: {
+            ...canonicalSettlementSelect,
+            customerId: true,
             id: true,
             receivableNumber: true,
             sourceId: true,
@@ -742,6 +788,7 @@ export class SalesOrdersService {
         rawOrder,
         sourceReceivables.get(rawOrder.id),
       );
+      if (query.paymentStatus && order.paymentStatus !== query.paymentStatus) continue;
       const day = dateKey(order.orderDate) ?? 'unknown-date';
       const manualName = normalizeCustomerName(order.customerName);
       const customerName =
@@ -751,11 +798,13 @@ export class SalesOrdersService {
         ? `customer:${order.customerId}`
         : `manual:${customerName.toLowerCase()}`;
       const currency = String(order.currency ?? 'TZS');
-      const key = `${day}:${customerKey}:${currency}`;
+      const key = JSON.stringify([order.companyId, day, customerKey, currency]);
 
       if (!groups.has(key)) {
         groups.set(key, {
           id: key,
+          companyId: order.companyId,
+          company: order.company,
           date: day,
           currency,
           customer: {
@@ -768,6 +817,7 @@ export class SalesOrdersService {
           totalAmount: 0,
           paidAmount: 0,
           outstandingAmount: 0,
+          settlementAdjustmentAmount: 0,
           statusCounts: {},
           paymentStatusCounts: {},
           orders: [],
@@ -778,11 +828,16 @@ export class SalesOrdersService {
       const status = String(order.status ?? 'UNKNOWN');
       const paymentStatus = String(order.paymentStatus ?? 'UNKNOWN');
       group.orderCount += 1;
-      group.totalAmount = roundMoney(group.totalAmount + moneyValue(order.totalAmount));
-      group.paidAmount = roundMoney(group.paidAmount + moneyValue(order.paidAmount));
-      group.outstandingAmount = roundMoney(
-        group.outstandingAmount + moneyValue(order.outstandingAmount),
-      );
+      if (!['CANCELLED', 'VOIDED'].includes(status)) {
+        group.totalAmount = roundMoney(group.totalAmount + moneyValue(order.totalAmount));
+        group.paidAmount = roundMoney(group.paidAmount + moneyValue(order.paidAmount));
+        group.outstandingAmount = roundMoney(
+          group.outstandingAmount + moneyValue(order.outstandingAmount),
+        );
+        group.settlementAdjustmentAmount = roundMoney(
+          group.settlementAdjustmentAmount + moneyValue(order.settlementAdjustmentAmount),
+        );
+      }
       group.statusCounts[status] = (group.statusCounts[status] ?? 0) + 1;
       group.paymentStatusCounts[paymentStatus] =
         (group.paymentStatusCounts[paymentStatus] ?? 0) + 1;
@@ -808,6 +863,9 @@ export class SalesOrdersService {
         totalAmount: moneyValue(order.totalAmount),
         paidAmount: moneyValue(order.paidAmount),
         outstandingAmount: moneyValue(order.outstandingAmount),
+        settlementAdjustmentAmount: moneyValue(order.settlementAdjustmentAmount),
+        settlementStatus: order.settlementStatus,
+        accountingCoverage: order.accountingCoverage,
       });
     }
 
@@ -876,10 +934,10 @@ export class SalesOrdersService {
         },
         receivable: {
           select: {
-            id: true,
             receivableNumber: true,
             sourceId: true,
-            amount: true,
+            ...canonicalSettlementSelect,
+            customerId: true,
             paidAmount: true,
             outstandingAmount: true,
             status: true,
@@ -960,10 +1018,10 @@ export class SalesOrdersService {
       : await this.prisma.receivable.findFirst({
           where: { sourceType: 'SalesOrder', sourceId: id, deletedAt: null },
           select: {
-            id: true,
             receivableNumber: true,
             sourceId: true,
-            amount: true,
+            ...canonicalSettlementSelect,
+            customerId: true,
             paidAmount: true,
             outstandingAmount: true,
             status: true,
@@ -1008,13 +1066,23 @@ export class SalesOrdersService {
     };
 
     const creditLimit = moneyValue(order.customer?.creditLimit);
-    const currentBalance = moneyValue(order.customer?.currentBalance);
+    const creditCurrency =
+      (
+        await this.prisma.companyProfile.findUnique({
+          where: { companyId: order.companyId },
+          select: { currency: true },
+        })
+      )?.currency ?? 'TZS';
+    const currentBalance = order.customer
+      ? await liveCustomerExposure(this.prisma, order.companyId, order.customer.id, creditCurrency)
+      : 0;
 
     return {
       order: orderWithStock,
       customerCredit: order.customer
         ? {
             customerId: order.customer.id,
+            currency: creditCurrency,
             status: order.customer.status,
             creditLimit,
             currentBalance,
@@ -1284,6 +1352,8 @@ export class SalesOrdersService {
         customer: { select: { id: true, name: true } },
         receivable: {
           select: {
+            ...canonicalSettlementSelect,
+            customerId: true,
             id: true,
             sourceId: true,
             paidAmount: true,
@@ -1312,6 +1382,8 @@ export class SalesOrdersService {
       : await (transaction ?? this.prisma).receivable.findFirst({
           where: { sourceType: 'SalesOrder', sourceId: id, deletedAt: null },
           select: {
+            ...canonicalSettlementSelect,
+            customerId: true,
             id: true,
             sourceId: true,
             paidAmount: true,
@@ -1330,6 +1402,8 @@ export class SalesOrdersService {
     const receivables = await this.prisma.receivable.findMany({
       where: { sourceType: 'SalesOrder', sourceId: { in: salesOrderIds }, deletedAt: null },
       select: {
+        ...canonicalSettlementSelect,
+        customerId: true,
         id: true,
         sourceId: true,
         paidAmount: true,
@@ -1352,28 +1426,56 @@ export class SalesOrdersService {
     T extends {
       receivable?: LinkedReceivableSnapshot | null;
       receivableId?: string | null;
+      totalAmount?: Prisma.Decimal | number | string;
+      status?: string;
+      companyId?: string;
+      customerId?: string | null;
+      currency?: string;
+      journalEntryId?: string | null;
     },
   >(order: T, sourceReceivable?: LinkedReceivableSnapshot | null): T {
     const receivable = order.receivable ?? sourceReceivable;
-    if (!receivable) return order;
-
-    const paidAmount = new Prisma.Decimal(receivable.paidAmount ?? 0).toDecimalPlaces(2);
-    const outstandingAmount = new Prisma.Decimal(receivable.outstandingAmount ?? 0).toDecimalPlaces(
-      2,
+    if (!receivable)
+      return {
+        ...order,
+        accountingCoverage: ['CANCELLED', 'VOIDED'].includes(order.status ?? '')
+          ? 'INACTIVE'
+          : order.journalEntryId
+            ? 'POSTED'
+            : order.status === 'DRAFT'
+              ? 'UNPOSTED'
+              : 'UNBILLED',
+      };
+    const inactive = ['CANCELLED', 'VOIDED'].includes(order.status ?? '');
+    const conflict =
+      receivable.deletedAt ||
+      receivable.status === 'CANCELLED' ||
+      (receivable.amount !== undefined &&
+        order.totalAmount !== undefined &&
+        new Prisma.Decimal(receivable.amount).gt(order.totalAmount)) ||
+      (receivable.companyId && order.companyId && receivable.companyId !== order.companyId) ||
+      (receivable.currency && order.currency && receivable.currency !== order.currency) ||
+      (receivable.customerId !== undefined &&
+        order.customerId !== undefined &&
+        receivable.customerId !== order.customerId);
+    if (inactive || conflict)
+      return { ...order, accountingCoverage: inactive ? 'INACTIVE' : 'CONFLICT' };
+    const projection = sourceSettlement(
+      order.totalAmount ??
+        new Prisma.Decimal(receivable.paidAmount).plus(receivable.outstandingAmount),
+      receivable,
     );
-    const paymentStatus = outstandingAmount.isZero()
-      ? PaymentStatus.PAID
-      : paidAmount.gt(0)
-        ? PaymentStatus.PARTIALLY_PAID
-        : PaymentStatus.UNPAID;
 
     return {
       ...order,
       receivableId: order.receivableId ?? receivable.id,
       receivable: order.receivable ?? receivable,
-      paidAmount,
-      outstandingAmount,
-      paymentStatus,
+      ...projection,
+      accountingCoverage: projection.settlementConflict
+        ? 'CONFLICT'
+        : receivable.journalEntryId || order.journalEntryId
+          ? 'POSTED'
+          : 'UNPOSTED',
     } as T;
   }
 
@@ -1721,6 +1823,7 @@ export class SalesOrdersService {
       await this.assertCustomerCreditAvailable(tx, {
         companyId: dto.companyId,
         customerId: customer.customerId,
+        currency: dto.currency ?? 'TZS',
         paymentMethod,
         totalAmount,
       });
@@ -1936,6 +2039,7 @@ export class SalesOrdersService {
       await this.assertCustomerCreditAvailable(tx, {
         companyId: existing.companyId,
         customerId: customer ? customer.customerId : existing.customerId,
+        currency: dto.currency ?? existing.currency,
         paymentMethod: nextPaymentMethod,
         totalAmount,
       });
@@ -2094,6 +2198,7 @@ export class SalesOrdersService {
       customerId?: string | null;
       paymentMethod?: SalesPaymentMethod | null;
       totalAmount: number;
+      currency?: string;
     },
   ) {
     if (input.paymentMethod !== SalesPaymentMethod.CREDIT || !input.customerId) return;
@@ -2112,7 +2217,12 @@ export class SalesOrdersService {
 
     // Party linkage (W5): live exposure (open receivables plus unpromoted Sales Desk sales)
     // instead of the cached balance alone, so desk credit counts against the limit.
-    const exposure = await liveCustomerExposure(tx, input.companyId, input.customerId);
+    const exposure = await liveCustomerExposure(
+      tx,
+      input.companyId,
+      input.customerId,
+      input.currency,
+    );
     const projectedBalance = exposure + input.totalAmount;
     if (projectedBalance > creditLimit) {
       throw new BadRequestException(
@@ -2336,6 +2446,7 @@ export class SalesOrdersService {
         await this.assertCustomerCreditAvailable(tx, {
           companyId: existing.companyId,
           customerId: existing.customerId,
+          currency: existing.currency,
           paymentMethod: 'CREDIT',
           totalAmount: outstandingAmount,
         });

@@ -186,7 +186,7 @@ describe('computePartyBalanceList', () => {
     expect(open.outstandingAmount).toEqual({ gt: 0 });
     expect(open.status).toEqual({ in: ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] });
     expect(open.supplierId).toEqual({ not: null });
-    expect(overdue.dueDate).toEqual({ lte: new Date(asOf.getTime() - 86400000) });
+    expect(overdue.dueDate).toEqual({ lt: new Date('2026-10-03T00:00:00.000Z') });
     const desk = prisma.invoiceDeskInvoice.groupBy.mock.calls[0][0].where;
     expect(desk.canonicalInvoiceId).toBeNull();
     expect(desk.supplier).toEqual({ canonicalSupplierId: { not: null } });

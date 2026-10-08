@@ -18,6 +18,7 @@ import { backendGet, backendPatch } from '@/lib/api-client';
 import { notifyDeskSaved, useLinkedDeskChanges } from '@/components/workspace/linked-desk-changes';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
+import { settlementLabel } from '@/lib/financial-document';
 import { RecordSalesOrderPaymentModal } from '@/app/(dashboard)/operations/_components/record-sales-order-payment-modal';
 import {
   ApprovalTimeline,
@@ -437,8 +438,12 @@ export function BusinessSaleDetail({ saleId }: { saleId: string }) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Total" value={money(order.totalAmount, currency)} />
-        <StatCard label="Paid" value={money(order.paidAmount, currency)} />
+        <StatCard label="Cash collected" value={money(order.paidAmount, currency)} />
         <StatCard label="Outstanding" value={money(order.outstandingAmount, currency)} />
+        <StatCard
+          label="Non-cash settlement"
+          value={money(order.settlementAdjustmentAmount, currency)}
+        />
         <StatCard
           label="Gross Profit"
           value={money(data.profit?.summary?.grossProfitAmount, currency)}
@@ -486,7 +491,17 @@ export function BusinessSaleDetail({ saleId }: { saleId: string }) {
           <Card className="p-5">
             <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
               <InfoRow label="Status" value={<StatusBadge value={order.status} />} />
-              <InfoRow label="Payment" value={<StatusBadge value={order.paymentStatus} />} />
+              <InfoRow
+                label="Settlement"
+                value={
+                  <StatusBadge
+                    value={settlementLabel({
+                      paymentStatus: order.paymentStatus,
+                      settlementStatus: order.settlementStatus,
+                    })}
+                  />
+                }
+              />
               <InfoRow label="Company" value={order.company?.name} />
               <InfoRow
                 label="Division / Branch"
@@ -501,7 +516,11 @@ export function BusinessSaleDetail({ saleId }: { saleId: string }) {
               <InfoRow label="Due Date" value={date(order.dueDate)} />
               <InfoRow
                 label="Credit Available"
-                value={money(data.customerCredit?.availableCredit, currency)}
+                value={
+                  data.customerCredit?.currency
+                    ? money(data.customerCredit.availableCredit, data.customerCredit.currency)
+                    : '—'
+                }
               />
             </div>
             {order.notes && (
@@ -613,7 +632,11 @@ export function BusinessSaleDetail({ saleId }: { saleId: string }) {
               <InfoRow label="Payment Status" value={<StatusBadge value={order.paymentStatus} />} />
               <InfoRow label="Receivable" value={data.ledger?.receivable?.receivableNumber} />
               <InfoRow label="Receivable Status" value={data.ledger?.receivable?.status} />
-              <InfoRow label="Paid" value={money(order.paidAmount, currency)} />
+              <InfoRow label="Cash collected" value={money(order.paidAmount, currency)} />
+              <InfoRow
+                label="Non-cash settlement"
+                value={money(order.settlementAdjustmentAmount, currency)}
+              />
               <InfoRow label="Outstanding" value={money(order.outstandingAmount, currency)} />
               <InfoRow label="Cash / Bank Account" value={order.cashAccount?.accountName} />
               <InfoRow label="Payment Reference" value={order.paymentReference} />

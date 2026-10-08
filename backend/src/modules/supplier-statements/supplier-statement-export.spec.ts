@@ -93,7 +93,7 @@ describe('supplier statement export', () => {
       '2026-09-20,PAYMENT,SPAY-1,"Payment · BANK_TRANSFER · ref a,""b""",0.00,80.00,120.00',
     );
     expect(rows[4]).toBe(
-      '2026-09-30,CLOSING,SSTAT-1,Closing balance (recorded),250.00,50.00,300.00',
+      '2026-09-30,CLOSING,SSTAT-1,Closing balance (dated activity),100.00,80.00,120.00',
     );
   });
 
@@ -129,7 +129,7 @@ describe('supplier statement export', () => {
     ]);
     expect(pdf.sections[1].totals).toEqual([
       { label: 'Payables raised in period', value: 'TZS 250.00' },
-      { label: 'Payments in period', value: 'TZS 80.00' },
+      { label: 'Settlements in period', value: 'TZS 80.00' },
       { label: 'Balance after activity', value: 'TZS 270.00', emphasis: true },
       { label: 'Recorded closing balance', value: 'TZS 300.00' },
     ]);

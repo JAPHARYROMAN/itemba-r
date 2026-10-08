@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CustomerStatementsService } from '../customer-statements/customer-statements.service';
 import { PartyBalanceService } from '../party-balance/party-balance.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { auditFor, CompanyScopeService } from '../../common/services';
@@ -33,6 +34,11 @@ export class CustomersService {
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
     private readonly partyBalance?: PartyBalanceService,
+    private readonly statements: CustomerStatementsService = new CustomerStatementsService(
+      prisma,
+      auditLogs,
+      companyScope,
+    ),
   ) {}
 
   async findAll(query: QueryCustomerDto, user: AuthUser) {
@@ -201,7 +207,7 @@ export class CustomersService {
       recentSalesOrders: salesSummary.recentSalesOrders,
       openReceivables: receivablesSummary.openReceivables,
       recentReceivables: receivablesSummary.recentReceivables,
-      latestStatements: statements,
+      latestStatements: await this.statements.projectSavedRuns(statements, user),
       priceAgreements,
       productHistory,
       ledger: ledger.events.slice(0, 12),

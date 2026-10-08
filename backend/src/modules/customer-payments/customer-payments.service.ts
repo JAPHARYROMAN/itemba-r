@@ -28,6 +28,7 @@ import {
 } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
+import { sourceSettlement } from '../../common/utils/source-settlement';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateCustomerPaymentDto } from './dto/create-customer-payment.dto';
@@ -68,6 +69,7 @@ interface LockedReceivable {
   id: string;
   companyId: string;
   customerId: string | null;
+  currency: CurrencyCode;
   outstandingAmount: Prisma.Decimal;
   paidAmount: Prisma.Decimal;
   status: string;
@@ -321,6 +323,11 @@ export class CustomerPaymentsService {
           `Receivable ${alloc.receivableId} does not belong to customer ${input.customerId}`,
         );
       }
+      if (locked.currency !== paymentCurrency) {
+        throw new BadRequestException(
+          `Receivable currency (${locked.currency}) does not match payment currency (${paymentCurrency})`,
+        );
+      }
       if (!(OPEN_RECEIVABLE_STATUSES as readonly string[]).includes(locked.status)) {
         throw new BadRequestException(
           `Receivable ${alloc.receivableId} is ${locked.status} and cannot receive a payment`,
@@ -516,14 +523,22 @@ export class CustomerPaymentsService {
       );
       for (const alloc of ordered) {
         const locked = await this.lockReceivable(tx, alloc.receivableId);
-        if (!locked || locked.companyId !== current.companyId) {
-          // Receivable deleted or moved companies — skip restoring it but keep
-          // reversing the rest + the JE (the funds movement still unwinds).
-          continue;
+        if (
+          !locked ||
+          locked.companyId !== current.companyId ||
+          locked.customerId !== current.customerId ||
+          locked.currency !== current.currency
+        ) {
+          throw new ConflictException(
+            'An allocated receivable is unavailable or belongs to another account or currency; ' +
+              'resolve its linkage before reversing this payment',
+          );
         }
         if (locked.status === 'WRITTEN_OFF' || locked.status === 'CANCELLED') {
-          // Closed receivable: do not resurrect its balance.
-          continue;
+          throw new ConflictException(
+            'An allocated receivable has been written off or cancelled; ' +
+              'resolve that settlement before reversing this payment',
+          );
         }
 
         const allocAmount = new Prisma.Decimal(alloc.amount).toDecimalPlaces(2);
@@ -857,7 +872,7 @@ export class CustomerPaymentsService {
     id: string,
   ): Promise<LockedReceivable | undefined> {
     const [locked] = await tx.$queryRaw<LockedReceivable[]>`
-      SELECT "id", "companyId", "customerId", "outstandingAmount", "paidAmount",
+      SELECT "id", "companyId", "customerId", "currency", "outstandingAmount", "paidAmount",
              "status", "sourceType", "sourceId"
       FROM "receivables"
       WHERE "id" = ${id} AND "deletedAt" IS NULL
@@ -953,22 +968,40 @@ export class CustomerPaymentsService {
       sourceId: string | null;
       paidAmount: Prisma.Decimal | number | string;
       outstandingAmount: Prisma.Decimal | number | string;
+      amount?: Prisma.Decimal | number | string;
+      companyId?: string;
+      currency?: CurrencyCode;
+      customerId?: string | null;
+      status?: string;
     },
   ) {
     if (receivable.sourceType !== 'SalesOrder' || !receivable.sourceId) return;
 
-    const paidAmount = new Prisma.Decimal(receivable.paidAmount ?? 0).toDecimalPlaces(2);
-    const outstandingAmount = new Prisma.Decimal(receivable.outstandingAmount ?? 0).toDecimalPlaces(
-      2,
-    );
-    const paymentStatus = outstandingAmount.isZero()
-      ? 'PAID'
-      : paidAmount.gt(0)
-        ? 'PARTIALLY_PAID'
-        : 'UNPAID';
+    const where = {
+      id: receivable.sourceId,
+      deletedAt: null,
+      ...(receivable.companyId ? { companyId: receivable.companyId } : {}),
+      ...(receivable.currency ? { currency: receivable.currency } : {}),
+      ...(receivable.customerId !== undefined ? { customerId: receivable.customerId } : {}),
+      status: { notIn: ['CANCELLED', 'VOIDED'] as any },
+    };
+    const order = await tx.salesOrder.findFirst({ where, select: { totalAmount: true } });
+    if (!order) return;
+    const projection = sourceSettlement(order.totalAmount, {
+      ...receivable,
+      amount:
+        receivable.amount ??
+        new Prisma.Decimal(receivable.paidAmount).plus(receivable.outstandingAmount),
+    });
+    if (projection.settlementConflict) {
+      throw new ConflictException(
+        'The receivable exceeds its source order; reconcile that linkage before changing payment',
+      );
+    }
+    const { paidAmount, outstandingAmount, paymentStatus } = projection;
 
     await tx.salesOrder.updateMany({
-      where: { id: receivable.sourceId, deletedAt: null },
+      where,
       data: {
         receivableId: receivable.id,
         paidAmount,

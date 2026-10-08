@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { SettlementHistory } from '../../common/utils/settlement-history';
 
 /** A single ledger movement on a customer statement. */
 export type StatementLineType = 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'REFUND' | 'ADJUSTMENT';
@@ -45,6 +46,7 @@ export interface CustomerStatement {
   closingBalance: Prisma.Decimal;
   lineCount: number;
   lines: StatementLine[];
+  settlementHistory: SettlementHistory;
   aging: StatementAging;
   /**
    * As-of date the {@link aging} summary was computed at. This is a LIVE

@@ -46,7 +46,25 @@ export function BusinessInvoiceDetail({ id }: { id: string }) {
           <dt>Outstanding</dt>
           <dd>{money(String(row.outstandingAmount), row.currency)}</dd>
         </div>
+        <div>
+          <dt>Cash paid</dt>
+          <dd>{money(String(row.paidAmount), row.currency)}</dd>
+        </div>
+        <div>
+          <dt>Non-cash settlement</dt>
+          <dd>{money(String(row.settlementAdjustmentAmount ?? 0), row.currency)}</dd>
+        </div>
+        <div>
+          <dt>Settlement</dt>
+          <dd>{row.settlementStatus || 'Not settled'}</dd>
+        </div>
       </dl>
+      {row.settlementConflict && (
+        <p role="alert">
+          The linked payable differs from this invoice. Reconcile its coverage before relying on the
+          invoice balance.
+        </p>
+      )}
       {row.purchaseOrder && (
         <Link href={`/operations/purchase-orders/${encodeURIComponent(row.purchaseOrder.id)}`}>
           Purchase order {row.purchaseOrder.purchaseOrderNumber}

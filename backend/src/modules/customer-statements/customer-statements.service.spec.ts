@@ -85,6 +85,7 @@ const REFUNDS = [
 function makeService(overrides?: { customer?: any; companyScope?: any }) {
   const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
   const prisma: any = {
+    journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
     customer: {
       findFirst: jest
         .fn()
@@ -118,6 +119,263 @@ const SEL = {
 };
 
 describe('CustomerStatementsService.buildStatement', () => {
+  it('ages deadline dates by the same UTC calendar day as account overdue filters', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-08T12:00:00Z'));
+    try {
+      const { service, prisma } = makeService();
+      prisma.receivable.findMany.mockResolvedValue([
+        {
+          id: 'calendar-ar',
+          receivableNumber: 'REC-DUE',
+          amount: D(100),
+          issueDate: new Date('2026-10-01'),
+          outstandingAmount: D(100),
+          dueDate: new Date('2026-10-07T23:59:00Z'),
+          status: 'OPEN',
+        },
+      ]);
+      prisma.customerPayment.findMany.mockResolvedValue([]);
+      prisma.creditNote.findMany.mockResolvedValue([]);
+      prisma.refund.findMany.mockResolvedValue([]);
+      const statement = await service.buildStatement(
+        { ...SEL, dateFrom: '2026-10-01', dateTo: '2026-10-08' },
+        USER,
+      );
+      expect(statement.aging.current).toBe(0);
+      expect(statement.aging.days1_30).toBe(100);
+      expect(statement.aging.oldestDaysOverdue).toBe(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('recovers historical journal settlements and makes detail and generated balances agree', async () => {
+    const { service, prisma } = makeService();
+    prisma.receivable.findMany.mockResolvedValue([
+      {
+        id: 'legacy-r',
+        receivableNumber: 'REC-LEGACY',
+        amount: D(100),
+        paidAmount: D(60),
+        outstandingAmount: D(40),
+        issueDate: new Date('2026-01-10'),
+        dueDate: null,
+        status: 'PARTIALLY_PAID',
+      },
+    ]);
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    prisma.creditNote.findMany.mockResolvedValue([]);
+    prisma.refund.findMany.mockResolvedValue([]);
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'legacy-je',
+        journalNumber: 'JE-LEGACY',
+        transactionDate: new Date('2026-02-10'),
+        description: 'Receivable settlement REC-LEGACY',
+        referenceId: 'legacy-r',
+        reversalOfId: null,
+        status: 'POSTED',
+        lines: [
+          {
+            debit: D(0),
+            credit: D(60),
+            account: { accountSubType: 'ar_control', accountCode: '1100' },
+          },
+        ],
+      },
+    ]);
+    prisma.customerStatementRun = { create: jest.fn(async ({ data }) => ({ id: 'run', ...data })) };
+    const detail = await service.buildStatement(SEL, USER);
+    const generated = await service.generate(
+      {
+        companyId: COMPANY,
+        customerId: CUSTOMER,
+        periodStart: SEL.dateFrom,
+        periodEnd: SEL.dateTo,
+      } as any,
+      USER,
+    );
+    expect(detail.openingBalance.toFixed(2)).toBe('100.00');
+    expect(detail.totalCredits.toFixed(2)).toBe('60.00');
+    expect(detail.closingBalance.toFixed(2)).toBe('40.00');
+    expect(generated.closingBalance.toFixed(2)).toBe('40.00');
+    expect(detail.settlementHistory).toMatchObject({
+      status: 'COMPLETE',
+      recoveredLegacySettlements: 1,
+    });
+    expect(detail.lines[0]).toMatchObject({
+      type: 'ADJUSTMENT',
+      reference: 'JE-LEGACY',
+      sourceId: 'legacy-je',
+    });
+  });
+
+  it('exposes unexplained paid amounts but refuses to persist a reconciled statement', async () => {
+    const { service, prisma } = makeService();
+    prisma.receivable.findMany.mockResolvedValue([
+      {
+        id: 'unproved',
+        receivableNumber: 'REC-UNPROVED',
+        amount: D(100),
+        paidAmount: D(40),
+        outstandingAmount: D(60),
+        issueDate: new Date('2026-02-05'),
+        dueDate: null,
+        status: 'PARTIALLY_PAID',
+      },
+    ]);
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    prisma.creditNote.findMany.mockResolvedValue([]);
+    prisma.refund.findMany.mockResolvedValue([]);
+    prisma.customerStatementRun = { create: jest.fn() };
+    const detail = await service.getDetail(SEL as any, USER);
+    expect(detail.closingBalance).toBe('100.00');
+    expect(detail.lines).toHaveLength(1);
+    expect(detail.settlementHistory).toMatchObject({
+      status: 'INCOMPLETE',
+      unresolvedAmount: '40.00',
+    });
+    await expect(
+      service.generate(
+        {
+          companyId: COMPANY,
+          customerId: CUSTOMER,
+          periodStart: SEL.dateFrom,
+          periodEnd: SEL.dateTo,
+        } as any,
+        USER,
+      ),
+    ).rejects.toThrow('settlement history is reconciled');
+    expect(prisma.customerStatementRun.create).not.toHaveBeenCalled();
+    expect((service as any).pdfSections(await service.buildStatement(SEL, USER))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ heading: 'Settlement history is incomplete' }),
+      ]),
+    );
+    expect((service as any).sheetRows(await service.buildStatement(SEL, USER))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ Type: 'HISTORY_GAP', Reference: 'REC-UNPROVED' }),
+      ]),
+    );
+  });
+
+  it('includes the original invoice until the dated write-off, without calling forgiveness paid', async () => {
+    const { service, prisma } = makeService();
+    prisma.receivable.findMany.mockResolvedValue([
+      {
+        id: 'written',
+        receivableNumber: 'REC-WRITTEN',
+        amount: D(100),
+        paidAmount: D(0),
+        outstandingAmount: D(0),
+        issueDate: new Date('2026-01-10'),
+        dueDate: null,
+        status: 'WRITTEN_OFF',
+      },
+    ]);
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    prisma.creditNote.findMany.mockResolvedValue([]);
+    prisma.refund.findMany.mockResolvedValue([]);
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'writeoff',
+        journalNumber: 'JE-WRITEOFF',
+        transactionDate: new Date('2026-03-10'),
+        description: 'Receivable write-off REC-WRITTEN',
+        referenceId: 'written',
+        reversalOfId: null,
+        status: 'POSTED',
+        lines: [
+          {
+            debit: D(0),
+            credit: D(100),
+            account: { accountSubType: 'ar_control', accountCode: '1100' },
+          },
+        ],
+      },
+    ]);
+    const before = await service.buildStatement(SEL, USER);
+    const after = await service.buildStatement({ ...SEL, dateTo: '2026-03-31' }, USER);
+    expect(before.closingBalance.toFixed(2)).toBe('100.00');
+    expect(after.closingBalance.toFixed(2)).toBe('0.00');
+    expect(after.lines[0]).toMatchObject({ type: 'ADJUSTMENT', reference: 'JE-WRITEOFF' });
+    expect(after.settlementHistory.status).toBe('COMPLETE');
+  });
+
+  it('preserves a voided credit note and its reversal in their original periods', async () => {
+    const { service, prisma } = makeService();
+    prisma.receivable.findMany.mockResolvedValue([]);
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    prisma.refund.findMany.mockResolvedValue([]);
+    prisma.creditNote.findMany.mockResolvedValue([
+      {
+        id: 'cn',
+        creditNoteNumber: 'CN-VOID',
+        totalAmount: D(100),
+        issueDate: new Date('2026-02-10'),
+        reason: null,
+        status: 'VOID',
+        journalEntryId: 'cn-original',
+        journalEntry: {
+          reversedBy_: [
+            { id: 'cn-reversal', status: 'POSTED', transactionDate: new Date('2026-03-02') },
+          ],
+        },
+      },
+    ]);
+    const february = await service.buildStatement(SEL, USER);
+    const march = await service.buildStatement(
+      { ...SEL, dateFrom: '2026-03-01', dateTo: '2026-03-31' },
+      USER,
+    );
+    expect(february.closingBalance.toFixed(2)).toBe('-100.00');
+    expect(march.openingBalance.toFixed(2)).toBe('-100.00');
+    expect(march.totalDebits.toFixed(2)).toBe('100.00');
+    expect(march.closingBalance.toFixed(2)).toBe('0.00');
+  });
+
+  it('reconstructs a legacy voided refund through its explicit reversal ID without a journal backlink', async () => {
+    const { service, prisma } = makeService();
+    prisma.receivable.findMany.mockResolvedValue([]);
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    prisma.creditNote.findMany.mockResolvedValue([]);
+    prisma.refund.findMany.mockResolvedValue([
+      {
+        id: 'refund',
+        refundNumber: 'RF-VOID',
+        amount: D(250),
+        refundDate: new Date('2026-02-25'),
+        status: 'VOID',
+        journalEntryId: 'rf-original',
+        reversalJournalEntryId: 'rf-reversal',
+        journalEntry: { reversedBy_: [] },
+      },
+    ]);
+    prisma.journalEntry.findMany.mockResolvedValue([
+      {
+        id: 'rf-reversal',
+        journalNumber: 'JE-RF-REVERSE',
+        status: 'POSTED',
+        transactionDate: new Date('2026-03-10'),
+      },
+    ]);
+    const february = await service.buildStatement(SEL, USER);
+    const march = await service.buildStatement(
+      { ...SEL, dateFrom: '2026-03-01', dateTo: '2026-03-31' },
+      USER,
+    );
+    expect(february.closingBalance.toFixed(2)).toBe('250.00');
+    expect(march.openingBalance.toFixed(2)).toBe('250.00');
+    expect(march.totalCredits.toFixed(2)).toBe('250.00');
+    expect(march.closingBalance.toFixed(2)).toBe('0.00');
+    expect(march.settlementHistory.status).toBe('COMPLETE');
+    expect(march.lines[0].sourceId).toBe('rf-reversal');
+    expect(prisma.journalEntry.findMany.mock.calls[0][0].where).toEqual({
+      id: { in: ['rf-reversal'] },
+      companyId: COMPANY,
+      deletedAt: null,
+      status: 'POSTED',
+    });
+  });
   it('computes opening balance from pre-period movements only', async () => {
     const { service } = makeService();
     const s = await service.buildStatement(SEL, USER);
@@ -227,13 +485,13 @@ describe('CustomerStatementsService.buildStatement', () => {
     }
   });
 
-  it('excludes WRITTEN_OFF / CANCELLED receivables from the statement debit set', async () => {
+  it('retains issued documents for dated write-offs and cancellation reversals', async () => {
     const { service, prisma } = makeService();
     await service.buildStatement(SEL, USER);
     const where = prisma.receivable.findMany.mock.calls[0][0].where;
     // A written-off / cancelled receivable is no longer owed — its original
     // amount must not contribute a debit and overstate the balance.
-    expect(where.status).toEqual({ notIn: ['WRITTEN_OFF', 'CANCELLED'] });
+    expect(where.OR).toEqual([{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }]);
   });
 
   it('scopes every movement query to a single currency (default TZS)', async () => {
@@ -303,6 +561,7 @@ describe('CustomerStatementsService.generate (persisted summary run)', () => {
   }) {
     const created: any[] = [];
     const prisma: any = {
+      journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       customer: { findFirst: jest.fn().mockResolvedValue({ id: CUSTOMER }) },
       receivable: { findMany: jest.fn().mockResolvedValue(fixtures.receivables ?? []) },
       customerPayment: { findMany: jest.fn().mockResolvedValue(fixtures.payments ?? []) },
@@ -381,25 +640,23 @@ describe('CustomerStatementsService.generate (persisted summary run)', () => {
       // payment dated AFTER periodEnd -> must be excluded from the query window
       payments: [{ amount: D(1000), paymentDate: new Date('2026-03-10') }],
     });
-    // The service filters payments by paymentDate <= periodEnd; simulate the DB
-    // returning only in-window rows (none) so credits stay 0.
-    prisma.customerPayment.findMany.mockResolvedValue([]);
+    // Load the complete evidence, then bound the dated movements to the period.
     const run = await service.generate(GEN as any, USER);
     expect(run.totalCredits.toFixed(2)).toBe('0.00');
     expect(run.closingBalance.toFixed(2)).toBe('1000.00');
     // Assert the query really bounds paymentDate to periodEnd (inclusive EOD).
     const where = prisma.customerPayment.findMany.mock.calls[0][0].where;
-    expect(where.status).toBe('COMPLETED');
-    expect(where.paymentDate.lte).toBeInstanceOf(Date);
+    expect(where.status).toEqual({ in: ['COMPLETED', 'REVERSED'] });
+    expect(where.paymentDate).toBeUndefined();
     expect(where.currency).toBe('TZS');
   });
 
-  it('excludes WRITTEN_OFF / CANCELLED receivables from the persisted debit set', async () => {
+  it('uses the same dated lifecycle document set in persisted statements', async () => {
     const { service, prisma } = makeGen({});
     await service.generate(GEN as any, USER);
     const where = prisma.receivable.findMany.mock.calls[0][0].where;
     // Must match the detail (buildStatement) path so the saved run reconciles.
-    expect(where.status).toEqual({ notIn: ['WRITTEN_OFF', 'CANCELLED'] });
+    expect(where.OR).toEqual([{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }]);
   });
 
   it('scopes every source to companyId + currency (single currency, no cross-currency sum)', async () => {
@@ -516,6 +773,32 @@ describe('CustomerStatementsService.emailToCustomer', () => {
     // sendEmail is still called (it is the no-op boundary), targeting customer email
     expect(email.sendEmail).toHaveBeenCalledTimes(1);
     expect(email.sendEmail.mock.calls[0][0]).toBe('ap@acme.io');
+  });
+
+  it('marks incomplete history in both HTML and text email bodies', async () => {
+    const { service, prisma, email } = makeService();
+    prisma.receivable.findMany.mockResolvedValue([
+      {
+        id: 'gap-ar',
+        receivableNumber: 'REC-GAP',
+        amount: D(100),
+        paidAmount: D(30),
+        outstandingAmount: D(70),
+        issueDate: new Date('2026-02-05'),
+        dueDate: null,
+        status: 'PARTIALLY_PAID',
+      },
+    ]);
+    prisma.customerPayment.findMany.mockResolvedValue([]);
+    prisma.creditNote.findMany.mockResolvedValue([]);
+    prisma.refund.findMany.mockResolvedValue([]);
+    await service.emailToCustomer(SEL as any, USER);
+    const [, , html, text] = email.sendEmail.mock.calls[0];
+    for (const body of [html, text]) {
+      expect(body).toContain('Settlement history is incomplete');
+      expect(body).toContain('TZS 30.00');
+      expect(body).toContain('This statement is not reconciled.');
+    }
   });
 
   it('reports emailed:true when SMTP host is set and recipient resolved', async () => {

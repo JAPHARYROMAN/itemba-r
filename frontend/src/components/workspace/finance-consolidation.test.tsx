@@ -4,10 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Payables from '@/app/(dashboard)/finance/payables/page';
 import Receivables from '@/app/(dashboard)/finance/receivables/page';
 
+const auth = vi.hoisted(() => ({ manage: false }));
+
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     loading: false,
-    hasPermission: (permission: string) => permission.endsWith('.view'),
+    hasPermission: (permission: string) =>
+      permission.endsWith('.view') || (auth.manage && permission.endsWith('.manage')),
   }),
 }));
 vi.mock('next/navigation', () => ({
@@ -16,6 +19,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 beforeEach(() => {
+  auth.manage = false;
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
 });
 
@@ -23,6 +27,62 @@ describe.each([
   { Page: Payables, module: 'payables', party: 'supplier', number: 'payableNumber' },
   { Page: Receivables, module: 'receivables', party: 'customer', number: 'receivableNumber' },
 ])('$module account-first flow', ({ Page, module, party, number }) => {
+  it('shows date-overdue debt as payable and hides deletion for posted documents', async () => {
+    auth.manage = true;
+    const document = {
+      id: 'posted-document',
+      [number]: 'POSTED-1',
+      [`${party}Name`]: 'Party A',
+      companyId: 'company-a',
+      currency: 'USD',
+      amount: '100.00',
+      paidAmount: '20.00',
+      outstandingAmount: '80.00',
+      status: 'OVERDUE',
+      lifecycleStatus: 'PARTIALLY_PAID',
+      issueDate: '2000-01-01',
+      dueDate: '2000-02-01',
+      createdAt: '2000-01-01',
+      canDelete: false,
+    };
+    const account = {
+      accountKey: 'account-a',
+      companyId: 'company-a',
+      [`${party}Name`]: 'Party A',
+      currency: 'USD',
+      documentCount: 1,
+      openDocumentCount: 1,
+      amount: 100,
+      paidAmount: 20,
+      outstandingAmount: 80,
+      overdueAmount: 80,
+      status: 'OVERDUE',
+      documents: [document],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: url.includes('/accounts?')
+            ? { data: [account], total: 1, page: 1, totalPages: 1 }
+            : { data: [], total: 0 },
+        }),
+      })),
+    );
+    const user = userEvent.setup();
+    render(<Page />);
+    await user.click(await screen.findByRole('button', { name: 'View transactions for Party A' }));
+    const row = screen.getByText('POSTED-1').closest('tr')!;
+    expect(within(row).getByRole('button', { name: 'Pay', exact: true })).toBeEnabled();
+    expect(within(row).getByRole('button', { name: 'Write Off', exact: true })).toBeEnabled();
+    expect(
+      within(row).queryByRole('button', { name: 'Delete', exact: true }),
+    ).not.toBeInTheDocument();
+    expect(within(row).getByText('OVERDUE')).toBeInTheDocument();
+  });
+
   it('starts with a consolidated balance and drills into all seven distinct transactions and full details', async () => {
     const documents = Array.from({ length: 7 }, (_, i) => ({
       id: `${module}-transaction-${i}`,

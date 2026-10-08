@@ -1,13 +1,8 @@
 import { Prisma } from '@prisma/client';
 import type { BusinessPdfModel } from '../generated-documents/pdf-builder';
+import type { SettlementHistory } from '../../common/utils/settlement-history';
 
-/**
- * Party linkage (Phase 3 PR-6): a statement run's period rendered as a document. Pure: the
- * service reads the run and its period's payables and payments; these builders only shape
- * them. The run's recorded balances attribute settlements to the payable's own period (so
- * they reconcile with the payables ledger); the activity lists payables by issue date and
- * payments by payment date, and says so when the two closings differ.
- */
+/** Pure rendering of one dated ledger; the service recomputes saved runs before export. */
 type Decimalish = Prisma.Decimal | number | string;
 const ZERO = new Prisma.Decimal(0);
 const money = (value: Decimalish | null | undefined) => new Prisma.Decimal(value ?? 0).toFixed(2);
@@ -52,18 +47,27 @@ export interface StatementParty {
 }
 export interface StatementLine {
   date: string;
-  type: 'PAYABLE' | 'PAYMENT';
+  type: 'PAYABLE' | 'PAYMENT' | 'ADJUSTMENT';
   reference: string;
   description: string;
   debit: string;
   credit: string;
   balance: string;
 }
+export interface SupplierStatementMovement {
+  date: Date;
+  type: StatementLine['type'];
+  reference: string;
+  description: string;
+  debit: Prisma.Decimal;
+  credit: Prisma.Decimal;
+}
 export interface SupplierStatementExport {
   run: StatementRunRow;
   supplier: StatementParty | null;
   lines: StatementLine[];
   activity: { debits: string; credits: string; closing: string };
+  settlementHistory?: SettlementHistory;
 }
 
 export function buildSupplierStatement(
@@ -71,8 +75,11 @@ export function buildSupplierStatement(
   supplier: StatementParty | null,
   payables: StatementPayable[],
   payments: StatementPayment[],
+  adjustments: SupplierStatementMovement[] = [],
+  settlementHistory?: SettlementHistory,
 ): SupplierStatementExport {
   const events = [
+    ...adjustments.map((a) => ({ ...a, order: a.type === 'PAYABLE' ? 0 : 1 })),
     ...payables.map((p) => ({
       date: p.issueDate,
       type: 'PAYABLE' as const,
@@ -126,6 +133,7 @@ export function buildSupplierStatement(
     supplier,
     lines,
     activity: { debits: money(debits), credits: money(credits), closing: money(balance) },
+    settlementHistory,
   };
 }
 
@@ -137,7 +145,7 @@ export function supplierStatementCsv(s: SupplierStatementExport): string {
       day(s.run.periodStart),
       'OPENING',
       s.run.statementRunNumber,
-      'Opening balance (recorded)',
+      'Opening balance (dated activity)',
       '',
       '',
       money(s.run.openingBalance),
@@ -155,12 +163,25 @@ export function supplierStatementCsv(s: SupplierStatementExport): string {
       day(s.run.periodEnd),
       'CLOSING',
       s.run.statementRunNumber,
-      'Closing balance (recorded)',
-      money(s.run.totalDebits),
-      money(s.run.totalCredits),
-      money(s.run.closingBalance),
+      'Closing balance (dated activity)',
+      s.activity.debits,
+      s.activity.credits,
+      s.activity.closing,
     ],
   ];
+  if (s.settlementHistory?.status === 'INCOMPLETE') {
+    rows.push([
+      '',
+      'HISTORY_INCOMPLETE',
+      '',
+      'Settlement evidence is incomplete; this balance is not reconciled',
+      '',
+      '',
+      s.settlementHistory.unresolvedAmount,
+    ]);
+    for (const gap of s.settlementHistory.gaps)
+      rows.push(['', 'HISTORY_GAP', gap.reference, gap.reason, '', '', gap.amount]);
+  }
   return rows.map((r) => r.map(cell).join(',')).join('\n') + '\n';
 }
 
@@ -198,7 +219,7 @@ export function supplierStatementPdf(
     },
     sections: [
       {
-        title: 'Recorded balances',
+        title: 'Balances from dated activity',
         items: [
           { label: 'Opening balance', value: fmt(s.run.openingBalance) },
           { label: 'Payables raised', value: fmt(s.run.totalDebits) },
@@ -206,7 +227,15 @@ export function supplierStatementPdf(
           { label: 'Closing balance', value: fmt(s.run.closingBalance) },
         ],
         paragraphs: [
-          'Recorded balances attribute each payable and its settlement to the period the payable was raised in, so they reconcile with the payables ledger. The activity below lists payables by issue date and payments by payment date.',
+          'Balances use payable issue dates and actual settlement dates. Historical settlements retain their original journal references. Saved statement balances are recalculated for this export.',
+          ...(s.settlementHistory?.status === 'INCOMPLETE'
+            ? [
+                `Settlement evidence is incomplete (${s.run.currency} ${s.settlementHistory.unresolvedAmount}); this statement is not reconciled.`,
+                ...s.settlementHistory.gaps.map(
+                  (g) => `${g.reference}: ${g.reason} (${s.run.currency} ${g.amount})`,
+                ),
+              ]
+            : []),
         ],
       },
       {
@@ -229,7 +258,7 @@ export function supplierStatementPdf(
         },
         totals: [
           { label: 'Payables raised in period', value: fmt(s.activity.debits) },
-          { label: 'Payments in period', value: fmt(s.activity.credits) },
+          { label: 'Settlements in period', value: fmt(s.activity.credits) },
           { label: 'Balance after activity', value: fmt(s.activity.closing), emphasis: true },
           ...(recordedMatchesActivity
             ? []

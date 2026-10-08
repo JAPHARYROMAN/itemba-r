@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { AccessLevel, CurrencyCode, Prisma, ReceivableStatus } from '@prisma/client';
+import { AccessLevel, CurrencyCode, Prisma, CustomerStatementRun } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -7,25 +7,22 @@ import { CompanyScopeService } from '../../common/services';
 import { EmailService } from '../../common/services/email.service';
 import { PrintEngineService } from '../print-engine/print-engine.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { utcToday } from '../../common/utils/source-settlement';
 import { GenerateCustomerStatementDto } from './dto/generate-customer-statement.dto';
 import { QueryCustomerStatementDto } from './dto/query-customer-statement.dto';
 import { DetailStatementQueryDto } from './dto/detail-statement.dto';
 import { ExportStatementDto } from './dto/export-statement.dto';
 import { EmailStatementDto } from './dto/email-statement.dto';
 import { CustomerStatement, StatementAging, StatementLine } from './statement.types';
+import {
+  loadSettlementJournals,
+  recoverSettlementHistory,
+  reversalJournalSelection,
+  summarizeDatedMovements,
+} from '../../common/utils/settlement-history';
 
 const ZERO = new Prisma.Decimal(0);
 const DAY_MS = 1000 * 60 * 60 * 24;
-
-// Receivable statuses that must NOT contribute a debit to the statement.
-// A WRITTEN_OFF / CANCELLED receivable is no longer owed by the customer — its
-// original `amount` would otherwise overstate the AR balance. Exclude them from
-// the statement debit set in both the persisted (netMovements) and detail
-// (buildStatement) paths so the two reconcile.
-const EXCLUDED_RECEIVABLE_STATUSES: ReceivableStatus[] = [
-  ReceivableStatus.WRITTEN_OFF,
-  ReceivableStatus.CANCELLED,
-];
 
 interface StatementSelection {
   companyId: string;
@@ -51,7 +48,7 @@ export class CustomerStatementsService {
     private readonly email?: EmailService,
   ) {}
 
-  // ─── Existing summary-run endpoints (unchanged behaviour) ────────────────────
+  // Saved runs retain their original evidence and expose recomputed dated balances.
 
   async findAll(query: QueryCustomerStatementDto, user: AuthUser) {
     const { companyId, customerId, page = 1, limit = 20 } = query;
@@ -74,9 +71,10 @@ export class CustomerStatementsService {
       }),
       this.prisma.customerStatementRun.count({ where }),
     ]);
+    const projected = await Promise.all(data.map((run) => this.projectRun(run)));
     return {
-      data,
-      items: data,
+      data: projected,
+      items: projected,
       total,
       page: Number(page),
       limit: take,
@@ -94,13 +92,38 @@ export class CustomerStatementsService {
     });
     if (!item) throw new NotFoundException('Customer statement run not found');
     await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
-    return item;
+    return this.projectRun(item);
+  }
+
+  /** Project already-selected runs through the same scoped ledger as statement detail. */
+  async projectSavedRuns<T extends CustomerStatementRun>(runs: T[], user: AuthUser) {
+    await Promise.all(
+      [...new Set(runs.map((run) => run.companyId))].map((companyId) =>
+        this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ),
+      ),
+    );
+    const ledgers = new Map<string, ReturnType<CustomerStatementsService['loadMovements']>>();
+    return Promise.all(
+      runs.map(async (run) => {
+        const key = JSON.stringify([run.companyId, run.customerId, run.currency]);
+        let ledger = ledgers.get(key);
+        if (!ledger) {
+          ledger = this.loadMovements(
+            run.companyId,
+            run.customerId ?? undefined,
+            run.currency as CurrencyCode,
+          );
+          ledgers.set(key, ledger);
+        }
+        return this.projectRun(run, await ledger);
+      }),
+    );
   }
 
   async generate(dto: GenerateCustomerStatementDto, user: AuthUser) {
-    const periodStart = new Date(dto.periodStart);
+    const periodStart = dateRangeStart(dto.periodStart);
     const periodEnd = dateRangeEnd(dto.periodEnd);
-    if (periodStart > periodEnd) {
+    if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime()) || periodStart > periodEnd) {
       throw new BadRequestException('Statement start date cannot be after end date');
     }
 
@@ -166,10 +189,8 @@ export class CustomerStatementsService {
   /**
    * Compute the reconciling summary totals for the persisted statement run.
    *
-   * Nets the same movement set as {@link buildStatement} — receivables (debit,
-   * excluding WRITTEN_OFF / CANCELLED which are no longer owed), COMPLETED
-   * customer payments (credit), ISSUED credit notes (credit), and PAID cash
-   * refunds (debit) — so the saved CustomerStatementRun ties out to the detail
+   * Nets the same movement set as {@link buildStatement} — original receivables (debit), dated payments and legacy settlement
+   * journals (credit), credit notes, cash refunds, write-offs and their dated reversals — so the saved CustomerStatementRun ties out to the detail
    * statement and the customer's real balance:
    *   closingBalance === openingBalance + totalDebits - totalCredits
    *
@@ -185,66 +206,257 @@ export class CustomerStatementsService {
     currency: CurrencyCode;
     periodStart: Date;
     periodEnd: Date;
-  }): Promise<{
-    openingBalance: Prisma.Decimal;
-    totalDebits: Prisma.Decimal;
-    totalCredits: Prisma.Decimal;
-    closingBalance: Prisma.Decimal;
-  }> {
-    const { companyId, customerId, currency, periodStart, periodEnd } = args;
-    const scope: { companyId: string; currency: CurrencyCode; customerId?: string } = {
-      companyId,
-      currency,
-    };
-    if (customerId) scope.customerId = customerId;
+  }) {
+    const ledger = await this.loadMovements(args.companyId, args.customerId, args.currency);
+    if (ledger.history.status === 'INCOMPLETE') {
+      throw new BadRequestException({
+        message: 'Statement cannot be generated until settlement history is reconciled',
+        settlementHistory: ledger.history,
+      });
+    }
+    return summarizeDatedMovements(ledger.movements, args.periodStart, args.periodEnd);
+  }
 
+  /** Full dated history: cumulative paid amounts are diagnostic, never dated credits. */
+  private async loadMovements(
+    companyId: string,
+    customerId: string | undefined,
+    currency: CurrencyCode,
+  ) {
+    const scope = { companyId, currency, ...(customerId ? { customerId } : {}) };
+    const journal = {
+      select: {
+        ...reversalJournalSelection,
+        reversedBy_: {
+          where: { companyId, deletedAt: null, status: 'POSTED' as const },
+          select: reversalJournalSelection,
+        },
+      },
+    };
     const [receivables, payments, creditNotes, refunds] = await Promise.all([
       this.prisma.receivable.findMany({
         where: {
           ...scope,
           deletedAt: null,
-          status: { notIn: EXCLUDED_RECEIVABLE_STATUSES },
-          issueDate: { lte: periodEnd },
+          OR: [{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }],
         },
-        select: { amount: true, issueDate: true },
+        select: {
+          id: true,
+          receivableNumber: true,
+          amount: true,
+          paidAmount: true,
+          issueDate: true,
+          dueDate: true,
+          outstandingAmount: true,
+          status: true,
+          journalEntryId: true,
+          sourceType: true,
+          sourceId: true,
+        },
+        orderBy: { issueDate: 'asc' },
       }),
       this.prisma.customerPayment.findMany({
-        where: { ...scope, deletedAt: null, status: 'COMPLETED', paymentDate: { lte: periodEnd } },
-        select: { amount: true, paymentDate: true },
+        where: { ...scope, deletedAt: null, status: { in: ['COMPLETED', 'REVERSED'] } },
+        select: {
+          id: true,
+          paymentNumber: true,
+          amount: true,
+          paymentDate: true,
+          reference: true,
+          status: true,
+          reversedAt: true,
+          journalEntryId: true,
+          reversalJournalEntryId: true,
+          reversalJournalEntry: { select: reversalJournalSelection },
+          allocations: { select: { receivableId: true, amount: true } },
+        },
+        orderBy: { paymentDate: 'asc' },
       }),
       this.prisma.creditNote.findMany({
-        where: { ...scope, deletedAt: null, status: 'ISSUED', issueDate: { lte: periodEnd } },
-        select: { totalAmount: true, issueDate: true },
+        where: { ...scope, deletedAt: null, status: { in: ['ISSUED', 'VOID'] } },
+        select: {
+          id: true,
+          creditNoteNumber: true,
+          totalAmount: true,
+          issueDate: true,
+          reason: true,
+          status: true,
+          journalEntryId: true,
+          journalEntry: journal,
+        },
+        orderBy: { issueDate: 'asc' },
       }),
       this.prisma.refund.findMany({
-        where: { ...scope, deletedAt: null, status: 'PAID', refundDate: { lte: periodEnd } },
-        select: { amount: true, refundDate: true },
+        where: { ...scope, deletedAt: null, status: { in: ['PAID', 'VOID'] } },
+        select: {
+          id: true,
+          refundNumber: true,
+          amount: true,
+          refundDate: true,
+          reason: true,
+          status: true,
+          journalEntryId: true,
+          reversalJournalEntryId: true,
+          journalEntry: journal,
+        },
+        orderBy: { refundDate: 'asc' },
       }),
     ]);
-
-    // Each movement contributes a signed delta (debit raises, credit lowers the
-    // AR balance). Pre-period deltas roll into the opening balance; in-period
-    // deltas split into the debit / credit period totals.
-    const deltas: Array<{ date: Date; debit: Prisma.Decimal; credit: Prisma.Decimal }> = [
-      ...receivables.map((r) => ({ date: r.issueDate, debit: r.amount, credit: ZERO })),
-      ...payments.map((p) => ({ date: p.paymentDate, debit: ZERO, credit: p.amount })),
-      ...creditNotes.map((c) => ({ date: c.issueDate, debit: ZERO, credit: c.totalAmount })),
-      ...refunds.map((rf) => ({ date: rf.refundDate, debit: rf.amount, credit: ZERO })),
-    ];
-
-    let openingBalance = ZERO;
-    let totalDebits = ZERO;
-    let totalCredits = ZERO;
-    for (const d of deltas) {
-      if (d.date < periodStart) {
-        openingBalance = openingBalance.plus(d.debit).minus(d.credit);
-      } else {
-        totalDebits = totalDebits.plus(d.debit);
-        totalCredits = totalCredits.plus(d.credit);
+    const refundReversalIds = refunds.flatMap((r) =>
+      r.status === 'VOID' && r.reversalJournalEntryId ? [r.reversalJournalEntryId] : [],
+    );
+    const refundReversals = refundReversalIds.length
+      ? await this.prisma.journalEntry.findMany({
+          where: {
+            id: { in: refundReversalIds },
+            companyId,
+            deletedAt: null,
+            status: 'POSTED',
+          },
+          select: reversalJournalSelection,
+        })
+      : [];
+    const refundReversalById = new Map(refundReversals.map((j) => [j.id, j]));
+    const documents = receivables.map((r) => ({ ...r, reference: r.receivableNumber }));
+    const recovered = recoverSettlementHistory({
+      kind: 'customer',
+      documents,
+      journals: await loadSettlementJournals(this.prisma, 'customer', companyId, documents),
+      modernJournalIds: payments.flatMap((p) => [p.journalEntryId, p.reversalJournalEntryId]),
+      completedAllocations: payments
+        .filter((p) => p.status !== 'REVERSED')
+        .flatMap((p) =>
+          (p.allocations ?? []).map((a) => ({ documentId: a.receivableId, amount: a.amount })),
+        ),
+    });
+    const movements: StatementLine[] = [...recovered.movements];
+    const add = (
+      date: Date,
+      type: StatementLine['type'],
+      reference: string,
+      description: string,
+      sourceId: string,
+      debit: Prisma.Decimal,
+      credit: Prisma.Decimal,
+    ) => {
+      movements.push({
+        date,
+        type,
+        reference,
+        description,
+        sourceId,
+        debit,
+        credit,
+        balance: ZERO,
+      });
+    };
+    const missingReversal = (id: string, reference: string, amount: Prisma.Decimal) => {
+      recovered.history.gaps.push({
+        documentId: id,
+        reference,
+        amount: amount.toFixed(2),
+        reason: 'Reversed or voided transaction has no dated accounting reversal',
+      });
+    };
+    for (const r of receivables)
+      add(
+        r.issueDate,
+        'INVOICE',
+        r.receivableNumber,
+        `Invoice ${r.receivableNumber}`,
+        r.id,
+        r.amount,
+        ZERO,
+      );
+    for (const p of payments) {
+      add(
+        p.paymentDate,
+        'PAYMENT',
+        p.paymentNumber,
+        p.reference ? `Payment ${p.paymentNumber} (${p.reference})` : `Payment ${p.paymentNumber}`,
+        p.id,
+        ZERO,
+        p.amount,
+      );
+      if (p.status === 'REVERSED') {
+        const date =
+          p.reversalJournalEntry?.status === 'POSTED'
+            ? p.reversalJournalEntry.transactionDate
+            : p.reversedAt;
+        if (date)
+          add(
+            date,
+            'ADJUSTMENT',
+            p.paymentNumber,
+            `Payment reversal ${p.paymentNumber}`,
+            p.reversalJournalEntryId ?? p.id,
+            p.amount,
+            ZERO,
+          );
+        else missingReversal(p.id, p.paymentNumber, p.amount);
       }
     }
-    const closingBalance = openingBalance.plus(totalDebits).minus(totalCredits);
-    return { openingBalance, totalDebits, totalCredits, closingBalance };
+    for (const c of creditNotes) {
+      if (c.status === 'VOID' && !c.journalEntryId) continue;
+      add(
+        c.issueDate,
+        'CREDIT_NOTE',
+        c.creditNoteNumber,
+        c.reason
+          ? `Credit note ${c.creditNoteNumber} (${c.reason})`
+          : `Credit note ${c.creditNoteNumber}`,
+        c.id,
+        ZERO,
+        c.totalAmount,
+      );
+      if (c.status === 'VOID') {
+        const reversal = c.journalEntry?.reversedBy_?.[0];
+        if (reversal)
+          add(
+            reversal.transactionDate,
+            'ADJUSTMENT',
+            c.creditNoteNumber,
+            `Credit note reversal ${c.creditNoteNumber}`,
+            reversal.id,
+            c.totalAmount,
+            ZERO,
+          );
+        else missingReversal(c.id, c.creditNoteNumber, c.totalAmount);
+      }
+    }
+    for (const r of refunds) {
+      if (r.status === 'VOID' && !r.journalEntryId) continue;
+      add(
+        r.refundDate,
+        'REFUND',
+        r.refundNumber,
+        r.reason ? `Refund ${r.refundNumber} (${r.reason})` : `Refund ${r.refundNumber}`,
+        r.id,
+        r.amount,
+        ZERO,
+      );
+      if (r.status === 'VOID') {
+        const reversal =
+          refundReversalById.get(r.reversalJournalEntryId ?? '') ??
+          r.journalEntry?.reversedBy_?.[0];
+        if (reversal)
+          add(
+            reversal.transactionDate,
+            'ADJUSTMENT',
+            r.refundNumber,
+            `Refund reversal ${r.refundNumber}`,
+            reversal.id,
+            ZERO,
+            r.amount,
+          );
+        else missingReversal(r.id, r.refundNumber, r.amount);
+      }
+    }
+    recovered.history.status = recovered.history.gaps.length ? 'INCOMPLETE' : 'COMPLETE';
+    recovered.history.unresolvedAmount = recovered.history.gaps
+      .reduce((sum, gap) => sum.plus(new Prisma.Decimal(gap.amount).abs()), ZERO)
+      .toFixed(2);
+    return { receivables, movements, history: recovered.history };
   }
 
   // ─── Professional statement of account (detail) ──────────────────────────────
@@ -270,10 +482,9 @@ export class CustomerStatementsService {
    *   openingBalance + totalDebits - totalCredits === closingBalance.
    *
    * Sign convention (customer AR ledger — what the customer owes us):
-   *   DEBIT  (raises balance): invoices/receivables issued (excluding
-   *          WRITTEN_OFF / CANCELLED, which are no longer owed), cash refunds
-   *          paid out
-   *   CREDIT (lowers balance): customer payments received, credit notes issued
+   *   DEBIT raises balance: original invoices, cash refunds, reversed settlements.
+   *   CREDIT lowers balance: payments, credit notes, write-offs and cancellations.
+   *   Reversals affect their own dates; later lifecycle changes never erase history.
    *
    * Scoped to a single currency (base TZS by default) exactly like the persisted
    * generate()/netMovements path so the detail statement reconciles with the
@@ -306,132 +517,11 @@ export class CustomerStatementsService {
     // path — scope every source to a single currency (base TZS by default) so
     // the detail statement reconciles with the saved run.
     const currency: CurrencyCode = this.resolveCurrency(sel.currency);
-    const base = { companyId: sel.companyId, customerId: sel.customerId, currency };
-
-    const [receivables, payments, creditNotes, refunds] = await Promise.all([
-      this.prisma.receivable.findMany({
-        where: {
-          ...base,
-          deletedAt: null,
-          status: { notIn: EXCLUDED_RECEIVABLE_STATUSES },
-          issueDate: { lte: to },
-        },
-        select: {
-          id: true,
-          receivableNumber: true,
-          amount: true,
-          issueDate: true,
-          dueDate: true,
-          outstandingAmount: true,
-          status: true,
-        },
-        orderBy: { issueDate: 'asc' },
-      }),
-      this.prisma.customerPayment.findMany({
-        where: {
-          ...base,
-          deletedAt: null,
-          status: 'COMPLETED',
-          paymentDate: { lte: to },
-        },
-        select: {
-          id: true,
-          paymentNumber: true,
-          amount: true,
-          paymentDate: true,
-          reference: true,
-        },
-        orderBy: { paymentDate: 'asc' },
-      }),
-      this.prisma.creditNote.findMany({
-        where: {
-          ...base,
-          deletedAt: null,
-          status: 'ISSUED',
-          issueDate: { lte: to },
-        },
-        select: {
-          id: true,
-          creditNoteNumber: true,
-          totalAmount: true,
-          issueDate: true,
-          reason: true,
-        },
-        orderBy: { issueDate: 'asc' },
-      }),
-      this.prisma.refund.findMany({
-        where: {
-          ...base,
-          deletedAt: null,
-          status: 'PAID',
-          refundDate: { lte: to },
-        },
-        select: {
-          id: true,
-          refundNumber: true,
-          amount: true,
-          refundDate: true,
-          reason: true,
-        },
-        orderBy: { refundDate: 'asc' },
-      }),
-    ]);
-
-    const movements: StatementLine[] = [];
-    for (const r of receivables) {
-      movements.push({
-        date: r.issueDate,
-        type: 'INVOICE',
-        reference: r.receivableNumber,
-        description: `Invoice ${r.receivableNumber}`,
-        sourceId: r.id,
-        debit: r.amount,
-        credit: ZERO,
-        balance: ZERO,
-      });
-    }
-    for (const p of payments) {
-      movements.push({
-        date: p.paymentDate,
-        type: 'PAYMENT',
-        reference: p.paymentNumber,
-        description: p.reference
-          ? `Payment ${p.paymentNumber} (${p.reference})`
-          : `Payment ${p.paymentNumber}`,
-        sourceId: p.id,
-        debit: ZERO,
-        credit: p.amount,
-        balance: ZERO,
-      });
-    }
-    for (const c of creditNotes) {
-      movements.push({
-        date: c.issueDate,
-        type: 'CREDIT_NOTE',
-        reference: c.creditNoteNumber,
-        description: c.reason
-          ? `Credit note ${c.creditNoteNumber} (${c.reason})`
-          : `Credit note ${c.creditNoteNumber}`,
-        sourceId: c.id,
-        debit: ZERO,
-        credit: c.totalAmount,
-        balance: ZERO,
-      });
-    }
-    for (const rf of refunds) {
-      movements.push({
-        date: rf.refundDate,
-        type: 'REFUND',
-        reference: rf.refundNumber,
-        description: rf.reason
-          ? `Refund ${rf.refundNumber} (${rf.reason})`
-          : `Refund ${rf.refundNumber}`,
-        sourceId: rf.id,
-        debit: rf.amount,
-        credit: ZERO,
-        balance: ZERO,
-      });
-    }
+    const { receivables, movements, history } = await this.loadMovements(
+      sel.companyId,
+      sel.customerId,
+      currency,
+    );
 
     // Chronological, with a stable secondary sort so equal-dated lines are
     // deterministic (invoices before the credits that offset them, etc.).
@@ -450,28 +540,13 @@ export class CustomerStatementsService {
       return a.reference.localeCompare(b.reference);
     });
 
-    // Opening balance = net of everything strictly BEFORE `from`.
-    let openingBalance = ZERO;
-    const inPeriod: StatementLine[] = [];
-    for (const m of movements) {
-      if (m.date < from) {
-        openingBalance = openingBalance.plus(m.debit).minus(m.credit);
-      } else {
-        inPeriod.push(m);
-      }
-    }
-
-    // Running balance + period totals.
+    const { openingBalance, totalDebits, totalCredits, closingBalance, inPeriod } =
+      summarizeDatedMovements(movements, from, to);
     let running = openingBalance;
-    let totalDebits = ZERO;
-    let totalCredits = ZERO;
     for (const line of inPeriod) {
       running = running.plus(line.debit).minus(line.credit);
       line.balance = running;
-      totalDebits = totalDebits.plus(line.debit);
-      totalCredits = totalCredits.plus(line.credit);
     }
-    const closingBalance = openingBalance.plus(totalDebits).minus(totalCredits);
 
     // Aging is a LIVE snapshot, NOT period-consistent. It is fed each
     // receivable's current `outstandingAmount`, which already reflects
@@ -506,6 +581,7 @@ export class CustomerStatementsService {
       closingBalance,
       lineCount: inPeriod.length,
       lines: inPeriod,
+      settlementHistory: history,
       aging,
       agingAsOf,
       generatedAt: new Date(),
@@ -538,7 +614,9 @@ export class CustomerStatementsService {
       if (!OPEN_STATUSES.has(r.status)) continue;
       const amount = Number(r.outstandingAmount);
       if (amount === 0) continue;
-      const days = r.dueDate ? Math.floor((asOf.getTime() - r.dueDate.getTime()) / DAY_MS) : 0;
+      const days = r.dueDate
+        ? Math.floor((utcToday(asOf).getTime() - utcToday(r.dueDate).getTime()) / DAY_MS)
+        : 0;
       if (days <= 0) buckets.current += amount;
       else if (days <= 30) buckets.days1_30 += amount;
       else if (days <= 60) buckets.days31_60 += amount;
@@ -574,6 +652,7 @@ export class CustomerStatementsService {
         credit: l.credit.toFixed(2),
         balance: l.balance.toFixed(2),
       })),
+      settlementHistory: s.settlementHistory,
       aging: s.aging,
       agingAsOf: s.agingAsOf,
       generatedAt: s.generatedAt,
@@ -762,6 +841,7 @@ export class CustomerStatementsService {
 
   private templateData(s: CustomerStatement): Record<string, unknown> {
     return {
+      settlementHistory: s.settlementHistory,
       customerName: s.customerName ?? '',
       currency: s.currency,
       dateFrom: this.fmtDate(s.dateFrom),
@@ -781,6 +861,15 @@ export class CustomerStatementsService {
           s.dateTo,
         )}\nOpening balance: ${this.money(s.openingBalance)} ${s.currency}`,
       },
+      ...(s.settlementHistory.status === 'INCOMPLETE'
+        ? [
+            {
+              heading: 'Settlement history is incomplete',
+              paragraph: `Unresolved evidence: ${s.currency} ${s.settlementHistory.unresolvedAmount}. This statement is not reconciled.`,
+              rows: s.settlementHistory.gaps.map((g) => [g.reference, g.reason, g.amount]),
+            },
+          ]
+        : []),
       {
         heading: 'Transactions',
         rows: [
@@ -849,6 +938,20 @@ export class CustomerStatementsService {
       Credit: this.money(s.totalCredits),
       Balance: this.money(s.closingBalance),
     });
+    if (s.settlementHistory.status === 'INCOMPLETE') {
+      rows.push({
+        Type: 'HISTORY_INCOMPLETE',
+        Description: 'Settlement evidence is incomplete; this statement is not reconciled',
+        Balance: s.settlementHistory.unresolvedAmount,
+      });
+      for (const gap of s.settlementHistory.gaps)
+        rows.push({
+          Type: 'HISTORY_GAP',
+          Reference: gap.reference,
+          Description: gap.reason,
+          Balance: gap.amount,
+        });
+    }
     return rows;
   }
 
@@ -955,7 +1058,12 @@ export class CustomerStatementsService {
           )}</td><td style="text-align:right">${this.money(l.balance)}</td></tr>`,
       )
       .join('');
+    const historyWarning =
+      s.settlementHistory.status === 'INCOMPLETE'
+        ? `<p><strong>Settlement history is incomplete.</strong> Unresolved evidence: ${this.escape(s.currency)} ${this.escape(s.settlementHistory.unresolvedAmount)}. This statement is not reconciled.</p>`
+        : '';
     return `
+      ${historyWarning}
       <p>Dear ${this.escape(s.customerName ?? 'Customer')},</p>
       <p>Please find your statement of account for the period
       <strong>${this.fmtDate(s.dateFrom)}</strong> to <strong>${this.fmtDate(s.dateTo)}</strong>.</p>
@@ -982,6 +1090,11 @@ export class CustomerStatementsService {
       `Dear ${s.customerName ?? 'Customer'},`,
       '',
       `Statement of account ${this.fmtDate(s.dateFrom)} to ${this.fmtDate(s.dateTo)} (${s.currency})`,
+      ...(s.settlementHistory.status === 'INCOMPLETE'
+        ? [
+            `Settlement history is incomplete. Unresolved evidence: ${s.currency} ${s.settlementHistory.unresolvedAmount}. This statement is not reconciled.`,
+          ]
+        : []),
       `Opening balance: ${this.money(s.openingBalance)}`,
       ...lines,
       `Closing balance: ${this.money(s.closingBalance)}`,
@@ -1036,5 +1149,41 @@ export class CustomerStatementsService {
     return `statement_${name || 'customer'}_${this.fmtDate(s.dateFrom)}_${this.fmtDate(
       s.dateTo,
     )}.${ext}`;
+  }
+  /** Preserve the saved evidence while projecting period-correct balances on every read. */
+  private async projectRun<T extends CustomerStatementRun>(
+    run: T,
+    loadedLedger?: Awaited<ReturnType<CustomerStatementsService['loadMovements']>>,
+  ) {
+    const ledger =
+      loadedLedger ??
+      (await this.loadMovements(
+        run.companyId,
+        run.customerId ?? undefined,
+        run.currency as CurrencyCode,
+      ));
+    const periodEnd =
+      run.periodEnd.getUTCHours() === 0 && run.periodEnd.getUTCMinutes() === 0
+        ? dateRangeEnd(run.periodEnd.toISOString().slice(0, 10))
+        : run.periodEnd;
+    const { openingBalance, totalDebits, totalCredits, closingBalance } = summarizeDatedMovements(
+      ledger.movements,
+      run.periodStart,
+      periodEnd,
+    );
+    const storedBalances = {
+      openingBalance: run.openingBalance,
+      totalDebits: run.totalDebits,
+      totalCredits: run.totalCredits,
+      closingBalance: run.closingBalance,
+    };
+    const datedBalances = { openingBalance, totalDebits, totalCredits, closingBalance };
+    return {
+      ...run,
+      ...datedBalances,
+      storedBalances,
+      datedBalances,
+      settlementHistory: ledger.history,
+    };
   }
 }

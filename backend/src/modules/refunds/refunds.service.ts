@@ -447,6 +447,11 @@ export class RefundsService {
       }
 
       const reversalJe = await this.reverseRefundJournal(tx, current, userId);
+      if (!reversalJe && current.journalEntryId) {
+        throw new ConflictException(
+          'Refund reversal could not be posted; void aborted to keep accounting and cash consistent',
+        );
+      }
 
       // If (and only if) the reversal JE was actually posted, unwind the cash
       // subledger cache too: the reversal re-debits GL cash (money back in), so
@@ -649,7 +654,7 @@ export class RefundsService {
       branchId: line.branchId ?? undefined,
     }));
 
-    return this.postingEngine.postLines(
+    const reversal = await this.postingEngine.postLines(
       {
         companyId: original.companyId,
         divisionId: original.divisionId,
@@ -664,5 +669,10 @@ export class RefundsService {
       },
       tx,
     );
+    await tx.journalEntry.update({
+      where: { id: reversal.id },
+      data: { reversalOfId: original.id },
+    });
+    return reversal;
   }
 }

@@ -26,7 +26,17 @@ import {
   StatusBadge,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { usePartyCredit } from '@/hooks/use-party-credit';
 import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
+import {
+  canDeleteFinancialDocument,
+  canSettleFinancialDocument,
+  financialAgingBucket,
+  financialDocumentStatus,
+  financialLifecycleStatus,
+  formatFinancialTotals,
+  isFinancialDocumentOverdue,
+} from '@/lib/financial-document';
 import {
   DetailGrid,
   DetailItem,
@@ -75,6 +85,9 @@ export interface Payable {
   issueDate: string;
   dueDate?: string | null;
   status: 'OPEN' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'WRITTEN_OFF';
+  lifecycleStatus?: string;
+  canDelete?: boolean;
+  settlementAdjustmentAmount?: number | string;
   notes?: string | null;
   companyId: string;
   company?: { name: string } | null;
@@ -246,7 +259,7 @@ function moneyNumber(value: unknown) {
 function payablePaidAmount(payable: Payable) {
   const explicit = payable.amountPaid ?? payable.paidAmount;
   if (explicit !== undefined && explicit !== null) return moneyNumber(explicit);
-  return Math.max(0, moneyNumber(payable.amount) - moneyNumber(payable.outstandingAmount));
+  return 0;
 }
 
 function payableOutstandingAmount(payable: Payable) {
@@ -263,15 +276,7 @@ function dateInputValue(value?: string | null): string {
 }
 
 function agingBucket(dueDate?: string | null): string {
-  if (!dueDate) return '-';
-  const time = new Date(dueDate).getTime();
-  if (!Number.isFinite(time)) return '-';
-  const days = Math.floor((Date.now() - time) / 86400000);
-  if (days <= 0) return 'Current';
-  if (days <= 30) return '1-30 days';
-  if (days <= 60) return '31-60 days';
-  if (days <= 90) return '61-90 days';
-  return '90+ days';
+  return financialAgingBucket(dueDate);
 }
 
 function scopeLabel(scope?: { name: string; code?: string | null } | null) {
@@ -286,6 +291,11 @@ function unitLabel(unit?: { name?: string | null; symbol?: string | null } | nul
 
 function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: () => void }) {
   const [detail, setDetail] = useState<Payable>(payable);
+  const { data: partyCredit } = usePartyCredit(
+    'supplier',
+    detail.supplierId ?? detail.supplier?.id,
+    detail.companyId,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -335,7 +345,7 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
       open
       onClose={onClose}
       title={`Payable ${detail.payableNumber ?? detail.id.slice(0, 8)}`}
-      subtitle={`${payableSupplierName(detail)} · ${detail.status}`}
+      subtitle={`${payableSupplierName(detail)} · ${financialDocumentStatus(detail)}`}
       size="3xl"
       footer={
         <Btn variant="secondary" onClick={onClose}>
@@ -360,7 +370,12 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
       <div className="workspace-form space-y-4">
         <div className="grid gap-3 md:grid-cols-4">
           <MoneyTile label="Bill Amount" value={detail.amount} currency={currency} />
-          <MoneyTile label="Paid" value={paid} currency={currency} tone="success" />
+          <MoneyTile label="Cash paid" value={paid} currency={currency} tone="success" />
+          <MoneyTile
+            label="Non-cash settlement"
+            value={detail.settlementAdjustmentAmount ?? 0}
+            currency={currency}
+          />
           <MoneyTile
             label="Outstanding"
             value={outstanding}
@@ -398,10 +413,15 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
             <DetailItem label="TIN" value={supplier?.tin} mono />
             <DetailItem label="VRN" value={supplier?.vrn} mono />
             <DetailItem label="Payment Terms" value={supplier?.paymentTerms} />
-            <DetailItem label="Credit Limit" value={formatMoney(supplier?.creditLimit, currency)} />
             <DetailItem
-              label="Current Balance"
-              value={formatMoney(supplier?.currentBalance, currency)}
+              label="Credit Limit"
+              value={
+                partyCredit ? formatMoney(partyCredit.creditLimit, partyCredit.baseCurrency) : '—'
+              }
+            />
+            <DetailItem
+              label="Party Balance"
+              value={partyCredit ? formatFinancialTotals(partyCredit.total) : '—'}
             />
             <DetailItem
               label="Supplier Status"
@@ -424,7 +444,10 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
             <DetailItem label="Due Date" value={fmtDetailDate(detail.dueDate)} />
             <DetailItem label="Created" value={fmtDateTime(detail.createdAt)} />
             <DetailItem label="Updated" value={fmtDateTime(detail.updatedAt)} />
-            <DetailItem label="Status" value={<InlineStatus status={detail.status} />} />
+            <DetailItem
+              label="Status"
+              value={<InlineStatus status={financialDocumentStatus(detail)} />}
+            />
           </DetailGrid>
         </DetailSection>
 
@@ -1344,14 +1367,14 @@ export default function PayablesPage() {
           currency: account.currency,
         }))
       : (data?.data ?? [])
-          .filter((p) => p.status === 'OVERDUE')
+          .filter((p) => isFinancialDocumentOverdue(p))
           .map((p) => ({ amount: payableOutstandingAmount(p), currency: p.currency })),
   );
   const totalRecords = viewMode === 'accounts' ? (accounts?.total ?? 0) : (data?.total ?? 0);
   const openRecords =
     viewMode === 'accounts'
       ? (accounts?.data.filter((account) => account.outstandingAmount > 0).length ?? 0)
-      : (data?.data.filter((p) => p.status === 'OPEN').length ?? 0);
+      : (data?.data.filter(canSettleFinancialDocument).length ?? 0);
   const paginated = viewMode === 'accounts' ? accounts : data;
 
   if (authLoading || !canView) {
@@ -1372,22 +1395,22 @@ export default function PayablesPage() {
       </Btn>
       {canManage && (
         <>
-          {(p.status === 'OPEN' || p.status === 'PARTIALLY_PAID' || p.status === 'OVERDUE') && (
+          {canSettleFinancialDocument(p) && (
             <Btn variant="success" size="xs" onClick={() => setRecordingPayment(p)}>
               Pay
             </Btn>
           )}
-          {(p.status === 'OPEN' || p.status === 'OVERDUE') && (
+          {canSettleFinancialDocument(p) && (
             <Btn variant="warning" size="xs" onClick={() => setWritingOff(p)}>
               Write Off
             </Btn>
           )}
-          {p.status === 'OPEN' && (
+          {financialLifecycleStatus(p) === 'OPEN' && (
             <Btn variant="ghost" size="xs" onClick={() => setEditing(p)}>
               Edit
             </Btn>
           )}
-          {p.status === 'OPEN' && (
+          {canDeleteFinancialDocument(p) && (
             <Btn variant="danger" size="xs" onClick={() => setDeleting(p)}>
               Delete
             </Btn>
@@ -1575,7 +1598,7 @@ export default function PayablesPage() {
           records={data?.data ?? []}
           name={(p) => p.payableNumber ?? p.id.slice(0, 8)}
           reference={(p) => payableSupplierName(p)}
-          status={(p) => p.status}
+          status={financialDocumentStatus}
           fields={[
             {
               label: 'Outstanding',
@@ -1586,7 +1609,11 @@ export default function PayablesPage() {
           details={[
             { label: 'Issued', value: (p) => formatDate(p.issueDate) },
             { label: 'Original amount', value: (p) => formatMoney(p.amount, p.currency) },
-            { label: 'Paid', value: (p) => formatMoney(payablePaidAmount(p), p.currency) },
+            { label: 'Cash paid', value: (p) => formatMoney(payablePaidAmount(p), p.currency) },
+            {
+              label: 'Non-cash settlement',
+              value: (p) => formatMoney(p.settlementAdjustmentAmount ?? 0, p.currency),
+            },
             { label: 'Company', value: (p) => p.company?.name || '—' },
           ]}
           actions={renderRecordActions}
@@ -1610,7 +1637,7 @@ export default function PayablesPage() {
                   <th className="px-4 py-3">Company</th>
                   <th className="px-4 py-3 text-right">Documents</th>
                   <th className="px-4 py-3 text-right">Total Credit</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Cash paid / adjustments</th>
                   <th className="px-4 py-3 text-right">Outstanding</th>
                   <th className="px-4 py-3 text-right">Overdue</th>
                   <th className="px-4 py-3">Next Due</th>
@@ -1674,6 +1701,19 @@ export default function PayablesPage() {
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-green-700">
                             {formatMoney(account.paidAmount, account.currency)}
+                            {account.documents.some(
+                              (record) => Number(record.settlementAdjustmentAmount ?? 0) > 0,
+                            ) && (
+                              <div className="text-xs mt-1">
+                                Non-cash:{' '}
+                                {formatFinancialTotals(
+                                  account.documents.map((record) => ({
+                                    currency: record.currency,
+                                    amount: record.settlementAdjustmentAmount ?? 0,
+                                  })),
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-semibold">
                             {formatMoney(account.outstandingAmount, account.currency)}
@@ -1720,7 +1760,9 @@ export default function PayablesPage() {
                                       <th className="px-3 py-2">Issue</th>
                                       <th className="px-3 py-2">Due</th>
                                       <th className="px-3 py-2 text-right">Amount</th>
-                                      <th className="px-3 py-2 text-right">Paid</th>
+                                      <th className="px-3 py-2 text-right">
+                                        Cash paid / adjustments
+                                      </th>
                                       <th className="px-3 py-2 text-right">Outstanding</th>
                                       <th className="px-3 py-2">Status</th>
                                       <th className="px-3 py-2 text-right">Actions</th>
@@ -1739,12 +1781,21 @@ export default function PayablesPage() {
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-green-700">
                                           {formatMoney(payablePaidAmount(p), p.currency)}
+                                          {Number(p.settlementAdjustmentAmount ?? 0) > 0 && (
+                                            <div className="text-xs mt-1">
+                                              Non-cash:{' '}
+                                              {formatMoney(
+                                                p.settlementAdjustmentAmount,
+                                                p.currency,
+                                              )}
+                                            </div>
+                                          )}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold">
                                           {formatMoney(payableOutstandingAmount(p), p.currency)}
                                         </td>
                                         <td className="px-3 py-2">
-                                          <StatusBadge status={p.status} />
+                                          <StatusBadge status={financialDocumentStatus(p)} />
                                         </td>
                                         <td className="px-3 py-2">
                                           <div className="flex items-center justify-end gap-1.5">
@@ -1757,9 +1808,7 @@ export default function PayablesPage() {
                                             </Btn>
                                             {canManage && (
                                               <>
-                                                {(p.status === 'OPEN' ||
-                                                  p.status === 'PARTIALLY_PAID' ||
-                                                  p.status === 'OVERDUE') && (
+                                                {canSettleFinancialDocument(p) && (
                                                   <Btn
                                                     variant="success"
                                                     size="xs"
@@ -1768,8 +1817,7 @@ export default function PayablesPage() {
                                                     Pay
                                                   </Btn>
                                                 )}
-                                                {(p.status === 'OPEN' ||
-                                                  p.status === 'OVERDUE') && (
+                                                {canSettleFinancialDocument(p) && (
                                                   <Btn
                                                     variant="warning"
                                                     size="xs"
@@ -1778,7 +1826,7 @@ export default function PayablesPage() {
                                                     Write Off
                                                   </Btn>
                                                 )}
-                                                {p.status === 'OPEN' && (
+                                                {financialLifecycleStatus(p) === 'OPEN' && (
                                                   <Btn
                                                     variant="ghost"
                                                     size="xs"
@@ -1787,7 +1835,7 @@ export default function PayablesPage() {
                                                     Edit
                                                   </Btn>
                                                 )}
-                                                {p.status === 'OPEN' && (
+                                                {canDeleteFinancialDocument(p) && (
                                                   <Btn
                                                     variant="danger"
                                                     size="xs"
@@ -1828,7 +1876,7 @@ export default function PayablesPage() {
                   <th className="px-4 py-3">AP #</th>
                   <th className="px-4 py-3">Supplier</th>
                   <th className="px-4 py-3 text-right">Amount</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Cash paid / adjustments</th>
                   <th className="px-4 py-3 text-right">Outstanding</th>
                   <th className="px-4 py-3">Issue Date</th>
                   <th className="px-4 py-3">Due Date</th>
@@ -1876,6 +1924,11 @@ export default function PayablesPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-green-700">
                         {formatMoney(payablePaidAmount(p), p.currency)}
+                        {Number(p.settlementAdjustmentAmount ?? 0) > 0 && (
+                          <div className="text-xs mt-1">
+                            Non-cash: {formatMoney(p.settlementAdjustmentAmount, p.currency)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">
                         {formatMoney(payableOutstandingAmount(p), p.currency)}
@@ -1888,7 +1941,7 @@ export default function PayablesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={p.status} />
+                        <StatusBadge status={financialDocumentStatus(p)} />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">

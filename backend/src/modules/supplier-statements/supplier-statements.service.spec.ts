@@ -17,6 +17,9 @@ const END = '2026-02-28';
  * and a foreign-currency row must be excluded by the currency scope.
  */
 const PRE_PERIOD = {
+  id: 'p0',
+  payableNumber: 'AP-0',
+  outstandingAmount: D(600),
   amount: D(1000),
   paidAmount: D(400),
   issueDate: new Date('2026-01-10'),
@@ -24,6 +27,9 @@ const PRE_PERIOD = {
   currency: CurrencyCode.TZS,
 };
 const IN_PERIOD_1 = {
+  id: 'p1',
+  payableNumber: 'AP-1',
+  outstandingAmount: D(3000),
   amount: D(5000),
   paidAmount: D(2000),
   issueDate: new Date('2026-02-05'),
@@ -31,6 +37,9 @@ const IN_PERIOD_1 = {
   currency: CurrencyCode.TZS,
 };
 const IN_PERIOD_2 = {
+  id: 'p2',
+  payableNumber: 'AP-2',
+  outstandingAmount: D(0),
   amount: D(3000),
   paidAmount: D(3000),
   issueDate: new Date('2026-02-20'),
@@ -38,10 +47,44 @@ const IN_PERIOD_2 = {
   currency: CurrencyCode.TZS,
 };
 
-function makeService(payables: any[] = [PRE_PERIOD, IN_PERIOD_1, IN_PERIOD_2]) {
+const DATED_PAYMENTS = [
+  {
+    id: 's0',
+    paymentNumber: 'SP-0',
+    amount: D(400),
+    paymentDate: new Date('2026-01-20'),
+    method: 'CASH',
+    status: 'COMPLETED',
+    allocations: [{ payableId: 'p0', amount: D(400) }],
+  },
+  {
+    id: 's1',
+    paymentNumber: 'SP-1',
+    amount: D(2000),
+    paymentDate: new Date('2026-02-10'),
+    method: 'CASH',
+    status: 'COMPLETED',
+    allocations: [{ payableId: 'p1', amount: D(2000) }],
+  },
+  {
+    id: 's2',
+    paymentNumber: 'SP-2',
+    amount: D(3000),
+    paymentDate: new Date('2026-02-25'),
+    method: 'CASH',
+    status: 'COMPLETED',
+    allocations: [{ payableId: 'p2', amount: D(3000) }],
+  },
+];
+function makeService(
+  payables: any[] = [PRE_PERIOD, IN_PERIOD_1, IN_PERIOD_2],
+  payments: any[] = payables.length ? DATED_PAYMENTS : [],
+) {
   const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
   const created: any[] = [];
   const prisma: any = {
+    journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
+    supplierPayment: { findMany: jest.fn().mockResolvedValue(payments) },
     supplier: {
       findFirst: jest.fn().mockResolvedValue({ id: SUPPLIER }),
     },
@@ -69,7 +112,106 @@ const DTO = {
 };
 
 describe('SupplierStatementsService.generate reconciliation', () => {
-  it('computes opening balance from pre-period payables only (amount − paidAmount)', async () => {
+  it('uses the payment date: January closes unpaid and February opens with the same debt', async () => {
+    const { service, prisma } = makeService(
+      [
+        {
+          ...PRE_PERIOD,
+          amount: D(100),
+          paidAmount: D(100),
+          outstandingAmount: D(0),
+          status: 'PAID',
+        },
+      ],
+      [
+        {
+          ...DATED_PAYMENTS[0],
+          amount: D(100),
+          paymentDate: new Date('2026-02-10'),
+          allocations: [{ payableId: 'p0', amount: D(100) }],
+        },
+      ],
+    );
+    const january = await service.generate(
+      { ...DTO, periodStart: '2026-01-01', periodEnd: '2026-01-31' } as any,
+      USER,
+    );
+    const february = await service.generate(DTO as any, USER);
+    expect(january.closingBalance.toFixed(2)).toBe('100.00');
+    expect(january.totalCredits.toFixed(2)).toBe('0.00');
+    expect(february.openingBalance.toFixed(2)).toBe('100.00');
+    expect(february.totalCredits.toFixed(2)).toBe('100.00');
+    expect(february.closingBalance.toFixed(2)).toBe('0.00');
+    expect(prisma.supplierStatementRun.create.mock.calls[1][0].data.periodEnd.toISOString()).toBe(
+      '2026-02-28T23:59:59.999Z',
+    );
+  });
+
+  it('applies reversed payments on their posted reversal date, retaining backdated payment history', async () => {
+    const { service } = makeService(
+      [
+        {
+          ...PRE_PERIOD,
+          amount: D(100),
+          paidAmount: D(0),
+          outstandingAmount: D(100),
+          status: 'OPEN',
+        },
+      ],
+      [
+        {
+          ...DATED_PAYMENTS[0],
+          amount: D(100),
+          status: 'REVERSED',
+          allocations: [{ payableId: 'p0', amount: D(100) }],
+          reversedAt: new Date('2026-03-01'),
+          reversalJournalEntry: { status: 'POSTED', transactionDate: new Date('2026-02-10') },
+        },
+      ],
+    );
+    const january = await service.generate(
+      { ...DTO, periodStart: '2026-01-01', periodEnd: '2026-01-31' } as any,
+      USER,
+    );
+    const february = await service.generate(DTO as any, USER);
+    expect(january.closingBalance.toFixed(2)).toBe('0.00');
+    expect(february.openingBalance.toFixed(2)).toBe('0.00');
+    expect(february.totalDebits.toFixed(2)).toBe('100.00');
+    expect(february.closingBalance.toFixed(2)).toBe('100.00');
+  });
+
+  it('includes advances once, even when they have no allocated payable yet', async () => {
+    const { service, prisma } = makeService(
+      [],
+      [
+        {
+          ...DATED_PAYMENTS[0],
+          amount: D(100),
+          allocations: [],
+          purchaseAdvance: { id: 'advance' },
+        },
+      ],
+    );
+    const run = await service.generate(
+      { ...DTO, periodStart: '2026-01-01', periodEnd: '2026-01-31' } as any,
+      USER,
+    );
+    expect(run.totalCredits.toFixed(2)).toBe('100.00');
+    expect(run.closingBalance.toFixed(2)).toBe('-100.00');
+    expect(prisma.supplierPayment.findMany.mock.calls[0][0].where.OR).toContainEqual({
+      purchaseAdvance: { isNot: null },
+    });
+  });
+
+  it('blocks unexplained historical paid amounts instead of assigning them to issue dates', async () => {
+    const { service, prisma } = makeService([PRE_PERIOD], []);
+    await expect(service.generate(DTO as any, USER)).rejects.toThrow(
+      'settlement history is reconciled',
+    );
+    expect(prisma.supplierStatementRun.create).not.toHaveBeenCalled();
+  });
+
+  it('computes opening from pre-period invoices and dated settlements', async () => {
     const { service } = makeService();
     const run = await service.generate(DTO as any, USER);
     // pre-period: 1000 − 400 = 600
@@ -97,13 +239,11 @@ describe('SupplierStatementsService.generate reconciliation', () => {
     expect(run.closingBalance.toFixed(2)).toBe('3600.00');
   });
 
-  it('excludes WRITTEN_OFF / CANCELLED payables via the query filter', async () => {
+  it('retains issued payables for dated write-offs and reversal evidence', async () => {
     const { service, prisma } = makeService();
     await service.generate(DTO as any, USER);
     const where = prisma.payable.findMany.mock.calls[0][0].where;
-    expect(where.status).toEqual({
-      notIn: [PayableStatus.WRITTEN_OFF, PayableStatus.CANCELLED],
-    });
+    expect(where.OR).toEqual([{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }]);
   });
 
   it('scopes the run to a single currency (default TZS) and persists it', async () => {
@@ -126,7 +266,7 @@ describe('SupplierStatementsService.generate reconciliation', () => {
     const { service, prisma } = makeService();
     await service.generate(DTO as any, USER);
     const where = prisma.payable.findMany.mock.calls[0][0].where;
-    expect(where.issueDate).toEqual({ lte: new Date(END) });
+    expect(where.issueDate).toBeUndefined();
     expect(where.companyId).toBe(COMPANY);
     expect(where.deletedAt).toBeNull();
     expect(where.supplierId).toBe(SUPPLIER);
@@ -192,6 +332,7 @@ describe('SupplierStatementsService.export', () => {
   };
   function exportService(documents?: any) {
     const prisma: any = {
+      journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       supplierStatementRun: { findFirst: jest.fn().mockResolvedValue(run) },
       supplier: {
         findFirst: jest
@@ -223,7 +364,10 @@ describe('SupplierStatementsService.export', () => {
         ]),
       },
     };
-    const companyScope: any = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
+    const companyScope: any = {
+      assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+      companyWhereFor: jest.fn().mockResolvedValue({ companyId: COMPANY }),
+    };
     const service = new SupplierStatementsService(
       prisma,
       { log: jest.fn() } as any,
@@ -241,20 +385,65 @@ describe('SupplierStatementsService.export', () => {
       companyId: COMPANY,
       supplierId: SUPPLIER,
       currency: 'TZS',
-      issueDate: { gte: run.periodStart, lte: run.periodEnd },
     });
     expect(prisma.supplierPayment.findMany.mock.calls[0][0].where).toMatchObject({
       companyId: COMPANY,
       supplierId: SUPPLIER,
-      reversedAt: null,
-      paymentDate: { gte: run.periodStart, lte: run.periodEnd },
+      status: { in: ['COMPLETED', 'REVERSED'] },
     });
     expect(result.filename).toBe('supplier-statement-SSTAT-1.csv');
     expect(result.mimeType).toBe('text/csv; charset=utf-8');
     const lines = result.buffer.toString('utf8').trim().split('\n');
     expect(lines).toHaveLength(5);
-    expect(lines[2]).toBe('2026-09-05,PAYABLE,PAY-1,Payable raised,100.00,0.00,200.00');
-    expect(lines[3]).toBe('2026-09-20,PAYMENT,SPAY-1,Payment · CASH,0.00,40.00,160.00');
+    expect(lines[2]).toBe('2026-09-05,PAYABLE,PAY-1,Payable raised,100.00,0.00,100.00');
+    expect(lines[3]).toBe('2026-09-20,PAYMENT,SPAY-1,Payment · CASH,0.00,40.00,60.00');
+  });
+
+  it('projects old run list/detail/export from the same ledger while retaining stored totals', async () => {
+    const { service, prisma } = exportService();
+    prisma.supplierStatementRun.findMany = jest.fn().mockResolvedValue([run]);
+    prisma.supplierStatementRun.count = jest.fn().mockResolvedValue(1);
+    const one = await service.findOne('run-1', exportUser());
+    const list = await service.findAll({ companyId: COMPANY } as any, exportUser());
+    const exported = await service.export('run-1', 'csv', exportUser());
+    expect(one.closingBalance.toFixed(2)).toBe('60.00');
+    expect(one.storedBalances.closingBalance.toFixed(2)).toBe('200.00');
+    expect(one.settlementHistory.status).toBe('COMPLETE');
+    expect(list.data[0].closingBalance.toFixed(2)).toBe('60.00');
+    expect(exported.buffer.toString()).toContain(
+      '2026-09-30,CLOSING,SSTAT-1,Closing balance (dated activity),100.00,40.00,60.00',
+    );
+    expect(prisma.supplierStatementRun.update).toBeUndefined();
+  });
+
+  it('shows the same provisional dated balance in detail and export when settlement evidence is incomplete', async () => {
+    const { service, prisma } = exportService();
+    prisma.payable.findMany.mockResolvedValue([
+      {
+        id: 'unproved',
+        payableNumber: 'AP-UNPROVED',
+        amount: D(100),
+        paidAmount: D(20),
+        outstandingAmount: D(80),
+        issueDate: new Date('2026-09-05'),
+        supplierName: 'Fuel Co',
+        status: 'PARTIALLY_PAID',
+      },
+    ]);
+    prisma.supplierPayment.findMany.mockResolvedValue([]);
+    const detail = await service.findOne('run-1', exportUser());
+    const exported = await service.export('run-1', 'csv', exportUser());
+    expect(detail.closingBalance.toFixed(2)).toBe('100.00');
+    expect(detail.storedBalances.closingBalance.toFixed(2)).toBe('200.00');
+    expect(detail.settlementHistory).toMatchObject({
+      status: 'INCOMPLETE',
+      unresolvedAmount: '20.00',
+    });
+    expect(exported.buffer.toString()).toContain(
+      'Closing balance (dated activity),100.00,0.00,100.00',
+    );
+    expect(exported.buffer.toString()).toContain('HISTORY_INCOMPLETE');
+    expect(exported.buffer.toString()).toContain('AP-UNPROVED');
   });
 
   it('renders the PDF through the letterhead renderer for the run company, or refuses without it', async () => {

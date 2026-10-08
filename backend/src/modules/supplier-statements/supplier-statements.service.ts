@@ -1,9 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessLevel, CurrencyCode, PayableStatus, Prisma } from '@prisma/client';
+import { AccessLevel, CurrencyCode, Prisma, SupplierStatementRun } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { dateRangeStart, dateRangeEnd } from '../../common/utils/date-range';
+import {
+  loadSettlementJournals,
+  recoverSettlementHistory,
+  reversalJournalSelection,
+  summarizeDatedMovements,
+} from '../../common/utils/settlement-history';
 import { GenerateSupplierStatementDto } from './dto/generate-supplier-statement.dto';
 import { QuerySupplierStatementDto } from './dto/query-supplier-statement.dto';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
@@ -11,19 +18,10 @@ import {
   buildSupplierStatement,
   supplierStatementCsv,
   supplierStatementPdf,
+  SupplierStatementMovement,
 } from './supplier-statement-export';
 
 const ZERO = new Prisma.Decimal(0);
-
-/**
- * Payable statuses that MUST be excluded from a supplier (AP) statement:
- *   WRITTEN_OFF — the AP liability was cleared by a write-off JE, not paid; its
- *                 amount/paidAmount no longer reflect a real balance owed.
- *   CANCELLED   — the payable was voided and never represented a real liability.
- * Including either makes the closing balance un-reconcilable against the AP
- * subledger's true outstanding.
- */
-const EXCLUDED_STATUSES: PayableStatus[] = [PayableStatus.WRITTEN_OFF, PayableStatus.CANCELLED];
 
 @Injectable()
 export class SupplierStatementsService {
@@ -49,40 +47,28 @@ export class SupplierStatementsService {
           select: { id: true, name: true, supplierCode: true },
         })
       : null;
-    const scope = {
-      companyId: run.companyId,
-      deletedAt: null,
-      currency: run.currency as CurrencyCode,
-      ...(run.supplierId ? { supplierId: run.supplierId } : {}),
-    };
-    const period = { gte: run.periodStart, lte: run.periodEnd };
-    const [payables, payments] = await Promise.all([
-      this.prisma.payable.findMany({
-        where: { ...scope, status: { notIn: EXCLUDED_STATUSES }, issueDate: period },
-        select: { id: true, payableNumber: true, issueDate: true, amount: true, supplierName: true },
-        orderBy: { issueDate: 'asc' },
-        take: 10001,
-      }),
-      this.prisma.supplierPayment.findMany({
-        where: { ...scope, reversedAt: null, paymentDate: period },
-        select: {
-          id: true,
-          paymentNumber: true,
-          paymentDate: true,
-          amount: true,
-          method: true,
-          reference: true,
-          supplier: { select: { name: true } },
-        },
-        orderBy: { paymentDate: 'asc' },
-        take: 10001,
-      }),
-    ]);
-    if (payables.length > 10000 || payments.length > 10000)
+    const ledger = await this.loadMovements(
+      run.companyId,
+      run.supplierId ?? undefined,
+      run.currency as CurrencyCode,
+    );
+    const periodEnd =
+      run.periodEnd.getUTCHours() === 0 && run.periodEnd.getUTCMinutes() === 0
+        ? dateRangeEnd(run.periodEnd.toISOString().slice(0, 10))
+        : run.periodEnd;
+    const totals = summarizeDatedMovements(ledger.movements, run.periodStart, periodEnd);
+    if (totals.inPeriod.length > 10000)
       throw new BadRequestException(
         'This statement period has more than 10,000 lines; generate a shorter period to export it.',
       );
-    const statement = buildSupplierStatement(run, supplier, payables, payments);
+    const statement = buildSupplierStatement(
+      { ...run, ...totals, periodEnd },
+      supplier,
+      [],
+      [],
+      totals.inPeriod,
+      ledger.history,
+    );
     const base = `supplier-statement-${run.statementRunNumber}`;
     if (format === 'csv')
       return {
@@ -123,7 +109,14 @@ export class SupplierStatementsService {
       }),
       this.prisma.supplierStatementRun.count({ where }),
     ]);
-    return { data, total, page: Number(page), limit: take, totalPages: Math.ceil(total / take) };
+    const projected = await Promise.all(data.map((run) => this.projectRun(run)));
+    return {
+      data: projected,
+      total,
+      page: Number(page),
+      limit: take,
+      totalPages: Math.ceil(total / take),
+    };
   }
 
   async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
@@ -136,13 +129,38 @@ export class SupplierStatementsService {
     });
     if (!item) throw new NotFoundException('Supplier statement run not found');
     await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
-    return item;
+    return this.projectRun(item);
+  }
+
+  /** Project already-selected runs through the same scoped ledger as statement detail. */
+  async projectSavedRuns<T extends SupplierStatementRun>(runs: T[], user: AuthUser) {
+    await Promise.all(
+      [...new Set(runs.map((run) => run.companyId))].map((companyId) =>
+        this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ),
+      ),
+    );
+    const ledgers = new Map<string, ReturnType<SupplierStatementsService['loadMovements']>>();
+    return Promise.all(
+      runs.map(async (run) => {
+        const key = JSON.stringify([run.companyId, run.supplierId, run.currency]);
+        let ledger = ledgers.get(key);
+        if (!ledger) {
+          ledger = this.loadMovements(
+            run.companyId,
+            run.supplierId ?? undefined,
+            run.currency as CurrencyCode,
+          );
+          ledgers.set(key, ledger);
+        }
+        return this.projectRun(run, await ledger);
+      }),
+    );
   }
 
   async generate(dto: GenerateSupplierStatementDto, user: AuthUser) {
-    const periodStart = new Date(dto.periodStart);
-    const periodEnd = new Date(dto.periodEnd);
-    if (periodStart > periodEnd) {
+    const periodStart = dateRangeStart(dto.periodStart);
+    const periodEnd = dateRangeEnd(dto.periodEnd);
+    if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime()) || periodStart > periodEnd) {
       throw new BadRequestException('Statement start date cannot be after end date');
     }
 
@@ -163,47 +181,18 @@ export class SupplierStatementsService {
     // it on the run so consumers know what the totals are denominated in.
     const currency: CurrencyCode = dto.currency ?? CurrencyCode.TZS;
 
-    // Pull every payable up to and including periodEnd, then split pre-period
-    // (opening) vs in-period. WRITTEN_OFF / CANCELLED are excluded so the run
-    // reconciles against the AP subledger's true outstanding.
-    const payableWhere: Prisma.PayableWhereInput = {
-      companyId: dto.companyId,
-      deletedAt: null,
-      currency,
-      status: { notIn: EXCLUDED_STATUSES },
-      issueDate: { lte: periodEnd },
-    };
-    if (dto.supplierId) payableWhere.supplierId = dto.supplierId;
-
-    const payables = await this.prisma.payable.findMany({
-      where: payableWhere,
-      select: { amount: true, paidAmount: true, issueDate: true },
-    });
-
-    // Sign convention (supplier AP ledger — what we owe the supplier):
-    //   DEBIT  (raises balance): invoice/payable amount billed to us
-    //   CREDIT (lowers balance): amount paid against the payable
-    //
-    // With no separate AP payment ledger, paidAmount is the payable's
-    // as-of-now cumulative settlement. Attributing it to the payable's own
-    // issue period keeps the run reconcilable by construction:
-    //   opening = Σ_{issue < start} (amount − paidAmount)
-    //   closing = opening + Σ_{in-period} amount − Σ_{in-period} paidAmount
-    //           = Σ_{issue ≤ end} (amount − paidAmount)   (true outstanding)
-    let openingBalance = ZERO;
-    let totalDebits = ZERO;
-    let totalCredits = ZERO;
-    for (const p of payables) {
-      const amount = p.amount ?? ZERO;
-      const paid = p.paidAmount ?? ZERO;
-      if (p.issueDate < periodStart) {
-        openingBalance = openingBalance.plus(amount).minus(paid);
-      } else {
-        totalDebits = totalDebits.plus(amount);
-        totalCredits = totalCredits.plus(paid);
-      }
+    const ledger = await this.loadMovements(dto.companyId, dto.supplierId, currency);
+    if (ledger.history.status === 'INCOMPLETE') {
+      throw new BadRequestException({
+        message: 'Statement cannot be generated until settlement history is reconciled',
+        settlementHistory: ledger.history,
+      });
     }
-    const closingBalance = openingBalance.plus(totalDebits).minus(totalCredits);
+    const { openingBalance, totalDebits, totalCredits, closingBalance } = summarizeDatedMovements(
+      ledger.movements,
+      periodStart,
+      periodEnd,
+    );
 
     const run = await this.prisma.supplierStatementRun.create({
       data: {
@@ -232,5 +221,166 @@ export class SupplierStatementsService {
       newValue: run as any,
     });
     return run;
+  }
+  /** The exact same dated AP ledger feeds saved balances and rendered activity. */
+  private async loadMovements(
+    companyId: string,
+    supplierId: string | undefined,
+    currency: CurrencyCode,
+  ) {
+    const scope = { companyId, currency, deletedAt: null, ...(supplierId ? { supplierId } : {}) };
+    const [payables, payments] = await Promise.all([
+      this.prisma.payable.findMany({
+        where: {
+          ...scope,
+          OR: [{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }],
+        },
+        select: {
+          id: true,
+          payableNumber: true,
+          issueDate: true,
+          amount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+          status: true,
+          supplierName: true,
+          journalEntryId: true,
+        },
+        orderBy: { issueDate: 'asc' },
+      }),
+      this.prisma.supplierPayment.findMany({
+        where: {
+          ...scope,
+          status: { in: ['COMPLETED', 'REVERSED'] },
+          OR: [
+            { sourceType: { notIn: ['InvoiceDeskInvoice', 'CashDesk'] } },
+            { sourceType: null },
+            { allocations: { some: {} } },
+            { purchaseAdvance: { isNot: null } },
+          ],
+        },
+        select: {
+          id: true,
+          paymentNumber: true,
+          paymentDate: true,
+          amount: true,
+          method: true,
+          reference: true,
+          status: true,
+          reversedAt: true,
+          journalEntryId: true,
+          reversalJournalEntryId: true,
+          reversalJournalEntry: { select: reversalJournalSelection },
+          supplier: { select: { name: true } },
+          allocations: { select: { payableId: true, amount: true } },
+        },
+        orderBy: { paymentDate: 'asc' },
+      }),
+    ]);
+    const documents = payables.map((p) => ({ ...p, reference: p.payableNumber }));
+    const recovered = recoverSettlementHistory({
+      kind: 'supplier',
+      documents,
+      journals: await loadSettlementJournals(this.prisma, 'supplier', companyId, documents),
+      modernJournalIds: payments.flatMap((p) => [p.journalEntryId, p.reversalJournalEntryId]),
+      completedAllocations: payments
+        .filter((p) => p.status !== 'REVERSED')
+        .flatMap((p) =>
+          (p.allocations ?? []).map((a) => ({ documentId: a.payableId, amount: a.amount })),
+        ),
+    });
+    const movements: SupplierStatementMovement[] = [...recovered.movements];
+    for (const p of payables)
+      movements.push({
+        date: p.issueDate,
+        type: 'PAYABLE',
+        reference: p.payableNumber,
+        description: supplierId
+          ? 'Payable raised'
+          : `Payable raised · ${p.supplierName ?? 'Supplier'}`,
+        debit: p.amount,
+        credit: ZERO,
+      });
+    for (const p of payments) {
+      movements.push({
+        date: p.paymentDate,
+        type: 'PAYMENT',
+        reference: p.paymentNumber,
+        description: [
+          'Payment',
+          p.method,
+          p.reference ? `ref ${p.reference}` : null,
+          supplierId ? null : p.supplier?.name,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        debit: ZERO,
+        credit: p.amount,
+      });
+      if (p.status === 'REVERSED') {
+        const date =
+          p.reversalJournalEntry?.status === 'POSTED'
+            ? p.reversalJournalEntry.transactionDate
+            : p.reversedAt;
+        if (date)
+          movements.push({
+            date,
+            type: 'ADJUSTMENT',
+            reference: p.paymentNumber,
+            description: `Payment reversal ${p.paymentNumber}`,
+            debit: p.amount,
+            credit: ZERO,
+          });
+        else
+          recovered.history.gaps.push({
+            documentId: p.id,
+            reference: p.paymentNumber,
+            amount: p.amount.toFixed(2),
+            reason: 'Reversed payment has no dated reversal',
+          });
+      }
+    }
+    recovered.history.status = recovered.history.gaps.length ? 'INCOMPLETE' : 'COMPLETE';
+    recovered.history.unresolvedAmount = recovered.history.gaps
+      .reduce((sum, gap) => sum.plus(new Prisma.Decimal(gap.amount).abs()), ZERO)
+      .toFixed(2);
+    return { movements, history: recovered.history };
+  }
+
+  /** Preserve the saved evidence while projecting period-correct balances on every read. */
+  private async projectRun<T extends SupplierStatementRun>(
+    run: T,
+    loadedLedger?: Awaited<ReturnType<SupplierStatementsService['loadMovements']>>,
+  ) {
+    const ledger =
+      loadedLedger ??
+      (await this.loadMovements(
+        run.companyId,
+        run.supplierId ?? undefined,
+        run.currency as CurrencyCode,
+      ));
+    const periodEnd =
+      run.periodEnd.getUTCHours() === 0 && run.periodEnd.getUTCMinutes() === 0
+        ? dateRangeEnd(run.periodEnd.toISOString().slice(0, 10))
+        : run.periodEnd;
+    const { openingBalance, totalDebits, totalCredits, closingBalance } = summarizeDatedMovements(
+      ledger.movements,
+      run.periodStart,
+      periodEnd,
+    );
+    const storedBalances = {
+      openingBalance: run.openingBalance,
+      totalDebits: run.totalDebits,
+      totalCredits: run.totalCredits,
+      closingBalance: run.closingBalance,
+    };
+    const datedBalances = { openingBalance, totalDebits, totalCredits, closingBalance };
+    return {
+      ...run,
+      ...datedBalances,
+      storedBalances,
+      datedBalances,
+      settlementHistory: ledger.history,
+    };
   }
 }

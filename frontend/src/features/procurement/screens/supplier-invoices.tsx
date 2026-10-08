@@ -2,6 +2,7 @@
 import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
 import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
 import { businessTransactionSnapshot } from '@/lib/account-consolidation';
+import { formatFinancialTotals } from '@/lib/financial-document';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
@@ -126,6 +127,9 @@ export interface SupplierInvoice {
   discountAmount: number | string;
   totalAmount: number | string;
   paidAmount: number | string;
+  settlementAdjustmentAmount?: number | string;
+  settlementStatus?: string;
+  settlementConflict?: boolean;
   outstandingAmount: number | string;
   currency: string;
   status: string;
@@ -1064,9 +1068,8 @@ export default function SupplierInvoicesPage() {
   const invoices = data?.data ?? [];
   const approvedCount = invoices.filter((invoice) => invoice.status === 'APPROVED').length;
   const disputedCount = invoices.filter((invoice) => invoice.status === 'DISPUTED').length;
-  const outstanding = invoices.reduce(
-    (sum, invoice) => sum + asNumber(invoice.outstandingAmount),
-    0,
+  const outstanding = formatFinancialTotals(
+    invoices.map((invoice) => ({ currency: invoice.currency, amount: invoice.outstandingAmount })),
   );
   const buildExportRows = () =>
     invoices.map((invoice) => ({
@@ -1192,7 +1195,7 @@ export default function SupplierInvoicesPage() {
         <StatCard label="Invoices" value={data?.total ?? 0} />
         <StatCard label="Approved" value={approvedCount} />
         <StatCard label="Disputed" value={disputedCount} />
-        <StatCard label="Outstanding" value={money(outstanding)} />
+        <StatCard label="Outstanding (page)" value={outstanding} />
       </div>
 
       <PageToolbar
@@ -1294,6 +1297,8 @@ export default function SupplierInvoicesPage() {
           revision={data}
           snapshot={businessTransactionSnapshot}
           title="Supplier invoice accounts"
+          paidLabel="Cash paid"
+          documentAdjustment={(invoice) => invoice.settlementAdjustmentAmount ?? 0}
           page={page}
           onPage={setPage}
           documentName={(invoice) => invoice.supplierInvoiceNumber}
@@ -1301,7 +1306,21 @@ export default function SupplierInvoicesPage() {
           documentStatus={(invoice) => invoice.status}
           documentFields={[
             { label: 'Total', value: (invoice) => money(invoice.totalAmount, invoice.currency) },
-            { label: 'Paid', value: (invoice) => money(invoice.paidAmount, invoice.currency) },
+            { label: 'Cash paid', value: (invoice) => money(invoice.paidAmount, invoice.currency) },
+            {
+              label: 'Non-cash settlement',
+              value: (invoice) => money(invoice.settlementAdjustmentAmount ?? 0, invoice.currency),
+            },
+            { label: 'Settlement', value: (invoice) => invoice.settlementStatus || 'Not settled' },
+            {
+              label: 'Balance coverage',
+              value: (invoice) =>
+                invoice.settlementConflict
+                  ? 'Linked payable needs reconciliation'
+                  : invoice.payable
+                    ? 'Linked payable'
+                    : 'No payable linked',
+            },
             {
               label: 'Outstanding',
               value: (invoice) => money(invoice.outstandingAmount, invoice.currency),
@@ -1434,6 +1453,14 @@ export default function SupplierInvoicesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={invoice.status} />
+                        {invoice.settlementStatus && (
+                          <div className="mt-1">
+                            <StatusBadge status={invoice.settlementStatus} />
+                          </div>
+                        )}
+                        {invoice.settlementConflict && (
+                          <p className="text-xs mt-1">Payable needs reconciliation</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {invoice.latestMatch ? (
