@@ -119,6 +119,26 @@ describe('manifest-bound derived report and company-summary evidence', () => {
     }
   });
 
+  it('limits account selectors to order lists while preserving their inherited scope filters', () => {
+    for (const [listId, summaryId] of [
+      ['PurchaseOrdersController.findAll', 'PurchaseOrdersController.summary'],
+      ['SalesOrdersController.findAll', 'SalesOrdersController.workbenchSummary'],
+    ]) {
+      const listSchema = byId.get(listId)?.params.querySchema;
+      const summarySchema = byId.get(summaryId)?.params.querySchema;
+      expect(listSchema?.quality).toBe('strict');
+      expect(summarySchema?.quality).toBe('strict');
+      const listFields = listSchema?.schema.properties ?? {};
+      const summaryFields = summarySchema?.schema.properties ?? {};
+      expect(Object.keys(listFields).sort()).toEqual(
+        [...Object.keys(summaryFields), 'view'].sort(),
+      );
+      expect(listFields.view).toMatchObject({ enum: ['accounts', 'documents'] });
+      expect(listFields.companyId).toEqual(summaryFields.companyId);
+      expect(summaryFields).not.toHaveProperty('view');
+    }
+  });
+
   it('keeps global and company authorization oracles distinct and causal', () => {
     const financialFixtures = fixtures.filter(
       (fixture) => fixture.seedScenario === 'financial-company-pair-v1',

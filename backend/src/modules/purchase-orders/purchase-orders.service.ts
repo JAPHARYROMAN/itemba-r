@@ -21,7 +21,7 @@ import { AccountResolverService, AccountRole, CompanyScopeService } from '../../
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreatePurchaseOrderDto, PurchaseOrderLineDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
-import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { QueryPurchaseOrderDto, QueryPurchaseOrderListDto } from './dto/query-purchase-order.dto';
 import { UpdatePurchaseInvoiceReferenceDto } from './dto/update-purchase-invoice-reference.dto';
 import { ProfitService } from '../profit/profit.service';
 import {
@@ -154,7 +154,7 @@ export class PurchaseOrdersService {
     };
   }
 
-  async findAll(query: QueryPurchaseOrderDto, user: AuthUser) {
+  async findAll(query: QueryPurchaseOrderListDto, user: AuthUser) {
     const {
       page = 1,
       limit = 20,
