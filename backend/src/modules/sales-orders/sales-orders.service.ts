@@ -40,7 +40,7 @@ import {
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CreateSalesOrderDto, SalesOrderLineDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
-import { QuerySalesOrderDto } from './dto/query-sales-order.dto';
+import { QuerySalesOrderDto, QuerySalesOrderListDto } from './dto/query-sales-order.dto';
 import { ProfitService, SaleLineProfitSnapshot } from '../profit/profit.service';
 import {
   AccessLevel,
@@ -548,7 +548,7 @@ export class SalesOrdersService {
     return where;
   }
 
-  async findAll(query: QuerySalesOrderDto, user: AuthUser) {
+  async findAll(query: QuerySalesOrderListDto, user: AuthUser) {
     const { page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
     const where = await this.salesOrderWhere(query, user);

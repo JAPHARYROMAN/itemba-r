@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestj
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
-import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { QueryPurchaseOrderDto, QueryPurchaseOrderListDto } from './dto/query-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { UpdatePurchaseInvoiceReferenceDto } from './dto/update-purchase-invoice-reference.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -15,7 +15,7 @@ export class PurchaseOrdersController {
 
   @Get()
   @RequirePermissions('purchases.view')
-  findAll(@Query() query: QueryPurchaseOrderDto, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QueryPurchaseOrderListDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 

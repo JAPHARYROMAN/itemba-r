@@ -3,7 +3,7 @@ import { ReceiptAccountsQueryDto } from '../../common/dto/resource-query.dto';
 import { SalesOrdersService } from './sales-orders.service';
 import { CreateSalesOrderDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
-import { QuerySalesOrderDto } from './dto/query-sales-order.dto';
+import { QuerySalesOrderDto, QuerySalesOrderListDto } from './dto/query-sales-order.dto';
 import {
   RequireAnyPermissions,
   RequirePermissions,
@@ -16,7 +16,7 @@ export class SalesOrdersController {
 
   @Get()
   @RequirePermissions('sales.view')
-  findAll(@Query() query: QuerySalesOrderDto, @CurrentUser() user: AuthUser) {
+  findAll(@Query() query: QuerySalesOrderListDto, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user);
   }
 
