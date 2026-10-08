@@ -85,7 +85,6 @@
   box-shadow: inset 3px 0 var(--aurora-success);
 }
 .approval-overview .record-browser {
-  min-height: 530px;
   margin-bottom: 24px;
 }
 .approval-check-details {

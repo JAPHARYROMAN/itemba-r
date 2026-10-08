@@ -125,9 +125,6 @@
   flex-basis: 100%;
   color: var(--aurora-text-muted);
 }
-.statutory-return-workspace .record-browser {
-  min-height: 480px;
-}
 @media (max-width: 600px) {
   .statutory-return-workspace .hr-report-options {
     display: grid;

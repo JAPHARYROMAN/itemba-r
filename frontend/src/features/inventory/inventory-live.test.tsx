@@ -281,6 +281,9 @@ describe('Live stock workspace', () => {
     expect(screen.getByLabelText('Stock positions')).toHaveTextContent('24 records');
     fireEvent.click(screen.getByRole('button', { name: 'Next', exact: true }));
     expect(screen.getByRole('button', { name: 'Inspect Item 7-2' })).toBeVisible();
+    const locations = screen.getByText('Stock by location · 8').closest('details')!;
+    expect(locations).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('Stock by location · 8'));
     fireEvent.click(screen.getByRole('button', { name: 'Next locations' }));
     expect(screen.getByRole('button', { name: /Warehouse 7/ })).toBeVisible();
     filters();

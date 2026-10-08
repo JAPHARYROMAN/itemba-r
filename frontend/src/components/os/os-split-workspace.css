@@ -281,19 +281,10 @@
     height: auto;
     display: block;
   }
-  .os-workspace-pane .record-browser,
-  .os-workspace-pane .record-workspace > .record-browser {
+  .os-workspace-pane .record-browser:not(.workspace-expanded),
+  .os-workspace-pane .record-workspace > .record-browser:not(.workspace-expanded) {
     height: auto;
     min-height: 0;
-  }
-  .os-workspace-pane .record-inspector {
-    overflow: visible;
-  }
-  .os-workspace-pane .record-inspector dl,
-  .os-workspace-pane .record-inspector .record-actions {
-    max-height: none;
-    overflow: visible;
-    flex: initial;
   }
 }
 @media print {
