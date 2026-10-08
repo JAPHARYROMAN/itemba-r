@@ -1,6 +1,9 @@
 'use client';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -962,6 +965,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
   const [exporting, setExporting] = useState('');
   const [salesPage, setSalesPage] = useWorkspaceState('records.book.sales.page', 1);
   const [expensePage, setExpensePage] = useWorkspaceState('records.book.expenses.page', 1);
+  const [consolidatedExpenses, setConsolidatedExpenses] = useWorkspaceState(
+    'records.book.expenses.consolidated',
+    true,
+  );
+  const [expenseAccountPage, setExpenseAccountPage] = useWorkspaceState(
+    'records.book.expenses.account-page',
+    1,
+  );
   const [categoryPageNumber, setCategoryPageNumber] = useWorkspaceState(
     'records.book.categories.page',
     1,
@@ -1098,8 +1109,9 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
     previousFilters.current = nextFilters;
     setSalesPage(1);
     setExpensePage(1);
+    setExpenseAccountPage(1);
     setCategoryPageNumber(1);
-  }, [filters, setSalesPage, setExpensePage, setCategoryPageNumber]);
+  }, [filters, setSalesPage, setExpensePage, setExpenseAccountPage, setCategoryPageNumber]);
 
   useRecordBookRefresh(
     loadData,
@@ -1197,6 +1209,101 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
       </div>
     );
   }
+
+  const renderExpenseActions = (expense: RecordExpense) => (
+    <div className="flex justify-end gap-2">
+      <Link
+        href={`/records/money-out/${expense.id}`}
+        className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+      >
+        View
+      </Link>
+      {canUpdate && expense.status === 'DRAFT' && (
+        <Btn size="xs" variant="secondary" onClick={() => setExpenseModal(expense)}>
+          Edit
+        </Btn>
+      )}
+      {canFinalize && expense.status === 'DRAFT' && (
+        <Btn
+          size="xs"
+          variant="success"
+          onClick={() =>
+            requestAction({
+              title: 'Finalize money out',
+              description:
+                'Finalized records become read-only until an administrator reopens them.',
+              confirmLabel: 'Finalize',
+              tone: 'success',
+              execute: () => backendPatch(`/record-book/expenses/${expense.id}/finalize`, {}),
+            })
+          }
+        >
+          Finalize
+        </Btn>
+      )}
+      {canAdmin && expense.status === 'FINALIZED' && (
+        <Btn
+          size="xs"
+          variant="warning"
+          onClick={() =>
+            requestAction({
+              title: 'Reopen money out',
+              description:
+                'This returns the record to Draft for correction. Explain why the finalized record must change.',
+              confirmLabel: 'Reopen',
+              tone: 'warning',
+              requireReason: true,
+              execute: (reason) =>
+                backendPatch(`/record-book/expenses/${expense.id}/reopen`, {
+                  reason,
+                }),
+            })
+          }
+        >
+          Reopen
+        </Btn>
+      )}
+      {canVoid && expense.status !== 'VOIDED' && (
+        <Btn
+          size="xs"
+          variant="danger"
+          onClick={() =>
+            requestAction({
+              title: 'Void money-out record',
+              description:
+                'The record remains in the audit history but is excluded from active totals.',
+              confirmLabel: 'Void record',
+              tone: 'danger',
+              requireReason: true,
+              execute: (reason) =>
+                backendPatch(`/record-book/expenses/${expense.id}/void`, {
+                  reason,
+                }),
+            })
+          }
+        >
+          Void
+        </Btn>
+      )}
+      {canDelete && expense.status === 'DRAFT' && (
+        <Btn
+          size="xs"
+          variant="danger"
+          onClick={() =>
+            requestAction({
+              title: 'Delete draft money out',
+              description: 'The draft will move to Trash and can be restored by an administrator.',
+              confirmLabel: 'Move to Trash',
+              tone: 'danger',
+              execute: () => backendDelete(`/record-book/expenses/${expense.id}`),
+            })
+          }
+        >
+          Delete
+        </Btn>
+      )}
+    </div>
+  );
 
   const activeType =
     initialTab === 'expenses' ? 'expenses' : initialTab === 'daily-sales' ? 'sales' : 'combined';
@@ -1632,7 +1739,44 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                   </Btn>
                 )}
               </div>
-              {!expenses?.data.length ? (
+              {initialTab === 'expenses' && (
+                <ConsolidationSwitch
+                  value={consolidatedExpenses}
+                  onChange={(value) => {
+                    setConsolidatedExpenses(value);
+                    setExpenseAccountPage(1);
+                  }}
+                />
+              )}
+              {initialTab === 'expenses' && consolidatedExpenses ? (
+                <PartyTransactionRegister<RecordExpense>
+                  endpoint="/record-book/expenses"
+                  query={buildFilterQuery(effectiveFilters)}
+                  revision={expenses}
+                  title="Money-out recipient accounts"
+                  showSettlement={false}
+                  page={expenseAccountPage}
+                  onPage={setExpenseAccountPage}
+                  snapshot={(record) => ({
+                    ...businessTransactionSnapshot(record),
+                    partyName: record.paidTo,
+                  })}
+                  documentName={(record) => record.reference || record.description}
+                  documentDate={(record) => record.recordDate}
+                  documentStatus={(record) => record.status}
+                  documentFields={[
+                    { label: 'Amount', value: (record) => money(record.amount, record.currency) },
+                    { label: 'Category', value: (record) => record.expenseCategory?.name },
+                    { label: 'Description', value: (record) => record.description },
+                    {
+                      label: 'Payment method',
+                      value: (record) => record.paymentLabel || record.paymentMethod,
+                    },
+                    { label: 'Notes', value: (record) => record.notes || '\u2014' },
+                  ]}
+                  documentActions={renderExpenseActions}
+                />
+              ) : !expenses?.data.length ? (
                 <EmptyState
                   title="No money-out records"
                   description="Record food, labour, transport, utilities, and other manual outflows here."
@@ -1670,117 +1814,14 @@ export function RecordBookClient({ initialTab }: { initialTab: Tab }) {
                           <td className="px-3 py-3">
                             <StatusPill status={expense.status} />
                           </td>
-                          <td className="px-3 py-3">
-                            <div className="flex justify-end gap-2">
-                              <Link
-                                href={`/records/money-out/${expense.id}`}
-                                className="inline-flex items-center rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800"
-                              >
-                                View
-                              </Link>
-                              {canUpdate && expense.status === 'DRAFT' && (
-                                <Btn
-                                  size="xs"
-                                  variant="secondary"
-                                  onClick={() => setExpenseModal(expense)}
-                                >
-                                  Edit
-                                </Btn>
-                              )}
-                              {canFinalize && expense.status === 'DRAFT' && (
-                                <Btn
-                                  size="xs"
-                                  variant="success"
-                                  onClick={() =>
-                                    requestAction({
-                                      title: 'Finalize money out',
-                                      description:
-                                        'Finalized records become read-only until an administrator reopens them.',
-                                      confirmLabel: 'Finalize',
-                                      tone: 'success',
-                                      execute: () =>
-                                        backendPatch(
-                                          `/record-book/expenses/${expense.id}/finalize`,
-                                          {},
-                                        ),
-                                    })
-                                  }
-                                >
-                                  Finalize
-                                </Btn>
-                              )}
-                              {canAdmin && expense.status === 'FINALIZED' && (
-                                <Btn
-                                  size="xs"
-                                  variant="warning"
-                                  onClick={() =>
-                                    requestAction({
-                                      title: 'Reopen money out',
-                                      description:
-                                        'This returns the record to Draft for correction. Explain why the finalized record must change.',
-                                      confirmLabel: 'Reopen',
-                                      tone: 'warning',
-                                      requireReason: true,
-                                      execute: (reason) =>
-                                        backendPatch(`/record-book/expenses/${expense.id}/reopen`, {
-                                          reason,
-                                        }),
-                                    })
-                                  }
-                                >
-                                  Reopen
-                                </Btn>
-                              )}
-                              {canVoid && expense.status !== 'VOIDED' && (
-                                <Btn
-                                  size="xs"
-                                  variant="danger"
-                                  onClick={() =>
-                                    requestAction({
-                                      title: 'Void money-out record',
-                                      description:
-                                        'The record remains in the audit history but is excluded from active totals.',
-                                      confirmLabel: 'Void record',
-                                      tone: 'danger',
-                                      requireReason: true,
-                                      execute: (reason) =>
-                                        backendPatch(`/record-book/expenses/${expense.id}/void`, {
-                                          reason,
-                                        }),
-                                    })
-                                  }
-                                >
-                                  Void
-                                </Btn>
-                              )}
-                              {canDelete && expense.status === 'DRAFT' && (
-                                <Btn
-                                  size="xs"
-                                  variant="danger"
-                                  onClick={() =>
-                                    requestAction({
-                                      title: 'Delete draft money out',
-                                      description:
-                                        'The draft will move to Trash and can be restored by an administrator.',
-                                      confirmLabel: 'Move to Trash',
-                                      tone: 'danger',
-                                      execute: () =>
-                                        backendDelete(`/record-book/expenses/${expense.id}`),
-                                    })
-                                  }
-                                >
-                                  Delete
-                                </Btn>
-                              )}
-                            </div>
-                          </td>
+                          <td className="px-3 py-3">{renderExpenseActions(expense)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </WorkspaceTable>
                 </div>
               )}
-              {expenses && (
+              {expenses && !(initialTab === 'expenses' && consolidatedExpenses) && (
                 <RecordBookPagination
                   page={expenses.page}
                   totalPages={expenses.totalPages}

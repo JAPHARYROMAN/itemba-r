@@ -35,7 +35,8 @@ vi.mock('@/hooks/use-auth', () => ({
     hasPermission: (p: string) => api.permissions.has(p),
   }),
 }));
-vi.mock('@/lib/api-client', () => ({
+vi.mock('@/lib/api-client', async (original) => ({
+  ...(await original<object>()),
   backendGet: api.get,
   backendPost: api.post,
   backendPatch: api.patch,

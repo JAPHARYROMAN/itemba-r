@@ -1,4 +1,7 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 import { useDeferredValue, useRef, useState } from 'react';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { BusinessTransactionLink } from '@/components/workspace/business-transaction-link';
@@ -70,6 +73,7 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
     divisionId: '',
     branchId: '',
   });
+  const [consolidated, setConsolidated] = useWorkspaceState('invoices.direct.consolidation', true);
   const [status, setStatus] = useWorkspaceState('invoice-desk.status', 'all'),
     [search, setSearch] = useWorkspaceState('invoice-desk.search', ''),
     [page, setPage] = useWorkspaceState('invoice-desk.page', 1),
@@ -523,44 +527,82 @@ export function InvoiceDesk({ targetRecordId }: { targetRecordId?: string } = {}
                 </button>
               )}
             </div>
-            <InvoiceList
-              rows={rows}
-              loading={invoices.loading || deferredSearch !== search}
-              error={invoices.error}
-              retry={invoices.reload}
-              onSelect={setSelected}
-              emptyTitle={
-                search || status !== 'all' || supplierId
-                  ? 'No matching invoices'
-                  : 'Your invoice register starts here'
-              }
-              emptyText={
-                search || status !== 'all' || supplierId
-                  ? 'Try a different search or filter.'
-                  : 'Record a supplier invoice to track its due date and payments.'
-              }
+            <ConsolidationSwitch
+              value={consolidated}
+              onChange={(value) => {
+                setConsolidated(value);
+                setPage(1);
+              }}
             />
-            {!!invoices.data?.total && (
-              <footer className="desk-pagination">
-                <span>
-                  {invoices.data.total} invoices · Page {page} of{' '}
-                  {Math.ceil(invoices.data.total / 25)}
-                </span>
-                <button
-                  aria-label="Previous page"
-                  disabled={page === 1 || invoices.loading}
-                  onClick={() => setPage((p) => p - 1)}
-                >
-                  <ChevronLeft size={17} />
-                </button>
-                <button
-                  aria-label="Next page"
-                  disabled={page * 25 >= invoices.data.total || invoices.loading}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  <ChevronRight size={17} />
-                </button>
-              </footer>
+            {consolidated ? (
+              <PartyTransactionRegister<Invoice>
+                endpoint="/invoice-desk/invoices"
+                requestLimit={null}
+                query={{ ...query, status, search: deferredSearch, supplierId }}
+                revision={invoices.data}
+                snapshot={businessTransactionSnapshot}
+                title="Direct supplier accounts"
+                page={page}
+                onPage={setPage}
+                documentName={(record) => record.invoiceNumber}
+                documentDate={(record) => record.invoiceDate}
+                documentStatus={(record) => record.status}
+                documentFields={[
+                  { label: 'Total', value: (record) => money(record.totalAmount, record.currency) },
+                  { label: 'Paid', value: (record) => money(record.paidAmount, record.currency) },
+                  {
+                    label: 'Outstanding',
+                    value: (record) => money(record.outstanding, record.currency),
+                  },
+                ]}
+                documentActions={(record) => (
+                  <Btn variant="secondary" onClick={() => setSelected(record.id)}>
+                    Open full invoice
+                  </Btn>
+                )}
+              />
+            ) : (
+              <>
+                <InvoiceList
+                  rows={rows}
+                  loading={invoices.loading || deferredSearch !== search}
+                  error={invoices.error}
+                  retry={invoices.reload}
+                  onSelect={setSelected}
+                  emptyTitle={
+                    search || status !== 'all' || supplierId
+                      ? 'No matching invoices'
+                      : 'Your invoice register starts here'
+                  }
+                  emptyText={
+                    search || status !== 'all' || supplierId
+                      ? 'Try a different search or filter.'
+                      : 'Record a supplier invoice to track its due date and payments.'
+                  }
+                />
+                {!!invoices.data?.total && (
+                  <footer className="desk-pagination">
+                    <span>
+                      {invoices.data.total} invoices · Page {page} of{' '}
+                      {Math.ceil(invoices.data.total / 25)}
+                    </span>
+                    <button
+                      aria-label="Previous page"
+                      disabled={page === 1 || invoices.loading}
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      <ChevronLeft size={17} />
+                    </button>
+                    <button
+                      aria-label="Next page"
+                      disabled={page * 25 >= invoices.data.total || invoices.loading}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      <ChevronRight size={17} />
+                    </button>
+                  </footer>
+                )}
+              </>
             )}
           </section>
         )}

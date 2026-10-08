@@ -1,3 +1,4 @@
+import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
@@ -86,129 +87,33 @@ export class ReceivablesService {
       orderBy: [{ companyId: 'asc' }, { customerName: 'asc' }, { issueDate: 'desc' }],
     });
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const accounts = new Map<
-      string,
-      {
-        accountKey: string;
-        companyId: string;
-        customerId: string | null;
-        customerName: string;
-        customerCode: string | null;
-        company: { id: string; name: string; code: string } | null;
-        currency: string;
-        documentCount: number;
-        openDocumentCount: number;
-        amount: number;
-        paidAmount: number;
-        outstandingAmount: number;
-        overdueAmount: number;
-        overdueCount: number;
-        oldestIssueDate: Date | null;
-        nextDueDate: Date | null;
-        lastIssueDate: Date | null;
-        status: string;
-        documents: typeof records;
-      }
-    >();
-
-    for (const raw of records) {
-      const record = this.withDisplayCustomerName(raw);
-      const customerName = this.cleanAccountName(record.customer?.name || record.customerName);
-      const currency = record.currency || 'TZS';
-      const customerKey = record.customerId
-        ? `CUSTOMER:${record.companyId}:${record.customerId}`
-        : `UNLINKED:${record.companyId}:${this.normaliseAccountName(customerName)}`;
-      const accountKey = `${customerKey}:${currency}`;
-      const amount = this.toNumber(record.amount);
-      const paidAmount = this.toNumber(record.paidAmount);
-      const outstandingAmount = this.toNumber(record.outstandingAmount);
-      const isOpen =
-        outstandingAmount > 0.005 && !['PAID', 'WRITTEN_OFF', 'CANCELLED'].includes(record.status);
-      const dueDate = record.dueDate ? new Date(record.dueDate) : null;
-      const isOverdue = isOpen && !!dueDate && dueDate < today;
-      const issueDate = record.issueDate ? new Date(record.issueDate) : null;
-
-      let account = accounts.get(accountKey);
-      if (!account) {
-        account = {
-          accountKey,
+    const accounts = consolidateAccounts(
+      records.map((raw) => {
+        const record = this.withDisplayCustomerName(raw);
+        return {
+          record,
+          id: record.id,
           companyId: record.companyId,
-          customerId: record.customerId ?? null,
-          customerName,
-          customerCode: record.customer?.customerCode ?? null,
-          company: record.company ?? null,
-          currency,
-          documentCount: 0,
-          openDocumentCount: 0,
-          amount: 0,
-          paidAmount: 0,
-          outstandingAmount: 0,
-          overdueAmount: 0,
-          overdueCount: 0,
-          oldestIssueDate: null,
-          nextDueDate: null,
-          lastIssueDate: null,
-          status: 'PAID',
-          documents: [],
+          company: record.company,
+          partyId: record.customerId,
+          partyName: record.customer?.name || record.customerName,
+          partyCode: record.customer?.customerCode,
+          currency: record.currency || 'TZS',
+          amount: record.amount,
+          paidAmount: record.paidAmount,
+          outstandingAmount: record.outstandingAmount,
+          issueDate: record.issueDate,
+          dueDate: record.dueDate,
+          inactive: record.status === 'CANCELLED',
         };
-        accounts.set(accountKey, account);
-      }
-
-      account.documentCount += 1;
-      account.amount += amount;
-      account.paidAmount += paidAmount;
-      account.outstandingAmount += outstandingAmount;
-      if (isOpen) account.openDocumentCount += 1;
-      if (isOverdue) {
-        account.overdueAmount += outstandingAmount;
-        account.overdueCount += 1;
-      }
-      if (issueDate && (!account.oldestIssueDate || issueDate < account.oldestIssueDate)) {
-        account.oldestIssueDate = issueDate;
-      }
-      if (issueDate && (!account.lastIssueDate || issueDate > account.lastIssueDate)) {
-        account.lastIssueDate = issueDate;
-      }
-      if (dueDate && isOpen && (!account.nextDueDate || dueDate < account.nextDueDate)) {
-        account.nextDueDate = dueDate;
-      }
-      account.documents.push(record);
-    }
-
-    const data = Array.from(accounts.values())
-      .map((account) => ({
-        ...account,
-        status:
-          account.outstandingAmount <= 0.005
-            ? 'PAID'
-            : account.overdueAmount > 0.005
-              ? 'OVERDUE'
-              : account.paidAmount > 0.005
-                ? 'PARTIALLY_PAID'
-                : 'OPEN',
-        amount: this.roundMoney(account.amount),
-        paidAmount: this.roundMoney(account.paidAmount),
-        outstandingAmount: this.roundMoney(account.outstandingAmount),
-        overdueAmount: this.roundMoney(account.overdueAmount),
-      }))
-      .sort((a, b) => {
-        const byOutstanding = b.outstandingAmount - a.outstandingAmount;
-        if (byOutstanding !== 0) return byOutstanding;
-        return a.customerName.localeCompare(b.customerName);
-      });
-
-    const pageData = data.slice(paging.skip, paging.skip + paging.limit);
-
-    return {
-      data: pageData,
-      total: data.length,
-      page: paging.page,
-      limit: paging.limit,
-      totalPages: Math.ceil(data.length / paging.limit),
-    };
+      }),
+    ).map((account) => ({
+      ...account,
+      customerId: account.partyId,
+      customerName: account.partyName,
+      customerCode: account.partyCode,
+    }));
+    return accountPage(accounts, { page: paging.page, limit: paging.limit });
   }
 
   async findOne(id: string, user?: AuthUser) {
@@ -822,24 +727,6 @@ export class ReceivablesService {
         },
       ];
     return where;
-  }
-
-  private toNumber(value: Prisma.Decimal | number | string | null | undefined) {
-    const parsed = Number(value ?? 0);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  private roundMoney(value: number) {
-    return Math.round((value + Number.EPSILON) * 100) / 100;
-  }
-
-  private cleanAccountName(value?: string | null) {
-    const name = value?.trim();
-    return name && name.length > 0 ? name : 'Walk-in Customer';
-  }
-
-  private normaliseAccountName(value: string) {
-    return value.trim().toLowerCase().replace(/\s+/g, ' ');
   }
 
   private includeListScope() {

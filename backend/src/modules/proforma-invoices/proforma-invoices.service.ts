@@ -137,6 +137,7 @@ export class ProformaInvoicesService {
         where,
         include: {
           customer: { select: { id: true, name: true, customerCode: true } },
+          company: { select: { id: true, name: true, code: true } },
         },
         skip,
         take: limit,

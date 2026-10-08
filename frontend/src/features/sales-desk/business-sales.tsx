@@ -1,4 +1,9 @@
 'use client';
+import {
+  ConsolidatedAccounts,
+  ConsolidationSwitch,
+  type ConsolidatedAccount,
+} from '@/components/workspace/consolidated-accounts';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import {
@@ -1341,10 +1346,11 @@ export function BusinessSales() {
   const [customerDayData, setCustomerDayData] = useState<Paginated<CustomerDaySummary> | null>(
     null,
   );
-  const [viewMode, setViewMode] = useWorkspaceState<'summary' | 'orders'>(
-    'sales-desk.business-sales.view',
-    'orders',
+  const [viewMode, setViewMode] = useWorkspaceState<'accounts' | 'summary' | 'orders'>(
+    'sales-desk.business-sales.view.consolidation',
+    'accounts',
   );
+  const [accounts, setAccounts] = useState<Paginated<ConsolidatedAccount<SalesOrder>> | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useWorkspaceLayout('/sales-desk/sales');
@@ -1422,22 +1428,29 @@ export function BusinessSales() {
       if (filterDateFrom) query.dateFrom = filterDateFrom;
       if (filterDateTo) query.dateTo = filterDateTo;
       const [pageResult, summaryResult] = await Promise.all([
-        viewMode === 'summary'
-          ? backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
-              query: { ...query, page, limit: 20 },
+        viewMode === 'accounts'
+          ? backendPage<ConsolidatedAccount<SalesOrder>>('/sales-orders', {
+              query: { ...query, view: 'accounts', page, limit: 20 },
               signal: request.signal,
             })
-          : backendPage<SalesOrder>('/sales-orders', {
-              query: { ...query, page, limit: 20 },
-              signal: request.signal,
-            }),
+          : viewMode === 'summary'
+            ? backendPage<CustomerDaySummary>('/sales-orders/customer-day-summary', {
+                query: { ...query, page, limit: 20 },
+                signal: request.signal,
+              })
+            : backendPage<SalesOrder>('/sales-orders', {
+                query: { ...query, page, limit: 20 },
+                signal: request.signal,
+              }),
         backendGet<WorkbenchSummary>('/sales-orders/workbench-summary', {
           query,
           signal: request.signal,
         }),
       ]);
       if (!request.current()) return;
-      if (viewMode === 'summary') {
+      if (viewMode === 'accounts') {
+        setAccounts(pageResult as Paginated<ConsolidatedAccount<SalesOrder>>);
+      } else if (viewMode === 'summary') {
         setCustomerDayData(pageResult as Paginated<CustomerDaySummary>);
       } else {
         setData(pageResult as Paginated<SalesOrder>);
@@ -1445,6 +1458,7 @@ export function BusinessSales() {
       setSummary(summaryResult);
     } catch (err: unknown) {
       if (!request.current()) return;
+      setAccounts(emptyPaginated<ConsolidatedAccount<SalesOrder>>());
       setData(emptyPaginated<SalesOrder>());
       setCustomerDayData(emptyPaginated<CustomerDaySummary>());
       setSummary(blankSummary());
@@ -2044,6 +2058,13 @@ export function BusinessSales() {
         }
         actions={
           <>
+            <ConsolidationSwitch
+              value={viewMode === 'accounts'}
+              onChange={(value) => {
+                setViewMode(value ? 'accounts' : 'orders');
+                setPage(1);
+              }}
+            />
             <div
               className="inline-flex rounded-lg border p-1"
               style={{ borderColor: 'var(--aurora-border)', background: 'var(--aurora-card)' }}
@@ -2102,7 +2123,29 @@ export function BusinessSales() {
         </p>
         {viewMode === 'orders' && <WorkspaceViewSwitch value={layout} onChange={setLayout} />}
       </div>
-      {viewMode === 'orders' && layout === 'focus' ? (
+      {viewMode === 'accounts' ? (
+        <ConsolidatedAccounts
+          accounts={accounts?.data ?? []}
+          title="Customer accounts"
+          documentName={(o) => o.salesOrderNumber ?? o.orderNumber ?? o.id}
+          documentDate={(o) => o.orderDate}
+          documentStatus={(o) => o.status}
+          documentFields={[
+            { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
+            { label: 'Paid', value: (o) => fmtMoney(Number(o.paidAmount ?? 0), o.currency) },
+            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Notes', value: (o) => o.notes || '—' },
+          ]}
+          documentActions={renderOrderActions}
+          loading={loading}
+          error={loadError}
+          onRetry={load}
+          page={page}
+          total={accounts?.total ?? 0}
+          onPage={setPage}
+        />
+      ) : viewMode === 'orders' && layout === 'focus' ? (
         <RecordBrowser
           title="Sales orders"
           records={data?.data ?? []}

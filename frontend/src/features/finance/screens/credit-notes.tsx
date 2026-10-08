@@ -1,4 +1,7 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -1276,6 +1279,7 @@ export default function CreditNotesPage() {
   const canView = hasPermission('receivables.view');
   const canManage = hasPermission('receivables.manage');
 
+  const [consolidated, setConsolidated] = useState(true);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [data, setData] = useState<CreditNotePage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1590,32 +1594,65 @@ export default function CreditNotesPage() {
         }
       />
 
-      <ResponsiveDataTable<CreditNote>
-        columns={columns}
-        data={rows}
-        keyField="id"
-        loading={loading}
-        error={error}
-        onRetry={() => void load()}
-        errorTitle="Could not load credit notes"
-        emptyTitle="No credit notes found"
-        emptyDescription={
-          canManage
-            ? 'Adjust your filters or create a new credit note.'
-            : 'Adjust your filters or ask an administrator to create a credit note.'
-        }
-        exportable
-        exportFileName="credit-notes"
-        exportPdf={{ title: 'Credit Notes', companyId: companyId || undefined }}
-        pagination={{
-          page,
-          limit: PAGE_SIZE,
-          total: data?.total ?? 0,
-          onPageChange: (next) => {
-            if (next >= 1 && next <= totalPages) setPage(next);
-          },
+      <ConsolidationSwitch
+        value={consolidated}
+        onChange={(value) => {
+          setConsolidated(value);
+          setPage(1);
         }}
       />
+      {consolidated ? (
+        <PartyTransactionRegister<CreditNote>
+          endpoint="/credit-notes"
+          query={{ companyId, status, dateFrom, dateTo }}
+          revision={data}
+          snapshot={businessTransactionSnapshot}
+          title="Customer credit accounts"
+          showSettlement={false}
+          page={page}
+          onPage={setPage}
+          documentName={(note) => note.creditNoteNumber}
+          documentDate={(note) => note.issueDate}
+          documentStatus={(note) => note.status}
+          documentFields={[
+            { label: 'Credit amount', value: (note) => money(note.totalAmount, note.currency) },
+            { label: 'Applied', value: (note) => money(note.appliedAmount, note.currency) },
+            { label: 'Reason', value: (note) => note.reason || '—' },
+          ]}
+          documentActions={(note) => (
+            <Btn variant="secondary" onClick={() => setViewing(note)}>
+              Open full credit note
+            </Btn>
+          )}
+        />
+      ) : (
+        <ResponsiveDataTable<CreditNote>
+          columns={columns}
+          data={rows}
+          keyField="id"
+          loading={loading}
+          error={error}
+          onRetry={() => void load()}
+          errorTitle="Could not load credit notes"
+          emptyTitle="No credit notes found"
+          emptyDescription={
+            canManage
+              ? 'Adjust your filters or create a new credit note.'
+              : 'Adjust your filters or ask an administrator to create a credit note.'
+          }
+          exportable
+          exportFileName="credit-notes"
+          exportPdf={{ title: 'Credit Notes', companyId: companyId || undefined }}
+          pagination={{
+            page,
+            limit: PAGE_SIZE,
+            total: data?.total ?? 0,
+            onPageChange: (next) => {
+              if (next >= 1 && next <= totalPages) setPage(next);
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

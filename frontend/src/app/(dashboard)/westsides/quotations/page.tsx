@@ -1,9 +1,24 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { useCallback, useEffect, useState } from 'react';
 import { DocumentPreviewLink } from '@/components/documents';
-import { Btn, Card, FormDateField, FormInput, FormSelect, FormTextarea, Modal, PageHeader, PageSpinner, showToast, StatusBadge } from '@/components/ui';
+import {
+  Btn,
+  Card,
+  FormDateField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  Modal,
+  PageHeader,
+  PageSpinner,
+  showToast,
+  StatusBadge,
+} from '@/components/ui';
 import { backendGet, backendList, backendPage, backendPatch, backendPost } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
@@ -89,6 +104,7 @@ interface Quotation {
   customerName?: string | null;
   customer?: { name?: string | null; customerCode?: string | null } | null;
   companyId: string;
+  company?: { name: string } | null;
   divisionId?: string | null;
   branchId?: string | null;
   quotationType: string;
@@ -495,7 +511,10 @@ function QuotationModal({
       }
     >
       {error && (
-        <div role="alert" className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <div
+          role="alert"
+          className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200"
+        >
           {error}
         </div>
       )}
@@ -684,6 +703,8 @@ export default function QuotationsPage() {
   const { hasPermission, loading: authLoading } = useAuth();
   const canView = hasPermission('quotations.view');
   const beginRequest = useRequestGuard();
+  const [consolidated, setConsolidated] = useState(true);
+  const [accountPage, setAccountPage] = useState(1);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [items, setItems] = useState<Paginated<Quotation> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -801,7 +822,43 @@ export default function QuotationsPage() {
         </div>
       )}
 
-      {loading ? (
+      <ConsolidationSwitch
+        value={consolidated}
+        onChange={(value) => {
+          setConsolidated(value);
+          setAccountPage(1);
+        }}
+      />
+      {consolidated ? (
+        <PartyTransactionRegister<Quotation>
+          endpoint="/quotations"
+          query={{}}
+          revision={items}
+          snapshot={businessTransactionSnapshot}
+          title="Quotation customer accounts"
+          showSettlement={false}
+          page={accountPage}
+          onPage={setAccountPage}
+          documentName={(record) => record.quotationNumber}
+          documentDate={(record) => record.quotationDate}
+          documentStatus={(record) => record.status}
+          documentFields={[
+            { label: 'Total', value: (record) => fmtMoney(record.totalAmount, record.currency) },
+            { label: 'Valid until', value: (record) => fmtDate(record.validUntil) },
+            { label: 'Notes', value: (record) => record.notes || '—' },
+          ]}
+          documentActions={(record) => (
+            <>
+              <DocumentPreviewLink href={`/westsides/quotations/${record.id}/print`} />
+              {record.status === 'DRAFT' && (
+                <Btn variant="secondary" onClick={() => void openEdit(record.id)}>
+                  Edit
+                </Btn>
+              )}
+            </>
+          )}
+        />
+      ) : loading ? (
         <PageSpinner />
       ) : (
         <Card className="overflow-hidden" padding="none">

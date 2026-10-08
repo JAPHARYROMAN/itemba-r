@@ -81,6 +81,7 @@ beforeEach(() => {
 describe('Loans & Debts workspace', () => {
   it('opens complete loan details by keyboard and preserves read-only permissions', async () => {
     render(<LoansDebtsPage />);
+    await userEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
     const trigger = await screen.findByRole('button', { name: 'Review Example bank' });
     capture('loans-list');
     trigger.focus();
@@ -98,6 +99,7 @@ describe('Loans & Debts workspace', () => {
   });
   it('combines filters and pagination, and clears obsolete selected details', async () => {
     render(<LoansDebtsPage />);
+    await userEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Review Example bank' }));
     await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
     await chooseSelectOption('Company', 'co');
@@ -128,6 +130,7 @@ describe('Loans & Debts workspace', () => {
   it('shows a recoverable failure instead of a misleading empty register', async () => {
     state.fail = true;
     render(<LoansDebtsPage />);
+    await userEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Service temporarily unavailable');
     expect(screen.queryByText('No loans recorded')).not.toBeInTheDocument();
     state.fail = false;
@@ -137,6 +140,7 @@ describe('Loans & Debts workspace', () => {
   it('allows debt-only readers without loading the loan endpoints', async () => {
     state.permissions = new Set(['debts.read']);
     render(<LoansDebtsPage />);
+    await userEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
     expect(await screen.findByText('No debts recorded')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Loans', exact: true })).not.toBeInTheDocument();
     expect(state.calls.mock.calls.some(([url]) => url.includes('/loans'))).toBe(false);

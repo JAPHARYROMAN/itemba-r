@@ -1,4 +1,10 @@
 'use client';
+import {
+  ConsolidatedAccounts,
+  ConsolidationSwitch,
+  type ConsolidatedAccount,
+} from '@/components/workspace/consolidated-accounts';
+
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
@@ -71,6 +77,7 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
     [to, setTo] = useWorkspaceState('records.to', '');
   const [currency, setCurrency] = useWorkspaceState('records.currency', ''),
     [visibility, setVisibility] = useWorkspaceState('records.visibility', 'all');
+  const [consolidated, setConsolidated] = useWorkspaceState('records.consolidation', true);
   const [page, setPage] = useWorkspaceState('records.page', 1);
   const [pickerOpen, setPickerOpen] = useState(false);
   const createTrigger = useRef<HTMLElement | null>(null);
@@ -98,13 +105,19 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
     status,
     search: deferred,
   };
+  const accountView = consolidated && !!register && register.kind !== 'NOTE';
   const listQuery = { ...query, ...(register ? { kind: register.kind } : {}), page };
   const directory = useWorkspaceResource<Directory>('/records/directory', {}, allowed);
   const list = useWorkspaceResource<{ rows: Entry[]; total: number; pageSize: number }>(
     '/records',
     listQuery,
-    allowed && !invalidDates,
+    allowed && !invalidDates && !accountView,
   );
+  const accountList = useWorkspaceResource<{
+    rows: ConsolidatedAccount<Entry>[];
+    total: number;
+    pageSize: number;
+  }>('/records', { ...listQuery, view: 'accounts' }, allowed && !invalidDates && accountView);
   const summary = useWorkspaceResource<Summary[]>(
     '/records/summary',
     query,
@@ -115,19 +128,22 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
     {},
     allowed && !!selected,
   );
+  const { reload: reloadAccounts } = accountList;
   const { reload: reloadList } = list,
     { reload: reloadSummary } = summary,
     { reload: reloadDetail } = detail;
   useEffect(() => {
     const refresh = () => {
+      reloadAccounts();
       reloadList();
       reloadSummary();
       reloadDetail();
     };
     window.addEventListener(CHANGE_EVENT, refresh);
     return () => window.removeEventListener(CHANGE_EVENT, refresh);
-  }, [reloadList, reloadSummary, reloadDetail]);
+  }, [reloadAccounts, reloadList, reloadSummary, reloadDetail]);
   const refresh = () => {
+    reloadAccounts();
     reloadList();
     reloadSummary();
     reloadDetail();
@@ -473,130 +489,176 @@ export function RecordsNotebook({ embedded = false }: { embedded?: boolean }) {
             {summary.error}
           </p>
         )}
-        <section
-          className="records-list"
-          aria-label={register ? `${register.label} register` : 'Recent records'}
-        >
-          <div className="records-list-heading">
-            <h2>{register ? `${register.label} register` : 'Recent records'}</h2>
-            <span>{!list.loading && !invalidDates ? `${total} matching records` : ' '}</span>
-          </div>
-          {list.error ? (
-            <div role="alert" className="records-empty">
-              <p>{list.error}</p>
-              <Btn variant="secondary" onClick={refresh}>
-                Try again
+        {register && register.kind !== 'NOTE' && (
+          <ConsolidationSwitch
+            value={consolidated}
+            onChange={(value) => {
+              setConsolidated(value);
+              setPage(1);
+            }}
+          />
+        )}
+        {accountView && !invalidDates ? (
+          <ConsolidatedAccounts
+            accounts={accountList.data?.rows ?? []}
+            title={`${register!.label} accounts`}
+            showSettlement={isDebt(register!.kind)}
+            documentName={(entry) => entry.reference || entry.title}
+            documentDate={(entry) => entry.recordDate}
+            documentStatus={(entry) => entry.status}
+            documentFields={[
+              { label: 'Amount', value: (entry) => money(entry.amount, entry.currency) },
+              ...(isDebt(register!.kind)
+                ? [
+                    {
+                      label: 'Outstanding',
+                      value: (entry: Entry) => money(entry.balance, entry.currency),
+                    },
+                    { label: 'Due date', value: (entry: Entry) => dateLabel(entry.dueDate) },
+                  ]
+                : []),
+              { label: 'Title', value: (entry) => entry.title },
+              { label: 'Notes', value: (entry) => entry.notes || '—' },
+            ]}
+            documentActions={(entry) => (
+              <Btn variant="secondary" onClick={() => select(entry.id)}>
+                Open full record
               </Btn>
+            )}
+            loading={accountList.loading}
+            error={accountList.error ?? undefined}
+            onRetry={refresh}
+            page={page}
+            total={accountList.data?.total ?? 0}
+            pageSize={25}
+            onPage={setPage}
+          />
+        ) : (
+          <section
+            className="records-list"
+            aria-label={register ? `${register.label} register` : 'Recent records'}
+          >
+            <div className="records-list-heading">
+              <h2>{register ? `${register.label} register` : 'Recent records'}</h2>
+              <span>{!list.loading && !invalidDates ? `${total} matching records` : ' '}</span>
             </div>
-          ) : invalidDates ? null : list.loading ? (
-            <div role="status" className="records-empty">
-              Loading records…
-            </div>
-          ) : !list.data?.rows.length ? (
-            <div className="records-empty">
-              <BookOpen size={32} />
-              <h3>
-                {search || from || to || status !== 'all' || scope.companyId
-                  ? 'No matching records'
-                  : register
-                    ? `Your ${register.label.toLowerCase()} start here`
-                    : 'Your notebook starts here'}
-              </h3>
-              <p>
-                {register
-                  ? `Add your first ${register.singular}, or adjust your filters.`
-                  : 'Choose a register above to add a debt, transaction or note.'}
-              </p>
-              {manage && register && (
-                <Btn onClick={() => setEditor({ mode: 'create', kind: register.kind })}>
-                  Add {register.singular}
+            {list.error ? (
+              <div role="alert" className="records-empty">
+                <p>{list.error}</p>
+                <Btn variant="secondary" onClick={refresh}>
+                  Try again
                 </Btn>
-              )}
-            </div>
-          ) : (
-            <div className="records-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Record</th>
-                    <th>Date</th>
-                    <th>Amount</th>
-                    <th>Outstanding</th>
-                    <th>Status</th>
-                    <th>Organisation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.data.rows.map((r) => (
-                    <tr key={r.id}>
-                      <td>
-                        <button className="records-row-title" onClick={() => select(r.id)}>
-                          {r.title}
-                        </button>
-                        <span>
-                          {r.supplierId && hasPermission('suppliers.view') ? (
-                            <Link href={openPartyIn('profile', 'supplier', r.supplierId)}>
-                              {r.counterparty || 'Supplier'}
-                            </Link>
-                          ) : r.customerId && hasPermission('customers.view') ? (
-                            <Link href={openPartyIn('profile', 'customer', r.customerId)}>
-                              {r.counterparty || 'Customer'}
-                            </Link>
-                          ) : (
-                            r.counterparty || registers.find((k) => k.kind === r.kind)?.label
-                          )}
-                          {r.reference ? ` · ${r.reference}` : ''}
-                        </span>
-                      </td>
-                      <td data-label="Date">
-                        {dateLabel(r.recordDate)}
-                        {r.dueDate && <small>Due {dateLabel(r.dueDate)}</small>}
-                      </td>
-                      <td data-label="Amount">
-                        {r.kind === 'NOTE' ? '—' : money(r.amount, r.currency)}
-                      </td>
-                      <td data-label="Outstanding">
-                        {isDebt(r.kind) ? money(r.balance, r.currency) : '—'}
-                      </td>
-                      <td data-label="Status">
-                        <Status value={r.status} />
-                      </td>
-                      <td data-label="Organisation">
-                        {r.company?.name ?? 'Private'}
-                        <small>
-                          {[r.division?.name, r.branch?.name].filter(Boolean).join(' · ')}
-                        </small>
-                      </td>
+              </div>
+            ) : invalidDates ? null : list.loading ? (
+              <div role="status" className="records-empty">
+                Loading records…
+              </div>
+            ) : !list.data?.rows.length ? (
+              <div className="records-empty">
+                <BookOpen size={32} />
+                <h3>
+                  {search || from || to || status !== 'all' || scope.companyId
+                    ? 'No matching records'
+                    : register
+                      ? `Your ${register.label.toLowerCase()} start here`
+                      : 'Your notebook starts here'}
+                </h3>
+                <p>
+                  {register
+                    ? `Add your first ${register.singular}, or adjust your filters.`
+                    : 'Choose a register above to add a debt, transaction or note.'}
+                </p>
+                {manage && register && (
+                  <Btn onClick={() => setEditor({ mode: 'create', kind: register.kind })}>
+                    Add {register.singular}
+                  </Btn>
+                )}
+              </div>
+            ) : (
+              <div className="records-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Record</th>
+                      <th>Date</th>
+                      <th>Amount</th>
+                      <th>Outstanding</th>
+                      <th>Status</th>
+                      <th>Organisation</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <footer className="records-pagination">
-            <span>
-              Page {page} of {Math.max(1, Math.ceil(total / 25))}
-            </span>
-            <div>
-              <Btn
-                variant="secondary"
-                aria-label="Previous page"
-                disabled={page <= 1 || list.loading}
-                onClick={() => setPage(page - 1)}
-              >
-                <ChevronLeft size={17} />
-              </Btn>
-              <Btn
-                variant="secondary"
-                aria-label="Next page"
-                disabled={page * 25 >= total || list.loading}
-                onClick={() => setPage(page + 1)}
-              >
-                <ChevronRight size={17} />
-              </Btn>
-            </div>
-          </footer>
-        </section>
+                  </thead>
+                  <tbody>
+                    {list.data.rows.map((r) => (
+                      <tr key={r.id}>
+                        <td>
+                          <button className="records-row-title" onClick={() => select(r.id)}>
+                            {r.title}
+                          </button>
+                          <span>
+                            {r.supplierId && hasPermission('suppliers.view') ? (
+                              <Link href={openPartyIn('profile', 'supplier', r.supplierId)}>
+                                {r.counterparty || 'Supplier'}
+                              </Link>
+                            ) : r.customerId && hasPermission('customers.view') ? (
+                              <Link href={openPartyIn('profile', 'customer', r.customerId)}>
+                                {r.counterparty || 'Customer'}
+                              </Link>
+                            ) : (
+                              r.counterparty || registers.find((k) => k.kind === r.kind)?.label
+                            )}
+                            {r.reference ? ` · ${r.reference}` : ''}
+                          </span>
+                        </td>
+                        <td data-label="Date">
+                          {dateLabel(r.recordDate)}
+                          {r.dueDate && <small>Due {dateLabel(r.dueDate)}</small>}
+                        </td>
+                        <td data-label="Amount">
+                          {r.kind === 'NOTE' ? '—' : money(r.amount, r.currency)}
+                        </td>
+                        <td data-label="Outstanding">
+                          {isDebt(r.kind) ? money(r.balance, r.currency) : '—'}
+                        </td>
+                        <td data-label="Status">
+                          <Status value={r.status} />
+                        </td>
+                        <td data-label="Organisation">
+                          {r.company?.name ?? 'Private'}
+                          <small>
+                            {[r.division?.name, r.branch?.name].filter(Boolean).join(' · ')}
+                          </small>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <footer className="records-pagination">
+              <span>
+                Page {page} of {Math.max(1, Math.ceil(total / 25))}
+              </span>
+              <div>
+                <Btn
+                  variant="secondary"
+                  aria-label="Previous page"
+                  disabled={page <= 1 || list.loading}
+                  onClick={() => setPage(page - 1)}
+                >
+                  <ChevronLeft size={17} />
+                </Btn>
+                <Btn
+                  variant="secondary"
+                  aria-label="Next page"
+                  disabled={page * 25 >= total || list.loading}
+                  onClick={() => setPage(page + 1)}
+                >
+                  <ChevronRight size={17} />
+                </Btn>
+              </div>
+            </footer>
+          </section>
+        )}
         {section === 'overview' && !invalidDates && (
           <section className="records-summary" aria-label="Register totals">
             {registers.map((r) => {

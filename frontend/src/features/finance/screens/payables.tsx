@@ -414,6 +414,7 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
         <DetailSection title="Payable Details" description="Document scope, source, and dates.">
           <DetailGrid>
             <DetailItem label="AP Number" value={detail.payableNumber} mono />
+            <DetailItem label="Transaction ID" value={detail.id} mono />
             <DetailItem label="Source Type" value={detail.sourceType} />
             <DetailItem label="Source ID" value={detail.sourceId} mono />
             <DetailItem label="Company" value={detail.company?.name} />
@@ -1219,7 +1220,7 @@ export default function PayablesPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
-  const [viewMode, setViewMode] = useState<'accounts' | 'documents'>('documents');
+  const [viewMode, setViewMode] = useState<'accounts' | 'documents'>('accounts');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [companyId, setCompanyId] = useWorkspaceState('finance/payables.companyId', '');
   const [status, setStatus] = useWorkspaceState('finance/payables.status', '');
@@ -1486,9 +1487,13 @@ export default function PayablesPage() {
           label={viewMode === 'accounts' ? 'Supplier Accounts' : 'Documents'}
           value={totalRecords}
         />
-        <StatCard label="Open" value={openRecords} />
-        <StatCard label="Outstanding" value={formatMoneyTotals(outstandingTotals)} />
-        <StatCard label="Overdue" value={formatMoneyTotals(overdueTotals)} hint="Past due date" />
+        <StatCard label="Open (page)" value={openRecords} />
+        <StatCard label="Outstanding (page)" value={formatMoneyTotals(outstandingTotals)} />
+        <StatCard
+          label="Overdue (page)"
+          value={formatMoneyTotals(overdueTotals)}
+          hint="Past due date"
+        />
       </div>
 
       <PageToolbar
@@ -1637,7 +1642,19 @@ export default function PayablesPage() {
                       <Fragment key={account.accountKey}>
                         <tr className="hover:bg-slate-50">
                           <td className="px-4 py-3">
-                            <div className="font-semibold">{account.supplierName}</div>
+                            <button
+                              className="font-semibold text-left"
+                              aria-label={`View transactions for ${account.supplierName}`}
+                              aria-expanded={!!expanded}
+                              onClick={() =>
+                                setExpandedAccounts((prev) => ({
+                                  ...prev,
+                                  [account.accountKey]: !expanded,
+                                }))
+                              }
+                            >
+                              {account.supplierName}
+                            </button>
                             <div className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
                               {account.supplierCode ?? 'Unlinked supplier'} · {account.currency}
                             </div>

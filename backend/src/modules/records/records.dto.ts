@@ -15,6 +15,7 @@ import {
 
 export const RECORD_KINDS = ['DEBTOR', 'CREDITOR', 'SALE', 'PURCHASE', 'EXPENSE', 'NOTE'] as const;
 export class RecordsQuery {
+  @IsOptional() @IsIn(['accounts', 'documents']) view?: 'accounts' | 'documents';
   @IsOptional() @IsIn(RECORD_KINDS) kind?: string;
   @IsOptional() @IsUUID() companyId?: string;
   @IsOptional() @IsUUID() divisionId?: string;

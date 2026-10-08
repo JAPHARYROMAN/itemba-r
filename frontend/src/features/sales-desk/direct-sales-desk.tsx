@@ -1,4 +1,7 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
 import { useWorkspaceRouter } from '@/components/workspace/workspace-navigation';
 import { useDeferredValue, useState } from 'react';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
@@ -53,6 +56,7 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
       divisionId: '',
       branchId: '',
     });
+  const [consolidated, setConsolidated] = useWorkspaceState('sales.direct.consolidation', true);
   const [search, setSearch] = useWorkspaceState('sales-desk.search', ''),
     [status, setStatus] = useWorkspaceState('sales-desk.status', 'all'),
     [from, setFrom] = useWorkspaceState('sales-desk.from', ''),
@@ -454,20 +458,58 @@ export function DirectSalesDesk({ targetRecordId }: { targetRecordId?: string } 
                 Customer filter · Clear ×
               </button>
             )}
-            {invalid ? (
-              <p role="alert" className="desk-error">
-                Start date must be on or before end date.
-              </p>
-            ) : (
-              <SalesList
-                rows={sales.data?.rows ?? []}
-                error={sales.error}
-                loading={sales.loading}
-                onSelect={setSelected}
-                empty="No sales match this view."
+            <ConsolidationSwitch
+              value={consolidated}
+              onChange={(value) => {
+                setConsolidated(value);
+                setPage(1);
+              }}
+            />
+            {consolidated && !invalid ? (
+              <PartyTransactionRegister<Sale>
+                endpoint="/sales-desk/sales"
+                requestLimit={null}
+                query={{ ...query, status, search: deferred, from, to, customerId }}
+                revision={sales.data}
+                snapshot={businessTransactionSnapshot}
+                title="Direct customer accounts"
+                page={page}
+                onPage={setPage}
+                documentName={(record) => record.saleNumber}
+                documentDate={(record) => record.saleDate}
+                documentStatus={(record) => record.status}
+                documentFields={[
+                  { label: 'Total', value: (record) => money(record.totalAmount, record.currency) },
+                  { label: 'Paid', value: (record) => money(record.paidAmount, record.currency) },
+                  {
+                    label: 'Outstanding',
+                    value: (record) => money(record.outstanding, record.currency),
+                  },
+                ]}
+                documentActions={(record) => (
+                  <Btn variant="secondary" onClick={() => setSelected(record.id)}>
+                    Open full sale
+                  </Btn>
+                )}
               />
+            ) : (
+              <>
+                {invalid ? (
+                  <p role="alert" className="desk-error">
+                    Start date must be on or before end date.
+                  </p>
+                ) : (
+                  <SalesList
+                    rows={sales.data?.rows ?? []}
+                    error={sales.error}
+                    loading={sales.loading}
+                    onSelect={setSelected}
+                    empty="No sales match this view."
+                  />
+                )}
+                <Pagination page={page} total={sales.data?.total ?? 0} change={setPage} />
+              </>
             )}
-            <Pagination page={page} total={sales.data?.total ?? 0} change={setPage} />
           </>
         )}
         {section === 'customers' && (

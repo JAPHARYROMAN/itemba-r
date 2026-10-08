@@ -168,7 +168,16 @@ export class QuotationsService {
     if (quotationType) where.quotationType = quotationType;
 
     const [data, total] = await Promise.all([
-      this.prisma.quotation.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.quotation.findMany({
+        where,
+        include: {
+          company: { select: { id: true, name: true, code: true } },
+          customer: { select: { id: true, name: true, customerCode: true } },
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
       this.prisma.quotation.count({ where }),
     ]);
     return { data, total, page, limit };

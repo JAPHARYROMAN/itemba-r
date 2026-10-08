@@ -11,7 +11,11 @@ const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), permissions: new Se
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: (...p: string[]) => p.every((x) => api.permissions.has(x)) }),
 }));
-vi.mock('@/lib/api-client', () => ({ backendGet: api.get, backendPost: api.post }));
+vi.mock('@/lib/api-client', async (original) => ({
+  ...(await original<object>()),
+  backendGet: api.get,
+  backendPost: api.post,
+}));
 const scope = { companyId: 'company', divisionId: 'division', branchId: 'branch' };
 const directory = {
   companies: [{ id: 'company', name: 'Company' }],

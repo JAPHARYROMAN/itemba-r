@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { PaymentStatus, PurchaseOrderStatus, PurchaseType } from '@prisma/client';
 
 export class QueryPurchaseOrderDto {
+  @IsOptional() @IsIn(['accounts', 'documents']) view?: 'accounts' | 'documents';
   @IsOptional() @IsString() companyId?: string;
   @IsOptional() @IsString() divisionId?: string;
   @IsOptional() @IsString() branchId?: string;

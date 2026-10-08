@@ -1,4 +1,8 @@
 'use client';
+import { PartyTransactionRegister } from '@/components/workspace/party-transaction-register';
+import { ConsolidationSwitch } from '@/components/workspace/consolidated-accounts';
+import { businessTransactionSnapshot } from '@/lib/account-consolidation';
+
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
 
 import { WorkspaceTable } from '@/components/ui/workspace-table';
@@ -79,6 +83,10 @@ export default function SupplierOrderDraftsPage() {
   const [search, setSearch] = useWorkspaceState(
     'operations/purchase-orders/order-drafts.search',
     '',
+  );
+  const [consolidated, setConsolidated] = useWorkspaceState(
+    'supplier-order-drafts.consolidation',
+    true,
   );
   const [page, setPage] = useWorkspaceState('operations/purchase-orders/order-drafts.page', 1);
   const [loading, setLoading] = useState(true);
@@ -399,148 +407,193 @@ export default function SupplierOrderDraftsPage() {
           </Btn>
         </div>
       )}
-      <Card padding="none" className="overflow-hidden">
-        {loading ? (
-          <div className="p-5">
-            <SkeletonTable rows={6} cols={7} />
-          </div>
-        ) : !data?.data.length ? (
-          <EmptyState
-            title="No supplier order drafts"
-            description="Create an independent supplier-facing request without posting an actual purchase."
-            action={
-              canCreate ? <Btn onClick={() => setCreating(true)}>Create Draft</Btn> : undefined
-            }
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <WorkspaceTable className="w-full text-left text-[13px]">
-              <thead
-                style={{ background: 'var(--aurora-bg-subtle)', color: 'var(--aurora-text-muted)' }}
-              >
-                <tr>
-                  <th className="px-4 py-3">Draft</th>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Supplier</th>
-                  <th className="px-4 py-3">Scope</th>
-                  <th className="px-4 py-3 text-right">Pricing</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.data.map((draft) => (
-                  <tr
-                    key={draft.id}
-                    className="border-t"
-                    style={{ borderColor: 'var(--aurora-border)' }}
-                  >
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/operations/purchase-orders/order-drafts/${draft.id}`}
-                        className="font-semibold text-brand-600 hover:underline"
-                      >
-                        {draft.draftNumber}
-                      </Link>
-                      <div
-                        className="mt-0.5 text-[11px]"
-                        style={{ color: 'var(--aurora-text-muted)' }}
-                      >
-                        {draft.title || `${draft.lines.length} item lines`}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">{dateOnly(draft.draftDate)}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{draft.supplierName}</div>
-                      <div className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
-                        {draft.supplierId ? 'Saved supplier snapshot' : 'One-off supplier'}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div>{draft.company?.name}</div>
-                      <div className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
-                        {draft.division?.name || 'All divisions'} ·{' '}
-                        {draft.branch?.name || 'All branches'}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="font-semibold">
-                        {money(draft.totalAmount, draft.currency)}
-                      </div>
-                      {draft.hasUnpricedLines && (
-                        <div className="text-[11px] text-amber-600">
-                          Partial total · prices pending
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={draft.status} />
-                      {draft.convertedPurchaseOrder && (
-                        <Link
-                          className="mt-1 block text-xs text-brand-600"
-                          href={`/operations/purchase-orders/${draft.convertedPurchaseOrder.id}`}
-                        >
-                          Converted � {draft.convertedPurchaseOrder.purchaseOrderNumber}
-                        </Link>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-end gap-1.5">
+      <ConsolidationSwitch
+        value={consolidated}
+        onChange={(value) => {
+          setConsolidated(value);
+          setPage(1);
+        }}
+      />
+      {consolidated ? (
+        <PartyTransactionRegister<SupplierOrderDraft>
+          endpoint="/supplier-order-drafts"
+          query={{ companyId, divisionId, branchId, supplierId, status, dateFrom, dateTo, search }}
+          revision={data}
+          snapshot={businessTransactionSnapshot}
+          title="Draft supplier accounts"
+          totalLabel="Priced total"
+          showSettlement={false}
+          page={page}
+          onPage={setPage}
+          documentName={(draft) => draft.draftNumber}
+          documentDate={(draft) => draft.draftDate}
+          documentStatus={(draft) => draft.status}
+          documentFields={[
+            { label: 'Priced total', value: (draft) => money(draft.totalAmount, draft.currency) },
+            {
+              label: 'Pricing',
+              value: (draft) =>
+                draft.hasUnpricedLines ? 'Contains unpriced lines' : 'Fully priced',
+            },
+            { label: 'Notes', value: (draft) => draft.notes || '—' },
+          ]}
+          documentActions={(draft) => (
+            <Link href={`/operations/purchase-orders/order-drafts/${draft.id}`}>
+              Open full draft
+            </Link>
+          )}
+        />
+      ) : (
+        <Card padding="none" className="overflow-hidden">
+          {loading ? (
+            <div className="p-5">
+              <SkeletonTable rows={6} cols={7} />
+            </div>
+          ) : !data?.data.length ? (
+            <EmptyState
+              title="No supplier order drafts"
+              description="Create an independent supplier-facing request without posting an actual purchase."
+              action={
+                canCreate ? <Btn onClick={() => setCreating(true)}>Create Draft</Btn> : undefined
+              }
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <WorkspaceTable className="w-full text-left text-[13px]">
+                <thead
+                  style={{
+                    background: 'var(--aurora-bg-subtle)',
+                    color: 'var(--aurora-text-muted)',
+                  }}
+                >
+                  <tr>
+                    <th className="px-4 py-3">Draft</th>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Supplier</th>
+                    <th className="px-4 py-3">Scope</th>
+                    <th className="px-4 py-3 text-right">Pricing</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.data.map((draft) => (
+                    <tr
+                      key={draft.id}
+                      className="border-t"
+                      style={{ borderColor: 'var(--aurora-border)' }}
+                    >
+                      <td className="px-4 py-3">
                         <Link
                           href={`/operations/purchase-orders/order-drafts/${draft.id}`}
-                          className="rounded-md border px-2.5 py-1 text-[11px] font-medium"
-                          style={{ borderColor: 'var(--aurora-border)' }}
+                          className="font-semibold text-brand-600 hover:underline"
                         >
-                          View
+                          {draft.draftNumber}
                         </Link>
-                        {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canUpdate && (
-                          <button
-                            className="rounded-md border px-2.5 py-1 text-[11px]"
+                        <div
+                          className="mt-0.5 text-[11px]"
+                          style={{ color: 'var(--aurora-text-muted)' }}
+                        >
+                          {draft.title || `${draft.lines.length} item lines`}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">{dateOnly(draft.draftDate)}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{draft.supplierName}</div>
+                        <div className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {draft.supplierId ? 'Saved supplier snapshot' : 'One-off supplier'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>{draft.company?.name}</div>
+                        <div className="text-[11px]" style={{ color: 'var(--aurora-text-muted)' }}>
+                          {draft.division?.name || 'All divisions'} ·{' '}
+                          {draft.branch?.name || 'All branches'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-semibold">
+                          {money(draft.totalAmount, draft.currency)}
+                        </div>
+                        {draft.hasUnpricedLines && (
+                          <div className="text-[11px] text-amber-600">
+                            Partial total · prices pending
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={draft.status} />
+                        {draft.convertedPurchaseOrder && (
+                          <Link
+                            className="mt-1 block text-xs text-brand-600"
+                            href={`/operations/purchase-orders/${draft.convertedPurchaseOrder.id}`}
+                          >
+                            Converted � {draft.convertedPurchaseOrder.purchaseOrderNumber}
+                          </Link>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <Link
+                            href={`/operations/purchase-orders/order-drafts/${draft.id}`}
+                            className="rounded-md border px-2.5 py-1 text-[11px] font-medium"
                             style={{ borderColor: 'var(--aurora-border)' }}
-                            onClick={() => setEditing(draft)}
                           >
-                            Edit
-                          </button>
-                        )}
-                        {canCreate && (
-                          <button
-                            title="Duplicate"
-                            className="rounded-md border p-1.5"
-                            style={{ borderColor: 'var(--aurora-border)' }}
-                            onClick={() => duplicate(draft)}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canSend && (
-                          <button
-                            title="Mark sent"
-                            className="rounded-md bg-brand-600 p-1.5 text-white"
-                            onClick={() => setPending({ draft, action: 'send' })}
-                          >
-                            <Send className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canManage && (
-                          <button
-                            title="Delete draft"
-                            className="rounded-md bg-red-600 p-1.5 text-white"
-                            onClick={() => setPending({ draft, action: 'delete' })}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </WorkspaceTable>
-          </div>
-        )}
-      </Card>
+                            View
+                          </Link>
+                          {!draft.convertedPurchaseOrder &&
+                            draft.status === 'DRAFT' &&
+                            canUpdate && (
+                              <button
+                                className="rounded-md border px-2.5 py-1 text-[11px]"
+                                style={{ borderColor: 'var(--aurora-border)' }}
+                                onClick={() => setEditing(draft)}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          {canCreate && (
+                            <button
+                              title="Duplicate"
+                              className="rounded-md border p-1.5"
+                              style={{ borderColor: 'var(--aurora-border)' }}
+                              onClick={() => duplicate(draft)}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {!draft.convertedPurchaseOrder && draft.status === 'DRAFT' && canSend && (
+                            <button
+                              title="Mark sent"
+                              className="rounded-md bg-brand-600 p-1.5 text-white"
+                              onClick={() => setPending({ draft, action: 'send' })}
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {!draft.convertedPurchaseOrder &&
+                            draft.status === 'DRAFT' &&
+                            canManage && (
+                              <button
+                                title="Delete draft"
+                                className="rounded-md bg-red-600 p-1.5 text-white"
+                                onClick={() => setPending({ draft, action: 'delete' })}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </WorkspaceTable>
+            </div>
+          )}
+        </Card>
+      )}
 
-      {data && data.totalPages > 1 && (
+      {!consolidated && data && data.totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
           <Btn
             size="sm"

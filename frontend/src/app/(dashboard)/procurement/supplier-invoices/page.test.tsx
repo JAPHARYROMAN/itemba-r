@@ -21,7 +21,8 @@ vi.mock('@/hooks/use-auth', () => ({
 const backendList = vi.fn();
 const backendPage = vi.fn();
 const backendPatch = vi.fn();
-vi.mock('@/lib/api-client', () => ({
+vi.mock('@/lib/api-client', async (original) => ({
+  ...(await original<object>()),
   backendGet: vi.fn(),
   backendList: (path: string, options?: unknown) => backendList(path, options),
   backendPage: (path: string, options?: unknown) => backendPage(path, options),
@@ -146,6 +147,7 @@ describe('SupplierInvoicesPage void action gating', () => {
     });
 
     render(<SupplierInvoicesPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
 
     await screen.findByText('INV-2026-001');
     expect(
@@ -169,6 +171,7 @@ describe('SupplierInvoicesPage void action gating', () => {
     });
 
     render(<SupplierInvoicesPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Individual transactions' }));
 
     const voidBtn = await screen.findByRole('button', { name: 'Void invoice INV-2026-001' });
     expect(
