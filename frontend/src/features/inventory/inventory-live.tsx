@@ -437,7 +437,7 @@ function LiveStock() {
                   {productQuantity(data.totals.negative)} have negative stock on hand. Quantities
                   stay with each product so different units are not combined.
                 </p>
-                <details className="inventory-live-locations" open>
+                <details className="inventory-live-locations">
                   <summary>Stock by location · {locations.length}</summary>
                   <div className="inventory-location-grid">
                     {locations.slice((locationPage - 1) * 6, locationPage * 6).map((location) => (

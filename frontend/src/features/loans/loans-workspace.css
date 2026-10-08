@@ -1,6 +1,3 @@
-.obligations-workspace .record-browser {
-  grid-template-columns: minmax(0, 1fr) 320px;
-}
 .os-workspace-link {
   padding: 10px 14px;
   border: 1px solid var(--aurora-border);

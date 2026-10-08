@@ -29,6 +29,47 @@ beforeEach(() => {
 });
 
 describe('Record browser continuity', () => {
+  it('gives the list the initial view and keeps every supplied field labelled', () => {
+    render(
+      <RecordBrowser
+        records={[row]}
+        title="Counts"
+        name={(record) => record.name}
+        fields={[
+          { label: 'Quantity', value: (record) => record.quantity },
+          { label: 'Value', value: () => 'TZS 40,000' },
+          { label: 'Location', value: () => 'Main branch' },
+        ]}
+      />,
+    );
+    expect(screen.getByLabelText('Record details')).toHaveAttribute('hidden');
+    expect(screen.queryByText('Everything in view.')).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Location' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Main branch' })).toHaveAttribute(
+      'data-column-label',
+      'Location',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect September count' }));
+    const inspector = screen.getByLabelText('Record details');
+    expect(inspector).not.toHaveAttribute('hidden');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand record details' }));
+    expect(inspector.closest('.record-browser')).toHaveClass('record-details-expanded');
+    expect(inspector).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Close details' }));
+    expect(inspector).toHaveAttribute('hidden');
+    expect(inspector.closest('.record-browser')).not.toHaveClass('record-details-expanded');
+  });
+
+  it('changes row density without changing the records or selection', () => {
+    render(<Browser />);
+    const control = screen.getByRole('button', { name: 'Compact rows' });
+    expect(control).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect September count' }));
+    fireEvent.click(control);
+    expect(control).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('heading', { name: row.name })).toBeInTheDocument();
+    expect(screen.getByLabelText('Counts')).toHaveTextContent('1 records');
+  });
   it('does not steal focus from another control when a selected record refreshes', () => {
     window.matchMedia = vi.fn().mockReturnValue({ matches: true });
     const tree = (loading: boolean) => (
