@@ -94,7 +94,11 @@ export class FinancialReportsService {
           where: {
             companyId,
             accountId: control.id,
-            journalEntry: { status: 'POSTED', transactionDate: { lte: asOfDate } },
+            journalEntry: {
+              status: REPORTABLE_JE_STATUS_FILTER,
+              deletedAt: null,
+              transactionDate: { lte: asOfDate },
+            },
           },
           _sum: { debit: true, credit: true },
         })

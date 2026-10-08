@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -9,7 +10,10 @@ export const OPEN_DOCUMENT_STATUSES = ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as c
 
 const ZERO = new Prisma.Decimal(0);
 const money = (value: Prisma.Decimal) => value.toFixed(2);
-const dayDiff = (from: Date, to: Date) => Math.floor((to.getTime() - from.getTime()) / 86400000);
+const utcDay = (date: Date) =>
+  new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+const dayDiff = (from: Date, to: Date) =>
+  Math.floor((utcDay(to).getTime() - utcDay(from).getTime()) / 86400000);
 
 export interface PartyBalanceErpBucket {
   currency: string;
@@ -125,18 +129,28 @@ export async function refreshCachedPartyBalance(
 /**
  * What a customer owes right now across the two ledgers that carry customer debt: open
  * receivables and unpromoted Sales Desk sales. Used by the credit-limit check instead of
- * the cached balance alone. Currency-blind on purpose: it replaces a check that was.
+ * the cached balance alone. Credit limits are denominated in the company's base currency;
+ * foreign-currency credit requires an explicit conversion policy before it can be checked.
  */
 export async function liveCustomerExposure(
   db: Db,
   companyId: string,
   customerId: string,
+  denomination?: string,
 ): Promise<number> {
+  const baseCurrency = await baseCurrencyFor(db, companyId);
+  if (denomination && denomination !== baseCurrency) {
+    throw new BadRequestException(
+      `Customer credit limits are denominated in ${baseCurrency}. A ${denomination} credit sale requires an explicit currency conversion before checking this limit.`,
+    );
+  }
+  const currency = baseCurrency as never;
   const [receivables, deskSales] = await Promise.all([
     db.receivable.aggregate({
       where: {
         companyId,
         customerId,
+        currency,
         deletedAt: null,
         status: { in: [...OPEN_DOCUMENT_STATUSES] as never },
       },
@@ -145,6 +159,7 @@ export async function liveCustomerExposure(
     db.salesDeskSale.findMany({
       where: {
         companyId,
+        currency,
         voidedAt: null,
         canonicalSalesOrderId: null,
         customer: { canonicalCustomerId: customerId },
@@ -261,7 +276,7 @@ export async function computePartyBalance(
     if (balance.lte(0)) continue;
     const bucket = desk.get(row.currency) ?? { outstanding: ZERO, overdue: ZERO, documents: 0 };
     bucket.outstanding = bucket.outstanding.plus(balance);
-    if (row.dueDate && row.dueDate < asOf) bucket.overdue = bucket.overdue.plus(balance);
+    if (row.dueDate && row.dueDate < utcDay(asOf)) bucket.overdue = bucket.overdue.plus(balance);
     bucket.documents += 1;
     desk.set(row.currency, bucket);
   }
@@ -448,8 +463,7 @@ export async function computePartyBalanceList(
           })
         ).map((c) => ({ ...c, code: c.customerCode }));
   if (!parties.length) return [];
-  // Mirrors computePartyBalance: ERP overdue once a full day past due, desk overdue when past.
-  const erpOverdueBefore = new Date(asOf.getTime() - 86400000);
+  const overdueBefore = utcDay(asOf);
 
   const erpWhere = { ...companyWhere, deletedAt: null, status, outstandingAmount: { gt: 0 } };
   const erpOpen: Grouped[] =
@@ -485,7 +499,7 @@ export async function computePartyBalanceList(
       ? (
           await db.payable.groupBy({
             by: ['supplierId', 'currency'],
-            where: { ...erpWhere, supplierId: { not: null }, dueDate: { lte: erpOverdueBefore } },
+            where: { ...erpWhere, supplierId: { not: null }, dueDate: { lt: overdueBefore } },
             _sum: { outstandingAmount: true },
           })
         ).map((g) => ({
@@ -497,7 +511,7 @@ export async function computePartyBalanceList(
       : (
           await db.receivable.groupBy({
             by: ['customerId', 'currency'],
-            where: { ...erpWhere, customerId: { not: null }, dueDate: { lte: erpOverdueBefore } },
+            where: { ...erpWhere, customerId: { not: null }, dueDate: { lt: overdueBefore } },
             _sum: { outstandingAmount: true },
           })
         ).map((g) => ({
@@ -520,7 +534,7 @@ export async function computePartyBalanceList(
     for (const overdue of [false, true]) {
       const groups = await db.invoiceDeskInvoice.groupBy({
         by: ['supplierId', 'currency'],
-        where: overdue ? { ...where, dueDate: { lt: asOf } } : where,
+        where: overdue ? { ...where, dueDate: { lt: overdueBefore } } : where,
         _sum: { totalAmount: true, paidAmount: true },
         _count: { _all: true },
       });
@@ -544,7 +558,7 @@ export async function computePartyBalanceList(
     for (const overdue of [false, true]) {
       const groups = await db.salesDeskSale.groupBy({
         by: ['customerId', 'currency'],
-        where: overdue ? { ...where, dueDate: { lt: asOf } } : where,
+        where: overdue ? { ...where, dueDate: { lt: overdueBefore } } : where,
         _sum: { totalAmount: true, paidAmount: true },
         _count: { _all: true },
       });

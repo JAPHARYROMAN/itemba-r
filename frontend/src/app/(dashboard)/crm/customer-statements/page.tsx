@@ -24,6 +24,11 @@ import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendList, backendPage, backendPost, backendGet } from '@/lib/api-client';
 import { downloadBinaryExport } from '@/lib/export-download';
+import { formatFinancialTotals } from '@/lib/financial-document';
+import {
+  StatementHistoryWarning,
+  type StatementSettlementHistory,
+} from '@/components/workspace/statement-history-warning';
 
 // The generate service uses the literal 'ALL' sentinel for a company-wide run
 // (no specific customer). Surface it as a friendly label instead of a raw id.
@@ -52,6 +57,8 @@ interface StatementRun extends Record<string, unknown> {
   totalDebits?: number | string | null;
   totalCredits?: number | string | null;
   closingBalance?: number | string | null;
+  currency: string;
+  settlementHistory?: StatementSettlementHistory;
   status: string;
   createdAt?: string | null;
   // Included by the backend list endpoint.
@@ -99,7 +106,9 @@ interface StatementDetail {
   lineCount: number;
   lines: StatementLine[];
   aging: StatementAging;
+  agingAsOf: string;
   generatedAt: string;
+  settlementHistory?: StatementSettlementHistory;
 }
 
 // Selection that identifies a single-customer statement of account.
@@ -229,7 +238,8 @@ export default function CustomerStatementsPage() {
   }, [customers]);
 
   const companyName = useCallback(
-    (row: StatementRun) => row.company?.name ?? companyMap.get(row.companyId)?.name ?? row.companyId,
+    (row: StatementRun) =>
+      row.company?.name ?? companyMap.get(row.companyId)?.name ?? row.companyId,
     [companyMap],
   );
 
@@ -368,9 +378,9 @@ export default function CustomerStatementsPage() {
         periodEnd: genEnd,
       });
       const target = genCustomerId
-        ? genCustomers.find((c) => c.id === genCustomerId)?.name ??
+        ? (genCustomers.find((c) => c.id === genCustomerId)?.name ??
           customerMap.get(genCustomerId)?.name ??
-          'customer'
+          'customer')
         : 'all customers';
       showToast('success', 'Customer statement generated', `Statement generated for ${target}.`);
       setGenerateOpen(false);
@@ -408,34 +418,35 @@ export default function CustomerStatementsPage() {
 
   // ─── Statement of account (detail) ─────────────────────────────────────────
 
-  const loadDetail = useCallback(async (sel: StatementSelection) => {
-    if (authLoading || !canViewDetail) return;
-    const request = beginDetail();
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-    try {
-      const result = await backendGet<StatementDetail>('/customer-statements/detail', {
-        signal: request.signal,
-        query: {
-          companyId: sel.companyId,
-          customerId: sel.customerId,
-          dateFrom: sel.dateFrom,
-          dateTo: sel.dateTo,
-          currency: sel.currency || undefined,
-        },
-      });
-      if (!request.current()) return;
-      setDetail(result);
-    } catch (err) {
-      if (!request.current()) return;
-      setDetailError(
-        err instanceof Error ? err.message : 'Failed to load statement of account',
-      );
-    } finally {
-      if (request.current()) setDetailLoading(false);
-    }
-  }, [authLoading, beginDetail, canViewDetail]);
+  const loadDetail = useCallback(
+    async (sel: StatementSelection) => {
+      if (authLoading || !canViewDetail) return;
+      const request = beginDetail();
+      setDetailLoading(true);
+      setDetailError(null);
+      setDetail(null);
+      try {
+        const result = await backendGet<StatementDetail>('/customer-statements/detail', {
+          signal: request.signal,
+          query: {
+            companyId: sel.companyId,
+            customerId: sel.customerId,
+            dateFrom: sel.dateFrom,
+            dateTo: sel.dateTo,
+            currency: sel.currency || undefined,
+          },
+        });
+        if (!request.current()) return;
+        setDetail(result);
+      } catch (err) {
+        if (!request.current()) return;
+        setDetailError(err instanceof Error ? err.message : 'Failed to load statement of account');
+      } finally {
+        if (request.current()) setDetailLoading(false);
+      }
+    },
+    [authLoading, beginDetail, canViewDetail],
+  );
 
   const openDetail = useCallback(
     (sel: StatementSelection) => {
@@ -454,7 +465,7 @@ export default function CustomerStatementsPage() {
         customerName: customerName(row),
         dateFrom: isoDate(new Date(row.periodStart)),
         dateTo: isoDate(new Date(row.periodEnd)),
-        currency: 'TZS',
+        currency: row.currency ?? 'TZS',
       });
     },
     [customerName, openDetail],
@@ -517,10 +528,7 @@ export default function CustomerStatementsPage() {
     if (!payload) return;
     setExporting('email');
     try {
-      const res = await backendPost<EmailStatementResponse>(
-        '/customer-statements/email',
-        payload,
-      );
+      const res = await backendPost<EmailStatementResponse>('/customer-statements/email', payload);
       if (res.emailed) {
         showToast(
           'success',
@@ -546,7 +554,9 @@ export default function CustomerStatementsPage() {
 
   const stats = useMemo(() => {
     const generated = rows.filter((r) => r.status === 'GENERATED' || r.status === 'SENT').length;
-    const totalClosing = rows.reduce((sum, r) => sum + asNumber(r.closingBalance), 0);
+    const totalClosing = formatFinancialTotals(
+      rows.map((r) => ({ currency: r.currency ?? 'TZS', amount: r.closingBalance ?? 0 })),
+    );
     return { generated, totalClosing };
   }, [rows]);
 
@@ -602,27 +612,32 @@ export default function CustomerStatementsPage() {
       header: 'Debits',
       priority: 3,
       align: 'right',
-      accessor: (r) => <span className="text-sm">{money(r.totalDebits)}</span>,
+      accessor: (r) => <span className="text-sm">{money(r.totalDebits, r.currency)}</span>,
     },
     {
       key: 'totalCredits',
       header: 'Credits',
       priority: 3,
       align: 'right',
-      accessor: (r) => <span className="text-sm">{money(r.totalCredits)}</span>,
+      accessor: (r) => <span className="text-sm">{money(r.totalCredits, r.currency)}</span>,
     },
     {
       key: 'closingBalance',
       header: 'Closing Balance',
       priority: 1,
       align: 'right',
-      accessor: (r) => <span className="font-medium">{money(r.closingBalance)}</span>,
+      accessor: (r) => <span className="font-medium">{money(r.closingBalance, r.currency)}</span>,
     },
     {
       key: 'status',
       header: 'Status',
       priority: 1,
-      accessor: (r) => <StatusBadge status={r.status} />,
+      accessor: (r) => (
+        <div>
+          <StatusBadge status={r.status} />
+          <StatementHistoryWarning history={r.settlementHistory} currency={r.currency ?? 'TZS'} />
+        </div>
+      ),
     },
     {
       key: 'actions',
@@ -700,7 +715,7 @@ export default function CustomerStatementsPage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatCard label="Statement Runs" value={data?.total ?? 0} />
         <StatCard label="Generated / Sent" value={stats.generated} variant="green" />
-        <StatCard label="Closing (page)" value={money(stats.totalClosing)} />
+        <StatCard label="Closing (page)" value={stats.totalClosing} />
       </div>
 
       <PageToolbar
@@ -842,14 +857,12 @@ export default function CustomerStatementsPage() {
       )}
 
       {canViewDetail && (
-        <Drawer
-          open={detailOpen}
-          onClose={closeDetail}
-          title="Statement of Account"
-          width="720px"
-        >
+        <Drawer open={detailOpen} onClose={closeDetail} title="Statement of Account" width="720px">
           {detailLoading ? (
-            <div className="py-16 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+            <div
+              className="py-16 text-center text-sm"
+              style={{ color: 'var(--aurora-text-muted)' }}
+            >
               Loading statement of account…
             </div>
           ) : detailError ? (
@@ -872,6 +885,27 @@ export default function CustomerStatementsPage() {
             </div>
           ) : detail ? (
             <div className="space-y-6">
+              {detail.settlementHistory?.status === 'INCOMPLETE' && (
+                <div
+                  role="alert"
+                  className="rounded-lg border p-4"
+                  style={{ borderColor: 'var(--aurora-warning)', background: 'var(--aurora-card)' }}
+                >
+                  <strong>Settlement history needs reconciliation</strong>
+                  <p className="mt-1 text-sm">
+                    {money(detail.settlementHistory.unresolvedAmount, detailCurrency)} of recorded
+                    settlements has no complete dated evidence. The balance below includes verified
+                    movements only.
+                  </p>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {detail.settlementHistory.gaps.map((gap, index) => (
+                      <li key={`${gap.documentId}:${gap.reason}:${index}`}>
+                        {gap.reference} · {money(gap.amount, detailCurrency)} · {gap.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {/* Header: who / when */}
               <DetailList
                 columns={2}
@@ -879,14 +913,11 @@ export default function CustomerStatementsPage() {
                   {
                     label: 'Customer',
                     value:
-                      detail.customerName ??
-                      detailSelection?.customerName ??
-                      detail.customerId,
+                      detail.customerName ?? detailSelection?.customerName ?? detail.customerId,
                   },
                   {
                     label: 'Company',
-                    value:
-                      companyMap.get(detail.companyId)?.name ?? detail.companyId,
+                    value: companyMap.get(detail.companyId)?.name ?? detail.companyId,
                   },
                   { label: 'Currency', value: detail.currency },
                   {
@@ -931,7 +962,10 @@ export default function CustomerStatementsPage() {
                   className="overflow-x-auto rounded-lg border"
                   style={{ borderColor: 'var(--aurora-border)' }}
                 >
-                  <WorkspaceTable className="w-full text-sm" style={{ color: 'var(--aurora-text)' }}>
+                  <WorkspaceTable
+                    className="w-full text-sm"
+                    style={{ color: 'var(--aurora-text)' }}
+                  >
                     <thead>
                       <tr
                         className="text-xs uppercase tracking-wider"
@@ -987,9 +1021,7 @@ export default function CustomerStatementsPage() {
                             key={`${line.sourceId}-${idx}`}
                             style={{ borderBottom: '1px solid var(--aurora-border)' }}
                           >
-                            <td className="px-3 py-2 whitespace-nowrap">
-                              {formatDate(line.date)}
-                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">{formatDate(line.date)}</td>
                             <td className="px-3 py-2">
                               <StatusBadge status={LINE_TYPE_LABEL[line.type] ?? line.type} />
                             </td>
@@ -1005,9 +1037,7 @@ export default function CustomerStatementsPage() {
                               )}
                             </td>
                             <td className="px-3 py-2 text-right">
-                              {asNumber(line.debit) === 0
-                                ? '—'
-                                : money(line.debit, detailCurrency)}
+                              {asNumber(line.debit) === 0 ? '—' : money(line.debit, detailCurrency)}
                             </td>
                             <td className="px-3 py-2 text-right">
                               {asNumber(line.credit) === 0
@@ -1053,7 +1083,7 @@ export default function CustomerStatementsPage() {
                   className="text-xs font-semibold uppercase tracking-wider mb-2"
                   style={{ color: 'var(--aurora-text-muted)' }}
                 >
-                  Aging summary (as of {formatDate(detail.dateTo)})
+                  Current aging (as of {formatDate(detail.agingAsOf)})
                 </h3>
                 <DetailList
                   columns={3}
@@ -1117,7 +1147,10 @@ export default function CustomerStatementsPage() {
               </div>
             </div>
           ) : (
-            <div className="py-16 text-center text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
+            <div
+              className="py-16 text-center text-sm"
+              style={{ color: 'var(--aurora-text-muted)' }}
+            >
               No statement to display.
             </div>
           )}

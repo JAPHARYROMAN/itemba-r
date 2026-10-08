@@ -87,9 +87,38 @@ beforeEach(() => {
             paidAmount: 750,
             outstanding: 1250,
             unpaidCount: 1,
+            perCurrency: [
+              { currency: 'TZS', totalAmount: 2000, paidAmount: 750, outstandingAmount: 1250 },
+            ],
           },
   );
-  state.page.mockResolvedValue({ data: [sale], total: 1, page: 1, limit: 20, totalPages: 1 });
+  state.page.mockImplementation(async (_path: string, options: { query?: { view?: string } }) => ({
+    data:
+      options.query?.view === 'accounts'
+        ? [
+            {
+              accountKey: 'customer-account',
+              partyName: 'Acacia Trading',
+              partyId: customer.id,
+              companyId: 'company',
+              company: customer.company,
+              currency: 'TZS',
+              documentCount: 1,
+              openDocumentCount: 1,
+              amount: 2000,
+              paidAmount: 750,
+              outstandingAmount: 1250,
+              overdueAmount: 0,
+              status: 'PARTIALLY_PAID',
+              documents: [sale],
+            },
+          ]
+        : [sale],
+    total: 1,
+    page: 1,
+    limit: 20,
+    totalPages: 1,
+  }));
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
 });
 function AppWindow({ id, href }: { id: string; href: string }) {

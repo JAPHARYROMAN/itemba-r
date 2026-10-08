@@ -3,6 +3,7 @@ import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.
 import { CashPurchasePaymentsService } from '../supplier-payments/cash-purchase-payments.service';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
+import { canonicalSettlementSelect, sourceSettlement } from '../../common/utils/source-settlement';
 import {
   BadRequestException,
   ConflictException,
@@ -182,7 +183,6 @@ export class PurchaseOrdersService {
     if (supplierId) where.supplierId = supplierId;
     if (purchaseType) where.purchaseType = purchaseType;
     if (status) where.status = status;
-    if (paymentStatus) where.paymentStatus = paymentStatus;
     if (dateFrom || dateTo) {
       where.orderDate = {};
       if (dateFrom) where.orderDate.gte = dateRangeStart(dateFrom);
@@ -243,6 +243,7 @@ export class PurchaseOrdersService {
       this.prisma.purchaseOrder.findMany({
         where,
         include: {
+          payable: { select: { ...canonicalSettlementSelect, supplierId: true } },
           company: { select: { id: true, name: true, code: true } },
           supplier: { select: { id: true, name: true } },
           supplierInvoices: {
@@ -269,12 +270,14 @@ export class PurchaseOrdersService {
           },
         },
         orderBy: { orderDate: 'desc' },
-        ...(query.view === 'accounts' ? {} : { skip, take: limit }),
+        ...(query.view === 'accounts' || paymentStatus ? {} : { skip, take: limit }),
       }),
       this.prisma.purchaseOrder.count({ where }),
     ]);
 
-    const documents = data.map((order) => this.decorateInvoiceReference(order));
+    const documents = data
+      .map((order) => this.withPayableSettlement(this.decorateInvoiceReference(order)))
+      .filter((order) => !paymentStatus || order.paymentStatus === paymentStatus);
     if (query.view === 'accounts') {
       return accountPage(
         consolidateAccounts(
@@ -297,11 +300,11 @@ export class PurchaseOrdersService {
       );
     }
     return {
-      data: documents,
-      total,
+      data: paymentStatus ? documents.slice(skip, skip + limit) : documents,
+      total: paymentStatus ? documents.length : total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil((paymentStatus ? documents.length : total) / limit),
     };
   }
 
@@ -336,7 +339,6 @@ export class PurchaseOrdersService {
     if (supplierId) baseWhere.supplierId = supplierId;
     if (purchaseType) baseWhere.purchaseType = purchaseType;
     if (status) baseWhere.status = status;
-    if (paymentStatus) baseWhere.paymentStatus = paymentStatus;
     if (dateFrom || dateTo) {
       baseWhere.orderDate = {};
       if (dateFrom) baseWhere.orderDate.gte = dateRangeStart(dateFrom);
@@ -380,74 +382,127 @@ export class PurchaseOrdersService {
       ];
     }
 
-    const where: any = { ...baseWhere };
-    if (invoiceStatus === 'MISSING') {
-      where.AND = [
-        ...(where.AND ?? []),
-        { supplierInvoiceNumber: null },
-        { supplierInvoices: { none: { deletedAt: null } } },
-      ];
-    } else if (invoiceStatus === 'RECORDED') {
-      where.AND = [
-        ...(where.AND ?? []),
-        { supplierInvoiceNumber: { not: null } },
-        { supplierInvoices: { none: { deletedAt: null } } },
-      ];
-    } else if (invoiceStatus === 'LINKED') {
-      where.supplierInvoices = { some: { deletedAt: null } };
-    }
-
-    const [grouped, missingInvoiceCount, recordedInvoiceCount, linkedInvoiceCount] =
-      await Promise.all([
-        this.prisma.purchaseOrder.groupBy({
-          by: ['status'],
-          where,
-          _count: { _all: true },
-          _sum: { totalAmount: true, outstandingAmount: true },
-        }),
-        this.prisma.purchaseOrder.count({
-          where: {
-            ...baseWhere,
-            supplierInvoiceNumber: null,
-            supplierInvoices: { none: { deletedAt: null } },
-          },
-        }),
-        this.prisma.purchaseOrder.count({
-          where: {
-            ...baseWhere,
-            supplierInvoiceNumber: { not: null },
-            supplierInvoices: { none: { deletedAt: null } },
-          },
-        }),
-        this.prisma.purchaseOrder.count({
-          where: { ...baseWhere, supplierInvoices: { some: { deletedAt: null } } },
-        }),
-      ]);
-
-    const byStatus = grouped.map((row) => ({
-      status: row.status,
-      count: row._count._all,
-      totalAmount: Number(row._sum.totalAmount ?? 0),
-      outstandingAmount: Number(row._sum.outstandingAmount ?? 0),
-    }));
-
-    const totals = byStatus.reduce(
-      (acc, row) => {
-        acc.count += row.count;
-        acc.totalAmount += row.totalAmount;
-        acc.outstandingAmount += row.outstandingAmount;
-        return acc;
+    const records = await this.prisma.purchaseOrder.findMany({
+      where: baseWhere,
+      include: {
+        payable: { select: { ...canonicalSettlementSelect, supplierId: true } },
+        supplierInvoices: { where: { deletedAt: null }, select: { id: true } },
       },
-      { count: 0, totalAmount: 0, outstandingAmount: 0 },
+    });
+    const scopedDocuments = records
+      .map((record) => this.withPayableSettlement(record))
+      .filter((record) => !paymentStatus || record.paymentStatus === paymentStatus);
+    const invoiceCoverage = (record: (typeof scopedDocuments)[number]) =>
+      record.supplierInvoices?.length
+        ? 'LINKED'
+        : record.supplierInvoiceNumber != null
+          ? 'RECORDED'
+          : 'MISSING';
+    const missingInvoiceCount = scopedDocuments.filter(
+      (record) => invoiceCoverage(record) === 'MISSING',
+    ).length;
+    const recordedInvoiceCount = scopedDocuments.filter(
+      (record) => invoiceCoverage(record) === 'RECORDED',
+    ).length;
+    const linkedInvoiceCount = scopedDocuments.filter(
+      (record) => invoiceCoverage(record) === 'LINKED',
+    ).length;
+    const documents = scopedDocuments.filter(
+      (record) => !invoiceStatus || invoiceCoverage(record) === invoiceStatus,
     );
+    const amounts = new Map<
+      string,
+      {
+        currency: string;
+        totalAmount: Prisma.Decimal;
+        paidAmount: Prisma.Decimal;
+        outstandingAmount: Prisma.Decimal;
+        receivedOutstandingAmount: Prisma.Decimal;
+        unbilledAmount: Prisma.Decimal;
+      }
+    >();
+    const statuses = new Map<
+      string,
+      {
+        status: string;
+        count: number;
+        byCurrency: Map<
+          string,
+          { currency: string; totalAmount: Prisma.Decimal; outstandingAmount: Prisma.Decimal }
+        >;
+      }
+    >();
+    for (const record of documents) {
+      const bucket = statuses.get(record.status) ?? {
+        status: record.status,
+        count: 0,
+        byCurrency: new Map(),
+      };
+      bucket.count++;
+      statuses.set(record.status, bucket);
+      if (['CANCELLED', 'VOIDED'].includes(record.status)) continue;
+      const currency = record.currency || 'TZS';
+      const row = amounts.get(currency) ?? {
+        currency,
+        totalAmount: new Prisma.Decimal(0),
+        paidAmount: new Prisma.Decimal(0),
+        outstandingAmount: new Prisma.Decimal(0),
+        receivedOutstandingAmount: new Prisma.Decimal(0),
+        unbilledAmount: new Prisma.Decimal(0),
+      };
+      row.totalAmount = row.totalAmount.plus(record.totalAmount);
+      row.paidAmount = row.paidAmount.plus(record.paidAmount);
+      row.outstandingAmount = row.outstandingAmount.plus(record.outstandingAmount);
+      if (['RECEIVED', 'PARTIALLY_RECEIVED'].includes(record.status)) {
+        row.receivedOutstandingAmount = row.receivedOutstandingAmount.plus(
+          record.outstandingAmount,
+        );
+        row.unbilledAmount = row.unbilledAmount.plus(record.unbilledAmount);
+      }
+      amounts.set(currency, row);
+      const statusCurrency = bucket.byCurrency.get(currency) ?? {
+        currency,
+        totalAmount: new Prisma.Decimal(0),
+        outstandingAmount: new Prisma.Decimal(0),
+      };
+      statusCurrency.totalAmount = statusCurrency.totalAmount.plus(record.totalAmount);
+      statusCurrency.outstandingAmount = statusCurrency.outstandingAmount.plus(
+        record.outstandingAmount,
+      );
+      bucket.byCurrency.set(currency, statusCurrency);
+    }
+    const moneyRow = (row: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          key,
+          value instanceof Prisma.Decimal ? value.toDecimalPlaces(2).toNumber() : value,
+        ]),
+      );
+    const perCurrency = [...amounts.values()]
+      .sort((a, b) => a.currency.localeCompare(b.currency))
+      .map((row) => moneyRow(row));
+    const single = perCurrency.length === 1 ? perCurrency[0] : null;
+    const byStatus = [...statuses.values()].map((row) => {
+      const perCurrency = [...row.byCurrency.values()].map((value) => moneyRow(value));
+      return {
+        status: row.status,
+        count: row.count,
+        perCurrency,
+        totalAmount: perCurrency.length > 1 ? null : (perCurrency[0]?.totalAmount ?? 0),
+        outstandingAmount: perCurrency.length > 1 ? null : (perCurrency[0]?.outstandingAmount ?? 0),
+      };
+    });
 
     return {
       totals: {
-        count: totals.count,
-        totalAmount: roundMoney(totals.totalAmount),
-        outstandingAmount: roundMoney(totals.outstandingAmount),
+        count: documents.length,
+        totalAmount: single?.totalAmount ?? (perCurrency.length > 1 ? null : 0),
+        outstandingAmount: single?.outstandingAmount ?? (perCurrency.length > 1 ? null : 0),
       },
       byStatus,
+      perCurrency,
+      currency: single?.currency ?? null,
+      mixedCurrencies: perCurrency.length > 1,
       invoices: { missingInvoiceCount, recordedInvoiceCount, linkedInvoiceCount },
     };
   }
@@ -461,6 +516,7 @@ export class PurchaseOrdersService {
     const record = await (transaction ?? this.prisma).purchaseOrder.findFirst({
       where: { id, deletedAt: null },
       include: {
+        payable: { select: { ...canonicalSettlementSelect, supplierId: true } },
         company: {
           select: {
             id: true,
@@ -540,7 +596,58 @@ export class PurchaseOrdersService {
     });
     if (!record) throw new NotFoundException('Purchase order not found');
     if (user) await this.companyScope.assertCanAccessCompany(user, record.companyId, minimum);
-    return this.decorateInvoiceReference(record);
+    return this.withPayableSettlement(this.decorateInvoiceReference(record));
+  }
+
+  private withPayableSettlement<
+    T extends {
+      totalAmount: Prisma.Decimal;
+      paidAmount: Prisma.Decimal;
+      outstandingAmount: Prisma.Decimal;
+      paymentStatus: string;
+      status: string;
+      companyId: string;
+      currency: string;
+      supplierId: string | null;
+      payable?: any;
+      journalEntryId?: string | null;
+    },
+  >(record: T) {
+    const inactive = ['CANCELLED', 'VOIDED'].includes(record.status);
+    const received = ['RECEIVED', 'PARTIALLY_RECEIVED'].includes(record.status);
+    const payable = record.payable;
+    const conflict =
+      payable &&
+      (payable.deletedAt ||
+        payable.status === 'CANCELLED' ||
+        payable.companyId !== record.companyId ||
+        payable.currency !== record.currency ||
+        payable.supplierId !== record.supplierId ||
+        new Prisma.Decimal(payable.amount).gt(record.totalAmount));
+    const projection =
+      !inactive && payable && !conflict
+        ? sourceSettlement(record.totalAmount, payable)
+        : {
+            settlementAdjustmentAmount: new Prisma.Decimal(0),
+            unbilledAmount:
+              inactive || !received || payable || record.journalEntryId
+                ? new Prisma.Decimal(0)
+                : record.totalAmount,
+            settlementStatus: inactive ? 'INACTIVE' : record.paymentStatus,
+          };
+    return {
+      ...record,
+      ...projection,
+      accountingCoverage: inactive
+        ? 'INACTIVE'
+        : conflict
+          ? 'CONFLICT'
+          : payable?.journalEntryId || record.journalEntryId
+            ? 'POSTED'
+            : payable || !received
+              ? 'UNPOSTED'
+              : 'UNBILLED',
+    };
   }
 
   async convertDraft(id: string, dto: CreatePurchaseOrderDto, user: AuthUser) {
@@ -1487,6 +1594,7 @@ export class PurchaseOrdersService {
         payable = await this.createPurchasePayable({
           order: existing as any,
           transactionDate: receivedAt,
+          paymentDueDate: dto.paymentDueDate ? new Date(dto.paymentDueDate) : null,
           userId,
           tx,
         });
@@ -1829,6 +1937,7 @@ export class PurchaseOrdersService {
       expectedDate: Date | null;
     };
     transactionDate: Date;
+    paymentDueDate?: Date | null;
     userId: string;
     tx: Prisma.TransactionClient;
   }) {
@@ -1868,7 +1977,7 @@ export class PurchaseOrdersService {
         outstandingAmount: amount,
         currency: input.order.currency as any,
         issueDate: input.transactionDate,
-        dueDate: input.order.expectedDate ?? undefined,
+        dueDate: input.paymentDueDate ?? undefined,
         status: 'OPEN',
         notes: `Auto-created from purchase ${input.order.purchaseOrderNumber}`,
       },

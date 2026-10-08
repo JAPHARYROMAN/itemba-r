@@ -1,4 +1,9 @@
 import { accountPage, consolidateAccounts } from '../../common/utils/consolidate-accounts';
+import {
+  settlementStatusFilter,
+  sourceSettlement,
+  withSettlementLifecycle,
+} from '../../common/utils/source-settlement';
 import { assertLegacyPosWriteAllowed } from '../../common/services/pos-draft-policy';
 import {
   BadRequestException,
@@ -35,6 +40,10 @@ type ReceivableSalesOrderSnapshot = {
   amount: Prisma.Decimal | number | string;
   paidAmount: Prisma.Decimal | number | string;
   outstandingAmount: Prisma.Decimal | number | string;
+  companyId?: string;
+  customerId?: string | null;
+  currency?: string;
+  status?: string;
 };
 
 @Injectable()
@@ -68,7 +77,9 @@ export class ReceivablesService {
     ]);
 
     return {
-      data: data.map((receivable) => this.withDisplayCustomerName(receivable)),
+      data: data.map((receivable) =>
+        withSettlementLifecycle(this.withDisplayCustomerName(receivable)),
+      ),
       total,
       page: paging.page,
       limit: paging.limit,
@@ -89,7 +100,7 @@ export class ReceivablesService {
 
     const accounts = consolidateAccounts(
       records.map((raw) => {
-        const record = this.withDisplayCustomerName(raw);
+        const record = withSettlementLifecycle(this.withDisplayCustomerName(raw));
         return {
           record,
           id: record.id,
@@ -147,7 +158,7 @@ export class ReceivablesService {
           },
         })
       : null;
-    return this.withDisplayCustomerName({ ...record, customer });
+    return withSettlementLifecycle(this.withDisplayCustomerName({ ...record, customer }));
   }
 
   async create(dto: CreateReceivableDto, user: AuthUser) {
@@ -651,6 +662,7 @@ export class ReceivablesService {
           notes: dto.reason,
         },
       });
+      await this.syncSalesOrderPaymentFromReceivable(tx, updated);
       await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
 
       // The bad-debt journal, AR subledger transition, customer projection,
@@ -677,17 +689,59 @@ export class ReceivablesService {
     await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.MANAGE);
     const userId = user.id;
     await this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "receivables" WHERE "id" = ${id} AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Receivable not found');
+      const live = await tx.receivable.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              salesOrders: true,
+              fuelCreditSales: true,
+              projectBillings: true,
+              trips: true,
+              creditNotes: true,
+              refunds: true,
+              paymentAllocations: true,
+              cashDeskMovements: true,
+            },
+          },
+        },
+      });
+      await this.companyScope.assertCanAccessCompany(user, live.companyId, AccessLevel.MANAGE);
+      if (
+        !withSettlementLifecycle(live).canDelete ||
+        Object.values(live._count ?? {}).some((count) => count > 0)
+      ) {
+        throw new BadRequestException(
+          'Posted, settled, or source-linked receivables cannot be deleted. Use the source cancellation or reversal workflow.',
+        );
+      }
+      const posted = await tx.journalEntry.count({
+        where: {
+          OR: [
+            ...(live.journalEntryId ? [{ id: live.journalEntryId }] : []),
+            { referenceType: 'Receivable', referenceId: id },
+          ],
+          status: { in: ['POSTED', 'REVERSED'] },
+        },
+      });
+      if (posted) {
+        throw new BadRequestException(
+          'Posted, settled, or source-linked receivables cannot be deleted. Use the source cancellation or reversal workflow.',
+        );
+      }
       await tx.receivable.update({ where: { id }, data: { deletedAt: new Date() } });
-      await this.syncCustomerBalance(tx, existing.companyId, existing.customerId);
-    });
-
-    await this.auditLogs.log({
-      action: 'RECEIVABLE_DELETE',
-      entityType: 'Receivable',
-      entityId: id,
-      userId,
-      companyId: existing.companyId,
-      oldValue: existing as any,
+      await this.syncCustomerBalance(tx, live.companyId, live.customerId);
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'RECEIVABLE_DELETE',
+        entityType: 'Receivable',
+        entityId: id,
+        userId,
+        companyId: live.companyId,
+        oldValue: live as any,
+      });
     });
 
     return { success: true };
@@ -706,7 +760,7 @@ export class ReceivablesService {
     }
     if (divisionId) where.divisionId = divisionId;
     if (branchId) where.branchId = branchId;
-    if (status) where.status = status;
+    Object.assign(where, settlementStatusFilter(status));
     if (customerId) where.customerId = customerId;
     if (dateFrom || dateTo) {
       where.issueDate = {};
@@ -731,6 +785,18 @@ export class ReceivablesService {
 
   private includeListScope() {
     return {
+      _count: {
+        select: {
+          salesOrders: true,
+          fuelCreditSales: true,
+          projectBillings: true,
+          trips: true,
+          creditNotes: true,
+          refunds: true,
+          paymentAllocations: true,
+          cashDeskMovements: true,
+        },
+      },
       company: { select: { id: true, name: true, code: true } },
       division: { select: { id: true, name: true, code: true } },
       branch: { select: { id: true, name: true, code: true } },
@@ -1073,19 +1139,35 @@ export class ReceivablesService {
     receivable: ReceivableSalesOrderSnapshot,
   ) {
     if (receivable.sourceType !== 'SalesOrder' || !receivable.sourceId) return;
-
-    const paidAmount = new Prisma.Decimal(receivable.paidAmount ?? 0).toDecimalPlaces(2);
-    const outstandingAmount = new Prisma.Decimal(receivable.outstandingAmount ?? 0).toDecimalPlaces(
-      2,
+    const source = await tx.salesOrder.findFirst({
+      where: {
+        id: receivable.sourceId,
+        deletedAt: null,
+        ...(receivable.companyId ? { companyId: receivable.companyId } : {}),
+        ...(receivable.currency ? { currency: receivable.currency as any } : {}),
+        ...(receivable.customerId !== undefined ? { customerId: receivable.customerId } : {}),
+        status: { notIn: ['CANCELLED', 'VOIDED'] },
+      },
+      select: { id: true, totalAmount: true },
+    });
+    if (!source || new Prisma.Decimal(receivable.amount).gt(source.totalAmount)) {
+      throw new BadRequestException(
+        'The receivable does not match its active source sales order. Review the accounting coverage before settling it.',
+      );
+    }
+    const { paidAmount, outstandingAmount, paymentStatus } = sourceSettlement(
+      source.totalAmount,
+      receivable,
     );
-    const paymentStatus = outstandingAmount.isZero()
-      ? PaymentStatus.PAID
-      : paidAmount.gt(0)
-        ? PaymentStatus.PARTIALLY_PAID
-        : PaymentStatus.UNPAID;
 
     await tx.salesOrder.updateMany({
-      where: { id: receivable.sourceId, deletedAt: null },
+      where: {
+        id: receivable.sourceId,
+        deletedAt: null,
+        ...(receivable.companyId ? { companyId: receivable.companyId } : {}),
+        ...(receivable.currency ? { currency: receivable.currency as any } : {}),
+        status: { notIn: ['CANCELLED', 'VOIDED'] },
+      },
       data: {
         receivableId: receivable.id,
         paidAmount,

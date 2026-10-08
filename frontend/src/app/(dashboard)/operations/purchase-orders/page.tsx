@@ -45,6 +45,14 @@ import {
 import { cellToString, downloadTextFile, formatDateOnly, rowsToCsv } from '@/lib/report-export';
 import { downloadTablePdf } from '@/lib/export-download';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  accountingCoverageLabel,
+  currencySummaryValues,
+  formatFinancialTotals,
+  settlementLabel,
+  sumFinancialAmounts,
+  type CurrencySummary,
+} from '@/lib/financial-document';
 import { OrderLineEditor, mergeOrderProductOptions } from '../_components/order-line-editor';
 import { PurchaseOrderTabs } from './_components/PurchaseOrderTabs';
 
@@ -131,6 +139,10 @@ interface PurchaseOrder {
   totalAmount: number;
   outstandingAmount: number;
   paidAmount?: number | string;
+  settlementAdjustmentAmount?: number | string;
+  settlementStatus?: string;
+  accountingCoverage?: string;
+  unbilledAmount?: number | string;
   status: string;
   paymentStatus: string;
   currency: string;
@@ -203,7 +215,8 @@ const EXPORT_COLUMNS = [
 ];
 
 interface PurchaseSummary {
-  totals?: { count?: number; totalAmount?: number; outstandingAmount?: number };
+  totals?: { count?: number; totalAmount?: number | null; outstandingAmount?: number | null };
+  perCurrency?: CurrencySummary[];
   invoices?: {
     missingInvoiceCount?: number;
     recordedInvoiceCount?: number;
@@ -896,6 +909,7 @@ function ReceiveOrderModal({
     accounts: { id: string; name: string; balance: string; currency: string }[];
   } | null>(null);
   const [cashAccountId, setCashAccountId] = useState('');
+  const [paymentDueDate, setPaymentDueDate] = useState('');
   const [fundingLoading, setFundingLoading] = useState(isCash);
   useEffect(() => {
     if (!isCash) return;
@@ -921,10 +935,10 @@ function ReceiveOrderModal({
     setSaving(true);
     setError('');
     try {
-      await backendPatch(
-        `/purchase-orders/${order.id}/receive`,
-        isCash ? { cashAccountId: cashAccountId || undefined } : {},
-      );
+      await backendPatch(`/purchase-orders/${order.id}/receive`, {
+        ...(isCash ? { cashAccountId: cashAccountId || undefined } : {}),
+        ...(paymentDueDate ? { paymentDueDate } : {}),
+      });
       showToast('success', 'Purchase order received', order.purchaseOrderNumber ?? order.id);
       onReceived();
     } catch (err: unknown) {
@@ -980,6 +994,14 @@ function ReceiveOrderModal({
           </div>
           <div>Inventory will be received into this order&apos;s branch/location.</div>
         </div>
+        {order.purchaseType === 'CREDIT_PURCHASE' && (
+          <FormDateField
+            label="Supplier payment due date (optional)"
+            value={paymentDueDate}
+            onChange={setPaymentDueDate}
+            hint="Enter the agreed payment deadline. Expected delivery does not set payment terms."
+          />
+        )}
         {isCash && (
           <div className="space-y-3">
             {fundingLoading ? (
@@ -1449,8 +1471,11 @@ export default function PurchaseOrdersPage() {
     received:
       data?.data.filter((o) => o.status === 'RECEIVED' || o.status === 'PARTIALLY_RECEIVED')
         .length ?? 0,
-    cost: data?.data.reduce((acc, o) => acc + Number(o.totalAmount || 0), 0) ?? 0,
   };
+  const costRows = summary?.perCurrency
+    ? currencySummaryValues(summary.perCurrency, 'totalAmount')
+    : (data?.data ?? []).map((o) => ({ currency: o.currency, amount: o.totalAmount }));
+  const totalCost = formatFinancialTotals(costRows);
 
   return (
     <div className="business-workspace space-y-6">
@@ -1537,7 +1562,13 @@ export default function PurchaseOrdersPage() {
         <StatCard label="Total Orders" value={summary?.totals?.count ?? data?.total ?? 0} />
         <StatCard label="Confirmed (page)" value={stats.confirmed} />
         <StatCard label="Received (page)" value={stats.received} />
-        <StatCard label="Total Cost" value={fmtMoney(summary?.totals?.totalAmount ?? stats.cost)} />
+        <StatCard label="Order value" value={totalCost} />
+        <StatCard
+          label="Received without posted payable"
+          value={formatFinancialTotals(
+            currencySummaryValues(summary?.perCurrency ?? [], 'unbilledAmount'),
+          )}
+        />
         <StatCard
           label="Missing Invoice"
           value={summary?.invoices?.missingInvoiceCount ?? 0}
@@ -1717,16 +1748,43 @@ export default function PurchaseOrdersPage() {
       {consolidated ? (
         <ConsolidatedAccounts
           accounts={accounts?.data ?? []}
-          title="Supplier accounts"
+          title="Supplier purchase accounts"
+          totalLabel="Order value"
+          paidLabel="Cash paid"
+          outstandingLabel="Order balance"
+          documentAdjustment={(o) => o.settlementAdjustmentAmount ?? 0}
+          accountNote={(account) => {
+            const unbilled = account.documents.filter(
+              (o) =>
+                ['RECEIVED', 'PARTIALLY_RECEIVED'].includes(o.status) &&
+                Number(o.unbilledAmount ?? 0) > 0,
+            );
+            return unbilled.length
+              ? `Received value awaiting posted payable · ${fmtMoney(sumFinancialAmounts(unbilled.map((o) => o.unbilledAmount ?? 0)), account.currency)} · ${unbilled.length} order${unbilled.length === 1 ? '' : 's'}`
+              : null;
+          }}
+          description="Purchase commitments and received orders, grouped by supplier. Posted payables are shown in Cash Desk. A received order without a posted payable needs accounting coverage."
           showAging={false}
           documentName={(o) => o.purchaseOrderNumber ?? o.id}
           documentDate={(o) => o.orderDate}
           documentStatus={(o) => o.status}
           documentFields={[
             { label: 'Total', value: (o) => fmtMoney(o.totalAmount, o.currency) },
-            { label: 'Paid', value: (o) => fmtMoney(Number(o.paidAmount ?? 0), o.currency) },
-            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
-            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Cash paid', value: (o) => fmtMoney(Number(o.paidAmount ?? 0), o.currency) },
+            { label: 'Order balance', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            {
+              label: 'Unbilled order value',
+              value: (o) => fmtMoney(o.unbilledAmount ?? 0, o.currency),
+            },
+            {
+              label: 'Non-cash settlement',
+              value: (o) => fmtMoney(o.settlementAdjustmentAmount ?? 0, o.currency),
+            },
+            { label: 'Settlement', value: (o) => <StatusBadge value={settlementLabel(o)} /> },
+            {
+              label: 'Accounting coverage',
+              value: (o) => accountingCoverageLabel(o.accountingCoverage),
+            },
             { label: 'Supplier invoice', value: (o) => o.displayInvoiceNumber || 'Not recorded' },
             { label: 'Notes', value: (o) => o.notes || '—' },
           ]}
@@ -1751,8 +1809,21 @@ export default function PurchaseOrdersPage() {
           ]}
           details={[
             { label: 'Supplier', value: (o) => o.supplier?.name ?? o.supplierName ?? '—' },
-            { label: 'Outstanding', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
-            { label: 'Payment', value: (o) => <StatusBadge value={o.paymentStatus} /> },
+            { label: 'Order balance', value: (o) => fmtMoney(o.outstandingAmount, o.currency) },
+            {
+              label: 'Unbilled order value',
+              value: (o) => fmtMoney(o.unbilledAmount ?? 0, o.currency),
+            },
+            { label: 'Cash paid', value: (o) => fmtMoney(o.paidAmount ?? 0, o.currency) },
+            {
+              label: 'Non-cash settlement',
+              value: (o) => fmtMoney(o.settlementAdjustmentAmount ?? 0, o.currency),
+            },
+            { label: 'Settlement', value: (o) => <StatusBadge value={settlementLabel(o)} /> },
+            {
+              label: 'Accounting coverage',
+              value: (o) => accountingCoverageLabel(o.accountingCoverage),
+            },
             {
               label: 'Supplier invoice',
               value: (o) => o.displayInvoiceNumber || o.internalInvoiceNumber || 'Not recorded',
@@ -1799,7 +1870,7 @@ export default function PurchaseOrdersPage() {
                     Total
                   </th>
                   <th scope="col" className="px-4 py-3 text-right">
-                    Outstanding
+                    Order balance
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Status
@@ -1876,9 +1947,12 @@ export default function PurchaseOrdersPage() {
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge value={o.status} />
+                          <p className="text-xs mt-1">
+                            {accountingCoverageLabel(o.accountingCoverage)}
+                          </p>
                         </td>
                         <td className="px-4 py-3">
-                          <StatusBadge value={o.paymentStatus} />
+                          <StatusBadge value={settlementLabel(o)} />
                         </td>
                         <td className="px-4 py-3 text-right space-x-1">{renderOrderActions(o)}</td>
                       </tr>

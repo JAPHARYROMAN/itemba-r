@@ -115,6 +115,34 @@ const baseInput = () => ({
 });
 
 describe('SupplierPaymentsService.createInTransaction', () => {
+  it.each([
+    { companyId: 'other' },
+    { supplierId: 'other' },
+    { currency: 'USD' },
+    { totalAmount: d(50) },
+  ])(
+    'refuses mismatched linked purchase coverage before committing settlement: %p',
+    async (changes) => {
+      const { service, tx, postLines } = setup({
+        locked: { amount: d(500) },
+        orders: [
+          {
+            id: 'po-1',
+            totalAmount: d(500),
+            companyId: 'company-1',
+            supplierId: 'supplier-1',
+            currency: 'TZS',
+            ...changes,
+          },
+        ],
+      });
+      await expect(service.createInTransaction(tx, user, baseInput())).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(tx.purchaseOrder.update).not.toHaveBeenCalled();
+      expect(postLines).not.toHaveBeenCalled();
+    },
+  );
   it('keeps received purchase-order balances and payment status in step with the payable', async () => {
     const { service, tx } = setup({ orders: [{ id: 'po-1', totalAmount: d(500) }] });
     await service.createInTransaction(tx, user, baseInput());
@@ -126,8 +154,6 @@ describe('SupplierPaymentsService.createInTransaction', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           payableId: 'pay-1',
-          companyId: 'company-1',
-          currency: 'TZS',
           status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] },
         }),
       }),
@@ -293,6 +319,7 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
       companyId: 'company-1',
       supplierId: 'supplier-1',
       paymentNumber: 'SPAY-1',
+      currency: 'TZS',
       status: 'COMPLETED',
       amount: d('200'),
       cashAccountId: 'bank-1',
@@ -303,6 +330,21 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
       ...overrides,
     };
   }
+  it.each(['WRITTEN_OFF', 'CANCELLED'])(
+    'refuses cash/journal reversal after %s without unwinding the source settlement',
+    async (status) => {
+      const { service, tx, postLines } = setup({
+        locked: { status, paidAmount: d(200), outstandingAmount: d(0) },
+      });
+      tx.supplierPayment.findFirst.mockResolvedValue(reversible());
+      await expect(
+        service.reverseInTransaction(tx, user, 'spay-1', null, {}),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.payable.update).not.toHaveBeenCalled();
+      expect(postLines).not.toHaveBeenCalled();
+      expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+    },
+  );
   it('preserves Cash Desk ownership, uses its reversal date, and restores purchase-order balances once', async () => {
     const { service, tx, postLines } = setup({
       locked: { paidAmount: d(200), outstandingAmount: d(300), status: 'PARTIALLY_PAID' },

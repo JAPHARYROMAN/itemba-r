@@ -26,8 +26,18 @@ import {
   StatusBadge,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
+import { usePartyCredit } from '@/hooks/use-party-credit';
 import { DocumentArtifactButton } from '@/components/documents';
 import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
+import {
+  canDeleteFinancialDocument,
+  canSettleFinancialDocument,
+  financialAgingBucket,
+  financialDocumentStatus,
+  financialLifecycleStatus,
+  formatFinancialTotals,
+  isFinancialDocumentOverdue,
+} from '@/lib/financial-document';
 import {
   DetailGrid,
   DetailItem,
@@ -76,6 +86,9 @@ export interface Receivable {
   issueDate: string;
   dueDate: string;
   status: 'OPEN' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'WRITTEN_OFF';
+  lifecycleStatus?: string;
+  canDelete?: boolean;
+  settlementAdjustmentAmount?: number | string;
   notes?: string | null;
   companyId: string;
   company?: { name: string } | null;
@@ -266,7 +279,7 @@ function moneyNumber(value: unknown) {
 function receivablePaidAmount(receivable: Receivable) {
   const explicit = receivable.amountPaid ?? receivable.paidAmount;
   if (explicit !== undefined && explicit !== null) return moneyNumber(explicit);
-  return Math.max(0, moneyNumber(receivable.amount) - moneyNumber(receivable.outstandingAmount));
+  return 0;
 }
 
 function receivableOutstandingAmount(receivable: Receivable) {
@@ -284,13 +297,8 @@ function receivableCustomerName(receivable: Receivable) {
   );
 }
 
-function agingBucket(dueDate: string): string {
-  const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000);
-  if (days <= 0) return 'Current';
-  if (days <= 30) return '1-30 days';
-  if (days <= 60) return '31-60 days';
-  if (days <= 90) return '61-90 days';
-  return '90+ days';
+function agingBucket(dueDate?: string | null): string {
+  return financialAgingBucket(dueDate);
 }
 
 function scopeLabel(scope?: { name: string; code?: string | null } | null) {
@@ -311,6 +319,11 @@ function ReceivableDetailModal({
   onClose: () => void;
 }) {
   const [detail, setDetail] = useState<Receivable>(receivable);
+  const { data: partyCredit } = usePartyCredit(
+    'customer',
+    detail.customerId ?? detail.customer?.id,
+    detail.companyId,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -364,7 +377,7 @@ function ReceivableDetailModal({
       open
       onClose={onClose}
       title={`Receivable ${detail.receivableNumber ?? detail.id.slice(0, 8)}`}
-      subtitle={`${receivableCustomerName(detail)} · ${detail.status}`}
+      subtitle={`${receivableCustomerName(detail)} · ${financialDocumentStatus(detail)}`}
       size="3xl"
       footer={
         <Btn variant="secondary" onClick={onClose}>
@@ -389,7 +402,12 @@ function ReceivableDetailModal({
       <div className="workspace-form space-y-4">
         <div className="grid gap-3 md:grid-cols-4">
           <MoneyTile label="Invoice Amount" value={detail.amount} currency={currency} />
-          <MoneyTile label="Paid / Collected" value={paid} currency={currency} tone="success" />
+          <MoneyTile label="Cash collected" value={paid} currency={currency} tone="success" />
+          <MoneyTile
+            label="Non-cash settlement"
+            value={detail.settlementAdjustmentAmount ?? 0}
+            currency={currency}
+          />
           <MoneyTile
             label="Outstanding"
             value={outstanding}
@@ -427,10 +445,15 @@ function ReceivableDetailModal({
             <DetailItem label="TIN" value={customer?.tin} mono />
             <DetailItem label="VRN" value={customer?.vrn} mono />
             <DetailItem label="Payment Terms" value={customer?.paymentTerms} />
-            <DetailItem label="Credit Limit" value={formatMoney(customer?.creditLimit, currency)} />
             <DetailItem
-              label="Current Balance"
-              value={formatMoney(customer?.currentBalance, currency)}
+              label="Credit Limit"
+              value={
+                partyCredit ? formatMoney(partyCredit.creditLimit, partyCredit.baseCurrency) : '—'
+              }
+            />
+            <DetailItem
+              label="Party Balance"
+              value={partyCredit ? formatFinancialTotals(partyCredit.total) : '—'}
             />
             <DetailItem
               label="Customer Status"
@@ -453,7 +476,10 @@ function ReceivableDetailModal({
             <DetailItem label="Due Date" value={fmtDetailDate(detail.dueDate)} />
             <DetailItem label="Created" value={fmtDateTime(detail.createdAt)} />
             <DetailItem label="Updated" value={fmtDateTime(detail.updatedAt)} />
-            <DetailItem label="Status" value={<InlineStatus status={detail.status} />} />
+            <DetailItem
+              label="Status"
+              value={<InlineStatus status={financialDocumentStatus(detail)} />}
+            />
           </DetailGrid>
         </DetailSection>
 
@@ -1408,14 +1434,14 @@ export default function ReceivablesPage() {
           currency: account.currency,
         }))
       : (data?.data ?? [])
-          .filter((r) => r.status === 'OVERDUE')
+          .filter((r) => isFinancialDocumentOverdue(r))
           .map((r) => ({ amount: receivableOutstandingAmount(r), currency: r.currency })),
   );
   const totalRecords = viewMode === 'accounts' ? (accounts?.total ?? 0) : (data?.total ?? 0);
   const openRecords =
     viewMode === 'accounts'
       ? (accounts?.data.filter((account) => account.outstandingAmount > 0).length ?? 0)
-      : (data?.data.filter((r) => r.status === 'OPEN').length ?? 0);
+      : (data?.data.filter(canSettleFinancialDocument).length ?? 0);
   const paginated = viewMode === 'accounts' ? accounts : data;
 
   if (authLoading || !canView) {
@@ -1436,22 +1462,22 @@ export default function ReceivablesPage() {
       </Btn>
       {canManage && (
         <>
-          {(r.status === 'OPEN' || r.status === 'PARTIALLY_PAID' || r.status === 'OVERDUE') && (
+          {canSettleFinancialDocument(r) && (
             <Btn variant="success" size="xs" onClick={() => setRecordingPayment(r)}>
               Pay
             </Btn>
           )}
-          {(r.status === 'OPEN' || r.status === 'OVERDUE') && (
+          {canSettleFinancialDocument(r) && (
             <Btn variant="warning" size="xs" onClick={() => setWritingOff(r)}>
               Write Off
             </Btn>
           )}
-          {r.status === 'OPEN' && (
+          {financialLifecycleStatus(r) === 'OPEN' && (
             <Btn variant="ghost" size="xs" onClick={() => setEditing(r)}>
               Edit
             </Btn>
           )}
-          {r.status === 'OPEN' && (
+          {canDeleteFinancialDocument(r) && (
             <Btn variant="danger" size="xs" onClick={() => setDeleting(r)}>
               Delete
             </Btn>
@@ -1639,7 +1665,7 @@ export default function ReceivablesPage() {
           records={data?.data ?? []}
           name={(r) => r.receivableNumber ?? r.id.slice(0, 8)}
           reference={(r) => receivableCustomerName(r)}
-          status={(r) => r.status}
+          status={financialDocumentStatus}
           fields={[
             {
               label: 'Outstanding',
@@ -1650,7 +1676,14 @@ export default function ReceivablesPage() {
           details={[
             { label: 'Issued', value: (r) => formatDate(r.issueDate) },
             { label: 'Original amount', value: (r) => formatMoney(r.amount, r.currency) },
-            { label: 'Paid', value: (r) => formatMoney(receivablePaidAmount(r), r.currency) },
+            {
+              label: 'Cash collected',
+              value: (r) => formatMoney(receivablePaidAmount(r), r.currency),
+            },
+            {
+              label: 'Non-cash settlement',
+              value: (r) => formatMoney(r.settlementAdjustmentAmount ?? 0, r.currency),
+            },
             { label: 'Company', value: (r) => r.company?.name || '—' },
           ]}
           actions={renderRecordActions}
@@ -1674,7 +1707,7 @@ export default function ReceivablesPage() {
                   <th className="px-4 py-3">Company</th>
                   <th className="px-4 py-3 text-right">Documents</th>
                   <th className="px-4 py-3 text-right">Total Debt</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Cash collected / adjustments</th>
                   <th className="px-4 py-3 text-right">Outstanding</th>
                   <th className="px-4 py-3 text-right">Overdue</th>
                   <th className="px-4 py-3">Next Due</th>
@@ -1738,6 +1771,19 @@ export default function ReceivablesPage() {
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-green-700">
                             {formatMoney(account.paidAmount, account.currency)}
+                            {account.documents.some(
+                              (record) => Number(record.settlementAdjustmentAmount ?? 0) > 0,
+                            ) && (
+                              <div className="text-xs mt-1">
+                                Non-cash:{' '}
+                                {formatFinancialTotals(
+                                  account.documents.map((record) => ({
+                                    currency: record.currency,
+                                    amount: record.settlementAdjustmentAmount ?? 0,
+                                  })),
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-semibold">
                             {formatMoney(account.outstandingAmount, account.currency)}
@@ -1794,7 +1840,9 @@ export default function ReceivablesPage() {
                                       <th className="px-3 py-2">Issue</th>
                                       <th className="px-3 py-2">Due</th>
                                       <th className="px-3 py-2 text-right">Amount</th>
-                                      <th className="px-3 py-2 text-right">Paid</th>
+                                      <th className="px-3 py-2 text-right">
+                                        Cash collected / adjustments
+                                      </th>
                                       <th className="px-3 py-2 text-right">Outstanding</th>
                                       <th className="px-3 py-2">Status</th>
                                       <th className="px-3 py-2 text-right">Actions</th>
@@ -1813,12 +1861,21 @@ export default function ReceivablesPage() {
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-green-700">
                                           {formatMoney(receivablePaidAmount(r), r.currency)}
+                                          {Number(r.settlementAdjustmentAmount ?? 0) > 0 && (
+                                            <div className="text-xs mt-1">
+                                              Non-cash:{' '}
+                                              {formatMoney(
+                                                r.settlementAdjustmentAmount,
+                                                r.currency,
+                                              )}
+                                            </div>
+                                          )}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold">
                                           {formatMoney(receivableOutstandingAmount(r), r.currency)}
                                         </td>
                                         <td className="px-3 py-2">
-                                          <StatusBadge status={r.status} />
+                                          <StatusBadge status={financialDocumentStatus(r)} />
                                         </td>
                                         <td className="px-3 py-2">
                                           <div className="flex items-center justify-end gap-1.5">
@@ -1831,9 +1888,7 @@ export default function ReceivablesPage() {
                                             </Btn>
                                             {canManage && (
                                               <>
-                                                {(r.status === 'OPEN' ||
-                                                  r.status === 'PARTIALLY_PAID' ||
-                                                  r.status === 'OVERDUE') && (
+                                                {canSettleFinancialDocument(r) && (
                                                   <Btn
                                                     variant="success"
                                                     size="xs"
@@ -1842,8 +1897,7 @@ export default function ReceivablesPage() {
                                                     Pay
                                                   </Btn>
                                                 )}
-                                                {(r.status === 'OPEN' ||
-                                                  r.status === 'OVERDUE') && (
+                                                {canSettleFinancialDocument(r) && (
                                                   <Btn
                                                     variant="warning"
                                                     size="xs"
@@ -1852,7 +1906,7 @@ export default function ReceivablesPage() {
                                                     Write Off
                                                   </Btn>
                                                 )}
-                                                {r.status === 'OPEN' && (
+                                                {financialLifecycleStatus(r) === 'OPEN' && (
                                                   <Btn
                                                     variant="ghost"
                                                     size="xs"
@@ -1861,7 +1915,7 @@ export default function ReceivablesPage() {
                                                     Edit
                                                   </Btn>
                                                 )}
-                                                {r.status === 'OPEN' && (
+                                                {canDeleteFinancialDocument(r) && (
                                                   <Btn
                                                     variant="danger"
                                                     size="xs"
@@ -1902,7 +1956,7 @@ export default function ReceivablesPage() {
                   <th className="px-4 py-3">AR #</th>
                   <th className="px-4 py-3">Customer</th>
                   <th className="px-4 py-3 text-right">Amount</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Cash collected / adjustments</th>
                   <th className="px-4 py-3 text-right">Outstanding</th>
                   <th className="px-4 py-3">Issue Date</th>
                   <th className="px-4 py-3">Due Date</th>
@@ -1950,6 +2004,11 @@ export default function ReceivablesPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-green-700">
                         {formatMoney(receivablePaidAmount(r), r.currency)}
+                        {Number(r.settlementAdjustmentAmount ?? 0) > 0 && (
+                          <div className="text-xs mt-1">
+                            Non-cash: {formatMoney(r.settlementAdjustmentAmount, r.currency)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">
                         {formatMoney(receivableOutstandingAmount(r), r.currency)}
@@ -1962,7 +2021,7 @@ export default function ReceivablesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={r.status} />
+                        <StatusBadge status={financialDocumentStatus(r)} />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">

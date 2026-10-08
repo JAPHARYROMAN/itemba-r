@@ -66,6 +66,7 @@ function makeService() {
       update: jest.fn(async ({ data }: any) => ({ id: 'so-1', companyId: 'company-1', ...data })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       findFirst: jest.fn(async () => persistedOrder()),
+      findMany: jest.fn(async () => []),
       findUnique: jest.fn(async () => null),
       groupBy: jest.fn(async () => []),
       aggregate: jest.fn(async () => ({
@@ -1883,52 +1884,106 @@ describe('SalesOrdersService cancel phantom-inventory guard', () => {
 });
 
 describe('SalesOrdersService workbench summary aggregation', () => {
-  it('derives counts and money rollups from groupBy/_sum instead of loading rows', async () => {
+  it('filters customer-day groups using canonical payments instead of stale order paymentStatus', async () => {
     const { service, prisma } = makeService();
-    prisma.salesOrder.groupBy.mockResolvedValue([
-      { status: 'DRAFT', _count: { _all: 3 } },
-      { status: 'CONFIRMED', _count: { _all: 4 } },
-      { status: 'PARTIALLY_PAID', _count: { _all: 1 } },
-      { status: 'PAID', _count: { _all: 2 } },
-      { status: 'CANCELLED', _count: { _all: 1 } },
-      { status: 'VOIDED', _count: { _all: 1 } },
+    prisma.salesOrder.findMany.mockResolvedValue([
+      persistedOrder({
+        paymentStatus: 'UNPAID',
+        paidAmount: 0,
+        outstandingAmount: 200,
+        receivable: {
+          id: 'ar-1',
+          sourceId: 'so-1',
+          amount: 200,
+          paidAmount: 200,
+          outstandingAmount: 0,
+          status: 'PAID',
+        },
+      }),
+      persistedOrder({
+        id: 'open',
+        paymentStatus: 'UNPAID',
+        paidAmount: 0,
+        outstandingAmount: 200,
+      }),
     ]);
-    prisma.salesOrder.aggregate.mockResolvedValue({
-      _sum: { totalAmount: 1000, outstandingAmount: 250, paidAmount: 750 },
-    });
-    prisma.salesOrder.count
-      .mockResolvedValueOnce(5) // unpaidCount
-      .mockResolvedValueOnce(2); // overdueCreditOrders
-
-    const summary = await service.workbenchSummary({} as any, user);
-
-    expect(summary).toEqual({
-      totalOrders: 12,
-      draft: 3,
-      confirmed: 7,
-      cancelled: 2,
-      revenue: 1000,
-      outstanding: 250,
-      paidAmount: 750,
-      unpaidCount: 5,
-      overdueCreditOrders: 2,
-      blockedFailedActionCount: 0,
-    });
+    const result = await service.customerDaySummary({ paymentStatus: 'PAID' } as any, user);
+    expect(prisma.salesOrder.findMany.mock.calls[0][0].where.paymentStatus).toBeUndefined();
+    expect(result.total).toBe(1);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({ orderCount: 1, paidAmount: 200, outstandingAmount: 0 }),
+    );
+    expect(result.data[0].orders[0].id).toBe('so-1');
   });
 
-  it('excludes CANCELLED/VOIDED orders from every money rollup and count', async () => {
+  it('keeps same-day manual customers separate by company and excludes inactive amounts', async () => {
     const { service, prisma } = makeService();
-    prisma.salesOrder.groupBy.mockResolvedValue([]);
-
-    await service.workbenchSummary({} as any, user);
-
-    const deadExcluded = { status: { notIn: ['CANCELLED', 'VOIDED'] } };
-    expect(prisma.salesOrder.aggregate).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining(deadExcluded) }),
+    prisma.salesOrder.findMany.mockResolvedValue([
+      persistedOrder(),
+      persistedOrder({ id: 'other', companyId: 'company-2' }),
+      persistedOrder({ id: 'cancel', status: 'CANCELLED', totalAmount: 1000, paidAmount: 1000 }),
+    ]);
+    const result = await service.customerDaySummary({} as any, user);
+    expect(result.total).toBe(2);
+    expect(result.data.map((record: any) => record.totalAmount)).toEqual([200, 200]);
+    expect(new Set(result.data.map((record: any) => record.companyId))).toEqual(
+      new Set(['company-1', 'company-2']),
     );
-    for (const call of prisma.salesOrder.count.mock.calls) {
-      expect(call[0].where).toEqual(expect.objectContaining(deadExcluded));
-    }
+  });
+  it('uses canonical linked settlements for monetary totals', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findMany.mockResolvedValue([
+      persistedOrder({
+        paidAmount: 0,
+        outstandingAmount: 200,
+        receivable: {
+          id: 'ar-1',
+          sourceId: 'so-1',
+          amount: 200,
+          paidAmount: 80,
+          outstandingAmount: 0,
+          status: 'WRITTEN_OFF',
+        },
+      }),
+    ]);
+
+    const summary = await service.workbenchSummary({} as any, user);
+    expect(summary).toEqual(
+      expect.objectContaining({
+        totalOrders: 1,
+        revenue: 200,
+        outstanding: 0,
+        paidAmount: 80,
+        unpaidCount: 0,
+        currency: 'TZS',
+        mixedCurrencies: false,
+      }),
+    );
+  });
+
+  it('separates currencies and excludes CANCELLED/VOIDED from money rollups', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findMany.mockResolvedValue([
+      persistedOrder(),
+      persistedOrder({ id: 'usd', currency: 'USD', totalAmount: 5, paidAmount: 5 }),
+      persistedOrder({ id: 'cancel', status: 'CANCELLED', totalAmount: 1000 }),
+      persistedOrder({ id: 'void', status: 'VOIDED', totalAmount: 1000 }),
+    ]);
+    const result = await service.workbenchSummary({} as any, user);
+    expect(result).toEqual(
+      expect.objectContaining({
+        totalOrders: 4,
+        cancelled: 2,
+        revenue: null,
+        outstanding: null,
+        paidAmount: null,
+        mixedCurrencies: true,
+      }),
+    );
+    expect(result.perCurrency).toEqual([
+      expect.objectContaining({ currency: 'TZS', revenue: 200, paidAmount: 200 }),
+      expect.objectContaining({ currency: 'USD', revenue: 5, paidAmount: 5 }),
+    ]);
   });
 });
 

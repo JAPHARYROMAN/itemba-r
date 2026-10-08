@@ -13,6 +13,7 @@ function lockedReceivable(overrides: Record<string, unknown> = {}) {
     customerId: 'cust-1',
     customerName: 'Acme Ltd',
     receivableNumber: 'REC-2026-000001',
+    amount: '500',
     outstandingAmount: '500',
     paidAmount: '0',
     status: 'OPEN',
@@ -37,6 +38,7 @@ function makeService(
     companyProfile: { findUnique: jest.fn(async () => ({ currency: 'TZS' })) },
     $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
     receivable: {
+      findUniqueOrThrow: jest.fn().mockImplementation(async () => ({ ...stagedRow })),
       update: jest.fn().mockImplementation(({ data }: any) => {
         stagedRow = { ...stagedRow, ...data };
         return { ...stagedRow };
@@ -64,7 +66,14 @@ function makeService(
         ...data,
       })),
     },
-    salesOrder: { updateMany: jest.fn() },
+    salesOrder: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'so-1', totalAmount: 500 }),
+      updateMany: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    paymentAllocation: { count: jest.fn().mockResolvedValue(0) },
+    creditNote: { count: jest.fn().mockResolvedValue(0) },
+    journalEntry: { count: jest.fn().mockResolvedValue(0) },
     cashAccount: {
       findFirst: jest
         .fn()
@@ -300,6 +309,49 @@ describe('ReceivablesService.update customer balance projection', () => {
 });
 
 describe('ReceivablesService.writeOff bad-debt journal', () => {
+  it('preserves uncovered sales order value when a partial invoice is forgiven', async () => {
+    const { service, tx } = makeService(
+      lockedReceivable({
+        sourceType: 'SalesOrder',
+        sourceId: 'so-1',
+        amount: '300',
+        paidAmount: '100',
+        outstandingAmount: '200',
+        status: 'PARTIALLY_PAID',
+      }),
+    );
+    tx.salesOrder.findFirst.mockResolvedValue({ id: 'so-1', totalAmount: 500 });
+    await service.writeOff('rec-1', { reason: 'partial invoice forgiven' } as any, user);
+    const { paidAmount, outstandingAmount } = tx.salesOrder.updateMany.mock.calls[0][0].data;
+    expect(Number(paidAmount)).toBe(100);
+    expect(Number(outstandingAmount)).toBe(200);
+  });
+  it('synchronizes its sales order balance without classifying forgiveness as cash', async () => {
+    const { service, tx } = makeService(
+      lockedReceivable({
+        sourceType: 'SalesOrder',
+        sourceId: 'so-1',
+        paidAmount: '100',
+        outstandingAmount: '400',
+        status: 'PARTIALLY_PAID',
+      }),
+    );
+    await service.writeOff('rec-1', { reason: 'irrecoverable' } as any, user);
+    expect(tx.salesOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'so-1', companyId: 'company-1', currency: 'TZS' }),
+        data: {
+          receivableId: 'rec-1',
+          paidAmount: expect.any(Object),
+          outstandingAmount: expect.any(Object),
+          paymentStatus: 'PARTIALLY_PAID',
+        },
+      }),
+    );
+    const { paidAmount, outstandingAmount } = tx.salesOrder.updateMany.mock.calls[0][0].data;
+    expect(Number(paidAmount)).toBe(100);
+    expect(Number(outstandingAmount)).toBe(0);
+  });
   it('posts a balanced DR Bad debt / CR AR_CONTROL journal and zeroes outstanding', async () => {
     const { service, tx, postingEngine } = makeService(lockedReceivable());
 
@@ -397,4 +449,50 @@ describe('ReceivablesService.writeOff bad-debt journal', () => {
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     expect(tx.receivable.update).not.toHaveBeenCalled();
   });
+});
+
+describe('ReceivablesService governed deletion', () => {
+  it.each([
+    { journalEntryId: 'je-1' },
+    { paidAmount: '10' },
+    { sourceType: 'SalesOrder', sourceId: 'so-1' },
+  ])('rejects live posted, settled or source-linked debt: %p', async (overrides) => {
+    const { service, tx } = makeService(lockedReceivable(overrides));
+    await expect(service.remove('rec-1', user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+  });
+
+  it('re-reads after the row lock and blocks a concurrent payment', async () => {
+    const { service, tx } = makeService(lockedReceivable());
+    tx.receivable.findUniqueOrThrow.mockResolvedValue(lockedReceivable({ paidAmount: '10' }));
+    await expect(service.remove('rec-1', user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+  });
+
+  it('allows only an unposted, unallocated manual record and binds the deletion audit to the same transaction', async () => {
+    const { service, tx, auditLogs } = makeService(lockedReceivable());
+    await expect(service.remove('rec-1', user)).resolves.toEqual({ success: true });
+    expect(tx.receivable.update).toHaveBeenCalledWith({
+      where: { id: 'rec-1' },
+      data: { deletedAt: expect.any(Date) },
+    });
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ action: 'RECEIVABLE_DELETE' }),
+    );
+  });
+
+  it.each(['POSTED', 'REVERSED'])(
+    'blocks a historical %s journal whose direct link was lost',
+    async (journalStatus) => {
+      const { service, tx } = makeService(lockedReceivable());
+      tx.journalEntry.count.mockImplementation(async ({ where }: any) => {
+        const statuses = typeof where.status === 'string' ? [where.status] : where.status.in;
+        return statuses.includes(journalStatus) ? 1 : 0;
+      });
+      await expect(service.remove('rec-1', user)).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.receivable.update).not.toHaveBeenCalled();
+    },
+  );
 });

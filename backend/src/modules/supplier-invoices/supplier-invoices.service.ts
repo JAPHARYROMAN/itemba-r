@@ -27,6 +27,7 @@ import { QuerySupplierInvoiceDto } from './dto/query-supplier-invoice.dto';
 import { ApproveSupplierInvoiceDto } from './dto/approve-supplier-invoice.dto';
 import { VoidSupplierInvoiceDto } from './dto/void-supplier-invoice.dto';
 import { computeThreeWayMatch } from '../three-way-matching/three-way-match-calculator';
+import { sourceSettlement } from '../../common/utils/source-settlement';
 
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
 
@@ -1605,6 +1606,7 @@ export class SupplierInvoicesService {
       new Set(items.map((item) => item.purchaseOrderId).filter(Boolean)),
     );
     const payableIds = Array.from(new Set(items.map((item) => item.payableId).filter(Boolean)));
+    const companyIds = Array.from(new Set(items.map((item) => item.companyId)));
     const invoiceIds = items.map((item) => item.id);
 
     const [suppliers, purchaseOrders, payables, matches] = await Promise.all([
@@ -1622,9 +1624,14 @@ export class SupplierInvoicesService {
         : [],
       payableIds.length
         ? this.prisma.payable.findMany({
-            where: { id: { in: payableIds } },
+            where: { id: { in: payableIds }, companyId: { in: companyIds } },
             select: {
               id: true,
+              companyId: true,
+              supplierId: true,
+              currency: true,
+              amount: true,
+              deletedAt: true,
               payableNumber: true,
               status: true,
               paidAmount: true,
@@ -1648,15 +1655,38 @@ export class SupplierInvoicesService {
       }
     }
 
-    return items.map((item) => ({
-      ...item,
-      supplier: suppliersById.get(item.supplierId) ?? null,
-      purchaseOrder: item.purchaseOrderId
-        ? (purchaseOrdersById.get(item.purchaseOrderId) ?? null)
-        : null,
-      payable: item.payableId ? (payablesById.get(item.payableId) ?? null) : null,
-      latestMatch: matchesByInvoiceId.get(item.id) ?? null,
-    }));
+    return items.map((item) => {
+      const payable = item.payableId ? payablesById.get(item.payableId) : undefined;
+      const posted = ['APPROVED', 'PARTIALLY_PAID', 'PAID'].includes(item.status);
+      const validSettlement = Boolean(
+        posted &&
+        payable &&
+        !payable.deletedAt &&
+        payable.status !== 'CANCELLED' &&
+        payable.companyId === item.companyId &&
+        payable.supplierId === item.supplierId &&
+        payable.currency === item.currency &&
+        new Prisma.Decimal(payable.amount).minus(item.totalAmount).abs().lte(MONEY_TOLERANCE),
+      );
+      return {
+        ...item,
+        ...(validSettlement ? sourceSettlement(item.totalAmount, payable!) : {}),
+        settlementConflict: Boolean(posted && item.payableId && !validSettlement),
+        supplier: suppliersById.get(item.supplierId) ?? null,
+        purchaseOrder: item.purchaseOrderId
+          ? (purchaseOrdersById.get(item.purchaseOrderId) ?? null)
+          : null,
+        // Never expose a payable linked across a company, supplier, or currency boundary.
+        payable:
+          payable &&
+          payable.companyId === item.companyId &&
+          payable.supplierId === item.supplierId &&
+          payable.currency === item.currency
+            ? payable
+            : null,
+        latestMatch: matchesByInvoiceId.get(item.id) ?? null,
+      };
+    });
   }
 
   private async syncSupplierBalance(

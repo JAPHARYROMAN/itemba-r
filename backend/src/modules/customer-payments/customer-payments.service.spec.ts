@@ -10,6 +10,7 @@ function receivable(overrides: Record<string, any> = {}) {
     id: 'rec-1',
     companyId: 'company-1',
     customerId: 'customer-1',
+    currency: 'TZS',
     outstandingAmount: new Prisma.Decimal(100),
     paidAmount: new Prisma.Decimal(0),
     status: 'OPEN',
@@ -146,7 +147,10 @@ function makeService(
         opts.advanceAccountId ? { id: opts.advanceAccountId } : null,
       ),
     },
-    salesOrder: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    salesOrder: {
+      findFirst: jest.fn(async () => ({ totalAmount: new Prisma.Decimal(100) })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+    },
     customerPayment: {
       create: jest.fn(async ({ data }: any) => paymentRow({ ...data, id: 'pay-1' })),
       update: jest.fn(async ({ data }: any) =>
@@ -429,6 +433,29 @@ describe('CustomerPaymentsService.create — allocation across multiple receivab
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('rejects allocating a TZS payment to the same customer USD receivable before posting or changing its balance', async () => {
+    const { service, postLines, tx } = makeService({
+      receivablesById: { 'rec-1': receivable({ currency: 'USD' }) },
+    });
+    await expect(
+      service.create(
+        {
+          companyId: 'company-1',
+          customerId: 'customer-1',
+          amount: 100,
+          paymentDate: '2026-06-01',
+          cashAccountId: 'cash-1',
+          currency: 'TZS',
+          allocations: [{ receivableId: 'rec-1', amount: 100 }],
+        } as any,
+        user,
+      ),
+    ).rejects.toThrow('does not match payment currency');
+    expect(postLines).not.toHaveBeenCalled();
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+    expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('CustomerPaymentsService.create — balanced GL posting', () => {
@@ -666,21 +693,47 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
     expect(cashLine.customerId).toBeUndefined();
   });
 
-  it('does NOT resurrect the balance of a WRITTEN_OFF receivable', async () => {
-    const { service, receivableUpdates } = makeService({
-      paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(100) }],
-      receivablesById: {
-        'rec-1': receivable({
-          id: 'rec-1',
-          outstandingAmount: new Prisma.Decimal(0),
-          paidAmount: new Prisma.Decimal(100),
-          status: 'WRITTEN_OFF',
-        }),
-      },
-    });
+  it.each(['WRITTEN_OFF', 'CANCELLED'])(
+    'rejects reversing a payment allocated to a %s receivable before changing cash or journals',
+    async (status) => {
+      const { service, receivableUpdates, postLines, tx, cashAccountUpdates } = makeService({
+        paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(100) }],
+        receivablesById: {
+          'rec-1': receivable({
+            id: 'rec-1',
+            outstandingAmount: new Prisma.Decimal(0),
+            paidAmount: new Prisma.Decimal(100),
+            status,
+          }),
+        },
+      });
 
-    await service.reverse('pay-1', {} as any, user);
-    expect(receivableUpdates['rec-1']).toBeUndefined();
+      await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(receivableUpdates['rec-1']).toBeUndefined();
+      expect(postLines).not.toHaveBeenCalled();
+      expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
+      expect(cashAccountUpdates).toEqual([]);
+    },
+  );
+
+  it.each([
+    undefined,
+    receivable({ companyId: 'other-company' }),
+    receivable({ customerId: 'other-customer' }),
+    receivable({ currency: 'USD' }),
+  ])('rejects reversing a payment with an unavailable or mismatched allocation', async (record) => {
+    const { service, postLines, receivableUpdates, cashAccountUpdates } = makeService({
+      paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(100) }],
+      receivablesById: { 'rec-1': record },
+    });
+    await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(postLines).not.toHaveBeenCalled();
+    expect(receivableUpdates).toEqual({});
+    expect(cashAccountUpdates).toEqual([]);
   });
 
   it('throws ConflictException and never posts when the payment is already REVERSED (double-reverse guard)', async () => {

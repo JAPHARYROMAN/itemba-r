@@ -14,6 +14,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
 import { PurchaseOrderTabs } from '../_components/PurchaseOrderTabs';
+import { accountingCoverageLabel, settlementLabel } from '@/lib/financial-document';
 
 type AnyRecord = Record<string, any>;
 
@@ -367,8 +368,12 @@ export default function PurchaseOrderDetailPage() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Total" value={money(order.totalAmount, currency)} />
-        <StatCard label="Paid" value={money(order.paidAmount, currency)} />
-        <StatCard label="Outstanding" value={money(order.outstandingAmount, currency)} />
+        <StatCard label="Cash paid" value={money(order.paidAmount, currency)} />
+        <StatCard label="Order balance" value={money(order.outstandingAmount, currency)} />
+        <StatCard
+          label="Non-cash settlement"
+          value={money(order.settlementAdjustmentAmount, currency)}
+        />
         <StatCard label="Status" value={order.status?.replace(/_/g, ' ') ?? '-'} />
       </div>
 
@@ -402,6 +407,18 @@ export default function PurchaseOrderDetailPage() {
             <InfoRow label="Currency" value={order.currency} />
             <InfoRow label="Order Date" value={date(order.orderDate)} />
             <InfoRow label="Expected Date" value={date(order.expectedDate)} />
+            <InfoRow
+              label="Accounting coverage"
+              value={accountingCoverageLabel(order.accountingCoverage)}
+            />
+            <InfoRow label="Unbilled order value" value={money(order.unbilledAmount, currency)} />
+            <InfoRow
+              label="Settlement"
+              value={settlementLabel({
+                paymentStatus: order.paymentStatus,
+                settlementStatus: order.settlementStatus,
+              })}
+            />
             <InfoRow
               label="Supplier Invoice #"
               value={

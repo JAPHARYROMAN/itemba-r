@@ -82,6 +82,62 @@ beforeEach(() => {
   });
   state.patch.mockReset();
 });
+it('shows partial uncovered received order value alongside an existing posted payable', async () => {
+  state.permissions = new Set(['purchases.view']);
+  const partial = {
+    ...record,
+    status: 'RECEIVED',
+    accountingCoverage: 'POSTED',
+    paidAmount: 20,
+    outstandingAmount: 100,
+    unbilledAmount: '20.00',
+  };
+  state.page.mockResolvedValue({
+    data: [
+      {
+        accountKey: 'account-a',
+        partyName: 'Creditor A',
+        companyId: record.companyId,
+        currency: 'USD',
+        documentCount: 1,
+        openDocumentCount: 1,
+        amount: 120,
+        paidAmount: 20,
+        outstandingAmount: 100,
+        overdueAmount: 0,
+        status: 'OPEN',
+        documents: [partial],
+      },
+    ],
+    total: 1,
+    totalPages: 1,
+    page: 1,
+  });
+  state.get.mockResolvedValue({
+    totalOrders: 1,
+    received: 1,
+    perCurrency: [
+      {
+        currency: 'USD',
+        totalAmount: 120,
+        paidAmount: 20,
+        outstandingAmount: 100,
+        unbilledAmount: '20.00',
+      },
+    ],
+    invoices: { missingInvoiceCount: 0 },
+  });
+  render(<Purchases />);
+  expect(
+    await screen.findByText('Received value awaiting posted payable · USD 20.00 · 1 order'),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'View transactions for Creditor A' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Inspect PO-001' }));
+  const inspector = screen.getByRole('complementary', { name: 'Record details' });
+  expect(within(inspector).getByText('Posted payable')).toBeInTheDocument();
+  expect(within(inspector).getByText('Unbilled order value')).toBeInTheDocument();
+  expect(within(inspector).getAllByText('USD 20.00')).toHaveLength(2);
+});
 describe.each([
   { Page: Sales, permission: 'sales', name: 'SO-001' },
   { Page: Purchases, permission: 'purchases', name: 'PO-001' },

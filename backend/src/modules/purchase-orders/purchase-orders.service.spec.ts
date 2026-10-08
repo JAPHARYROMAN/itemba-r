@@ -18,6 +18,7 @@ function makeService() {
       update: jest.fn(async ({ data }: any) => ({ id: 'po-1', companyId: 'company-1', ...data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(async () => ({ id: 'po-1', companyId: 'company-1' })),
       groupBy: jest.fn().mockResolvedValue([]),
@@ -1051,36 +1052,158 @@ describe('PurchaseOrdersService.cancel outstanding reset (finding #19)', () => {
 });
 
 describe('PurchaseOrdersService.summary', () => {
-  it('rolls status group sums into register-wide totals', async () => {
+  it('keeps invoice coverage facets consistent with canonical payment filtering', async () => {
     const { service, prisma } = makeService();
-    prisma.purchaseOrder.groupBy.mockResolvedValue([
-      {
-        status: 'DRAFT',
-        _count: { _all: 2 },
-        _sum: { totalAmount: 100, outstandingAmount: 100 },
-      },
-      {
-        status: 'RECEIVED',
-        _count: { _all: 1 },
-        _sum: { totalAmount: 400, outstandingAmount: 0 },
-      },
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order({
+        payable: {
+          id: 'ap-1',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          currency: 'TZS',
+          amount: 100,
+          paidAmount: 100,
+          outstandingAmount: 0,
+          status: 'PAID',
+        },
+        supplierInvoices: [{ id: 'si-1' }],
+      }),
+      order({ id: 'open' }),
+    ]);
+    const result = await service.summary({ paymentStatus: 'PAID' } as any, user);
+    expect(result.invoices).toEqual({
+      linkedInvoiceCount: 1,
+      missingInvoiceCount: 0,
+      recordedInvoiceCount: 0,
+    });
+    expect(result.totals.count).toBe(1);
+  });
+  const order = (overrides: Record<string, unknown> = {}) => ({
+    id: 'po-1',
+    companyId: 'company-1',
+    currency: 'TZS',
+    supplierId: 'supplier-1',
+    totalAmount: new Prisma.Decimal(100),
+    paidAmount: new Prisma.Decimal(0),
+    outstandingAmount: new Prisma.Decimal(100),
+    paymentStatus: 'UNPAID',
+    status: 'RECEIVED',
+    ...overrides,
+  });
+
+  it('uses canonical settlement instead of stale historic order balances', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order({
+        payable: {
+          id: 'ap-1',
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          currency: 'TZS',
+          amount: 100,
+          paidAmount: 100,
+          outstandingAmount: 0,
+          status: 'PAID',
+          deletedAt: null,
+          journalEntryId: 'je-1',
+        },
+      }),
     ]);
 
     const result = await service.summary({ companyId: 'company-1' } as any, user);
-
-    expect(prisma.purchaseOrder.groupBy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        by: ['status'],
-        where: expect.objectContaining({ deletedAt: null, companyId: 'company-1' }),
-        _sum: { totalAmount: true, outstandingAmount: true },
-      }),
-    );
-    expect(result.totals).toEqual({ count: 3, totalAmount: 500, outstandingAmount: 100 });
-    expect(result.byStatus).toEqual([
-      { status: 'DRAFT', count: 2, totalAmount: 100, outstandingAmount: 100 },
-      { status: 'RECEIVED', count: 1, totalAmount: 400, outstandingAmount: 0 },
+    expect(result.totals).toEqual({ count: 1, totalAmount: 100, outstandingAmount: 0 });
+    expect(result.perCurrency).toEqual([
+      expect.objectContaining({ currency: 'TZS', paidAmount: 100, outstandingAmount: 0 }),
     ]);
   });
+
+  it('separates currency units and excludes canceled monetary values', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order(),
+      order({
+        id: 'usd',
+        currency: 'USD',
+        totalAmount: new Prisma.Decimal(5),
+        outstandingAmount: new Prisma.Decimal(5),
+      }),
+      order({ id: 'canceled', status: 'CANCELLED', totalAmount: new Prisma.Decimal(1000) }),
+    ]);
+    const result = await service.summary({} as any, user);
+    expect(result.totals).toEqual({ count: 3, totalAmount: null, outstandingAmount: null });
+    expect(result.mixedCurrencies).toBe(true);
+    expect(result.perCurrency).toEqual([
+      expect.objectContaining({ currency: 'TZS', totalAmount: 100, outstandingAmount: 100 }),
+      expect.objectContaining({ currency: 'USD', totalAmount: 5, outstandingAmount: 5 }),
+    ]);
+  });
+
+  it('flags a deleted canonical liability instead of projecting it as a paid source', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue(
+      order({
+        payable: {
+          companyId: 'company-1',
+          supplierId: 'supplier-1',
+          currency: 'TZS',
+          amount: 100,
+          paidAmount: 100,
+          outstandingAmount: 0,
+          deletedAt: new Date(),
+        },
+      }),
+    );
+    const result = await service.findOne('po-1', user);
+    expect(result.accountingCoverage).toBe('CONFLICT');
+    expect(Number(result.outstandingAmount)).toBe(100);
+  });
+
+  it('counts received unbilled coverage separately from draft commitments', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order(),
+      order({ id: 'draft', status: 'DRAFT' }),
+    ]);
+    const result = await service.summary({} as any, user);
+    expect(result.perCurrency).toEqual([
+      expect.objectContaining({ totalAmount: 200, unbilledAmount: 100 }),
+    ]);
+  });
+});
+
+describe('PurchaseOrdersService explicit payment deadline', () => {
+  it.each([undefined, '2026-11-30'])(
+    'creates receipt AP using explicit paymentDueDate %s instead of expected delivery',
+    async (paymentDueDate) => {
+      const { service, prisma } = makeService();
+      prisma.purchaseOrder.findFirst.mockResolvedValue({
+        id: 'po-1',
+        purchaseOrderNumber: 'PO-1',
+        companyId: 'company-1',
+        divisionId: null,
+        branchId: 'branch-1',
+        supplierId: 'supplier-1',
+        supplierName: 'Supplier',
+        purchaseType: 'CREDIT_PURCHASE',
+        currency: 'TZS',
+        totalAmount: new Prisma.Decimal(200),
+        paidAmount: new Prisma.Decimal(0),
+        outstandingAmount: new Prisma.Decimal(200),
+        paymentStatus: 'UNPAID',
+        status: 'CONFIRMED',
+        expectedDate: new Date('2026-10-01'),
+        lines: [],
+      });
+      await service.receive('po-1', user, { paymentDueDate });
+      expect(prisma.payable.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dueDate: paymentDueDate ? new Date(paymentDueDate) : undefined,
+          }),
+        }),
+      );
+    },
+  );
 });
 
 describe('PurchaseOrdersService.confirm cash account currency', () => {

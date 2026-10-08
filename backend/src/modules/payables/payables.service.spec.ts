@@ -15,6 +15,7 @@ function lockedPayable(overrides: Record<string, unknown> = {}) {
     supplierName: 'Acme',
     payableNumber: 'PAY-2026-000001',
     sourceType: null,
+    amount: '500',
     outstandingAmount: '500',
     paidAmount: '0',
     status: 'OPEN',
@@ -34,6 +35,7 @@ function makeService(
   const tx = {
     $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
     payable: {
+      findUniqueOrThrow: jest.fn().mockImplementation(async () => ({ ...stagedRow })),
       update: jest.fn().mockImplementation(async ({ data }: any) => {
         stagedRow = { ...stagedRow, ...data };
         return { ...stagedRow };
@@ -62,8 +64,17 @@ function makeService(
         ...data,
       })),
     },
-    supplierInvoice: { findMany: jest.fn().mockResolvedValue([]) },
-    purchaseOrder: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
+    supplierInvoice: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+      update: jest.fn(),
+    },
+    purchaseOrder: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+      update: jest.fn(),
+    },
+    supplierPaymentAllocation: { count: jest.fn().mockResolvedValue(0) },
     cashAccount: {
       // Default: an active CASH_ON_HAND till in the same company and currency.
       // Individual tests override for BANK / cross-company / cross-currency
@@ -77,6 +88,7 @@ function makeService(
     },
     companyProfile: { findUnique: jest.fn().mockResolvedValue({ currency: 'TZS' }) },
     journalEntry: {
+      count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn().mockResolvedValue(opts.originalJe ?? null),
     },
   } as any;
@@ -154,6 +166,19 @@ describe('PayablesService.recordPayment status guard', () => {
 });
 
 describe('PayablesService.recordPayment party linkage (W2)', () => {
+  it('accepts overdue payables through the same canonical supplier-payment path', async () => {
+    const { service, tx } = makeService(lockedPayable({ status: 'OVERDUE' }));
+    await service.recordPayment('pay-1', { amount: 100 } as any, user);
+    expect(tx.supplierPayment.create).toHaveBeenCalledTimes(1);
+    expect(tx.payable.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paidAmount: new Prisma.Decimal(100),
+          outstandingAmount: new Prisma.Decimal(400),
+        }),
+      }),
+    );
+  });
   it('settles a linked payable through a SupplierPayment with a SupplierPayment-referenced journal', async () => {
     const { service, tx, postingEngine } = makeService(lockedPayable());
     await service.recordPayment('pay-1', { amount: 100 } as any, user);
@@ -358,6 +383,41 @@ describe('PayablesService.recordPayment cash subledger + role (cashAccountId)', 
 });
 
 describe('PayablesService Expense-sourced settlement guards (single settlement path)', () => {
+  it.each([
+    { journalEntryId: 'posted' },
+    { paidAmount: '10', journalEntryId: null },
+    { sourceType: 'PurchaseOrder', sourceId: 'po-1', journalEntryId: null },
+  ])(
+    'rejects posted, settled and source-linked removal under the live row lock: %p',
+    async (overrides) => {
+      const { service, tx } = makeService(lockedPayable(overrides));
+      await expect(service.remove('pay-1', user)).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.$queryRaw).toHaveBeenCalled();
+      expect(tx.payable.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a payment committed after the initial deletion pre-read', async () => {
+    const { service, tx } = makeService(lockedPayable({ journalEntryId: null }));
+    tx.payable.findUniqueOrThrow.mockResolvedValue(
+      lockedPayable({ journalEntryId: null, paidAmount: '10' }),
+    );
+    await expect(service.remove('pay-1', user)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.payable.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['POSTED', 'REVERSED'])(
+    'rejects a %s Payable reference even when journalEntryId was lost',
+    async (journalStatus) => {
+      const { service, tx } = makeService(lockedPayable({ journalEntryId: null }));
+      tx.journalEntry.count.mockImplementation(async ({ where }: any) => {
+        const statuses = typeof where.status === 'string' ? [where.status] : where.status.in;
+        return statuses.includes(journalStatus) ? 1 : 0;
+      });
+      await expect(service.remove('pay-1', user)).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.payable.update).not.toHaveBeenCalled();
+    },
+  );
   it('rejects recordPayment on an Expense-sourced payable (no journal, no subledger move)', async () => {
     const { service, tx, postingEngine } = makeService(
       lockedPayable({ sourceType: 'Expense', sourceId: 'expense-1' }),
@@ -391,12 +451,12 @@ describe('PayablesService Expense-sourced settlement guards (single settlement p
     );
 
     await expect(service.remove('pay-1', user)).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalled();
     expect(tx.payable.update).not.toHaveBeenCalled();
   });
 
   it('still soft-deletes an ordinary manual payable', async () => {
-    const { service, tx } = makeService(lockedPayable());
+    const { service, tx } = makeService(lockedPayable({ journalEntryId: null }));
 
     await expect(service.remove('pay-1', user)).resolves.toEqual({ success: true });
     expect(tx.payable.update).toHaveBeenCalledWith({
@@ -481,6 +541,34 @@ describe('PayablesService.update supplier balance projection', () => {
 });
 
 describe('PayablesService.writeOff forgiveness journal (#H write-off, ITMB)', () => {
+  it('updates invoice and received purchase balances while retaining real cash paid', async () => {
+    const { service, tx } = makeService(
+      lockedPayable({ paidAmount: '100', outstandingAmount: '400', status: 'PARTIALLY_PAID' }),
+    );
+    tx.supplierInvoice.findMany.mockResolvedValue([
+      { id: 'invoice-1', totalAmount: new Prisma.Decimal(500) },
+    ]);
+    tx.purchaseOrder.findMany.mockResolvedValue([
+      { id: 'po-1', totalAmount: new Prisma.Decimal(500) },
+    ]);
+    await service.writeOff('pay-1', { reason: 'supplier forgiveness' } as any, user);
+    expect(tx.purchaseOrder.update).toHaveBeenCalledWith({
+      where: { id: 'po-1' },
+      data: {
+        paidAmount: new Prisma.Decimal(100),
+        outstandingAmount: new Prisma.Decimal(0),
+        paymentStatus: 'PARTIALLY_PAID',
+      },
+    });
+    expect(tx.supplierInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'invoice-1' },
+      data: {
+        paidAmount: new Prisma.Decimal(100),
+        outstandingAmount: new Prisma.Decimal(0),
+        status: 'PARTIALLY_PAID',
+      },
+    });
+  });
   // Role-aware resolver: writeOff must post DR AP_CONTROL / CR
   // LIABILITY_WRITEOFF_INCOME. It must NEVER credit INVENTORY_ASSET (the bug:
   // reversing an SI-backed payable's DR INVENTORY_ASSET / CR AP_CONTROL wiped

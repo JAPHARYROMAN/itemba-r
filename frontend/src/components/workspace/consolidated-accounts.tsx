@@ -5,6 +5,7 @@ import { Btn, Card, StatusBadge } from '@/components/ui';
 import { WorkspaceTable } from '@/components/ui/workspace-table';
 import { formatDate } from '@/lib/format';
 import { formatAccountMoney } from '@/lib/account-consolidation';
+import { sumFinancialAmounts } from '@/lib/financial-document';
 import { RecordBrowser, type RecordField } from './record-browser';
 
 export interface ConsolidatedAccount<T> {
@@ -75,6 +76,11 @@ export function ConsolidatedAccounts<T extends { id: string }>({
   showPaid = true,
   showAging = true,
   totalLabel = 'Total',
+  paidLabel = 'Paid / settled',
+  outstandingLabel = 'Outstanding',
+  description,
+  documentAdjustment,
+  accountNote,
 }: {
   accounts: ConsolidatedAccount<T>[];
   title: string;
@@ -94,6 +100,11 @@ export function ConsolidatedAccounts<T extends { id: string }>({
   showPaid?: boolean;
   showAging?: boolean;
   totalLabel?: string;
+  paidLabel?: string;
+  outstandingLabel?: string;
+  description?: ReactNode;
+  documentAdjustment?: (record: T) => number | string;
+  accountNote?: (account: ConsolidatedAccount<T>) => ReactNode;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const prefix = useId();
@@ -102,8 +113,8 @@ export function ConsolidatedAccounts<T extends { id: string }>({
       <div className="p-4 space-y-1">
         <strong>{title}</strong>
         <p className="text-sm" style={{ color: 'var(--aurora-text-muted)' }}>
-          Select an account to see every matching transaction. Totals follow your filters and stay
-          separate by company and currency.
+          {description ??
+            'Select an account to see every matching transaction. Totals follow your filters and stay separate by company and currency.'}
         </p>
       </div>
       {loading ? (
@@ -133,8 +144,9 @@ export function ConsolidatedAccounts<T extends { id: string }>({
                   totalLabel,
                   ...(showSettlement
                     ? [
-                        ...(showPaid ? ['Paid / settled'] : []),
-                        'Outstanding',
+                        ...(showPaid ? [paidLabel] : []),
+                        ...(documentAdjustment ? ['Non-cash settlement'] : []),
+                        outstandingLabel,
                         ...(showAging ? ['Overdue', 'Next due'] : []),
                       ]
                     : []),
@@ -158,6 +170,21 @@ export function ConsolidatedAccounts<T extends { id: string }>({
                     showSettlement={showSettlement}
                     showPaid={showPaid}
                     showAging={showAging}
+                    adjustmentAmount={
+                      documentAdjustment
+                        ? sumFinancialAmounts(
+                            account.documents
+                              .filter(
+                                (record) =>
+                                  !['CANCELLED', 'VOIDED', 'VOID', 'REJECTED'].includes(
+                                    documentStatus(record),
+                                  ),
+                              )
+                              .map(documentAdjustment),
+                          )
+                        : undefined
+                    }
+                    note={accountNote?.(account)}
                     onSelect={() => setExpanded(open ? null : account.accountKey)}
                   >
                     <RecordBrowser
@@ -221,6 +248,8 @@ function AccountRows<T>({
   showSettlement,
   showPaid,
   showAging,
+  adjustmentAmount,
+  note,
 }: {
   account: ConsolidatedAccount<T>;
   open: boolean;
@@ -230,6 +259,8 @@ function AccountRows<T>({
   showSettlement: boolean;
   showPaid: boolean;
   showAging: boolean;
+  adjustmentAmount?: string;
+  note?: ReactNode;
 }) {
   return (
     <>
@@ -248,6 +279,7 @@ function AccountRows<T>({
             {account.partyCode || (account.partyId ? 'Linked account' : 'Name-based account')} ·{' '}
             {account.currency}
           </div>
+          {note && <div className="mt-1 text-xs">{note}</div>}
         </td>
         <td className="px-4 py-3">{account.company?.name || account.companyId || 'Private'}</td>
         <td className="px-4 py-3">
@@ -259,6 +291,7 @@ function AccountRows<T>({
           ...(showSettlement
             ? [
                 ...(showPaid ? [account.paidAmount] : []),
+                ...(adjustmentAmount === undefined ? [] : [adjustmentAmount]),
                 account.outstandingAmount,
                 ...(showAging ? [account.overdueAmount] : []),
               ]
@@ -278,7 +311,15 @@ function AccountRows<T>({
       {open && (
         <tr id={detailsId}>
           <td
-            colSpan={4 + (showSettlement ? Number(showPaid) + 1 + (showAging ? 2 : 0) : 0)}
+            colSpan={
+              4 +
+              (showSettlement
+                ? Number(showPaid) +
+                  Number(adjustmentAmount !== undefined) +
+                  1 +
+                  (showAging ? 2 : 0)
+                : 0)
+            }
             className="p-4"
           >
             {children}

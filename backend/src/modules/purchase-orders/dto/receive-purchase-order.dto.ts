@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsDateString,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -30,6 +31,11 @@ export class ReceiveFuelTankAllocationDto {
 }
 
 export class ReceivePurchaseOrderDto {
+  /** Supplier payment deadline; independent from the delivery date. */
+  @IsOptional()
+  @IsDateString()
+  paymentDueDate?: string;
+
   @IsOptional()
   @IsUUID()
   cashAccountId?: string;
