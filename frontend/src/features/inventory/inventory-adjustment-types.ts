@@ -25,6 +25,7 @@ export interface StockAdjustment {
 export interface AdjustmentLine {
   id: string;
   productId: string;
+  unitId?: string;
   product?: (Named & { sku?: string | null }) | null;
   unit?: (Named & { symbol?: string | null }) | null;
   systemQuantity?: AdjustmentNumber;

@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Image from 'next/image';
-import { WorkspaceLink as Link } from '@/components/workspace/workspace-navigation';
-import { Package } from 'lucide-react';
+import {
+  useWorkspaceSearchParams,
+  useWorkspaceSearchReader,
+  useWorkspaceRouter,
+  useWorkspacePathname,
+} from '@/components/workspace/workspace-navigation';
 import {
   Btn,
   FormSelect,
@@ -20,9 +23,9 @@ import { backendDelete } from '@/lib/api-client';
 import { backendAllPages } from '@/lib/backend-all-pages';
 import { rowsToCsv, cellToString, downloadTextFile } from '@/lib/report-export';
 import { downloadTablePdf, TABLE_PDF_MAX_ROWS } from '@/lib/export-download';
-import { RecordBrowser } from './record-browser';
+import { ProductRegister } from './product-register';
+import { useUnsavedWork, useUnsavedWorkScopeId } from './unsaved-work-provider';
 import { CatalogueChoiceError } from './catalogue-editors';
-import { catalogueMoney } from './catalogue-types';
 import { useWorkspaceState } from './workspace-session';
 import {
   useInventoryDefinitionEditor,
@@ -145,12 +148,16 @@ export function ProductDelete({
 
 export function ProductWorkspace() {
   const workspace = useInventoryWorkspace();
+  const params = useWorkspaceSearchParams();
+  const readSearch = useWorkspaceSearchReader();
+  const router = useWorkspaceRouter();
+  const pathname = useWorkspacePathname();
+  const { request } = useUnsavedWork();
+  const workScope = useUnsavedWorkScopeId();
   const { hasPermission, loading: authLoading } = useAuth();
   const canRead = !authLoading && hasPermission('products.view');
   const externalSearch = workspace?.searchQuery || '';
-  const stateKey = useInventoryStateKey(
-    'products.' + JSON.stringify([workspace?.embedded, workspace?.scope, externalSearch]),
-  );
+  const stateKey = useInventoryStateKey('products');
   const [localScope, setLocalScope] = useWorkspaceState(stateKey + '.scope', {
     companyId: '',
     divisionId: '',
@@ -161,20 +168,49 @@ export function ProductWorkspace() {
   const scopeKey = JSON.stringify([companyId, divisionId, branchId]);
   const [categorySelection, setCategorySelection] = useWorkspaceState(stateKey + '.category', {
     scope: scopeKey,
-    categoryId: '',
-    productFamilyId: '',
+    categoryId: params.get('categoryId') || '',
+    productFamilyId: params.get('productFamilyId') || '',
   });
-  const categoryId = categorySelection.scope === scopeKey ? categorySelection.categoryId : '';
-  const productFamilyId =
-    categorySelection.scope === scopeKey ? categorySelection.productFamilyId : '';
-  const [productType, setProductType] = useWorkspaceState(stateKey + '.type', ''),
-    [status, setStatus] = useWorkspaceState(stateKey + '.status', ''),
-    [priceSource, setPriceSource] = useWorkspaceState(stateKey + '.priceSource', '');
+  const categoryId = categorySelection.categoryId;
+  const productFamilyId = categorySelection.productFamilyId;
+  const [productType, setProductType] = useWorkspaceState(
+      stateKey + '.type',
+      params.get('productType') || '',
+    ),
+    [status, setStatus] = useWorkspaceState(stateKey + '.status', params.get('status') || ''),
+    [priceSource, setPriceSource] = useWorkspaceState(
+      stateKey + '.priceSource',
+      params.get('priceSource') || '',
+    );
+  const urlFilters = JSON.stringify(
+    ['categoryId', 'productFamilyId', 'productType', 'status', 'priceSource'].map((key) => [
+      key,
+      params.get(key),
+    ]),
+  );
+  useEffect(() => {
+    const incoming = Object.fromEntries(JSON.parse(urlFilters)) as Record<string, string | null>;
+    if (incoming.categoryId !== null || incoming.productFamilyId !== null)
+      setCategorySelection((previous) => {
+        const categoryId = incoming.categoryId ?? previous.categoryId;
+        const productFamilyId = incoming.productFamilyId ?? previous.productFamilyId;
+        return previous.categoryId === categoryId && previous.productFamilyId === productFamilyId
+          ? previous
+          : { ...previous, categoryId, productFamilyId };
+      });
+    if (incoming.productType !== null) setProductType(incoming.productType);
+    if (incoming.status !== null) setStatus(incoming.status);
+    if (incoming.priceSource !== null) setPriceSource(incoming.priceSource);
+  }, [urlFilters, setCategorySelection, setProductType, setStatus, setPriceSource]);
   const [searchState, setSearchState] = useWorkspaceState(stateKey + '.search', {
     external: externalSearch,
     value: externalSearch,
   });
-  const search = searchState.external === externalSearch ? searchState.value : externalSearch;
+  const search = workspace?.embedded
+    ? externalSearch
+    : searchState.external === externalSearch
+      ? searchState.value
+      : externalSearch;
   const setSearch = (value: string) => setSearchState({ external: externalSearch, value });
   const [query, setQuery] = useState(search.trim());
   useEffect(() => {
@@ -204,6 +240,84 @@ export function ProductWorkspace() {
     { ...filters, page, limit: 20 },
     canRead,
   );
+  const requestedProductId = params.get('productId');
+  const requestedSignature = JSON.stringify([scopeKey, requestedProductId]);
+  const requestedSelection = useRef(requestedSignature);
+  const [selection, setSelection] = useWorkspaceState<{ scope: string; id: string | null }>(
+    stateKey + '.selectedId',
+    { scope: scopeKey, id: requestedProductId },
+  );
+  const selectedId = selection.scope === scopeKey ? selection.id : requestedProductId;
+  const setSelectedId = (id: string | null) => setSelection({ scope: scopeKey, id });
+  const [selectedSnapshot, setSelectedSnapshot] = useState<{
+    scope: string;
+    record: Product;
+  } | null>(null);
+  useEffect(() => {
+    if (requestedSelection.current === requestedSignature) return;
+    requestedSelection.current = requestedSignature;
+    setSelectedSnapshot(null);
+    setSelection({ scope: scopeKey, id: requestedProductId });
+  }, [requestedSignature, requestedProductId, scopeKey, setSelection]);
+  const selectedRow = result.data?.data.find((record) => record.id === selectedId);
+  const snapshot =
+    selectedSnapshot?.scope === scopeKey && selectedSnapshot.record.id === selectedId
+      ? selectedSnapshot.record
+      : undefined;
+  const detail = useWorkspaceResource<Product>(
+    `/products/${encodeURIComponent(selectedId || '')}`,
+    {},
+    canRead && !!selectedId && !selectedRow && !snapshot,
+  );
+  const selectedSource = selectedRow || snapshot || detail.data || undefined;
+  const selected =
+    selectedSource?.id === selectedId &&
+    (!companyId || selectedSource.companyId === companyId) &&
+    (!divisionId || !selectedSource.divisionId || selectedSource.divisionId === divisionId)
+      ? selectedSource
+      : undefined;
+  const [retrievedAt, setRetrievedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (result.data) setRetrievedAt(Date.now());
+  }, [result.data]);
+  const guardChange = (action: () => void) =>
+    request(action, undefined, 'close', { scope: workScope });
+  const changeCatalogFilters = (
+    changes: Partial<
+      Record<'categoryId' | 'productFamilyId' | 'productType' | 'status' | 'priceSource', string>
+    >,
+  ) =>
+    guardChange(() => {
+      if ('categoryId' in changes || 'productFamilyId' in changes)
+        setCategorySelection((previous) => ({
+          ...previous,
+          ...('categoryId' in changes ? { categoryId: changes.categoryId! } : {}),
+          ...('productFamilyId' in changes ? { productFamilyId: changes.productFamilyId! } : {}),
+        }));
+      if (changes.productType !== undefined) setProductType(changes.productType);
+      if (changes.status !== undefined) setStatus(changes.status);
+      if (changes.priceSource !== undefined) setPriceSource(changes.priceSource);
+      const next = readSearch();
+      Object.entries(changes).forEach(([key, value]) => next.set(key, value));
+      router.replace(`${pathname}?${next}`, { scroll: false });
+    });
+  const selectRecord = (record: Product | null) =>
+    guardChange(() => {
+      setSelectedId(record?.id || null);
+      setSelectedSnapshot(record ? { scope: scopeKey, record } : null);
+      if (workspace?.embedded) {
+        const next = readSearch();
+        if (record) next.set('productId', record.id);
+        else next.delete('productId');
+        router.replace(`${pathname}?${next}`, { scroll: false });
+      }
+    });
+  const refreshProduct = () =>
+    guardChange(() => {
+      setSelectedSnapshot(null);
+      result.reload();
+      detail.reload();
+    });
   useEffect(() => {
     if (result.data && page > 1 && !result.data.data.length)
       setPagination({ key: filterKey, page: page - 1 });
@@ -221,7 +335,7 @@ export function ProductWorkspace() {
   const branches = useWorkspaceChoices<Branch>(
     '/branches',
     { companyId, divisionId: divisionId || undefined, activeOnly: true },
-    canRead && !workspace?.embedded && !!companyId && hasPermission('branches.read'),
+    canRead && !!companyId && hasPermission('branches.read'),
   );
   const categories = useWorkspaceChoices<Category>(
     '/product-categories',
@@ -335,23 +449,19 @@ export function ProductWorkspace() {
     <Btn onClick={() => entry.open({ kind: 'product', companyId, divisionId })}>New product</Btn>
   );
   const profileHref = (r: Product) => {
-    const params = new URLSearchParams();
+    const profileParams = new URLSearchParams();
     Object.entries({ companyId: companyId || r.companyId, divisionId, branchId, q: query }).forEach(
       ([key, value]) => {
-        if (value) params.set(key, value);
+        if (value) profileParams.set(key, value);
       },
     );
-    return `${workspace?.embedded ? '/inventory/products' : '/operations/products'}/${r.id}?${params}`;
+    Object.entries({ categoryId, productFamilyId, productType, status, priceSource }).forEach(
+      ([key, value]) => {
+        if (value || params.has(key)) profileParams.set(key, value);
+      },
+    );
+    return `${workspace?.embedded ? '/inventory/products' : '/operations/products'}/${encodeURIComponent(r.id)}?${profileParams}`;
   };
-  const currentPrice = (
-    r: Product,
-    effective:
-      | 'effectiveSellingPrice'
-      | 'effectivePurchasePrice'
-      | 'effectiveWholesalePrice'
-      | 'effectiveRetailPrice',
-    own: 'defaultSellingPrice' | 'defaultPurchasePrice' | 'wholesalePrice' | 'retailPrice',
-  ) => catalogueMoney(r[effective] !== undefined ? r[effective] : r[own]);
   return (
     <div className="business-workspace record-workspace catalogue-workspace product-workspace">
       <PageHeader
@@ -374,8 +484,9 @@ export function ProductWorkspace() {
       </div>
       <p className="catalogue-help">
         {branchId
-          ? 'Stock quantities refer to the selected branch. '
+          ? `Stock quantities refer to ${branches.rows.find((branch) => branch.id === branchId)?.name || 'the selected branch'}. `
           : 'Choose a company and branch to see available stock. '}
+        {retrievedAt && `Retrieved ${new Date(retrievedAt).toLocaleTimeString('en-GB')}. `}
         CSV includes every matching product; PDF supports up to 5,000.
       </p>
       {notice && (
@@ -396,7 +507,7 @@ export function ProductWorkspace() {
       )}
       <PageToolbar
         search={search}
-        onSearch={setSearch}
+        onSearch={workspace?.embedded ? undefined : (value) => guardChange(() => setSearch(value))}
         searchPlaceholder="Search products…"
         collapsibleFilters
         activeFilterCount={
@@ -421,7 +532,9 @@ export function ProductWorkspace() {
                     value={companyId}
                     disabled={companies.loading || !!companies.error}
                     onChange={(e) =>
-                      setLocalScope({ companyId: e.target.value, divisionId: '', branchId: '' })
+                      guardChange(() =>
+                        setLocalScope({ companyId: e.target.value, divisionId: '', branchId: '' }),
+                      )
                     }
                   >
                     <option value="">All accessible companies</option>
@@ -438,7 +551,9 @@ export function ProductWorkspace() {
                     value={divisionId}
                     disabled={!companyId || divisions.loading || !!divisions.error}
                     onChange={(e) =>
-                      setLocalScope((p) => ({ ...p, divisionId: e.target.value, branchId: '' }))
+                      guardChange(() =>
+                        setLocalScope((p) => ({ ...p, divisionId: e.target.value, branchId: '' })),
+                      )
                     }
                   >
                     <option value="">All divisions</option>
@@ -454,7 +569,9 @@ export function ProductWorkspace() {
                     label="Branch filter"
                     value={branchId}
                     disabled={!companyId || branches.loading || !!branches.error}
-                    onChange={(e) => setLocalScope((p) => ({ ...p, branchId: e.target.value }))}
+                    onChange={(e) =>
+                      guardChange(() => setLocalScope((p) => ({ ...p, branchId: e.target.value })))
+                    }
                   >
                     <option value="">All branches</option>
                     {branches.rows.map((b) => (
@@ -472,14 +589,16 @@ export function ProductWorkspace() {
                 value={categoryId}
                 disabled={categories.loading || !!categories.error}
                 onChange={(e) =>
-                  setCategorySelection({
-                    scope: scopeKey,
+                  changeCatalogFilters({
                     categoryId: e.target.value,
                     productFamilyId: '',
                   })
                 }
               >
                 <option value="">All categories</option>
+                {categoryId && !categories.rows.some((category) => category.id === categoryId) && (
+                  <option value={categoryId}>Selected category</option>
+                )}
                 {categories.rows.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -492,14 +611,16 @@ export function ProductWorkspace() {
               value={productFamilyId}
               disabled={families.loading || !!families.error}
               onChange={(e) =>
-                setCategorySelection({
-                  scope: scopeKey,
-                  categoryId,
+                changeCatalogFilters({
                   productFamilyId: e.target.value,
                 })
               }
             >
               <option value="">All families</option>
+              {productFamilyId &&
+                !families.rows.some((family) => family.id === productFamilyId) && (
+                  <option value={productFamilyId}>Selected family</option>
+                )}
               {families.rows.map((f) => (
                 <option key={f.id} value={f.id}>
                   {[f.brand, f.name].filter(Boolean).join(' · ')}
@@ -509,7 +630,7 @@ export function ProductWorkspace() {
             <FormSelect
               label="Type filter"
               value={productType}
-              onChange={(e) => setProductType(e.target.value)}
+              onChange={(e) => changeCatalogFilters({ productType: e.target.value })}
             >
               <option value="">All types</option>
               {PRODUCT_TYPES.map((t) => (
@@ -521,7 +642,7 @@ export function ProductWorkspace() {
             <FormSelect
               label="Status filter"
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
+              onChange={(e) => changeCatalogFilters({ status: e.target.value })}
             >
               <option value="">All statuses</option>
               {PRODUCT_STATUSES.map((s) => (
@@ -533,7 +654,7 @@ export function ProductWorkspace() {
             <FormSelect
               label="Price source filter"
               value={priceSource}
-              onChange={(e) => setPriceSource(e.target.value)}
+              onChange={(e) => changeCatalogFilters({ priceSource: e.target.value })}
             >
               <option value="">All price sources</option>
               {['PRODUCT_OVERRIDE', 'FAMILY_DEFAULT', 'MISSING'].map((s) => (
@@ -544,14 +665,21 @@ export function ProductWorkspace() {
             </FormSelect>
             <Btn
               variant="ghost"
-              onClick={() => {
-                setLocalScope({ companyId: '', divisionId: '', branchId: '' });
-                setCategorySelection({ scope: scopeKey, categoryId: '', productFamilyId: '' });
-                setProductType('');
-                setStatus('');
-                setPriceSource('');
-                setSearch('');
-              }}
+              onClick={() =>
+                guardChange(() => {
+                  setLocalScope({ companyId: '', divisionId: '', branchId: '' });
+                  setCategorySelection({ scope: scopeKey, categoryId: '', productFamilyId: '' });
+                  setProductType('');
+                  setStatus('');
+                  setPriceSource('');
+                  const next = readSearch();
+                  ['categoryId', 'productFamilyId', 'productType', 'status', 'priceSource'].forEach(
+                    (key) => next.set(key, ''),
+                  );
+                  router.replace(`${pathname}?${next}`, { scroll: false });
+                  if (!workspace?.embedded) setSearch('');
+                })
+              }
             >
               Clear filters
             </Btn>
@@ -560,7 +688,7 @@ export function ProductWorkspace() {
         actions={
           <>
             {workspace?.embedded && create}
-            <Btn variant="secondary" disabled={result.loading} onClick={result.reload}>
+            <Btn variant="secondary" disabled={result.loading} onClick={refreshProduct}>
               Refresh
             </Btn>
             <Btn
@@ -585,139 +713,56 @@ export function ProductWorkspace() {
           Preparing the full filtered export…
         </p>
       )}
-      <RecordBrowser<Product>
-        key={filterKey}
-        stateKey={stateKey + '.records'}
-        selectionScope={filterKey}
-        title="Products"
+      <ProductRegister
         records={rows}
-        name={(r) => r.name}
-        reference={(r) => [r.productCode, productVariant(r)].filter(Boolean).join(' · ')}
-        status={(r) => r.status}
-        decoration={(r) =>
-          r.imageUrl ? (
-            <Image
-              src={`/api/backend/products/${r.id}/image?v=${imageVersion}`}
-              alt=""
-              width={44}
-              height={44}
-              unoptimized
-              className="product-thumbnail"
-            />
-          ) : (
-            <span className="product-thumbnail product-thumbnail-empty">
-              <Package size={20} aria-hidden />
-            </span>
-          )
-        }
-        fields={[
-          {
-            label: 'Selling price',
-            value: (r) => (
-              <span className="product-price-cell">
-                {currentPrice(r, 'effectiveSellingPrice', 'defaultSellingPrice')}
-                <small>{priceSourceLabel(r.priceSource)}</small>
-              </span>
-            ),
-          },
-          branchId
-            ? {
-                label: 'Available',
-                value: (r) =>
-                  r.trackInventory ? (
-                    <span className={productLowStock(r) ? 'product-low-stock' : ''}>
-                      {productQuantity(r.availableQuantity)} {r.baseUnit?.symbol}
-                      {productLowStock(r) && <small>At or below reorder level</small>}
-                    </span>
-                  ) : (
-                    'Not tracked'
-                  ),
-              }
-            : { label: 'Category', value: (r) => r.category?.name || r.categoryId },
-        ]}
-        details={[
-          ...(branchId
-            ? [
-                { label: 'Category', value: (r: Product) => r.category?.name || r.categoryId },
-                {
-                  label: 'On hand',
-                  value: (r: Product) =>
-                    r.trackInventory
-                      ? productQuantity(r.inventoryBalance?.quantityOnHand)
-                      : 'Not tracked',
-                },
-              ]
-            : []),
-          { label: 'Family', value: productFamilyLabel },
-          { label: 'Company', value: (r) => r.company?.name || r.companyId },
-          { label: 'Division', value: (r) => r.division?.name || r.divisionId || 'Company-wide' },
-          { label: 'Type', value: (r) => productLabel(r.productType) },
-          {
-            label: 'Base unit',
-            value: (r) => (r.baseUnit ? `${r.baseUnit.name} · ${r.baseUnit.symbol}` : r.baseUnitId),
-          },
-          {
-            label: 'Purchase price',
-            value: (r) => currentPrice(r, 'effectivePurchasePrice', 'defaultPurchasePrice'),
-          },
-          {
-            label: 'Wholesale price',
-            value: (r) => currentPrice(r, 'effectiveWholesalePrice', 'wholesalePrice'),
-          },
-          {
-            label: 'Retail price',
-            value: (r) => currentPrice(r, 'effectiveRetailPrice', 'retailPrice'),
-          },
-          { label: 'SKU', value: (r) => r.sku || '—' },
-          { label: 'Barcode', value: (r) => r.barcode || '—' },
-          { label: 'Minimum stock', value: (r) => productQuantity(r.minimumStockLevel) },
-          { label: 'Maximum stock', value: (r) => productQuantity(r.maximumStockLevel) },
-          { label: 'Reorder level', value: (r) => productQuantity(r.reorderLevel) },
-          {
-            label: 'Tracking',
-            value: (r) =>
-              [
-                r.trackInventory && 'Inventory',
-                r.trackBatch && 'Batches',
-                r.trackExpiry && 'Expiry',
-              ]
-                .filter(Boolean)
-                .join(' · ') || 'Not tracked',
-          },
-          {
-            label: 'Tax',
-            value: (r) =>
-              r.isTaxable
-                ? `Taxable · ${numeric(r.taxRate) === null ? 'rate not set' : `${productQuantity(r.taxRate)}%`}`
-                : r.isTaxable === false
-                  ? 'Not taxable'
-                  : 'Not set',
-          },
-          { label: 'Description', value: (r) => r.description || '—' },
-        ]}
+        total={result.data?.total || 0}
+        page={page}
+        selectedId={selectedId}
+        selected={selected}
         loading={result.loading}
         error={result.error}
+        detailLoading={detail.loading}
+        detailError={
+          detail.error ||
+          (selectedSource && !selected ? 'This product is unavailable in the selected scope.' : '')
+        }
         onRetry={result.reload}
-        page={page}
-        onPage={setPage}
-        pageSize={20}
-        total={result.data?.total || 0}
-        empty="No products match this view. Adjust the filters or add a product."
-        actions={(r) => (
-          <>
-            <Link href={profileHref(r)}>Full product profile</Link>
-            {hasPermission('products.update') && (
-              <Btn variant="secondary" onClick={() => entry.open({ kind: 'product', record: r })}>
-                Edit product
-              </Btn>
-            )}
-            {hasPermission('products.delete') && (
-              <Btn variant="ghost" onClick={() => setDeleting(r)}>
-                Delete product
-              </Btn>
-            )}
-          </>
-        )}
+        onDetailRetry={refreshProduct}
+        onSelect={selectRecord}
+        onClose={() => selectRecord(null)}
+        onPage={(next) =>
+          guardChange(() => {
+            setSelectedId(null);
+            setSelectedSnapshot(null);
+            setPage(next);
+            if (workspace?.embedded) {
+              const params = readSearch();
+              params.delete('productId');
+              router.replace(`${pathname}?${params}`, { scroll: false });
+            }
+          })
+        }
+        scope={scope}
+        branchLabel={
+          branches.rows.find((branch) => branch.id === branchId)?.name || 'Selected branch'
+        }
+        retrievedAt={retrievedAt}
+        imageVersion={imageVersion}
+        profileHref={profileHref}
+        onSaved={(updated) => {
+          setNotice(`“${updated.name}” updated.`);
+          setSelectedSnapshot({ scope: scopeKey, record: updated });
+          setImageVersion(Date.now());
+          result.reload();
+        }}
+        onAdjust={(record) =>
+          entry.open({
+            kind: 'adjustment',
+            scope: { ...scope, companyId: record.companyId },
+            productId: record.id,
+          })
+        }
+        onDelete={(record) => guardChange(() => setDeleting(record))}
       />
       {deleting && (
         <ProductDelete

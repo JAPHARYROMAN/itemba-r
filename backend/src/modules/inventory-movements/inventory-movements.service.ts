@@ -9,6 +9,7 @@ import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { ProfitService } from '../profit/profit.service';
+import { lockInventoryProducts } from './inventory-product-lock';
 
 const INBOUND_TYPES: InventoryMovementType[] = [
   'OPENING_STOCK',
@@ -226,16 +227,38 @@ export class InventoryMovementsService {
     tx?: Prisma.TransactionClient;
   }): Promise<InventoryMovement> {
     this.validateMovementDirection(data.movementType);
-    if (data.quantity <= 0) {
+    if (!Number.isFinite(data.quantity) || data.quantity <= 0) {
       throw new BadRequestException('Inventory movement quantity must be greater than zero');
     }
 
     // Movement creation and balance update MUST be atomic. If no transaction
     // was passed in, open one here so a failure in either side rolls back both.
     const run = async (db: Prisma.TransactionClient) => {
+      await lockInventoryProducts(db, [data.productId]);
       const scope = await this.resolveMovementScope(data, db);
       await this.validateMovementReferences({ ...data, ...scope }, db);
-      await this.profit.assertInventoryMovementHasCost(data, db);
+      let zeroEndingCount = false;
+      if (
+        data.movementType === 'ADJUSTMENT_IN' &&
+        data.referenceType === 'StockAdjustment' &&
+        data.unitCost == null
+      ) {
+        const balance = await db.inventoryBalance.findUnique({
+          where: {
+            companyId_productId_branchId: {
+              companyId: data.companyId,
+              productId: data.productId,
+              branchId: scope.branchId,
+            },
+          },
+          select: { quantityOnHand: true },
+        });
+        zeroEndingCount =
+          !!balance &&
+          balance.quantityOnHand.lt(0) &&
+          balance.quantityOnHand.plus(data.quantity).eq(0);
+      }
+      if (!zeroEndingCount) await this.profit.assertInventoryMovementHasCost(data, db);
 
       if (
         data.receiptValue &&
@@ -248,8 +271,17 @@ export class InventoryMovementsService {
         throw new BadRequestException(
           'An exact receipt value requires a costed purchase receipt in its owning transaction.',
         );
-      if (data.transferValue && (!data.tx || !['TRANSFER_IN', 'TRANSFER_OUT'].includes(data.movementType) || data.unitCost == null || data.transferValue.lt(0) || data.transferValue.decimalPlaces() > 2)) {
-        throw new BadRequestException('An exact transfer value requires a paired, costed transfer in its owning transaction.');
+      if (
+        data.transferValue &&
+        (!data.tx ||
+          !['TRANSFER_IN', 'TRANSFER_OUT'].includes(data.movementType) ||
+          data.unitCost == null ||
+          data.transferValue.lt(0) ||
+          data.transferValue.decimalPlaces() > 2)
+      ) {
+        throw new BadRequestException(
+          'An exact transfer value requires a paired, costed transfer in its owning transaction.',
+        );
       }
       const movementNumber = await this.codes.next({
         entityType: 'InventoryMovement',
@@ -266,7 +298,8 @@ export class InventoryMovementsService {
           unitId: data.unitId,
           unitCost: data.unitCost,
           totalCost:
-            data.transferValue ?? data.receiptValue ??
+            data.transferValue ??
+            data.receiptValue ??
             (data.unitCost != null ? data.quantity * data.unitCost : undefined),
           movementDate: data.movementDate,
           createdById: data.createdById,
@@ -316,7 +349,11 @@ export class InventoryMovementsService {
   private async applyMovementToBalance(
     movement: InventoryMovement,
     db: Prisma.TransactionClient,
-    opts?: { allowNegativeOnHand?: boolean; receiptValue?: Prisma.Decimal; transferValue?: Prisma.Decimal },
+    opts?: {
+      allowNegativeOnHand?: boolean;
+      receiptValue?: Prisma.Decimal;
+      transferValue?: Prisma.Decimal;
+    },
   ) {
     const isInbound = INBOUND_TYPES.includes(movement.movementType);
     const isOutbound = OUTBOUND_TYPES.includes(movement.movementType);
@@ -395,7 +432,10 @@ export class InventoryMovementsService {
     // Sales and planned transfers cannot consume another transaction's hold.
     // Physical loss/correction may still deplete held units; final sale approval
     // then rechecks availability rather than pretending those goods still exist.
-    if (['SALE_ISSUE', 'TRANSFER_OUT'].includes(movement.movementType) && currentQty - reservedQty < quantity) {
+    if (
+      ['SALE_ISSUE', 'TRANSFER_OUT'].includes(movement.movementType) &&
+      currentQty - reservedQty < quantity
+    ) {
       throw new BadRequestException(
         `Insufficient available stock at branch/location ${movement.branchId}: requested ${quantity}, available ${Math.max(0, currentQty - reservedQty)} after reservations`,
       );
@@ -429,11 +469,18 @@ export class InventoryMovementsService {
       // Cost-less inbound: averageCost stays as-is; totalValue is held.
       newTotalValueDec = existingTotalValue;
     } else if (opts?.transferValue) {
-      if (opts.transferValue.gt(existingTotalValue) || (newQtyDec.eq(0) && !opts.transferValue.eq(existingTotalValue))) {
-        throw new BadRequestException('Transfer value must equal the inventory value actually removed.');
+      if (
+        opts.transferValue.gt(existingTotalValue) ||
+        (newQtyDec.eq(0) && !opts.transferValue.eq(existingTotalValue))
+      ) {
+        throw new BadRequestException(
+          'Transfer value must equal the inventory value actually removed.',
+        );
       }
       newTotalValueDec = existingTotalValue.minus(opts.transferValue);
-      newAvgCostDec = newQtyDec.gt(0) ? newTotalValueDec.dividedBy(newQtyDec) : new Prisma.Decimal(0);
+      newAvgCostDec = newQtyDec.gt(0)
+        ? newTotalValueDec.dividedBy(newQtyDec)
+        : new Prisma.Decimal(0);
     } else {
       // Outbound: relieve at the current average, additively.
       if (newQtyDec.gt(0)) {
@@ -442,6 +489,13 @@ export class InventoryMovementsService {
       } else {
         newTotalValueDec = new Prisma.Decimal(0);
       }
+    }
+
+    // A correction from a compensating negative balance to zero owns no stock.
+    // Costed inbound must not manufacture inventory value at that boundary.
+    if (newQtyDec.eq(0)) {
+      newTotalValueDec = new Prisma.Decimal(0);
+      newAvgCostDec = new Prisma.Decimal(0);
     }
 
     await db.inventoryBalance.update({

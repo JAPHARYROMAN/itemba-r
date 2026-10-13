@@ -210,24 +210,30 @@ beforeEach(() => {
   };
 });
 type User = ReturnType<typeof userEvent.setup>;
+const editorSurface = () =>
+  screen.queryByRole('dialog', { name: /^(Edit|New) product$/ }) ||
+  screen.getByRole('region', { name: 'Product settings' });
+const expectedVersion = () =>
+  state.product.updatedAt ? { expectedUpdatedAt: state.product.updatedAt } : {};
 const input = (label: string, value: string) =>
-  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText(new RegExp('^' + label)), {
+  fireEvent.change(within(editorSurface()).getByLabelText(new RegExp('^' + label)), {
     target: { value },
   });
 // The editor's dropdowns are shared select fields, set by value like `input`.
-const pick = (label: string, value: string) =>
-  changeSelectField(label, value, screen.getByRole('dialog'));
-const field = (label: string) => getSelectField(label, screen.getByRole('dialog'));
+const pick = (label: string, value: string) => changeSelectField(label, value, editorSurface());
+const field = (label: string) => getSelectField(label, editorSurface());
 async function dialog(editing = true) {
-  const modal = await screen.findByRole('dialog', {
-    name: editing ? 'Edit product' : 'New product',
-  });
+  const modal =
+    (editing && screen.queryByRole('region', { name: 'Product settings' })) ||
+    (await screen.findByRole('dialog', {
+      name: editing ? 'Edit product' : 'New product',
+    }));
   await waitFor(() => expect(getSelectField('Product family', modal)).not.toBeDisabled());
   return within(modal);
 }
 async function edit(user: User) {
   await user.click(await screen.findByRole('button', { name: 'Inspect White paint' }));
-  await user.click(screen.getByRole('button', { name: 'Edit product' }));
+  await user.click(screen.getByRole('tab', { name: 'Edit' }));
   return dialog();
 }
 async function create(user: User) {
@@ -354,7 +360,10 @@ describe('Inventory product continuity', () => {
     review();
     save();
     await waitFor(() =>
-      expect(state.patch).toHaveBeenCalledWith('/products/product', { name: 'Ivory paint' }),
+      expect(state.patch).toHaveBeenCalledWith('/products/product', {
+        ...expectedVersion(),
+        name: 'Ivory paint',
+      }),
     );
   });
   it('preserves explicit clears and zero while leaving new server values untouched', async () => {
@@ -373,6 +382,7 @@ describe('Inventory product continuity', () => {
     save();
     await waitFor(() =>
       expect(state.patch).toHaveBeenCalledWith('/products/product', {
+        ...expectedVersion(),
         description: null,
         sku: null,
         salesUnitId: null,
@@ -397,6 +407,7 @@ describe('Inventory product continuity', () => {
     save();
     await waitFor(() =>
       expect(state.patch).toHaveBeenCalledWith('/products/product', {
+        ...expectedVersion(),
         defaultSellingPrice: null,
         wholesalePrice: null,
         retailPrice: null,
@@ -415,7 +426,10 @@ describe('Inventory product continuity', () => {
     review();
     save();
     await waitFor(() =>
-      expect(state.patch).toHaveBeenCalledWith('/products/product', { description: 'Review me' }),
+      expect(state.patch).toHaveBeenCalledWith('/products/product', {
+        ...expectedVersion(),
+        description: 'Review me',
+      }),
     );
   });
   it.each(['company', 'division', 'paint', 'unit', 'family'])(
@@ -565,6 +579,7 @@ describe('Inventory product continuity', () => {
     save();
     await waitFor(() =>
       expect(state.patch).toHaveBeenCalledWith('/products/product', {
+        ...expectedVersion(),
         description: 'Unfinished description',
       }),
     );
@@ -601,7 +616,10 @@ describe('Inventory product continuity', () => {
     input('Description', 'Text only');
     save();
     await waitFor(() =>
-      expect(state.patch).toHaveBeenCalledWith('/products/product', { description: 'Text only' }),
+      expect(state.patch).toHaveBeenCalledWith('/products/product', {
+        ...expectedVersion(),
+        description: 'Text only',
+      }),
     );
     expect(state.upload).not.toHaveBeenCalled();
   });
@@ -699,7 +717,7 @@ describe('Inventory product continuity', () => {
   });
   it('restores register filters, page and selected ID after leaving, then recovers an obsolete page', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    render(<App standalone />);
     await screen.findByRole('button', { name: 'Inspect White paint' });
     await user.type(screen.getByRole('searchbox'), 'paint');
     await waitFor(() =>

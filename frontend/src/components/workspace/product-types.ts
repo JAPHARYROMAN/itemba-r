@@ -64,7 +64,8 @@ export interface Product {
   availableQuantity?: number | string | null;
   inventoryBalance?: {
     quantityOnHand?: number | string | null;
-    availableQuantity?: number | null;
+    quantityReserved?: number | string | null;
+    availableQuantity?: number | string | null;
   } | null;
   trackInventory: boolean;
   trackBatch: boolean;

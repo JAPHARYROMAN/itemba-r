@@ -91,7 +91,17 @@ export function AppSurface({
   if (appId === 'inventory') {
     const match = /^\/inventory\/products\/([^/]+)$/.exec(pathname);
     const back = new URLSearchParams({ tab: 'catalog', view: 'products' });
-    for (const key of ['companyId', 'divisionId', 'branchId', 'q']) {
+    for (const key of [
+      'companyId',
+      'divisionId',
+      'branchId',
+      'q',
+      'categoryId',
+      'productFamilyId',
+      'productType',
+      'status',
+      'priceSource',
+    ]) {
       const value = params.get(key);
       if (value) back.set(key, value);
     }
@@ -99,6 +109,11 @@ export function AppSurface({
       <Product
         key={match[1]}
         productId={decodeURIComponent(match[1])}
+        scope={{
+          companyId: params.get('companyId') || '',
+          divisionId: params.get('divisionId') || '',
+          branchId: params.get('branchId') || '',
+        }}
         backHref={`/inventory?${back}`}
       />
     ) : (

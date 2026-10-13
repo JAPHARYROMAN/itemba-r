@@ -43,20 +43,32 @@ describe('product workspace read contracts', () => {
   const create = (records: any[] = []) => {
     const product = {
       findMany: jest.fn().mockResolvedValue(records),
-      count: jest.fn().mockResolvedValue(23),
+      count: jest
+        .fn()
+        .mockImplementation(async ({ where }: any) =>
+          JSON.stringify(where).includes('"equals"') ? 0 : 23,
+        ),
     };
     const inventoryBalance = { findMany: jest.fn().mockResolvedValue([]) };
+    const branch = {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'branch', division: { companyId: 'company' }, divisionId: null }),
+    };
+    const organization = { assertCanAccessScope: jest.fn().mockResolvedValue(undefined) };
     const companyScope = {
       companyWhereFor: jest.fn().mockResolvedValue({ companyId: { in: ['company'] } }),
     };
+    const db = { product, inventoryBalance, branch };
     const service = new ProductsService(
-      { product, inventoryBalance } as any,
+      { ...db, $transaction: (work: (tx: any) => unknown) => work(db) } as any,
       {} as any,
       companyScope as any,
       {} as any,
       {} as any,
+      organization as any,
     );
-    return { product, inventoryBalance, companyScope, service };
+    return { product, inventoryBalance, branch, organization, companyScope, service };
   };
   it('combines company, division, search, family and pricing filters for both reads and counts', async () => {
     const { product, companyScope, service } = create();
@@ -76,7 +88,8 @@ describe('product workspace read contracts', () => {
       user,
     );
     expect(companyScope.companyWhereFor).toHaveBeenCalledWith(user, 'company');
-    const where = product.findMany.mock.calls[0][0].where;
+    const where = product.count.mock.calls.find(([args]) => args.where.deletedAt === null)![0]
+      .where;
     expect(where).toMatchObject({
       deletedAt: null,
       companyId: { in: ['company'] },

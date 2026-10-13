@@ -6,9 +6,30 @@ export default function ProductDetailPage() {
   const search = useSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const back = new URLSearchParams({ tab: 'catalog', view: 'products' });
-  for (const key of ['companyId', 'divisionId', 'branchId', 'q']) {
+  for (const key of [
+    'companyId',
+    'divisionId',
+    'branchId',
+    'q',
+    'categoryId',
+    'productFamilyId',
+    'productType',
+    'status',
+    'priceSource',
+  ]) {
     const value = search.get(key);
     if (value) back.set(key, value);
   }
-  return <ProductProfile key={id} productId={id} backHref={`/inventory?${back}`} />;
+  return (
+    <ProductProfile
+      key={id}
+      productId={id}
+      backHref={`/inventory?${back}`}
+      scope={{
+        companyId: search.get('companyId') || '',
+        divisionId: search.get('divisionId') || '',
+        branchId: search.get('branchId') || '',
+      }}
+    />
+  );
 }

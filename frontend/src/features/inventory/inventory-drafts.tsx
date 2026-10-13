@@ -405,6 +405,7 @@ function useDraftController(
         <AdjustmentEditor
           key={editor.key}
           scope={editor.scope}
+          productId={editor.productId || ''}
           draftSource={editor.source}
           onClose={close}
           onSaved={saved}
@@ -550,4 +551,8 @@ export function useInventoryDraftEditor(
         editor.open({ kind: 'damage-action', id, action: action as DamageAction });
     },
   };
+}
+/** Row actions pass an exact product and branch without navigating away. */
+export function useInventoryStockEditor(onSaved: () => void) {
+  return useInventoryEditors(['adjustment'], onSaved, undefined, 'other-window');
 }

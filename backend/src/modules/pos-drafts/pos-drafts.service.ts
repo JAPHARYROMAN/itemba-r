@@ -35,6 +35,7 @@ import { CustomerPaymentsService } from '../customer-payments/customer-payments.
 import { StockAdjustmentsService } from '../stock-adjustments/stock-adjustments.service';
 import { StockDamageService } from '../stock-damage/stock-damage.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
 import {
   MobilePosLiteService,
   effectiveSellingPrice,
@@ -1677,7 +1678,52 @@ export class PosDraftsService {
             );
           acceptedAction = true;
           if (draft.kind === 'SALE') await lockPosSalePosting(tx, draft.companyId);
-          await this.expire(tx, draft.companyId, draft.branchId);
+          const inventoryPayload = object(draft.payload);
+          let receiptProducts: string[] = [];
+          // Office receiving locks its order before products. Expiry must not
+          // take stock locks first and reverse that order for a POS receipt.
+          if (draft.kind === 'RECEIPT') {
+            await tx.$queryRaw(
+              Prisma.sql`SELECT id FROM purchase_orders WHERE id=${inventoryPayload.purchaseOrderId} FOR UPDATE`,
+            );
+            const order = await tx.purchaseOrder.findFirst({
+              where: {
+                id: inventoryPayload.purchaseOrderId,
+                companyId: draft.companyId,
+                branchId: draft.branchId,
+                deletedAt: null,
+              },
+              select: { lines: { select: { productId: true } } },
+            });
+            if (!order)
+              throw new ConflictException('The selected receipt order is no longer available');
+            receiptProducts = order.lines.map((line) => line.productId);
+          } else if (draft.kind === 'COLLECTION') {
+            await tx.$queryRaw(
+              Prisma.sql`SELECT id FROM sales_orders WHERE id=${inventoryPayload.salesOrderId} FOR UPDATE`,
+            );
+          }
+          // Expiry and this draft may touch different products. Acquire their
+          // union before any balance so later posting cannot reverse the order.
+          const expiredProducts = await tx.posDraftReservation.findMany({
+            where: {
+              companyId: draft.companyId,
+              branchId: draft.branchId,
+              releasedAt: null,
+              expiresAt: { lte: new Date() },
+            },
+            select: { productId: true },
+            distinct: ['productId'],
+          });
+          await lockInventoryProducts(tx, [
+            ...(Array.isArray(inventoryPayload.lines)
+              ? inventoryPayload.lines.map((line: JsonRecord) => line.productId).filter(Boolean)
+              : []),
+            ...(inventoryPayload.productId ? [inventoryPayload.productId] : []),
+            ...receiptProducts,
+            ...expiredProducts.map((row) => row.productId),
+          ]);
+          await this.expire(tx, draft.companyId, draft.branchId, expiredProducts);
           let metadata: JsonRecord | undefined;
           if (continuedDraftId) {
             // Matching captures continue the cashier sale by default. Only a
@@ -2200,6 +2246,7 @@ export class PosDraftsService {
   }
 
   private async balance(tx: Db, companyId: string, branchId: string, productId: string) {
+    await lockInventoryProducts(tx, [productId]);
     await tx.inventoryBalance.upsert({
       where: { companyId_productId_branchId: { companyId, productId, branchId } },
       create: { companyId, branchId, productId, quantityOnHand: 0, quantityReserved: 0 },
@@ -2212,13 +2259,24 @@ export class PosDraftsService {
       where: { companyId_productId_branchId: { companyId, productId, branchId } },
     });
   }
-  private async expire(tx: Db, companyId: string, branchId: string) {
-    const products = await tx.posDraftReservation.findMany({
-      where: { companyId, branchId, releasedAt: null, expiresAt: { lte: new Date() } },
-      select: { productId: true },
-      distinct: ['productId'],
-      orderBy: { productId: 'asc' },
-    });
+  private async expire(
+    tx: Db,
+    companyId: string,
+    branchId: string,
+    preselected?: Array<{ productId: string }>,
+  ) {
+    const products =
+      preselected ??
+      (await tx.posDraftReservation.findMany({
+        where: { companyId, branchId, releasedAt: null, expiresAt: { lte: new Date() } },
+        select: { productId: true },
+        distinct: ['productId'],
+        orderBy: { productId: 'asc' },
+      }));
+    await lockInventoryProducts(
+      tx,
+      products.map((row) => row.productId),
+    );
     for (const product of products) {
       const locked = await this.balance(tx, companyId, branchId, product.productId);
       await releaseExpiredPosReservations(tx, { ...locked, branchId });
@@ -2257,6 +2315,10 @@ export class PosDraftsService {
       where: { draftId: draft.id, releasedAt: null },
       orderBy: { productId: 'asc' },
     });
+    await lockInventoryProducts(
+      tx,
+      reservations.map((row) => row.productId),
+    );
     for (const r of reservations) {
       await this.balance(tx, draft.companyId, r.branchId, r.productId);
       const claimed = await tx.posDraftReservation.updateMany({
@@ -2279,6 +2341,10 @@ export class PosDraftsService {
   private async reserve(tx: Db, draft: PosDraft) {
     const p = object(draft.payload),
       until = new Date(Date.now() + 86400000);
+    await lockInventoryProducts(
+      tx,
+      p.lines.map((line: JsonRecord) => line.productId),
+    );
     for (const line of [...p.lines].sort((a, b) => a.productId.localeCompare(b.productId))) {
       const product = await tx.product.findUniqueOrThrow({
         where: { id: line.productId },
@@ -2331,6 +2397,12 @@ export class PosDraftsService {
         branchId: draft.branchId,
       };
     const date = `${draft.businessDate.toISOString().slice(0, 10)}T12:00:00+03:00`;
+    await lockInventoryProducts(tx, [
+      ...(Array.isArray(p.lines)
+        ? p.lines.map((line: JsonRecord) => line.productId).filter(Boolean)
+        : []),
+      ...(p.productId ? [p.productId] : []),
+    ]);
     if (draft.kind === 'SALE') {
       const snap = object(p._sale);
       // Compare stored list prices against the current master; approval cannot

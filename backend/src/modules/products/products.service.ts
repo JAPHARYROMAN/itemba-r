@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { auditFor, CompanyScopeService } from '../../common/services';
@@ -17,6 +23,7 @@ import {
 } from './product-image';
 import { ProfitService } from '../profit/profit.service';
 import { DocumentsService } from '../documents/documents.service';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import {
   AccessLevel,
   AuditSeverity,
@@ -64,6 +71,14 @@ function optionalText(value?: string | null): string | undefined {
   return trimmed || undefined;
 }
 
+function productName(value: unknown) {
+  if (typeof value !== 'string' || !value.trim())
+    throw new BadRequestException('Product name cannot be blank.');
+  return value.trim();
+}
+
+type ProductClient = PrismaService | Prisma.TransactionClient;
+
 function nullablePrice(value: number | string | Prisma.Decimal | null | undefined) {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
@@ -103,13 +118,17 @@ function familyVariantLabel(familyName: string) {
 
 @Injectable()
 export class ProductsService {
+  private readonly organization: OrganizationScopeService;
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
     private readonly profit: ProfitService,
     private readonly documents: DocumentsService,
-  ) {}
+    organization?: OrganizationScopeService,
+  ) {
+    this.organization = organization ?? new OrganizationScopeService(prisma);
+  }
 
   async findAll(query: QueryProductDto, user: AuthUser) {
     const {
@@ -128,14 +147,32 @@ export class ProductsService {
     } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const companyWhere = await this.companyScope.companyWhereFor(user, companyId);
+    const where: Prisma.ProductWhereInput = {
       deletedAt: null,
-      ...(await this.companyScope.companyWhereFor(user, companyId)),
+      ...companyWhere,
     };
+    let productDivisionId = divisionId;
+    if (branchId) {
+      // Product lookup grants do not imply access to another branch's stock.
+      const branch = await this.prisma.branch.findFirst({
+        where: {
+          id: branchId,
+          deletedAt: null,
+          division: { deletedAt: null, AND: [companyWhere] },
+          ...(divisionId ? { divisionId } : {}),
+        },
+        select: { id: true, divisionId: true, division: { select: { companyId: true } } },
+      });
+      if (!branch) throw new ForbiddenException('The selected branch is not available to you.');
+      await this.organization.assertCanAccessScope(user, branch.divisionId, branch.id);
+      where.companyId = branch.division.companyId;
+      productDivisionId = divisionId ?? branch.divisionId ?? undefined;
+    }
     // Division filter: when set, return products explicitly tagged to this
     // division PLUS company-wide (divisionId=null) products. Operators
     // working in a division should still be able to sell company-wide SKUs.
-    if (divisionId) where.OR = [{ divisionId }, { divisionId: null }];
+    if (productDivisionId) where.OR = [{ divisionId: productDivisionId }, { divisionId: null }];
     if (categoryId) where.categoryId = categoryId;
     if (productFamilyId) where.productFamilyId = productFamilyId;
     if (supplierId) {
@@ -162,7 +199,9 @@ export class ProductsService {
     }
     if (productType) where.productType = productType;
     if (status) where.status = status;
-    if (search) {
+    const term = search?.trim();
+    if (term) {
+      const search = term;
       const searchTerms = [
         { name: { contains: search, mode: 'insensitive' as const } },
         { productCode: { contains: search, mode: 'insensitive' as const } },
@@ -210,50 +249,93 @@ export class ProductsService {
         : [clause];
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.product.findMany({
-        where,
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              supplierLinks: {
-                where: { supplier: { deletedAt: null } },
-                select: {
-                  supplier: {
-                    select: {
-                      id: true,
-                      name: true,
-                      legalName: true,
-                      supplierCode: true,
-                    },
+    const listArgs = {
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            supplierLinks: {
+              where: { supplier: { deletedAt: null } },
+              select: {
+                supplier: {
+                  select: {
+                    id: true,
+                    name: true,
+                    legalName: true,
+                    supplierCode: true,
                   },
                 },
               },
             },
           },
-          productFamily: {
-            select: {
-              id: true,
-              name: true,
-              brand: true,
-              defaultPurchasePrice: true,
-              defaultSellingPrice: true,
-              wholesalePrice: true,
-              retailPrice: true,
-            },
-          },
-          division: { select: { id: true, name: true, code: true } },
-          company: { select: { id: true, name: true, code: true } },
-          baseUnit: { select: { id: true, name: true, symbol: true } },
         },
-        orderBy: { name: 'asc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.product.count({ where }),
-    ]);
+        productFamily: {
+          select: {
+            id: true,
+            name: true,
+            brand: true,
+            defaultPurchasePrice: true,
+            defaultSellingPrice: true,
+            wholesalePrice: true,
+            retailPrice: true,
+          },
+        },
+        division: { select: { id: true, name: true, code: true } },
+        company: { select: { id: true, name: true, code: true } },
+        baseUnit: { select: { id: true, name: true, symbol: true } },
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    } satisfies Omit<Prisma.ProductFindManyArgs, 'where' | 'skip' | 'take'>;
+    const read = async (db: ProductClient) => {
+      if (!term) {
+        const [data, total] = await Promise.all([
+          db.product.findMany({ ...listArgs, where, skip, take: limit }),
+          db.product.count({ where }),
+        ]);
+        return { data, total };
+      }
+      const identifiers: Prisma.ProductWhereInput = {
+        OR: ['productCode', 'sku', 'barcode'].map((field) => ({
+          [field]: { equals: term, mode: 'insensitive' },
+        })),
+      };
+      const exactWhere: Prisma.ProductWhereInput = { AND: [where, identifiers] };
+      // Nullable SKU/barcode values must remain in the fuzzy partition. A plain
+      // NOT(OR(...)) evaluates to SQL UNKNOWN for those products and drops them.
+      const notExactIdentifiers: Prisma.ProductWhereInput = {
+        AND: [
+          { NOT: { productCode: { equals: term, mode: 'insensitive' } } },
+          { OR: [{ sku: null }, { NOT: { sku: { equals: term, mode: 'insensitive' } } }] },
+          { OR: [{ barcode: null }, { NOT: { barcode: { equals: term, mode: 'insensitive' } } }] },
+        ],
+      };
+      const [exactCount, total] = await Promise.all([
+        db.product.count({ where: exactWhere }),
+        db.product.count({ where }),
+      ]);
+      const exactTake = Math.max(0, Math.min(limit, exactCount - skip));
+      const exact = exactTake
+        ? await db.product.findMany({ ...listArgs, where: exactWhere, skip, take: exactTake })
+        : [];
+      const fuzzy =
+        exactTake < limit
+          ? await db.product.findMany({
+              ...listArgs,
+              where: { AND: [where, notExactIdentifiers] },
+              skip: Math.max(0, skip - exactCount),
+              take: limit - exactTake,
+            })
+          : [];
+      return { data: [...exact, ...fuzzy], total };
+    };
+    // Counts and partitioned pages share one snapshot, including exact matches
+    // outside the first alphabetical lookup page.
+    const { data, total } = term
+      ? await this.prisma.$transaction(read, {
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        })
+      : await read(this.prisma);
 
     const enrichedData = await this.withProductListAliasesAndAvailability(data, branchId);
 
@@ -309,7 +391,7 @@ export class ProductsService {
         balanceByProductId.set(balance.productId, {
           quantityOnHand,
           quantityReserved,
-          availableQuantity: Math.max(0, quantityOnHand - quantityReserved),
+          availableQuantity: quantityOnHand - quantityReserved,
           averageCost: Number(balance.averageCost),
         });
       }
@@ -721,9 +803,12 @@ export class ProductsService {
     }
   }
 
-  private async findFamilyPricing(productFamilyId?: string | null) {
+  private async findFamilyPricing(
+    productFamilyId?: string | null,
+    db: ProductClient = this.prisma,
+  ) {
     if (!productFamilyId) return null;
-    return this.prisma.productFamily.findFirst({
+    return db.productFamily.findFirst({
       where: { id: productFamilyId, deletedAt: null, isActive: true },
       select: {
         defaultPurchasePrice: true,
@@ -923,16 +1008,19 @@ export class ProductsService {
     }
   }
 
-  private async assertInheritedFamilyPriceAboveProductCost(input: {
-    productName: string;
-    productType?: string | null;
-    trackInventory?: boolean | null;
-    defaultPurchasePrice?: number | string | Prisma.Decimal | null;
-    defaultSellingPrice?: number | string | Prisma.Decimal | null;
-    retailPrice?: number | string | Prisma.Decimal | null;
-    wholesalePrice?: number | string | Prisma.Decimal | null;
-    productFamilyId?: string | null;
-  }) {
+  private async assertInheritedFamilyPriceAboveProductCost(
+    input: {
+      productName: string;
+      productType?: string | null;
+      trackInventory?: boolean | null;
+      defaultPurchasePrice?: number | string | Prisma.Decimal | null;
+      defaultSellingPrice?: number | string | Prisma.Decimal | null;
+      retailPrice?: number | string | Prisma.Decimal | null;
+      wholesalePrice?: number | string | Prisma.Decimal | null;
+      productFamilyId?: string | null;
+    },
+    db: ProductClient = this.prisma,
+  ) {
     if (!this.profit.isStockProduct(input)) return;
     if (!input.productFamilyId) return;
 
@@ -942,7 +1030,7 @@ export class ProductsService {
       positivePrice(input.wholesalePrice) != null;
     if (hasProductSalePrice) return;
 
-    const family = await this.prisma.productFamily.findFirst({
+    const family = await db.productFamily.findFirst({
       where: { id: input.productFamilyId, deletedAt: null, isActive: true },
       select: {
         defaultPurchasePrice: true,
@@ -986,6 +1074,7 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto, user: AuthUser) {
+    dto = { ...dto, name: productName(dto.name) };
     await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
     await this.assertReferencesBelongToCompany(dto.companyId, dto);
     const productFamilyId = await this.resolveProductFamilyId(dto.companyId, {
@@ -1090,9 +1179,71 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto, user: AuthUser) {
+    await this.findOne(id, user, AccessLevel.WRITE);
+    if (dto.name !== undefined) dto = { ...dto, name: productName(dto.name) };
+    const expected = dto.expectedUpdatedAt ? new Date(dto.expectedUpdatedAt) : null;
+    if (expected && Number.isNaN(expected.getTime()))
+      throw new BadRequestException('Product version must be a valid timestamp.');
+    return this.prisma.$transaction(async (db) => {
+      // This lock is also used by inventory capture/posting. Compare the displayed
+      // version before resolving or creating a family, so conflicts have no side effects.
+      await db.$queryRaw(Prisma.sql`SELECT id FROM products WHERE id = ${id} FOR UPDATE`);
+      const existing = await db.product.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Product not found');
+      if (expected && existing.updatedAt.getTime() !== expected.getTime())
+        throw new ConflictException(
+          'This product changed. Refresh and review your changes before saving.',
+        );
+      return this.updateLocked(id, dto, user, existing, db);
+    });
+  }
+
+  private async assertUnusedBaseUnit(id: string, db: Prisma.TransactionClient) {
+    const usage = await db.product.findUnique({ where: { id }, select: { _count: true } });
+    if (Object.values(usage?._count ?? {}).some((count) => count > 0))
+      throw new BadRequestException(
+        'The base unit cannot change after a product has stock or linked transaction history. Use unit conversions or create a new product.',
+      );
+  }
+
+  private async assertNoStockExposure(id: string, db: Prisma.TransactionClient) {
+    const balance = await db.inventoryBalance.findFirst({
+      where: {
+        productId: id,
+        OR: [
+          { quantityOnHand: { not: 0 } },
+          { quantityReserved: { not: 0 } },
+          { totalValue: { not: 0 } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (balance)
+      throw new BadRequestException(
+        'Inventory tracking cannot be disabled while stock, reservations or stock value remain.',
+      );
+  }
+
+  private async updateLocked(
+    id: string,
+    dto: UpdateProductDto,
+    user: AuthUser,
+    existing: Prisma.ProductGetPayload<Record<string, never>>,
+    db: Prisma.TransactionClient,
+  ) {
     const userId = user.id;
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    await this.assertReferencesBelongToCompany(existing.companyId, dto);
+    await this.assertReferencesBelongToCompany(existing.companyId, dto, db);
+    const baseUnitChanged = dto.baseUnitId !== undefined && dto.baseUnitId !== existing.baseUnitId;
+    if (baseUnitChanged) await this.assertUnusedBaseUnit(id, db);
+    const becomesNonStock =
+      dto.productType !== undefined &&
+      this.profit.isStockProduct(existing) &&
+      !this.profit.isStockProduct({
+        productType: dto.productType,
+        trackInventory: dto.trackInventory ?? existing.trackInventory,
+      });
+    if ((dto.trackInventory === false && existing.trackInventory) || becomesNonStock)
+      await this.assertNoStockExposure(id, db);
     const productCode = normalizeProductCode(dto.productCode);
     const targetCategoryId = dto.categoryId ?? existing.categoryId;
     const targetDivisionId =
@@ -1108,17 +1259,18 @@ export class ProductsService {
       },
       existing.productFamilyId,
       dto.categoryId !== undefined || dto.divisionId !== undefined,
+      db,
     );
     const effectiveProductFamilyId =
       productFamilyId !== undefined ? productFamilyId : existing.productFamilyId;
-    const familyPricing = await this.findFamilyPricing(effectiveProductFamilyId);
+    const familyPricing = await this.findFamilyPricing(effectiveProductFamilyId, db);
     const effectiveDefaultPurchasePrice =
       dto.defaultPurchasePrice !== undefined
         ? dto.defaultPurchasePrice
         : (existing.defaultPurchasePrice ?? familyPricing?.defaultPurchasePrice ?? null);
 
     if (productCode && productCode !== existing.productCode) {
-      const duplicate = await this.prisma.product.findFirst({
+      const duplicate = await db.product.findFirst({
         where: {
           productCode,
           companyId: existing.companyId,
@@ -1130,36 +1282,58 @@ export class ProductsService {
         throw new BadRequestException('A product with this code already exists in the company');
       }
     }
-    this.profit.assertProductMasterPricing({
-      name: dto.name ?? existing.name,
-      productType: dto.productType ?? existing.productType,
-      trackInventory: dto.trackInventory ?? existing.trackInventory,
-      defaultPurchasePrice: effectiveDefaultPurchasePrice,
-      defaultSellingPrice:
-        dto.defaultSellingPrice !== undefined
-          ? dto.defaultSellingPrice
-          : existing.defaultSellingPrice,
-      retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
-      wholesalePrice:
-        dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
-    });
-    await this.assertInheritedFamilyPriceAboveProductCost({
-      productName: dto.name ?? existing.name,
-      productType: dto.productType ?? existing.productType,
-      trackInventory: dto.trackInventory ?? existing.trackInventory,
-      defaultPurchasePrice: effectiveDefaultPurchasePrice,
-      defaultSellingPrice:
-        dto.defaultSellingPrice !== undefined
-          ? dto.defaultSellingPrice
-          : existing.defaultSellingPrice,
-      retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
-      wholesalePrice:
-        dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
-      productFamilyId: effectiveProductFamilyId,
-    });
+    const pricingChanged =
+      [
+        'productType',
+        'trackInventory',
+        'defaultPurchasePrice',
+        'defaultSellingPrice',
+        'retailPrice',
+        'wholesalePrice',
+      ].some((key) => {
+        const field = key as keyof UpdateProductDto & keyof typeof existing;
+        if (dto[field] === undefined) return false;
+        const before = existing[field];
+        const after = dto[field];
+        return before instanceof Prisma.Decimal
+          ? after === null || !before.equals(String(after))
+          : before !== after;
+      }) || effectiveProductFamilyId !== existing.productFamilyId;
+    if (pricingChanged) {
+      this.profit.assertProductMasterPricing({
+        name: dto.name ?? existing.name,
+        productType: dto.productType ?? existing.productType,
+        trackInventory: dto.trackInventory ?? existing.trackInventory,
+        defaultPurchasePrice: effectiveDefaultPurchasePrice,
+        defaultSellingPrice:
+          dto.defaultSellingPrice !== undefined
+            ? dto.defaultSellingPrice
+            : existing.defaultSellingPrice,
+        retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
+        wholesalePrice:
+          dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+      });
+      await this.assertInheritedFamilyPriceAboveProductCost(
+        {
+          productName: dto.name ?? existing.name,
+          productType: dto.productType ?? existing.productType,
+          trackInventory: dto.trackInventory ?? existing.trackInventory,
+          defaultPurchasePrice: effectiveDefaultPurchasePrice,
+          defaultSellingPrice:
+            dto.defaultSellingPrice !== undefined
+              ? dto.defaultSellingPrice
+              : existing.defaultSellingPrice,
+          retailPrice: dto.retailPrice !== undefined ? dto.retailPrice : existing.retailPrice,
+          wholesalePrice:
+            dto.wholesalePrice !== undefined ? dto.wholesalePrice : existing.wholesalePrice,
+          productFamilyId: effectiveProductFamilyId,
+        },
+        db,
+      );
+    }
 
-    const record = await this.prisma.product.update({
-      where: { id },
+    const updated = await db.product.updateMany({
+      where: { id, deletedAt: null, updatedAt: existing.updatedAt },
       data: {
         ...(productCode !== undefined && { productCode }),
         ...(dto.divisionId !== undefined && { divisionId: dto.divisionId || null }),
@@ -1206,12 +1380,18 @@ export class ProductsService {
         ...(dto.isTaxable !== undefined && { isTaxable: dto.isTaxable }),
         ...(dto.taxRate !== undefined && { taxRate: dto.taxRate }),
         ...(dto.status !== undefined && { status: dto.status }),
+        updatedAt: new Date(Math.max(Date.now(), existing.updatedAt.getTime() + 1)),
       },
     });
+    if (updated.count !== 1)
+      throw new ConflictException(
+        'This product changed. Refresh and review your changes before saving.',
+      );
+    const record = await db.product.findUniqueOrThrow({ where: { id } });
 
     {
       const meta = auditFor('Product', 'UPDATE');
-      await this.auditLogs.log({
+      await this.auditLogs.logStrictInTransaction(db, {
         action: meta.action,
         entityType: 'Product',
         entityId: id,
@@ -1231,6 +1411,7 @@ export class ProductsService {
     refs: ProductReferenceIds,
     currentProductFamilyId?: string | null,
     validateCurrent = false,
+    db: ProductClient = this.prisma,
   ): Promise<string | null | undefined> {
     const categoryId = refs.categoryId;
     if (!categoryId) {
@@ -1243,7 +1424,7 @@ export class ProductsService {
     const familyName = optionalText(refs.productFamilyName);
     if (familyName) {
       const divisionId = optionalText(refs.divisionId) ?? null;
-      const existing = await this.prisma.productFamily.findFirst({
+      const existing = await db.productFamily.findFirst({
         where: {
           companyId,
           categoryId,
@@ -1255,7 +1436,7 @@ export class ProductsService {
       });
       if (existing) return existing.id;
 
-      const created = await this.prisma.productFamily.create({
+      const created = await db.productFamily.create({
         data: {
           companyId,
           categoryId,
@@ -1276,6 +1457,7 @@ export class ProductsService {
         familyId,
         categoryId,
         refs.divisionId,
+        db,
       );
     }
 
@@ -1285,6 +1467,7 @@ export class ProductsService {
         currentProductFamilyId,
         categoryId,
         refs.divisionId,
+        db,
       );
     }
 
@@ -1296,8 +1479,9 @@ export class ProductsService {
     productFamilyId: string,
     categoryId: string,
     divisionId?: string | null,
+    db: ProductClient = this.prisma,
   ) {
-    const family = await this.prisma.productFamily.findFirst({
+    const family = await db.productFamily.findFirst({
       where: { id: productFamilyId, deletedAt: null, isActive: true },
       select: { id: true, companyId: true, categoryId: true, divisionId: true },
     });
@@ -1314,9 +1498,13 @@ export class ProductsService {
     return family.id;
   }
 
-  private async assertReferencesBelongToCompany(companyId: string, refs: ProductReferenceIds) {
+  private async assertReferencesBelongToCompany(
+    companyId: string,
+    refs: ProductReferenceIds,
+    db: ProductClient = this.prisma,
+  ) {
     if (refs.categoryId) {
-      const category = await this.prisma.productCategory.findFirst({
+      const category = await db.productCategory.findFirst({
         where: { id: refs.categoryId, deletedAt: null },
         select: { companyId: true },
       });
@@ -1326,7 +1514,7 @@ export class ProductsService {
     }
 
     if (refs.divisionId) {
-      const division = await this.prisma.division.findFirst({
+      const division = await db.division.findFirst({
         where: { id: refs.divisionId, deletedAt: null },
         select: { companyId: true },
       });
@@ -1344,7 +1532,7 @@ export class ProductsService {
     );
     if (unitIds.length === 0) return;
 
-    const units = await this.prisma.unitOfMeasure.findMany({
+    const units = await db.unitOfMeasure.findMany({
       where: { id: { in: unitIds }, deletedAt: null },
       select: { id: true, companyId: true, status: true },
     });

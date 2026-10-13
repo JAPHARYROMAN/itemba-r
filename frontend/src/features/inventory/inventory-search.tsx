@@ -33,6 +33,7 @@ interface InventorySearchProps {
   scope: ScopeValue;
   query: string;
   permissions: InventorySearchPermissions;
+  navigationFilters?: Record<string, string>;
   onQueryChange: (query: string) => void;
   onNavigate: (href: string) => void;
 }
@@ -54,7 +55,7 @@ export function inventoryViewHref(
   const params = new URLSearchParams({ tab, view });
   appendScope(params, scope);
   Object.entries(extras).forEach(([key, value]) => {
-    if (value) params.set(key, value);
+    if (value !== undefined) params.set(key, value);
   });
   return `/inventory?${params.toString()}`;
 }
@@ -94,11 +95,13 @@ export default function InventorySearch({
   scope,
   query,
   permissions,
+  navigationFilters = {},
   onQueryChange,
   onNavigate,
 }: InventorySearchProps) {
   const resultsId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(query);
   const [results, setResults] = useState<InventorySearchProduct[]>([]);
   const [total, setTotal] = useState(0);
@@ -111,6 +114,28 @@ export default function InventorySearch({
   useEffect(() => {
     setValue(query);
   }, [query]);
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        event.key !== '/' ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')
+      )
+        return;
+      // A floating Inventory window owns its own shortcut; a hidden window must not steal focus.
+      if (!rootRef.current?.getClientRects().length) return;
+      const owner = rootRef.current.closest('[data-window-id]');
+      if (owner && owner.getAttribute('data-active') !== 'true') return;
+      event.preventDefault();
+      inputRef.current?.focus();
+    };
+    document.addEventListener('keydown', focusSearch);
+    return () => document.removeEventListener('keydown', focusSearch);
+  }, []);
 
   useEffect(() => {
     const trimmed = value.trim();
@@ -184,7 +209,15 @@ export default function InventorySearch({
   };
 
   const openProduct = (product: InventorySearchProduct) => {
-    navigate(inventoryProductHref(scope, product.id, value));
+    navigate(
+      permissions.catalog
+        ? inventoryViewHref(scope, 'catalog', 'products', {
+            ...navigationFilters,
+            productId: product.id,
+            q: value.trim(),
+          })
+        : inventoryProductHref(scope, product.id, value),
+    );
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -221,6 +254,7 @@ export default function InventorySearch({
       >
         <AppIcon name="search" size={18} className="shrink-0 text-[var(--aurora-text-muted)]" />
         <input
+          ref={inputRef}
           type="search"
           role="combobox"
           value={value}
@@ -234,9 +268,12 @@ export default function InventorySearch({
           aria-haspopup="dialog"
           aria-controls={showResults ? resultsId : undefined}
           aria-expanded={showResults}
-          placeholder="Search products, codes, SKUs, barcodes, categories…"
+          placeholder="Find products, codes, SKUs, barcodes, brands or variants…"
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--aurora-text-muted)]"
         />
+        <kbd className="inventory-search-shortcut" aria-hidden="true">
+          /
+        </kbd>
         {value && (
           <button
             type="button"
@@ -349,7 +386,20 @@ export default function InventorySearch({
                           {available && (
                             <span
                               className="block text-xs font-semibold"
-                              style={{ color: 'var(--aurora-success)' }}
+                              style={{
+                                color:
+                                  Number(
+                                    product.inventoryBalance?.availableQuantity ??
+                                      product.availableQuantity,
+                                  ) < 0
+                                    ? 'var(--aurora-danger)'
+                                    : Number(
+                                          product.inventoryBalance?.availableQuantity ??
+                                            product.availableQuantity,
+                                        ) === 0
+                                      ? 'var(--aurora-warning)'
+                                      : 'var(--aurora-success)',
+                              }}
                             >
                               {available}
                             </span>
@@ -372,7 +422,7 @@ export default function InventorySearch({
                               onClick={() =>
                                 navigate(
                                   inventoryViewHref(scope, 'stock', 'balances', {
-                                    q: identifier,
+                                    productId: product.id,
                                   }),
                                 )
                               }
@@ -388,7 +438,6 @@ export default function InventorySearch({
                                 navigate(
                                   inventoryViewHref(scope, 'stock', 'movements', {
                                     productId: product.id,
-                                    q: value.trim(),
                                   }),
                                 )
                               }
@@ -404,7 +453,6 @@ export default function InventorySearch({
                                 navigate(
                                   inventoryViewHref(scope, 'stock', 'batches', {
                                     productId: product.id,
-                                    q: value.trim(),
                                   }),
                                 )
                               }
@@ -423,7 +471,12 @@ export default function InventorySearch({
                 <button
                   type="button"
                   onClick={() =>
-                    navigate(inventoryViewHref(scope, 'catalog', 'products', { q: value.trim() }))
+                    navigate(
+                      inventoryViewHref(scope, 'catalog', 'products', {
+                        ...navigationFilters,
+                        q: value.trim(),
+                      }),
+                    )
                   }
                   className="flex w-full items-center justify-between border-t px-4 py-3 text-left text-sm font-semibold text-[var(--aurora-primary)] hover:bg-[var(--aurora-bg-subtle)]"
                   style={{ borderColor: 'var(--aurora-border)' }}

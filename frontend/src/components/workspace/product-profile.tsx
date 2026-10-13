@@ -13,6 +13,7 @@ import {
   PageSpinner,
   PermissionDeniedState,
   StatusBadge,
+  type ScopeValue,
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
@@ -25,6 +26,7 @@ import {
 import { ProfileSections } from './partner-profile-controls';
 import { productLabel, priceSourceLabel, productQuantity } from './product-form';
 import { catalogueMoney } from './catalogue-types';
+import { inventoryViewHref } from '@/features/inventory/inventory-search';
 import type { Product } from './product-types';
 import './workspace.css';
 import './partner-profile.css';
@@ -174,10 +176,12 @@ function Table({
     </div>
   );
 }
-function Stock({ product }: { product: Product }) {
+function Stock({ product, scope }: { product: Product; scope?: ScopeValue }) {
   const result = useWorkspaceChoices<Balance>('/inventory-balances', {
     companyId: product.companyId,
     productId: product.id,
+    ...(scope?.divisionId ? { divisionId: scope.divisionId } : {}),
+    ...(scope?.branchId ? { branchId: scope.branchId } : {}),
   });
   const stateKey = useInventoryStateKey('product.' + product.id + '.stock');
   const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
@@ -196,8 +200,12 @@ function Stock({ product }: { product: Product }) {
   return (
     <>
       <p className="partner-profile-history-note">
-        All accessible branches and locations in this company. Totals include every balance record (
-        {result.rows.length}).
+        {scope?.branchId
+          ? `Selected branch${result.rows[0]?.branch?.name ? ` · ${result.rows[0].branch.name}` : ''}.`
+          : scope?.divisionId
+            ? 'All accessible branches in the selected division.'
+            : 'All accessible branches and locations in this company.'}{' '}
+        Totals include every balance record ({result.rows.length}).
       </p>
       <div className="workspace-summary">
         <div>
@@ -252,12 +260,22 @@ function Stock({ product }: { product: Product }) {
     </>
   );
 }
-function Movements({ product, canReadSales }: { product: Product; canReadSales: boolean }) {
+function Movements({
+  product,
+  canReadSales,
+  scope,
+}: {
+  product: Product;
+  canReadSales: boolean;
+  scope?: ScopeValue;
+}) {
   const stateKey = useInventoryStateKey('product.' + product.id + '.movements');
   const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
   const result = useWorkspaceResource<{ data: Movement[]; total: number }>('/inventory-movements', {
     companyId: product.companyId,
     productId: product.id,
+    ...(scope?.divisionId ? { divisionId: scope.divisionId } : {}),
+    ...(scope?.branchId ? { branchId: scope.branchId } : {}),
     page,
     limit: 20,
   });
@@ -270,7 +288,11 @@ function Movements({ product, canReadSales }: { product: Product; canReadSales: 
   return (
     <>
       <p className="partner-profile-history-note">
-        Stock movements across all accessible branches in this company.
+        {scope?.branchId
+          ? 'Stock movements for the selected branch.'
+          : scope?.divisionId
+            ? 'Stock movements across accessible branches in the selected division.'
+            : 'Stock movements across all accessible branches in this company.'}
       </p>
       {!rows.length ? (
         <EmptyState title="No movements" description="No stock movements on this page." />
@@ -330,16 +352,35 @@ function Movements({ product, canReadSales }: { product: Product; canReadSales: 
       <Pages page={page} total={result.data?.total || 0} setPage={setPage} />
       <Link
         className="product-profile-related"
-        href={`/inventory?tab=stock&view=movements&companyId=${encodeURIComponent(product.companyId)}`}
+        href={inventoryViewHref(
+          {
+            companyId: product.companyId,
+            divisionId: scope?.divisionId || '',
+            branchId: scope?.branchId || '',
+          },
+          'stock',
+          'movements',
+          { productId: product.id },
+        )}
       >
         Open inventory movements →
       </Link>
     </>
   );
 }
-function Profit({ product, canReadSales }: { product: Product; canReadSales: boolean }) {
+function Profit({
+  product,
+  canReadSales,
+  scope,
+}: {
+  product: Product;
+  canReadSales: boolean;
+  scope?: ScopeValue;
+}) {
   const result = useWorkspaceResource<LedgerRow[]>(`/profit/products/${product.id}/ledger`, {
     companyId: product.companyId,
+    ...(scope?.divisionId ? { divisionId: scope.divisionId } : {}),
+    ...(scope?.branchId ? { branchId: scope.branchId } : {}),
   });
   const stateKey = useInventoryStateKey('product.' + product.id + '.profit');
   const [page, setPage] = useWorkspaceState(stateKey + '.page', 1);
@@ -352,6 +393,7 @@ function Profit({ product, canReadSales }: { product: Product; canReadSales: boo
       <p className="partner-profile-history-note">
         The latest 250 sales lines returned by the profit ledger, using recorded sale costs. This is
         a recent history, not a lifetime total.
+        {scope?.branchId && ' Filtered to the selected branch.'}
       </p>
       {!rows.length ? (
         <EmptyState
@@ -421,6 +463,7 @@ function Content({
   backHref,
   section,
   setSection,
+  scope,
 }: {
   product: Product;
   imageVersion: number;
@@ -429,6 +472,7 @@ function Content({
   backHref: string;
   section: Section;
   setSection: (value: Section) => void;
+  scope?: ScopeValue;
 }) {
   const { hasPermission } = useAuth();
   const sections: Section[] = ['Overview'];
@@ -477,6 +521,11 @@ function Content({
           <StatusBadge status={product.status} />
         </div>
       </header>
+      {scope?.branchId && (
+        <p className="partner-profile-history-note">
+          Stock and activity stay in the selected branch.
+        </p>
+      )}
       <div className="product-profile-overview">
         <div className="product-profile-image">
           {product.imageUrl ? (
@@ -618,19 +667,27 @@ function Content({
               )}
             </>
           )}
-          {active === 'Stock by branch' && <Stock product={product} />}
+          {active === 'Stock by branch' && <Stock product={product} scope={scope} />}
           {active === 'Movement history' && (
-            <Movements product={product} canReadSales={hasPermission('sales.view')} />
+            <Movements product={product} scope={scope} canReadSales={hasPermission('sales.view')} />
           )}
           {active === 'Profitability' && (
-            <Profit product={product} canReadSales={hasPermission('sales.view')} />
+            <Profit product={product} scope={scope} canReadSales={hasPermission('sales.view')} />
           )}
         </section>
       </Card>
     </>
   );
 }
-export function ProductProfile({ productId, backHref }: { productId: string; backHref: string }) {
+export function ProductProfile({
+  productId,
+  backHref,
+  scope,
+}: {
+  productId: string;
+  backHref: string;
+  scope?: ScopeValue;
+}) {
   const { hasPermission, loading } = useAuth();
   const allowed =
     !loading &&
@@ -676,15 +733,27 @@ export function ProductProfile({ productId, backHref }: { productId: string; bac
       )}
       {resource.loading ? (
         <PageSpinner />
-      ) : resource.error || !resource.data ? (
+      ) : resource.error ||
+        !resource.data ||
+        (scope?.companyId && scope.companyId !== resource.data.companyId) ||
+        (scope?.divisionId &&
+          resource.data.divisionId &&
+          scope.divisionId !== resource.data.divisionId) ? (
         <>
           <PageHeader title="Product" />
           <Link href={backHref}>Back to products</Link>
-          <ErrorState message={resource.error || 'Product not found.'} onRetry={resource.reload} />
+          <ErrorState
+            message={
+              resource.error ||
+              (resource.data ? 'Product unavailable in the selected scope.' : 'Product not found.')
+            }
+            onRetry={resource.reload}
+          />
         </>
       ) : (
         <Content
           product={resource.data}
+          scope={scope}
           imageVersion={imageVersion}
           onRefresh={resource.reload}
           onEdit={() => {

@@ -2007,7 +2007,7 @@ const stockAndSupplierDefinitions: readonly FixtureDefinition[] = [
     { status: literal('PENDING_APPROVAL') },
     'STOCK_ADJUSTMENT_SUBMIT',
     'StockAdjustment',
-    { preState: { status: literal('DRAFT') } },
+    { body: {}, preState: { status: literal('DRAFT') } },
   ),
   transitionFixture(
     'StockAdjustmentsController.approve',

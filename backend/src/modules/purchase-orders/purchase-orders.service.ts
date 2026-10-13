@@ -15,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
 import { PostingEngineService, partyOf } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
@@ -1413,6 +1414,10 @@ export class PurchaseOrdersService {
         );
       }
       const receivingBranchId = existing.branchId;
+      await lockInventoryProducts(
+        tx,
+        existing.lines.map((line) => line.productId),
+      );
       const requestedFuelAllocations = dto.fuelTankAllocations ?? [];
       this.assertFuelTankAllocationsReferenceOrderLines(
         existing.lines as any[],

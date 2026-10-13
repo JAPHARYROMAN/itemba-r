@@ -414,10 +414,12 @@ describe('product editor', () => {
     await ready();
     fireEvent.click(screen.getByLabelText('Inherit family selling prices'));
     capture('product-editor');
-    expect(screen.getByRole('group', { name: 'Identity & organisation' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Family & variant' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Prices & tax' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Basics' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Family & variant' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Pricing' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Units & inventory' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Stock controls' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Tax' })).toBeInTheDocument();
   });
 });
 describe('product validation contracts', () => {

@@ -6,11 +6,12 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { ProfitModule } from '../profit/profit.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { CompanyScopeService } from '../../common/services';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 
 @Module({
   imports: [PrismaModule, AuditLogsModule, ProfitModule, DocumentsModule],
   controllers: [ProductsController],
-  providers: [ProductsService, CompanyScopeService],
+  providers: [ProductsService, CompanyScopeService, OrganizationScopeService],
   exports: [ProductsService],
 })
 export class ProductsModule {}

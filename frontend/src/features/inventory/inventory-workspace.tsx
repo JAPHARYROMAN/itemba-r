@@ -9,7 +9,7 @@ import {
   useWorkspaceSearchParams as useSearchParams,
   useWorkspaceSearchReader,
 } from '@/components/workspace/workspace-navigation';
-import { AppIcon, Btn, EmptyState, PageHeader, PageSpinner } from '@/components/ui';
+import { AppIcon, EmptyState, PageHeader, PageSpinner } from '@/components/ui';
 import type { AppIconName, ScopeValue } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import InventorySearch from './inventory-search';
@@ -102,7 +102,6 @@ export default function InventoryWorkspace() {
   const searchParams = useSearchParams();
   const readSearch = useWorkspaceSearchReader();
   const scope = readScope(searchParams);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [recordsRevision, setRecordsRevision] = useState(0);
 
   const tabs = useMemo<TabDefinition[]>(
@@ -160,7 +159,7 @@ export default function InventoryWorkspace() {
       },
       {
         id: 'catalog',
-        label: 'Catalog',
+        label: 'Products and stock',
         icon: 'product',
         permission: () =>
           hasPermission('products.view') ||
@@ -253,7 +252,13 @@ export default function InventoryWorkspace() {
     requestedTab && VALID_TABS.has(requestedTab as WorkspaceTab)
       ? visibleTabs.find((tab) => tab.id === requestedTab)?.id
       : undefined;
-  const selectedTab = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0];
+  const defaultTab =
+    visibleTabs.find(
+      (tab) => tab.id === 'catalog' && tab.views.some((view) => view.id === 'products'),
+    ) ??
+    visibleTabs.find((tab) => tab.id === 'stock') ??
+    visibleTabs[0];
+  const selectedTab = visibleTabs.find((tab) => tab.id === activeTab) ?? defaultTab;
   const requestedView = searchParams.get('view');
   const selectedView =
     selectedTab?.views.find((view) => view.id === requestedView) ?? selectedTab?.views[0];
@@ -320,39 +325,34 @@ export default function InventoryWorkspace() {
     <div className="business-workspace inventory-workspace">
       <PageHeader
         title="Inventory"
-        subtitle="Your products, stock and daily controls in one place."
-        actions={
-          canSearchInventory && (
-            <Btn
-              variant="secondary"
-              aria-expanded={searchOpen}
-              aria-controls="inventory-product-search"
-              onClick={() => setSearchOpen((v) => !v)}
-            >
-              Find a product
-            </Btn>
-          )
-        }
+        subtitle="Find a product. See its stock. Make your next move."
       />
       <nav className="inventory-workspace-nav" aria-label="Inventory sections">
-        {visibleTabs.map((tab) => (
-          <Link
-            key={tab.id}
-            href={hrefFor(tab.id, tab.views[0]?.id)}
-            aria-current={tab.id === selectedTab.id ? 'page' : undefined}
-          >
-            <AppIcon name={tab.icon} size={16} />
-            {tab.label}
-          </Link>
-        ))}
+        {[...visibleTabs]
+          .sort((a, b) => Number(b.id === 'catalog') - Number(a.id === 'catalog'))
+          .map((tab) => (
+            <Link
+              key={tab.id}
+              href={hrefFor(tab.id, tab.views[0]?.id)}
+              aria-current={tab.id === selectedTab.id ? 'page' : undefined}
+            >
+              <AppIcon name={tab.icon} size={16} />
+              {tab.label}
+            </Link>
+          ))}
       </nav>
       <section className="inventory-scope-panel" aria-label="Inventory scope">
         <InventoryScope value={scope} onChange={onScopeChange} />
-        {canSearchInventory && searchOpen && (
+        {canSearchInventory && (
           <div id="inventory-product-search">
             <InventorySearch
               scope={scope}
               query={inventorySearchQuery}
+              navigationFilters={Object.fromEntries(
+                ['categoryId', 'productFamilyId', 'productType', 'status', 'priceSource'].flatMap(
+                  (key) => (searchParams.has(key) ? [[key, searchParams.get(key)!]] : []),
+                ),
+              )}
               permissions={{
                 balances: hasPermission('inventory.view'),
                 movements: hasPermission('inventory.movements.view'),

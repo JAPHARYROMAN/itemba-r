@@ -56,6 +56,7 @@ const mount = (start?: ScopeValue) =>
   );
 beforeEach(() => {
   vi.resetAllMocks();
+  localStorage.clear();
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute('open', '');
   };
@@ -78,6 +79,34 @@ beforeEach(() => {
   }));
 });
 describe('Inventory scope controls', () => {
+  it('restores only an authorized retained branch and otherwise chooses the sole branch', async () => {
+    localStorage.setItem('inventory.lastBranch.session', JSON.stringify(initial));
+    mount({ companyId: 'company', divisionId: '', branchId: '' });
+    await waitFor(() => expect(selectFieldValue(getSelectField('Branch'))).toBe('branch'));
+    expect(screen.getByLabelText('Scope')).toHaveTextContent('"divisionId":"division"');
+  });
+  it('leaves a chooser for several branches when the retained branch is no longer authorized', async () => {
+    localStorage.setItem(
+      'inventory.lastBranch.session',
+      JSON.stringify({ ...initial, branchId: 'revoked' }),
+    );
+    const base = state.page.getMockImplementation()!;
+    state.page.mockImplementation(async (path: string, options: unknown) =>
+      path === '/branches'
+        ? {
+            data: [
+              { id: 'one', name: 'North' },
+              { id: 'two', name: 'South' },
+            ],
+            total: 2,
+          }
+        : base(path, options),
+    );
+    mount({ companyId: 'company', divisionId: '', branchId: '' });
+    await waitFor(() => expect(selectFieldOptions(getSelectField('Branch'))).toContain('South'));
+    expect(selectFieldValue(getSelectField('Branch'))).toBe('');
+    expect(screen.getByLabelText('Scope')).not.toHaveTextContent('revoked');
+  });
   it('loads all choice pages, resolves legacy branch parents and preserves chosen scope', async () => {
     state.page.mockImplementation(async (path: string, { query }: { query: { page: number } }) => ({
       data:

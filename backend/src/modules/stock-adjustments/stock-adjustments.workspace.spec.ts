@@ -9,6 +9,7 @@ function setup() {
   const scope = {
     companyWhereFor: jest.fn().mockResolvedValue({ companyId: { in: ['company'] } }),
   };
+  const organization = { recordWhereFor: jest.fn().mockResolvedValue({}) };
   const service = new StockAdjustmentsService(
     prisma as any,
     {} as any,
@@ -16,10 +17,22 @@ function setup() {
     scope as any,
     {} as any,
     {} as any,
+    organization as any,
   );
-  return { prisma, scope, service };
+  return { prisma, scope, service, organization };
 }
 describe('Stock adjustment workspace queries', () => {
+  it('includes a division-authorized legacy count with only a branch scope', async () => {
+    const { prisma, service, organization } = setup();
+    organization.recordWhereFor.mockResolvedValue({ OR: [{ divisionId: { in: ['division'] } }] });
+    await service.findAll({ branchId: 'branch' }, {} as any);
+    expect(prisma.stockAdjustment.findMany.mock.calls[0][0].where.AND).toContainEqual({
+      OR: [
+        { divisionId: { in: ['division'] } },
+        { divisionId: null, branch: { divisionId: { in: ['division'] } } },
+      ],
+    });
+  });
   it('combines scoped search, branch, division, dates and stable pagination for rows and total', async () => {
     const { prisma, service } = setup();
     expect(
@@ -45,12 +58,13 @@ describe('Stock adjustment workspace queries', () => {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       where: {
         deletedAt: null,
-        companyId: { in: ['company'] },
         divisionId: 'division',
         branchId: 'branch',
         status: 'APPROVED',
         createdAt: { lte: new Date('2026-09-18T23:59:59.999Z') },
         AND: [
+          { companyId: { in: ['company'] } },
+          {},
           { OR: expect.arrayContaining([{ reason: { contains: 'count', mode: 'insensitive' } }]) },
         ],
       },

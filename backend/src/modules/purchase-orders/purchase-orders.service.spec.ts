@@ -913,6 +913,13 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
         tx: prisma,
       }),
     );
+    const productLock = prisma.$queryRaw.mock.calls.findIndex(([query]: any[]) =>
+      String(query.sql ?? query).includes('FROM products'),
+    );
+    expect(productLock).toBeGreaterThanOrEqual(0);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[productLock]).toBeLessThan(
+      inventoryMovements.createMovement.mock.invocationCallOrder[0],
+    );
   });
   it.each([
     ['companyId', 'other-company'],

@@ -22,6 +22,7 @@ import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
 import { InventoryScope } from './inventory-scope';
 import { StockExportDialog } from './stock-export-dialog';
 import { useInventoryWorkspace } from './inventory-workspace-context';
+import { useInventoryStockEditor } from './inventory-drafts';
 import { inventoryProductHref, inventoryViewHref } from './inventory-search';
 import './inventory-workspace.css';
 
@@ -193,6 +194,7 @@ function LiveStock() {
     query,
     enabled,
   );
+  const stockEditor = useInventoryStockEditor(result.reload);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   useEffect(() => {
@@ -547,6 +549,19 @@ function LiveStock() {
                   ]}
                   actions={(r) => (
                     <>
+                      {scopeFor(r).branchId && hasPermission('inventory.adjustments.create') && (
+                        <Btn
+                          onClick={() =>
+                            stockEditor.open({
+                              kind: 'adjustment',
+                              scope: scopeFor(r),
+                              productId: r.productId,
+                            })
+                          }
+                        >
+                          Adjust stock
+                        </Btn>
+                      )}
                       {hasPermission('products.view') && (
                         <Link
                           className="workspace-secondary-link"
@@ -595,6 +610,7 @@ function LiveStock() {
                   )}
                   empty="No stock positions match this view. Change the location, review filter or search."
                 />
+                {stockEditor.drafts}
                 <div className="inventory-actions" aria-label="Inventory workspaces">
                   {hasPermission('product_batches.view') && (
                     <Link

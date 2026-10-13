@@ -250,6 +250,16 @@ describe('SalesOrdersService confirmation against POS captures', () => {
     expect(prisma.salesOrder.findFirst.mock.invocationCallOrder[1]).toBeLessThan(
       prisma.posDraft.findMany.mock.invocationCallOrder[0],
     );
+    const productLock = prisma.$queryRaw.mock.calls.findIndex(([query]: any[]) =>
+      String(query.sql ?? query).includes('FROM products'),
+    );
+    expect(productLock).toBeGreaterThanOrEqual(0);
+    expect(prisma.salesOrder.findFirst.mock.invocationCallOrder[1]).toBeLessThan(
+      prisma.$queryRaw.mock.invocationCallOrder[productLock],
+    );
+    expect(prisma.$queryRaw.mock.invocationCallOrder[productLock]).toBeLessThan(
+      prisma.posDraft.findMany.mock.invocationCallOrder[0],
+    );
     expect(prisma.$executeRaw.mock.calls[0][0].values).toEqual(['PosSalePosting:company-1']);
     expect(prisma.$executeRaw.mock.calls[1][0].values).toEqual([
       `POSDraft:company-1:${canonicalSaleSignature(current)}`,
@@ -1655,6 +1665,31 @@ describe('SalesOrdersService cancel money guard', () => {
       }),
     );
     // No reversal / cancellation side effects run once the guard trips.
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
+  });
+  it('rechecks issued notes after waiting for the sales-order lock', async () => {
+    const { service, prisma, inventoryMovements } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({ status: 'CONFIRMED', paidAmount: 0, paymentStatus: 'UNPAID' }),
+    );
+    prisma.creditNote.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'cn-new' });
+    await expect(service.cancel('so-1', user)).rejects.toThrow('issued credit note');
+    expect(prisma.creditNote.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
+  });
+  it('rechecks payments after waiting for the sales-order lock', async () => {
+    const { service, prisma } = makeService();
+    prisma.salesOrder.findFirst
+      .mockResolvedValueOnce(
+        persistedOrder({ status: 'CONFIRMED', paidAmount: 0, paymentStatus: 'UNPAID' }),
+      )
+      .mockResolvedValueOnce(
+        persistedOrder({ status: 'CONFIRMED', paidAmount: 10, paymentStatus: 'PARTIALLY_PAID' }),
+      );
+    await expect(service.cancel('so-1', user)).rejects.toThrow('received payment');
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(prisma.salesOrder.update).not.toHaveBeenCalled();
   });
 });

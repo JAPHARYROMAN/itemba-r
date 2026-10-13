@@ -7,6 +7,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
 import { CreateGoodsReceivedNoteDto } from './dto/create-goods-received-note.dto';
 import { QueryGoodsReceivedNotesDto } from './dto/query-goods-received-notes.dto';
@@ -329,6 +330,10 @@ export class GoodsReceivedNotesService {
         });
       }
 
+      await lockInventoryProducts(
+        tx,
+        existing.lines.map((line) => line.productId),
+      );
       const postedAt = new Date();
       const claim = await tx.goodsReceivedNote.updateMany({
         where: { id, deletedAt: null, status: 'APPROVED' as any },

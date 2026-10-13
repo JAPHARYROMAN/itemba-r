@@ -29,6 +29,8 @@ import {
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CashBookService } from '../cash-book/cash-book.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
+import { lockReceivableWithoutWaiting, preflightSalesOrderReceivables } from '../../common/services/receivable-conflict-lock';
 import { TaxAutoApplyService } from '../tax-auto-apply/tax-auto-apply.service';
 import {
   PostingEngineService,
@@ -2317,6 +2319,10 @@ export class SalesOrdersService {
       if (!existing.branchId)
         throw new BadRequestException('Sales order branch/location is required to issue stock');
       const issuingBranchId = existing.branchId;
+      await lockInventoryProducts(
+        tx,
+        existing.lines.map((line) => line.productId),
+      );
       await this.assertPosDraftDuplicateReview(tx, existing, originatingPosDraftId);
 
       // Atomically claim the order: flip DRAFT -> CONFIRMED in one guarded write
@@ -3200,6 +3206,40 @@ export class SalesOrdersService {
 
     const record = await this.prisma.$transaction(async (tx) => {
       if (existing.status === 'CONFIRMED') {
+        // Match confirmation's document-before-products order, then claim every
+        // product before accounting locks or per-line movement numbering.
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM sales_orders WHERE id=${id} FOR UPDATE`);
+        const current = await this.findOne(id, user, AccessLevel.WRITE, tx);
+        if (current.status !== 'CONFIRMED')
+          throw new ConflictException('The sales order changed. Reload it before cancelling.');
+        if (Number(current.paidAmount ?? 0) > 0 || current.paymentStatus !== 'UNPAID')
+          throw new BadRequestException(
+            'This sales order has received payment and cannot be cancelled directly. ' +
+              'Record a refund or credit note to reverse the payment first.',
+          );
+        const currentCreditNote = await tx.creditNote.findFirst({
+          where: {
+            salesOrderId: id,
+            companyId: current.companyId,
+            status: 'ISSUED',
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (currentCreditNote)
+          throw new ConflictException(
+            'Cannot cancel a sales order that has an issued credit note against it; void the credit note first.',
+          );
+        await preflightSalesOrderReceivables(
+          tx,
+          current.companyId,
+          [id],
+          current.receivableId ? [current.receivableId] : [],
+        );
+        await lockInventoryProducts(
+          tx,
+          existing.lines.map((line) => line.productId),
+        );
         // GL reversal (DECISION 2): a CONFIRMED order posted a balanced
         // confirmation journal (DR AR/Cash, CR Revenue/VAT, plus DR COGS / CR
         // Inventory). The SALES_RETURN movement below unwinds the inventory
@@ -3319,6 +3359,13 @@ export class SalesOrdersService {
       }
 
       if (existing.receivableId) {
+        const linked = await lockReceivableWithoutWaiting(tx, existing.receivableId);
+        if (!linked || linked.companyId !== existing.companyId)
+          throw new NotFoundException('Linked receivable not found');
+        if (linked.status === 'CANCELLED' || linked.status === 'WRITTEN_OFF')
+          throw new ConflictException(
+            'The linked receivable was already reversed; reload the sales order.',
+          );
         const cancelledReceivable = await tx.receivable.update({
           where: { id: existing.receivableId },
           data: {

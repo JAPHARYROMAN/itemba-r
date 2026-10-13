@@ -11,6 +11,49 @@ env:
   DATABASE_URL: postgresql://itemba:1618@localhost:5432/itemba_r_ci_placeholder?schema=public
 
 jobs:
+  inventory-workflows:
+    name: Inventory — Product edits and stock accounting proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: inventory_proof
+          POSTGRES_PASSWORD: isolated-inventory-proof-ci
+          POSTGRES_DB: inventory_release_proof
+        ports: ['18565:5432']
+        options: >-
+          --health-cmd "pg_isready -U inventory_proof -d inventory_release_proof"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://inventory_proof:isolated-inventory-proof-ci@127.0.0.1:18565/inventory_release_proof?schema=public
+      INVENTORY_PRODUCT_TEST_DATABASE_URL: postgresql://inventory_proof:isolated-inventory-proof-ci@127.0.0.1:18565/inventory_release_proof?schema=public
+      INVENTORY_ADJUSTMENT_TEST_DATABASE_URL: postgresql://inventory_proof:isolated-inventory-proof-ci@127.0.0.1:18565/inventory_release_proof?schema=public
+      INVENTORY_REVERSAL_TEST_DATABASE_URL: postgresql://inventory_proof:isolated-inventory-proof-ci@127.0.0.1:18565/inventory_release_proof?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run prisma:generate
+        working-directory: backend
+      - run: npm run build
+        working-directory: backend
+      - name: Prove exact lookup, concurrent edits and stock setting guards
+        run: node scripts/test-inventory-products.cjs
+        working-directory: backend
+      - name: Prove count capture, retry, posting races and atomic accounting
+        run: node scripts/test-inventory-adjustments.cjs
+        working-directory: backend
+      - name: Prove sales and return reversals under concurrent stock and payment locks
+        run: node scripts/test-inventory-reversal-locks.cjs
+        working-directory: backend
+
   pos-draft-workflows:
     name: POS Draft — Isolated transaction and security proof
     runs-on: ubuntu-latest

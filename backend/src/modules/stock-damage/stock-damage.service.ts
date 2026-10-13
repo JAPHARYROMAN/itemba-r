@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
 import { CreateStockDamageDto } from './dto/create-stock-damage.dto';
 import { UpdateStockDamageDto } from './dto/update-stock-damage.dto';
 import { QueryStockDamageDto } from './dto/query-stock-damage.dto';
@@ -362,6 +363,7 @@ export class StockDamageService {
     // status === APPROVED) so concurrent/retried posts cannot remove stock twice, and gate
     // the batch decrement on availability so remainingQuantity can never go negative.
     const run = async (tx: Prisma.TransactionClient) => {
+      await lockInventoryProducts(tx, [productId]);
       const claimed = await tx.stockDamage.updateMany({
         where: { id, status: 'APPROVED' },
         data: { status: 'POSTED' },

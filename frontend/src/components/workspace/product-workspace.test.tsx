@@ -17,8 +17,14 @@ const state = vi.hoisted(() => ({
   upload: vi.fn(),
   download: vi.fn(),
   pdf: vi.fn(),
+  params: '',
+  replace: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: state.replace }),
+  usePathname: () => '/inventory',
+  useSearchParams: () => new URLSearchParams(state.params),
+}));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     user: { companyId: 'company' },
@@ -49,6 +55,7 @@ const family = {
 };
 const product: Product = {
   id: 'product',
+  updatedAt: '2026-10-13T10:00:00.000Z',
   companyId: 'company',
   company: { name: 'Example Company' },
   divisionId: 'division',
@@ -129,6 +136,7 @@ function capture(name: string) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  state.params = '';
   state.permissions = new Set([
     'products.view',
     'products.create',
@@ -258,12 +266,12 @@ describe('product register', () => {
       ),
     );
   });
-  it('preserves embedded scope in stock, search and profile links, clearing dependent filters on scope changes', async () => {
+  it('preserves embedded scope in stock, search and profile links and retains filters on scope changes', async () => {
     const ui = mount(embedded());
     await inspect();
     expect(screen.queryByLabelText('Company filter')).not.toBeInTheDocument();
     const details = screen.getByRole('complementary', { name: 'Record details' });
-    expect(within(details).getByText('At or below reorder level')).toBeVisible();
+    expect(within(details).getByText('No available stock')).toBeVisible();
     const href = screen.getByRole('link', { name: 'Full product profile' }).getAttribute('href');
     expect(href).toBe(
       '/inventory/products/product?companyId=company&divisionId=division&branchId=branch',
@@ -279,7 +287,7 @@ describe('product register', () => {
             companyId: 'second',
             divisionId: 'division',
             branchId: 'branch',
-            categoryId: '',
+            categoryId: 'paint',
             productFamilyId: '',
             search: 'blue',
             page: 1,
@@ -426,7 +434,7 @@ describe('product register', () => {
   it('opens the shared editor, reports its save and preserves generated/skipped family results', async () => {
     mount();
     await inspect();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit product' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Edit' }));
     await waitFor(() => expect(getSelectField('Product family')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Description'), {
       target: { value: 'Updated description' },
@@ -464,7 +472,6 @@ describe('product register', () => {
     await inspect();
     const detail = screen.getByRole('complementary', { name: 'Record details' });
     for (const value of [
-      'COR-W',
       '12345678',
       'Washable interior finish',
       'Coral · 4 litre',
@@ -487,10 +494,224 @@ describe('product register', () => {
     mount();
     await inspect();
     const details = screen.getByRole('complementary', { name: 'Record details' });
-    expect(details).toHaveFocus();
+    expect(within(details).getByRole('heading', { name: 'Record details' })).toHaveFocus();
     fireEvent.keyDown(details, { key: 'Escape' });
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Inspect Coral white' })).toHaveFocus(),
     );
+  });
+  it('retains catalog filters when the permanent search query or organisation scope changes', async () => {
+    const ui = mount(embedded());
+    await screen.findByRole('button', { name: 'Inspect Coral white' });
+    expect(screen.queryByPlaceholderText('Search products…')).not.toBeInTheDocument();
+    openFilters();
+    await waitFor(() => expect(getSelectField('Category filter')).toBeEnabled());
+    changeSelectField('Category filter', 'paint');
+    changeSelectField('Type filter', 'STOCK_ITEM');
+    changeSelectField('Status filter', 'ACTIVE');
+    expect(state.replace.mock.lastCall?.[0]).toContain('status=ACTIVE');
+    ui.rerender(<UnsavedWorkProvider>{embedded('company', 'blue')}</UnsavedWorkProvider>);
+    await waitFor(() =>
+      expect(state.get).toHaveBeenLastCalledWith(
+        '/products',
+        expect.objectContaining({
+          query: expect.objectContaining({
+            search: 'blue',
+            categoryId: 'paint',
+            productType: 'STOCK_ITEM',
+            status: 'ACTIVE',
+          }),
+        }),
+      ),
+    );
+    ui.rerender(<UnsavedWorkProvider>{embedded('second', 'blue')}</UnsavedWorkProvider>);
+    await waitFor(() =>
+      expect(state.get).toHaveBeenLastCalledWith(
+        '/products',
+        expect.objectContaining({
+          query: expect.objectContaining({
+            companyId: 'second',
+            categoryId: 'paint',
+            productType: 'STOCK_ITEM',
+            status: 'ACTIVE',
+          }),
+        }),
+      ),
+    );
+  });
+  it('synchronizes explicit catalog filters from URL navigation, including intentional clears', async () => {
+    state.params =
+      'categoryId=paint&productType=STOCK_ITEM&status=ACTIVE&priceSource=FAMILY_DEFAULT';
+    const ui = mount(embedded());
+    await waitFor(() =>
+      expect(state.get).toHaveBeenCalledWith(
+        '/products',
+        expect.objectContaining({
+          query: expect.objectContaining({
+            categoryId: 'paint',
+            status: 'ACTIVE',
+            priceSource: 'FAMILY_DEFAULT',
+          }),
+        }),
+      ),
+    );
+    state.params = 'categoryId=&productType=SERVICE&status=INACTIVE&priceSource=MISSING';
+    ui.rerender(<UnsavedWorkProvider>{embedded()}</UnsavedWorkProvider>);
+    await waitFor(() =>
+      expect(state.get).toHaveBeenLastCalledWith(
+        '/products',
+        expect.objectContaining({
+          query: expect.objectContaining({
+            categoryId: '',
+            productType: 'SERVICE',
+            status: 'INACTIVE',
+            priceSource: 'MISSING',
+          }),
+        }),
+      ),
+    );
+  });
+  it('opens an exact selected product outside the paginated results and reads only its branch stock', async () => {
+    state.params = 'productId=product';
+    state.permissions.add('inventory.view');
+    state.permissions.add('inventory.movements.view');
+    const exact = { ...product, inventoryBalance: null, availableQuantity: undefined };
+    state.get.mockImplementation(async (path: string) =>
+      path === '/products/product'
+        ? exact
+        : path === '/inventory-balances'
+          ? {
+              data: [
+                {
+                  id: 'balance',
+                  productId: 'product',
+                  branchId: 'branch',
+                  quantityOnHand: 2,
+                  quantityReserved: 5,
+                },
+              ],
+              total: 1,
+            }
+          : { data: [other], total: 1 },
+    );
+    mount(embedded('company', 'typed search'));
+    const inspector = await screen.findByRole('region', { name: 'Coral white inspector' });
+    expect(await within(inspector).findByText('Over-reserved')).toBeVisible();
+    expect(within(inspector).getByText('-3')).toBeVisible();
+    expect(state.get).toHaveBeenCalledWith(
+      '/products/product',
+      expect.objectContaining({ query: {} }),
+    );
+    expect(state.get).toHaveBeenCalledWith(
+      '/inventory-balances',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          productId: 'product',
+          companyId: 'company',
+          branchId: 'branch',
+        }),
+      }),
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    const movementHref = screen
+      .getByRole('link', { name: 'Stock movements' })
+      .getAttribute('href')!;
+    expect(new URL(movementHref, 'https://itemba.example').searchParams.get('productId')).toBe(
+      'product',
+    );
+    expect(movementHref).not.toContain('typed');
+  });
+  it('changes the exact inspector identity on same-view navigation even when names match', async () => {
+    const duplicate = { ...other, name: product.name, inventoryBalance: product.inventoryBalance };
+    state.get.mockImplementation(async (path: string) =>
+      path === '/products/product'
+        ? product
+        : path === '/products/other'
+          ? duplicate
+          : { data: [product, duplicate], total: 2 },
+    );
+    state.params = 'productId=product';
+    const ui = mount(embedded());
+    await screen.findByRole('region', { name: 'Coral white inspector' });
+    expect(screen.getByRole('link', { name: 'Full product profile' })).toHaveAttribute(
+      'href',
+      '/inventory/products/product?companyId=company&divisionId=division&branchId=branch',
+    );
+    state.params = 'productId=other';
+    ui.rerender(<UnsavedWorkProvider>{embedded()}</UnsavedWorkProvider>);
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Full product profile' })).toHaveAttribute(
+        'href',
+        '/inventory/products/other?companyId=company&divisionId=division&branchId=branch',
+      ),
+    );
+  });
+  it('shows authoritative zero for a successful absent scoped balance, without fabricating a stored balance', async () => {
+    state.params = 'productId=product';
+    state.permissions.add('inventory.view');
+    state.get.mockImplementation(async (path: string) =>
+      path === '/products/product'
+        ? { ...product, inventoryBalance: null, availableQuantity: undefined }
+        : path === '/inventory-balances'
+          ? { data: [], total: 0 }
+          : { data: [other], total: 1 },
+    );
+    mount(embedded());
+    const inspector = await screen.findByRole('region', { name: 'Coral white inspector' });
+    expect(await within(inspector).findByText('Out of stock')).toBeVisible();
+    const metrics = inspector.querySelector('.product-stock-metrics')!;
+    expect(metrics.querySelectorAll('strong')).toHaveLength(3);
+    expect(
+      Array.from(metrics.querySelectorAll('strong')).map((value) => value.textContent),
+    ).toEqual(['0', '0', '0']);
+    expect(state.patch).not.toHaveBeenCalled();
+    expect(state.post).not.toHaveBeenCalled();
+  });
+  it('preserves a failed rename for retry and patches only the name and source version', async () => {
+    state.get.mockResolvedValue({
+      data: [{ ...product, defaultPurchasePrice: 0, defaultSellingPrice: 0 }],
+      total: 1,
+    });
+    state.patch
+      .mockRejectedValueOnce(new Error('Product changed. Refresh and review.'))
+      .mockResolvedValue({
+        ...product,
+        name: 'Coral ivory',
+        updatedAt: '2026-10-13T10:01:00.000Z',
+      });
+    mount(embedded());
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByLabelText('New product name', { exact: false }), {
+      target: { value: '  Coral ivory  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Product changed');
+    expect(screen.getByLabelText('New product name', { exact: false })).toHaveValue(
+      '  Coral ivory  ',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    await waitFor(() => expect(state.patch).toHaveBeenCalledTimes(2));
+    expect(state.patch).toHaveBeenLastCalledWith('/products/product', {
+      name: 'Coral ivory',
+      expectedUpdatedAt: product.updatedAt,
+    });
+  });
+  it('guards both tab changes and product switching while inline settings are unfinished', async () => {
+    mount(embedded());
+    await inspect();
+    fireEvent.click(screen.getByRole('tab', { name: 'Edit' }));
+    await waitFor(() => expect(getSelectField('Product family')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Keep this edit' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    expect(await screen.findByText('Keep your changes?')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Stay here' }));
+    expect(screen.getByRole('tab', { name: 'Edit' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Description')).toHaveValue('Keep this edit');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Coral blue' }));
+    expect(await screen.findByText('Keep your changes?')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(await screen.findByRole('region', { name: 'Coral blue inspector' })).toBeVisible();
+    expect(state.patch).not.toHaveBeenCalled();
   });
 });
