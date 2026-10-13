@@ -716,9 +716,9 @@ async function main() {
         createdById: actor.id,
         lines: {
           create: [
-            { accountId: cash.id, debit: 60, credit: 0 },
-            { accountId: ar.id, debit: 40, credit: 0 },
-            { accountId: revenue.id, debit: 0, credit: 100 },
+            { companyId: company.id, accountId: cash.id, debit: 60, credit: 0 },
+            { companyId: company.id, accountId: ar.id, debit: 40, credit: 0 },
+            { companyId: company.id, accountId: revenue.id, debit: 0, credit: 100 },
           ],
         },
       },
