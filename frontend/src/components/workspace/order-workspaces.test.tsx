@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessSales as Sales } from '@/features/sales-desk/business-sales';
@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   get: vi.fn(),
   patch: vi.fn(),
   push: vi.fn(),
+  query: new URLSearchParams(),
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: (p: string) => state.permissions.has(p) }),
@@ -17,7 +18,7 @@ vi.mock('@/hooks/use-auth', () => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: state.push }),
   usePathname: () => '/operations/purchase-orders',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => state.query,
 }));
 vi.mock('@/lib/api-client', () => ({
   backendPage: state.page,
@@ -45,6 +46,7 @@ const record = {
   customerName: 'Customer A',
 };
 beforeEach(() => {
+  state.query = new URLSearchParams();
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
   state.page
     .mockReset()
@@ -81,6 +83,47 @@ beforeEach(() => {
     invoices: { missingInvoiceCount: 0 },
   });
   state.patch.mockReset();
+});
+it('keeps overview drill-through scope in sales reads and allows clearing additional filters', async () => {
+  state.permissions = new Set(['sales.view']);
+  state.query = new URLSearchParams({
+    overview: 'true',
+    companyId: 'co-1',
+    divisionId: 'division',
+    branchId: 'branch',
+    currency: 'USD',
+    salespersonId: 'employee',
+    confirmedOnly: 'true',
+    dateFrom: '2026-10-01',
+    dateTo: '2026-10-13',
+  });
+  render(<Sales />);
+  await waitFor(() =>
+    expect(state.page).toHaveBeenCalledWith(
+      '/sales-orders',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          companyId: 'co-1',
+          divisionId: 'division',
+          branchId: 'branch',
+          currency: 'USD',
+          salespersonId: 'employee',
+          confirmedOnly: 'true',
+          dateFrom: '2026-10-01',
+          dateTo: '2026-10-13',
+        }),
+      }),
+    ),
+  );
+  expect(screen.getByText(/Overview scope:/)).toHaveTextContent('Confirmed sales');
+  await userEvent.click(screen.getByRole('button', { name: 'Clear additional filters' }));
+  await waitFor(() => {
+    const query = state.page.mock.calls.at(-1)?.[1]?.query;
+    expect(query).toMatchObject({ companyId: 'co-1', dateFrom: '2026-10-01' });
+    expect(query).not.toHaveProperty('branchId');
+    expect(query).not.toHaveProperty('currency');
+    expect(query).not.toHaveProperty('confirmedOnly');
+  });
 });
 it('shows partial uncovered received order value alongside an existing posted payable', async () => {
   state.permissions = new Set(['purchases.view']);

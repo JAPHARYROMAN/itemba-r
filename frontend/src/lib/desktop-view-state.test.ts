@@ -4,6 +4,33 @@ import { format } from 'prettier';
 import { describe, expect, it } from 'vitest';
 import { parseDesktopViewState } from './desktop-view-state';
 describe('desktop view contract', () => {
+  it('persists overview scope without retaining financial responses or form fields', () => {
+    const filters = {
+      companyId: 'company',
+      divisionId: 'division',
+      branchId: 'branch',
+      currency: 'USD',
+      dateFrom: '2026-10-01',
+      dateTo: '2026-10-13',
+      preset: 'month',
+    };
+    const scope = { branchId: 'branch', currency: 'USD', confirmedOnly: 'true' };
+    expect(
+      parseDesktopViewState('sales-desk', {
+        version: 1,
+        values: {
+          'sales-desk.overview.filters': filters,
+          'sales-desk.business-sales.overview-scope': scope,
+          'sales-desk.overview.response': { outstanding: '123' },
+          'sales-desk.overview.filters.private': { cardNumber: 'secret' },
+          'sales-desk.business-sales.overview-scope.private': { amount: '123' },
+        },
+      }).values,
+    ).toEqual({
+      'sales-desk.overview.filters': filters,
+      'sales-desk.business-sales.overview-scope': scope,
+    });
+  });
   it('persists customer performance view choices without retaining account responses', () => {
     const filters = {
       companyId: 'company',

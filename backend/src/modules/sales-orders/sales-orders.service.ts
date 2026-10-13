@@ -517,6 +517,8 @@ export class SalesOrdersService {
       branchId,
       customerId,
       salespersonId,
+      currency,
+      confirmedOnly,
       salesType,
       status,
       paymentStatus,
@@ -535,6 +537,8 @@ export class SalesOrdersService {
     if (branchId) where.branchId = branchId;
     if (customerId) where.customerId = customerId;
     if (salespersonId) where.salespersonId = salespersonId;
+    if (currency) where.currency = currency;
+    if (confirmedOnly && !status) where.status = { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] };
     if (salesType) where.salesType = salesType;
     if (status) where.status = status;
     if (paymentStatus) where.paymentStatus = paymentStatus;

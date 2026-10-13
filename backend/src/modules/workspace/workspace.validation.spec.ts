@@ -1,5 +1,55 @@
 import { validateAppearance, validateLayout } from './workspace.validation';
 describe('workspace storage validation', () => {
+  it('persists overview scope and drill-through filters without persisting financial responses', () => {
+    const values = {
+      'sales-desk.overview.filters': {
+        companyId: 'company',
+        branchId: 'branch',
+        currency: 'USD',
+        dateFrom: '2026-10-01',
+        dateTo: '2026-10-09',
+        preset: 'custom',
+      },
+      'sales-desk.business-sales.overview-scope': {
+        branchId: 'branch',
+        divisionId: 'division',
+        currency: 'USD',
+        salespersonId: 'person',
+        confirmedOnly: 'true',
+      },
+    };
+    const input = (settings: Record<string, unknown>) => ({
+      version: 1,
+      activeId: 'one',
+      windows: [
+        {
+          id: 'one',
+          appId: 'sales-desk',
+          href: '/sales-desk',
+          mode: 'floating',
+          bounds: { x: 0, y: 0, width: 900, height: 600 },
+          viewState: { version: 1, values: settings },
+        },
+      ],
+    });
+    expect(validateLayout(input(values))).toBeTruthy();
+    for (const privateField of ['paidAmount', 'metrics', 'customerBalance', 'form'])
+      expect(() =>
+        validateLayout(
+          input({
+            'sales-desk.overview.filters': {
+              ...values['sales-desk.overview.filters'],
+              [privateField]: 'private',
+            },
+          }),
+        ),
+      ).toThrow('Unsupported window view settings');
+    expect(() =>
+      validateLayout(
+        input({ 'sales-desk.business-sales.overview-scope': { confirmedOnly: true } }),
+      ),
+    ).toThrow('Unsupported window view settings');
+  });
   const window = {
     id: 'one',
     appId: 'invoice-desk',

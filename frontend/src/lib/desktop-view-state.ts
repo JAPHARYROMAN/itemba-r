@@ -81,6 +81,21 @@ export function isDesktopViewValue(appId: string, key: string, value: unknown): 
     }
   }
   if (appId === 'sales-desk') {
+    if (
+      key === 'sales-desk.overview.filters' ||
+      key === 'sales-desk.business-sales.overview-scope'
+    ) {
+      const names =
+        key === 'sales-desk.overview.filters'
+          ? ['companyId', 'divisionId', 'branchId', 'currency', 'dateFrom', 'dateTo', 'preset']
+          : ['divisionId', 'branchId', 'currency', 'salespersonId', 'confirmedOnly'];
+      return (
+        !!value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.entries(value).every(([name, item]) => names.includes(name) && text(item))
+      );
+    }
     if (key === 'sales-desk.customer-performance.filters')
       return (
         !!value &&

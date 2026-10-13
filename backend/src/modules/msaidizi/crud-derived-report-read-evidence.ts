@@ -312,6 +312,8 @@ const PURCHASE_ORDER_SUMMARY_QUERY_PARAMETERS = Object.freeze([
   'supplierId',
 ] as const);
 const SALES_ORDER_WORKBENCH_QUERY_PARAMETERS = Object.freeze([
+  'currency',
+  'confirmedOnly',
   'branchId',
   'companyId',
   'customerId',
@@ -326,6 +328,14 @@ const SALES_ORDER_WORKBENCH_QUERY_PARAMETERS = Object.freeze([
   'salespersonId',
   'search',
   'status',
+] as const);
+const SALES_OVERVIEW_QUERY_PARAMETERS = Object.freeze([
+  'companyId',
+  'divisionId',
+  'branchId',
+  'currency',
+  'dateFrom',
+  'dateTo',
 ] as const);
 const SUPPLIER_WORKBENCH_QUERY_PARAMETERS = Object.freeze([
   'branchId',
@@ -469,6 +479,17 @@ const companyRows = (
 ];
 
 const definitions: readonly CrudDerivedReportDefinition[] = Object.freeze([
+  operations('SalesOrdersController.overview', 'sales-orders/overview', {
+    expectedQueryParameters: SALES_OVERVIEW_QUERY_PARAMETERS,
+    queryBindings: [
+      companyA(),
+      literal('currency', 'TZS'),
+      literal('dateFrom', '2026-07-01'),
+      literal('dateTo', '2026-07-31'),
+    ],
+    presentBindings: ['operationsSalesOrderA'],
+    absentBindings: ['operationsSalesOrderB'],
+  }),
   financial('FinancialReportsController.getGroupSummary', 'financial-reports/group-summary', {
     presentBindings: ['companyA', 'companyB'],
     rows: companyRows(

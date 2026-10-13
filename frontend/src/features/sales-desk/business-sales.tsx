@@ -18,7 +18,7 @@ import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
 import { RecordBrowser } from '@/components/workspace/record-browser';
 import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DocumentPreviewLink } from '@/components/documents';
 import {
@@ -506,7 +506,7 @@ function employeeLabel(employee?: Employee | SalesOrder['salesperson'] | null) {
   return name || employee.employeeCode || employee.id;
 }
 
-function SalesOrderModal({
+export function SalesOrderModal({
   mode,
   initial,
   companies,
@@ -1401,6 +1401,10 @@ export function BusinessSales() {
     '',
   );
   const [filterDateTo, setFilterDateTo] = useWorkspaceState('sales-desk.business-sales.to', '');
+  const [overviewScope, setOverviewScope] = useWorkspaceState<Record<string, string>>(
+    'sales-desk.business-sales.overview-scope',
+    {},
+  );
   const [page, setPage] = useWorkspaceState('sales-desk.business-sales.page', 1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<SalesOrder | null>(null);
@@ -1450,6 +1454,7 @@ export function BusinessSales() {
     setLoadError('');
     try {
       const query: Record<string, string | number> = {};
+      Object.assign(query, overviewScope);
       if (filterSearch.trim()) query.search = filterSearch.trim();
       if (filterCompany) query.companyId = filterCompany;
       if (filterType) query.salesType = filterType;
@@ -1508,6 +1513,7 @@ export function BusinessSales() {
     filterDateFrom,
     filterDateTo,
     viewMode,
+    overviewScope,
   ]);
 
   useEffect(() => {
@@ -1526,6 +1532,7 @@ export function BusinessSales() {
       setExporting(format);
       try {
         const query: Record<string, string | number> = {};
+        Object.assign(query, overviewScope);
         if (filterSearch.trim()) query.search = filterSearch.trim();
         if (filterCompany) query.companyId = filterCompany;
         if (filterType) query.salesType = filterType;
@@ -1693,13 +1700,37 @@ export function BusinessSales() {
       filterDateFrom,
       filterDateTo,
       viewMode,
+      overviewScope,
     ],
   );
 
+  const seededUrlQuery = useRef<string | null>(null);
   useEffect(() => {
     // Seed the workbench from drill-through URLs (e.g. the operations dashboard
     // links to ?status=CONFIRMED or ?paymentStatus=UNPAID) plus the edit deep-link.
     const params = searchParams;
+    const urlQuery = params.toString();
+    if (seededUrlQuery.current === urlQuery) return;
+    seededUrlQuery.current = urlQuery;
+    if (params.get('overview') === 'true') {
+      setOverviewScope(
+        Object.fromEntries(
+          ['divisionId', 'branchId', 'currency', 'salespersonId', 'confirmedOnly'].flatMap((key) =>
+            params.get(key) ? [[key, params.get(key)!]] : [],
+          ),
+        ),
+      );
+      setFilterCompany(params.get('companyId') ?? '');
+      setFilterStatus(params.get('status') ?? '');
+      setFilterPayment(params.get('paymentStatus') ?? '');
+      setFilterType(params.get('salesType') ?? '');
+      setFilterDateFrom(params.get('dateFrom') ?? '');
+      setFilterDateTo(params.get('dateTo') ?? '');
+      setSearchInput('');
+      setFilterSearch('');
+      setViewMode('orders');
+      setPage(1);
+    }
     setRequestedEditId(params.get('editId') ?? '');
     const status = params.get('status');
     if (status && SALES_STATUSES.includes(status)) setFilterStatus(status);
@@ -1718,6 +1749,11 @@ export function BusinessSales() {
     setFilterType,
     setFilterDateFrom,
     setFilterDateTo,
+    setOverviewScope,
+    setFilterCompany,
+    setSearchInput,
+    setViewMode,
+    setPage,
   ]);
 
   useEffect(() => {
@@ -1992,6 +2028,36 @@ export function BusinessSales() {
         </div>
       )}
 
+      {Object.values(overviewScope).some(Boolean) && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 text-xs"
+          style={{ color: 'var(--aurora-text-secondary)' }}
+        >
+          <span>
+            Overview scope:{' '}
+            {[
+              overviewScope.currency,
+              overviewScope.confirmedOnly === 'true' ? 'Confirmed sales' : '',
+              overviewScope.divisionId ? 'Selected division' : '',
+              overviewScope.branchId ? 'Selected branch' : '',
+              overviewScope.salespersonId ? 'Selected salesperson' : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
+          <Btn
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              setOverviewScope({});
+              setPage(1);
+            }}
+          >
+            Clear additional filters
+          </Btn>
+        </div>
+      )}
+
       <PageToolbar
         collapsibleFilters
         activeFilterCount={
@@ -2002,6 +2068,7 @@ export function BusinessSales() {
             filterPayment,
             filterDateFrom,
             filterDateTo,
+            ...Object.values(overviewScope),
           ].filter(Boolean).length
         }
         search={searchInput}
@@ -2014,6 +2081,13 @@ export function BusinessSales() {
               value={filterCompany}
               onChange={(value) => {
                 setFilterCompany(value);
+                setOverviewScope((previous) =>
+                  Object.fromEntries(
+                    Object.entries(previous).filter(([key]) =>
+                      ['currency', 'confirmedOnly'].includes(key),
+                    ),
+                  ),
+                );
                 setPage(1);
               }}
               options={[
@@ -2038,6 +2112,11 @@ export function BusinessSales() {
               value={filterStatus}
               onChange={(value) => {
                 setFilterStatus(value);
+                setOverviewScope((previous) =>
+                  Object.fromEntries(
+                    Object.entries(previous).filter(([key]) => key !== 'confirmedOnly'),
+                  ),
+                );
                 setPage(1);
               }}
               options={[
