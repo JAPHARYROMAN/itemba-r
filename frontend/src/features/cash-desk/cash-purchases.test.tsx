@@ -32,6 +32,7 @@ const h = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => h.navigation,
   usePathname: () => '/cash-desk',
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
