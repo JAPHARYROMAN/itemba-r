@@ -8,8 +8,15 @@ import { CashEditor } from './cash-editor';
 import { CashExpenses } from './cash-expenses';
 import type { Account, Invoice, Movement } from './types';
 import { erpMirror, money } from './types';
-const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  query: new URLSearchParams(),
+}));
+vi.mock('next/navigation', () => ({
+  useRouter: () => navigation,
+  useSearchParams: () => navigation.query,
+}));
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
@@ -51,6 +58,7 @@ const account: Account = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  navigation.query = new URLSearchParams();
   api.permissions = new Set([
     'cash_desk.view',
     'cash_desk.manage',
@@ -82,6 +90,28 @@ beforeEach(() => {
   api.post.mockResolvedValue({ id: 'saved' });
 });
 describe('Cash Desk', () => {
+  it('opens overview collections with the selected organisation and date', async () => {
+    navigation.query = new URLSearchParams({
+      fromOverview: 'true',
+      view: 'collections',
+      ...scope,
+      currency: 'USD',
+      date: '2026-10-13',
+    });
+    api.permissions.add('sales.view');
+    api.permissions.add('receivables.view');
+    render(<CashDesk />);
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/cash-desk/sales-connection',
+        expect.objectContaining({
+          query: expect.objectContaining({ ...scope, date: '2026-10-13' }),
+        }),
+      ),
+    );
+    expect(screen.getByRole('heading', { name: 'Sales Desk collections' })).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+  });
   it('loads the selected company directory when an explicit financial scope is required', async () => {
     const fallback = api.get.getMockImplementation()!;
     api.get.mockImplementation((path, ...args) =>

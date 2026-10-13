@@ -20,6 +20,7 @@ const FINANCIAL_REPORTS = Object.freeze([
 ]);
 
 const OPERATIONS_REPORTS = Object.freeze([
+  'SalesOrdersController.overview',
   'OperationsReportsController.getBranchProfitability',
   'OperationsReportsController.getCustomerProductSales',
   'OperationsReportsController.getInventoryMovements',
@@ -71,15 +72,15 @@ describe('manifest-bound derived report and company-summary evidence', () => {
   const packs = derivedReportReadEvidencePacks(manifest);
   const fixtures = packs.flatMap((pack) => pack.fixtures);
 
-  it('registers exactly the reviewed 11 financial, 16 operations, and 24 summary gaps', () => {
-    expect(CRUD_DERIVED_REPORT_REVIEWED_DEFINITION_COUNT).toBe(51);
+  it('registers exactly the reviewed 11 financial, 17 operations, and 24 summary reads', () => {
+    expect(CRUD_DERIVED_REPORT_REVIEWED_DEFINITION_COUNT).toBe(52);
     expect(packs.map((pack) => pack.packId)).toEqual([
       'derived-financial-report-reads',
       'derived-operations-report-reads',
       'derived-company-summary-reads',
     ]);
-    expect(packs.map((pack) => pack.fixtures.length)).toEqual([11, 16, 24]);
-    expect(new Set(fixtures.map((fixture) => fixture.fixtureId))).toHaveProperty('size', 51);
+    expect(packs.map((pack) => pack.fixtures.length)).toEqual([11, 17, 24]);
+    expect(new Set(fixtures.map((fixture) => fixture.fixtureId))).toHaveProperty('size', 52);
     expect(fixtures.map((fixture) => fixture.capabilityId).sort()).toEqual(
       [...FINANCIAL_REPORTS, ...OPERATIONS_REPORTS, ...COMPANY_SUMMARY_READS].sort(),
     );
@@ -248,7 +249,7 @@ describe('manifest-bound derived report and company-summary evidence', () => {
     const drifted = derivedReportReadEvidencePacks(driftedManifest).flatMap(
       (pack) => pack.fixtures,
     );
-    expect(drifted).toHaveLength(50);
+    expect(drifted).toHaveLength(51);
     expect(drifted.some((fixture) => fixture.capabilityId === target?.id)).toBe(false);
   });
 

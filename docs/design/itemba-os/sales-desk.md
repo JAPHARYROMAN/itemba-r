@@ -6,12 +6,24 @@ Sales Desk is the ITEMBA OS home for customers and sales at `/sales-desk`, avail
 
 - **Customers** (`/sales-desk/customers`) uses `/customers`, including existing balances, ledgers, statements and edit permissions.
 - **Sales** (`/sales-desk/sales`) uses `/sales-orders`, including existing lines, customer links, receipts, stock movements, journals and audit history. The initial date range includes all history; users can narrow it explicitly.
-- The overview reads the existing customer and sales workbench summaries. Customer and sales access are evaluated independently. It shows counts, rather than adding monetary amounts across currencies.
+- The overview uses `/sales-orders/overview` for sales performance, collections and current customer balances. Customer and sales access are evaluated independently; customer-only users keep a customer summary. Amounts always use one selected currency.
 - `/operations/customers` and `/operations/sales-orders`, their detail pages and sales print links remain valid and open in Sales Desk. Record IDs are unchanged. Newly generated links use `/sales-desk/customers/:id` and `/sales-desk/sales/:id`.
 - Existing `customers.*`, `sales.*`, organisation and payment permissions remain authoritative. Either `customers.view`, `sales.view` or `sales_desk.view` allows opening the app, but does not grant access to the other sections.
 - Search, date/status/scope filters and page positions belong to each desktop window. Named desktop sessions persist only the allowlisted view settings; business forms keep using the existing draft facilities.
 
 The former independent Sales Desk register remains under **Direct entries**. Its customers and sales are not automatically merged into Operations records: that would require reconciling identities, receipts and posted balances. Existing `/sales-desk?record=…` links continue to open that register. `source=direct` keeps navigation within it. No historical direct entries are deleted or hidden.
+
+## Business sales overview
+
+The overview defaults to this month through today in East Africa Time. Today, this week and custom dates are available, with company → division → branch and currency filters. The custom range may cover up to 366 days; comparison figures use the immediately preceding period of equal length.
+
+- **Sales value, confirmed sales and average sale value** include confirmed, partially paid and paid sales by order date. Values include tax and agreed discounts, before credit notes/refunds. Draft, cancelled and voided sales are excluded.
+- **Money collected** follows effective receipt or allocation dates, including later payments against older sales and earlier deposits applied during the period. It counts verified sales cash/bank journal legs, legacy cash/receivable settlements and relevant customer-payment allocations once; inventory cost journals, original receivable accruals, reversed receipts, write-offs, unrelated allocations and unapplied advances are excluded. When organisation restrictions mean amounts represent only permitted allocations, **Scoped collections** explains that they may represent part of a receipt. Reconciliation warnings remain visible.
+- **Outstanding now, overdue now and aging** use current linked receivables across all sale dates. They are current balances, not balances reconstructed at the selected period end. Missing due dates are not overdue. Upcoming collections include today through seven days ahead.
+- Trends, customer activity, products, branches, salespeople and recent records use the selected period. Product rankings use line values before document discounts and retain separate quantities for different units. The chart includes a readable data table.
+- Attention lists cover open drafts and current debts across all dates. Sales drill-through links retain scope, currency, date and confirmed-only restrictions; draft links explicitly clear the period. Additional overview filters are visible and removable in the sales register. Collection cards scroll within the active desktop window to the supporting list; Cash Desk opens its existing daily collection workflow with the selected organisation and end date. Cash Desk collections display their existing separate currency summaries.
+
+Every source intersects company and organisation grants with the requested scope. Balances require `receivables.view`; receipt projections additionally require `cash_desk.view` and `customer-payments.view`; customer activity requires `customers.view`. Restricted metrics are unavailable rather than shown as zero. All reads share a repeatable-read database snapshot. A projection exceeding 10,000 scoped source records or 50,000 product lines asks for a narrower scope/range instead of silently returning partial totals.
 
 ## Direct entries
 

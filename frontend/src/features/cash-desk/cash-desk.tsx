@@ -7,7 +7,11 @@ import { getApp } from '@/lib/apps';
 import { useDeskRecordSelection } from '@/components/workspace/desk-record-selection';
 import { useDeskSection } from '@/components/workspace/use-desk-section';
 import { useWorkspaceState } from '@/components/workspace/workspace-session';
-import { useWorkspaceRouter, WorkspaceLink } from '@/components/workspace/workspace-navigation';
+import {
+  useWorkspaceRouter,
+  useWorkspaceSearchParams,
+  WorkspaceLink,
+} from '@/components/workspace/workspace-navigation';
 import { WorkspaceDraftShelf, type WorkspaceDraft } from '@/components/workspace/workspace-drafts';
 import {
   ArrowDownLeft,
@@ -83,6 +87,7 @@ export function CashDesk({
   targetSupplierId,
   targetCustomerId,
 }: { targetRecordId?: string; targetSupplierId?: string; targetCustomerId?: string } = {}) {
+  const searchParams = useWorkspaceSearchParams();
   const { hasPermission } = useAuth(),
     allowed = hasPermission('cash_desk.view'),
     manage = hasPermission('cash_desk.manage'),
@@ -129,6 +134,25 @@ export function CashDesk({
   }, [partyTargetKey, setSection]);
   const [editor, setEditor] = useState<Editor | null>(null),
     [notice, setNotice] = useState('');
+  const seededOverviewQuery = useRef<string | null>(null);
+  useEffect(() => {
+    if (searchParams.get('fromOverview') !== 'true' || searchParams.get('view') !== 'collections') {
+      seededOverviewQuery.current = null;
+      return;
+    }
+    const overviewQuery = searchParams.toString();
+    if (seededOverviewQuery.current === overviewQuery) return;
+    seededOverviewQuery.current = overviewQuery;
+    setSection('collections');
+    setScope({
+      companyId: searchParams.get('companyId') ?? '',
+      divisionId: searchParams.get('divisionId') ?? '',
+      branchId: searchParams.get('branchId') ?? '',
+    });
+    const requestedDate = searchParams.get('date');
+    if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) setDate(requestedDate);
+    setCurrency(searchParams.get('currency') ?? '');
+  }, [searchParams, setSection, setScope, setDate, setCurrency]);
   const [selectedId, selectRecord] = useDeskRecordSelection('cash-desk', targetRecordId);
   const detail = useWorkspaceResource<Movement>(
     `/cash-desk/movements/${encodeURIComponent(selectedId)}`,

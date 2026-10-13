@@ -1,6 +1,12 @@
-import { IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { Type } from 'class-transformer';
-import { SalesOrderStatus, SalesType, PaymentStatus, SalesPaymentMethod } from '@prisma/client';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  CurrencyCode,
+  SalesOrderStatus,
+  SalesType,
+  PaymentStatus,
+  SalesPaymentMethod,
+} from '@prisma/client';
 
 export class QuerySalesOrderDto {
   @IsOptional() @IsString() companyId?: string;
@@ -8,6 +14,11 @@ export class QuerySalesOrderDto {
   @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() customerId?: string;
   @IsOptional() @IsString() salespersonId?: string;
+  @IsOptional() @IsEnum(CurrencyCode) currency?: CurrencyCode;
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  confirmedOnly?: boolean;
   @IsOptional() @IsEnum(SalesType) salesType?: SalesType;
   @IsOptional() @IsEnum(SalesOrderStatus) status?: SalesOrderStatus;
   @IsOptional() @IsEnum(PaymentStatus) paymentStatus?: PaymentStatus;

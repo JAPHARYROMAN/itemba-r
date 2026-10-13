@@ -1987,6 +1987,43 @@ describe('SalesOrdersService workbench summary aggregation', () => {
   });
 });
 
+describe('SalesOrdersService overview drill-through filters', () => {
+  it('preserves currency, organization, period and confirmed-only restrictions in list and summary queries', async () => {
+    const { service, prisma } = makeService();
+    const query = {
+      companyId: 'company-1',
+      divisionId: 'division-1',
+      branchId: 'branch-1',
+      currency: 'USD',
+      confirmedOnly: true,
+      dateFrom: '2026-10-01',
+      dateTo: '2026-10-09',
+    } as any;
+    await service.findAll(query, user);
+    await service.workbenchSummary(query, user);
+    for (const [input] of prisma.salesOrder.findMany.mock.calls)
+      expect(input.where).toMatchObject({
+        companyId: 'company-1',
+        divisionId: 'division-1',
+        branchId: 'branch-1',
+        currency: 'USD',
+        status: { in: ['CONFIRMED', 'PARTIALLY_PAID', 'PAID'] },
+        orderDate: {
+          gte: new Date('2026-10-01T00:00:00.000Z'),
+          lte: new Date('2026-10-09T23:59:59.999Z'),
+        },
+      });
+  });
+  it('lets an explicit draft drill-through clear confirmed-only restriction', async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ currency: 'TZS', confirmedOnly: true, status: 'DRAFT' } as any, user);
+    expect(prisma.salesOrder.findMany.mock.calls[0][0].where).toMatchObject({
+      currency: 'TZS',
+      status: 'DRAFT',
+    });
+  });
+});
+
 describe('SalesOrdersService confirm currency guard', () => {
   function confirmableCashOrder(overrides: Record<string, unknown> = {}) {
     return persistedOrder({

@@ -4,6 +4,8 @@ import { SalesOrdersService } from './sales-orders.service';
 import { CreateSalesOrderDto } from './dto/create-sales-order.dto';
 import { UpdateSalesOrderDto } from './dto/update-sales-order.dto';
 import { QuerySalesOrderDto, QuerySalesOrderListDto } from './dto/query-sales-order.dto';
+import { SalesOverviewQueryDto } from './dto/sales-overview-query.dto';
+import { SalesOverviewService } from './sales-overview.service';
 import {
   RequireAnyPermissions,
   RequirePermissions,
@@ -12,7 +14,16 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 
 @Controller('sales-orders')
 export class SalesOrdersController {
-  constructor(private readonly service: SalesOrdersService) {}
+  constructor(
+    private readonly service: SalesOrdersService,
+    private readonly overviewService: SalesOverviewService,
+  ) {}
+
+  @Get('overview')
+  @RequirePermissions('sales.view')
+  overview(@Query() query: SalesOverviewQueryDto, @CurrentUser() user: AuthUser) {
+    return this.overviewService.read(user, query);
+  }
 
   @Get()
   @RequirePermissions('sales.view')

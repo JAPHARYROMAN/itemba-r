@@ -6,8 +6,9 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { InventoryMovementsModule } from '../inventory-movements/inventory-movements.module';
 import { TaxAutoApplyModule } from '../tax-auto-apply/tax-auto-apply.module';
 import { ProfitModule } from '../profit/profit.module';
-import { CompanyScopeService } from '../../common/services';
+import { CompanyScopeService, OrganizationScopeService } from '../../common/services';
 import { CashBookModule } from '../cash-book/cash-book.module';
+import { SalesOverviewService } from './sales-overview.service';
 
 @Module({
   imports: [
@@ -19,7 +20,12 @@ import { CashBookModule } from '../cash-book/cash-book.module';
     CashBookModule,
   ],
   controllers: [SalesOrdersController],
-  providers: [SalesOrdersService, CompanyScopeService],
+  providers: [
+    SalesOrdersService,
+    SalesOverviewService,
+    CompanyScopeService,
+    OrganizationScopeService,
+  ],
   exports: [SalesOrdersService],
 })
 export class SalesOrdersModule {}
