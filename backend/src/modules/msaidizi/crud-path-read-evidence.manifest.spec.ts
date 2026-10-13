@@ -10,7 +10,7 @@ import {
 describe('CRUD path-record evidence against the live capability manifest', () => {
   const manifest = extractCapabilities(loadAllControllers());
 
-  it('registers all 144 eligible pending path reads and records 53 policy exclusions', () => {
+  it('registers all 146 eligible pending path reads and records 53 policy exclusions', () => {
     const pathReads = manifest.filter(
       (capability) =>
         capability.verb === 'GET' &&
@@ -41,8 +41,8 @@ describe('CRUD path-record evidence against the live capability manifest', () =>
         manifest.find((capability) => capability.id === blocker.capabilityId)?.agentExcluded,
     );
 
-    expect(tranche).toHaveLength(144);
-    expect(registered).toHaveLength(144);
+    expect(tranche).toHaveLength(146);
+    expect(registered).toHaveLength(146);
     expect(eligibleBlocked).toHaveLength(0);
     expect(policyExcluded).toHaveLength(53);
     expect(new Set(registered).size).toBe(registered.length);
@@ -61,11 +61,60 @@ describe('CRUD path-record evidence against the live capability manifest', () =>
     expect(packs.map((pack) => [pack.packId, pack.fixtures.length])).toEqual([
       ['path-record-platform', 34],
       ['path-record-governance', 11],
-      ['path-record-finance', 22],
+      ['path-record-finance', 24],
       ['path-record-operations', 19],
       ['path-record-hr', 17],
       ['path-record-derived', 41],
     ]);
+  });
+
+  it('binds payment history and issued detail to real account sources and foreign-company denials', () => {
+    const fixtures = pathRecordReadEvidencePacks(manifest).flatMap((pack) => pack.fixtures);
+    const history = fixtures.find(
+      (fixture) => fixture.capabilityId === 'CustomerPerformanceController.history',
+    );
+    const statement = fixtures.find(
+      (fixture) => fixture.capabilityId === 'CustomerStatementsController.savedDetail',
+    );
+    expect(history).toMatchObject({
+      seedScenario: 'customer-account-company-pair-v1',
+      governance: { scope: 'company', audit: 'not_applicable' },
+      pathBindings: [{ name: 'id', binding: 'customerAccountCustomerA' }],
+      response: {
+        kind: 'collection',
+        identity: { responsePath: ['id'], binding: 'customerAccountPaymentA' },
+        scope: { kind: 'company', from: 'payload', responsePath: ['customer', 'companyId'] },
+        absent: 'customerAccountPaymentB',
+      },
+      scopeProbe: {
+        pathBindings: [{ name: 'id', binding: 'customerAccountCustomerB' }],
+        queryBindings: [
+          { name: 'companyId', binding: 'companyA' },
+          { name: 'currency', literal: 'TZS' },
+          { name: 'dateFrom', literal: '2026-08-01' },
+          { name: 'dateTo', literal: '2026-08-31' },
+        ],
+        expectedStatuses: [403, 404],
+      },
+    });
+    expect(statement).toMatchObject({
+      seedScenario: 'customer-account-company-pair-v1',
+      governance: { scope: 'company', audit: 'not_applicable' },
+      pathBindings: [{ name: 'id', binding: 'customerAccountStatementA' }],
+      response: {
+        identity: { responsePath: ['runId'], binding: 'customerAccountStatementA' },
+        absent: 'customerAccountStatementB',
+        values: expect.arrayContaining([
+          { responsePath: ['customerId'], binding: 'customerAccountCustomerA' },
+          { responsePath: ['closingBalance'], literal: '875.00' },
+        ]),
+      },
+      scopeProbe: {
+        pathBindings: [{ name: 'id', binding: 'customerAccountStatementB' }],
+        queryBindings: [],
+        expectedStatuses: [403, 404],
+      },
+    });
   });
 
   it('references only real generated Prisma models for isolated seeds', () => {

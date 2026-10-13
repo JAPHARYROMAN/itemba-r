@@ -19,6 +19,12 @@ export type CrudPathReadBinding =
   | 'permissionA'
   | 'roleA'
   | 'customerA'
+  | 'customerAccountCustomerA'
+  | 'customerAccountCustomerB'
+  | 'customerAccountPaymentA'
+  | 'customerAccountPaymentB'
+  | 'customerAccountStatementA'
+  | 'customerAccountStatementB'
   | 'createdCustomerA'
   | 'cashAccountA'
   | 'chartOfAccountA'
@@ -40,6 +46,8 @@ export type CrudPathReadScopeAssertion =
       /** Path in the unwrapped response record. */
       responsePath: readonly string[];
       binding: 'companyA';
+      /** A collection can carry tenant ownership in its enclosing payload. */
+      from?: 'payload';
     }
   | {
       kind: 'actor';
@@ -75,6 +83,10 @@ export interface CrudPathReadResponseContract {
     binding: CrudPathReadBinding;
   };
   scope: CrudPathReadScopeAssertion;
+  /** Exact domain values in the enclosing payload, independent of shape. */
+  values?: readonly (CrudPathReadValue & { responsePath: readonly string[] })[];
+  /** A real, foreign-company source marker must never occur in the payload. */
+  absent?: CrudPathReadBinding;
 }
 
 export interface CrudPathReadFixtureRegistration {
@@ -93,6 +105,13 @@ export interface CrudPathReadFixtureRegistration {
   executionPrincipal?: 'company' | 'group';
   /** Prisma model the isolated harness must seed before invoking this route. */
   seedModel?: string;
+  /** Reviewed source and issued-snapshot setup, completed before GET sentinels. */
+  seedScenario?: 'customer-account-company-pair-v1';
+  scopeProbe?: {
+    pathBindings: readonly CrudPathReadArgumentBinding[];
+    queryBindings: readonly CrudPathReadArgumentBinding[];
+    expectedStatuses: readonly (403 | 404)[];
+  };
 }
 
 export interface CrudPathReadFixturePack {
@@ -323,6 +342,69 @@ const governanceDefinitions = Object.freeze([
 ] satisfies readonly CrudPathReadDefinition[]);
 
 const financeDefinitions = Object.freeze([
+  {
+    capabilityId: 'CustomerPerformanceController.history',
+    expectedPath: 'customer-performance/:id/history',
+    pathBindings: [{ name: 'id', binding: 'customerAccountCustomerA' }],
+    queryBindings: [
+      { name: 'companyId', binding: 'companyA' },
+      { name: 'currency', literal: 'TZS' },
+      { name: 'dateFrom', literal: '2026-08-01' },
+      { name: 'dateTo', literal: '2026-08-31' },
+    ],
+    response: {
+      kind: 'collection',
+      identity: { responsePath: ['id'], binding: 'customerAccountPaymentA' },
+      scope: {
+        kind: 'company',
+        responsePath: ['customer', 'companyId'],
+        binding: 'companyA',
+        from: 'payload',
+      },
+      values: [
+        { responsePath: ['customer', 'id'], binding: 'customerAccountCustomerA' },
+        { responsePath: ['currency'], literal: 'TZS' },
+        { responsePath: ['total'], literal: 1 },
+      ],
+      absent: 'customerAccountPaymentB',
+    },
+    seedScenario: 'customer-account-company-pair-v1',
+    scopeProbe: {
+      pathBindings: [{ name: 'id', binding: 'customerAccountCustomerB' }],
+      queryBindings: [
+        { name: 'companyId', binding: 'companyA' },
+        { name: 'currency', literal: 'TZS' },
+        { name: 'dateFrom', literal: '2026-08-01' },
+        { name: 'dateTo', literal: '2026-08-31' },
+      ],
+      expectedStatuses: [403, 404],
+    },
+  },
+  {
+    capabilityId: 'CustomerStatementsController.savedDetail',
+    expectedPath: 'customer-statements/:id/detail',
+    pathBindings: [{ name: 'id', binding: 'customerAccountStatementA' }],
+    queryBindings: [],
+    response: {
+      kind: 'record',
+      identity: { responsePath: ['runId'], binding: 'customerAccountStatementA' },
+      scope: { kind: 'company', responsePath: ['companyId'], binding: 'companyA' },
+      values: [
+        { responsePath: ['customerId'], binding: 'customerAccountCustomerA' },
+        { responsePath: ['currency'], literal: 'TZS' },
+        { responsePath: ['totalDebits'], literal: '1000.00' },
+        { responsePath: ['totalCredits'], literal: '125.00' },
+        { responsePath: ['closingBalance'], literal: '875.00' },
+      ],
+      absent: 'customerAccountStatementB',
+    },
+    seedScenario: 'customer-account-company-pair-v1',
+    scopeProbe: {
+      pathBindings: [{ name: 'id', binding: 'customerAccountStatementB' }],
+      queryBindings: [],
+      expectedStatuses: [403, 404],
+    },
+  },
   companyRecord(
     'BankReconciliationsController.findOne',
     'bank-reconciliations/:id',
@@ -1183,6 +1265,8 @@ export function pathRecordReadEvidencePacks(
                 ? { executionPrincipal: definition.executionPrincipal }
                 : {}),
               ...(definition.seedModel ? { seedModel: definition.seedModel } : {}),
+              ...(definition.seedScenario ? { seedScenario: definition.seedScenario } : {}),
+              ...(definition.scopeProbe ? { scopeProbe: definition.scopeProbe } : {}),
             }),
           ];
         })
