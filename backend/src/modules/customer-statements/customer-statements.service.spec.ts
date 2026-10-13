@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { Workbook } from 'exceljs';
 import { CustomerStatementsService } from './customer-statements.service';
 import {
   assembleCustomerAccounts,
@@ -712,9 +713,8 @@ describe('Customer statements and preserved exports', () => {
     expect(model.sections[0].table?.numericColumns).toEqual([2, 3, 4]);
     expect(buildBusinessPdf(model).toString('ascii', 0, 5)).toBe('%PDF-');
     const excel = await statements.exportExcel(selection, USER);
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(excel.buffer);
+    const workbook = new Workbook();
+    await workbook.xlsx.load(Uint8Array.from(excel.buffer).buffer);
     const sheet = workbook.worksheets[0];
     expect(sheet.getRow(8).getCell(6).value).toBe(0);
     expect(typeof sheet.getRow(9).getCell(4).value).toBe('number');
