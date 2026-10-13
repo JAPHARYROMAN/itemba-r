@@ -16147,6 +16147,11 @@ model CustomerStatementRun {
   generatedAt        DateTime                @default(now())
   status             CustomerStatementStatus @default(GENERATED)
   documentId         String?
+  /// Immutable issued account detail; legacy runs have no snapshot and cannot be reissued.
+  snapshot           Json?
+  snapshotHash       String?
+  pdfContent         Bytes?
+  calculationVersion String?
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
 

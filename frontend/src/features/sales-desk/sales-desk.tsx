@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { ChevronRight, LayoutDashboard, Receipt, Users } from 'lucide-react';
+import { ChevronRight, LayoutDashboard, Receipt, TrendingUp, Users } from 'lucide-react';
 import { AppGlyph } from '@/components/os/app-glyph';
 import { PageSpinner, PermissionDeniedState } from '@/components/ui';
 import {
@@ -19,6 +19,10 @@ import './sales-desk.css';
 
 const loading = () => <PageSpinner label="Opening Sales Desk" />;
 const Sales = dynamic(() => import('./business-sales').then((m) => m.BusinessSales), { loading });
+const CustomerPerformance = dynamic(
+  () => import('./customer-performance').then((m) => m.CustomerPerformancePage),
+  { loading },
+);
 const Sale = dynamic(() => import('./business-sale-detail').then((m) => m.BusinessSaleDetail), {
   loading,
 });
@@ -81,6 +85,13 @@ export function SalesDesk({ targetRecordId }: { targetRecordId?: string } = {}) 
       visible: hasPermission('sales.view'),
     },
     {
+      id: 'customer-performance',
+      label: 'Customer Performance',
+      icon: TrendingUp,
+      href: '/sales-desk/customer-performance',
+      visible: hasPermission('customers.view') && hasPermission('sales.view'),
+    },
+    {
       id: 'customers',
       label: 'Customers',
       icon: Users,
@@ -134,6 +145,8 @@ export function SalesDesk({ targetRecordId }: { targetRecordId?: string } = {}) 
             <Customers kind="customers" workspace="sales-desk" />
             <SalesCustomerReconciliation />
           </>
+        ) : route.kind === 'customer-performance' ? (
+          <CustomerPerformance />
         ) : route.kind === 'sale' ? (
           <Sale key={route.id} saleId={route.id} />
         ) : route.kind === 'customer' ? (

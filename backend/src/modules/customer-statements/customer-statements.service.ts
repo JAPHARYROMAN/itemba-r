@@ -1,1189 +1,758 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccessLevel, CurrencyCode, Prisma, CustomerStatementRun } from '@prisma/client';
+import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CompanyScopeService } from '../../common/services';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import { EmailService } from '../../common/services/email.service';
 import { PrintEngineService } from '../print-engine/print-engine.service';
+import { buildBusinessPdf } from '../generated-documents/pdf-builder';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
-import { utcToday } from '../../common/utils/source-settlement';
 import { GenerateCustomerStatementDto } from './dto/generate-customer-statement.dto';
 import { QueryCustomerStatementDto } from './dto/query-customer-statement.dto';
 import { DetailStatementQueryDto } from './dto/detail-statement.dto';
 import { ExportStatementDto } from './dto/export-statement.dto';
 import { EmailStatementDto } from './dto/email-statement.dto';
-import { CustomerStatement, StatementAging, StatementLine } from './statement.types';
-import {
-  loadSettlementJournals,
-  recoverSettlementHistory,
-  reversalJournalSelection,
-  summarizeDatedMovements,
-} from '../../common/utils/settlement-history';
+import { CustomerStatement } from './statement.types';
+import { CustomerAccountProjectionService } from './customer-account-projection.service';
+import { customerStatementPdf } from './customer-statement-pdf';
+import { summarizeDatedMovements } from '../../common/utils/settlement-history';
 
-const ZERO = new Prisma.Decimal(0);
-const DAY_MS = 1000 * 60 * 60 * 24;
-
-interface StatementSelection {
+const VERSION = 'customer-account-v1';
+const D = (value: string | number | Prisma.Decimal = 0) => new Prisma.Decimal(value);
+type Selection = {
   companyId: string;
   customerId: string;
   dateFrom: string;
   dateTo: string;
   currency?: string;
-}
+  divisionId?: string;
+  branchId?: string;
+};
+const canonical = (value: any): any =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, canonical(value[key])]),
+        )
+      : value;
+const hash = (value: unknown) =>
+  createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex');
 
 @Injectable()
 export class CustomerStatementsService {
-  private readonly logger = new Logger(CustomerStatementsService.name);
-
+  private readonly projection: CustomerAccountProjectionService;
+  private readonly organization: OrganizationScopeService;
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
-    // Optional so existing 3-arg constructions (e.g. the cross-company
-    // isolation regression spec that only exercises findAll) keep compiling.
-    // NestJS DI always injects both at runtime; the detail/export/email paths
-    // guard against a missing injection defensively.
     private readonly printEngine?: PrintEngineService,
     private readonly email?: EmailService,
-  ) {}
-
-  // Saved runs retain their original evidence and expose recomputed dated balances.
-
-  async findAll(query: QueryCustomerStatementDto, user: AuthUser) {
-    const { companyId, customerId, page = 1, limit = 20 } = query;
-    const take = Math.min(Math.max(Number(limit), 1), 100);
-    const skip = (Number(page) - 1) * take;
-    const where: Prisma.CustomerStatementRunWhereInput = {
-      ...(await this.companyScope.companyWhereFor(user, companyId)),
-    };
-    if (customerId) where.customerId = customerId;
-    const [data, total] = await Promise.all([
-      this.prisma.customerStatementRun.findMany({
-        where,
-        include: {
-          company: { select: { id: true, name: true, code: true } },
-          generatedBy: { select: { id: true, fullName: true, email: true } },
-        },
-        skip,
-        take,
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.customerStatementRun.count({ where }),
-    ]);
-    const projected = await Promise.all(data.map((run) => this.projectRun(run)));
-    return {
-      data: projected,
-      items: projected,
-      total,
-      page: Number(page),
-      limit: take,
-      totalPages: Math.ceil(total / take),
-    };
+    projection?: CustomerAccountProjectionService,
+    organization?: OrganizationScopeService,
+  ) {
+    // Older direct constructors still get the actual mandatory scope service;
+    // no mock-shaped fallback or company-only permission path is permitted.
+    this.organization = organization ?? new OrganizationScopeService(prisma);
+    this.projection =
+      projection ?? new CustomerAccountProjectionService(prisma, companyScope, this.organization);
   }
-
-  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
-    const item = await this.prisma.customerStatementRun.findFirst({
-      where: { id },
-      include: {
+  async findAll(query: QueryCustomerStatementDto, user: AuthUser) {
+    const companyWhere = await this.companyScope.companyWhereFor(user, query.companyId);
+    const grants = await this.organization.accessibleIds(user);
+    const runs = await this.prisma.customerStatementRun.findMany({
+      where: { ...companyWhere, ...(query.customerId ? { customerId: query.customerId } : {}) },
+      select: {
+        id: true,
+        statementRunNumber: true,
+        companyId: true,
+        customerId: true,
+        periodStart: true,
+        periodEnd: true,
+        openingBalance: true,
+        totalDebits: true,
+        totalCredits: true,
+        closingBalance: true,
+        currency: true,
+        status: true,
+        generatedById: true,
+        generatedAt: true,
+        createdAt: true,
+        documentId: true,
+        calculationVersion: true,
+        snapshotHash: true,
+        snapshot: true,
         company: { select: { id: true, name: true, code: true } },
         generatedBy: { select: { id: true, fullName: true, email: true } },
       },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: 5001,
     });
-    if (!item) throw new NotFoundException('Customer statement run not found');
-    await this.companyScope.assertCanAccessCompany(user, item.companyId, minimum);
-    return this.projectRun(item);
+    if (runs.length > 5000)
+      throw new BadRequestException('Choose a company or customer to narrow statement history.');
+    const visible = runs.filter(
+      (run) => grants.unrestricted || this.scopeAllowed((run.snapshot as any)?.scope, grants),
+    );
+    const page = Math.max(1, Number(query.page ?? 1)),
+      limit = Math.min(100, Math.max(1, Number(query.limit ?? 20)));
+    const data = await this.projectSavedRuns(visible.slice((page - 1) * limit, page * limit), user);
+    return {
+      data,
+      items: data,
+      total: visible.length,
+      page,
+      limit,
+      totalPages: Math.ceil(visible.length / limit),
+    };
   }
-
-  /** Project already-selected runs through the same scoped ledger as statement detail. */
-  async projectSavedRuns<T extends CustomerStatementRun>(runs: T[], user: AuthUser) {
+  async findOne(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
+    const run = await this.savedRun(id, user, minimum);
+    return (await this.projectSavedRuns([run], user))[0];
+  }
+  /** Customer profiles use issued snapshots unchanged; legacy summaries expose
+   * separately labeled reconciled balances without inventing issued detail. */
+  async projectSavedRuns<
+    T extends Pick<
+      CustomerStatementRun,
+      | 'id'
+      | 'companyId'
+      | 'customerId'
+      | 'currency'
+      | 'snapshot'
+      | 'periodStart'
+      | 'periodEnd'
+      | 'openingBalance'
+      | 'totalDebits'
+      | 'totalCredits'
+      | 'closingBalance'
+    >,
+  >(runs: T[], user: AuthUser) {
     await Promise.all(
       [...new Set(runs.map((run) => run.companyId))].map((companyId) =>
         this.companyScope.assertCanAccessCompany(user, companyId, AccessLevel.READ),
       ),
     );
-    const ledgers = new Map<string, ReturnType<CustomerStatementsService['loadMovements']>>();
+    const grants = await this.organization.accessibleIds(user);
+    const visible = runs.filter(
+      (run) => grants.unrestricted || this.scopeAllowed((run.snapshot as any)?.scope, grants),
+    );
+    const ledgers = new Map<string, ReturnType<CustomerAccountProjectionService['read']>>();
+    const keyFor = (run: T) => JSON.stringify([run.companyId, run.customerId, run.currency]);
+    const latestDates = new Map<string, string>();
+    for (const run of visible) {
+      const key = keyFor(run),
+        date = run.periodEnd.toISOString().slice(0, 10);
+      if (!latestDates.has(key) || latestDates.get(key)! < date) latestDates.set(key, date);
+    }
     return Promise.all(
-      runs.map(async (run) => {
-        const key = JSON.stringify([run.companyId, run.customerId, run.currency]);
+      visible.map(async (run) => {
+        if (run.snapshot) {
+          await this.savedRun(run.id, user);
+          return this.runSummary(run);
+        }
+        const key = keyFor(run);
         let ledger = ledgers.get(key);
         if (!ledger) {
-          ledger = this.loadMovements(
-            run.companyId,
-            run.customerId ?? undefined,
-            run.currency as CurrencyCode,
-          );
+          ledger = this.projection.read(user, {
+            companyId: run.companyId,
+            customerIds: run.customerId ? [run.customerId] : undefined,
+            currency: run.currency as CurrencyCode,
+            dateTo: latestDates.get(key)!,
+          });
           ledgers.set(key, ledger);
         }
-        return this.projectRun(run, await ledger);
-      }),
-    );
-  }
-
-  async generate(dto: GenerateCustomerStatementDto, user: AuthUser) {
-    const periodStart = dateRangeStart(dto.periodStart);
-    const periodEnd = dateRangeEnd(dto.periodEnd);
-    if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime()) || periodStart > periodEnd) {
-      throw new BadRequestException('Statement start date cannot be after end date');
-    }
-
-    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
-
-    if (dto.customerId) {
-      const customer = await this.prisma.customer.findFirst({
-        where: { id: dto.customerId, companyId: dto.companyId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!customer) {
-        throw new BadRequestException('Customer does not belong to the selected company');
-      }
-    }
-
-    // A statement must never sum across currencies. Scope every source to a
-    // single currency (base TZS by default) and persist it on the run.
-    const currency: CurrencyCode = dto.currency ?? CurrencyCode.TZS;
-
-    // Net the SAME movement set the detail path (buildStatement) uses —
-    // receivables (debit), COMPLETED customer payments (credit), ISSUED credit
-    // notes (credit) and PAID cash refunds (debit) — with a real opening
-    // balance from strictly-before-period activity. This replaces the legacy
-    // receivable.paidAmount aggregate, which ignored credit notes/refunds and
-    // counted cumulative (not period-scoped) payments.
-    const { openingBalance, totalDebits, totalCredits, closingBalance } = await this.netMovements({
-      companyId: dto.companyId,
-      customerId: dto.customerId,
-      currency,
-      periodStart,
-      periodEnd,
-    });
-
-    const run = await this.prisma.customerStatementRun.create({
-      data: {
-        statementRunNumber: `CSTAT-${Date.now()}`,
-        companyId: dto.companyId,
-        // NULL = whole-company run (the former "ALL" sentinel is gone; customerId is a real FK).
-        customerId: dto.customerId ?? null,
-        periodStart,
-        periodEnd,
-        openingBalance,
-        totalDebits,
-        totalCredits,
-        closingBalance,
-        currency,
-        generatedById: user.id,
-        status: 'GENERATED',
-      },
-    });
-
-    await this.auditLogs.log({
-      action: 'GENERATE',
-      entityType: 'CustomerStatementRun',
-      entityId: run.id,
-      userId: user.id,
-      companyId: dto.companyId,
-      newValue: run as any,
-    });
-    return run;
-  }
-
-  /**
-   * Compute the reconciling summary totals for the persisted statement run.
-   *
-   * Nets the same movement set as {@link buildStatement} — original receivables (debit), dated payments and legacy settlement
-   * journals (credit), credit notes, cash refunds, write-offs and their dated reversals — so the saved CustomerStatementRun ties out to the detail
-   * statement and the customer's real balance:
-   *   closingBalance === openingBalance + totalDebits - totalCredits
-   *
-   * `customerId` is optional (a whole-company run, stored with customerId NULL, nets across every
-   * customer). Every source is scoped to `companyId` and a single `currency`
-   * (statements never sum across currencies). Opening balance is the net of all
-   * activity strictly BEFORE `periodStart`; debits/credits are the in-period
-   * movements only, so post-period payments never leak in.
-   */
-  private async netMovements(args: {
-    companyId: string;
-    customerId?: string;
-    currency: CurrencyCode;
-    periodStart: Date;
-    periodEnd: Date;
-  }) {
-    const ledger = await this.loadMovements(args.companyId, args.customerId, args.currency);
-    if (ledger.history.status === 'INCOMPLETE') {
-      throw new BadRequestException({
-        message: 'Statement cannot be generated until settlement history is reconciled',
-        settlementHistory: ledger.history,
-      });
-    }
-    return summarizeDatedMovements(ledger.movements, args.periodStart, args.periodEnd);
-  }
-
-  /** Full dated history: cumulative paid amounts are diagnostic, never dated credits. */
-  private async loadMovements(
-    companyId: string,
-    customerId: string | undefined,
-    currency: CurrencyCode,
-  ) {
-    const scope = { companyId, currency, ...(customerId ? { customerId } : {}) };
-    const journal = {
-      select: {
-        ...reversalJournalSelection,
-        reversedBy_: {
-          where: { companyId, deletedAt: null, status: 'POSTED' as const },
-          select: reversalJournalSelection,
-        },
-      },
-    };
-    const [receivables, payments, creditNotes, refunds] = await Promise.all([
-      this.prisma.receivable.findMany({
-        where: {
-          ...scope,
-          deletedAt: null,
-          OR: [{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }],
-        },
-        select: {
-          id: true,
-          receivableNumber: true,
-          amount: true,
-          paidAmount: true,
-          issueDate: true,
-          dueDate: true,
-          outstandingAmount: true,
-          status: true,
-          journalEntryId: true,
-          sourceType: true,
-          sourceId: true,
-        },
-        orderBy: { issueDate: 'asc' },
-      }),
-      this.prisma.customerPayment.findMany({
-        where: { ...scope, deletedAt: null, status: { in: ['COMPLETED', 'REVERSED'] } },
-        select: {
-          id: true,
-          paymentNumber: true,
-          amount: true,
-          paymentDate: true,
-          reference: true,
-          status: true,
-          reversedAt: true,
-          journalEntryId: true,
-          reversalJournalEntryId: true,
-          reversalJournalEntry: { select: reversalJournalSelection },
-          allocations: { select: { receivableId: true, amount: true } },
-        },
-        orderBy: { paymentDate: 'asc' },
-      }),
-      this.prisma.creditNote.findMany({
-        where: { ...scope, deletedAt: null, status: { in: ['ISSUED', 'VOID'] } },
-        select: {
-          id: true,
-          creditNoteNumber: true,
-          totalAmount: true,
-          issueDate: true,
-          reason: true,
-          status: true,
-          journalEntryId: true,
-          journalEntry: journal,
-        },
-        orderBy: { issueDate: 'asc' },
-      }),
-      this.prisma.refund.findMany({
-        where: { ...scope, deletedAt: null, status: { in: ['PAID', 'VOID'] } },
-        select: {
-          id: true,
-          refundNumber: true,
-          amount: true,
-          refundDate: true,
-          reason: true,
-          status: true,
-          journalEntryId: true,
-          reversalJournalEntryId: true,
-          journalEntry: journal,
-        },
-        orderBy: { refundDate: 'asc' },
-      }),
-    ]);
-    const refundReversalIds = refunds.flatMap((r) =>
-      r.status === 'VOID' && r.reversalJournalEntryId ? [r.reversalJournalEntryId] : [],
-    );
-    const refundReversals = refundReversalIds.length
-      ? await this.prisma.journalEntry.findMany({
-          where: {
-            id: { in: refundReversalIds },
-            companyId,
-            deletedAt: null,
-            status: 'POSTED',
+        const projection = await ledger;
+        const datedBalances = summarizeDatedMovements(
+          projection.accounts.flatMap((account) => account.movements),
+          run.periodStart,
+          run.periodEnd.getUTCHours() === 0 && run.periodEnd.getUTCMinutes() === 0
+            ? dateRangeEnd(run.periodEnd.toISOString().slice(0, 10))
+            : run.periodEnd,
+        );
+        const totals = {
+          openingBalance: datedBalances.openingBalance,
+          totalDebits: datedBalances.totalDebits,
+          totalCredits: datedBalances.totalCredits,
+          closingBalance: datedBalances.closingBalance,
+        };
+        return {
+          ...this.runSummary(run),
+          ...totals,
+          storedBalances: {
+            openingBalance: run.openingBalance,
+            totalDebits: run.totalDebits,
+            totalCredits: run.totalCredits,
+            closingBalance: run.closingBalance,
           },
-          select: reversalJournalSelection,
-        })
-      : [];
-    const refundReversalById = new Map(refundReversals.map((j) => [j.id, j]));
-    const documents = receivables.map((r) => ({ ...r, reference: r.receivableNumber }));
-    const recovered = recoverSettlementHistory({
-      kind: 'customer',
-      documents,
-      journals: await loadSettlementJournals(this.prisma, 'customer', companyId, documents),
-      modernJournalIds: payments.flatMap((p) => [p.journalEntryId, p.reversalJournalEntryId]),
-      completedAllocations: payments
-        .filter((p) => p.status !== 'REVERSED')
-        .flatMap((p) =>
-          (p.allocations ?? []).map((a) => ({ documentId: a.receivableId, amount: a.amount })),
-        ),
-    });
-    const movements: StatementLine[] = [...recovered.movements];
-    const add = (
-      date: Date,
-      type: StatementLine['type'],
-      reference: string,
-      description: string,
-      sourceId: string,
-      debit: Prisma.Decimal,
-      credit: Prisma.Decimal,
-    ) => {
-      movements.push({
-        date,
-        type,
-        reference,
-        description,
-        sourceId,
-        debit,
-        credit,
-        balance: ZERO,
-      });
-    };
-    const missingReversal = (id: string, reference: string, amount: Prisma.Decimal) => {
-      recovered.history.gaps.push({
-        documentId: id,
-        reference,
-        amount: amount.toFixed(2),
-        reason: 'Reversed or voided transaction has no dated accounting reversal',
-      });
-    };
-    for (const r of receivables)
-      add(
-        r.issueDate,
-        'INVOICE',
-        r.receivableNumber,
-        `Invoice ${r.receivableNumber}`,
-        r.id,
-        r.amount,
-        ZERO,
-      );
-    for (const p of payments) {
-      add(
-        p.paymentDate,
-        'PAYMENT',
-        p.paymentNumber,
-        p.reference ? `Payment ${p.paymentNumber} (${p.reference})` : `Payment ${p.paymentNumber}`,
-        p.id,
-        ZERO,
-        p.amount,
-      );
-      if (p.status === 'REVERSED') {
-        const date =
-          p.reversalJournalEntry?.status === 'POSTED'
-            ? p.reversalJournalEntry.transactionDate
-            : p.reversedAt;
-        if (date)
-          add(
-            date,
-            'ADJUSTMENT',
-            p.paymentNumber,
-            `Payment reversal ${p.paymentNumber}`,
-            p.reversalJournalEntryId ?? p.id,
-            p.amount,
-            ZERO,
-          );
-        else missingReversal(p.id, p.paymentNumber, p.amount);
-      }
-    }
-    for (const c of creditNotes) {
-      if (c.status === 'VOID' && !c.journalEntryId) continue;
-      add(
-        c.issueDate,
-        'CREDIT_NOTE',
-        c.creditNoteNumber,
-        c.reason
-          ? `Credit note ${c.creditNoteNumber} (${c.reason})`
-          : `Credit note ${c.creditNoteNumber}`,
-        c.id,
-        ZERO,
-        c.totalAmount,
-      );
-      if (c.status === 'VOID') {
-        const reversal = c.journalEntry?.reversedBy_?.[0];
-        if (reversal)
-          add(
-            reversal.transactionDate,
-            'ADJUSTMENT',
-            c.creditNoteNumber,
-            `Credit note reversal ${c.creditNoteNumber}`,
-            reversal.id,
-            c.totalAmount,
-            ZERO,
-          );
-        else missingReversal(c.id, c.creditNoteNumber, c.totalAmount);
-      }
-    }
-    for (const r of refunds) {
-      if (r.status === 'VOID' && !r.journalEntryId) continue;
-      add(
-        r.refundDate,
-        'REFUND',
-        r.refundNumber,
-        r.reason ? `Refund ${r.refundNumber} (${r.reason})` : `Refund ${r.refundNumber}`,
-        r.id,
-        r.amount,
-        ZERO,
-      );
-      if (r.status === 'VOID') {
-        const reversal =
-          refundReversalById.get(r.reversalJournalEntryId ?? '') ??
-          r.journalEntry?.reversedBy_?.[0];
-        if (reversal)
-          add(
-            reversal.transactionDate,
-            'ADJUSTMENT',
-            r.refundNumber,
-            `Refund reversal ${r.refundNumber}`,
-            reversal.id,
-            ZERO,
-            r.amount,
-          );
-        else missingReversal(r.id, r.refundNumber, r.amount);
-      }
-    }
-    recovered.history.status = recovered.history.gaps.length ? 'INCOMPLETE' : 'COMPLETE';
-    recovered.history.unresolvedAmount = recovered.history.gaps
-      .reduce((sum, gap) => sum.plus(new Prisma.Decimal(gap.amount).abs()), ZERO)
-      .toFixed(2);
-    return { receivables, movements, history: recovered.history };
+          datedBalances: totals,
+          settlementHistory: this.combinedHistory(projection.accounts),
+        };
+      }),
+    );
   }
-
-  // ─── Professional statement of account (detail) ──────────────────────────────
-
-  /**
-   * Public detail endpoint: full statement of account for one customer over a
-   * range — opening balance, chronological ledger lines with running balance,
-   * closing balance, and a LIVE aging summary (see `agingAsOf`). Read-only;
-   * company scoped (assertCanAccessCompany + companyId in every query).
-   *
-   * Note: the ledger figures (opening/closing/lines) are period-correct as of
-   * `dateTo`, but the aging block is a current snapshot of what the customer
-   * owes today — it is NOT reconstructed as-of `dateTo` and, for a backdated
-   * statement, will not tie out to `closingBalance`.
-   */
+  async savedDetail(id: string, user: AuthUser) {
+    const run = await this.savedRun(id, user);
+    if (!run.snapshot)
+      throw new BadRequestException(
+        'This older statement contains totals only. Generate a new issued statement to preserve account detail.',
+      );
+    return run.snapshot;
+  }
+  async generate(dto: GenerateCustomerStatementDto, user: AuthUser) {
+    await this.companyScope.assertCanAccessCompany(user, dto.companyId, AccessLevel.WRITE);
+    if (!dto.customerId) return this.generateCompanySummary(dto, user);
+    const s = await this.buildStatement(
+      { ...dto, customerId: dto.customerId, dateFrom: dto.periodStart, dateTo: dto.periodEnd },
+      user,
+    );
+    this.assertPreviewHash(dto.expectedHash, s);
+    if (s.settlementHistory?.status === 'INCOMPLETE' || (s.integrityIssues ?? []).length > 0)
+      throw new BadRequestException(
+        'Resolve incomplete or partially scoped statement history before issuing this account statement.',
+      );
+    s.runId = randomUUID();
+    s.statementRunNumber = `CSTAT-${s.generatedAt.toISOString().slice(0, 10).replace(/-/g, '')}-${s.runId.slice(0, 8).toUpperCase()}`;
+    const pdfContent = buildBusinessPdf(customerStatementPdf(s));
+    const snapshot = {
+      ...this.serializeStatement(s),
+      pdfSha256: createHash('sha256').update(pdfContent).digest('hex'),
+    };
+    const snapshotHash = hash(snapshot);
+    const run = await this.prisma.$transaction(async (tx) => {
+      const issued = await tx.customerStatementRun.create({
+        data: {
+          id: s.runId,
+          statementRunNumber: s.statementRunNumber!,
+          companyId: s.companyId,
+          customerId: s.customerId,
+          periodStart: s.dateFrom,
+          periodEnd: s.dateTo,
+          openingBalance: s.openingBalance,
+          totalDebits: s.totalDebits,
+          totalCredits: s.totalCredits,
+          closingBalance: s.closingBalance,
+          currency: s.currency,
+          generatedById: user.id,
+          generatedAt: s.generatedAt,
+          status: 'GENERATED',
+          snapshot: snapshot as Prisma.InputJsonValue,
+          snapshotHash,
+          pdfContent,
+          calculationVersion: VERSION,
+        },
+      });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'GENERATE',
+        entityType: 'CustomerStatementRun',
+        entityId: issued.id,
+        userId: user.id,
+        companyId: issued.companyId,
+        metadata: { snapshotHash, calculationVersion: VERSION },
+      });
+      return issued;
+    });
+    return { ...this.runSummary(run), snapshot };
+  }
   async getDetail(query: DetailStatementQueryDto, user: AuthUser) {
     return this.serializeStatement(await this.buildStatement(query, user));
   }
-
-  /**
-   * Core computation. Returns a Decimal-typed statement so downstream callers
-   * (export/email/spec) can assert exact money reconciliation:
-   *   openingBalance + totalDebits - totalCredits === closingBalance.
-   *
-   * Sign convention (customer AR ledger — what the customer owes us):
-   *   DEBIT raises balance: original invoices, cash refunds, reversed settlements.
-   *   CREDIT lowers balance: payments, credit notes, write-offs and cancellations.
-   *   Reversals affect their own dates; later lifecycle changes never erase history.
-   *
-   * Scoped to a single currency (base TZS by default) exactly like the persisted
-   * generate()/netMovements path so the detail statement reconciles with the
-   * saved CustomerStatementRun.
-   */
-  async buildStatement(sel: StatementSelection, user: AuthUser): Promise<CustomerStatement> {
-    await this.companyScope.assertCanAccessCompany(user, sel.companyId, AccessLevel.READ);
-
-    const from = dateRangeStart(sel.dateFrom);
-    const to = dateRangeEnd(sel.dateTo);
-    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
-      throw new BadRequestException('Invalid dateFrom / dateTo');
-    }
-    if (from > to) {
-      throw new BadRequestException('dateFrom cannot be after dateTo');
-    }
-
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: sel.customerId, companyId: sel.companyId, deletedAt: null },
-      select: { id: true, name: true, email: true },
-    });
-    if (!customer) {
-      throw new NotFoundException('Customer does not belong to the selected company');
-    }
-
-    // Pull every ledger-affecting movement up to and including `to`, then split
-    // into pre-period (opening) vs in-period. One fetch per source keeps the
-    // company+customer scope explicit on each query. A statement must never sum
-    // across currencies, so — exactly like the persisted generate()/netMovements
-    // path — scope every source to a single currency (base TZS by default) so
-    // the detail statement reconciles with the saved run.
-    const currency: CurrencyCode = this.resolveCurrency(sel.currency);
-    const { receivables, movements, history } = await this.loadMovements(
-      sel.companyId,
-      sel.customerId,
+  async buildStatement(sel: Selection, user: AuthUser): Promise<CustomerStatement> {
+    await this.companyScope.assertCanAccessCompany(user, sel.companyId);
+    const from = dateRangeStart(sel.dateFrom),
+      to = dateRangeEnd(sel.dateTo);
+    if (isNaN(from.getTime()) || isNaN(to.getTime()) || from > to)
+      throw new BadRequestException('Choose a valid statement date range.');
+    if (sel.currency && !Object.values(CurrencyCode).includes(sel.currency as CurrencyCode))
+      throw new BadRequestException('Invalid statement currency');
+    const currency = (sel.currency ?? CurrencyCode.TZS) as CurrencyCode;
+    const result = await this.projection.read(user, {
+      companyId: sel.companyId,
+      divisionId: sel.divisionId,
+      branchId: sel.branchId,
       currency,
-    );
-
-    // Chronological, with a stable secondary sort so equal-dated lines are
-    // deterministic (invoices before the credits that offset them, etc.).
-    const typeRank: Record<StatementLine['type'], number> = {
-      INVOICE: 0,
-      REFUND: 1,
-      PAYMENT: 2,
-      CREDIT_NOTE: 3,
-      ADJUSTMENT: 4,
-    };
-    movements.sort((a, b) => {
-      const d = a.date.getTime() - b.date.getTime();
-      if (d !== 0) return d;
-      const t = typeRank[a.type] - typeRank[b.type];
-      if (t !== 0) return t;
-      return a.reference.localeCompare(b.reference);
+      dateTo: sel.dateTo,
+      customerIds: [sel.customerId],
     });
-
-    const { openingBalance, totalDebits, totalCredits, closingBalance, inPeriod } =
-      summarizeDatedMovements(movements, from, to);
-    let running = openingBalance;
-    for (const line of inPeriod) {
-      running = running.plus(line.debit).minus(line.credit);
-      line.balance = running;
-    }
-
-    // Aging is a LIVE snapshot, NOT period-consistent. It is fed each
-    // receivable's current `outstandingAmount`, which already reflects
-    // payments / credit notes applied AFTER `dateTo`. We therefore age it
-    // as of TODAY (not `dateTo`) and label it with `agingAsOf` so consumers
-    // know it describes the current position, not the position at `dateTo`.
-    // For a same-day statement (`dateTo` effectively today) this is a no-op.
-    // A true as-of-`dateTo` reconstruction would require rewinding each
-    // receivable's outstanding balance over the movement history and is
-    // deliberately out of scope here.
-    const agingAsOf = new Date();
-    const aging = this.computeAging(
-      receivables.map((r) => ({
-        outstandingAmount: r.outstandingAmount,
-        dueDate: r.dueDate,
-        status: r.status,
-      })),
-      agingAsOf,
+    const account = result.accounts.find(
+      (a) => a.customer.id === sel.customerId && a.customer.companyId === sel.companyId,
     );
-
+    if (!account)
+      throw new NotFoundException(
+        'Customer is not available in your selected organizational scope.',
+      );
+    let openingBalance = D(),
+      totalDebits = D(),
+      totalCredits = D();
+    const lines = account.movements.filter((movement) => {
+      if (movement.date < from) {
+        openingBalance = openingBalance.plus(movement.debit).minus(movement.credit);
+        return false;
+      }
+      return true;
+    });
+    let running = openingBalance;
+    const statementLines = lines.map((movement) => {
+      running = running.plus(movement.debit).minus(movement.credit);
+      totalDebits = totalDebits.plus(movement.debit);
+      totalCredits = totalCredits.plus(movement.credit);
+      return { ...movement, balance: running };
+    });
     return {
       companyId: sel.companyId,
       customerId: sel.customerId,
-      customerName: customer.name,
-      customerEmail: customer.email,
+      customerName: account.customer.name,
+      customerEmail: account.customer.email,
+      company: account.customer.company,
+      customer: account.customer,
+      scope: result.scope,
+      warnings: [...result.warnings, ...account.warnings],
+      integrityIssues: account.integrityIssues,
+      settlementHistory: account.settlementHistory,
       currency,
       dateFrom: from,
       dateTo: to,
       openingBalance,
       totalDebits,
       totalCredits,
-      closingBalance,
-      lineCount: inPeriod.length,
-      lines: inPeriod,
-      settlementHistory: history,
-      aging,
-      agingAsOf,
+      closingBalance: running,
+      netBalance: account.netBalance,
+      openInvoiceBalance: account.openInvoiceBalance,
+      customerCredit: account.customerCredit,
+      lineCount: statementLines.length,
+      lines: statementLines,
+      aging: account.aging,
+      agingAsOf: to,
       generatedAt: new Date(),
     };
   }
-
-  /**
-   * Age open receivables into days-past-due bands as of `asOf` (a LIVE
-   * snapshot — see caller: `asOf` is today, and `outstandingAmount` is the
-   * current balance). Bucket boundaries are IDENTICAL to
-   * FinancialReportsService.getCustomerAgingDetail
-   * (days <= 0 -> current, <= 30, <= 60, <= 90, else over90; null due = current)
-   * so statement aging ties out to the current aging reports.
-   */
-  private computeAging(
-    rows: Array<{ outstandingAmount: Prisma.Decimal; dueDate: Date | null; status: string }>,
-    asOf: Date,
-  ): StatementAging {
-    const buckets: StatementAging = {
-      current: 0,
-      days1_30: 0,
-      days31_60: 0,
-      days61_90: 0,
-      over90: 0,
-      total: 0,
-      oldestDaysOverdue: 0,
-    };
-    const OPEN_STATUSES = new Set(['OPEN', 'PARTIALLY_PAID', 'OVERDUE']);
-    for (const r of rows) {
-      if (!OPEN_STATUSES.has(r.status)) continue;
-      const amount = Number(r.outstandingAmount);
-      if (amount === 0) continue;
-      const days = r.dueDate
-        ? Math.floor((utcToday(asOf).getTime() - utcToday(r.dueDate).getTime()) / DAY_MS)
-        : 0;
-      if (days <= 0) buckets.current += amount;
-      else if (days <= 30) buckets.days1_30 += amount;
-      else if (days <= 60) buckets.days31_60 += amount;
-      else if (days <= 90) buckets.days61_90 += amount;
-      else buckets.over90 += amount;
-      buckets.total += amount;
-      buckets.oldestDaysOverdue = Math.max(buckets.oldestDaysOverdue, Math.max(0, days));
-    }
-    return buckets;
-  }
-
-  private serializeStatement(s: CustomerStatement) {
-    return {
-      companyId: s.companyId,
-      customerId: s.customerId,
-      customerName: s.customerName,
-      customerEmail: s.customerEmail,
-      currency: s.currency,
-      dateFrom: s.dateFrom,
-      dateTo: s.dateTo,
-      openingBalance: s.openingBalance.toFixed(2),
-      totalDebits: s.totalDebits.toFixed(2),
-      totalCredits: s.totalCredits.toFixed(2),
-      closingBalance: s.closingBalance.toFixed(2),
-      lineCount: s.lineCount,
-      lines: s.lines.map((l) => ({
-        date: l.date,
-        type: l.type,
-        reference: l.reference,
-        description: l.description,
-        sourceId: l.sourceId,
-        debit: l.debit.toFixed(2),
-        credit: l.credit.toFixed(2),
-        balance: l.balance.toFixed(2),
-      })),
-      settlementHistory: s.settlementHistory,
-      aging: s.aging,
-      agingAsOf: s.agingAsOf,
-      generatedAt: s.generatedAt,
-    };
-  }
-
-  // ─── Export (PDF / Excel) ────────────────────────────────────────────────────
-
-  async exportPdf(dto: ExportStatementDto, user: AuthUser) {
-    const statement = await this.buildStatement(dto, user);
-    const result = await this.renderPdf(statement, dto.templateId, user);
-    await this.auditLogs.log({
-      action: 'EXPORT',
-      entityType: 'CustomerStatement',
-      entityId: statement.customerId,
-      userId: user.id,
-      companyId: statement.companyId,
-      metadata: {
-        format: 'PDF',
-        filename: result.filename,
-        documentId: result.documentId,
-        dateFrom: statement.dateFrom.toISOString(),
-        dateTo: statement.dateTo.toISOString(),
-      } as any,
-    });
-    return result;
-  }
-
-  async exportExcel(dto: ExportStatementDto, user: AuthUser) {
-    const statement = await this.buildStatement(dto, user);
-    const result = await this.renderExcel(statement, dto.templateId, user);
-    await this.auditLogs.log({
-      action: 'EXPORT',
-      entityType: 'CustomerStatement',
-      entityId: statement.customerId,
-      userId: user.id,
-      companyId: statement.companyId,
-      metadata: {
-        format: 'EXCEL',
-        filename: result.filename,
-        documentId: result.documentId,
-        dateFrom: statement.dateFrom.toISOString(),
-        dateTo: statement.dateTo.toISOString(),
-      } as any,
-    });
-    return result;
-  }
-
-  /**
-   * Render a PDF. When `templateId` is supplied we delegate to the print-engine
-   * (it fills the stored DocumentTemplate body and persists a GeneratedDocument),
-   * passing the statement as structured pdfSections so the engine's own pdfkit
-   * pipeline lays it out. When no template is given we fall back to the same
-   * pdfkit library locally so export never hard-depends on a seeded template.
-   */
-  private async renderPdf(
-    statement: CustomerStatement,
-    templateId: string | undefined,
+  async exportPdf(
+    dto: ExportStatementDto,
     user: AuthUser,
   ): Promise<{ buffer: Buffer; filename: string; mimeType: string; documentId?: string }> {
-    const sections = this.pdfSections(statement);
-    if (templateId && this.printEngine) {
-      const r = await this.printEngine.renderPdf(
-        {
-          templateId,
-          entityType: 'CustomerStatement',
-          entityId: statement.customerId,
-          data: this.templateData(statement),
-          pdfSections: sections,
-        },
-        user,
-      );
+    this.assertTemplate(dto.templateId);
+    if (dto.runId) {
+      const run = await this.savedRun(dto.runId, user);
+      if (!run.snapshot || !run.pdfContent)
+        throw new BadRequestException('This older run has no preserved statement PDF.');
+      const s = this.deserializeStatement(run.snapshot);
+      await this.auditExport(user, s, 'PDF');
       return {
-        buffer: r.buffer,
-        filename: r.filename,
-        mimeType: r.mimeType,
-        documentId: r.id,
+        buffer: Buffer.from(run.pdfContent),
+        filename: this.filename(s, 'pdf'),
+        mimeType: 'application/pdf',
       };
     }
-    const buffer = await this.buildPdfBuffer(statement, sections);
-    return {
-      buffer,
-      filename: this.statementFilename(statement, 'pdf'),
+    const s = await this.buildStatement(this.selection(dto), user);
+    this.assertPreviewHash(dto.expectedHash, s);
+    const result = {
+      buffer: buildBusinessPdf(customerStatementPdf(s)),
+      filename: this.filename(s, 'pdf'),
       mimeType: 'application/pdf',
     };
+    await this.auditExport(user, s, 'PDF');
+    return result;
   }
-
-  private async renderExcel(
-    statement: CustomerStatement,
-    templateId: string | undefined,
+  async exportExcel(
+    dto: ExportStatementDto,
     user: AuthUser,
   ): Promise<{ buffer: Buffer; filename: string; mimeType: string; documentId?: string }> {
-    const sheetData = this.sheetRows(statement);
-    if (templateId && this.printEngine) {
-      const r = await this.printEngine.renderExcel(
-        {
-          templateId,
-          entityType: 'CustomerStatement',
-          entityId: statement.customerId,
-          data: this.templateData(statement),
-          sheetName: 'Statement',
-          sheetData,
-        },
-        user,
-      );
-      return {
-        buffer: r.buffer,
-        filename: r.filename,
-        mimeType: r.mimeType,
-        documentId: r.id,
-      };
-    }
-    const buffer = await this.buildExcelBuffer(statement, sheetData);
-    return {
-      buffer,
-      filename: this.statementFilename(statement, 'xlsx'),
+    this.assertTemplate(dto.templateId);
+    const s = dto.runId
+      ? this.deserializeStatement(await this.savedDetail(dto.runId, user))
+      : await this.buildStatement(this.selection(dto), user);
+    if (!dto.runId) this.assertPreviewHash(dto.expectedHash, s);
+    const result = {
+      buffer: await this.excel(s),
+      filename: this.filename(s, 'xlsx'),
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     };
+    await this.auditExport(user, s, 'EXCEL');
+    return result;
   }
-
-  // ─── Email to customer ───────────────────────────────────────────────────────
-
-  /**
-   * Render the statement PDF and email it to the customer. Uses the shared
-   * EmailService; if SMTP is not configured that service no-ops + logs, so this
-   * still resolves with `emailed: false` (no throw). The PDF is embedded as a
-   * base64 download link in the HTML body — the shared EmailService.sendEmail
-   * signature does not expose MIME attachments, so a true attachment requires a
-   * future EmailService extension (out of this module's scope).
-   */
   async emailToCustomer(dto: EmailStatementDto, user: AuthUser) {
-    const statement = await this.buildStatement(dto, user);
-    const to = dto.to ?? statement.customerEmail ?? undefined;
-    const rendered = await this.renderPdf(statement, dto.templateId, user);
-
-    const smtpConfigured = !!process.env.SMTP_HOST;
-    let emailed = false;
-
-    if (!to) {
-      this.logger.warn(
-        `Statement email skipped: customer ${statement.customerId} has no email and no override was supplied`,
-      );
-    } else {
-      const subject = `Statement of account — ${statement.customerName ?? 'Customer'} (${this.fmtDate(
-        statement.dateFrom,
-      )} to ${this.fmtDate(statement.dateTo)})`;
-      const dataUri = `data:application/pdf;base64,${rendered.buffer.toString('base64')}`;
-      const html = this.emailHtml(statement, dataUri, rendered.filename);
-      const text = this.emailText(statement);
-      // sendEmail is best-effort and never throws; it no-ops when SMTP is unset.
-      await this.email?.sendEmail(to, subject, html, text);
-      emailed = smtpConfigured && !!this.email;
-    }
-
+    this.assertTemplate(dto.templateId);
+    const s = dto.runId
+      ? this.deserializeStatement(await this.savedDetail(dto.runId, user))
+      : await this.buildStatement(this.selection(dto), user);
+    if (!dto.runId) this.assertPreviewHash(dto.expectedHash, s);
+    const currentCustomer = dto.runId
+      ? await this.prisma.customer.findFirst({
+          where: { id: s.customerId, companyId: s.companyId, deletedAt: null },
+          select: { email: true },
+        })
+      : undefined;
+    if (dto.runId && !currentCustomer)
+      throw new NotFoundException('Customer is no longer available for statement email.');
+    const to = dto.to ?? (dto.runId ? currentCustomer?.email : s.customerEmail),
+      smtpConfigured = !!process.env.SMTP_HOST;
+    const filename = this.filename(s, 'pdf'),
+      pdf = dto.runId
+        ? (await this.exportPdf({ runId: dto.runId } as ExportStatementDto, user)).buffer
+        : buildBusinessPdf(customerStatementPdf(s));
+    const escape = (v: string) =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const historyWarning =
+      s.settlementHistory?.status === 'INCOMPLETE'
+        ? `Settlement history is incomplete. Unresolved evidence: ${s.currency} ${s.settlementHistory.unresolvedAmount}. This statement is not reconciled.`
+        : '';
+    const emailed =
+      to && this.email
+        ? await this.email.sendEmailWithAttachments(
+            to,
+            `Statement of account — ${s.customerName ?? 'Customer'}`,
+            `<p>${escape(historyWarning)}</p><p>Dear ${escape(s.customerName ?? 'Customer')},</p><p>Your attached statement covers ${s.dateFrom.toISOString().slice(0, 10)} to ${s.dateTo.toISOString().slice(0, 10)} (${s.currency}). Closing balance: ${s.closingBalance.toFixed(2)}.</p>`,
+            `${historyWarning}\nStatement of account ${s.currency}; closing balance ${s.closingBalance.toFixed(2)}.`,
+            [{ filename, content: pdf, contentType: 'application/pdf' }],
+          )
+        : false;
     await this.auditLogs.log({
       action: 'EMAIL',
       entityType: 'CustomerStatement',
-      entityId: statement.customerId,
+      entityId: s.customerId,
       userId: user.id,
-      companyId: statement.companyId,
-      metadata: {
-        to: to ?? null,
-        emailed,
-        smtpConfigured,
-        filename: rendered.filename,
-        documentId: rendered.documentId,
-      } as any,
+      companyId: s.companyId,
+      metadata: { to: to ?? null, emailed, smtpConfigured, filename },
     });
-
     return {
       emailed,
       smtpConfigured,
       to: to ?? null,
-      filename: rendered.filename,
-      documentId: rendered.documentId ?? null,
-      closingBalance: statement.closingBalance.toString(),
+      filename,
+      closingBalance: s.closingBalance.toFixed(2),
       message: !to
         ? 'No recipient email available for this customer'
-        : smtpConfigured
-          ? 'Statement emailed to customer'
-          : 'SMTP not configured — statement email skipped and logged',
+        : !smtpConfigured
+          ? 'SMTP not configured — statement email skipped and logged'
+          : emailed
+            ? 'Statement emailed to customer with PDF attachment'
+            : 'Statement email delivery failed or is unavailable',
     };
   }
-
-  // ─── Rendering helpers (shared by print-engine delegation + local fallback) ──
-
-  private templateData(s: CustomerStatement): Record<string, unknown> {
-    return {
-      settlementHistory: s.settlementHistory,
-      customerName: s.customerName ?? '',
-      currency: s.currency,
-      dateFrom: this.fmtDate(s.dateFrom),
-      dateTo: this.fmtDate(s.dateTo),
-      openingBalance: this.money(s.openingBalance),
-      totalDebits: this.money(s.totalDebits),
-      totalCredits: this.money(s.totalCredits),
-      closingBalance: this.money(s.closingBalance),
-    };
+  private async savedRun(id: string, user: AuthUser, minimum: AccessLevel = AccessLevel.READ) {
+    const run = await this.prisma.customerStatementRun.findFirst({ where: { id } });
+    if (!run) throw new NotFoundException('Customer statement run not found');
+    await this.companyScope.assertCanAccessCompany(user, run.companyId, minimum);
+    const grants = await this.organization.accessibleIds(user, minimum);
+    if (!grants.unrestricted && !this.scopeAllowed((run.snapshot as any)?.scope, grants))
+      throw new ForbiddenException(
+        'This statement includes divisions or branches outside your current access.',
+      );
+    if (run.snapshot && run.snapshotHash !== hash(run.snapshot))
+      throw new BadRequestException('The saved statement integrity check failed.');
+    if (
+      run.snapshot &&
+      run.pdfContent &&
+      (run.snapshot as any).pdfSha256 !==
+        createHash('sha256').update(Buffer.from(run.pdfContent)).digest('hex')
+    )
+      throw new BadRequestException('The saved statement PDF integrity check failed.');
+    return run;
   }
-
-  private pdfSections(s: CustomerStatement) {
-    return [
-      {
-        heading: `Statement of Account — ${s.customerName ?? s.customerId}`,
-        paragraph: `Currency ${s.currency}    Period ${this.fmtDate(s.dateFrom)} to ${this.fmtDate(
-          s.dateTo,
-        )}\nOpening balance: ${this.money(s.openingBalance)} ${s.currency}`,
-      },
-      ...(s.settlementHistory.status === 'INCOMPLETE'
-        ? [
-            {
-              heading: 'Settlement history is incomplete',
-              paragraph: `Unresolved evidence: ${s.currency} ${s.settlementHistory.unresolvedAmount}. This statement is not reconciled.`,
-              rows: s.settlementHistory.gaps.map((g) => [g.reference, g.reason, g.amount]),
-            },
-          ]
-        : []),
-      {
-        heading: 'Transactions',
-        rows: [
-          ['Date', 'Type', 'Reference', 'Debit', 'Credit', 'Balance'],
-          ...s.lines.map((l) => [
-            this.fmtDate(l.date),
-            l.type,
-            l.reference,
-            this.money(l.debit),
-            this.money(l.credit),
-            this.money(l.balance),
-          ]),
-        ],
-      },
-      {
-        heading: 'Summary',
-        rows: [
-          ['Opening balance', this.money(s.openingBalance)],
-          ['Total debits', this.money(s.totalDebits)],
-          ['Total credits', this.money(s.totalCredits)],
-          ['Closing balance', this.money(s.closingBalance)],
-        ],
-      },
-      {
-        heading: `Aging (live, as of ${this.fmtDate(s.agingAsOf)})`,
-        rows: [
-          ['Current', this.num(s.aging.current)],
-          ['1-30 days', this.num(s.aging.days1_30)],
-          ['31-60 days', this.num(s.aging.days31_60)],
-          ['61-90 days', this.num(s.aging.days61_90)],
-          ['Over 90 days', this.num(s.aging.over90)],
-          ['Total outstanding', this.num(s.aging.total)],
-        ],
-      },
-    ];
-  }
-
-  private sheetRows(s: CustomerStatement): Array<Record<string, unknown>> {
-    const rows: Array<Record<string, unknown>> = [];
-    rows.push({
-      Date: this.fmtDate(s.dateFrom),
-      Type: 'OPENING',
-      Reference: '',
-      Description: 'Opening balance',
-      Debit: '',
-      Credit: '',
-      Balance: this.money(s.openingBalance),
-    });
-    for (const l of s.lines) {
-      rows.push({
-        Date: this.fmtDate(l.date),
-        Type: l.type,
-        Reference: l.reference,
-        Description: l.description,
-        Debit: l.debit.isZero() ? '' : this.money(l.debit),
-        Credit: l.credit.isZero() ? '' : this.money(l.credit),
-        Balance: this.money(l.balance),
-      });
-    }
-    rows.push({
-      Date: this.fmtDate(s.dateTo),
-      Type: 'CLOSING',
-      Reference: '',
-      Description: 'Closing balance',
-      Debit: this.money(s.totalDebits),
-      Credit: this.money(s.totalCredits),
-      Balance: this.money(s.closingBalance),
-    });
-    if (s.settlementHistory.status === 'INCOMPLETE') {
-      rows.push({
-        Type: 'HISTORY_INCOMPLETE',
-        Description: 'Settlement evidence is incomplete; this statement is not reconciled',
-        Balance: s.settlementHistory.unresolvedAmount,
-      });
-      for (const gap of s.settlementHistory.gaps)
-        rows.push({
-          Type: 'HISTORY_GAP',
-          Reference: gap.reference,
-          Description: gap.reason,
-          Balance: gap.amount,
-        });
-    }
-    return rows;
-  }
-
-  private async buildPdfBuffer(
-    s: CustomerStatement,
-    sections: Array<{ heading?: string; paragraph?: string; rows?: string[][] }>,
-  ): Promise<Buffer> {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const PDFDocument = require('pdfkit');
-    return new Promise<Buffer>((resolve, reject) => {
-      try {
-        const doc = new PDFDocument({ size: 'A4', margin: 48 });
-        const chunks: Buffer[] = [];
-        doc.on('data', (c: Buffer) => chunks.push(c));
-        doc.on('end', () => resolve(Buffer.concat(chunks)));
-        doc.on('error', reject);
-
-        doc.fontSize(16).font('Helvetica-Bold').text('Statement of Account');
-        doc
-          .fontSize(10)
-          .font('Helvetica')
-          .fillColor('gray')
-          .text(`Generated ${new Date().toISOString()}`);
-        doc.fillColor('black').moveDown(1);
-
-        for (const section of sections) {
-          if (section.heading) {
-            doc.fontSize(12).font('Helvetica-Bold').text(section.heading);
-            doc.font('Helvetica').moveDown(0.3);
-          }
-          if (section.paragraph) {
-            doc.fontSize(10).text(section.paragraph);
-            doc.moveDown(0.4);
-          }
-          if (section.rows?.length) {
-            doc.fontSize(9);
-            for (const row of section.rows) doc.text(row.join('    '));
-            doc.moveDown(0.5);
-          }
-        }
-        doc.end();
-      } catch (err) {
-        reject(err);
-      }
-    });
-  }
-
-  private async buildExcelBuffer(
-    s: CustomerStatement,
-    rows: Array<Record<string, unknown>>,
-  ): Promise<Buffer> {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'ITEMBA-R';
-    workbook.created = new Date();
-    const ws = workbook.addWorksheet('Statement');
-
-    ws.addRow([`Statement of Account — ${s.customerName ?? s.customerId}`]).font = {
-      bold: true,
-      size: 14,
-    };
-    ws.addRow([`${s.currency}   ${this.fmtDate(s.dateFrom)} to ${this.fmtDate(s.dateTo)}`]).font = {
-      italic: true,
-    };
-    ws.addRow([]);
-
-    const headers = ['Date', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance'];
-    const headerRow = ws.addRow(headers);
-    headerRow.font = { bold: true };
-    headerRow.eachCell((cell: any) => {
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
-    });
-    for (const r of rows) {
-      ws.addRow(headers.map((h) => this.neutralize(r[h] ?? '')));
-    }
-    headers.forEach((h, i) => {
-      ws.getColumn(i + 1).width = Math.max(h.length + 2, 14);
-    });
-
-    ws.addRow([]);
-    ws.addRow(['Aging (live, as of ' + this.fmtDate(s.agingAsOf) + ')']).font = { bold: true };
-    ws.addRow(['Current', this.num(s.aging.current)]);
-    ws.addRow(['1-30 days', this.num(s.aging.days1_30)]);
-    ws.addRow(['31-60 days', this.num(s.aging.days31_60)]);
-    ws.addRow(['61-90 days', this.num(s.aging.days61_90)]);
-    ws.addRow(['Over 90 days', this.num(s.aging.over90)]);
-    ws.addRow(['Total outstanding', this.num(s.aging.total)]);
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buffer);
-  }
-
-  private emailHtml(s: CustomerStatement, dataUri: string, filename: string): string {
-    const rowsHtml = s.lines
-      .map(
-        (l) =>
-          `<tr><td>${this.fmtDate(l.date)}</td><td>${l.type}</td><td>${this.escape(
-            l.reference,
-          )}</td><td style="text-align:right">${this.money(
-            l.debit,
-          )}</td><td style="text-align:right">${this.money(
-            l.credit,
-          )}</td><td style="text-align:right">${this.money(l.balance)}</td></tr>`,
-      )
-      .join('');
-    const historyWarning =
-      s.settlementHistory.status === 'INCOMPLETE'
-        ? `<p><strong>Settlement history is incomplete.</strong> Unresolved evidence: ${this.escape(s.currency)} ${this.escape(s.settlementHistory.unresolvedAmount)}. This statement is not reconciled.</p>`
-        : '';
-    return `
-      ${historyWarning}
-      <p>Dear ${this.escape(s.customerName ?? 'Customer')},</p>
-      <p>Please find your statement of account for the period
-      <strong>${this.fmtDate(s.dateFrom)}</strong> to <strong>${this.fmtDate(s.dateTo)}</strong>.</p>
-      <p>Opening balance: <strong>${this.money(s.openingBalance)} ${s.currency}</strong><br/>
-      Closing balance: <strong>${this.money(s.closingBalance)} ${s.currency}</strong></p>
-      <table border="1" cellpadding="4" cellspacing="0">
-        <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-      <p><a href="${dataUri}" download="${this.escape(filename)}">Download PDF statement (${this.escape(
-        filename,
-      )})</a></p>
-      <p>Thank you for your business.</p>`;
-  }
-
-  private emailText(s: CustomerStatement): string {
-    const lines = s.lines.map(
-      (l) =>
-        `${this.fmtDate(l.date)}  ${l.type}  ${l.reference}  Dr ${this.money(
-          l.debit,
-        )}  Cr ${this.money(l.credit)}  Bal ${this.money(l.balance)}`,
+  private scopeAllowed(
+    scope: any,
+    grants: { unrestricted: boolean; divisionIds: string[]; branchIds: string[] },
+  ) {
+    if (grants.unrestricted) return true;
+    if (!scope) return false;
+    if (scope.branchId)
+      return (
+        grants.branchIds.includes(scope.branchId) ||
+        (scope.divisionId && grants.divisionIds.includes(scope.divisionId))
+      );
+    if (scope.divisionId) return grants.divisionIds.includes(scope.divisionId);
+    if (scope.unrestricted) return false;
+    return (
+      (scope.divisionIds ?? []).every((id: string) => grants.divisionIds.includes(id)) &&
+      (scope.branchIds ?? []).every((id: string) => grants.branchIds.includes(id)) &&
+      (scope.divisionIds?.length ?? 0) + (scope.branchIds?.length ?? 0) > 0
     );
-    return [
-      `Dear ${s.customerName ?? 'Customer'},`,
-      '',
-      `Statement of account ${this.fmtDate(s.dateFrom)} to ${this.fmtDate(s.dateTo)} (${s.currency})`,
-      ...(s.settlementHistory.status === 'INCOMPLETE'
-        ? [
-            `Settlement history is incomplete. Unresolved evidence: ${s.currency} ${s.settlementHistory.unresolvedAmount}. This statement is not reconciled.`,
-          ]
-        : []),
-      `Opening balance: ${this.money(s.openingBalance)}`,
-      ...lines,
-      `Closing balance: ${this.money(s.closingBalance)}`,
-    ].join('\n');
   }
-
-  // ─── Small formatters ────────────────────────────────────────────────────────
-
-  /**
-   * Coerce an optional currency label into a concrete {@link CurrencyCode} for
-   * single-currency scoping. Mirrors the persisted generate() path (base TZS by
-   * default). An unrecognised label falls back to TZS rather than throwing so a
-   * stale presentation label never breaks the read-only detail endpoint.
-   */
-  private resolveCurrency(currency?: string): CurrencyCode {
-    if (currency && (Object.values(CurrencyCode) as string[]).includes(currency)) {
-      return currency as CurrencyCode;
-    }
-    return CurrencyCode.TZS;
+  private runSummary(run: any) {
+    const { snapshot, pdfContent, ...summary } = run;
+    return { ...summary, hasSnapshot: !!snapshot, hasPdf: !!pdfContent || !!snapshot };
   }
-
-  private money(d: Prisma.Decimal): string {
-    return d.toFixed(2);
-  }
-
-  private num(n: number): string {
-    return n.toFixed(2);
-  }
-
-  private fmtDate(d: Date): string {
-    return d.toISOString().slice(0, 10);
-  }
-
-  private escape(v: string): string {
-    return String(v ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  private neutralize(value: unknown): unknown {
-    if (typeof value !== 'string') return value;
-    if (/^[=+\-@\t\r]/.test(value)) return `'${value}`;
+  private serializeStatement(s: CustomerStatement) {
+    const value = JSON.parse(
+      JSON.stringify({
+        ...s,
+        openingBalance: s.openingBalance.toFixed(2),
+        totalDebits: s.totalDebits.toFixed(2),
+        totalCredits: s.totalCredits.toFixed(2),
+        closingBalance: s.closingBalance.toFixed(2),
+        netBalance: (s.netBalance ?? s.closingBalance).toFixed(2),
+        openInvoiceBalance: (s.openInvoiceBalance ?? D(s.aging.total)).toFixed(2),
+        customerCredit: (s.customerCredit ?? D()).toFixed(2),
+        calculationVersion: VERSION,
+        lines: s.lines.map((line) => ({
+          ...line,
+          debit: line.debit.toFixed(2),
+          credit: line.credit.toFixed(2),
+          balance: line.balance.toFixed(2),
+        })),
+      }),
+    );
+    value.contentHash = this.contentHash(value);
     return value;
   }
-
-  private statementFilename(s: CustomerStatement, ext: string): string {
-    const name = (s.customerName ?? s.customerId)
-      .replace(/[^a-z0-9-]+/gi, '_')
-      .replace(/^_+|_+$/g, '');
-    return `statement_${name || 'customer'}_${this.fmtDate(s.dateFrom)}_${this.fmtDate(
-      s.dateTo,
-    )}.${ext}`;
+  private contentHash(value: any) {
+    const { generatedAt, runId, statementRunNumber, contentHash, pdfSha256, ...content } = value;
+    return hash(content);
   }
-  /** Preserve the saved evidence while projecting period-correct balances on every read. */
-  private async projectRun<T extends CustomerStatementRun>(
-    run: T,
-    loadedLedger?: Awaited<ReturnType<CustomerStatementsService['loadMovements']>>,
-  ) {
-    const ledger =
-      loadedLedger ??
-      (await this.loadMovements(
-        run.companyId,
-        run.customerId ?? undefined,
-        run.currency as CurrencyCode,
-      ));
-    const periodEnd =
-      run.periodEnd.getUTCHours() === 0 && run.periodEnd.getUTCMinutes() === 0
-        ? dateRangeEnd(run.periodEnd.toISOString().slice(0, 10))
-        : run.periodEnd;
-    const { openingBalance, totalDebits, totalCredits, closingBalance } = summarizeDatedMovements(
-      ledger.movements,
-      run.periodStart,
-      periodEnd,
-    );
-    const storedBalances = {
-      openingBalance: run.openingBalance,
-      totalDebits: run.totalDebits,
-      totalCredits: run.totalCredits,
-      closingBalance: run.closingBalance,
-    };
-    const datedBalances = { openingBalance, totalDebits, totalCredits, closingBalance };
+  private assertPreviewHash(expected: string | undefined, s: CustomerStatement) {
+    if (expected && expected !== this.serializeStatement(s).contentHash)
+      throw new BadRequestException(
+        'Account activity changed after the preview. Refresh the statement before exporting.',
+      );
+  }
+  private deserializeStatement(value: any): CustomerStatement {
     return {
-      ...run,
-      ...datedBalances,
-      storedBalances,
-      datedBalances,
-      settlementHistory: ledger.history,
+      ...value,
+      dateFrom: new Date(value.dateFrom),
+      dateTo: new Date(value.dateTo),
+      generatedAt: new Date(value.generatedAt),
+      agingAsOf: new Date(value.agingAsOf),
+      openingBalance: D(value.openingBalance),
+      totalDebits: D(value.totalDebits),
+      totalCredits: D(value.totalCredits),
+      closingBalance: D(value.closingBalance),
+      netBalance: D(value.netBalance),
+      openInvoiceBalance: D(value.openInvoiceBalance),
+      customerCredit: D(value.customerCredit),
+      lines: value.lines.map((line: any) => ({
+        ...line,
+        date: new Date(line.date),
+        debit: D(line.debit),
+        credit: D(line.credit),
+        balance: D(line.balance),
+      })),
     };
+  }
+  private selection(dto: ExportStatementDto): Selection {
+    if (!dto.companyId || !dto.customerId || !dto.dateFrom || !dto.dateTo)
+      throw new BadRequestException('Provide a saved runId or a complete statement selection.');
+    return {
+      ...dto,
+      companyId: dto.companyId,
+      customerId: dto.customerId,
+      dateFrom: dto.dateFrom,
+      dateTo: dto.dateTo,
+    };
+  }
+  private assertTemplate(templateId?: string) {
+    if (templateId)
+      throw new BadRequestException(
+        'Customer account statements use the verified statement layout. Template overrides are not supported for this export.',
+      );
+  }
+  private async generateCompanySummary(dto: GenerateCustomerStatementDto, user: AuthUser) {
+    const from = dateRangeStart(dto.periodStart),
+      to = dateRangeEnd(dto.periodEnd);
+    if (isNaN(from.getTime()) || isNaN(to.getTime()) || from > to)
+      throw new BadRequestException('Choose a valid statement date range.');
+    const projection = await this.projection.read(user, {
+      companyId: dto.companyId,
+      divisionId: dto.divisionId,
+      branchId: dto.branchId,
+      currency: dto.currency,
+      dateTo: dto.periodEnd,
+    });
+    if (
+      projection.accounts.some(
+        (account) =>
+          account.settlementHistory?.status === 'INCOMPLETE' || account.integrityIssues?.length,
+      )
+    )
+      throw new BadRequestException(
+        'Statement cannot be generated until settlement history is reconciled',
+      );
+    let openingBalance = D(),
+      totalDebits = D(),
+      totalCredits = D();
+    for (const account of projection.accounts)
+      for (const line of account.movements) {
+        if (line.date < from) openingBalance = openingBalance.plus(line.debit).minus(line.credit);
+        else {
+          totalDebits = totalDebits.plus(line.debit);
+          totalCredits = totalCredits.plus(line.credit);
+        }
+      }
+    const run = await this.prisma.customerStatementRun.create({
+      data: {
+        statementRunNumber: `CSTAT-${randomUUID()}`,
+        companyId: dto.companyId,
+        customerId: null,
+        periodStart: from,
+        periodEnd: to,
+        openingBalance,
+        totalDebits,
+        totalCredits,
+        closingBalance: openingBalance.plus(totalDebits).minus(totalCredits),
+        currency: projection.currency,
+        generatedById: user.id,
+        status: 'GENERATED',
+        calculationVersion: VERSION,
+      },
+    });
+    await this.auditLogs.log({
+      action: 'GENERATE',
+      entityType: 'CustomerStatementRun',
+      entityId: run.id,
+      userId: user.id,
+      companyId: dto.companyId,
+      metadata: {
+        customerId: null,
+        statementBasis: 'Scoped company summary; no customer-issued snapshot',
+      },
+    });
+    return this.runSummary(run);
+  }
+  private combinedHistory(
+    accounts: Array<{
+      settlementHistory?: NonNullable<CustomerStatement['settlementHistory']>;
+    }>,
+  ) {
+    const histories = accounts.flatMap((account) =>
+      account.settlementHistory ? [account.settlementHistory] : [],
+    );
+    const gaps = histories.flatMap((history) => history.gaps);
+    return {
+      status: gaps.length ? ('INCOMPLETE' as const) : ('COMPLETE' as const),
+      recoveredLegacySettlements: histories.reduce(
+        (sum, history) => sum + history.recoveredLegacySettlements,
+        0,
+      ),
+      unresolvedAmount: gaps.reduce((sum, gap) => sum.plus(D(gap.amount).abs()), D()).toFixed(2),
+      gaps,
+    };
+  }
+  private filename(s: CustomerStatement, ext: string) {
+    const name = (s.customerName ?? s.customerId).replace(/[^a-z0-9-]+/gi, '_');
+    return `${s.statementRunNumber ?? 'statement'}_${name}_${s.dateFrom.toISOString().slice(0, 10)}_${s.dateTo.toISOString().slice(0, 10)}.${ext}`;
+  }
+  private async auditExport(user: AuthUser, s: CustomerStatement, format: string) {
+    await this.auditLogs.log({
+      action: 'EXPORT',
+      entityType: 'CustomerStatement',
+      entityId: s.runId ?? s.customerId,
+      userId: user.id,
+      companyId: s.companyId,
+      metadata: { format, dateFrom: s.dateFrom.toISOString(), dateTo: s.dateTo.toISOString() },
+    });
+  }
+  private async excel(s: CustomerStatement): Promise<Buffer> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ExcelJS = require('exceljs');
+    // Excel retains only 15 significant digits. Preserve larger amounts as
+    // exact decimal text rather than silently losing cents in numerical cells.
+    const cellAmount = (value: Prisma.Decimal | string | number) => {
+      const amount = D(value);
+      return amount.abs().gte('10000000000000') ? amount.toFixed(2) : amount.toNumber();
+    };
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = s.company?.name ?? 'ITEMBA-R';
+    workbook.created = s.generatedAt;
+    const sheet = workbook.addWorksheet('Statement', { views: [{ state: 'frozen', ySplit: 7 }] });
+    sheet.addRow([this.safeCell(s.company?.name ?? 'Itemba Group')]).font = {
+      bold: true,
+      size: 16,
+    };
+    sheet.addRow(['Statement of Account', this.safeCell(s.customerName ?? s.customerId)]);
+    sheet.addRow(['Statement reference', s.statementRunNumber ?? 'Preview']);
+    sheet.addRow([
+      'Period',
+      `${s.dateFrom.toISOString().slice(0, 10)} to ${s.dateTo.toISOString().slice(0, 10)}`,
+    ]);
+    sheet.addRow(['Currency', s.currency]);
+    sheet.addRow(['Generated', s.generatedAt.toISOString()]);
+    const headers = sheet.addRow([
+      'Date',
+      'Description',
+      'Reference',
+      'Debit',
+      'Credit',
+      'Balance',
+    ]);
+    headers.font = { bold: true };
+    headers.eachCell((cell: any) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    });
+    sheet.addRow([
+      s.dateFrom.toISOString().slice(0, 10),
+      'Opening balance',
+      '',
+      null,
+      null,
+      cellAmount(s.openingBalance),
+    ]);
+    for (const line of s.lines)
+      sheet.addRow([
+        line.date.toISOString().slice(0, 10),
+        this.safeCell(line.description),
+        this.safeCell(line.reference),
+        line.debit.isZero() ? null : cellAmount(line.debit),
+        line.credit.isZero() ? null : cellAmount(line.credit),
+        cellAmount(line.balance),
+      ]);
+    sheet.addRow([
+      s.dateTo.toISOString().slice(0, 10),
+      'Closing balance',
+      '',
+      cellAmount(s.totalDebits),
+      cellAmount(s.totalCredits),
+      cellAmount(s.closingBalance),
+    ]).font = { bold: true };
+    sheet.columns = [
+      { width: 14 },
+      { width: 58 },
+      { width: 26 },
+      { width: 21, style: { numFmt: '#,##0.00;[Red](#,##0.00)' } },
+      { width: 21, style: { numFmt: '#,##0.00;[Red](#,##0.00)' } },
+      { width: 21, style: { numFmt: '#,##0.00;[Red](#,##0.00)' } },
+    ];
+    sheet.addRow([]);
+    sheet.addRow([`Invoice aging as of ${s.dateTo.toISOString().slice(0, 10)}`]).font = {
+      bold: true,
+    };
+    for (const [key, value] of Object.entries(s.aging))
+      sheet.addRow([key, key === 'oldestDaysOverdue' ? value : cellAmount(value)]);
+    sheet.addRow(['Open invoice balance', cellAmount(s.openInvoiceBalance ?? D(s.aging.total))]);
+    sheet.addRow(['Customer credit / deposits', cellAmount(s.customerCredit ?? D())]);
+    for (const warning of s.warnings ?? [])
+      sheet.addRow(['Statement basis', this.safeCell(warning)]);
+    sheet.eachRow((row: any) => {
+      row.eachCell((cell: any) => {
+        if (typeof cell.value === 'string' && /^-?\d+\.\d{2}$/.test(cell.value)) {
+          cell.alignment = { horizontal: 'right' };
+          cell.note =
+            'Stored as exact text to preserve cents. Excel numerical cells round amounts of this size.';
+        }
+      });
+    });
+    sheet.pageSetup = {
+      paperSize: 9,
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      printTitlesRow: '7:7',
+    };
+    sheet.headerFooter.oddFooter = '&LStatement of Account&RPage &P of &N';
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+  private safeCell(value: string) {
+    return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   }
 }

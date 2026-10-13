@@ -5,6 +5,17 @@ const route = (href: string) => {
   return salesDeskRoute(url.pathname, url.searchParams);
 };
 describe('Sales Desk record continuity', () => {
+  it('opens customer performance without changing original customer records or direct links', () => {
+    expect(route('/sales-desk/customer-performance?customerId=customer-id')).toEqual({
+      kind: 'customer-performance',
+    });
+    expect(route('/sales-desk?view=customer-performance')).toEqual({
+      kind: 'customer-performance',
+    });
+    expect(route('/sales-desk?source=direct&view=customer-performance')).toEqual({
+      kind: 'direct',
+    });
+  });
   it('uses the existing record identity from old and new customer links', () => {
     expect(route('/operations/customers/customer-id')).toEqual(
       route('/sales-desk/customers/customer-id'),

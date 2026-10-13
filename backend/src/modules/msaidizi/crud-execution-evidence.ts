@@ -165,6 +165,7 @@ export type CrudMetadataReadQueryBinding =
     };
 
 export type CrudMetadataReadDedicatedSeedScenario =
+  | 'customer-performance-directory-company-pair-v1'
   | 'receipt-account-company-pair-v1'
   | 'profit-cost-gap-product-company-pair-v1';
 
@@ -581,6 +582,7 @@ const metadataReadCompanyMarkerSeeds: Readonly<Record<string, string>> = Object.
   'CreditNotesController.findAll': 'CreditNote',
   'CustomerCreditProfilesController.findAll': 'CustomerCreditProfile',
   'CustomerPaymentsController.findAll': 'CustomerPayment',
+  'CustomerPerformanceController.read': 'Customer',
   'CustomerPriceAgreementsController.findAll': 'CustomerPriceAgreement',
   'CustomerSegmentsController.findAll': 'CustomerSegment',
   'CustomerStatementsController.findAll': 'CustomerStatementRun',
@@ -783,6 +785,17 @@ const metadataReadDedicatedControls: Readonly<
     }>
   >
 > = Object.freeze({
+  'CustomerPerformanceController.read': Object.freeze({
+    seedScenario: 'customer-performance-directory-company-pair-v1',
+    queryBindings: Object.freeze([
+      { name: 'companyId', binding: 'companyA' as const },
+      { name: 'currency', literal: 'TZS' },
+      { name: 'dateFrom', literal: '2026-08-01' },
+      { name: 'dateTo', literal: '2026-08-31' },
+      { name: 'sort', literal: 'name' },
+      { name: 'limit', literal: 100 },
+    ]),
+  }),
   'ProfitController.costGaps': Object.freeze({
     seedScenario: 'profit-cost-gap-product-company-pair-v1',
     queryBindings: Object.freeze([{ name: 'companyId', binding: 'companyA' as const }]),

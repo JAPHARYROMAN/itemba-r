@@ -7,11 +7,19 @@ import { CompanyScopeService } from '../../common/services';
 import { EmailService } from '../../common/services/email.service';
 import { CustomerStatementsController } from './customer-statements.controller';
 import { CustomerStatementsService } from './customer-statements.service';
+import { CustomerAccountProjectionService } from './customer-account-projection.service';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 
 @Module({
   imports: [PrismaModule, AuditLogsModule, PrintEngineModule, ConfigModule],
   controllers: [CustomerStatementsController],
-  providers: [CustomerStatementsService, CompanyScopeService, EmailService],
-  exports: [CustomerStatementsService],
+  providers: [
+    CustomerStatementsService,
+    CustomerAccountProjectionService,
+    CompanyScopeService,
+    OrganizationScopeService,
+    EmailService,
+  ],
+  exports: [CustomerStatementsService, CustomerAccountProjectionService],
 })
 export class CustomerStatementsModule {}

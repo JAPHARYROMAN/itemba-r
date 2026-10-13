@@ -134,6 +134,8 @@ import {
 import { createE2eApp } from './e2e-app';
 import { deleteAuditLogsForTest } from './audit-log-maintenance';
 import { CrudFixtureAuditScopeContract } from '../src/modules/msaidizi/crud-evidence-governance';
+import { CustomerStatementsService } from '../src/modules/customer-statements/customer-statements.service';
+import { seedCrudCustomerAccountReadControls } from './crud-customer-account-read-controls';
 import {
   CRUD_EVIDENCE_NON_POSTING_LOCK_MODULE,
   CrudEvidenceMetadataSeedFields,
@@ -684,6 +686,22 @@ describeEvidence('signed Msaidizi CRUD loopback execution evidence', () => {
             result,
           );
           assertions.push(read.noDatabaseMutation);
+          if (fixture.scopeProbe) {
+            const denied = await invokeReadWithDatabaseClosure(fixture.capabilityId, creatorToken, {
+              path: boundArguments(fixture.scopeProbe.pathBindings),
+              query: boundArguments(fixture.scopeProbe.queryBindings),
+            });
+            assertions.push(
+              check(
+                'company-A principal cannot read the seeded company-B account',
+                fixture.scopeProbe.expectedStatuses.some(
+                  (status) => denied.result.status === status,
+                ),
+                statusDetail(denied.result),
+              ),
+              denied.noDatabaseMutation,
+            );
+          }
           addCase(fixture.fixtureId, 'positive', result, assertions);
         }
       }
@@ -1749,6 +1767,26 @@ describeEvidence('signed Msaidizi CRUD loopback execution evidence', () => {
       creatorUserId,
       suffix,
     });
+    const customerAccountReadSeed = await seedCrudCustomerAccountReadControls(
+      prisma,
+      app.get(CustomerStatementsService),
+      { companyAId, companyBId, divisionAId, divisionBId, branchAId, branchBId, suffix },
+      {
+        id: groupReader.id,
+        email: groupReader.email,
+        roles: [groupRole.name],
+        roleScopes: [RoleScope.GROUP],
+        permissions: permissions.map((permission) => permission.code),
+        companyId: companyAId,
+        companyAccess: crossCompanyAccess,
+      },
+    );
+    pathReadValues.set('customerAccountCustomerA', customerAccountReadSeed.customerA);
+    pathReadValues.set('customerAccountCustomerB', customerAccountReadSeed.customerB);
+    pathReadValues.set('customerAccountPaymentA', customerAccountReadSeed.paymentA);
+    pathReadValues.set('customerAccountPaymentB', customerAccountReadSeed.paymentB);
+    pathReadValues.set('customerAccountStatementA', customerAccountReadSeed.statementA);
+    pathReadValues.set('customerAccountStatementB', customerAccountReadSeed.statementB);
     await seedDerivedReportReadControls();
     await seedGlobalAdminReadControls();
     await seedRemainingReadControls();
@@ -5078,6 +5116,58 @@ describeEvidence('signed Msaidizi CRUD loopback execution evidence', () => {
     const control = fixture.observable.causalRecordControl;
     if (!control) {
       throw new Error(`${fixture.capabilityId} has no signed fixture-private seed control.`);
+    }
+    if (control.seedScenario === 'customer-performance-directory-company-pair-v1') {
+      if (
+        fixture.observable.seedModel !== 'Customer' ||
+        fixture.capabilityId !== 'CustomerPerformanceController.read'
+      ) {
+        throw new Error(
+          `${fixture.capabilityId} cannot use the customer performance directory scenario.`,
+        );
+      }
+      const [present, absent] = await prisma.$transaction([
+        prisma.customer.create({
+          data: {
+            companyId: companyAId,
+            divisionId: divisionAId,
+            branchId: branchAId,
+            customerCode: `CE-PERFORMANCE-A-${suffix}`,
+            name: `000 CRUD Performance A ${suffix}`,
+          },
+        }),
+        prisma.customer.create({
+          data: {
+            companyId: companyBId,
+            divisionId: divisionBId,
+            branchId: branchBId,
+            customerCode: `CE-PERFORMANCE-B-${suffix}`,
+            name: `000 CRUD Performance B ${suffix}`,
+          },
+        }),
+      ]);
+      if (
+        present.companyId !== companyAId ||
+        absent.companyId !== companyBId ||
+        present.id === absent.id
+      ) {
+        throw new Error('Customer performance directory A/B seed scope is invalid.');
+      }
+      return {
+        seedScenario: control.seedScenario,
+        present: present as unknown as Record<string, unknown>,
+        absent: absent as unknown as Record<string, unknown>,
+        dispose: async () => {
+          for (const customer of [present, absent]) {
+            await physicallyDeleteDisposableRecord(
+              prisma.$executeRawUnsafe.bind(prisma),
+              requiredEnv('CRUD_COVERAGE_SCHEMA'),
+              'Customer',
+              { id: customer.id },
+            );
+          }
+        },
+      };
     }
     if (control.seedScenario === 'receipt-account-company-pair-v1') {
       if (
@@ -12508,6 +12598,28 @@ describeEvidence('signed Msaidizi CRUD loopback execution evidence', () => {
     assertions.push(
       pathReadScopeAssertion(fixture.response.scope, fixture.response.kind, record, rows),
     );
+    for (const value of fixture.response.values ?? []) {
+      const expected = value.binding ? pathReadValues.get(value.binding) : value.literal;
+      assertions.push(
+        check(
+          `response preserves the seeded ${value.responsePath.join('.')} value`,
+          expected !== undefined && nestedValue(record, value.responsePath) === expected,
+        ),
+      );
+    }
+    if (fixture.response.absent) {
+      const absent = pathReadValues.get(fixture.response.absent);
+      const observed =
+        typeof absent === 'string'
+          ? evaluateMetadataReadCompanyMarkers(result.body, '', absent)
+          : undefined;
+      assertions.push(
+        check(
+          'response excludes the seeded foreign-company source identity',
+          Boolean(absent) && observed?.absent === true,
+        ),
+      );
+    }
     return assertions;
   }
 
@@ -12530,7 +12642,7 @@ describeEvidence('signed Msaidizi CRUD loopback execution evidence', () => {
     }
     const expected = pathReadValues.get(scope.binding);
     const values =
-      responseKind === 'collection'
+      responseKind === 'collection' && !(scope.kind === 'company' && scope.from === 'payload')
         ? rows.map((row) => nestedValue(row, scope.responsePath))
         : [nestedValue(record, scope.responsePath)];
     return check(

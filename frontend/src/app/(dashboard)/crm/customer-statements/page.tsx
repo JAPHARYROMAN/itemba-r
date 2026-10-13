@@ -24,6 +24,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useRequestGuard } from '@/hooks/use-request-guard';
 import { backendList, backendPage, backendPost, backendGet } from '@/lib/api-client';
 import { downloadBinaryExport } from '@/lib/export-download';
+import { performanceMoney } from '@/features/sales-desk/customer-performance-types';
 import { formatFinancialTotals } from '@/lib/financial-document';
 import {
   StatementHistoryWarning,
@@ -59,6 +60,8 @@ interface StatementRun extends Record<string, unknown> {
   closingBalance?: number | string | null;
   currency: string;
   settlementHistory?: StatementSettlementHistory;
+  warnings?: string[];
+  contentHash?: string;
   status: string;
   createdAt?: string | null;
   // Included by the backend list endpoint.
@@ -109,6 +112,8 @@ interface StatementDetail {
   agingAsOf: string;
   generatedAt: string;
   settlementHistory?: StatementSettlementHistory;
+  warnings?: string[];
+  contentHash?: string;
 }
 
 // Selection that identifies a single-customer statement of account.
@@ -119,6 +124,7 @@ interface StatementSelection {
   dateFrom: string;
   dateTo: string;
   currency: string;
+  runId?: string;
 }
 
 interface Paginated<T> {
@@ -140,10 +146,7 @@ function asNumber(value: number | string | null | undefined) {
 }
 
 function money(value: number | string | null | undefined, currency = 'TZS') {
-  return `${currency} ${new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(asNumber(value))}`;
+  return performanceMoney(value ?? '0.00', currency);
 }
 
 function formatDate(value: string | null | undefined) {
@@ -371,7 +374,7 @@ export default function CustomerStatementsPage() {
     if (!validateGenerate()) return;
     setGenerating(true);
     try {
-      await backendPost('/customer-statements/generate', {
+      const run = await backendPost<StatementRun>('/customer-statements/generate', {
         companyId: genCompanyId,
         customerId: genCustomerId || undefined,
         periodStart: genStart,
@@ -399,6 +402,7 @@ export default function CustomerStatementsPage() {
           dateFrom: genStart,
           dateTo: genEnd,
           currency: 'TZS',
+          runId: run.id,
         });
       }
 
@@ -426,16 +430,23 @@ export default function CustomerStatementsPage() {
       setDetailError(null);
       setDetail(null);
       try {
-        const result = await backendGet<StatementDetail>('/customer-statements/detail', {
-          signal: request.signal,
-          query: {
-            companyId: sel.companyId,
-            customerId: sel.customerId,
-            dateFrom: sel.dateFrom,
-            dateTo: sel.dateTo,
-            currency: sel.currency || undefined,
+        const result = await backendGet<StatementDetail>(
+          sel.runId
+            ? `/customer-statements/${encodeURIComponent(sel.runId)}/detail`
+            : '/customer-statements/detail',
+          {
+            signal: request.signal,
+            query: sel.runId
+              ? {}
+              : {
+                  companyId: sel.companyId,
+                  customerId: sel.customerId,
+                  dateFrom: sel.dateFrom,
+                  dateTo: sel.dateTo,
+                  currency: sel.currency || undefined,
+                },
           },
-        });
+        );
         if (!request.current()) return;
         setDetail(result);
       } catch (err) {
@@ -466,6 +477,7 @@ export default function CustomerStatementsPage() {
         dateFrom: isoDate(new Date(row.periodStart)),
         dateTo: isoDate(new Date(row.periodEnd)),
         currency: row.currency ?? 'TZS',
+        runId: row.id,
       });
     },
     [customerName, openDetail],
@@ -478,14 +490,16 @@ export default function CustomerStatementsPage() {
 
   const exportPayload = useCallback(() => {
     if (!detailSelection) return null;
+    if (detailSelection.runId) return { runId: detailSelection.runId };
     return {
       companyId: detailSelection.companyId,
       customerId: detailSelection.customerId,
       dateFrom: detailSelection.dateFrom,
       dateTo: detailSelection.dateTo,
       currency: detailSelection.currency || undefined,
+      ...(detail?.contentHash ? { expectedHash: detail.contentHash } : {}),
     };
-  }, [detailSelection]);
+  }, [detailSelection, detail]);
 
   const handleExportPdf = async () => {
     const payload = exportPayload();
@@ -885,6 +899,16 @@ export default function CustomerStatementsPage() {
             </div>
           ) : detail ? (
             <div className="space-y-6">
+              {detail.warnings?.map((warning) => (
+                <p
+                  key={warning}
+                  role="status"
+                  className="rounded-lg border p-3 text-sm"
+                  style={{ borderColor: 'var(--aurora-warning)' }}
+                >
+                  {warning}
+                </p>
+              ))}
               {detail.settlementHistory?.status === 'INCOMPLETE' && (
                 <div
                   role="alert"
@@ -1083,7 +1107,7 @@ export default function CustomerStatementsPage() {
                   className="text-xs font-semibold uppercase tracking-wider mb-2"
                   style={{ color: 'var(--aurora-text-muted)' }}
                 >
-                  Current aging (as of {formatDate(detail.agingAsOf)})
+                  Aging summary (as of {formatDate(detail.agingAsOf ?? detail.dateTo)})
                 </h3>
                 <DetailList
                   columns={3}

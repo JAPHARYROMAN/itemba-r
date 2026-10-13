@@ -81,6 +81,33 @@ export function isDesktopViewValue(appId: string, key: string, value: unknown): 
     }
   }
   if (appId === 'sales-desk') {
+    if (key === 'sales-desk.customer-performance.filters')
+      return (
+        !!value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.entries(value).every(
+          ([name, item]) =>
+            [
+              'companyId',
+              'divisionId',
+              'branchId',
+              'currency',
+              'dateFrom',
+              'dateTo',
+              'search',
+              'category',
+              'sort',
+            ].includes(name) && text(item),
+        )
+      );
+    if (
+      key === 'sales-desk.customer-performance.page' ||
+      /^sales-desk\.customer-performance\.historyPage\.[\w-]+$/.test(key)
+    ) {
+      allowed = true;
+      field = 'page';
+    }
     const match =
       /^sales-desk\.(business-sales|customers)\.(search|page|view|companyId|type|status|payment|from|to|filters)$/.exec(
         key,

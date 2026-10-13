@@ -13,6 +13,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { FuelReportingModule } from './modules/fuel-reporting/fuel-reporting.module';
 import { PetroDollarModule } from './modules/petrodollar/petrodollar.module';
 import { SalesDeskModule } from './modules/sales-desk/sales-desk.module';
+import { CustomerPerformanceModule } from './modules/customer-performance/customer-performance.module';
 import { RecordsModule } from './modules/records/records.module';
 import { DeskReportsModule } from './modules/desk-reports/desk-reports.module';
 import { CashDeskModule } from './modules/cash-desk/cash-desk.module';
@@ -269,6 +270,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PartyProfileModule,
     PartyLinksModule,
     SalesDeskModule,
+    CustomerPerformanceModule,
     RecordsModule,
     DeskReportsModule,
     UsersModule,

@@ -42,6 +42,8 @@ export interface BusinessPdfSection {
   plainParagraphs?: boolean;
   /** Starts this section on a clean continuation page. */
   pageBreakBefore?: boolean;
+  /** Keep a short summary's heading, table and totals on the same page. */
+  keepTogether?: boolean;
   items?: Array<{ label: string; value: string }>;
   paragraphs?: string[];
   table?: BusinessPdfTable;
@@ -496,7 +498,7 @@ class SimplePdf {
    * Height this section will occupy, mirroring the painter closely enough to
    * reserve space for it. Used only to decide how many rows fit on page 1.
    */
-  private estimateSectionHeight(section: BusinessPdfSection): number {
+  private estimateSectionHeight(section: BusinessPdfSection, includeTable = false): number {
     let height = 26; // heading, rule and the spacing either side of them
     if (section.items?.length) height += Math.ceil(section.items.length / 2) * 24 + 4;
     for (const paragraph of section.paragraphs ?? []) {
@@ -504,11 +506,37 @@ class SimplePdf {
     }
     if (section.totals?.length) height += section.totals.length * 18 + 5;
     if (section.signatures?.length) height += 42;
+    if (includeTable && section.table) {
+      const widths = distributeColumns(
+        section.table.headers.length,
+        this.contentWidth,
+        section.table.columnWeights,
+      );
+      const headerLines = Math.max(
+        ...section.table.headers.map(
+          (value, index) => wrapText(value, widths[index] - 8, 7).length,
+        ),
+        1,
+      );
+      height += Math.max(20, headerLines * 8 + 8) + 6;
+      for (const row of section.table.rows) {
+        const lines = Math.max(
+          ...row.map((value, index) => wrapText(value, widths[index] - 8, 8).length),
+          1,
+        );
+        height += Math.max(18, lines * 10 + 8);
+      }
+    }
     return height;
   }
 
   addSection(section: BusinessPdfSection, reserveBelow = 0): string[][] {
     if (section.pageBreakBefore) this.newPage();
+    if (section.keepTogether) {
+      const height = this.estimateSectionHeight(section, true) + 12;
+      // Large sections still paginate normally; only compact summaries move.
+      if (height <= this.pageHeight - MARGIN * 2 - 27) this.ensureSpace(height);
+    }
     const signatureOnly =
       !!section.signatures?.length &&
       !section.items?.length &&
@@ -760,7 +788,11 @@ class SimplePdf {
 
     const leftover: string[][] = [];
     for (const [rowIndex, row] of table.rows.entries()) {
-      const rowLines = row.map((cell, index) => wrapText(cell, colWidths[index] - 8, 8));
+      const rowLines = row.map((cell, index) =>
+        table.numericColumns?.includes(index)
+          ? [cleanText(cell)]
+          : wrapText(cell, colWidths[index] - 8, 8),
+      );
       const lineCount = Math.max(...rowLines.map((lines) => lines.length), 1);
       const rowHeight = Math.max(18, lineCount * 10 + 8);
       if (reserveBelow > 0) {

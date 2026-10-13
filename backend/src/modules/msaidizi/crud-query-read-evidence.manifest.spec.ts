@@ -198,7 +198,7 @@ describe('manifest-bound collection-read query evidence', () => {
     ).toEqual([...QUERY_SCHEMA_TARGETS].sort());
   });
 
-  it('partitions all 235 residual metadata candidates without a shape-only oracle', () => {
+  it('partitions all 236 residual metadata candidates without a shape-only oracle', () => {
     const fixtures = metadataReadEvidenceFixtures(manifest);
     const blockers = metadataReadEvidenceBlockers(manifest);
     const derivedSummaryFixtures = derivedReportReadEvidencePacks(manifest)
@@ -214,12 +214,12 @@ describe('manifest-bound collection-read query evidence', () => {
       ...blockers.map((blocker) => blocker.capabilityId),
     ];
 
-    expect(fixtures).toHaveLength(184);
+    expect(fixtures).toHaveLength(185);
     expect(derivedSummaryFixtures).toHaveLength(24);
     expect(globalAdminFixtures).toHaveLength(12);
     expect(remainingFixtures).toHaveLength(15);
     expect(blockers).toEqual([]);
-    expect(new Set(capabilityIds)).toHaveProperty('size', 235);
+    expect(new Set(capabilityIds)).toHaveProperty('size', 236);
     expect(
       fixtures.find((fixture) => fixture.capabilityId === 'AuditLogsController.findSensitive'),
     ).toMatchObject({
@@ -433,7 +433,7 @@ describe('manifest-bound collection-read query evidence', () => {
       },
     ]);
     expect(sha256Hex(canonicalJson(fixtures.map((fixture) => fixture.capabilityId).sort()))).toBe(
-      'd06e40aeea3af9dbebab2d1200d5224cfde331b9c3208be56b65df2076c0dd23',
+      '631cddd0b28644c084230ee44da0d2ae8ae2aa580cd3639cf09e8d086e752a73',
     );
     expect(sha256Hex(canonicalJson(blockers.map((blocker) => blocker.capabilityId).sort()))).toBe(
       '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
@@ -514,7 +514,7 @@ describe('manifest-bound collection-read query evidence', () => {
         companyBinding: 'companyA',
       },
     ]);
-    expect(fixtures.filter((fixture) => fixture.governance.scope === 'company')).toHaveLength(178);
+    expect(fixtures.filter((fixture) => fixture.governance.scope === 'company')).toHaveLength(179);
     for (const fixture of fixtures.filter(
       (candidate) => candidate.governance.scope === 'company',
     )) {
@@ -532,6 +532,44 @@ describe('manifest-bound collection-read query evidence', () => {
     expect(
       blockers.every((blocker) => blocker.reason === 'no_deterministic_seeded_positive_control'),
     ).toBe(true);
+  });
+
+  it('requires causal customer identities in the performance directory across companies', () => {
+    const fixture = metadataReadEvidenceFixtures(manifest).find(
+      (candidate) => candidate.capabilityId === 'CustomerPerformanceController.read',
+    );
+    expect(fixture).toMatchObject({
+      fixtureVersion: 6,
+      executionPrincipal: 'group',
+      governance: { scope: 'company', audit: 'not_applicable' },
+      request: {
+        queryBindings: [
+          { name: 'companyId', binding: 'companyA' },
+          { name: 'currency', literal: 'TZS' },
+          { name: 'dateFrom', literal: '2026-08-01' },
+          { name: 'dateTo', literal: '2026-08-31' },
+          { name: 'sort', literal: 'name' },
+          { name: 'limit', literal: 100 },
+        ],
+      },
+      observable: {
+        seedModel: 'Customer',
+        present: { binding: 'companyA' },
+        absent: { binding: 'companyB' },
+        causalRecordControl: {
+          seedScenario: 'customer-performance-directory-company-pair-v1',
+          lifecycle: 'fixture_isolated',
+          responseMarkerField: 'id',
+          present: { binding: 'scenarioA', companyBinding: 'companyA' },
+          absent: { binding: 'scenarioB', companyBinding: 'companyB' },
+        },
+      },
+    });
+    expect(metadataReadEvidenceBlockers(manifest)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ capabilityId: 'CustomerPerformanceController.read' }),
+      ]),
+    );
   });
 
   it('partitions metadata positives once across five domain-isolated packs', () => {
