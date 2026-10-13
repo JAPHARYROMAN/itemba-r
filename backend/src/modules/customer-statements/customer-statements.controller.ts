@@ -23,7 +23,7 @@ export class CustomerStatementsController {
   /**
    * Professional statement of account for one customer over a date range:
    * openingBalance, chronological lines with running balance, closingBalance,
-   * and an aging summary as of dateTo. Read-only.
+   * and historical invoice aging as of dateTo. Read-only.
    */
   @Get('detail')
   @RequirePermissions('customer_statements.view')
@@ -78,5 +78,11 @@ export class CustomerStatementsController {
   @RequirePermissions('customer_statements.view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user);
+  }
+
+  @Get(':id/detail')
+  @RequirePermissions('customer_statements.view')
+  savedDetail(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.savedDetail(id, user);
   }
 }

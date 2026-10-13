@@ -289,6 +289,8 @@ jobs:
         run: npx prisma migrate deploy --schema=../database/prisma/schema.prisma
       - name: Run e2e smoke tests
         run: npm run test:e2e:ci
+      - name: Prove customer performance, historical balances and immutable statement snapshots
+        run: node scripts/test-customer-performance.cjs
       - name: Prove PetroDollar station posting, payments, reversal and corrections
         run: npm run test:petrodollar-posting
       - name: Prove combined POS payments, party ledger and unified cash-book replay

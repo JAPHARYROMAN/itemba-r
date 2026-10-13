@@ -1,823 +1,811 @@
-import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { AccessLevel, Prisma } from '@prisma/client';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { CustomerStatementsService } from './customer-statements.service';
+import {
+  assembleCustomerAccounts,
+  CustomerAccountProjectionService,
+} from './customer-account-projection.service';
+import { customerStatementPdf } from './customer-statement-pdf';
+import { buildBusinessPdf } from '../generated-documents/pdf-builder';
 
-const D = (v: number | string) => new Prisma.Decimal(v);
-const USER: any = { id: 'user-1', email: 'u@x.io' };
-const COMPANY = 'co-1';
-const CUSTOMER = 'cust-1';
-
-/** Fixture movements. Dates: two BEFORE the period (roll into opening), the
- * rest inside [2026-02-01, 2026-02-28]. */
-const RECEIVABLES = [
-  // pre-period invoice -> opening debit 1000
-  {
-    id: 'r0',
-    receivableNumber: 'INV-0',
-    amount: D(1000),
-    issueDate: new Date('2026-01-10'),
-    dueDate: new Date('2026-01-25'),
-    outstandingAmount: D(0),
-    status: 'PAID',
-  },
-  // in-period invoices
-  {
-    id: 'r1',
-    receivableNumber: 'INV-1',
-    amount: D(5000),
-    issueDate: new Date('2026-02-05'),
-    dueDate: new Date('2026-02-20'),
-    outstandingAmount: D(5000),
-    status: 'OPEN',
-  },
-  {
-    id: 'r2',
-    receivableNumber: 'INV-2',
-    amount: D(2000),
-    issueDate: new Date('2026-02-15'),
-    dueDate: new Date('2025-11-01'), // long overdue vs dateTo -> over90
-    outstandingAmount: D(2000),
-    status: 'OVERDUE',
-  },
-];
-
-const PAYMENTS = [
-  // pre-period payment -> opening credit 1000 (pays off r0)
-  {
-    id: 'p0',
-    paymentNumber: 'PMT-0',
-    amount: D(1000),
-    paymentDate: new Date('2026-01-20'),
-    reference: null,
-  },
-  // in-period payment credit 3000
-  {
-    id: 'p1',
-    paymentNumber: 'PMT-1',
-    amount: D(3000),
-    paymentDate: new Date('2026-02-10'),
-    reference: 'MPESA-123',
-  },
-];
-
-const CREDIT_NOTES = [
-  // in-period credit note credit 500
-  {
-    id: 'c1',
-    creditNoteNumber: 'CN-1',
-    totalAmount: D(500),
-    issueDate: new Date('2026-02-18'),
-    reason: 'Return',
-  },
-];
-
-const REFUNDS = [
-  // in-period refund debit 250
-  {
-    id: 'f1',
-    refundNumber: 'RF-1',
-    amount: D(250),
-    refundDate: new Date('2026-02-25'),
-    reason: null,
-  },
-];
-
-function makeService(overrides?: { customer?: any; companyScope?: any }) {
-  const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
-  const prisma: any = {
-    journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
-    customer: {
-      findFirst: jest
-        .fn()
-        .mockResolvedValue(
-          overrides?.customer === undefined
-            ? { id: CUSTOMER, name: 'Acme Ltd', email: 'ap@acme.io' }
-            : overrides.customer,
-        ),
-    },
-    receivable: { findMany: jest.fn().mockResolvedValue(RECEIVABLES) },
-    customerPayment: { findMany: jest.fn().mockResolvedValue(PAYMENTS) },
-    creditNote: { findMany: jest.fn().mockResolvedValue(CREDIT_NOTES) },
-    refund: { findMany: jest.fn().mockResolvedValue(REFUNDS) },
+const D = (n: number | string) => new Prisma.Decimal(n);
+const DAY = (day: string) => new Date(`${day}T00:00:00Z`);
+const USER: any = { id: 'user-1', roleScopes: ['COMPANY'], permissions: [] };
+const customer = {
+  id: 'customer-1',
+  companyId: 'company-1',
+  name: 'Acme Limited',
+  customerCode: 'C-001',
+  email: 'ap@acme.test',
+  phone: null,
+  address: 'Dar es Salaam',
+  createdAt: DAY('2026-01-01'),
+  company: { id: 'company-1', name: 'Itemba Limited', code: 'ITEMBA' },
+};
+const base = { companyId: customer.companyId, customerId: customer.id, currency: 'TZS' };
+const invoice = {
+  ...base,
+  id: 'invoice-1',
+  receivableNumber: 'INV-001',
+  amount: D(1000),
+  issueDate: DAY('2026-02-05'),
+  dueDate: DAY('2026-02-20'),
+  status: 'WRITTEN_OFF',
+  outstandingAmount: D(0),
+  sourceType: 'SalesOrder',
+  sourceId: 'sale-1',
+  journalEntryId: 'sale-journal',
+  journalEntry: { companyId: 'company-1', status: 'POSTED', transactionDate: DAY('2026-02-05') },
+};
+const allocation = { receivableId: invoice.id, amount: D(400), receivable: invoice };
+const payment = {
+  ...base,
+  id: 'payment-1',
+  paymentNumber: 'PAY-001',
+  amount: D(400),
+  paymentDate: DAY('2026-02-10'),
+  appliedAmount: D(400),
+  unappliedAmount: D(0),
+  method: 'BANK_TRANSFER',
+  status: 'REVERSED',
+  reversedAt: DAY('2026-03-05'),
+  journalEntryId: 'payment-journal',
+  journalEntry: { status: 'REVERSED' },
+  reversalJournalEntry: { status: 'POSTED', transactionDate: DAY('2026-03-05') },
+  allocations: [allocation],
+};
+const arLine = (amount: number) => ({
+  credit: D(amount),
+  debit: D(0),
+  account: { accountCode: '1200', accountSubType: 'AR_CONTROL', accountType: 'ASSET' },
+});
+const cashLine = (amount: number) => ({
+  credit: D(0),
+  debit: D(amount),
+  account: { accountCode: '1000', accountSubType: 'CASH_ON_HAND', accountType: 'ASSET' },
+});
+function sources() {
+  return {
+    customers: [customer],
+    sales: [
+      {
+        ...base,
+        id: 'sale-1',
+        salesOrderNumber: 'SO-001',
+        totalAmount: D(1000),
+        taxAmount: D(0),
+        orderDate: invoice.issueDate,
+        paymentMethod: 'CREDIT',
+        status: 'CONFIRMED',
+        receivableId: invoice.id,
+        journalEntryId: 'sale-journal',
+        journalEntry: {
+          id: 'sale-journal',
+          status: 'POSTED',
+          transactionDate: invoice.issueDate,
+          reversedBy_: [],
+        },
+      },
+      {
+        ...base,
+        id: 'cash-sale',
+        salesOrderNumber: 'CS-001',
+        totalAmount: D(100),
+        orderDate: DAY('2026-02-11'),
+        paymentMethod: 'CASH',
+        status: 'CONFIRMED',
+        journalEntry: { status: 'POSTED', transactionDate: DAY('2026-02-11'), reversedBy_: [] },
+      },
+    ],
+    receivables: [invoice],
+    payments: [payment],
+    creditNotes: [
+      {
+        ...base,
+        id: 'credit-1',
+        creditNoteNumber: 'CN-001',
+        receivableId: invoice.id,
+        totalAmount: D(50),
+        issueDate: DAY('2026-02-15'),
+        status: 'VOID',
+        journalEntry: {
+          status: 'REVERSED',
+          reversedBy_: [{ status: 'POSTED', transactionDate: DAY('2026-03-07') }],
+        },
+      },
+    ],
+    refunds: [],
+    journals: [
+      {
+        id: 'legacy',
+        companyId: base.companyId,
+        referenceId: invoice.id,
+        description: 'Receivable settlement INV-001',
+        journalNumber: 'JE-001',
+        transactionDate: DAY('2026-02-12'),
+        totalDebit: D(200),
+        totalCredit: D(200),
+        status: 'POSTED',
+        lines: [arLine(200), cashLine(200)],
+        reversedBy_: [],
+      },
+      {
+        id: 'writeoff',
+        companyId: base.companyId,
+        referenceId: invoice.id,
+        description: 'Receivable write-off INV-001',
+        journalNumber: 'JE-002',
+        transactionDate: DAY('2026-04-01'),
+        totalCredit: D(800),
+        status: 'POSTED',
+        lines: [arLine(800)],
+        reversedBy_: [],
+      },
+    ],
   };
-  const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
-  const companyScope: any = overrides?.companyScope ?? { assertCanAccessCompany };
-  const printEngine: any = {
-    renderPdf: jest.fn(),
-    renderExcel: jest.fn(),
-  };
-  const email: any = { sendEmail: jest.fn().mockResolvedValue(undefined) };
-  const service = new CustomerStatementsService(prisma, audit, companyScope, printEngine, email);
-  return { service, prisma, audit, companyScope, printEngine, email, assertCanAccessCompany };
 }
-
-const SEL = {
-  companyId: COMPANY,
-  customerId: CUSTOMER,
+function account(asOf = '2026-02-28') {
+  return assembleCustomerAccounts(sources(), new Date(`${asOf}T23:59:59.999Z`))[0];
+}
+function service() {
+  const db: any = {
+    customer: { findFirst: jest.fn().mockResolvedValue({ email: 'current-accounts@acme.test' }) },
+    customerStatementRun: {
+      create: jest.fn().mockImplementation(async ({ data }) => data),
+      findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  };
+  const audit: any = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  };
+  db.$transaction = jest.fn().mockImplementation((callback) => callback(db));
+  const companies: any = {
+    assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+    companyWhereFor: jest.fn().mockResolvedValue({ companyId: base.companyId }),
+  };
+  const org: any = {
+    accessibleIds: jest
+      .fn()
+      .mockResolvedValue({ unrestricted: true, divisionIds: [], branchIds: [] }),
+  };
+  const projection: any = {
+    read: jest.fn().mockImplementation(async (_user, query) => ({
+      asOf: new Date(`${query.dateTo}T23:59:59.999Z`),
+      currency: 'TZS',
+      scope: { companyId: base.companyId, branchIds: [], divisionIds: [], unrestricted: true },
+      accounts: [account(query.dateTo)],
+      warnings: ['ERP customer account only. Standalone Direct Sales are separate.'],
+    })),
+  };
+  const email: any = { sendEmailWithAttachments: jest.fn().mockResolvedValue(true) };
+  return {
+    db,
+    audit,
+    companies,
+    org,
+    projection,
+    email,
+    service: new CustomerStatementsService(db, audit, companies, undefined, email, projection, org),
+  };
+}
+const selection = {
+  companyId: base.companyId,
+  customerId: base.customerId,
+  currency: 'TZS',
   dateFrom: '2026-02-01',
   dateTo: '2026-02-28',
 };
 
-describe('CustomerStatementsService.buildStatement', () => {
-  it('ages deadline dates by the same UTC calendar day as account overdue filters', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-10-08T12:00:00Z'));
-    try {
-      const { service, prisma } = makeService();
-      prisma.receivable.findMany.mockResolvedValue([
-        {
-          id: 'calendar-ar',
-          receivableNumber: 'REC-DUE',
-          amount: D(100),
-          issueDate: new Date('2026-10-01'),
-          outstandingAmount: D(100),
-          dueDate: new Date('2026-10-07T23:59:00Z'),
-          status: 'OPEN',
-        },
-      ]);
-      prisma.customerPayment.findMany.mockResolvedValue([]);
-      prisma.creditNote.findMany.mockResolvedValue([]);
-      prisma.refund.findMany.mockResolvedValue([]);
-      const statement = await service.buildStatement(
-        { ...SEL, dateFrom: '2026-10-01', dateTo: '2026-10-08' },
-        USER,
-      );
-      expect(statement.aging.current).toBe(0);
-      expect(statement.aging.days1_30).toBe(100);
-      expect(statement.aging.oldestDaysOverdue).toBe(1);
-    } finally {
-      jest.useRealTimers();
-    }
+describe('Customer account reconstruction', () => {
+  it('recovers a mixed-tender creation receipt without duplicating its gross invoice', () => {
+    const fixture: any = sources();
+    fixture.sales = [fixture.sales[0]];
+    fixture.payments = [];
+    fixture.creditNotes = [];
+    fixture.receivables[0] = {
+      ...invoice,
+      amount: D(100),
+      paidAmount: D(60),
+      status: 'PARTIALLY_PAID',
+    };
+    const creation = {
+      id: 'sale-journal',
+      companyId: base.companyId,
+      journalNumber: 'JE-MIXED',
+      transactionDate: invoice.issueDate,
+      status: 'POSTED',
+      description: 'Mixed tender sale',
+      referenceType: 'SalesOrder',
+      referenceId: 'sale-1',
+      reversalOfId: null,
+      lines: [cashLine(60), { ...arLine(0), debit: D(40) }],
+      reversedBy_: [],
+    };
+    fixture.journals = [creation];
+    fixture.sales[0] = {
+      ...fixture.sales[0],
+      totalAmount: D(100),
+      paymentMethod: 'CASH',
+      journalEntry: creation,
+    };
+    fixture.receivables[0].journalEntry = creation;
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    expect(result.netBalance.toFixed(2)).toBe('40.00');
+    expect(result.openInvoiceBalance.toFixed(2)).toBe('40.00');
+    expect(result.movements.filter((line) => line.type === 'INVOICE')).toHaveLength(1);
+    expect(result.payments.map((p) => p.amount.toFixed(2))).toEqual(['60.00']);
+    expect(result.settlementHistory?.status).toBe('COMPLETE');
+    const reversal = {
+      ...creation,
+      id: 'mixed-reversal',
+      journalNumber: 'JE-MIXED-REV',
+      transactionDate: DAY('2026-03-05'),
+      reversalOfId: creation.id,
+      lines: [{ ...cashLine(0), credit: D(60) }, arLine(40)],
+    };
+    creation.status = 'REVERSED';
+    (creation.reversedBy_ as any[]) = [reversal];
+    fixture.receivables[0].status = 'CANCELLED';
+    fixture.sales[0].status = 'CANCELLED';
+    const cancelled = assembleCustomerAccounts(fixture, new Date('2026-03-31T23:59:59Z'))[0];
+    expect(cancelled.netBalance.toFixed(2)).toBe('0.00');
+    expect(cancelled.openInvoiceBalance.toFixed(2)).toBe('0.00');
+    expect(cancelled.customerCredit.toFixed(2)).toBe('0.00');
   });
-  it('recovers historical journal settlements and makes detail and generated balances agree', async () => {
-    const { service, prisma } = makeService();
-    prisma.receivable.findMany.mockResolvedValue([
+  it('flags an unreconciled paid amount without inventing a historical receipt', () => {
+    const fixture: any = sources();
+    fixture.receivables[0] = { ...invoice, paidAmount: D(350) };
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    expect(result.netBalance.toFixed(2)).toBe('350.00');
+    expect(result.settlementHistory).toMatchObject({
+      status: 'INCOMPLETE',
+      unresolvedAmount: '150.00',
+    });
+    expect(result.integrityIssues).toContain('incomplete-settlement-history');
+  });
+  it('uses future receipts for evidence reconciliation while preserving historical balances and history', () => {
+    const fixture: any = sources();
+    fixture.receivables[0] = { ...invoice, paidAmount: D(400), status: 'PARTIALLY_PAID' };
+    fixture.payments = [
       {
-        id: 'legacy-r',
-        receivableNumber: 'REC-LEGACY',
-        amount: D(100),
-        paidAmount: D(60),
-        outstandingAmount: D(40),
-        issueDate: new Date('2026-01-10'),
-        dueDate: null,
-        status: 'PARTIALLY_PAID',
+        ...payment,
+        status: 'COMPLETED',
+        amount: D(200),
+        paymentDate: DAY('2026-03-10'),
+        reversedAt: null,
+        reversalJournalEntry: null,
+        allocations: [{ ...allocation, amount: D(200) }],
       },
-    ]);
-    prisma.customerPayment.findMany.mockResolvedValue([]);
-    prisma.creditNote.findMany.mockResolvedValue([]);
-    prisma.refund.findMany.mockResolvedValue([]);
-    prisma.journalEntry.findMany.mockResolvedValue([
+    ];
+    fixture.creditNotes = [];
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    expect(result.netBalance.toFixed(2)).toBe('800.00');
+    expect(result.settlementHistory?.status).toBe('COMPLETE');
+    expect(result.payments.some((p) => p.id === payment.id)).toBe(false);
+  });
+  it('preserves exact cents in large invoice aging buckets', () => {
+    const amount = '9999999999999999.99';
+    const rows: any = {
+      customers: [customer],
+      sales: [],
+      payments: [],
+      creditNotes: [],
+      refunds: [],
+      journals: [],
+      receivables: [{ ...invoice, status: 'OPEN', journalEntryId: null, amount: D(amount) }],
+    };
+    const reconstructed = assembleCustomerAccounts(rows, new Date('2026-02-28T23:59:59.999Z'))[0];
+    expect(reconstructed.aging.days1_30).toBe(amount);
+    expect(reconstructed.aging.total).toBe(amount);
+    expect(reconstructed.openInvoiceBalance.toFixed(2)).toBe(amount);
+  });
+  it('reconstructs historical balances before later reversal, void and write-off', () => {
+    expect(account().netBalance.toFixed(2)).toBe('350.00');
+    expect(account().openInvoiceBalance.toFixed(2)).toBe('350.00');
+    expect(account().aging.days1_30).toBe('350.00');
+    expect(account('2026-03-31').netBalance.toFixed(2)).toBe('800.00');
+    expect(account('2026-03-31').openInvoiceBalance.toFixed(2)).toBe('800.00');
+    expect(account('2026-04-30').netBalance.toFixed(2)).toBe('0.00');
+    expect(account('2026-04-30').openInvoiceBalance.toFixed(2)).toBe('0.00');
+  });
+  it('includes an immediate cash sale and receipt exactly once as zero-net activity', () => {
+    const rows = account().movements.filter((m) => m.sourceId === 'cash-sale');
+    expect(rows.map((m) => m.type)).toEqual(['INVOICE', 'PAYMENT']);
+    expect(rows.reduce((net, row) => net.plus(row.debit).minus(row.credit), D(0)).toFixed(2)).toBe(
+      '0.00',
+    );
+  });
+  it('shows reversed receipts in history with historical effective status and allocations', () => {
+    expect(account().payments.find((p) => p.id === payment.id)?.status).toBe('COMPLETED');
+    expect(account('2026-03-31').payments.find((p) => p.id === payment.id)?.status).toBe(
+      'REVERSED',
+    );
+    expect(account().payments.find((p) => p.id === 'legacy')?.allocations[0].dueDate).toEqual(
+      invoice.dueDate,
+    );
+  });
+  it('does not count a customer-payment journal again as a legacy receipt', () => {
+    const fixture = sources();
+    fixture.journals.push({ ...fixture.journals[0], id: payment.journalEntryId });
+    expect(
+      assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0].netBalance.toFixed(2),
+    ).toBe('350.00');
+  });
+  it('rejects settlement-shaped inventory/tax journals without verified cash/AR legs', () => {
+    const fixture = sources();
+    fixture.journals[0].lines = [
       {
-        id: 'legacy-je',
-        journalNumber: 'JE-LEGACY',
-        transactionDate: new Date('2026-02-10'),
-        description: 'Receivable settlement REC-LEGACY',
-        referenceId: 'legacy-r',
-        reversalOfId: null,
-        status: 'POSTED',
-        lines: [
-          {
-            debit: D(0),
-            credit: D(60),
-            account: { accountSubType: 'ar_control', accountCode: '1100' },
-          },
-        ],
+        ...arLine(200),
+        account: { accountCode: '1200', accountSubType: 'INVENTORY_ASSET', accountType: 'ASSET' },
       },
-    ]);
-    prisma.customerStatementRun = { create: jest.fn(async ({ data }) => ({ id: 'run', ...data })) };
-    const detail = await service.buildStatement(SEL, USER);
-    const generated = await service.generate(
+      cashLine(200),
+    ];
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    expect(result.netBalance.toFixed(2)).toBe('550.00');
+    expect(result.warnings).toContain(
+      'Journal JE-001 does not contain a verified receivable cash settlement leg.',
+    );
+  });
+  it('keeps deposits separate from open invoice balances and late allocations', () => {
+    const fixture = sources();
+    fixture.payments[0] = { ...payment, amount: D(500), unappliedAmount: D(100), allocations: [] };
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    expect(result.openInvoiceBalance.toFixed(2)).toBe('750.00');
+    expect(result.customerCredit.toFixed(2)).toBe('500.00');
+    expect(result.netBalance.toFixed(2)).toBe('250.00');
+  });
+  it('does not include a never-posted cancelled draft or warn about it', () => {
+    const fixture = sources();
+    fixture.sales.push({
+      ...fixture.sales[1],
+      id: 'draft',
+      status: 'CANCELLED',
+      journalEntry: undefined,
+    } as any);
+    expect(assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0].warnings).toEqual(
+      [],
+    );
+  });
+  it('uses stable source ordering for equal-dated invoices independent of database order', () => {
+    const fixture = sources();
+    fixture.receivables.push({
+      ...invoice,
+      id: 'invoice-2',
+      receivableNumber: 'INV-002',
+      status: 'OPEN',
+      journalEntryId: 'sale-journal-2',
+    });
+    const first = assembleCustomerAccounts(
+      fixture,
+      new Date('2026-02-28T23:59:59Z'),
+    )[0].movements.map((m) => `${m.reference}:${m.debit}:${m.credit}`);
+    fixture.receivables.reverse();
+    expect(
+      assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0].movements.map(
+        (m) => `${m.reference}:${m.debit}:${m.credit}`,
+      ),
+    ).toEqual(first);
+  });
+  it('records scoped allocations on their effective dates and never reveals inaccessible receipt metadata', () => {
+    const fixture: any = sources();
+    fixture.receivables[0].status = 'OPEN';
+    fixture.payments[0] = {
+      ...payment,
+      paymentDate: DAY('2026-01-10'),
+      createdAt: DAY('2026-01-10'),
+      headerVisible: false,
+      reference: 'HIDDEN-BANK-REFERENCE',
+      paymentNumber: 'HIDDEN-RECEIPT',
+      allocations: [{ ...allocation, createdAt: DAY('2026-02-10') }],
+    };
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    const scoped = result.payments.find((p) => p.sourceType === 'PaymentAllocation')!;
+    expect(scoped.date).toEqual(DAY('2026-02-10'));
+    expect(scoped.method).toBe('OTHER');
+    expect(scoped.id).not.toContain(payment.id);
+    const printed = JSON.stringify(result.movements);
+    expect(printed).not.toContain('HIDDEN-RECEIPT');
+    expect(printed).not.toContain('HIDDEN-BANK-REFERENCE');
+    expect(
+      result.movements.find((m) => m.sourceType === 'PaymentAllocation' && m.type === 'PAYMENT')!
+        .date,
+    ).toEqual(DAY('2026-02-10'));
+  });
+  it('preserves original accrual dates after a source issue-date edit and flags changed ownership or terms', () => {
+    const fixture: any = sources();
+    fixture.receivables[0] = { ...invoice, issueDate: DAY('2026-12-01'), status: 'OPEN' };
+    fixture.sourceEdits = [
       {
-        companyId: COMPANY,
-        customerId: CUSTOMER,
-        periodStart: SEL.dateFrom,
-        periodEnd: SEL.dateTo,
-      } as any,
+        companyId: customer.companyId,
+        oldValue: { customerId: customer.id, dueDate: '2026-02-20' },
+        newValue: { customerId: 'other-customer', dueDate: '2026-03-20' },
+      },
+    ];
+    const result = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0];
+    expect(result.movements.find((m) => m.sourceId === invoice.id)!.date).toEqual(
+      DAY('2026-02-05'),
+    );
+    expect(result.integrityIssues).toEqual(
+      expect.arrayContaining(['changed-source-ownership', 'changed-payment-terms']),
+    );
+  });
+  it('does not treat a draft mirror journal as a completed financial reversal', () => {
+    const fixture: any = sources();
+    fixture.payments[0] = {
+      ...payment,
+      reversalJournalEntry: { status: 'DRAFT', transactionDate: DAY('2026-03-05') },
+    };
+    const result = assembleCustomerAccounts(fixture, new Date('2026-03-31T23:59:59Z'))[0];
+    expect(result.payments.find((p) => p.id === payment.id)!.status).toBe('COMPLETED');
+    expect(result.integrityIssues).toContain('missing-reversal');
+  });
+  it('matches the resolved semantic role account instead of generic conventional-code alternatives', () => {
+    const fixture: any = sources();
+    fixture.roleAccounts = {
+      [customer.companyId]: { AR_CONTROL: 'ar-custom', CASH_ON_HAND: 'cash-custom' },
+    };
+    fixture.journals[0].lines = [
+      { ...arLine(200), accountId: 'ar-custom' },
+      { ...cashLine(200), accountId: 'cash-custom' },
+      {
+        ...arLine(5000),
+        accountId: 'unrelated-1100',
+        account: { accountCode: '1100', accountSubType: 'GENERIC_ASSET' },
+      },
+    ];
+    fixture.journals[1].lines = [{ ...arLine(800), accountId: 'ar-custom' }];
+    expect(
+      assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59Z'))[0].netBalance.toFixed(2),
+    ).toBe('350.00');
+  });
+  it('does not expose deposits or hidden allocation amounts on partially visible receipts', () => {
+    const fixture = sources();
+    (fixture.payments[0] as any)._count = { allocations: 2 };
+    fixture.payments[0].amount = D(9000);
+    fixture.payments[0].unappliedAmount = D(1000);
+    const visible = assembleCustomerAccounts(
+      fixture,
+      new Date('2026-02-28T23:59:59Z'),
+    )[0].payments.find(
+      (p) =>
+        p.allocations.some((a) => a.receivableId === invoice.id) &&
+        p.sourceType === 'CustomerPayment',
+    )!;
+    expect(visible.amount.toFixed(2)).toBe('400.00');
+    expect(visible.unappliedAmount.toFixed(2)).toBe('0.00');
+  });
+});
+
+describe('Customer statements and preserved exports', () => {
+  it('projects legacy customer profile summaries without overwriting their saved balances', async () => {
+    const { service: statements } = service();
+    const run: any = {
+      id: 'old',
+      companyId: base.companyId,
+      customerId: base.customerId,
+      currency: 'TZS',
+      snapshot: null,
+      periodStart: DAY(selection.dateFrom),
+      periodEnd: DAY(selection.dateTo),
+      openingBalance: D(0),
+      totalDebits: D(1000),
+      totalCredits: D(0),
+      closingBalance: D(1000),
+    };
+    const [projected] = await statements.projectSavedRuns([run], USER);
+    expect(projected.closingBalance.toFixed(2)).toBe('350.00');
+    expect(projected.storedBalances.closingBalance.toFixed(2)).toBe('1000.00');
+    expect(projected.settlementHistory.status).toBe('COMPLETE');
+    expect(projected.hasSnapshot).toBe(false);
+    expect(run.closingBalance.toFixed(2)).toBe('1000.00');
+  });
+  it('preserves very large Excel amounts as exact text with a precision note', async () => {
+    const amount = '9999999999999999.99';
+    const fixture: any = {
+      customers: [customer],
+      sales: [],
+      payments: [],
+      creditNotes: [],
+      refunds: [],
+      journals: [],
+      receivables: [{ ...invoice, status: 'OPEN', journalEntryId: null, amount: D(amount) }],
+    };
+    const projected = assembleCustomerAccounts(fixture, new Date('2026-02-28T23:59:59.999Z'))[0];
+    const ctx = service();
+    ctx.projection.read.mockResolvedValue({
+      accounts: [projected],
+      warnings: [],
+      currency: 'TZS',
+      scope: { companyId: base.companyId, divisionIds: [], branchIds: [], unrestricted: true },
+    });
+    const result = await ctx.service.exportExcel(selection, USER);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const workbook = new (require('exceljs').Workbook)();
+    await workbook.xlsx.load(result.buffer);
+    const sheet = workbook.getWorksheet('Statement');
+    expect(sheet.getCell('D9').value).toBe(amount);
+    expect(sheet.getCell('F10').value).toBe(amount);
+    expect(sheet.getCell('F10').note).toContain('preserve cents');
+    expect(sheet.getCell('F8').value).toBe(0);
+  });
+  it('calculates an opening balance and exact running balances with historical aging', async () => {
+    const { service: statements } = service();
+    const detail = await statements.getDetail({ ...selection, dateFrom: '2026-02-11' }, USER);
+    expect(detail.openingBalance).toBe('600.00');
+    expect(detail.closingBalance).toBe('350.00');
+    expect(
+      D(detail.openingBalance).plus(detail.totalDebits).minus(detail.totalCredits).toFixed(2),
+    ).toBe(detail.closingBalance);
+    expect(detail.lines.at(-1).balance).toBe('350.00');
+    expect(detail.agingAsOf).toBe('2026-02-28T23:59:59.999Z');
+  });
+  it('freezes issued lines and PDF, and reopens them after source data changes', async () => {
+    const { service: statements, db, projection } = service();
+    const run = await statements.generate(
+      {
+        companyId: selection.companyId,
+        customerId: selection.customerId,
+        periodStart: selection.dateFrom,
+        periodEnd: selection.dateTo,
+      },
       USER,
     );
-    expect(detail.openingBalance.toFixed(2)).toBe('100.00');
-    expect(detail.totalCredits.toFixed(2)).toBe('60.00');
-    expect(detail.closingBalance.toFixed(2)).toBe('40.00');
-    expect(generated.closingBalance.toFixed(2)).toBe('40.00');
-    expect(detail.settlementHistory).toMatchObject({
-      status: 'COMPLETE',
-      recoveredLegacySettlements: 1,
-    });
-    expect(detail.lines[0]).toMatchObject({
-      type: 'ADJUSTMENT',
-      reference: 'JE-LEGACY',
-      sourceId: 'legacy-je',
-    });
+    db.customerStatementRun.findFirst.mockResolvedValue(
+      db.customerStatementRun.create.mock.calls[0][0].data,
+    );
+    projection.read.mockRejectedValue(new Error('Live source changed'));
+    expect(((await statements.savedDetail(run.id, USER)) as any).closingBalance).toBe('350.00');
+    const pdf = await statements.exportPdf({ runId: run.id } as any, USER);
+    expect(pdf.buffer).toEqual(db.customerStatementRun.create.mock.calls[0][0].data.pdfContent);
+    expect(pdf.buffer.toString('ascii', 0, 5)).toBe('%PDF-');
   });
-
-  it('exposes unexplained paid amounts but refuses to persist a reconciled statement', async () => {
-    const { service, prisma } = makeService();
-    prisma.receivable.findMany.mockResolvedValue([
+  it('hashes JSONB snapshots independent of key order and detects altered content', async () => {
+    const { service: statements, db } = service();
+    const run = await statements.generate(
       {
-        id: 'unproved',
-        receivableNumber: 'REC-UNPROVED',
-        amount: D(100),
-        paidAmount: D(40),
-        outstandingAmount: D(60),
-        issueDate: new Date('2026-02-05'),
-        dueDate: null,
-        status: 'PARTIALLY_PAID',
+        companyId: selection.companyId,
+        customerId: selection.customerId,
+        periodStart: selection.dateFrom,
+        periodEnd: selection.dateTo,
       },
-    ]);
-    prisma.customerPayment.findMany.mockResolvedValue([]);
-    prisma.creditNote.findMany.mockResolvedValue([]);
-    prisma.refund.findMany.mockResolvedValue([]);
-    prisma.customerStatementRun = { create: jest.fn() };
-    const detail = await service.getDetail(SEL as any, USER);
-    expect(detail.closingBalance).toBe('100.00');
-    expect(detail.lines).toHaveLength(1);
-    expect(detail.settlementHistory).toMatchObject({
-      status: 'INCOMPLETE',
-      unresolvedAmount: '40.00',
-    });
+      USER,
+    );
+    const stored = db.customerStatementRun.create.mock.calls[0][0].data;
+    stored.snapshot = Object.fromEntries(Object.entries(stored.snapshot).reverse());
+    db.customerStatementRun.findFirst.mockResolvedValue(stored);
+    expect(((await statements.savedDetail(run.id, USER)) as any).closingBalance).toBe('350.00');
+    stored.snapshot.closingBalance = '999.00';
+    await expect(statements.savedDetail(run.id, USER)).rejects.toThrow('integrity check');
+  });
+  it('rejects a changed preview before export or issue', async () => {
+    const { service: statements } = service();
     await expect(
-      service.generate(
+      statements.exportPdf({ ...selection, expectedHash: 'stale' }, USER),
+    ).rejects.toThrow('Refresh the statement');
+    await expect(
+      statements.generate(
         {
-          companyId: COMPANY,
-          customerId: CUSTOMER,
-          periodStart: SEL.dateFrom,
-          periodEnd: SEL.dateTo,
-        } as any,
+          companyId: selection.companyId,
+          customerId: selection.customerId,
+          periodStart: selection.dateFrom,
+          periodEnd: selection.dateTo,
+          expectedHash: 'stale',
+        },
         USER,
       ),
-    ).rejects.toThrow('settlement history is reconciled');
-    expect(prisma.customerStatementRun.create).not.toHaveBeenCalled();
-    expect((service as any).pdfSections(await service.buildStatement(SEL, USER))).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ heading: 'Settlement history is incomplete' }),
-      ]),
-    );
-    expect((service as any).sheetRows(await service.buildStatement(SEL, USER))).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ Type: 'HISTORY_GAP', Reference: 'REC-UNPROVED' }),
-      ]),
-    );
+    ).rejects.toThrow('Refresh the statement');
   });
-
-  it('includes the original invoice until the dated write-off, without calling forgiveness paid', async () => {
-    const { service, prisma } = makeService();
-    prisma.receivable.findMany.mockResolvedValue([
-      {
-        id: 'written',
-        receivableNumber: 'REC-WRITTEN',
-        amount: D(100),
-        paidAmount: D(0),
-        outstandingAmount: D(0),
-        issueDate: new Date('2026-01-10'),
-        dueDate: null,
-        status: 'WRITTEN_OFF',
-      },
-    ]);
-    prisma.customerPayment.findMany.mockResolvedValue([]);
-    prisma.creditNote.findMany.mockResolvedValue([]);
-    prisma.refund.findMany.mockResolvedValue([]);
-    prisma.journalEntry.findMany.mockResolvedValue([
-      {
-        id: 'writeoff',
-        journalNumber: 'JE-WRITEOFF',
-        transactionDate: new Date('2026-03-10'),
-        description: 'Receivable write-off REC-WRITTEN',
-        referenceId: 'written',
-        reversalOfId: null,
-        status: 'POSTED',
-        lines: [
-          {
-            debit: D(0),
-            credit: D(100),
-            account: { accountSubType: 'ar_control', accountCode: '1100' },
-          },
-        ],
-      },
-    ]);
-    const before = await service.buildStatement(SEL, USER);
-    const after = await service.buildStatement({ ...SEL, dateTo: '2026-03-31' }, USER);
-    expect(before.closingBalance.toFixed(2)).toBe('100.00');
-    expect(after.closingBalance.toFixed(2)).toBe('0.00');
-    expect(after.lines[0]).toMatchObject({ type: 'ADJUSTMENT', reference: 'JE-WRITEOFF' });
-    expect(after.settlementHistory.status).toBe('COMPLETE');
-  });
-
-  it('preserves a voided credit note and its reversal in their original periods', async () => {
-    const { service, prisma } = makeService();
-    prisma.receivable.findMany.mockResolvedValue([]);
-    prisma.customerPayment.findMany.mockResolvedValue([]);
-    prisma.refund.findMany.mockResolvedValue([]);
-    prisma.creditNote.findMany.mockResolvedValue([
-      {
-        id: 'cn',
-        creditNoteNumber: 'CN-VOID',
-        totalAmount: D(100),
-        issueDate: new Date('2026-02-10'),
-        reason: null,
-        status: 'VOID',
-        journalEntryId: 'cn-original',
-        journalEntry: {
-          reversedBy_: [
-            { id: 'cn-reversal', status: 'POSTED', transactionDate: new Date('2026-03-02') },
-          ],
+  it('fails closed on unknown historical dates and legacy summary-only runs', async () => {
+    const { service: statements, db, projection } = service();
+    const projected = await projection.read(USER, { dateTo: selection.dateTo });
+    projected.accounts[0].warnings.push('Invoice has no dated cancellation evidence.');
+    projected.accounts[0].integrityIssues = ['missing-cancellation'];
+    projection.read.mockResolvedValue(projected);
+    await expect(
+      statements.generate(
+        {
+          companyId: selection.companyId,
+          customerId: selection.customerId,
+          periodStart: selection.dateFrom,
+          periodEnd: selection.dateTo,
         },
-      },
-    ]);
-    const february = await service.buildStatement(SEL, USER);
-    const march = await service.buildStatement(
-      { ...SEL, dateFrom: '2026-03-01', dateTo: '2026-03-31' },
-      USER,
-    );
-    expect(february.closingBalance.toFixed(2)).toBe('-100.00');
-    expect(march.openingBalance.toFixed(2)).toBe('-100.00');
-    expect(march.totalDebits.toFixed(2)).toBe('100.00');
-    expect(march.closingBalance.toFixed(2)).toBe('0.00');
-  });
-
-  it('reconstructs a legacy voided refund through its explicit reversal ID without a journal backlink', async () => {
-    const { service, prisma } = makeService();
-    prisma.receivable.findMany.mockResolvedValue([]);
-    prisma.customerPayment.findMany.mockResolvedValue([]);
-    prisma.creditNote.findMany.mockResolvedValue([]);
-    prisma.refund.findMany.mockResolvedValue([
-      {
-        id: 'refund',
-        refundNumber: 'RF-VOID',
-        amount: D(250),
-        refundDate: new Date('2026-02-25'),
-        status: 'VOID',
-        journalEntryId: 'rf-original',
-        reversalJournalEntryId: 'rf-reversal',
-        journalEntry: { reversedBy_: [] },
-      },
-    ]);
-    prisma.journalEntry.findMany.mockResolvedValue([
-      {
-        id: 'rf-reversal',
-        journalNumber: 'JE-RF-REVERSE',
-        status: 'POSTED',
-        transactionDate: new Date('2026-03-10'),
-      },
-    ]);
-    const february = await service.buildStatement(SEL, USER);
-    const march = await service.buildStatement(
-      { ...SEL, dateFrom: '2026-03-01', dateTo: '2026-03-31' },
-      USER,
-    );
-    expect(february.closingBalance.toFixed(2)).toBe('250.00');
-    expect(march.openingBalance.toFixed(2)).toBe('250.00');
-    expect(march.totalCredits.toFixed(2)).toBe('250.00');
-    expect(march.closingBalance.toFixed(2)).toBe('0.00');
-    expect(march.settlementHistory.status).toBe('COMPLETE');
-    expect(march.lines[0].sourceId).toBe('rf-reversal');
-    expect(prisma.journalEntry.findMany.mock.calls[0][0].where).toEqual({
-      id: { in: ['rf-reversal'] },
-      companyId: COMPANY,
-      deletedAt: null,
-      status: 'POSTED',
-    });
-  });
-  it('computes opening balance from pre-period movements only', async () => {
-    const { service } = makeService();
-    const s = await service.buildStatement(SEL, USER);
-    // opening = INV-0 (1000 debit) - PMT-0 (1000 credit) = 0
-    expect(s.openingBalance.toFixed(2)).toBe('0.00');
-    // in-period lines exclude the two pre-period movements (INV-0, PMT-0)
-    expect(s.lineCount).toBe(5);
-    expect(s.lines.map((l) => l.reference)).toEqual(['INV-1', 'PMT-1', 'INV-2', 'CN-1', 'RF-1']);
-  });
-
-  it('reconciles opening + totalDebits - totalCredits === closingBalance', async () => {
-    const { service } = makeService();
-    const s = await service.buildStatement(SEL, USER);
-    // debits: INV-1 5000 + INV-2 2000 + RF-1 250 = 7250
-    // credits: PMT-1 3000 + CN-1 500 = 3500
-    expect(s.totalDebits.toFixed(2)).toBe('7250.00');
-    expect(s.totalCredits.toFixed(2)).toBe('3500.00');
-    const recomputed = s.openingBalance.plus(s.totalDebits).minus(s.totalCredits);
-    expect(recomputed.toFixed(2)).toBe(s.closingBalance.toFixed(2));
-    // opening 0 + 7250 - 3500 = 3750
-    expect(s.closingBalance.toFixed(2)).toBe('3750.00');
-  });
-
-  it('running balance on the last line equals closingBalance', async () => {
-    const { service } = makeService();
-    const s = await service.buildStatement(SEL, USER);
-    const last = s.lines[s.lines.length - 1];
-    expect(last.balance.toFixed(2)).toBe(s.closingBalance.toFixed(2));
-    // running balance is monotonic in the chronological order applied
-    let acc = s.openingBalance;
-    for (const l of s.lines) {
-      acc = acc.plus(l.debit).minus(l.credit);
-      expect(l.balance.toFixed(2)).toBe(acc.toFixed(2));
-    }
-  });
-
-  it('orders lines chronologically with deterministic same-date tie-break', async () => {
-    const { service } = makeService();
-    const s = await service.buildStatement(SEL, USER);
-    const dates = s.lines.map((l) => l.date.getTime());
-    const sorted = [...dates].sort((a, b) => a - b);
-    expect(dates).toEqual(sorted);
-  });
-
-  it('buckets aging as a LIVE snapshot (as of today, not dateTo) using open receivables', async () => {
-    const { service } = makeService();
-    const s = await service.buildStatement(SEL, USER);
-
-    // Aging is deliberately a current snapshot: it ages each receivable's
-    // live outstandingAmount as of TODAY, NOT as of dateTo (2026-02-28).
-    // r0 is PAID -> excluded regardless. r1/r2 are OPEN/OVERDUE with
-    // outstanding 5000/2000. Compute the expected band from `now` so this
-    // test does not hard-depend on the wall clock.
-    const now = Date.now();
-    const DAY = 1000 * 60 * 60 * 24;
-    const bandOf = (due: string, amount: number) => {
-      const days = Math.floor((now - new Date(due).getTime()) / DAY);
-      if (days <= 0) return { current: amount } as Record<string, number>;
-      if (days <= 30) return { days1_30: amount };
-      if (days <= 60) return { days31_60: amount };
-      if (days <= 90) return { days61_90: amount };
-      return { over90: amount };
-    };
-    const expected: Record<string, number> = {
-      current: 0,
-      days1_30: 0,
-      days31_60: 0,
-      days61_90: 0,
-      over90: 0,
-    };
-    for (const [k, v] of Object.entries(bandOf('2026-02-20', 5000))) expected[k] += v;
-    for (const [k, v] of Object.entries(bandOf('2025-11-01', 2000))) expected[k] += v;
-
-    expect(s.aging.current).toBe(expected.current);
-    expect(s.aging.days1_30).toBe(expected.days1_30);
-    expect(s.aging.days31_60).toBe(expected.days31_60);
-    expect(s.aging.days61_90).toBe(expected.days61_90);
-    expect(s.aging.over90).toBe(expected.over90);
-    expect(s.aging.total).toBe(7000);
-  });
-
-  it('ages as of today, not dateTo, and returns agingAsOf ~= now', async () => {
-    const { service } = makeService();
-    const before = Date.now();
-    const s = await service.buildStatement(SEL, USER);
-    const after = Date.now();
-
-    // agingAsOf is a live "today" timestamp, independent of the (past) dateTo.
-    expect(s.agingAsOf).toBeInstanceOf(Date);
-    expect(s.agingAsOf.getTime()).toBeGreaterThanOrEqual(before);
-    expect(s.agingAsOf.getTime()).toBeLessThanOrEqual(after);
-    // It must NOT be pinned to dateTo (2026-02-28) for a backdated statement.
-    expect(s.agingAsOf.getTime()).toBeGreaterThan(s.dateTo.getTime());
-
-    // oldestDaysOverdue is measured from today, so it grows well past the
-    // dateTo-relative value (r2 due 2025-11-01 is many months overdue now).
-    expect(s.aging.oldestDaysOverdue).toBeGreaterThan(90);
-  });
-
-  it('scopes every movement query to companyId + customerId', async () => {
-    const { service, prisma } = makeService();
-    await service.buildStatement(SEL, USER);
-    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
-      const where = prisma[model].findMany.mock.calls[0][0].where;
-      expect(where.companyId).toBe(COMPANY);
-      expect(where.customerId).toBe(CUSTOMER);
-    }
-  });
-
-  it('retains issued documents for dated write-offs and cancellation reversals', async () => {
-    const { service, prisma } = makeService();
-    await service.buildStatement(SEL, USER);
-    const where = prisma.receivable.findMany.mock.calls[0][0].where;
-    // A written-off / cancelled receivable is no longer owed — its original
-    // amount must not contribute a debit and overstate the balance.
-    expect(where.OR).toEqual([{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }]);
-  });
-
-  it('scopes every movement query to a single currency (default TZS)', async () => {
-    const { service, prisma } = makeService();
-    await service.buildStatement(SEL, USER);
-    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
-      const where = prisma[model].findMany.mock.calls[0][0].where;
-      expect(where.currency).toBe('TZS');
-    }
-  });
-
-  it('honours an explicit currency label so it reconciles with the persisted run', async () => {
-    const { service, prisma } = makeService();
-    const s = await service.buildStatement({ ...SEL, currency: 'USD' }, USER);
-    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
-      const where = prisma[model].findMany.mock.calls[0][0].where;
-      expect(where.currency).toBe('USD');
-    }
-    expect(s.currency).toBe('USD');
-  });
-
-  it('falls back to TZS for an unrecognised currency label', async () => {
-    const { service, prisma } = makeService();
-    const s = await service.buildStatement({ ...SEL, currency: 'not-a-currency' }, USER);
-    expect(s.currency).toBe('TZS');
-    const where = prisma.receivable.findMany.mock.calls[0][0].where;
-    expect(where.currency).toBe('TZS');
-  });
-
-  it('enforces company access before returning data', async () => {
-    const assertCanAccessCompany = jest.fn().mockRejectedValue(new Error('forbidden'));
-    const { service } = makeService({ companyScope: { assertCanAccessCompany } });
-    await expect(service.buildStatement(SEL, USER)).rejects.toThrow('forbidden');
-    expect(assertCanAccessCompany).toHaveBeenCalledWith(USER, COMPANY, AccessLevel.READ);
-  });
-
-  it('throws NotFound when the customer is not in the company', async () => {
-    const { service } = makeService({ customer: null });
-    await expect(service.buildStatement(SEL, USER)).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it('rejects dateFrom after dateTo', async () => {
-    const { service } = makeService();
-    await expect(
-      service.buildStatement({ ...SEL, dateFrom: '2026-03-01', dateTo: '2026-02-01' }, USER),
+        USER,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
+    db.customerStatementRun.findFirst.mockResolvedValue({
+      id: 'old',
+      companyId: selection.companyId,
+      snapshot: null,
+    });
+    await expect(statements.savedDetail('old', USER)).rejects.toThrow('totals only');
+  });
+  it('revalidates every saved organizational scope and allows explicit authorized branch snapshots', async () => {
+    const { service: statements, db, org } = service();
+    const run = await statements.generate(
+      {
+        companyId: selection.companyId,
+        customerId: selection.customerId,
+        periodStart: selection.dateFrom,
+        periodEnd: selection.dateTo,
+      },
+      USER,
+    );
+    db.customerStatementRun.findFirst.mockResolvedValue(
+      db.customerStatementRun.create.mock.calls[0][0].data,
+    );
+    org.accessibleIds.mockResolvedValue({
+      unrestricted: false,
+      divisionIds: [],
+      branchIds: ['branch-1'],
+    });
+    await expect(statements.savedDetail(run.id, USER)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(
+      (statements as any).scopeAllowed(
+        { unrestricted: true, branchId: 'branch-1' },
+        { unrestricted: false, divisionIds: [], branchIds: ['branch-1'] },
+      ),
+    ).toBe(true);
+  });
+  it('keeps existing company-wide summaries but rejects unsupported template overrides explicitly', async () => {
+    const { service: statements } = service();
+    const summary = await statements.generate(
+      {
+        companyId: selection.companyId,
+        periodStart: selection.dateFrom,
+        periodEnd: selection.dateTo,
+      },
+      USER,
+    );
+    expect(summary.customerId).toBeNull();
+    expect(summary.closingBalance.toFixed(2)).toBe('350.00');
+    expect(summary.hasSnapshot).toBe(false);
+    await expect(
+      statements.exportPdf({ ...selection, templateId: 'custom' }, USER),
+    ).rejects.toThrow('Template overrides');
+  });
+  it('returns no customer detail outside the projection scope and rejects invalid currency', async () => {
+    const { service: statements, projection } = service();
+    projection.read.mockResolvedValue({ accounts: [] });
+    await expect(statements.getDetail(selection, USER)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(statements.getDetail({ ...selection, currency: 'INVALID' }, USER)).rejects.toThrow(
+      'Invalid statement currency',
+    );
+  });
+  it('exports numeric formatted spreadsheet money and a proper PDF table', async () => {
+    const { service: statements } = service();
+    const statement = await statements.buildStatement(selection, USER),
+      model = customerStatementPdf(statement);
+    expect(model.sections[0].table?.numericColumns).toEqual([2, 3, 4]);
+    expect(buildBusinessPdf(model).toString('ascii', 0, 5)).toBe('%PDF-');
+    const excel = await statements.exportExcel(selection, USER);
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(excel.buffer);
+    const sheet = workbook.worksheets[0];
+    expect(sheet.getRow(8).getCell(6).value).toBe(0);
+    expect(typeof sheet.getRow(9).getCell(4).value).toBe('number');
+    expect(sheet.pageSetup.printTitlesRow).toBe('7:7');
+  });
+  it('sends a real PDF attachment through the existing email boundary and audits actual delivery result', async () => {
+    const { service: statements, email, audit } = service();
+    const result = await statements.emailToCustomer(selection, USER);
+    expect(result.emailed).toBe(true);
+    expect(email.sendEmailWithAttachments.mock.calls[0][4][0].content.toString('ascii', 0, 5)).toBe(
+      '%PDF-',
+    );
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'EMAIL',
+        metadata: expect.objectContaining({ emailed: true }),
+      }),
+    );
+  });
+  it('emails the exact retained PDF to the current customer address after live activity changes', async () => {
+    const { service: statements, db, projection, email } = service();
+    const run = await statements.generate(
+      {
+        companyId: selection.companyId,
+        customerId: selection.customerId,
+        periodStart: selection.dateFrom,
+        periodEnd: selection.dateTo,
+      },
+      USER,
+    );
+    const stored = db.customerStatementRun.create.mock.calls[0][0].data;
+    db.customerStatementRun.findFirst.mockResolvedValue(stored);
+    projection.read.mockRejectedValue(new Error('Changed live activity must not be read'));
+    await statements.emailToCustomer({ runId: run.id } as any, USER);
+    expect(email.sendEmailWithAttachments.mock.calls[0][0]).toBe('current-accounts@acme.test');
+    expect(email.sendEmailWithAttachments.mock.calls[0][4][0].content).toEqual(stored.pdfContent);
+  });
+  it('rejects an outdated live email preview before sending', async () => {
+    const { service: statements, email } = service();
+    await expect(
+      statements.emailToCustomer({ ...selection, expectedHash: 'stale' }, USER),
+    ).rejects.toThrow('Refresh the statement');
+    expect(email.sendEmailWithAttachments).not.toHaveBeenCalled();
+  });
+  it('rejects a modified retained PDF even when the saved JSON has not changed', async () => {
+    const { service: statements, db } = service();
+    const run = await statements.generate(
+      {
+        companyId: selection.companyId,
+        customerId: selection.customerId,
+        periodStart: selection.dateFrom,
+        periodEnd: selection.dateTo,
+      },
+      USER,
+    );
+    const stored = db.customerStatementRun.create.mock.calls[0][0].data;
+    stored.pdfContent = Buffer.from('%PDF-modified');
+    db.customerStatementRun.findFirst.mockResolvedValue(stored);
+    await expect(statements.exportPdf({ runId: run.id } as any, USER)).rejects.toThrow(
+      'PDF integrity check',
+    );
+  });
+  it('requires the strict audit to succeed inside the issue transaction', async () => {
+    const { service: statements, audit, db } = service();
+    audit.logStrictInTransaction.mockRejectedValue(new Error('Audit storage unavailable'));
+    await expect(
+      statements.generate(
+        {
+          companyId: selection.companyId,
+          customerId: selection.customerId,
+          periodStart: selection.dateFrom,
+          periodEnd: selection.dateTo,
+        },
+        USER,
+      ),
+    ).rejects.toThrow('Audit storage unavailable');
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function));
   });
 });
 
-describe('CustomerStatementsService.generate (persisted summary run)', () => {
-  const GEN = {
-    companyId: COMPANY,
-    customerId: CUSTOMER,
-    periodStart: '2026-02-01',
-    periodEnd: '2026-02-28',
-  };
-
-  /**
-   * Build a service whose movement fetches return the supplied fixtures and
-   * that captures the persisted CustomerStatementRun.create() payload.
-   */
-  function makeGen(fixtures: {
-    receivables?: any[];
-    payments?: any[];
-    creditNotes?: any[];
-    refunds?: any[];
-  }) {
-    const created: any[] = [];
-    const prisma: any = {
-      journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
-      customer: { findFirst: jest.fn().mockResolvedValue({ id: CUSTOMER }) },
-      receivable: { findMany: jest.fn().mockResolvedValue(fixtures.receivables ?? []) },
-      customerPayment: { findMany: jest.fn().mockResolvedValue(fixtures.payments ?? []) },
-      creditNote: { findMany: jest.fn().mockResolvedValue(fixtures.creditNotes ?? []) },
-      refund: { findMany: jest.fn().mockResolvedValue(fixtures.refunds ?? []) },
-      customerStatementRun: {
-        create: jest.fn().mockImplementation((args: any) => {
-          const row = { id: 'run-1', ...args.data };
-          created.push(row);
-          return Promise.resolve(row);
+describe('Projection query isolation', () => {
+  it('always intersects company, organization and currency inside a repeatable-read snapshot', async () => {
+    const fixture = sources();
+    const tx: any = {
+      chartOfAccount: { findMany: jest.fn().mockResolvedValue([]) },
+      auditLog: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    for (const [model, rows] of [
+      ['customer', fixture.customers],
+      ['salesOrder', []],
+      ['receivable', fixture.receivables],
+      ['customerPayment', []],
+      ['creditNote', []],
+      ['refund', []],
+      ['journalEntry', fixture.journals],
+    ] as const)
+      tx[model] = { findMany: jest.fn().mockResolvedValue(rows) };
+    const db: any = { $transaction: jest.fn().mockImplementation((callback) => callback(tx)) },
+      company: any = { companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company-1' }) },
+      org: any = {
+        accessibleIds: jest
+          .fn()
+          .mockResolvedValue({ unrestricted: false, divisionIds: [], branchIds: ['branch-1'] }),
+        recordWhereFor: jest.fn().mockResolvedValue({ OR: [{ branchId: { in: ['branch-1'] } }] }),
+      };
+    await new CustomerAccountProjectionService(db, company, org).read(USER, {
+      companyId: 'company-1',
+      currency: 'TZS',
+      dateTo: '2026-02-28',
+    });
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'RepeatableRead' }),
+    );
+    for (const model of ['salesOrder', 'receivable', 'creditNote', 'refund'])
+      expect(tx[model].findMany.mock.calls[0][0].where).toEqual(
+        expect.objectContaining({
+          currency: 'TZS',
+          AND: expect.arrayContaining([
+            { companyId: 'company-1' },
+            { OR: [{ branchId: { in: ['branch-1'] } }] },
+          ]),
         }),
-      },
-    };
-    const audit: any = { log: jest.fn().mockResolvedValue(undefined) };
-    const companyScope: any = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
-    const service = new CustomerStatementsService(prisma, audit, companyScope);
-    return { service, prisma, created };
-  }
-
-  it('failure scenario: credit note + refund + payment net into the persisted balance', async () => {
-    // 1,000,000 in-period invoice; 400,000 ISSUED credit note; 600,000 payment.
-    // The credit note fully clears the invoice with the payment -> real closing 0.
-    const { service, created } = makeGen({
-      receivables: [{ amount: D(1_000_000), issueDate: new Date('2026-02-05') }],
-      payments: [{ amount: D(600_000), paymentDate: new Date('2026-02-20') }],
-      creditNotes: [{ totalAmount: D(400_000), issueDate: new Date('2026-02-18') }],
-      refunds: [],
-    });
-    const run = await service.generate(GEN as any, USER);
-
-    // Legacy math would have stored debits 1,000,000 / credits 600,000 / closing
-    // 400,000 (credit note invisible). The fix nets the credit note in.
-    expect(run.totalDebits.toFixed(2)).toBe('1000000.00');
-    expect(run.totalCredits.toFixed(2)).toBe('1000000.00'); // 600k payment + 400k CN
-    expect(run.closingBalance.toFixed(2)).toBe('0.00');
-    expect(run.openingBalance.toFixed(2)).toBe('0.00');
-    // closing == opening + debits - credits (reconciles)
-    const recomputed = run.openingBalance.plus(run.totalDebits).minus(run.totalCredits);
-    expect(recomputed.toFixed(2)).toBe(run.closingBalance.toFixed(2));
-    expect(created).toHaveLength(1);
-  });
-
-  it('includes cash refunds as debits (raise the balance)', async () => {
-    const { service } = makeGen({
-      receivables: [{ amount: D(1000), issueDate: new Date('2026-02-05') }],
-      refunds: [{ amount: D(250), refundDate: new Date('2026-02-25') }],
-    });
-    const run = await service.generate(GEN as any, USER);
-    // debits 1000 invoice + 250 refund = 1250; no credits -> closing 1250
-    expect(run.totalDebits.toFixed(2)).toBe('1250.00');
-    expect(run.totalCredits.toFixed(2)).toBe('0.00');
-    expect(run.closingBalance.toFixed(2)).toBe('1250.00');
-  });
-
-  it('computes opening balance from strictly-before-period activity', async () => {
-    const { service } = makeGen({
-      // pre-period invoice 2000 (rolls into opening), in-period invoice 500
-      receivables: [
-        { amount: D(2000), issueDate: new Date('2026-01-10') },
-        { amount: D(500), issueDate: new Date('2026-02-10') },
-      ],
-      // pre-period payment 800 (rolls into opening)
-      payments: [{ amount: D(800), paymentDate: new Date('2026-01-15') }],
-    });
-    const run = await service.generate(GEN as any, USER);
-    // opening = 2000 - 800 = 1200; in-period debits 500, credits 0
-    expect(run.openingBalance.toFixed(2)).toBe('1200.00');
-    expect(run.totalDebits.toFixed(2)).toBe('500.00');
-    expect(run.totalCredits.toFixed(2)).toBe('0.00');
-    expect(run.closingBalance.toFixed(2)).toBe('1700.00');
-  });
-
-  it('does not count payments made after periodEnd on an in-period invoice', async () => {
-    const { service, prisma } = makeGen({
-      receivables: [{ amount: D(1000), issueDate: new Date('2026-02-05') }],
-      // payment dated AFTER periodEnd -> must be excluded from the query window
-      payments: [{ amount: D(1000), paymentDate: new Date('2026-03-10') }],
-    });
-    // Load the complete evidence, then bound the dated movements to the period.
-    const run = await service.generate(GEN as any, USER);
-    expect(run.totalCredits.toFixed(2)).toBe('0.00');
-    expect(run.closingBalance.toFixed(2)).toBe('1000.00');
-    // Assert the query really bounds paymentDate to periodEnd (inclusive EOD).
-    const where = prisma.customerPayment.findMany.mock.calls[0][0].where;
-    expect(where.status).toEqual({ in: ['COMPLETED', 'REVERSED'] });
-    expect(where.paymentDate).toBeUndefined();
-    expect(where.currency).toBe('TZS');
-  });
-
-  it('uses the same dated lifecycle document set in persisted statements', async () => {
-    const { service, prisma } = makeGen({});
-    await service.generate(GEN as any, USER);
-    const where = prisma.receivable.findMany.mock.calls[0][0].where;
-    // Must match the detail (buildStatement) path so the saved run reconciles.
-    expect(where.OR).toEqual([{ status: { not: 'CANCELLED' } }, { journalEntryId: { not: null } }]);
-  });
-
-  it('scopes every source to companyId + currency (single currency, no cross-currency sum)', async () => {
-    const { service, prisma } = makeGen({});
-    await service.generate({ ...GEN, currency: 'USD' } as any, USER);
-    for (const model of ['receivable', 'customerPayment', 'creditNote', 'refund'] as const) {
-      const where = prisma[model].findMany.mock.calls[0][0].where;
-      expect(where.companyId).toBe(COMPANY);
-      expect(where.customerId).toBe(CUSTOMER);
-      expect(where.currency).toBe('USD');
-    }
-  });
-
-  it('persists openingBalance and currency on the run row', async () => {
-    const { service, prisma } = makeGen({
-      receivables: [{ amount: D(1000), issueDate: new Date('2026-02-05') }],
-    });
-    await service.generate(GEN as any, USER);
-    const data = prisma.customerStatementRun.create.mock.calls[0][0].data;
-    expect(data.currency).toBe('TZS');
-    expect(data.openingBalance.toFixed(2)).toBe('0.00');
-    expect(data.closingBalance.toFixed(2)).toBe('1000.00');
-  });
-
-  it('supports an ALL-customers run (no customerId scope on the fetch)', async () => {
-    const { service, prisma } = makeGen({
-      receivables: [{ amount: D(3000), issueDate: new Date('2026-02-05') }],
-    });
-    const run = await service.generate(
-      { companyId: COMPANY, periodStart: '2026-02-01', periodEnd: '2026-02-28' } as any,
-      USER,
-    );
-    expect(run.customerId).toBeNull();
-    const where = prisma.receivable.findMany.mock.calls[0][0].where;
-    expect(where.customerId).toBeUndefined();
-    expect(prisma.customer.findFirst).not.toHaveBeenCalled();
-    expect(run.closingBalance.toFixed(2)).toBe('3000.00');
-  });
-
-  it('rejects periodStart after periodEnd', async () => {
-    const { service } = makeGen({});
-    await expect(
-      service.generate({ ...GEN, periodStart: '2026-03-01', periodEnd: '2026-02-01' } as any, USER),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-});
-
-describe('CustomerStatementsService.getDetail serialization', () => {
-  it('returns money fields as strings and includes aging', async () => {
-    const { service } = makeService();
-    const out = await service.getDetail(SEL as any, USER);
-    expect(typeof out.openingBalance).toBe('string');
-    expect(typeof out.closingBalance).toBe('string');
-    expect(out.closingBalance).toBe('3750.00');
-    expect(out.lines[0].debit).toBe('5000.00');
-    expect(out.aging.total).toBe(7000);
-    // Aging is labelled with its live as-of date so consumers know it is a
-    // current snapshot, not an as-of-dateTo figure.
-    expect(out.agingAsOf).toBeInstanceOf(Date);
-  });
-});
-
-describe('CustomerStatementsService.exportPdf', () => {
-  it('delegates to print-engine when templateId is supplied', async () => {
-    const { service, printEngine, audit } = makeService();
-    printEngine.renderPdf.mockResolvedValue({
-      id: 'gen-1',
-      filename: 'tmpl.pdf',
-      buffer: Buffer.from('%PDF-1.4 test'),
-      mimeType: 'application/pdf',
-    });
-    const res = await service.exportPdf({ ...SEL, templateId: 'tmpl-1' } as any, USER);
-    expect(printEngine.renderPdf).toHaveBeenCalledTimes(1);
-    expect(res.documentId).toBe('gen-1');
-    expect(res.mimeType).toBe('application/pdf');
-    expect(audit.log).toHaveBeenCalled();
-  });
-
-  it('renders a local PDF buffer when no templateId is supplied', async () => {
-    const { service, printEngine } = makeService();
-    const res = await service.exportPdf(SEL as any, USER);
-    expect(printEngine.renderPdf).not.toHaveBeenCalled();
-    expect(Buffer.isBuffer(res.buffer)).toBe(true);
-    expect(res.buffer.slice(0, 5).toString('utf8')).toBe('%PDF-');
-    expect(res.filename).toMatch(/\.pdf$/);
-  });
-});
-
-describe('CustomerStatementsService.exportExcel', () => {
-  it('renders a local XLSX buffer when no templateId is supplied', async () => {
-    const { service } = makeService();
-    const res = await service.exportExcel(SEL as any, USER);
-    expect(Buffer.isBuffer(res.buffer)).toBe(true);
-    // XLSX (zip) magic bytes PK
-    expect(res.buffer[0]).toBe(0x50);
-    expect(res.buffer[1]).toBe(0x4b);
-    expect(res.filename).toMatch(/\.xlsx$/);
-  });
-});
-
-describe('CustomerStatementsService.emailToCustomer', () => {
-  const OLD_ENV = process.env.SMTP_HOST;
-  afterEach(() => {
-    if (OLD_ENV === undefined) delete process.env.SMTP_HOST;
-    else process.env.SMTP_HOST = OLD_ENV;
-  });
-
-  it('no-ops gracefully (emailed:false) when SMTP is not configured', async () => {
-    delete process.env.SMTP_HOST;
-    const { service, email } = makeService();
-    const res = await service.emailToCustomer(SEL as any, USER);
-    expect(res.emailed).toBe(false);
-    expect(res.smtpConfigured).toBe(false);
-    // sendEmail is still called (it is the no-op boundary), targeting customer email
-    expect(email.sendEmail).toHaveBeenCalledTimes(1);
-    expect(email.sendEmail.mock.calls[0][0]).toBe('ap@acme.io');
-  });
-
-  it('marks incomplete history in both HTML and text email bodies', async () => {
-    const { service, prisma, email } = makeService();
-    prisma.receivable.findMany.mockResolvedValue([
-      {
-        id: 'gap-ar',
-        receivableNumber: 'REC-GAP',
-        amount: D(100),
-        paidAmount: D(30),
-        outstandingAmount: D(70),
-        issueDate: new Date('2026-02-05'),
-        dueDate: null,
-        status: 'PARTIALLY_PAID',
-      },
-    ]);
-    prisma.customerPayment.findMany.mockResolvedValue([]);
-    prisma.creditNote.findMany.mockResolvedValue([]);
-    prisma.refund.findMany.mockResolvedValue([]);
-    await service.emailToCustomer(SEL as any, USER);
-    const [, , html, text] = email.sendEmail.mock.calls[0];
-    for (const body of [html, text]) {
-      expect(body).toContain('Settlement history is incomplete');
-      expect(body).toContain('TZS 30.00');
-      expect(body).toContain('This statement is not reconciled.');
-    }
-  });
-
-  it('reports emailed:true when SMTP host is set and recipient resolved', async () => {
-    process.env.SMTP_HOST = 'smtp.example.com';
-    const { service } = makeService();
-    const res = await service.emailToCustomer(SEL as any, USER);
-    expect(res.smtpConfigured).toBe(true);
-    expect(res.emailed).toBe(true);
-    expect(res.to).toBe('ap@acme.io');
-  });
-
-  it('skips send when no recipient and no customer email', async () => {
-    delete process.env.SMTP_HOST;
-    const { service, email } = makeService({
-      customer: { id: CUSTOMER, name: 'NoEmail Ltd', email: null },
-    });
-    const res = await service.emailToCustomer(SEL as any, USER);
-    expect(email.sendEmail).not.toHaveBeenCalled();
-    expect(res.emailed).toBe(false);
-    expect(res.to).toBeNull();
+      );
   });
 });

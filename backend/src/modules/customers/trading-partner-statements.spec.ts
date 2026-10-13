@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { CustomersService } from './customers.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
 
-const user = { id: 'user' } as any;
+const user = { id: 'user', roleScopes: ['COMPANY'] } as any;
 const decimal = (value: number) => new Prisma.Decimal(value);
 const zero = decimal(0);
 
@@ -28,6 +28,8 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
       return Promise.resolve([
         {
           id: 'document',
+          companyId: 'company',
+          customerId: 'party',
           [kind === 'customer' ? 'receivableNumber' : 'payableNumber']: 'DOC-1',
           amount: decimal(100 * scale),
           paidAmount: decimal((incomplete ? 55 : 50) * scale),
@@ -43,6 +45,8 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
       return Promise.resolve([
         {
           id: 'payment-1',
+          companyId: 'company',
+          customerId: 'party',
           paymentNumber: 'PMT-1',
           paymentDate: new Date('2026-02-10'),
           amount: decimal(20 * scale),
@@ -56,6 +60,8 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
         },
         {
           id: 'payment-2',
+          companyId: 'company',
+          customerId: 'party',
           paymentNumber: 'PMT-2',
           paymentDate: new Date('2026-03-10'),
           amount: decimal(30 * scale),
@@ -70,7 +76,10 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
       ]);
     });
     const runQuery = jest.fn().mockResolvedValue(runs);
-    const scope = { assertCanAccessCompany: jest.fn().mockResolvedValue(undefined) };
+    const scope = {
+      assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
+      companyWhereFor: jest.fn().mockResolvedValue({ companyId: 'company' }),
+    };
     const prisma: any = {
       [kind === 'customer' ? 'receivable' : 'payable']: { findMany: documents },
       [`${kind}Payment`]: { findMany: payments },
@@ -80,7 +89,23 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
       refund: { findMany: jest.fn().mockResolvedValue([]) },
       customerPriceAgreement: { findMany: jest.fn().mockResolvedValue([]) },
       supplierPerformanceProfile: { findFirst: jest.fn().mockResolvedValue(null) },
+      customer: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'party',
+            companyId: 'company',
+            name: 'Customer',
+            customerCode: 'C-1',
+            createdAt: new Date('2026-01-01'),
+            company: { id: 'company', code: 'CO', name: 'Company' },
+          },
+        ]),
+      },
+      salesOrder: { findMany: jest.fn().mockResolvedValue([]) },
+      chartOfAccount: { findMany: jest.fn().mockResolvedValue([]) },
+      auditLog: { findMany: jest.fn().mockResolvedValue([]) },
     };
+    prisma.$transaction = jest.fn().mockImplementation((callback) => callback(prisma));
     const service =
       kind === 'customer'
         ? new CustomersService(prisma, { log: jest.fn() } as any, scope as any)
@@ -158,6 +183,19 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
     expect(result.latestStatements[1].currency).toBe('TZS');
     expect(result.latestStatements[1].closingBalance.toString()).toBe('80');
     for (const query of [documents, payments]) {
+      if (kind === 'customer') {
+        for (const currency of ['USD', 'TZS'])
+          expect(query).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: expect.objectContaining({
+                currency,
+                customerId: { in: ['party'] },
+                AND: expect.arrayContaining([{ companyId: 'company' }]),
+              }),
+            }),
+          );
+        continue;
+      }
       expect(query).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({

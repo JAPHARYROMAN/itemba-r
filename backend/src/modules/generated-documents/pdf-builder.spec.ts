@@ -71,6 +71,25 @@ const TEXT_MUTED_FILL_OP = '0.39 0.46 0.55 rg';
 const PANEL_FILL_OP = '0.97 0.98 0.99 rg';
 
 describe('buildBusinessPdf rendering', () => {
+  it('keeps large monetary values whole in a narrow numeric column', () => {
+    const amount = '9,999,999,999,999,999.99';
+    const raw = buildBusinessPdf(
+      sampleModel({
+        sections: [
+          {
+            title: 'Statement activity',
+            table: {
+              headers: ['Description', 'Balance'],
+              numericColumns: [1],
+              columnWeights: [9, 1],
+              rows: [['Posted invoice', amount]],
+            },
+          },
+        ],
+      }),
+    ).toString('latin1');
+    expect(raw).toContain(`(${amount}) Tj`);
+  });
   it('keeps a long document reference whole on one line in the header', () => {
     // Generated exports carry 30-character references that used to wrap
     // mid-code ("GD-TABLE-EXPORT-MUFHA4FZ-TFJ" / "CM").
@@ -261,6 +280,41 @@ describe('buildBusinessPdf rendering', () => {
     expect(raw).toContain('(DEBT DETAIL - REC-2026-000001) Tj');
     expect(raw).toContain('(DEBT DETAIL - REC-2026-000002) Tj');
     expect(occurrences(raw, '| CONTINUED')).toBe(2);
+  });
+
+  it('keeps a short aging summary and its totals together at table page boundaries', () => {
+    for (const rowCount of [14, 18, 22, 26, 30, 34, 38, 42]) {
+      const raw = buildBusinessPdf(
+        sampleModel({
+          sections: [
+            {
+              title: 'Transactions',
+              table: {
+                headers: ['Date', 'Payment'],
+                rows: Array.from({ length: rowCount }, (_, index) => [
+                  `2026-02-${String((index % 28) + 1).padStart(2, '0')}`,
+                  'Receipt with a description that wraps onto a second line in a narrow table column.',
+                ]),
+              },
+            },
+            {
+              title: 'Historical aging summary',
+              keepTogether: true,
+              table: { headers: ['Current', 'Overdue'], rows: [['1,250.00', '350.00']] },
+              totals: [
+                { label: 'Open invoice balance', value: 'TZS 1,600.00' },
+                { label: 'Customer deposits', value: 'TZS 0.00' },
+              ],
+            },
+          ],
+        }),
+      ).toString('latin1');
+      const summaryPage = raw
+        .split('| CONTINUED')
+        .find((page) => page.includes('(HISTORICAL AGING SUMMARY)'));
+      expect(summaryPage).toContain('(Open invoice balance)');
+      expect(summaryPage).toContain('(Customer deposits)');
+    }
   });
 });
 

@@ -17,6 +17,7 @@ import { PartnerAction } from '@/components/workspace/trading-partner-workspace'
 import '@/components/workspace/workspace.css';
 import '@/components/workspace/partner-profile.css';
 import { TradingPartnerEditor } from '@/components/workspace/trading-partner-editor';
+import { CustomerStatementWorkspace } from './customer-statement-workspace';
 import { PartyRelatedTabs } from '@/components/workspace/party-related-tabs';
 import { PartyBalancePanel } from '@/features/party/party-balance-panel';
 import type { PartyBalance } from '@/features/party/party-balance';
@@ -1007,41 +1008,55 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
               <p className="partner-profile-history-note">
                 Recent records returned by this profile. Summary balances cover all records.
               </p>
-              <PartnerStatementGenerator
-                kind="customers"
-                record={customer}
-                onGenerated={() => {
-                  setNotice('Customer statement generated.');
-                  load();
-                }}
-              />
-              {data.latestStatements.length === 0 ? (
-                <EmptyPanel text="No customer statements have been generated." />
+              {hasPermission('customer_statements.view') ? (
+                <CustomerStatementWorkspace
+                  key={customer.id}
+                  customer={customer}
+                  savedRuns={data.latestStatements}
+                  onSaved={() => {
+                    setNotice('Customer statement saved.');
+                    load();
+                  }}
+                />
               ) : (
-                data.latestStatements.map((statement) => (
-                  <div
-                    key={statement.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
-                    style={{ borderColor: 'var(--aurora-border)' }}
-                  >
-                    <div>
-                      <p className="font-semibold">{statement.statementRunNumber}</p>
-                      <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
-                        {shortDate(statement.periodStart)} - {shortDate(statement.periodEnd)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold">
-                        {money(statement.closingBalance, statement.currency)}
-                      </p>
-                      <StatusBadge status={statement.status} />
-                      <StatementHistoryWarning
-                        history={statement.settlementHistory}
-                        currency={statement.currency ?? 'TZS'}
-                      />
-                    </div>
-                  </div>
-                ))
+                <>
+                  <PartnerStatementGenerator
+                    kind="customers"
+                    record={customer}
+                    onGenerated={() => {
+                      setNotice('Customer statement generated.');
+                      load();
+                    }}
+                  />
+                  {data.latestStatements.length === 0 ? (
+                    <EmptyPanel text="No customer statements have been generated." />
+                  ) : (
+                    data.latestStatements.map((statement) => (
+                      <div
+                        key={statement.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
+                        style={{ borderColor: 'var(--aurora-border)' }}
+                      >
+                        <div>
+                          <p className="font-semibold">{statement.statementRunNumber}</p>
+                          <p className="text-xs" style={{ color: 'var(--aurora-text-muted)' }}>
+                            {shortDate(statement.periodStart)} - {shortDate(statement.periodEnd)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">
+                            {money(statement.closingBalance, statement.currency)}
+                          </p>
+                          <StatusBadge status={statement.status} />
+                          <StatementHistoryWarning
+                            history={statement.settlementHistory}
+                            currency={statement.currency ?? 'TZS'}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </>
               )}
             </div>
           )}

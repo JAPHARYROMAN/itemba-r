@@ -116,6 +116,10 @@
   text-underline-offset: 3px;
 }
 @container os-workspace (max-width: 760px) {
+  .sales-desk-business .desk-rail nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .sales-desk-business .desk-rail nav a {
     padding: 9px 12px;
     flex: 1;
@@ -133,6 +137,10 @@
   }
 }
 @media (max-width: 760px) {
+  .sales-desk-business .desk-rail nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .sales-desk-business .desk-rail nav a {
     padding: 9px 12px;
     flex: 1;

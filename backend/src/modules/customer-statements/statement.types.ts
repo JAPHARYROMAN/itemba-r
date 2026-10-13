@@ -16,6 +16,11 @@ export interface StatementLine {
   reference: string;
   description: string;
   sourceId: string;
+  sourceType?: string;
+  sourceUrl?: string;
+  receivableId?: string;
+  salesOrderId?: string;
+  reversalOfId?: string;
   debit: Prisma.Decimal;
   credit: Prisma.Decimal;
   /** Running balance AFTER this line is applied. Filled in during assembly. */
@@ -23,16 +28,48 @@ export interface StatementLine {
 }
 
 export interface StatementAging {
-  current: number;
-  days1_30: number;
-  days31_60: number;
-  days61_90: number;
-  over90: number;
-  total: number;
+  current: number | string;
+  days1_30: number | string;
+  days31_60: number | string;
+  days61_90: number | string;
+  over90: number | string;
+  total: number | string;
   oldestDaysOverdue: number;
 }
 
 export interface CustomerStatement {
+  runId?: string;
+  statementRunNumber?: string;
+  company?: {
+    id: string;
+    name: string;
+    code: string;
+    address?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  };
+  customer?: {
+    id: string;
+    name: string;
+    customerCode: string;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+  };
+  scope?: {
+    companyId?: string;
+    divisionId?: string;
+    branchId?: string;
+    divisionIds: string[];
+    branchIds: string[];
+    unrestricted: boolean;
+  };
+  warnings?: string[];
+  integrityIssues?: string[];
+  settlementHistory?: SettlementHistory;
+  openInvoiceBalance?: Prisma.Decimal;
+  customerCredit?: Prisma.Decimal;
+  netBalance?: Prisma.Decimal;
   companyId: string;
   customerId: string;
   customerName: string | null;
@@ -46,16 +83,8 @@ export interface CustomerStatement {
   closingBalance: Prisma.Decimal;
   lineCount: number;
   lines: StatementLine[];
-  settlementHistory: SettlementHistory;
   aging: StatementAging;
-  /**
-   * As-of date the {@link aging} summary was computed at. This is a LIVE
-   * snapshot (today), NOT `dateTo`: it is derived from each receivable's
-   * current `outstandingAmount`, which already reflects payments / credit
-   * notes applied AFTER `dateTo`. For a backdated statement (dateTo in the
-   * past) the aging therefore does NOT tie out to `closingBalance` — it
-   * describes what the customer owes right now, by age band.
-   */
+  /** Aging reconstructs invoice allocations and adjustments as of dateTo. */
   agingAsOf: Date;
   generatedAt: Date;
 }

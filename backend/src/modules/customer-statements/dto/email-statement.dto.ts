@@ -1,4 +1,5 @@
-import { IsDateString, IsEmail, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsOptional } from 'class-validator';
+import { ExportStatementDto } from './export-statement.dto';
 
 /**
  * Body for POST /customer-statements/email — emails a rendered PDF statement to
@@ -7,27 +8,7 @@ import { IsDateString, IsEmail, IsOptional, IsString } from 'class-validator';
  * EmailService no-ops and logs, so this endpoint still returns 2xx with
  * `emailed: false`.
  */
-export class EmailStatementDto {
-  @IsString()
-  companyId!: string;
-
-  @IsString()
-  customerId!: string;
-
-  @IsDateString()
-  dateFrom!: string;
-
-  @IsDateString()
-  dateTo!: string;
-
-  @IsOptional()
-  @IsString()
-  currency?: string;
-
-  @IsOptional()
-  @IsString()
-  templateId?: string;
-
+export class EmailStatementDto extends ExportStatementDto {
   /** Override recipient; defaults to the customer's stored email address. */
   @IsOptional()
   @IsEmail()

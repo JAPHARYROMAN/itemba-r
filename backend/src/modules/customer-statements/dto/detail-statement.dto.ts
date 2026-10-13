@@ -20,8 +20,11 @@ export class DetailStatementQueryDto {
   @IsDateString()
   dateTo!: string;
 
-  /** Presentation currency label only (data is single-currency per company). */
+  /** Currency selects actual movement data; different currencies never net. */
   @IsOptional()
   @IsString()
   currency?: string;
+
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
 }

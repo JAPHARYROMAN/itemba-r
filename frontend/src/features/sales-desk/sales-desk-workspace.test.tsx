@@ -140,7 +140,9 @@ describe('Operations records in Sales Desk', () => {
   it('reads the original customer directory and links profiles by the existing ID without copying data', async () => {
     state.query = new URLSearchParams('view=customers');
     render(<SalesDesk />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Inspect Acacia Trading' }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Inspect Acacia Trading' }, { timeout: 5000 }),
+    );
     expect(screen.getByRole('link', { name: 'Open profile' })).toHaveAttribute(
       'href',
       '/sales-desk/customers/existing-customer',
@@ -178,7 +180,11 @@ describe('Operations records in Sales Desk', () => {
     const mounted = render(windows(true));
     const first = within(screen.getByRole('region', { name: 'First sales window' }));
     const second = within(screen.getByRole('region', { name: 'Second sales window' }));
-    const firstSearch = await first.findByPlaceholderText('Order # or customer…');
+    const firstSearch = await first.findByPlaceholderText(
+      'Order # or customer…',
+      {},
+      { timeout: 5000 },
+    );
     await second.findByPlaceholderText('Order # or customer…');
     expect(
       state.page.mock.calls

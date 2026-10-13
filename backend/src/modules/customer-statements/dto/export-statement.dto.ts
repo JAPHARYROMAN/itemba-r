@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 /**
  * Body for the statement export endpoints (POST /customer-statements/export/pdf
@@ -10,15 +10,24 @@ import { IsDateString, IsOptional, IsString } from 'class-validator';
  * on a seeded template.
  */
 export class ExportStatementDto {
+  @IsOptional() @IsString() runId?: string;
+  @IsOptional() @IsString() expectedHash?: string;
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+
+  @ValidateIf((dto) => !dto.runId)
   @IsString()
   companyId!: string;
 
+  @ValidateIf((dto) => !dto.runId)
   @IsString()
   customerId!: string;
 
+  @ValidateIf((dto) => !dto.runId)
   @IsDateString()
   dateFrom!: string;
 
+  @ValidateIf((dto) => !dto.runId)
   @IsDateString()
   dateTo!: string;
 

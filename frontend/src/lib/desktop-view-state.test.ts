@@ -4,6 +4,33 @@ import { format } from 'prettier';
 import { describe, expect, it } from 'vitest';
 import { parseDesktopViewState } from './desktop-view-state';
 describe('desktop view contract', () => {
+  it('persists customer performance view choices without retaining account responses', () => {
+    const filters = {
+      companyId: 'company',
+      currency: 'USD',
+      category: 'good',
+      dateFrom: '2026-10-01',
+      dateTo: '2026-10-13',
+      search: 'Acacia',
+      sort: 'net-sales',
+    };
+    expect(
+      parseDesktopViewState('sales-desk', {
+        version: 1,
+        values: {
+          'sales-desk.customer-performance.filters': filters,
+          'sales-desk.customer-performance.page': 2,
+          'sales-desk.customer-performance.historyPage.customer-id': 3,
+          'sales-desk.customer-performance.response': { netDue: '123' },
+          'sales-desk.customer-performance.filters.private': { cardNumber: 'secret' },
+        },
+      }).values,
+    ).toEqual({
+      'sales-desk.customer-performance.filters': filters,
+      'sales-desk.customer-performance.page': 2,
+      'sales-desk.customer-performance.historyPage.customer-id': 3,
+    });
+  });
   it('keeps the server and browser allowlists identical', async () => {
     const front = readFileSync(resolve('src/lib/desktop-view-state.ts'), 'utf8');
     const back = readFileSync(

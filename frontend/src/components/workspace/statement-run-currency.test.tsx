@@ -17,7 +17,7 @@ vi.mock('@/lib/api-client', () => ({
   backendPost: vi.fn(),
 }));
 
-it('opens the selected saved statement in its original currency and labels an evidence gap', async () => {
+it('opens the selected saved statement by run identity and labels its currency evidence gap', async () => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
   state.page.mockResolvedValue({
     data: [
@@ -53,14 +53,9 @@ it('opens the selected saved statement in its original currency and labels an ev
   await userEvent.click(screen.getByRole('button', { name: 'View statement' }));
   await waitFor(() =>
     expect(state.get).toHaveBeenCalledWith(
-      '/customer-statements/detail',
-      expect.objectContaining({
-        query: expect.objectContaining({
-          companyId: 'company',
-          customerId: 'customer',
-          currency: 'USD',
-        }),
-      }),
+      '/customer-statements/statement/detail',
+      expect.objectContaining({ query: {} }),
     ),
   );
+  expect(state.get.mock.calls.some(([path]) => path === '/customer-statements/detail')).toBe(false);
 });

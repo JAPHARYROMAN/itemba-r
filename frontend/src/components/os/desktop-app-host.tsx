@@ -111,6 +111,7 @@ function Surface({ appId }: { appId: string }) {
         const link = (event.target as Element).closest<HTMLAnchorElement>('a[href]');
         if (
           !link ||
+          link.getAttribute('href')?.startsWith('#') ||
           event.defaultPrevented ||
           event.button !== 0 ||
           event.ctrlKey ||

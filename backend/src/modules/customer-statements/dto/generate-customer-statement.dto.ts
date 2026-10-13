@@ -23,4 +23,8 @@ export class GenerateCustomerStatementDto {
   @IsOptional()
   @IsEnum(CurrencyCode)
   currency?: CurrencyCode;
+
+  @IsOptional() @IsString() divisionId?: string;
+  @IsOptional() @IsString() branchId?: string;
+  @IsOptional() @IsString() expectedHash?: string;
 }
