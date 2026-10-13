@@ -178,7 +178,9 @@ export class CustomerStatementsService {
         const datedBalances = summarizeDatedMovements(
           projection.accounts.flatMap((account) => account.movements),
           run.periodStart,
-          dateRangeEnd(run.periodEnd.toISOString().slice(0, 10)),
+          run.periodEnd.getUTCHours() === 0 && run.periodEnd.getUTCMinutes() === 0
+            ? dateRangeEnd(run.periodEnd.toISOString().slice(0, 10))
+            : run.periodEnd,
         );
         const totals = {
           openingBalance: datedBalances.openingBalance,

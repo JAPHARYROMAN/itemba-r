@@ -501,6 +501,38 @@ describe('Customer statements and preserved exports', () => {
     expect(projected.hasSnapshot).toBe(false);
     expect(run.closingBalance.toFixed(2)).toBe('1000.00');
   });
+  it('preserves explicit intraday closing times on legacy summaries', async () => {
+    const ctx = service();
+    const projected = await ctx.projection.read(USER, { dateTo: selection.dateTo });
+    projected.accounts[0].movements.push({
+      date: new Date('2026-02-28T17:00:00Z'),
+      type: 'PAYMENT',
+      sourceId: 'after-cutoff',
+      sourceType: 'CustomerPayment',
+      sourceUrl: '/finance/receivables',
+      reference: 'AFTER-CUTOFF',
+      description: 'Receipt after the original cutoff',
+      debit: D(0),
+      credit: D(50),
+    });
+    ctx.projection.read.mockResolvedValue(projected);
+    const run: any = {
+      id: 'intraday',
+      companyId: base.companyId,
+      customerId: base.customerId,
+      currency: 'TZS',
+      snapshot: null,
+      periodStart: DAY(selection.dateFrom),
+      periodEnd: new Date('2026-02-28T14:00:00Z'),
+      openingBalance: D(0),
+      totalDebits: D(1000),
+      totalCredits: D(0),
+      closingBalance: D(1000),
+    };
+    const [summary] = await ctx.service.projectSavedRuns([run], USER);
+    expect(summary.closingBalance.toFixed(2)).toBe('350.00');
+    expect(summary.totalCredits.toFixed(2)).toBe('750.00');
+  });
   it('preserves very large Excel amounts as exact text with a precision note', async () => {
     const amount = '9999999999999999.99';
     const fixture: any = {
