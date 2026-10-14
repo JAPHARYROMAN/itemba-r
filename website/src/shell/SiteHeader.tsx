@@ -18,7 +18,7 @@ import { Crest } from './Crest';
  */
 export function SiteHeader() {
   return (
-    <header className="site-header material-nav sticky top-0 z-nav">
+    <header className="site-header material-nav sticky top-0 z-nav border-b border-line">
       <Container size="content" className="flex h-nav items-center gap-4">
         <Link href="/" aria-label={brandLabel} className="-ml-1 flex h-11 shrink-0 items-center px-1">
           <Crest variant="nav" eager />

@@ -6,8 +6,10 @@ import { companyUrl } from '@/content/site';
 import { companyJsonLd, faqPageJsonLd } from '@/lib/jsonld';
 import { pageMetadata } from '@/lib/seo';
 import { CompanyEnquire } from '@/sections/company/CompanyEnquire';
+import { CompanyDownloads } from '@/sections/company/CompanyDownloads';
 import { CompanyFaqs } from '@/sections/company/CompanyFaqs';
 import { CompanyGlance } from '@/sections/company/CompanyGlance';
+import { CompanyGallery } from '@/sections/company/CompanyGallery';
 import { CompanyHero } from '@/sections/company/CompanyHero';
 import { CompanySites } from '@/sections/company/CompanySites';
 import { CompanyStrengths } from '@/sections/company/CompanyStrengths';
@@ -61,6 +63,8 @@ export default async function CompanyPage({ params }: PageProps) {
       <CompanyWhatWeDo company={company} />
       <CompanySites company={company} />
       <CompanyStrengths company={company} />
+      <CompanyGallery company={company} />
+      <CompanyDownloads company={company} />
       <CompanyFaqs company={company} />
       <CompanyEnquire company={company} />
       <FooterTrail

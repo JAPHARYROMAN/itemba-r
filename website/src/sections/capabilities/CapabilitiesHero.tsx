@@ -5,16 +5,7 @@ import { serviceAreas, serviceIcons } from '@/content/services';
 import { ButtonLink, ChevronLink, HeadlineText, PageHero, Shortcuts } from '@/ui';
 import { capabilitiesSectionIds as ids } from './ids';
 
-/**
- * The hero of an Apple support-style page: typographic, centred, no
- * photograph (no master is both strong enough and wide enough to lead
- * here). "Verify the fit." in ink, "Contact the right team." in the quieter
- * grey on its own line, as Apple sets a two-part line; the lede; the two
- * actions (this page's enquiry form, and the group's ready-made profile and
- * capability statement as a PDF); then the six services as shortcuts, each
- * icon in the accent of the company that runs it, jumping to its row of the
- * capability map. Static server HTML: nothing here animates.
- */
+/** Editorial capability introduction with a shortcut to every service and its operating owner. */
 export function CapabilitiesHero() {
   const { hero } = capabilitiesPage;
   const shortcuts = serviceAreas.map((service) => ({
@@ -25,9 +16,11 @@ export function CapabilitiesHero() {
   }));
   return (
     <PageHero
+      align="start"
       eyebrow={hero.eyebrow}
       title={<HeadlineText headline={hero.headline} variant="muted-break" />}
       titleSize="display"
+      titleMeasure="wide"
       lede={hero.lede}
       actions={
         <>

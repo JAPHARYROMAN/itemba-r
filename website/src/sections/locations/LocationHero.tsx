@@ -15,6 +15,7 @@ export function LocationHero({ location }: { location: LocationProfile }) {
   const panel = location.heroPanel;
   return (
     <PageHero
+      align="start"
       eyebrow={location.eyebrow}
       title={location.title}
       titleSize="display"

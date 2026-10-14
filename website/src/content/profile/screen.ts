@@ -20,7 +20,7 @@ export const profileScreenCopy = {
   /** The four ready-made PDFs and the live print picker, straight under the cover. */
   downloads: {
     title: 'Download or print the profile.',
-    body: 'Ready-made PDF snapshots of the group profile and of each company’s legal profile, for banks, suppliers and partners.',
+    body: 'Ready-made PDF snapshots of the group profile and each company’s operating profile, for banks, suppliers and partners.',
     action: 'Download PDF',
     printTitle: 'Print the live profile',
     printBody: 'The PDFs are snapshots. To print the current page instead, choose a profile: it prints on A4, with its photographs.',

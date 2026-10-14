@@ -3,13 +3,7 @@ import { locationsPage, type LocationProfile } from '@/content/locations';
 import { companyUrl, locationUrl } from '@/content/site';
 import { Card, ChevronLink, Container, DirectionsLink, Eyebrow, Heading, Icon, Section, SmartLink, keepCompounds } from '@/ui';
 
-/**
- * The one location, as Apple lists a store: its name and why it matters on
- * the left, and a card with the head office's address and the companies
- * based there on the right; the way on is the location profile, or
- * directions. The index has one location today; the card is the pattern
- * for more.
- */
+/** Location description beside a charcoal office address and operating-company directory. */
 export function LocationsHeadquarters({ location }: { location: LocationProfile }) {
   const copy = locationsPage.headquarters;
   const companies = location.companySlugs.map(getCompanyBySlug).filter((company): company is Company => Boolean(company));
@@ -28,7 +22,7 @@ export function LocationsHeadquarters({ location }: { location: LocationProfile 
           </div>
         </div>
 
-        <Card padding="lg" className="lg:max-w-[30rem] lg:justify-self-end">
+        <Card tone="cinema" padding="lg" className="w-full border border-line lg:max-w-[30rem] lg:justify-self-end">
           <Icon name="map-pin" size="lg" strokeWidth={1.4} className="text-accent" />
           <h3 className="mt-8 text-eyebrow text-fg-muted">{copy.addressLabel}</h3>
           <address className="mt-2 text-body-lg not-italic text-fg md:text-lede">

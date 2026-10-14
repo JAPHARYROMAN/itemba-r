@@ -9,14 +9,14 @@ export function EnquireSteps({ label, steps, className }: { label: string; steps
   return (
     <div className={className}>
       <h3 className="text-eyebrow text-fg-muted">{label}</h3>
-      <ol role="list" className="mt-4 space-y-5">
+      <ol role="list" className="mt-4 border-b border-line">
         {steps.map((step, index) => (
-          <li key={step.title} className="flex gap-4">
+          <li key={step.title} className="flex gap-4 border-t border-line py-4">
             <span
               aria-hidden="true"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line-strong text-caption font-semibold tabular-nums text-fg"
+              className="w-8 shrink-0 pt-1 text-body-lg font-semibold tabular-nums text-gold-fg"
             >
-              {index + 1}
+              {String(index + 1).padStart(2, '0')}
             </span>
             <p className="pt-1 text-body text-fg-muted">
               <span className="font-semibold text-fg">{step.title}.</span> {step.body}

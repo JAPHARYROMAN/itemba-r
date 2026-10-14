@@ -73,18 +73,22 @@ export function ProfileManagement() {
         <GroupStructure />
       </div>
 
-      <Heading as="h3" size="h3" className="mt-16 md:mt-20">
-        {keepCompounds(leadershipHeading)}
-      </Heading>
-      <ul role="list" className="mt-6 grid gap-4 md:mt-8 md:grid-cols-2 lg:grid-cols-3">
-        {leadershipTeam.map((leader) => (
-          <Card key={leader.name} as="li" className="flex flex-col">
-            <h4 className="text-body-lg font-semibold text-fg">{leader.name}</h4>
-            <p className="mt-2 text-body text-fg">{keepCompounds(leader.groupRole)}</p>
-            <p className="mt-1 text-caption text-fg-muted">{keepCompounds(leader.companyRole)}</p>
-          </Card>
-        ))}
-      </ul>
+      {flags.publishLegalIdentifiers ? (
+        <>
+          <Heading as="h3" size="h3" className="mt-16 md:mt-20">
+            {keepCompounds(leadershipHeading)}
+          </Heading>
+          <ul role="list" className="mt-6 grid gap-4 md:mt-8 md:grid-cols-2 lg:grid-cols-3">
+            {leadershipTeam.map((leader) => (
+              <Card key={leader.name} as="li" className="flex flex-col">
+                <h4 className="text-body-lg font-semibold text-fg">{leader.name}</h4>
+                <p className="mt-2 text-body text-fg">{keepCompounds(leader.groupRole)}</p>
+                <p className="mt-1 text-caption text-fg-muted">{keepCompounds(leader.companyRole)}</p>
+              </Card>
+            ))}
+          </ul>
+        </>
+      ) : null}
 
       {flags.publishLegalIdentifiers ? (
         <>

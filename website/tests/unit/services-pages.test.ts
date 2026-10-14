@@ -155,10 +155,10 @@ describe('/services', () => {
     expect(html).not.toMatch(/real-estate\/[^"]*\.webp/);
   });
 
-  it('keeps one link colour, as home: group gold, the company in its dots and icons', () => {
+  it('uses each company accent to identify the services it runs', () => {
     const directory = html.match(/<section[^>]*aria-label="Services by company"[\s\S]*?<\/section>/)?.[0] ?? '';
-    expect(directory).not.toContain('text-accent-fg');
-    expect(directory).toContain('text-gold-fg');
+    expect(directory).toContain('text-accent-fg');
+    for (const company of companies) expect(directory).toContain(`data-accent="${company.accent}"`);
     expect(directory).toContain('text-accent');
   });
 
@@ -236,6 +236,8 @@ describe('/services/[slug]', () => {
     expect(behind).toContain('data-tone="cinema"');
     expect(tags(behind, 'h2')).toEqual([company.shortName]);
     expect(hrefs(behind)).toContain(`/companies/${company.slug}`);
+    expect(textOf(behind)).toContain(company.name);
+    if (!flags.publishLegalIdentifiers) expect(textOf(behind)).not.toContain(company.legal.incorporationDate);
     expect(behind).toMatch(new RegExp(`href="${profilePdfHref(company.id)}"[^>]*download`));
     for (const sibling of siblingServices(service)) expect(hrefs(behind)).toContain(`/services/${sibling.slug}`);
     const visual = service.companyVisual;

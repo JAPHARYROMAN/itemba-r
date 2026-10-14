@@ -4,15 +4,7 @@ import { ButtonLink, ChevronLink, PageHero, Shortcuts } from '@/ui';
 import { partnershipsSectionIds as ids } from './ids';
 import { routeAccent } from './routeAccent';
 
-/**
- * The hero of an Apple support-style page: typographic and centred, the
- * lead line "Partner with Itemba Group." as the h1, the lede, the two
- * actions (this page's enquiry form, and the capability page for checking
- * the fit first), then the four partnership routes as shortcuts, each
- * jumping to its card. A route's icon takes the accent of the company its
- * enquiry type routes to (the group gold for the group office). Static
- * server HTML: nothing here animates.
- */
+/** Editorial introduction for suppliers, buyers and partners, with anchors to the four routes. */
 export function PartnershipsHero() {
   const { hero } = partnershipsPage;
   const shortcuts = partnershipAreas.map((area) => ({
@@ -23,9 +15,11 @@ export function PartnershipsHero() {
   }));
   return (
     <PageHero
+      align="start"
       eyebrow={hero.eyebrow}
       title={headlineText(hero.headline)}
       titleSize="display"
+      titleMeasure="wide"
       lede={hero.lede}
       actions={
         <>

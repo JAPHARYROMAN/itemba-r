@@ -13,12 +13,12 @@ export function HomeCorridor() {
   return (
     <Section tone="alt" id="corridor" labelledBy="corridor-title">
       <Container>
-        <div className="mx-auto max-w-prose text-center">
+        <div className="max-w-prose">
           <Eyebrow>{homeCorridor.eyebrow}</Eyebrow>
           <Heading as="h2" id="corridor-title" size="h1" className="mt-2">
             {homeCorridor.title}
           </Heading>
-          <Lede tone="muted" className="mx-auto mt-5 max-w-[40rem] md:mt-6">
+          <Lede tone="muted" className="mt-5 max-w-[40rem] md:mt-6">
             {homeCorridor.body}
           </Lede>
         </div>

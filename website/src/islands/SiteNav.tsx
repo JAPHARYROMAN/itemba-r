@@ -154,7 +154,7 @@ export default function SiteNav({ links, cta, label, menuLabel, closeLabel, bran
               href={link.href}
               prefetch={linkPrefetch(link.href)}
               aria-current={current(link.href)}
-              className="flex h-nav items-center whitespace-nowrap px-2.5 text-legal text-fg/80 transition-colors duration-fast ease-apple hover:text-fg aria-[current=page]:text-fg aria-[current=page]:underline aria-[current=page]:decoration-fg/30 aria-[current=page]:underline-offset-4 xl:px-3.5"
+              className="flex h-nav items-center whitespace-nowrap px-2.5 text-caption font-medium text-fg transition-colors duration-fast ease-apple hover:text-fg aria-[current=page]:text-fg aria-[current=page]:underline aria-[current=page]:decoration-accent aria-[current=page]:underline-offset-8 xl:px-3.5"
             >
               {link.label}
             </Link>

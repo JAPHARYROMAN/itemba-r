@@ -33,6 +33,7 @@ import type {
 } from 'schema-dts';
 import { companies, companyAreaServed, type Company } from '@/content/companies';
 import { contact } from '@/content/contact';
+import { flags } from '@/content/flags';
 import type { InsightArticle } from '@/content/insights';
 import { locationAreaServed, type LocationProfile } from '@/content/locations';
 import { serviceAreaServed, serviceAreas, type ServiceArea } from '@/content/services';
@@ -112,7 +113,7 @@ export function organizationJsonLd(): WithContext<Organization> {
       '@type': 'Organization',
       '@id': companyEntityId(company.slug),
       name: company.name,
-      legalName: company.legalName,
+      legalName: flags.publishLegalIdentifiers ? company.legalName : undefined,
       url: absoluteUrl(companyUrl(company.slug)),
     })),
   };
@@ -221,7 +222,7 @@ export function companyJsonLd(company: Company): WithContext<LocalBusiness> {
     '@type': 'LocalBusiness',
     '@id': companyEntityId(company.slug),
     name: company.name,
-    legalName: company.legalName,
+    legalName: flags.publishLegalIdentifiers ? company.legalName : undefined,
     url: absoluteUrl(companyUrl(company.slug)),
     image: absoluteUrl(company.image.src),
     description: company.metaDescription,

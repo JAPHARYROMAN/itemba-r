@@ -10,7 +10,7 @@ export const profileCompanyOperations = [
     sector: 'Petroleum Retail, Fuel Supply, and Parking',
     companyId: 'mwanjalisi',
     detail:
-      'Petroleum retail and parking operations managed by Mwanjalisi Oil Company Ltd. The public-facing filling station brands are ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, while the parking facility trades as UZUNGUNI PARKING YARD.',
+      'Petroleum retail and parking operations managed by Mwanjalisi Oil Co Ltd. The public-facing filling station brands are ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, while the parking facility trades as UZUNGUNI PARKING YARD.',
   },
   {
     slug: 'westsides-company',
@@ -23,10 +23,10 @@ export const profileCompanyOperations = [
   {
     slug: 'itemba-enterprises',
     name: 'Itemba Enterprises Co Ltd',
-    sector: 'Logistics and Emerging Businesses',
+    sector: 'Logistics and Property Enquiries',
     companyId: 'enterprises',
     detail:
-      'Local logistics, cross-border transit, and emerging business activities after trading and hospitality operations moved under Westsides Company Ltd and UZUNGUNI PARKING YARD came under Mwanjalisi Oil Company Ltd management.',
+      'Itemba Enterprises focuses on local logistics and cross-border transit, and handles property-related enquiries through Itemba Estate. Westsides manages trade and hospitality, while Mwanjalisi Oil manages fuel and parking.',
   },
 ] as const;
 

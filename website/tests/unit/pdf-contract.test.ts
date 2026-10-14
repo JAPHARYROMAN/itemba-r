@@ -1,9 +1,9 @@
 /**
  * The four downloadable company profiles under public/downloads/ must stay
  * present and recognisably the same documents: 200 KB to 8 MB each, page
- * counts within ±30% of the origin/main baseline, and every key string from
- * tests/baseline/pdfs.json still extractable. Regenerating the PDFs (npm run
- * pdf) is expected to keep this green.
+ * counts within ±30% of the origin/main baseline, and retained key strings
+ * from tests/baseline/pdfs.json still extractable. Unverified dates and legal
+ * identifiers are intentionally removed and must be absent after regeneration.
  *
  * They must also say what the site says: each company's registered name and,
  * while flags.publishLegalIdentifiers is on, its TIN, incorporation date and
@@ -24,6 +24,24 @@ const baseline = JSON.parse(readFileSync(path.join(ROOT, 'tests/baseline/pdfs.js
   files: Record<string, { pageCount: number; keyStrings: Record<string, boolean> }>;
 };
 
+/** Exact omissions authorised by the verify-or-omit policy, not a new baseline. */
+const unpublishedIdentifiers = new Set(
+  companies.flatMap((company) => [
+    company.legal.tin,
+    company.legal.incorporationNumber,
+    company.legal.incorporationDate,
+  ]),
+);
+
+function retainedKey(key: string): string | null {
+  if (key === 'EST. 2012') return null;
+  if (!flags.publishLegalIdentifiers && unpublishedIdentifiers.has(key)) return null;
+  if (key === 'INDEPENDENT LEGAL COMPANIES') return 'Operating Companies';
+  if (!flags.publishLegalIdentifiers && key === 'Mwanjalisi Oil Company Ltd') return 'Mwanjalisi Oil Co Ltd';
+  const company = companies.find((entry) => entry.legalName === key);
+  return company && !flags.publishLegalIdentifiers ? company.name : key;
+}
+
 describe('profile PDF downloads', () => {
   it.each(Object.entries(baseline.files))('%s', async (file, facts) => {
     const full = path.join(ROOT, 'public/downloads', file);
@@ -36,8 +54,10 @@ describe('profile PDF downloads', () => {
     expect(pdf.pageCount).toBeLessThanOrEqual(Math.ceil(facts.pageCount * 1.3));
 
     const text = pdf.pages.map((p) => p.text).join('\n');
-    const missing = Object.keys(facts.keyStrings).filter((key) => !textIncludes(text, key));
+    const required = Object.keys(facts.keyStrings).map(retainedKey).filter((key): key is string => key !== null);
+    const missing = required.filter((key) => !textIncludes(text, key));
     expect(missing).toEqual([]);
+    expect(textIncludes(text, 'EST. 2012'), `${file} retains an unverified founding year`).toBe(false);
     const lastPageBody = pdf.pages.at(-1)!.text
       .replace(/Page\s+\d+\s+of\s+\d+/gi, '')
       .replace(/www\.itembagrouptz\.com|Itemba Group/gi, '')
@@ -57,7 +77,7 @@ describe('profile PDFs match the company records', () => {
   it.each(companies.map((c) => [c.slug, c] as const))('%s', async (_slug, company) => {
     const ownFile = path.basename(profilePdfHref(company.id));
     expect(ownFile).not.toBe(groupFile);
-    const needles = [company.legalName];
+    const needles = [flags.publishLegalIdentifiers ? company.legalName : company.name];
     if (flags.publishLegalIdentifiers) {
       needles.push(company.legal.tin, company.legal.incorporationNumber, company.legal.incorporationDate);
       // Directors by name (the role after " - " is not needed to identify them).
@@ -67,7 +87,14 @@ describe('profile PDFs match the company records', () => {
       const text = await pdfText(file);
       const missing = needles.filter((needle) => !textIncludes(text, needle));
       expect(missing, `${file} is stale: run npm run pdf`).toEqual([]);
-      if (!flags.publishLegalIdentifiers) expect(textIncludes(text, company.legal.tin), file).toBe(false);
+      if (!flags.publishLegalIdentifiers) {
+        for (const omitted of [company.legal.tin, company.legal.incorporationNumber, company.legal.incorporationDate]) {
+          expect(textIncludes(text, omitted), `${file} contains an unverified identifier`).toBe(false);
+        }
+        for (const director of company.legal.directors) {
+          expect(textIncludes(text, director.split(' - ')[0]!), `${file} contains an unverified director`).toBe(false);
+        }
+      }
     }
   });
 });

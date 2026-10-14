@@ -39,7 +39,7 @@ export default function ProfileDocuments() {
             <div className="print-letterhead-brand">
               <div className="print-logo-mark">
                 <img loading="lazy" src="/logo-print.png" alt={printCopy.logoAlt} />
-                <span>{printCopy.established}</span>
+                <span>{printCopy.locationMark}</span>
               </div>
               <div>
                 <p className="print-letterhead-title">{printCopy.letterheadTitle}</p>
@@ -59,7 +59,7 @@ export default function ProfileDocuments() {
               <div className="print-cover-identity">
                 <div className="print-cover-logo">
                   <img loading="lazy" src="/logo-print.png" alt={printCopy.logoAlt} />
-                  <span>{printCopy.established}</span>
+                  <span>{printCopy.locationMark}</span>
                 </div>
                 <span>{site.domain}</span>
               </div>
@@ -156,8 +156,10 @@ export default function ProfileDocuments() {
 }
 
 function PrintSectionBlock({ section }: { section: PrintSection }) {
+  // A short two-point section fits on one page; keep its heading with both points.
+  const keepTogether = !section.columns && !section.body && section.points?.length === 2 && section.points.every((point) => point.length < 450);
   return (
-    <section className={`print-section${section.pageBreakBefore ? ' print-section-page' : ''}`}>
+    <section className={`print-section${section.pageBreakBefore ? ' print-section-page' : ''}${keepTogether ? ' print-section-tight' : ''}`}>
       <h2>{section.title}</h2>
       {section.body ? <p>{section.body}</p> : null}
       {section.points ? (

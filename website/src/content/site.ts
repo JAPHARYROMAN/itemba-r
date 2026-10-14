@@ -26,8 +26,6 @@ export const site = {
   locale: 'en_TZ',
   /** html lang */
   language: siteLanguage,
-  /** Founding year shown on the print letterhead ("EST. 2012"). */
-  established: 2012,
   /** Default meta keywords for the root layout. */
   keywords:
     'Itemba Group, Tanzania, Songwe, Tunduma, energy, fuel distribution, logistics, cross-border transit, trade distribution, construction supplies, hospitality, real estate, Mwanjalisi Oil, Westsides, Itemba Enterprises',
@@ -42,7 +40,7 @@ export { siteDescriptions };
  * The rebuilt pages' copy changed (tests/baseline/approved-changes.json), so
  * it is the rebuild's review date, not origin/main's 2026-05-14.
  */
-export const contentUpdatedAt = '2026-09-27';
+export const contentUpdatedAt = '2026-10-14';
 
 /** The 11 core routes in sitemap order (services, locations, companies and insights follow). */
 export const coreRoutes = [

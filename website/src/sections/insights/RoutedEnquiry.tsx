@@ -1,6 +1,7 @@
 import { enquiryFormCopy } from '@/content/enquiry';
 import { routedEnquiryCopy } from '@/content/insights';
 import EnquiryRouter from '@/islands/EnquiryRouter';
+import { EnquireSteps } from '@/sections/locations/EnquireSteps';
 import { Container, Eyebrow, Heading, Lede, Section } from '@/ui';
 
 export type RoutedEnquiryProps = {
@@ -31,22 +32,7 @@ export function RoutedEnquiry({ title, description }: RoutedEnquiryProps) {
           <Lede tone="muted" className="mt-5">
             {copy.body}
           </Lede>
-          <h3 className="mt-10 text-eyebrow text-fg-muted">{copy.stepsLabel}</h3>
-          <ol role="list" className="mt-4 space-y-5">
-            {copy.steps.map((step, index) => (
-              <li key={step.title} className="flex gap-4">
-                <span
-                  aria-hidden="true"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line-strong text-caption font-semibold tabular-nums text-fg"
-                >
-                  {index + 1}
-                </span>
-                <p className="pt-1 text-body text-fg-muted">
-                  <span className="font-semibold text-fg">{step.title}.</span> {step.body}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <EnquireSteps label={copy.stepsLabel} steps={copy.steps} className="mt-10" />
         </div>
         <EnquiryRouter compact headingLevel={3} defaultIntentId="general" title={enquiryFormCopy.title} description={description} />
       </Container>

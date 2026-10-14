@@ -28,12 +28,12 @@ export const assetCapacity = [
   {
     title: 'Fuel and parking corridor capability',
     body:
-      'Two operating ITEMBA-branded fuel stations managed by Mwanjalisi Oil Company Ltd, three upcoming fuel locations, and UZUNGUNI PARKING YARD under Mwanjalisi Oil Company Ltd serving motorists and logistics operators in Mpemba-Tunduma.',
+      'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI fuel stations, together with UZUNGUNI PARKING YARD under Mwanjalisi Oil, serve motorists and logistics operators in Mpemba-Tunduma.',
   },
   {
     title: 'Hospitality and service capability',
     body:
-      'Lodging, restaurant, and bar services through UZUNGUNI INN at Mpemba-Tunduma under Westsides Company Ltd, alongside group logistics and emerging business capacity.',
+      'Lodging, restaurant, and bar services through UZUNGUNI INN at Mpemba-Tunduma under Westsides Company Ltd.',
   },
 ];
 

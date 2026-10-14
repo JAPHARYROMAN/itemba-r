@@ -30,7 +30,7 @@ export function LocationWhy({ location }: { location: LocationProfile }) {
   return (
     <Section id={locationSectionIds.why} labelledBy="why-title">
       <Container>
-        <div className="max-w-[46rem]">
+        <div className="max-w-[46rem] border-l-2 border-gold pl-6 md:pl-8">
           <Heading as="h2" id="why-title" size="h1">
             {copy.whyHeading}
           </Heading>

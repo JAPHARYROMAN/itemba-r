@@ -31,7 +31,7 @@ export function LocationServices({ location, titleId, title, lede, tone = 'alt',
   return (
     <Section tone={tone} id={id} labelledBy={titleId}>
       <Container>
-        <div className="max-w-[46rem]">
+        <div className="max-w-[46rem] border-l-2 border-gold pl-6 md:pl-8">
           <Heading as="h2" id={titleId} size="h1">
             {title}
           </Heading>
@@ -41,14 +41,14 @@ export function LocationServices({ location, titleId, title, lede, tone = 'alt',
             </Lede>
           ) : null}
         </div>
-        <ul role="list" className="mt-10 grid grid-cols-2 gap-3 md:mt-14 md:grid-cols-3 md:gap-4">
+        <ul role="list" className="mt-10 grid gap-3 sm:grid-cols-2 md:mt-14 md:grid-cols-3 md:gap-4">
           {services.map((service) => {
             const company = getCompanyBySlug(service.companySlug);
             return (
               <li
                 key={service.slug}
                 data-accent={company?.accent}
-                className="group relative flex min-w-0 flex-col rounded-tile bg-surface-alt p-5 transition-shadow duration-base ease-apple hover:shadow-card md:p-8"
+                className="group relative flex min-w-0 flex-col rounded-tile border-t-2 border-accent bg-surface-alt p-6 transition-shadow duration-base ease-apple hover:shadow-card md:p-8"
               >
                 <Icon name={serviceIcons[service.visual]} size="md" strokeWidth={1.4} className="text-accent md:size-8" />
                 <Heading as="h3" size="h4" className="mt-4 max-md:text-body max-md:font-semibold md:mt-10">

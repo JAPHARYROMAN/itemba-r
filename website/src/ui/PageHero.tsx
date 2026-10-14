@@ -61,8 +61,8 @@ export type PageHeroProps = {
 };
 
 /**
- * The Apple hero: eyebrow, display headline, lede and two actions, set
- * centred with generous space, then one large photograph (or, for a
+ * The editorial hero: eyebrow, display headline, lede and actions, set
+ * flush left by default, then one appropriately sized photograph (or, for a
  * portrait photograph, text and photograph side by side). The text is
  * static server HTML: no entrance motion, never hidden before paint. The
  * lede steps down to 19px on phones, so the headline leads there too.
@@ -83,7 +83,7 @@ export function PageHero({
   mediaCaption,
   tone = 'light',
   accent,
-  align = 'center',
+  align = 'start',
   breadcrumbs,
   children,
   id,
@@ -123,7 +123,7 @@ export function PageHero({
   );
 
   return (
-    <Section tone={tone} accent={accent} id={id} labelledBy={titleId} space="none" className="pb-section-tight pt-10 md:pt-14">
+    <Section tone={tone} accent={accent} id={id} labelledBy={titleId} space="none" className="page-hero border-b border-line pb-section-tight pt-12 md:pt-20">
       <Container size={wideTitle ? 'wide' : 'content'}>
         {breadcrumbs ? <div className="mb-8 md:mb-12">{breadcrumbs}</div> : null}
         {split ? (

@@ -12,11 +12,11 @@ import { Container, Heading, HeadlineText, Lede, Section } from '@/ui';
 export function HomeStatement() {
   return (
     <Section tone="alt" labelledBy="statement-title">
-      <Container className="text-center">
-        <Heading as="h2" id="statement-title" size="statement">
+      <Container className="grid gap-8 lg:grid-cols-[3fr_2fr] lg:items-end lg:gap-16">
+        <Heading as="h2" id="statement-title" size="h1">
           <HeadlineText headline={homeStatement.headline} variant="muted-break" breakFrom="always" />
         </Heading>
-        <Lede tone="muted" className="mx-auto mt-6 max-w-[40rem] md:mt-8">
+        <Lede tone="muted" className="max-w-[40rem]">
           {homeStatement.body}
         </Lede>
       </Container>

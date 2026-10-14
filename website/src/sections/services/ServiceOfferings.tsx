@@ -1,75 +1,48 @@
 import type { Company } from '@/content/companies';
 import { servicePageCopy, type ServiceArea } from '@/content/services';
 import { serviceUrl } from '@/content/site';
-import { Bento, BentoCell, ChevronLink, Container, Eyebrow, Heading, Icon, Section, Stat, cn, keepCompounds } from '@/ui';
+import { ChevronLink, Container, Eyebrow, Heading, Icon, Section, Stat, keepCompounds } from '@/ui';
 import { serviceSectionIds } from './ServiceSubNav';
 
-/**
- * "What it covers", as a bento on the company template's "What we do":
- * - the service in one sentence, then who it serves as hairline rows;
- * - beside it, its confirmed headline figure (the numeral centred in the
- *   space under its label). A service with no confirmed figure runs the
- *   first cell full width, its rows in two columns: no invented number,
- *   and no weak photograph standing in for one;
- * - then three cells that together cover everything the service offers,
- *   each under its line icon, one linking on where another service page
- *   covers it in full.
- * The cells sit white on the alternate grey.
- */
 export function ServiceOfferings({ service, company }: { service: ServiceArea; company: Company }) {
   const copy = servicePageCopy;
-  const stat = service.keyStat;
   return (
     <Section tone="alt" accent={company.accent} id={serviceSectionIds.offerings} labelledBy="offerings-title">
       <Container>
-        <Heading as="h2" id="offerings-title" size="h1">
-          {copy.offeringsHeading}
-        </Heading>
-
-        <Bento className="mt-10 md:mt-14">
-          <BentoCell span={stat ? 'two-thirds' : 'full'} padding="lg">
-            <Eyebrow dot>{copy.nav.offerings}</Eyebrow>
-            <p className="mt-5 max-w-[40rem] text-body-lg text-fg md:text-lede">{keepCompounds(service.overview)}</p>
-            <h3 className="mt-8 text-eyebrow text-fg-muted">{copy.audienceLabel}</h3>
-            <ul role="list" className={cn('mt-2 border-t border-line', !stat && 'md:grid md:grid-cols-2 md:gap-x-10')}>
-              {service.audience.map((audience) => (
-                <li key={audience} className="border-b border-line py-3 text-body text-fg">
-                  {keepCompounds(audience)}
-                </li>
-              ))}
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-20">
+          <div>
+            <Eyebrow dot>{company.shortName}</Eyebrow>
+            <Heading as="h2" id="offerings-title" size="h1" className="mt-4">{copy.offeringsHeading}</Heading>
+            <p className="mt-6 max-w-2xl text-lede text-fg-muted">{keepCompounds(service.overview)}</p>
+          </div>
+          <div className="border-t border-line pt-6 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
+            {service.keyStat ? (
+              <>
+                <Eyebrow>{copy.keyFigure}</Eyebrow>
+                <dl className="mt-5"><Stat value={service.keyStat.value} label={service.keyStat.label} size="display" tone="accent" /></dl>
+              </>
+            ) : null}
+            <h3 className={service.keyStat ? 'mt-8 text-eyebrow text-fg-muted' : 'text-eyebrow text-fg-muted'}>{copy.audienceLabel}</h3>
+            <ul role="list" className="mt-4 space-y-2">
+              {service.audience.map((audience) => <li key={audience} className="text-body text-fg">{keepCompounds(audience)}</li>)}
             </ul>
-          </BentoCell>
-
-          {stat ? (
-            <BentoCell span="third" padding="lg">
-              <Eyebrow>{copy.keyFigure}</Eyebrow>
-              <dl className="my-auto pt-8">
-                <Stat value={stat.value} label={stat.label} size="display-xl" tone="accent" />
-              </dl>
-            </BentoCell>
-          ) : null}
-
+          </div>
+        </div>
+        <div className="mt-12 divide-y divide-line border-y border-line md:mt-16">
           {service.features.map((feature, index) => (
-            <BentoCell
-              key={feature.title}
-              span="third"
-              // From `md` to `lg` the cells pair up; with no figure beside the
-              // first cell, the last feature takes the whole row rather than half.
-              className={cn(!stat && index === service.features.length - 1 && service.features.length % 2 === 1 && 'md:max-lg:col-span-6')}
-            >
-              <Icon name={feature.icon} size="lg" strokeWidth={1.4} className="text-accent" />
-              <Heading as="h3" size="h4" className="mt-8">
-                {feature.title}
-              </Heading>
-              <p className="mt-2 text-body text-fg-muted">{keepCompounds(feature.body)}</p>
-              {feature.serviceSlug ? (
-                <ChevronLink href={serviceUrl(feature.serviceSlug)} context={feature.title} className="mt-auto pt-6">
-                  {copy.featureAction}
-                </ChevronLink>
-              ) : null}
-            </BentoCell>
+            <article key={feature.title} className="grid gap-5 py-7 md:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1.3fr)] md:gap-8 md:py-9">
+              <span aria-hidden="true" className="text-caption tabular-nums text-accent-fg">{String(index + 1).padStart(2, '0')}</span>
+              <div className="flex items-start gap-4">
+                <Icon name={feature.icon} size="md" className="mt-1 shrink-0 text-accent" />
+                <Heading as="h3" size="h3">{feature.title}</Heading>
+              </div>
+              <div>
+                <p className="max-w-xl text-body-lg text-fg-muted">{keepCompounds(feature.body)}</p>
+                {feature.serviceSlug ? <ChevronLink href={serviceUrl(feature.serviceSlug)} context={feature.title} className="mt-4">{copy.featureAction}</ChevronLink> : null}
+              </div>
+            </article>
           ))}
-        </Bento>
+        </div>
       </Container>
     </Section>
   );

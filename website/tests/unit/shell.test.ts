@@ -67,11 +67,11 @@ describe('QuickContact bar', () => {
     expect(html).toContain('>WhatsApp<');
     // Email keeps the mailto: ConversionTracker counts, as a quiet action (not a pill).
     expect(html).toMatch(/<a href="mailto:[^"]*" aria-label="Email Itemba Group" class="[^"]*"><svg[\s\S]*?<\/svg><span>Email<\/span><\/a>/);
-    expect(html).not.toMatch(/<a href="mailto:[^"]*"[^>]*rounded-pill/);
+    expect(html).not.toMatch(/<a href="mailto:[^"]*"[^>]*bg-btn/);
     // The one pill (plan: Call · WhatsApp · Enquire) is Enquire, to the enquiry form, last in the bar.
-    const pills = [...html.matchAll(/<a [^>]*class="[^"]*rounded-pill[^"]*"[^>]*>([^<]*)<\/a>/g)];
+    const pills = [...html.matchAll(/<a [^>]*class="[^"]*rounded-card[^"]*"[^>]*>([^<]*)<\/a>/g)];
     expect(pills.map((m) => m[1])).toEqual([headerCta.label]);
-    expect(html).toMatch(new RegExp(`<a class="[^"]*rounded-pill[^"]*" href="${headerCta.href}">${headerCta.label}</a></div></aside>$`));
+    expect(html).toMatch(new RegExp(`<a class="[^"]*rounded-card[^"]*" href="${headerCta.href}">${headerCta.label}</a></div></aside>$`));
     expect(headerCta.href).toBe('/contact');
     expect(html).toMatch(/^<div aria-hidden="true" data-print="hide" class="h-\[calc\(var\(--quickbar-height\)/);
     expect(html).not.toMatch(/opacity:\s*0/);
@@ -82,14 +82,14 @@ describe('SiteHeader', () => {
   it('renders the crest, the seven primary links in order and the Enquire pill', () => {
     const html = renderToStaticMarkup(h(SiteHeader));
     // Nothing before the header: in particular no image preload for the crest.
-    expect(html).toMatch(/^<header class="site-header material-nav sticky top-0 z-nav">/);
+    expect(html).toMatch(/^<header class="site-header material-nav sticky top-0 z-nav[^"]*">/);
     const crest = html.match(/<img [^>]*>/)?.[0] ?? '';
     expect(crest).toContain('loading="eager"');
     expect(crest).toMatch(/fetchPriority="low"/i);
-    expect(crest).toContain('w=96');
+    expect(crest).toContain('w=128');
     // The nav mark (the shield and ITEMBA): the full lockup's GROUP line would be about 5px tall here.
     expect(crest).toContain('logo-nav.png');
-    expect(crest).toContain('height="30"');
+    expect(crest).toContain('height="40"');
     expect(html).toContain(`<nav aria-label="${shellCopy.navLabel}"`);
     expect(html).toMatch(/<a aria-label="Itemba Group home" class="[^"]*" href="\/">/);
 
@@ -134,8 +134,8 @@ describe('SiteFooter', () => {
   const html = renderToStaticMarkup(h(SiteFooter));
   const hrefs = new Set(hrefsOf(html));
 
-  it('is the Apple-dense 12px footer on the alt tile', () => {
-    expect(html).toMatch(/^<footer data-tone="alt" class="site-footer text-legal text-fg-muted">/);
+  it('is the readable directory footer on the charcoal surface', () => {
+    expect(html).toMatch(/^<footer data-tone="cinema" class="site-footer text-caption text-fg-muted">/);
     expect(html).toContain(`<nav aria-label="${footerDirectory.label}">`);
     expect(html).toContain(`Copyright © ${new Date().getFullYear()} Itemba Group. All rights reserved.`);
     expect(html).toContain('www.itembagrouptz.com');
@@ -144,7 +144,7 @@ describe('SiteFooter', () => {
     // The shield-and-ITEMBA mark, 30px tall: the full lockup's GROUP line would be about 3px at footer size.
     const crest = html.match(/<img [^>]*>/)?.[0] ?? '';
     expect(crest).toContain('logo-nav.png');
-    expect(crest).toContain('height="30"');
+    expect(crest).toContain('height="40"');
   });
 
   it('sets its directory labels in sentence case', () => {

@@ -19,7 +19,7 @@ export function ContactEnquire() {
   return (
     <Section tone="alt" id={contactSectionIds.enquire} labelledBy="enquire-title">
       <Container className="grid items-start gap-10 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)] lg:grid-rows-[auto_1fr] lg:gap-x-16 lg:gap-y-0">
-        <div className="lg:col-start-1 lg:row-start-1">
+        <div className="border-l-2 border-gold pl-6 lg:col-start-1 lg:row-start-1">
           <Eyebrow>{enquire.eyebrow}</Eyebrow>
           <Heading as="h2" id="enquire-title" size="h1" className="mt-2">
             {enquire.title}

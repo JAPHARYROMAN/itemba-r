@@ -31,6 +31,7 @@ import { flags } from '@/content/flags';
 import { getMedia, media, type MediaId } from '@/content/media';
 import {
   history,
+  leadershipTeam,
   legalCompanyProfiles,
   outline,
   printableProfiles,
@@ -136,22 +137,24 @@ describe('/company-profile: the screen view', () => {
     expect(textOf(enquire)).toContain(enquiryPrompts.companyProfile.title);
   });
 
-  it('publishes the legal identifiers (flags.publishLegalIdentifiers) and every group question', () => {
-    expect(flags.publishLegalIdentifiers).toBe(true);
+  it('omits unverified legal identifiers and keeps every group question', () => {
+    expect(flags.publishLegalIdentifiers).toBe(false);
     const text = textOf(screen);
     for (const company of legalCompanyProfiles) {
-      expect(text).toContain(company.tin);
-      expect(text).toContain(company.incorporationNumber);
+      expect(text).not.toContain(company.tin);
+      expect(text).not.toContain(company.incorporationNumber);
+      expect(text).not.toContain(company.incorporationDate);
+      for (const director of company.directors) expect(text).not.toContain(director.split(' - ')[0]);
     }
+    for (const leader of leadershipTeam) expect(text).not.toContain(leader.name);
     for (const faq of groupFaqs) expect(tags(screen, 'h3')).toContain(faq.question);
   });
 
-  it('lists the history in chronological order', () => {
+  it('describes the current companies without inventing chronology', () => {
     const order = history.map((item) => item.date);
-    expect(order.indexOf('2017 onward')).toBeGreaterThan(order.indexOf('9 June 2017'));
-    const years = order.map((date) => Number(/\d{4}/.exec(date)?.[0]));
-    expect([...years].sort((a, b) => a - b)).toEqual(years);
-    const text = textOf(screen);
+    expect(order).toEqual(['Fuel', 'Trade', 'Logistics']);
+    const text = textOf(screen.match(/<section[^>]*id="company-history"[\s\S]*?<\/section>/)?.[0] ?? '');
+    expect(text).not.toMatch(/\b(?:2012|2013|2014|2015|2017|2021|2025)\b|incorporat/i);
     const positions = history.map((item) => text.indexOf(item.title));
     expect(positions.every((p) => p >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);

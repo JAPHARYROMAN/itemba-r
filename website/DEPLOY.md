@@ -1,13 +1,25 @@
 # Deploying the Itemba Group website
 
-The marketing site (`website/`) is an independent Next.js 15 app, separate from
-the ERP `frontend/` and `backend/`. It ships as a single container using Next's
-**standalone** output and serves on port **3001**.
+The public marketing site is hosted on **Vercel**, in the existing `itemba-r`
+project. `website/` is an independent Next.js 15 app; its package and lockfile are
+separate from the ERP `frontend/` and `backend/`. A public-site release uses the
+Vercel procedure below and does not run the ERP/droplet deployment workflow.
 
-> The container is fully self-contained: every page, the per-page Open Graph
-> images, `sitemap.xml`, `robots.txt`, the web manifest, and the `/api/enquiries`
-> and `/api/health` endpoints are all served by the one Node process in
-> `Dockerfile`. No external Next server is required.
+Verified hosting configuration on **14 October 2026**:
+
+| Setting | Value |
+| --- | --- |
+| Scope | `team_TeJHOALxYDLMBE2VNoy81baj` (`japharyroman's projects`) |
+| Project | `itemba-r` / `prj_8hHUGyGgL0ZtLT6a7Ap14J7ItAKq` |
+| Root Directory | `website` |
+| Runtime | Node.js `24.x`; Next.js framework preset |
+| Install / build | `npm ci` / `npm run build` |
+| Public domains | `www.itembagrouptz.com` and `itembagrouptz.com` |
+
+Domain DNS is managed through Cloudflare. Keep the existing domain assignments
+and DNS for this release. Docker deployment remains an alternative reference:
+the app's standalone image serves every page, asset and API endpoint on port
+**3001**, independently of Vercel.
 
 ---
 
@@ -15,7 +27,7 @@ the ERP `frontend/` and `backend/`. It ships as a single container using Next's
 
 Two classes — and the distinction matters.
 
-### Build-time (inlined into the build — pass as `--build-arg`)
+### Build-time (Vercel environment settings, or Docker `--build-arg`)
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -24,11 +36,12 @@ Two classes — and the distinction matters.
 | `GOOGLE_SITE_VERIFICATION` | optional | Search Console verification token (baked into `<meta>` on static pages). |
 
 `NEXT_PUBLIC_*` values are **compiled into the client bundle at build time**.
-Setting them only at `docker run` has no effect — they must be `--build-arg`s.
+Configure them before the Vercel build. Setting them only at `docker run` has no
+effect — Docker builds require `--build-arg`s.
 If neither analytics ID is set, the `<Analytics />` component renders nothing
 (no tracking, no errors).
 
-### Runtime (read per request — pass at `docker run`)
+### Runtime (Vercel environment settings, or container environment)
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -43,9 +56,83 @@ If neither analytics ID is set, the `<Analytics />` component renders nothing
 > configured or fails, the enquiry API returns an error and the visitor is told to
 > use WhatsApp, email, or phone instead of seeing a false "saved" confirmation.
 
+Before accepting a Vercel release, configure all three email variables in the
+intended **Production and Preview** environments using a Resend
+account. Use a sender on a verified sending domain and a confirmed monitored
+recipient inbox. Enter the API key directly through secure environment settings;
+do not put it in chat, source control or deployment command arguments. The default
+`onboarding@resend.dev` sender is for account-owner testing, not live enquiries.
+After a controlled form submission, verify receipt in the intended inbox; a
+successful browser response alone does not establish delivery. Environment changes
+require a new deployment; promotion keeps the candidate's existing environment.
+
 ---
 
-## 2. Build the image
+## 2. Vercel: stage, verify, promote
+
+Run from the **repository root**, because the linked project's Root Directory is
+`website`. Reuse the existing `.vercel/project.json` link and confirm its project
+and scope match the table above. The root `.vercelignore` includes website sources,
+fonts, images and PDFs, while excluding ERP code, local dependencies, build
+artifacts and environment files. Deploy source rather than a local prebuilt output.
+
+1. Confirm the target, domain ownership and current production deployment. Record
+   the exact current deployment ID for rollback. Inspect environment **key names**
+   with `env ls`; never retrieve or print secret values.
+
+   ```bash
+   vercel project inspect itemba-r --scope team_TeJHOALxYDLMBE2VNoy81baj --non-interactive --yes
+   vercel domains inspect itembagrouptz.com --scope team_TeJHOALxYDLMBE2VNoy81baj
+   vercel inspect www.itembagrouptz.com --scope team_TeJHOALxYDLMBE2VNoy81baj
+   vercel env ls production --scope team_TeJHOALxYDLMBE2VNoy81baj
+   vercel env ls preview --scope team_TeJHOALxYDLMBE2VNoy81baj
+   ```
+
+2. Complete `npm run verify` from `website/`, production dependency audit,
+   Lighthouse review, PDF regeneration/relocking and visual acceptance. The
+   separate Website CI Docker smoke verifies container health and enquiry-volume
+   persistence; `npm run verify` does not run that job.
+
+3. Use the reversible `autoAssignCustomDomains=false` project setting as a
+   temporary staging guard, recording its original value. Create a
+   **production-target** candidate without assigning live domains:
+
+   ```bash
+   vercel deploy --prod --skip-domain --scope team_TeJHOALxYDLMBE2VNoy81baj --yes
+   ```
+
+4. Record the candidate ID/URL and test that deployment: all public pages, mobile
+   navigation, health, metadata, OG cards, redirects, four PDF downloads and
+   enquiry receipt. If deployment protection applies, use authenticated
+   `vercel curl / --deployment <candidate-url>` rather than weakening protection.
+   Confirm the public domains still resolve to the recorded prior deployment.
+
+5. Promote **that same tested production artifact**, without rebuilding it:
+
+   ```bash
+   vercel promote <candidate-deployment-id> --scope team_TeJHOALxYDLMBE2VNoy81baj --yes
+   ```
+
+   Reinspect `www.itembagrouptz.com` to confirm the candidate ID now owns the public
+   aliases, then repeat public smoke checks and verify enquiry receipt. Restore
+   the original `autoAssignCustomDomains=true` setting after promotion and smoke
+   checks. If launch is blocked, restore it before ending the attempt and leave
+   the release PR unmerged. The staging guard is temporary, not a permanent
+   hosting change.
+
+6. If acceptance fails after promotion, roll back to the **exact recorded prior
+   production ID** and verify both public domains and health again. The checkpoint
+   observed on 14 October 2026 was `dpl_2VUv5cacWsXNijokS3TcL96o4nFT`:
+
+   ```bash
+   vercel rollback dpl_2VUv5cacWsXNijokS3TcL96o4nFT --scope team_TeJHOALxYDLMBE2VNoy81baj --yes
+   ```
+
+   For later releases, replace that example with the ID recorded immediately
+   before staging. Do not infer the rollback target from a branch name or deploy
+   the ERP stack to roll back the public website.
+
+## 3. Docker alternative: build the image
 
 The build context is the `website/` directory (the Dockerfile expects
 `package.json` and the app at the context root).
@@ -62,14 +149,14 @@ docker build \
 
 Omit the `--build-arg`s for a build without analytics (e.g. a staging preview).
 
-## 3. Run the container
+## 4. Docker alternative: run the container
 
 ```bash
 docker run -d --name itemba-website \
   -p 3001:3001 \
-  -e RESEND_API_KEY=re_xxx \
-  -e ENQUIRY_EMAIL_TO=enquiries@itembagrouptz.com \
-  -e ENQUIRY_EMAIL_FROM=website@itembagrouptz.com \
+  -e RESEND_API_KEY \
+  -e ENQUIRY_EMAIL_TO \
+  -e ENQUIRY_EMAIL_FROM \
   -v itemba-enquiries:/app/data \
   itemba-website:latest
 ```
@@ -80,7 +167,10 @@ written, but live only as long as the container.
 
 The site is now on `http://<host>:3001`.
 
-## 4. Domain & TLS
+The example inherits the three email settings from the operator's securely
+configured environment; it contains no credentials.
+
+## 5. Docker alternative: domain & TLS
 
 Point **`www.itembagrouptz.com`** at the host and terminate TLS at a reverse
 proxy (Nginx / Caddy / your platform's load balancer) forwarding to `:3001`.
@@ -104,7 +194,7 @@ Search engines and headers:
   hosts never get that header.
 - Responses carry no `X-Powered-By` header (`poweredByHeader: false`).
 
-## 5. Verify after deploy
+## 6. Verify after deploy
 
 ```bash
 curl -I https://www.itembagrouptz.com/                      # 200, text/html
@@ -131,11 +221,11 @@ curl -sI https://staging-www.itembagrouptz.com/ | grep -i x-robots-tag  # stagin
   [X Card Validator](https://cards-dev.twitter.com/validator) — every route now
   serves a bespoke 1200×630 card.
 
-## 6. Health
+## 7. Health
 
 `GET /api/health` returns `200` with `{"status":"ok","service":"itemba-group-website",…}`
-(handled by `src/app/api/health/route.ts`, served by the same standalone Node
-process). Use it as the liveness/readiness probe rather than `GET /` (which
+(handled by `src/app/api/health/route.ts` on both Vercel and the standalone
+container). Use it as the liveness/readiness probe rather than `GET /` (which
 renders the full marketing homepage):
 
 ```bash
@@ -145,12 +235,12 @@ curl -fsS http://localhost:3001/api/health
 The image already declares a Docker `HEALTHCHECK` against this endpoint, so
 `docker ps` / orchestrators report health automatically.
 
-## 7. Regenerating the downloadable PDFs
+## 8. Regenerating the downloadable PDFs
 
 The company-profile page offers ready-made PDF downloads at
 `/downloads/itemba-<profile>-profile.pdf` (group + the three companies). These
 are **pre-generated, committed binaries** under `website/public/downloads/` —
-the runtime image serves them as static files (no Chromium in the container).
+Vercel and the runtime image serve them as static files (no runtime Chromium).
 
 They are produced from the same `@media print` layouts the in-browser "Print"
 button uses, via Chromium's print engine, so they stay in sync with the print
@@ -163,9 +253,12 @@ and site data (`src/content/contact.ts`, `src/content/site.ts`):
 # one-time, downloads the headless browser into the Playwright cache (not the image)
 npx playwright install chromium      # CI/Linux: npx playwright install --with-deps chromium
 
-# build, generate the 4 PDFs, then commit them
+# from website/: build and regenerate all four PDFs
 npm run pdf
-git add public/downloads && git commit -m "Website: regenerate profile PDFs"
+
+# visually review every document, then record the exact inputs and outputs
+npm run pdf:lock
+git add public/downloads scripts/pdf-inputs.lock
 ```
 
 `npm run pdf` builds the site, starts the production server on a temporary port,
@@ -174,5 +267,8 @@ against an already-running server instead of building, use
 `PDF_BASE_URL=http://127.0.0.1:3001 npm run pdf:generate`.
 
 > Keep `public/downloads/` tracked in git and **not** excluded in
-> `.dockerignore` — that's how the PDFs reach the image. Playwright is a
+> `.dockerignore` or the root `.vercelignore` — that's how the PDFs reach both
+> hosting paths. Regenerate and relock after any tracked PDF input or dependency
+> changes; changing the flag for unpublished legal details also requires new PDFs.
+> Playwright is a
 > `devDependency` only; it is never traced into the standalone runtime.

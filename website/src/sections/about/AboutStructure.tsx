@@ -115,12 +115,14 @@ export function AboutStructure() {
   return (
     <Section tone="alt" labelledBy="structure-title">
       <Container>
-        <div className="mx-auto max-w-prose text-center">
-          <Eyebrow>{organisation.eyebrow}</Eyebrow>
-          <Heading as="h2" id="structure-title" size="h1" className="mt-2">
-            {organisation.title}
-          </Heading>
-          <Lede tone="muted" className="mx-auto mt-5 max-w-[40rem] md:mt-6">
+        <div className="grid items-end gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
+          <div>
+            <Eyebrow>{organisation.eyebrow}</Eyebrow>
+            <Heading as="h2" id="structure-title" size="h1" className="mt-2">
+              {organisation.title}
+            </Heading>
+          </div>
+          <Lede tone="muted" className="max-w-[40rem]">
             {organisation.lede}
           </Lede>
         </div>

@@ -66,3 +66,5 @@ website/data/
 
 # Local screenshots, exports, logs and disposable deployment rehearsals
 /tmp/
+
+.vercel

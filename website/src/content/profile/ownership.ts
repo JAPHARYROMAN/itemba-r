@@ -4,7 +4,7 @@
 import 'server-only';
 
 export const ownershipSummary = [
-  'Each Itemba Group operating company is legally registered by BRELA as a private company.',
+  'Three operating companies focus on fuel and parking, trade and hospitality, and logistics.',
   'Itemba Group provides central strategic oversight, governance, and coordination across the companies.',
-  'Formal ownership, directorship, and statutory records are maintained in the company legal records and can be shared with authorized reviewers when required.',
+  'For ownership, directorship and statutory documentation, contact the group office with your review requirements.',
 ];

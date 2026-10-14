@@ -25,6 +25,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { aboutPage } from '@/content/about';
 import { companies, companiesPage, companyPageCopy } from '@/content/companies';
+import { CompanyGallery, companyGallery } from '@/sections/company/CompanyGallery';
+import { CompanyDownloads } from '@/sections/company/CompanyDownloads';
+import { profilePdfHref } from '@/content/profile/cover';
 import { flags } from '@/content/flags';
 import { homeClosing, homeCompanyTiles } from '@/content/home';
 import { getMedia, media, type MediaId } from '@/content/media';
@@ -64,16 +67,6 @@ const trail = (html: string) => {
 };
 const EMOJI = /\p{Extended_Pictographic}/u;
 
-/** Chronological sort key for a company-history date ("2017 onward" falls after 9 June 2017). */
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-function historyKey(date: string): number {
-  const year = Number(date.match(/\d{4}/)?.[0]);
-  const day = date.match(/^(\d{1,2}) (\w+) \d{4}$/);
-  if (day) return year * 10_000 + (MONTHS.indexOf(day[2] ?? '') + 1) * 100 + Number(day[1]);
-  if (/onward/.test(date)) return year * 10_000 + 1300;
-  return year * 10_000;
-}
-
 describe('/about: metadata', () => {
   const { metadata } = AboutModule;
 
@@ -104,7 +97,6 @@ describe('/about: page', () => {
       aboutPage.organisation.title,
       aboutPage.approach.title,
       aboutPage.timeline.title,
-      aboutPage.leadership.title,
       aboutPage.headquarters.title,
       homeClosing.title,
     ];
@@ -129,7 +121,7 @@ describe('/about: page', () => {
       expect(structure).toContain(`data-accent="${company.companyId}"`);
       for (const unit of company.units) expect(textOf(structure), unit.name).toContain(unit.name);
     }
-    expect(tree.companies.flatMap((c) => c.units)).toHaveLength(9);
+    expect(tree.companies.flatMap((c) => c.units)).toHaveLength(8);
     expect(textOf(structure)).toContain(tree.root.name);
     expect(structure).toMatch(/<svg aria-hidden="true"/);
     expect(structure).not.toMatch(/[├└│]|font-mono|→|★/);
@@ -144,30 +136,21 @@ describe('/about: page', () => {
     expect(text).not.toMatch(/manufactur/i);
   });
 
-  it('lays the milestones out oldest first, 2012 to 2025, covering the company history once', () => {
+  it('describes the three company focuses without unverified dates', () => {
     const { milestones } = aboutPage.timeline;
-    const years = milestones.map((m) => Number(m.year));
-    expect(years[0]).toBe(2012);
-    expect(years.at(-1)).toBe(2025);
-    expect([...years].sort((a, b) => a - b)).toEqual(years);
-    expect(new Set(years).size).toBe(years.length);
+    expect(milestones.map((m) => m.year)).toEqual(['Fuel', 'Trade', 'Logistics']);
 
     const covered = milestones.flatMap((m) => [...m.covers]);
     expect([...covered].sort()).toEqual(history.map((entry) => entry.date).sort());
-    const keys = covered.map(historyKey);
-    expect([...keys].sort((a, b) => a - b), 'covered dates, in page order').toEqual(keys);
-    for (const m of milestones) for (const date of m.covers) expect(date, m.year).toContain(m.year);
-
     const strip = section(html, 'timeline-title');
-    const times = [...strip.matchAll(/<time dateTime="([^"]*)">(\d{4})<\/time>/g)].map((m) => m[2]);
-    expect(times).toEqual(milestones.map((m) => m.year));
+    expect(strip).not.toMatch(/<time\b|\b(?:2012|2013|2014|2015|2017|2021|2025)\b|incorporat/i);
+    for (const milestone of milestones) expect(textOf(strip)).toContain(milestone.title);
   });
 
-  it('shows the leadership as typographic cards, in profile order, with no portraits', () => {
-    expect(flags.publishLegalIdentifiers).toBe(true);
-    const team = section(html, 'leadership-title');
-    expect(tags(team, 'h3')).toEqual(leadershipTeam.map((person) => person.name));
-    expect(team).not.toMatch(/<img\b/);
+  it('omits unverified named leadership', () => {
+    expect(flags.publishLegalIdentifiers).toBe(false);
+    expect(html).not.toContain('id="leadership-title"');
+    for (const person of leadershipTeam) expect(text).not.toContain(person.name);
   });
 
   it('places the head office without the unconfirmed claims, with directions and the location page', () => {
@@ -257,11 +240,11 @@ describe('/companies: page', () => {
     expect(hrefs(html)).toEqual(expect.arrayContaining(['#mwanjalisi', '#westsides', '#enterprises']));
   });
 
-  it('reuses the home tiles: Explore › to the company, Enquire › to its form', () => {
+  it('provides a dedicated photographic directory with company and enquiry routes', () => {
     for (const tile of homeCompanyTiles) {
       const company = companies.find((c) => c.slug === tile.companySlug)!;
       const tileHtml = section(html, `tile-${company.slug}`);
-      expect(textOf(tileHtml)).toContain(company.legalName);
+      expect(textOf(tileHtml)).toContain(company.name);
       expect(hrefs(tileHtml)).toEqual(expect.arrayContaining([`/companies/${company.slug}`, `/companies/${company.slug}#enquire`]));
     }
     expect(html).toMatch(/aria-labelledby="tile-mwanjalisi-oil" data-tone="cinema"/);
@@ -272,8 +255,8 @@ describe('/companies: page', () => {
     expect(tags(glance, 'h2')).toEqual([companyPageCopy.glance.title]);
     for (const company of companies) {
       expect(glance).toContain(`data-tone="alt" data-accent="${company.accent}"`);
-      expect(textOf(glance)).toContain(company.legalName);
-      expect(textOf(glance)).toContain(company.legal.incorporationDate);
+      expect(textOf(glance)).toContain(company.name);
+      expect(textOf(glance)).not.toContain(company.legal.incorporationDate);
       expect(textOf(glance)).toContain(company.keyStat.label);
     }
     expect(glance).toContain('text-accent-fg');
@@ -308,5 +291,31 @@ describe('/companies: page', () => {
   it('renders nothing hidden and no emoji', () => {
     expect(html).not.toMatch(/opacity:\s*0(?![.\d])/);
     expect(text).not.toMatch(EMOJI);
+  });
+});
+
+describe('company operation galleries and downloads', () => {
+  it.each(companies.map((company) => [company.slug, company] as const))('%s shows only owned enabled gallery photographs', (_slug, company) => {
+    const gallery = companyGallery(company);
+    expect(gallery.length).toBeGreaterThan(0);
+    const html = renderToStaticMarkup(h(CompanyGallery, { company }));
+    expect(html).toContain('id="gallery"');
+    expect(photos(html)).toEqual(gallery.map((photo) => photo.src));
+    for (const photo of gallery) {
+      const entry = getMedia(photo.media);
+      expect(entry.provenance).toBe('own');
+      expect(entry.requires ? flags[entry.requires] : true).toBe(true);
+      expect(photo.media).not.toBe(company.heroImage.media);
+    }
+    expect(new Set(gallery.map((photo) => photo.media)).size).toBe(gallery.length);
+    expect(html).not.toContain('uzunguni-lodge-room');
+  });
+
+  it.each(companies.map((company) => [company.slug, company] as const))('%s offers its matching profile PDF and the group profile', (_slug, company) => {
+    const html = renderToStaticMarkup(h(CompanyDownloads, { company }));
+    expect(hrefs(html)).toContain(profilePdfHref(company.id));
+    expect(html).toMatch(new RegExp(`href="${profilePdfHref(company.id)}"[^>]*download`));
+    expect(hrefs(html)).toContain('/company-profile');
+    expect(tags(html, 'h2')).toEqual([companyPageCopy.downloads.title]);
   });
 });

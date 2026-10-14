@@ -58,15 +58,15 @@ export const profileProductsServices = [
     eyebrow: 'Mwanjalisi Oil Co Ltd',
     title: 'Fuel and Lubricants',
     summary:
-      'Petroleum retail services managed by Mwanjalisi Oil Company Ltd, with fuel stations carrying the public ITEMBA location brand.',
+      'Petroleum retail services managed by Mwanjalisi Oil Co Ltd, with fuel stations carrying the public ITEMBA location brand.',
     offerings: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'Diesel', 'Petrol', 'Kerosene', 'Lubricants', 'Business fuel enquiries'],
   },
   {
     companyId: 'enterprises' as CompanyId,
     eyebrow: 'Itemba Enterprises Co Ltd',
-    title: 'Logistics and Emerging Businesses',
+    title: 'Logistics and Property Enquiries',
     summary:
-      'Local logistics, cross-border transit, and emerging business activities managed through Itemba Enterprises Co Ltd.',
-    offerings: ['Local logistics', 'Cross-border transit', 'Emerging business opportunities'],
+      'Local logistics, cross-border transit, and property-related enquiries through Itemba Enterprises Co Ltd.',
+    offerings: ['Local logistics', 'Cross-border transit', 'Property enquiries'],
   },
 ] as const;

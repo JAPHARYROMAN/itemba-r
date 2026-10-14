@@ -24,18 +24,18 @@ export type StructureCompany = {
   units: readonly StructureUnit[];
 };
 
-/** A dated entry of the company history (src/content/profile/history.ts). */
+/** A focus entry in the public company story (src/content/profile/history.ts). */
 export type HistoryDate = (typeof history)[number]['date'];
 
 /**
- * One year on the milestones strip. `covers` names the company-history
- * entries it summarises, in chronological order; together the milestones
+ * One company focus on the story strip. `covers` names the company-story
+ * entries it summarises; together the milestones
  * cover every entry once (tests/unit/about-companies.test.ts).
  */
 export type Milestone = {
   year: string;
-  /** ISO date (or year) for the <time> element. */
-  dateTime: string;
+  /** Only present for a verified date; undated entries use plain text. */
+  dateTime?: string;
   title: string;
   detail: string;
   covers: readonly HistoryDate[];
@@ -136,11 +136,10 @@ export const aboutPage = {
           companyId: 'enterprises',
           companySlug: 'itemba-enterprises',
           name: 'Itemba Enterprises Co Ltd',
-          focus: 'Logistics & emerging businesses',
+          focus: 'Logistics & property enquiries',
           units: [
             { name: 'Itemba Logistics', focus: 'Local & cross-border transit', flagship: true },
-            { name: 'Itemba Estate', focus: 'Real estate & property' },
-            { name: 'Emerging businesses', focus: 'New opportunities' },
+            { name: 'Itemba Estate', focus: 'Property enquiries' },
           ],
         },
       ] satisfies readonly StructureCompany[],
@@ -176,58 +175,27 @@ export const aboutPage = {
   },
   timeline: {
     eyebrow: 'Our story',
-    title: 'Built step by step, since 2012.',
-    lede: 'From one hardware business to three independent companies across six sectors.',
-    /** Oldest first. 2017 keeps its order: 2 May, 9 June, then the ITEMBA-MPEMBA opening. */
+    title: 'Three companies. A shared purpose.',
+    lede: 'Fuel, trade and logistics, with focused teams across six business sectors.',
+    /** Current operating responsibilities; no unverified incorporation or opening dates. */
     milestones: [
       {
-        year: '2012',
-        dateTime: '2012-01-20',
-        title: 'Itemba Enterprises incorporated',
-        detail: 'The group starts with one hardware business.',
-        covers: ['20 January 2012'],
+        year: 'Fuel',
+        title: 'Mwanjalisi Oil',
+        detail: 'ITEMBA fuel stations and UZUNGUNI PARKING YARD support motorists and transport operators.',
+        covers: ['Fuel'],
       },
       {
-        year: '2013',
-        dateTime: '2013',
-        title: 'Parking opens',
-        detail: 'Uzunguni Yard takes the group into parking facilities.',
-        covers: ['2013'],
+        year: 'Trade',
+        title: 'Westsides Company',
+        detail: 'Beverage distribution, ITEMBA-HARDWARE and UZUNGUNI INN serve business and hospitality customers.',
+        covers: ['Trade'],
       },
       {
-        year: '2014',
-        dateTime: '2014',
-        title: 'Beverage distribution begins',
-        detail: 'Retail at the Sogea Branch, then wholesale at Vwawa.',
-        covers: ['2014'],
-      },
-      {
-        year: '2015',
-        dateTime: '2015',
-        title: 'Fuel and hospitality',
-        detail: 'The first fuel station, today’s ITEMBA-UZUNGUNI, and UZUNGUNI INN open.',
-        covers: ['2015'],
-      },
-      {
-        year: '2017',
-        dateTime: '2017',
-        title: 'Mwanjalisi Oil and Westsides',
-        detail: 'Incorporated on 2 May and 9 June, for fuel and beverages. ITEMBA-MPEMBA opens later.',
-        covers: ['2 May 2017', '9 June 2017', '2017 onward'],
-      },
-      {
-        year: '2021',
-        dateTime: '2021',
-        title: 'Logistics begins',
-        detail: 'Itemba Enterprises moves into corridor transport.',
-        covers: ['2021'],
-      },
-      {
-        year: '2025',
-        dateTime: '2025-11-01',
-        title: 'Three focused companies',
-        detail: 'On 1 November, trading and hospitality move to Westsides; Itemba Enterprises focuses on logistics.',
-        covers: ['1 November 2025'],
+        year: 'Logistics',
+        title: 'Itemba Enterprises',
+        detail: 'Goods movement and cross-border transit connect Dar es Salaam, the Southern Highlands and Tunduma.',
+        covers: ['Logistics'],
       },
     ] satisfies readonly Milestone[],
   },

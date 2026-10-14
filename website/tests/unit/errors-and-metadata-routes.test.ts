@@ -200,7 +200,7 @@ describe('404', () => {
     expect(links[0]).toBe('/');
     expect(links).toContain('/contact');
     for (const company of companies) expect(links).toContain(`/companies/${company.slug}`);
-    expect(html.match(/rounded-pill/g)).toHaveLength(1);
+    expect(html.match(/<a\b[^>]*class="[^"]*bg-btn[^"]*"/g)).toHaveLength(1);
     expect(links).not.toContain('/partnerships');
   });
 

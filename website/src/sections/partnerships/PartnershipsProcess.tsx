@@ -15,7 +15,7 @@ export function PartnershipsProcess() {
   const { process } = partnershipsPage;
   return (
     <Section tone="cinema" id={ids.process} labelledBy="process-title">
-      <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-[minmax(0,27.5rem)_minmax(0,1fr)] lg:gap-16">
+      <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
         <div>
           <Eyebrow>{process.eyebrow}</Eyebrow>
           <Heading as="h2" id="process-title" size="h1" className="mt-3">
@@ -26,7 +26,7 @@ export function PartnershipsProcess() {
               <li key={step.title} className="flex gap-5 border-t border-line py-5 md:py-6">
                 <span
                   aria-hidden="true"
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line-strong text-caption font-semibold tabular-nums text-fg"
+                  className="w-9 shrink-0 pt-1 text-h3 tabular-nums text-gold-fg"
                 >
                   {index + 1}
                 </span>
@@ -42,7 +42,7 @@ export function PartnershipsProcess() {
           icon={process.visual.icon}
           statement={process.visual.statement}
           caption={companies.map((company) => company.shortName).join(' · ')}
-          className="order-first mx-auto aspect-[4/3] w-full max-w-md sm:aspect-square lg:mx-0 lg:max-w-none"
+          className="aspect-[4/3] w-full border border-line lg:aspect-square"
         />
       </Container>
     </Section>

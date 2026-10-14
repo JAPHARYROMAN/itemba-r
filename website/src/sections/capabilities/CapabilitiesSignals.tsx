@@ -74,7 +74,7 @@ export function CapabilitiesSignals() {
   return (
     <Section tone="alt" id={ids.signals} labelledBy="signals-title">
       <Container>
-        <div className="mx-auto max-w-prose text-center">
+        <div className="max-w-[46rem] border-l-2 border-gold pl-6 md:pl-8">
           <Eyebrow>{signals.eyebrow}</Eyebrow>
           <Heading as="h2" id="signals-title" size="h1" className="mt-2">
             {signals.title}
@@ -82,7 +82,7 @@ export function CapabilitiesSignals() {
         </div>
 
         <Bento className="mt-10 md:mt-16">
-          <BentoCell span="two-thirds" padding="lg">
+          <BentoCell span="two-thirds" padding="lg" className="border border-line">
             <SignalHead signal={structure} />
             <p className="mt-8 text-eyebrow text-fg-muted">{signals.companiesLabel}</p>
             <ul role="list" className="mt-2 border-t border-line">
@@ -107,7 +107,7 @@ export function CapabilitiesSignals() {
             </ul>
           </BentoCell>
 
-          <BentoCell span="third">
+          <BentoCell span="third" className="border border-line">
             <SignalHead signal={ownership} />
             <ChevronLink href={`#${ids.map}`} className="mt-auto pt-6">
               {signals.ownershipAction}
@@ -121,7 +121,7 @@ export function CapabilitiesSignals() {
             </ChevronLink>
           </BentoCell>
 
-          <BentoCell span="two-thirds" padding="none" className="md:flex-row">
+          <BentoCell span="two-thirds" padding="none" className="border border-line md:flex-row">
             <div className="flex flex-1 flex-col p-7 md:p-8">
               <SignalHead signal={base} />
               <p className="mt-auto pt-6 text-caption text-fg-muted">
@@ -135,7 +135,7 @@ export function CapabilitiesSignals() {
                * beside it (about 1.2:1), so the 2:1 photograph is drawn at the
                * frame's height, about 680px wide (object-fit: cover).
                */}
-              <Media media={signals.image} alt={signals.image.alt} fill sizes="(min-width: 768px) 680px, calc(100vw - 44px)" />
+              <Media media={signals.image} alt={signals.image.alt} fill sizes="(min-width: 1112px) 530px, (min-width: 768px) 680px, calc(100vw - 44px)" />
             </Reveal>
           </BentoCell>
         </Bento>

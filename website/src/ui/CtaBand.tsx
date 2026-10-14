@@ -26,17 +26,17 @@ export type CtaBandProps = {
 export function CtaBand({ titleId, title, titleAs = 'h2', eyebrow, lede, actions, tone = 'alt', accent, children, id }: CtaBandProps) {
   return (
     <Section tone={tone} accent={accent} id={id} labelledBy={titleId}>
-      <Container size="prose" className="text-center">
+      <Container size="content" className="border-t border-line pt-8">
         {eyebrow ? <Eyebrow className="mb-3">{eyebrow}</Eyebrow> : null}
         <Heading as={titleAs} id={titleId} size="statement">
           {title}
         </Heading>
         {lede ? (
-          <Lede tone="muted" className="mx-auto mt-5 max-w-[40rem]">
+          <Lede tone="muted" className="mt-5 max-w-[40rem]">
             {lede}
           </Lede>
         ) : null}
-        {actions ? <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">{actions}</div> : null}
+        {actions ? <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-4">{actions}</div> : null}
         {children ? <div className="mt-8">{children}</div> : null}
       </Container>
     </Section>

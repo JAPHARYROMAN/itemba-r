@@ -6,6 +6,7 @@
  */
 import 'server-only';
 import { getCompanyById, type CompanyLegal } from '../companies';
+import { flags } from '../flags';
 import { mediaFigure, mediaImage, type MediaFigure, type MediaImage } from '../media';
 import type { CompanyId } from '../types';
 
@@ -31,8 +32,8 @@ function legalIdentity(id: CompanyId): CompanyLegal & { name: string; profileTit
   const company = getCompanyById(id);
   if (!company) throw new Error(`Unknown company id: ${id}`);
   return {
-    name: company.legalName,
-    profileTitle: `${company.legalName} Company Profile`,
+    name: flags.publishLegalIdentifiers ? company.legalName : company.name,
+    profileTitle: `${flags.publishLegalIdentifiers ? company.legalName : company.name} Company Profile`,
     ...company.legal,
   };
 }
@@ -65,10 +66,6 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
       mediaFigure('hardware-storefront', {
         alt: 'ITEMBA-HARDWARE storefront and construction materials',
         caption: 'ITEMBA-HARDWARE supplies contractors, builders, and construction buyers.',
-      }),
-      mediaFigure('inn-bar-restaurant', {
-        alt: 'UZUNGUNI INN restaurant and bar seating',
-        caption: 'UZUNGUNI INN provides lodging, restaurant, and bar services.',
       }),
     ],
     sections: [
@@ -109,8 +106,8 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
       {
         title: 'Competitive Strengths',
         points: [
-          'Exclusive beverage supplier relationships with Tanzania Breweries Ltd, Tanzania Distilleries Ltd, Mega Beverage Ltd, SBC Tanzania Ltd (Pepsi), and Coca-Cola Kwanza Limited.',
-          'Robust distribution network across Songwe Region with branches, delivery capability, and grassroots market knowledge.',
+          'Beverage distribution for more than 50 stockists across Songwe Region.',
+          'Branches and delivery operations serving Songwe business customers.',
           'Clear division between beverage distribution, hardware, and hospitality operations.',
         ],
       },
@@ -121,9 +118,9 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
     ...legalIdentity('mwanjalisi'),
     sector: 'Fuel Retail, Lubricants, and Parking Facilities',
     summary:
-      'Mwanjalisi Oil Company Ltd manages ITEMBA-branded fuel stations and UZUNGUNI PARKING YARD for motorists, transport operators, and logistics customers.',
+      'Mwanjalisi Oil Co Ltd manages ITEMBA-branded fuel stations and UZUNGUNI PARKING YARD for motorists, transport operators, and logistics customers.',
     coverImage: mediaImage('mpemba-station-wide', {
-      alt: 'ITEMBA filling station forecourt managed by Mwanjalisi Oil Company Ltd',
+      alt: 'ITEMBA filling station forecourt managed by Mwanjalisi Oil',
     }),
     images: [
       mediaFigure('mpemba-truck-canopy', {
@@ -144,8 +141,8 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
         title: 'Business Activities',
         points: [
           'Retail fuel station operations supplying diesel, petrol, kerosene, and lubricants.',
-          'Public station brands operate as ITEMBA-MPEMBA and ITEMBA-UZUNGUNI while remaining under Mwanjalisi Oil Company Ltd management.',
-          'UZUNGUNI PARKING YARD is managed by Mwanjalisi Oil Company Ltd for corridor parking and vehicle staging.',
+          'Public station brands operate as ITEMBA-MPEMBA and ITEMBA-UZUNGUNI under Mwanjalisi Oil management.',
+          'UZUNGUNI PARKING YARD is managed by Mwanjalisi Oil for corridor parking and vehicle staging.',
         ],
       },
       {
@@ -162,14 +159,13 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
           'ITEMBA-UZUNGUNI along the TANZAM Highway in Uzunguni Area, Mpemba.',
           'ITEMBA-MPEMBA near Tunduma Bus Station along the Tunduma-Ileje Highway.',
           'UZUNGUNI PARKING YARD in Uzunguni Area, Mpemba-Tunduma.',
-          'Three upcoming ITEMBA-branded fuel station locations under the same company management structure.',
         ],
       },
       {
         title: 'Competitive Strengths',
         points: [
           'Fuel stations are positioned along major routes and near important passenger and logistics movement.',
-          'The station brand system keeps public visibility clear while preserving legal management under Mwanjalisi Oil Company Ltd.',
+          'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI share management under Mwanjalisi Oil.',
           'Parking, fuel, and corridor access create a connected service offer for transport operators.',
         ],
       },
@@ -178,9 +174,9 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
   {
     id: 'enterprises',
     ...legalIdentity('enterprises'),
-    sector: 'Logistics, Cross-Border Transit, and Emerging Businesses',
+    sector: 'Logistics, Cross-Border Transit, and Property Enquiries',
     summary:
-      'Itemba Enterprises Co Ltd is the original group company and now focuses on logistics services, cross-border transit, and emerging businesses.',
+      'Itemba Enterprises Co Ltd focuses on logistics services, cross-border transit, and property-related enquiries through Itemba Estate.',
     coverImage: mediaImage('logistics-tanker', {
       alt: 'Itemba Logistics tanker supporting goods movement and transit operations',
     }),
@@ -204,7 +200,7 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
         points: [
           'Local logistics and goods movement for businesses sourcing products from Dar es Salaam.',
           'Cross-border transit support through the Tunduma corridor.',
-          'Emerging business opportunities retained under Itemba Enterprises Co Ltd.',
+          'Property-related enquiries through Itemba Estate.',
         ],
       },
       {
@@ -216,19 +212,18 @@ export const legalCompanyProfiles: readonly LegalCompanyProfile[] = [
         ],
       },
       {
-        title: 'Company History',
+        title: 'Operating Focus',
         points: [
-          'Incorporated on 20 January 2012 as the original group company, initially running the hardware business.',
-          'Expanded into parking facilities in 2013, beverages in 2014, fuel and hospitality in 2015, and logistics in 2021.',
-          'After later group reorganization, trading and hospitality moved under Westsides Company Ltd while fuel and parking came under Mwanjalisi Oil Company Ltd.',
+          'Logistics and cross-border transit are managed by Itemba Enterprises.',
+          'Trading and hospitality are managed by Westsides, while fuel and parking are managed by Mwanjalisi Oil.',
         ],
       },
       {
         title: 'Competitive Strengths',
         points: [
           'Practical location advantage through the Tunduma corridor and Southern Highlands trade routes.',
-          'Group operating history across trade, fuel, parking, hospitality, and logistics.',
-          'Focused current role in logistics and emerging businesses with clear separation from other operating companies.',
+          'A connection to the group’s fuel, parking and trade operations.',
+          'Focused current role in logistics, with clear customer routing for property-related enquiries.',
         ],
       },
     ],

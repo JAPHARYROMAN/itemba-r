@@ -6,6 +6,7 @@ export const companySectionIds = {
   whatWeDo: 'what-we-do',
   sites: 'sites',
   strengths: 'strengths',
+  gallery: 'gallery',
   faq: 'faq',
   enquire: 'enquire',
 } as const;
@@ -29,6 +30,7 @@ export function CompanySubNav({ company }: { company: Company }) {
         { href: `#${ids.whatWeDo}`, label: nav.whatWeDo },
         { href: `#${ids.sites}`, label: nav.sites },
         { href: `#${ids.strengths}`, label: nav.strengths },
+        { href: `#${ids.gallery}`, label: nav.gallery },
         { href: `#${ids.faq}`, label: nav.faq },
       ]}
       cta={{ href: `#${ids.enquire}`, label: nav.enquire }}
