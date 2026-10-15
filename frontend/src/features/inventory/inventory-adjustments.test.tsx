@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import InventoryAdjustments from './inventory-adjustments';
 import { AdjustmentEditor, validAdjustmentQuantity } from './inventory-adjustment-editor';
 import { AdjustmentReview } from './inventory-adjustment-review';
+import type { CountRequest } from './inventory-adjustment-save';
 import type { StockAdjustment } from './inventory-adjustment-types';
 import { InventoryWorkspaceProvider } from './inventory-workspace-context';
 import { UnsavedWorkProvider } from '@/components/workspace/unsaved-work-provider';
@@ -154,7 +155,7 @@ beforeEach(() => {
   api.page.mockImplementation(async (path) => ({
     data:
       path === '/inventory-balances'
-        ? [{ quantityOnHand: '10.1234' }]
+        ? [{ quantityOnHand: '10.1234', physicalRevision: 3 }]
         : path === '/products'
           ? [
               {
@@ -489,6 +490,42 @@ async function selectProduct(line = 1) {
   );
 }
 describe('Adjustment entry', () => {
+  beforeEach(() => {
+    api.post.mockImplementation(async (_path: string, body: CountRequest) => ({
+      ...body,
+      id: 'adjustment',
+      status: 'DRAFT',
+      divisionId: body.divisionId ?? 'division',
+      notes: body.notes ?? null,
+      updatedAt: '2026-10-13T12:00:00.000Z',
+      lines: body.lines.map((line, index) => ({
+        id: `captured-line-${index}`,
+        productId: line.productId,
+        unitId: line.unitId,
+        systemQuantity: String(line.systemQuantity),
+        countedQuantity: String(line.countedQuantity),
+        varianceQuantity: (line.countedQuantity - line.systemQuantity).toFixed(4),
+        unitCost: line.unitCost ?? null,
+        reason: line.reason ?? null,
+      })),
+    }));
+    api.patch.mockResolvedValue({ id: 'adjustment', status: 'PENDING_APPROVAL' });
+  });
+  it('prefills an exact product, branch, base unit and on-hand, leaving counted quantity blank', async () => {
+    render(
+      <UnsavedWorkProvider>
+        <AdjustmentEditor scope={scope} productId="milk" onSaved={vi.fn()} onClose={vi.fn()} />
+      </UnsavedWorkProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(10.1234),
+    );
+    await waitFor(() => expect(selectFieldValue(getSelectField('Unit, line 1'))).toBe('unit'));
+    expect(screen.getByLabelText(/Counted quantity, line 1/)).toHaveValue(null);
+    expect(getSelectField('Unit, line 1')).toBeDisabled();
+    expect(selectFieldValue(getSelectField('Adjustment branch'))).toBe('branch');
+    expect(api.post).not.toHaveBeenCalled();
+  });
   it('supports verified manual counts for create-only users without requesting balances', async () => {
     api.permissions.delete('inventory.view');
     editor();
@@ -504,6 +541,7 @@ describe('Adjustment entry', () => {
     });
     fireEvent.change(screen.getByLabelText(/System quantity, line 1/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/Counted quantity, line 1/), { target: { value: '0' } });
+    await waitFor(() => expect(selectFieldValue(getSelectField('Unit, line 1'))).toBe('unit'));
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledOnce());
     expect(api.page.mock.calls.some(([path]) => path === '/inventory-balances')).toBe(false);
@@ -531,7 +569,8 @@ describe('Adjustment entry', () => {
     api.post.mockRejectedValueOnce(new Error('Unable to save draft'));
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to save draft');
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry save and submit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Done' }));
     await waitFor(() => expect(saved).toHaveBeenCalledOnce());
     expect(api.post.mock.calls[0]).toEqual(api.post.mock.calls[1]);
     expect(api.post).toHaveBeenLastCalledWith(
@@ -544,6 +583,7 @@ describe('Adjustment entry', () => {
             unitId: 'unit',
             systemQuantity: 10.1234,
             countedQuantity: 11.0001,
+            expectedRevision: 3,
             unitCost: 1200,
             reason: undefined,
           },
@@ -595,9 +635,9 @@ describe('Adjustment entry', () => {
     expect(screen.getByLabelText(/System quantity, line 1/)).toBeDisabled();
     fail = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry balances' }));
-    await screen.findByText(/No balance was found/);
-    expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(null);
-    expect(screen.getByLabelText(/System quantity, line 1/)).toBeEnabled();
+    await screen.findByText(/No recorded stock at this branch/);
+    expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(0);
+    expect(screen.getByLabelText(/System quantity, line 1/)).toBeDisabled();
     for (const value of ['', '-1', 'Infinity', '1.12345', '100000000000000'])
       expect(validAdjustmentQuantity(value)).toBe(false);
     expect(validAdjustmentQuantity('0')).toBe(true);

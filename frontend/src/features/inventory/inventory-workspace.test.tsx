@@ -75,6 +75,28 @@ beforeEach(() => {
   });
 });
 describe('Inventory workspace navigation', () => {
+  it('opens Products and stock by default with permanent search, using Live stock for inventory-only users', () => {
+    state.search = '';
+    const view = mount();
+    expect(screen.getByRole('link', { name: 'Products and stock', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('combobox', { name: 'Search inventory' })).toBeInTheDocument();
+    state.permissions = new Set(['inventory.view']);
+    view.rerender(
+      <UnsavedWorkProvider>
+        <InventoryWorkspace />
+      </UnsavedWorkProvider>,
+    );
+    expect(screen.getByRole('link', { name: 'Stock', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(
+      screen.queryByRole('link', { name: 'Products and stock', exact: true }),
+    ).not.toBeInTheDocument();
+  });
   it('changes companion tabs while preserving its own scope and the browser route', () => {
     state.search = 'tab=reports&companyId=main-company';
     render(
@@ -117,7 +139,7 @@ describe('Inventory workspace navigation', () => {
       </UnsavedWorkProvider>,
     );
     expect(screen.queryByRole('link', { name: 'Controls', exact: true })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Catalog', exact: true })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Products and stock', exact: true })).toHaveAttribute(
       'aria-current',
       'page',
     );
@@ -128,7 +150,6 @@ describe('Inventory workspace navigation', () => {
     fireEvent.change(screen.getByLabelText('View draft'), {
       target: { value: 'Unfinished stock count' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Find a product' }));
     fireEvent.focus(screen.getByRole('combobox', { name: 'Search inventory' }));
     fireEvent.click(await screen.findByRole('button', { name: /Cement CEM-01/ }));
     await screen.findByRole('dialog', { name: 'Keep your changes?' });
@@ -139,7 +160,7 @@ describe('Inventory workspace navigation', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Cement CEM-01/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(state.push).toHaveBeenCalledWith(
-      '/inventory/products/product?companyId=company&divisionId=division&branchId=branch&q=cement',
+      '/inventory?tab=catalog&view=products&companyId=company&divisionId=division&branchId=branch&productId=product&q=cement',
       { scroll: false },
     );
   });

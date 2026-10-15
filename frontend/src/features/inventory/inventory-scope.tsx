@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { FormSelect, type ScopeValue } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspaceChoices } from '@/hooks/use-workspace-choices';
@@ -31,16 +31,27 @@ export function InventoryScope({
     !!value.companyId && hasPermission('branches.read'),
   );
   const initialSelection = useRef(false),
-    resolved = useRef(new Set<string>());
+    attemptedBranches = useRef(new Set<string>());
+  const retainedKey = `inventory.lastBranch.${user?.id || 'session'}`;
+  const retained = useCallback(() => {
+    try {
+      return JSON.parse(localStorage.getItem(retainedKey) || 'null') as ScopeValue | null;
+    } catch {
+      return null;
+    }
+  }, [retainedKey]);
   useEffect(() => {
     if (initialSelection.current || companies.loading) return;
     if (companies.error) return;
     initialSelection.current = true;
     if (value.companyId) return;
+    const saved = retained();
     const companyId = hasPermission('companies.read')
-      ? companies.rows.length === 1
-        ? companies.rows[0].id
-        : ''
+      ? companies.rows.some((row) => row.id === saved?.companyId)
+        ? saved!.companyId
+        : companies.rows.length === 1
+          ? companies.rows[0].id
+          : ''
       : user?.companyId || '';
     if (companyId) onChange({ companyId, divisionId: '', branchId: '' });
   }, [
@@ -51,22 +62,55 @@ export function InventoryScope({
     onChange,
     user?.companyId,
     value.companyId,
+    retained,
   ]);
   useEffect(() => {
-    if (
-      !value.companyId ||
-      value.divisionId ||
-      !value.branchId ||
-      branches.loading ||
-      branches.error
-    )
+    if (!value.companyId || !hasPermission('branches.read') || branches.loading || branches.error)
       return;
-    const key = `${value.companyId}:${value.branchId}`;
-    const branch = branches.rows.find((r) => r.id === value.branchId);
-    if (!branch?.divisionId || resolved.current.has(key)) return;
-    resolved.current.add(key);
-    onChange({ ...value, divisionId: branch.divisionId });
-  }, [value, branches.loading, branches.error, branches.rows, onChange]);
+    const key = `${value.companyId}:${value.divisionId}`;
+    const current = branches.rows.find((row) => row.id === value.branchId);
+    if (value.branchId && !current) {
+      attemptedBranches.current.delete(key);
+      onChange({ ...value, branchId: '' });
+      return;
+    }
+    if (current) {
+      try {
+        localStorage.setItem(
+          retainedKey,
+          JSON.stringify({ ...value, divisionId: current.divisionId || value.divisionId }),
+        );
+      } catch {
+        /* Storage may be unavailable. */
+        attemptedBranches.current.add(key);
+      }
+      if (!value.divisionId && current.divisionId)
+        onChange({ ...value, divisionId: current.divisionId });
+      return;
+    }
+    if (attemptedBranches.current.has(key)) return;
+    attemptedBranches.current.add(key);
+    const saved = retained();
+    const branch =
+      (saved?.companyId === value.companyId
+        ? branches.rows.find((row) => row.id === saved.branchId)
+        : undefined) ?? (branches.rows.length === 1 ? branches.rows[0] : undefined);
+    if (branch)
+      onChange({
+        ...value,
+        branchId: branch.id,
+        divisionId: branch.divisionId || value.divisionId,
+      });
+  }, [
+    value,
+    branches.loading,
+    branches.error,
+    branches.rows,
+    onChange,
+    hasPermission,
+    retainedKey,
+    retained,
+  ]);
   const options = (rows: Choice[], selected: string) => (
     <>
       {selected && !rows.some((r) => r.id === selected) && (
@@ -102,7 +146,7 @@ export function InventoryScope({
       <FormSelect
         label="Branch"
         value={value.branchId}
-        placeholder="All branches"
+        placeholder="Choose a branch to see stock"
         disabled={!value.companyId || branches.loading || !hasPermission('branches.read')}
         onChange={(e) => {
           const branch = branches.rows.find((r) => r.id === e.target.value);

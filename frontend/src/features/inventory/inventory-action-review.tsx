@@ -195,7 +195,11 @@ export function InventoryActionReview({ kind, id, action, draftSource, onClose, 
       else if (kind === 'adjustment')
         await backendPatch(
           `${path}/${action}`,
-          action === 'reject' ? { reason: draft.form.reason.trim() } : undefined,
+          action === 'reject'
+            ? { reason: draft.form.reason.trim() }
+            : action === 'submit'
+              ? { expectedUpdatedAt: row.updatedAt }
+              : undefined,
         );
       else await backendPatch(`${path}/${action}`);
       if (mounted.current) {

@@ -17,6 +17,11 @@ import {
 } from '../accounting-engine/posting-engine.service';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
+import {
+  lockReceivableWithoutWaiting,
+  preflightSalesOrderReceivables,
+} from '../../common/services/receivable-conflict-lock';
 import { ProfitService } from '../profit/profit.service';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { pagination } from '../../common/utils/pagination';
@@ -27,6 +32,15 @@ import { CreditNoteStatus } from './credit-note-status.enum';
 import { creditNoteDb, CreditNoteRow } from './credit-note.types';
 
 const ZERO = new Prisma.Decimal(0);
+const returnedProductIds = (
+  lines: Array<{
+    productId?: string | null;
+    returnedQuantity?: Prisma.Decimal | number | string | null;
+  }> = [],
+) =>
+  lines
+    .filter((line) => line.productId && new Prisma.Decimal(line.returnedQuantity ?? 0).gt(0))
+    .map((line) => line.productId as string);
 
 /**
  * Credit notes = customer-facing reversals of a prior sale (returns, allowances,
@@ -379,13 +393,34 @@ export class CreditNotesService {
     }
 
     const result = await this.runWithTransaction(transaction, async (tx) => {
+      const current = await this.lockCreditNoteDocuments(tx, existing, CreditNoteStatus.DRAFT);
+      if (current.status !== CreditNoteStatus.DRAFT) {
+        throw new ConflictException('Credit note is no longer in DRAFT state');
+      }
+      await lockInventoryProducts(tx, returnedProductIds(existing.lines));
       const db = creditNoteDb(tx);
+      if (effectiveReceivableId) {
+        const linked = await tx.receivable.findFirst({
+          where: { id: effectiveReceivableId, companyId: existing.companyId, deletedAt: null },
+          select: { status: true },
+        });
+        if (linked && (linked.status === 'CANCELLED' || linked.status === 'WRITTEN_OFF')) {
+          throw new ConflictException(
+            `Cannot issue a credit note against a ${linked.status} receivable`,
+          );
+        }
+      }
 
       // Atomic claim: DRAFT -> ISSUED, guarded on the row still being DRAFT.
       // Two concurrent issues race here; the loser sees count 0 and aborts, so
       // the reversing JE is posted exactly once.
       const claim = await db.creditNote.updateMany({
-        where: { id, status: CreditNoteStatus.DRAFT, deletedAt: null },
+        where: {
+          id,
+          status: CreditNoteStatus.DRAFT,
+          updatedAt: current.updatedAt,
+          deletedAt: null,
+        },
         data: { status: CreditNoteStatus.ISSUED },
       });
       if (claim.count !== 1) {
@@ -527,18 +562,7 @@ export class CreditNotesService {
       // validates the note and inserts its claim. Void must share that lock so
       // no DRAFT/PAID refund can appear after a zero-count check.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('refunds:credit-note'), hashtext(${id}))`;
-      const locked = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "credit_notes"
-        WHERE "id" = ${id} AND "deletedAt" IS NULL
-        FOR UPDATE`;
-      if (locked.length !== 1) throw new NotFoundException('Credit note not found');
-      const current = (await db.creditNote.findFirst({
-        where: { id, deletedAt: null },
-      })) as CreditNoteRow | null;
-      if (!current) throw new NotFoundException('Credit note not found');
-      if (current.companyId !== existing.companyId) {
-        throw new ConflictException('Credit note ownership changed; refresh before voiding');
-      }
+      const current = await this.lockCreditNoteDocuments(tx, existing, CreditNoteStatus.ISSUED);
       if (current.status !== CreditNoteStatus.ISSUED) {
         throw new ConflictException(
           `Only ISSUED credit notes can be voided (current status: ${current.status})`,
@@ -561,6 +585,8 @@ export class CreditNotesService {
           'Cannot void a credit note that still has active refunds; void the refund(s) first',
         );
       }
+
+      await lockInventoryProducts(tx, returnedProductIds(existing.lines));
 
       // Atomic claim: ISSUED -> VOID.
       const claim = await db.creditNote.updateMany({
@@ -593,19 +619,9 @@ export class CreditNotesService {
       // credit-note lines are immutable after create, so they cannot have
       // changed; the lifecycle fields all come from the locked `current` row.
       //
-      // [LOCK ORDER — deadlock avoidance] This MUST run BEFORE restoreReceivable.
-      // issue() acquires the inventory-side locks first (the per-company
-      // InventoryMovement number-sequence row and the inventory_balances row,
-      // via restockReturnedLines) and the receivable FOR UPDATE second (via
-      // applyToReceivable). void() has to take the same locks in the SAME order
-      // — inventory before receivable — or a concurrent issue() of one note and
-      // void() of another sharing a receivable (or merely the same company's
-      // movement sequence row) form an ABBA cycle and Postgres kills one with a
-      // 40P01 deadlock. The per-note pg_advisory_xact_lock above does NOT
-      // serialize different notes, so ordering is the only protection. The two
-      // steps are independent (unwindRestock reads only lines + the restock JE;
-      // restoreReceivable reads only receivableId/appliedAmount), so the order
-      // swap is behavior-preserving.
+      // The receivable preflight already holds the debt without waiting. Preserve
+      // issue/void's shared sequence: inventory and its GL swing precede the AR
+      // projection update; restoreReceivable's final lock is reentrant.
       await this.unwindRestock(tx, { ...current, lines: existing.lines }, userId);
 
       // Give back the outstanding we previously took off the linked receivable.
@@ -651,6 +667,57 @@ export class CreditNotesService {
     run: (tx: Prisma.TransactionClient) => Promise<T>,
   ): Promise<T> {
     return transaction ? run(transaction) : this.prisma.$transaction(run);
+  }
+
+  /** Sales cancellation takes its order before products; issue and void share that order. */
+  private async lockCreditNoteDocuments(
+    tx: Prisma.TransactionClient,
+    note: Pick<CreditNoteRow, 'id' | 'companyId' | 'salesOrderId' | 'receivableId'>,
+    expectedStatus: CreditNoteStatus,
+  ): Promise<CreditNoteRow> {
+    const orderIds = new Set<string>();
+    if (note.salesOrderId) orderIds.add(note.salesOrderId);
+    if (note.receivableId) {
+      const receivable = await tx.receivable.findFirst({
+        where: { id: note.receivableId, companyId: note.companyId, deletedAt: null },
+        select: { sourceType: true, sourceId: true },
+      });
+      if (receivable?.sourceType === 'SalesOrder' && receivable.sourceId)
+        orderIds.add(receivable.sourceId);
+    }
+    const orderedIds = [...orderIds].sort();
+    if (orderedIds.length) {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_orders
+        WHERE id IN (${Prisma.join(orderedIds)}) AND "companyId" = ${note.companyId} AND "deletedAt" IS NULL
+        ORDER BY id FOR UPDATE
+      `);
+      if (locked.length !== orderedIds.length)
+        throw new NotFoundException('Linked sales order not found');
+    }
+    const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM credit_notes WHERE id = ${note.id} AND "deletedAt" IS NULL FOR UPDATE
+    `);
+    if (locked.length !== 1) throw new NotFoundException('Credit note not found');
+    const current = (await creditNoteDb(tx).creditNote.findFirst({
+      where: { id: note.id, deletedAt: null },
+    })) as CreditNoteRow | null;
+    if (!current) throw new NotFoundException('Credit note not found');
+    if (
+      current.companyId !== note.companyId ||
+      current.salesOrderId !== note.salesOrderId ||
+      current.receivableId !== note.receivableId
+    )
+      throw new ConflictException('Credit note links changed; refresh before continuing');
+    if (current.status !== expectedStatus)
+      throw new ConflictException(`Credit note is no longer in ${expectedStatus} state`);
+    await preflightSalesOrderReceivables(
+      tx,
+      note.companyId,
+      orderedIds,
+      note.receivableId ? [note.receivableId] : [],
+    );
+    return current;
   }
   private logInContext(
     transaction: Prisma.TransactionClient | undefined,
@@ -1096,24 +1163,17 @@ export class CreditNotesService {
     credit: Prisma.Decimal,
     user: AuthUser,
   ): Promise<Prisma.Decimal> {
-    const [locked] = await tx.$queryRaw<
-      Array<{
-        id: string;
-        companyId: string;
-        customerId: string | null;
-        outstandingAmount: Prisma.Decimal;
-        paidAmount: Prisma.Decimal;
-      }>
-    >`SELECT "id", "companyId", "customerId", "outstandingAmount", "paidAmount"
-      FROM "receivables"
-      WHERE "id" = ${receivableId} AND "deletedAt" IS NULL
-      FOR UPDATE`;
+    const locked = await lockReceivableWithoutWaiting(tx, receivableId);
 
     if (!locked) throw new NotFoundException('Linked receivable not found');
     if (locked.companyId !== companyId) {
       throw new BadRequestException('Receivable does not belong to this company');
     }
     await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
+    if (locked.status === 'CANCELLED' || locked.status === 'WRITTEN_OFF')
+      throw new ConflictException(
+        `Cannot issue a credit note against a ${locked.status} receivable`,
+      );
 
     const outstanding = new Prisma.Decimal(locked.outstandingAmount).toDecimalPlaces(2);
     // Never drive outstanding negative: apply at most the outstanding balance.
@@ -1154,20 +1214,7 @@ export class CreditNotesService {
     amount: Prisma.Decimal,
     user: AuthUser,
   ): Promise<void> {
-    const [locked] = await tx.$queryRaw<
-      Array<{
-        id: string;
-        companyId: string;
-        customerId: string | null;
-        amount: Prisma.Decimal;
-        outstandingAmount: Prisma.Decimal;
-        paidAmount: Prisma.Decimal;
-        status: string;
-      }>
-    >`SELECT "id", "companyId", "customerId", "amount", "outstandingAmount", "paidAmount", "status"
-      FROM "receivables"
-      WHERE "id" = ${receivableId} AND "deletedAt" IS NULL
-      FOR UPDATE`;
+    const locked = await lockReceivableWithoutWaiting(tx, receivableId);
     if (!locked) return; // receivable gone — nothing to restore
     if (locked.companyId !== companyId) return;
     await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);

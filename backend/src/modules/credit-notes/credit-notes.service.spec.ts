@@ -109,6 +109,9 @@ function makeService(opts?: {
   const creditNoteLine = { createMany: jest.fn(async () => ({ count: 1 })) };
 
   const receivableDelegate = {
+    findMany: jest.fn(async () =>
+      opts?.sourceReceivableId ? [{ id: opts.sourceReceivableId }] : [],
+    ),
     // receivable.findFirst is called in two contexts:
     //   1. resolveLinkedReceivableId fallback: where has sourceType/sourceId ->
     //      returns { id } of the receivable back-referenced by the sales order.
@@ -121,6 +124,8 @@ function makeService(opts?: {
       return receivable
         ? {
             companyId: receivable.companyId,
+            sourceType: receivable.sourceType,
+            sourceId: receivable.sourceId,
             status: opts?.receivableStatus ?? receivable.status ?? 'OPEN',
           }
         : null;
@@ -172,9 +177,20 @@ function makeService(opts?: {
     update: jest.fn(async () => ({})),
   };
 
-  const $queryRaw = jest.fn(async (query: unknown) =>
-    String(query).includes('credit_notes') ? [{ id: note.id }] : receivable ? [receivable] : [],
-  );
+  const $queryRaw = jest.fn(async (query: unknown) => {
+    const sql = String((query as { sql?: string }).sql ?? query);
+    if (sql.includes('credit_notes')) return [{ id: note.id }];
+    if (sql.includes('sales_orders'))
+      return [
+        ...new Set(
+          [
+            note.salesOrderId,
+            receivable?.sourceType === 'SalesOrder' ? receivable.sourceId : null,
+          ].filter(Boolean),
+        ),
+      ].map((id) => ({ id }));
+    return receivable ? [receivable] : [];
+  });
   const $executeRaw = jest.fn(async () => 1);
 
   const productDelegate = {
@@ -297,6 +313,76 @@ function makeService(opts?: {
 }
 
 const user = { id: 'user-1', permissions: ['receivables.manage'] } as any;
+
+describe('CreditNotesService document lock compatibility', () => {
+  it('locks both linked sales orders in sorted order, then note and products before issue', async () => {
+    const f = makeService({
+      note: { salesOrderId: 'so-z', receivableId: 'rec-1' },
+      receivable: {
+        id: 'rec-1',
+        companyId: 'company-1',
+        customerId: 'customer-1',
+        sourceType: 'SalesOrder',
+        sourceId: 'so-a',
+        outstandingAmount: D(0),
+        paidAmount: D(0),
+        status: 'OPEN',
+      },
+      lines: [
+        {
+          productId: 'prod-1',
+          unitId: 'unit-1',
+          quantity: D(1),
+          returnedQuantity: D(1),
+          restockUnitCost: D(60),
+        },
+      ],
+    });
+    await f.service.issue('cn-1', user);
+    const locks = f.prisma.$queryRaw.mock.calls.map(
+      (call: unknown[]) => call[0] as { sql?: string; values?: unknown[] },
+    );
+    expect(locks[0].sql).toContain('FROM sales_orders');
+    expect(locks[0].values?.slice(0, 2)).toEqual(['so-a', 'so-z']);
+    expect(locks[1].sql).toContain('FROM credit_notes');
+    expect(locks[2].sql).toContain('FROM receivables');
+    expect(locks[2].sql).toContain('NOWAIT');
+    expect(locks[3].sql).toContain('FROM products');
+    expect(f.prisma.$queryRaw.mock.invocationCallOrder[3]).toBeLessThan(
+      f.postingEngine.postLines.mock.invocationCallOrder[0],
+    );
+  });
+  it('rejects a note issued while the initial reader waited, before product or ledger locks', async () => {
+    const f = makeService();
+    f.prisma.$queryRaw.mockImplementation(async (query: { sql?: string }) => {
+      if (query.sql?.includes('credit_notes')) {
+        f.note.status = CreditNoteStatus.ISSUED;
+        return [{ id: f.note.id }];
+      }
+      return [];
+    });
+    await expect(f.service.issue('cn-1', user)).rejects.toThrow('no longer in DRAFT');
+    expect(f.prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(f.postingEngine.postLines).not.toHaveBeenCalled();
+    expect(f.prisma.creditNote.updateMany).not.toHaveBeenCalled();
+  });
+  it('rejects a receivable cancelled while the initial reader waited', async () => {
+    const f = makeService({
+      note: { receivableId: 'rec-1' },
+      receivable: { id: 'rec-1', companyId: 'company-1', status: 'OPEN' },
+    });
+    f.prisma.$queryRaw.mockImplementation(async (query: { sql?: string }) => {
+      if (query.sql?.includes('credit_notes')) {
+        f.receivableDelegate.findFirst.mockResolvedValue({ status: 'CANCELLED' } as any);
+        return [{ id: f.note.id }];
+      }
+      return [];
+    });
+    await expect(f.service.issue('cn-1', user)).rejects.toThrow('CANCELLED receivable');
+    expect(f.postingEngine.postLines).not.toHaveBeenCalled();
+    expect(f.prisma.creditNote.updateMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('CreditNotesService.issue — balanced reversing journal entry', () => {
   it('posts Dr Sales Returns (net) + Dr VAT (tax) = Cr AR (gross), and the JE balances', async () => {
@@ -1432,11 +1518,7 @@ describe('CreditNotesService.void — unwinds the restock', () => {
     expect(mv.allowNegativeOnHand).toBe(true);
   });
 
-  it('[Finding 16] void acquires the inventory-side locks BEFORE the receivable lock (same order as issue)', async () => {
-    // issue() locks inventory (movement sequence + inventory_balances, via
-    // restockReturnedLines) before the receivable FOR UPDATE (applyToReceivable).
-    // void() must match — inventory unwind first, receivable restore second —
-    // or a concurrent issue/void pair forms an ABBA deadlock (40P01).
+  it('[Finding 16] preflights debt without waiting, then unwinds inventory before the final debt restore', async () => {
     const receivable = {
       id: 'rec-1',
       companyId: 'company-1',
@@ -1466,8 +1548,9 @@ describe('CreditNotesService.void — unwinds the restock', () => {
       return { id: 'mov-void-1' };
     });
     (prisma.$queryRaw as jest.Mock).mockImplementation(async (query: unknown) => {
-      const sql = String(query);
+      const sql = String((query as { sql?: string }).sql ?? query);
       if (sql.includes('credit_notes')) return [{ id: 'cn-1' }];
+      if (sql.includes('FROM products')) order.push('product-locks');
       if (sql.includes('receivables')) {
         // The receivable FOR UPDATE taken by restoreReceivable.
         order.push('receivable-lock');
@@ -1479,7 +1562,10 @@ describe('CreditNotesService.void — unwinds the restock', () => {
     await service.void('cn-1', { reason: 'Issued in error' }, user);
 
     expect(order).toContain('inventory-locks');
+    expect(order).toContain('product-locks');
     expect(order).toContain('receivable-lock');
-    expect(order.indexOf('inventory-locks')).toBeLessThan(order.indexOf('receivable-lock'));
+    expect(order.indexOf('product-locks')).toBeLessThan(order.indexOf('inventory-locks'));
+    expect(order.indexOf('receivable-lock')).toBeLessThan(order.indexOf('product-locks'));
+    expect(order.lastIndexOf('receivable-lock')).toBeGreaterThan(order.indexOf('inventory-locks'));
   });
 });

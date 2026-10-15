@@ -11,6 +11,10 @@
 .inventory-batches > [data-page-header] {
   margin-bottom: 0;
 }
+.inventory-workspace {
+  gap: 16px;
+  container: inventory-workspace / inline-size;
+}
 .inventory-workspace-nav,
 .inventory-view-nav {
   display: flex;
@@ -64,7 +68,37 @@
 }
 .inventory-scope-panel {
   display: grid;
-  gap: 18px;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 16px;
+  background: var(--aurora-card);
+}
+@container inventory-workspace (min-width: 700px) {
+  .inventory-scope-panel {
+    position: sticky;
+    top: 56px;
+    z-index: 20;
+    box-shadow: var(--aurora-shadow-sm);
+  }
+  .product-register .os-split-detail > header > * {
+    scroll-margin-block-start: 210px;
+  }
+}
+.inventory-search-shortcut {
+  padding: 2px 7px;
+  border: 1px solid var(--aurora-border);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--aurora-text-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .inventory-workspace *,
+  .inventory-workspace *::before,
+  .inventory-workspace *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 .inventory-workspace [data-inventory-embedded] > .business-workspace {
   padding: 0;

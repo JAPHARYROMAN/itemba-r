@@ -8,6 +8,7 @@ import {
   Min,
 } from 'class-validator';
 import { ProductType, ProductStatus } from '@prisma/client';
+import { Transform } from 'class-transformer';
 
 export class CreateProductDto {
   @IsNotEmpty()
@@ -44,6 +45,7 @@ export class CreateProductDto {
   productFamilyBrand?: string;
 
   @IsNotEmpty()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   name!: string;
 

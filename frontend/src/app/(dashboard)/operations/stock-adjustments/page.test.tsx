@@ -85,7 +85,7 @@ describe('StockAdjustmentsPage in the inventory workspace', () => {
     expect(createButton).toBeEnabled();
     await user.click(createButton);
 
-    expect(await screen.findByRole('dialog', { name: 'New stock adjustment' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Adjust stock' })).toBeInTheDocument();
     const branchSelect = getSelectField('Adjustment branch');
     await waitFor(() => expect(branchSelect).toBeEnabled());
 

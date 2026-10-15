@@ -272,7 +272,11 @@ describe('Inventory action drafts', () => {
       else if (spec.kind === 'adjustment')
         expect(state.patch).toHaveBeenCalledWith(
           `${endpoint(spec.kind)}/${spec.action}`,
-          spec.action === 'reject' ? { reason: 'Please recount the cold room.' } : undefined,
+          spec.action === 'reject'
+            ? { reason: 'Please recount the cold room.' }
+            : spec.action === 'submit'
+              ? { expectedUpdatedAt: state.adjustment.updatedAt }
+              : undefined,
         );
       else expect(state.patch).toHaveBeenCalledWith(`${endpoint(spec.kind)}/${spec.action}`);
       expect(

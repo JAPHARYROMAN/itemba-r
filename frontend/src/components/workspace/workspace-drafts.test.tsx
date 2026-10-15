@@ -20,6 +20,9 @@ const state = vi.hoisted(() => ({
   changed: false,
   reviewKey: 'first',
   signOut: vi.fn(),
+  get: vi.fn(),
+  put: vi.fn(),
+  post: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => state.router,
@@ -28,6 +31,45 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ user: state.auth, hasPermission: () => true }),
 }));
+vi.mock('@/lib/api-client', async (original) => ({
+  ...(await original<typeof import('@/lib/api-client')>()),
+  backendGet: state.get,
+  backendPut: state.put,
+  backendPost: state.post,
+}));
+
+function SynchronizedCompletionForm() {
+  const draft = useWorkspaceDraftForm(
+    { reason: '' },
+    {
+      appId: 'inventory',
+      title: 'Post adjustment',
+      context: { kind: 'adjustment-action', recordId: 'adjustment', action: 'post' },
+      busy: false,
+      onClose: () => undefined,
+    },
+  );
+  const { drafts } = useWorkspaceDrafts('inventory');
+  return (
+    <form {...draft.guard.capture}>
+      <input
+        aria-label="Completion notes"
+        value={draft.form.reason}
+        onChange={(event) => draft.setForm({ reason: event.target.value })}
+      />
+      <button
+        type="button"
+        onClick={async () => {
+          await draft.saveNow();
+          draft.markSaved();
+        }}
+      >
+        Complete action
+      </button>
+      <output aria-label="Retained completion drafts">{drafts.length}</output>
+    </form>
+  );
+}
 
 function Form({
   draftId,
@@ -221,6 +263,41 @@ beforeEach(() => {
   };
 });
 describe('Workspace draft lifecycle', () => {
+  it('does not recreate a completed synchronized draft while its discard request is pending', async () => {
+    vi.useFakeTimers();
+    let completeDiscard!: () => void;
+    state.get.mockResolvedValue([]);
+    state.put.mockResolvedValue({ revision: 1 });
+    state.post.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          completeDiscard = resolve;
+        }),
+    );
+    try {
+      render(
+        <UnsavedWorkProvider>
+          <WorkspaceDraftsProvider synchronize>
+            <SynchronizedCompletionForm />
+          </WorkspaceDraftsProvider>
+        </UnsavedWorkProvider>,
+      );
+      await act(async () => undefined);
+      fireEvent.change(screen.getByLabelText('Completion notes'), {
+        target: { value: 'Reviewed and posted' },
+      });
+      await act(async () => fireEvent.click(screen.getByText('Complete action')));
+      expect(state.post).toHaveBeenCalledOnce();
+      const draftWrites = () => state.put.mock.calls.filter(([path]) => !path.endsWith('/lease'));
+      expect(draftWrites()).toHaveLength(1);
+      await act(async () => vi.advanceTimersByTimeAsync(1200));
+      expect(draftWrites()).toHaveLength(1);
+      await act(async () => completeDiscard());
+      expect(screen.getByLabelText('Retained completion drafts')).toHaveTextContent('0');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each([true, false])(
     'does not submit an unavailable or foreign-app draft (missing=%s)',
     async (missing) => {

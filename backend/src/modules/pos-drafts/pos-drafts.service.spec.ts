@@ -160,6 +160,73 @@ function fixture(overrides: Record<string, any> = {}) {
   return { service, tx, prisma, sales, audit, getDraft: () => draft };
 }
 
+describe('POS posting stock lock order', () => {
+  it('locks the receipt order before the union of receipt and expired products', async () => {
+    const po = {
+      id: 'po',
+      companyId: 'company',
+      branchId: 'branch',
+      updatedAt: new Date('2026-10-04'),
+      totalAmount: new Prisma.Decimal(100),
+      purchaseType: 'CREDIT_PURCHASE',
+      lines: [
+        {
+          productId: 'z-receipt',
+          quantity: new Prisma.Decimal(1),
+          lineTotal: new Prisma.Decimal(50),
+        },
+        {
+          productId: 'b-receipt',
+          quantity: new Prisma.Decimal(1),
+          lineTotal: new Prisma.Decimal(50),
+        },
+      ],
+    };
+    const f = fixture({
+      kind: 'RECEIPT',
+      originRole: 'STOCKIST',
+      pendingMoney: new Prisma.Decimal(0),
+      payload: {
+        purchaseOrderId: po.id,
+        _receiptFingerprint: digest({
+          updatedAt: po.updatedAt.toISOString(),
+          totalAmount: po.totalAmount.toFixed(2),
+          lines: po.lines.map((line) => [
+            line.productId,
+            line.quantity.toString(),
+            line.lineTotal.toString(),
+          ]),
+          purchaseType: po.purchaseType,
+        }),
+      },
+    });
+    f.tx.purchaseOrder = {
+      findFirst: jest.fn().mockResolvedValue(po),
+      findUniqueOrThrow: jest.fn().mockResolvedValue(po),
+    };
+    f.tx.posDraftReservation.findMany.mockResolvedValue([{ productId: 'a-expired' }]);
+    f.service.purchases = { receive: jest.fn().mockResolvedValue({ id: po.id }) };
+    const order: string[] = [];
+    f.tx.$queryRaw.mockImplementation(async (query: Prisma.Sql) => {
+      const sql = query.strings.join('');
+      if (sql.includes('FROM purchase_orders')) order.push('purchase-order');
+      if (sql.includes('FROM products')) {
+        order.push('products');
+        expect(query.values).toEqual(['a-expired', 'b-receipt', 'z-receipt']);
+      }
+      return [];
+    });
+    f.service.expire.mockImplementation(async () => {
+      order.push('expiry');
+    });
+    expect((await f.service.approve('draft', { revision: 1 }, administrator)).status).toBe(
+      'POSTED',
+    );
+    expect(order.indexOf('purchase-order')).toBeLessThan(order.indexOf('products'));
+    expect(order.indexOf('products')).toBeLessThan(order.indexOf('expiry'));
+  });
+});
+
 describe('reason-free sale price capture', () => {
   function capture(price = 90) {
     const f = fixture();

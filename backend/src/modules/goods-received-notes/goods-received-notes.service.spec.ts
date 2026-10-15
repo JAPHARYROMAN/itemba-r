@@ -87,6 +87,36 @@ function makeService() {
 const user = { id: 'user-1' } as any;
 
 describe('GoodsReceivedNotesService stock posting idempotency', () => {
+  it('locks all products in stable order before multi-line receipts or movement numbering', async () => {
+    const { service, prisma, inventoryMovements, approvedGrn } = makeService();
+    prisma.goodsReceivedNote.findFirst.mockResolvedValue({
+      ...approvedGrn,
+      lines: ['product-z', 'product-a', 'product-z'].map((productId, index) => ({
+        ...approvedGrn.lines[0],
+        id: `line-${index}`,
+        productId,
+      })),
+    });
+    prisma.product.findMany.mockResolvedValue(
+      ['product-z', 'product-a'].map((id) => ({
+        id,
+        name: id,
+        trackInventory: true,
+        baseUnitId: 'unit-1',
+        defaultPurchasePrice: 7,
+      })),
+    );
+    await service.post('grn-1', user);
+    const lockIndex = prisma.$queryRaw.mock.calls.findIndex(([query]: any[]) =>
+      String(query.sql ?? query).includes('FROM products'),
+    );
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(prisma.$queryRaw.mock.calls[lockIndex][0].values).toEqual(['product-a', 'product-z']);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[lockIndex]).toBeLessThan(
+      inventoryMovements.createMovement.mock.invocationCallOrder[0],
+    );
+    expect(inventoryMovements.createMovement).toHaveBeenCalledTimes(3);
+  });
   it('claims an approved GRN before creating inventory movements', async () => {
     const { service, prisma, inventoryMovements } = makeService();
 

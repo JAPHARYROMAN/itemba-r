@@ -4,6 +4,7 @@ import { CreateStockAdjustmentDto } from './dto/create-stock-adjustment.dto';
 import { UpdateStockAdjustmentDto } from './dto/update-stock-adjustment.dto';
 import { QueryStockAdjustmentDto } from './dto/query-stock-adjustment.dto';
 import { RejectStockAdjustmentDto } from './dto/reject-stock-adjustment.dto';
+import { SubmitStockAdjustmentDto } from './dto/submit-stock-adjustment.dto';
 import {
   RequireAnyPermissions,
   RequirePermissions,
@@ -44,8 +45,12 @@ export class StockAdjustmentsController {
 
   @Patch(':id/submit')
   @RequirePermissions('inventory.adjustments.create')
-  submit(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.submit(id, user);
+  submit(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SubmitStockAdjustmentDto,
+  ) {
+    return this.service.submit(id, user, dto);
   }
 
   @Patch(':id/approve')

@@ -30,6 +30,21 @@ import type {
 } from './product-types';
 import './catalogue-workspace.css';
 import './product-workspace.css';
+import './product-inspector.css';
+
+function ProductEditorSurface({
+  presentation,
+  ...props
+}: React.ComponentProps<typeof Modal> & { presentation: 'modal' | 'panel' }) {
+  if (presentation === 'panel')
+    return (
+      <section className="product-settings-panel" aria-label="Product settings">
+        <div className="product-settings-body">{props.children}</div>
+        <footer className="product-settings-footer">{props.footer}</footer>
+      </section>
+    );
+  return <Modal {...props} />;
+}
 
 export function ProductEditor({
   record,
@@ -39,6 +54,7 @@ export function ProductEditor({
   onClose,
   onSaved,
   onImageChanged,
+  presentation = 'modal',
 }: {
   record?: Product;
   draftSource?: WorkspaceDraft;
@@ -47,6 +63,7 @@ export function ProductEditor({
   onClose: () => void;
   onSaved: (result: ProductCreateResponse) => void;
   onImageChanged?: () => void;
+  presentation?: 'modal' | 'panel';
 }) {
   const { hasPermission, user } = useAuth();
   const [initial] = useState(() => ({
@@ -257,6 +274,7 @@ export function ProductEditor({
           'Load family choices before creating all family sizes, or turn off that option.',
         );
       const body = productBody(form, initial, !!record, family, siblings.length);
+      if (record?.updatedAt) body.expectedUpdatedAt = record.updatedAt;
       setBusy(true);
       const result = record
         ? await backendPatch<ProductCreateResponse>(`/products/${record.id}`, body)
@@ -404,7 +422,8 @@ export function ProductEditor({
     </FormSelect>
   );
   return (
-    <Modal
+    <ProductEditorSurface
+      presentation={presentation}
       open
       title={record ? 'Edit product' : 'New product'}
       onClose={close}
@@ -463,7 +482,7 @@ export function ProductEditor({
           </p>
         )}
         <fieldset disabled={saving || !allowed}>
-          <legend>Identity & organisation</legend>
+          <legend>Basics</legend>
           <div className="catalogue-form-grid">
             <FormSelect
               label="Company"
@@ -595,71 +614,74 @@ export function ProductEditor({
             onChange={(e) => change('description', e.target.value)}
             rows={3}
           />
-        </fieldset>
-        <fieldset disabled={saving || !allowed}>
-          <legend>Family & variant</legend>
-          <FormSelect
-            label="Product family"
-            value={newFamily ? '__new__' : form.productFamilyId}
-            disabled={!form.categoryId || families.loading || !!families.error || !canReadFamilies}
-            onChange={(e) => chooseFamily(e.target.value)}
-          >
-            <option value="">No family</option>
-            <option value="__new__">Create a new family…</option>
-            {form.productFamilyId && !scopedFamilies.some((f) => f.id === form.productFamilyId) && (
-              <option value={form.productFamilyId}>
-                {record?.productFamily?.name || form.productFamilyId}
-              </option>
-            )}
-            {scopedFamilies.map((f) => (
-              <option key={f.id} value={f.id}>
-                {[f.brand, f.name].filter(Boolean).join(' · ')}
-              </option>
-            ))}
-          </FormSelect>
-          <CatalogueChoiceError label="Family" source={families} />
-          {newFamily && (
-            <>
-              <div className="catalogue-form-grid">
-                {text('productFamilyName', 'New family name', true)}
-                {text('productFamilyBrand', 'Family brand')}
-              </div>
-              <p className="catalogue-help">
-                The family is created when you save this product. An existing family with the same
-                name and scope is reused.
-              </p>
-            </>
-          )}
-          <div className="catalogue-form-grid">
-            {text('variantName', 'Variant name')}
-            {text('variantColor', 'Colour')}
-            {text('variantSize', 'Size')}
-            {text('variantFinish', 'Finish')}
-          </div>
-          {!record && form.productFamilyId && (
-            <div className="product-price-note">
-              {checkbox('createFamilyVariants', 'Create all family sizes')}
-              <p className="catalogue-help">
-                {families.loading
-                  ? 'Loading family sizes…'
-                  : `${siblings.length} other active ${siblings.length === 1 ? 'family' : 'families'} in this category and scope.`}{' '}
-                Each generated product uses its family’s prices. Existing variants and families with
-                unsuitable prices are skipped.
-              </p>
-              {siblings.length > 0 && (
+          <section className="product-settings-subgroup" aria-label="Family & variant">
+            <h3>Family & variant</h3>
+            <FormSelect
+              label="Product family"
+              value={newFamily ? '__new__' : form.productFamilyId}
+              disabled={
+                !form.categoryId || families.loading || !!families.error || !canReadFamilies
+              }
+              onChange={(e) => chooseFamily(e.target.value)}
+            >
+              <option value="">No family</option>
+              <option value="__new__">Create a new family…</option>
+              {form.productFamilyId &&
+                !scopedFamilies.some((f) => f.id === form.productFamilyId) && (
+                  <option value={form.productFamilyId}>
+                    {record?.productFamily?.name || form.productFamilyId}
+                  </option>
+                )}
+              {scopedFamilies.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {[f.brand, f.name].filter(Boolean).join(' · ')}
+                </option>
+              ))}
+            </FormSelect>
+            <CatalogueChoiceError label="Family" source={families} />
+            {newFamily && (
+              <>
+                <div className="catalogue-form-grid">
+                  {text('productFamilyName', 'New family name', true)}
+                  {text('productFamilyBrand', 'Family brand')}
+                </div>
                 <p className="catalogue-help">
-                  {siblings
-                    .slice(0, 6)
-                    .map((f) => [f.brand, f.name].filter(Boolean).join(' · '))
-                    .join(', ')}
-                  {siblings.length > 6 ? ` and ${siblings.length - 6} more` : ''}
+                  The family is created when you save this product. An existing family with the same
+                  name and scope is reused.
                 </p>
-              )}
+              </>
+            )}
+            <div className="catalogue-form-grid">
+              {text('variantName', 'Variant name')}
+              {text('variantColor', 'Colour')}
+              {text('variantSize', 'Size')}
+              {text('variantFinish', 'Finish')}
             </div>
-          )}
+            {!record && form.productFamilyId && (
+              <div className="product-price-note">
+                {checkbox('createFamilyVariants', 'Create all family sizes')}
+                <p className="catalogue-help">
+                  {families.loading
+                    ? 'Loading family sizes…'
+                    : `${siblings.length} other active ${siblings.length === 1 ? 'family' : 'families'} in this category and scope.`}{' '}
+                  Each generated product uses its family’s prices. Existing variants and families
+                  with unsuitable prices are skipped.
+                </p>
+                {siblings.length > 0 && (
+                  <p className="catalogue-help">
+                    {siblings
+                      .slice(0, 6)
+                      .map((f) => [f.brand, f.name].filter(Boolean).join(' · '))
+                      .join(', ')}
+                    {siblings.length > 6 ? ` and ${siblings.length - 6} more` : ''}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
         </fieldset>
         <fieldset disabled={saving || !allowed}>
-          <legend>Prices & tax</legend>
+          <legend>Pricing</legend>
           {checkbox('useFamilyPrice', 'Inherit family selling prices', !form.productFamilyId)}
           {form.useFamilyPrice && (
             <div className="product-price-note">
@@ -693,8 +715,6 @@ export function ProductEditor({
               </span>
             </p>
           )}
-          {checkbox('isTaxable', 'Taxable product')}
-          {form.isTaxable && number('taxRate', 'Tax rate (%)')}
         </fieldset>
         <fieldset disabled={saving || !allowed}>
           <legend>Units & inventory</legend>
@@ -704,14 +724,22 @@ export function ProductEditor({
             {unitSelect('salesUnitId', 'Sales unit')}
           </div>
           <CatalogueChoiceError label="Unit" source={units} />
-          {checkbox('trackInventory', 'Track inventory')}
-          {checkbox('trackBatch', 'Track batches')}
-          {checkbox('trackExpiry', 'Track expiry dates')}
-          <div className="catalogue-form-grid">
-            {number('minimumStockLevel', 'Minimum stock')}
-            {number('maximumStockLevel', 'Maximum stock')}
-            {number('reorderLevel', 'Reorder level')}
-          </div>
+          <section className="product-settings-subgroup" aria-label="Stock controls">
+            <h3>Stock controls</h3>
+            {checkbox('trackInventory', 'Track inventory')}
+            {checkbox('trackBatch', 'Track batches')}
+            {checkbox('trackExpiry', 'Track expiry dates')}
+            <div className="catalogue-form-grid">
+              {number('minimumStockLevel', 'Minimum stock')}
+              {number('maximumStockLevel', 'Maximum stock')}
+              {number('reorderLevel', 'Reorder level')}
+            </div>
+          </section>
+        </fieldset>
+        <fieldset disabled={saving || !allowed}>
+          <legend>Tax</legend>
+          {checkbox('isTaxable', 'Taxable product')}
+          {form.isTaxable && number('taxRate', 'Tax rate (%)')}
         </fieldset>
       </form>
       <section className="product-image-editor" aria-label="Product photo management">
@@ -729,6 +757,12 @@ export function ProductEditor({
               </p>
             )}
             {imageNotice && <p role="status">{imageNotice}</p>}
+            {imageNotice && record.updatedAt && (
+              <p className="catalogue-help">
+                Refresh the product and review your draft before saving product details after an
+                image change.
+              </p>
+            )}
             {imageUrl && (
               <div className="product-image-preview">
                 <Image
@@ -809,6 +843,6 @@ export function ProductEditor({
           </p>
         )}
       </section>
-    </Modal>
+    </ProductEditorSurface>
   );
 }

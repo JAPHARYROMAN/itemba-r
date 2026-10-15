@@ -285,7 +285,9 @@ export function useWorkspaceDraftForm<T>(
   useEffect(() => {
     if (!store?.sync || options.busy || !actions.current.isDirty() || !actions.current.ownsDraft())
       return;
-    const timer = setTimeout(() => actions.current.retain(), 1000);
+    const timer = setTimeout(() => {
+      if (actions.current.isDirty() && actions.current.ownsDraft()) actions.current.retain();
+    }, 1000);
     return () => clearTimeout(timer);
   }, [form, options.busy, store]);
   useEffect(() => {
@@ -315,6 +317,16 @@ export function useWorkspaceDraftForm<T>(
       return saveNow();
     },
     saveNow,
+    persistRequest: async (key: string, metadata: Record<string, string>) => {
+      if (!ownsDraft()) throw new Error('This draft is no longer available in this window.');
+      requestId.current = key;
+      requestContext.current = { ...context(), ...metadata };
+      await saveNow();
+    },
+    clearRequestSnapshot: () => {
+      // A definitive rejection permits corrected input, while durable draft identity stays stable.
+      requestContext.current = null;
+    },
     syncStatus: store?.sync?.status(id),
     syncError: store?.sync?.error(id),
     guard,

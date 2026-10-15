@@ -20,6 +20,7 @@ import { applyDeskCashEffect } from '../cash-desk/cash-balance-effect';
 import { CashConnectionsService } from '../desk-reports/cash-connections.service';
 import { DeskPostingSource, sourceFingerprint } from '../desk-reports/desk-posting.domain';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { lockInventoryProducts } from '../inventory-movements/inventory-product-lock';
 import { calculateReport, ReportCatalog } from '../fuel-reporting/fuel-reporting.calculate';
 import { ReportPayloadDto } from '../fuel-reporting/fuel-reporting.dto';
 import { PETRODOLLAR_COMPANY_CODE, PetroDollarService } from './petrodollar.service';
@@ -494,6 +495,10 @@ export class PetroDollarPostingService {
         await this.validateSelections(tx, user, report, dto.selections);
         const s = dto.selections;
         const beforeStock: StockSnapshot[] = [];
+        await lockInventoryProducts(
+          tx,
+          summary.stock.map((row) => row.productId),
+        );
         const products = await tx.product.findMany({
           where: {
             id: { in: summary.stock.map((r) => r.productId) },
@@ -956,6 +961,10 @@ export class PetroDollarPostingService {
         if (latest?.id !== id)
           throw new ConflictException('Reverse and reopen later shifts first.');
         const e = posting.evidence as unknown as Evidence;
+        await lockInventoryProducts(
+          tx,
+          e.beforeStock.map((row) => row.productId),
+        );
         const sales = await tx.salesDeskSale.findMany({
           where: { fuelReportPostingId: posting.id },
           include: { payments: true },

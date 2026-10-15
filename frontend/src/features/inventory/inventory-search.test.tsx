@@ -33,6 +33,30 @@ describe('inventory search links', () => {
 });
 
 describe('InventorySearch', () => {
+  it('opens the chosen exact product ID when matching products have the same name', async () => {
+    h.backendPage.mockResolvedValue({
+      data: [
+        { id: 'one', name: 'Duplicate product', productCode: 'A-1' },
+        { id: 'two', name: 'Duplicate product', productCode: 'A-2' },
+      ],
+      total: 2,
+    });
+    const navigate = vi.fn();
+    render(
+      <InventorySearch
+        scope={scope}
+        query="Duplicate"
+        permissions={{ balances: true, movements: true, batches: true, catalog: true }}
+        onNavigate={navigate}
+        onQueryChange={vi.fn()}
+      />,
+    );
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Search inventory' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Duplicate product A-2/ }));
+    expect(navigate).toHaveBeenCalledWith(
+      '/inventory?tab=catalog&view=products&companyId=company-1&divisionId=division-1&branchId=branch-1&productId=two&q=Duplicate',
+    );
+  });
   it('ignores obsolete scope responses and does not open stale results while loading', async () => {
     let resolve!: (p: unknown) => void;
     h.backendPage.mockImplementationOnce(
@@ -156,7 +180,7 @@ describe('InventorySearch', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Movements' }));
     expect(onNavigate).toHaveBeenCalledWith(
-      '/inventory?tab=stock&view=movements&companyId=company-1&divisionId=division-1&branchId=branch-1&productId=product-1&q=cement',
+      '/inventory?tab=stock&view=movements&companyId=company-1&divisionId=division-1&branchId=branch-1&productId=product-1',
     );
     await waitFor(() => expect(onQueryChange).toHaveBeenCalledWith('cement'));
   });

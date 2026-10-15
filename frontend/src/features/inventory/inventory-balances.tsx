@@ -25,6 +25,7 @@ import { downloadTablePdf, TABLE_PDF_MAX_ROWS } from '@/lib/export-download';
 import { cellToString, downloadTextFile, rowsToCsv } from '@/lib/report-export';
 import { InventoryScope } from './inventory-scope';
 import { useInventoryWorkspace } from './inventory-workspace-context';
+import { useInventoryStockEditor } from './inventory-drafts';
 import { inventoryProductHref, inventoryViewHref } from './inventory-search';
 import './inventory-workspace.css';
 
@@ -154,18 +155,31 @@ function Balances() {
   }));
   const scope = workspace?.scope || local;
   const scopeKey = JSON.stringify(scope);
+  const externalProduct = params.get('productId') || '';
   const [selection, setSelection] = useState({
     scope: scopeKey,
+    externalProduct,
     categoryId: '',
     productFamilyId: '',
     productId: params.get('productId') || '',
   });
   const { categoryId, productFamilyId, productId } =
-    selection.scope === scopeKey
+    selection.scope === scopeKey && selection.externalProduct === externalProduct
       ? selection
-      : { categoryId: '', productFamilyId: '', productId: '' };
+      : {
+          categoryId: selection.scope === scopeKey ? selection.categoryId : '',
+          productFamilyId: selection.scope === scopeKey ? selection.productFamilyId : '',
+          productId: externalProduct,
+        };
   const select = (values: Partial<typeof selection>) =>
-    setSelection({ scope: scopeKey, categoryId, productFamilyId, productId, ...values });
+    setSelection({
+      scope: scopeKey,
+      externalProduct,
+      categoryId,
+      productFamilyId,
+      productId,
+      ...values,
+    });
   const externalSearch = workspace?.searchQuery ?? params.get('q') ?? '';
   const [searchState, setSearchState] = useState({
     external: externalSearch,
@@ -202,6 +216,7 @@ function Balances() {
     { ...filters, page, limit: 25 },
     canRead,
   );
+  const stockEditor = useInventoryStockEditor(result.reload);
   const summary = useWorkspaceResource<Summary>('/inventory-balances/summary', filters, canRead);
   const categories = useWorkspaceChoices<Choice>(
     '/product-categories',
@@ -484,6 +499,19 @@ function Balances() {
         ]}
         actions={(r) => (
           <>
+            {r.branchId && hasPermission('inventory.adjustments.create') && (
+              <Btn
+                onClick={() =>
+                  stockEditor.open({
+                    kind: 'adjustment',
+                    scope: rowScope(r),
+                    productId: r.productId,
+                  })
+                }
+              >
+                Adjust stock
+              </Btn>
+            )}
             {hasPermission('inventory.movements.view') && (
               <Link
                 className="workspace-secondary-link"
@@ -534,6 +562,7 @@ function Balances() {
         )}
         empty="No balances match this view. Change the scope or filters to see other stock."
       />
+      {stockEditor.drafts}
     </div>
   );
 }

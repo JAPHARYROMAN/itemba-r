@@ -402,7 +402,6 @@ describe('Measurement editors', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'New unit' })).not.toBeInTheDocument(),
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Find a product' }));
     fireEvent.click(screen.getByRole('button', { name: 'Repeat inventory search' }));
     expect(state.replace).toHaveBeenCalledTimes(1);
   });

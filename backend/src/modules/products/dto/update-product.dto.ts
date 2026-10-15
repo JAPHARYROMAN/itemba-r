@@ -1,14 +1,21 @@
 import {
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsNumber,
   IsOptional,
+  IsNotEmpty,
   IsString,
   Min,
 } from 'class-validator';
 import { ProductType, ProductStatus } from '@prisma/client';
+import { Transform } from 'class-transformer';
 
 export class UpdateProductDto {
+  /** Compare the version shown by the editor before applying any changes. */
+  @IsOptional()
+  @IsDateString()
+  expectedUpdatedAt?: string;
   @IsOptional()
   @IsString()
   productCode?: string;
@@ -34,7 +41,9 @@ export class UpdateProductDto {
   productFamilyBrand?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty()
   name?: string;
 
   @IsOptional()

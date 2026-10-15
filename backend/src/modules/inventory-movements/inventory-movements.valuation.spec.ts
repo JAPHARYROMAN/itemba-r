@@ -42,7 +42,7 @@ function makeService() {
     assertInventoryMovementHasCost: jest.fn().mockResolvedValue(undefined),
   } as any;
   const service = new InventoryMovementsService(prisma, auditLogs, codes, companyScope, profit);
-  return { service, auditLogs };
+  return { service, auditLogs, profit };
 }
 
 /**
@@ -119,6 +119,51 @@ function row(over: Partial<BalanceRow> = {}): BalanceRow {
 }
 
 describe('InventoryMovementsService WAC valuation (#3, #13)', () => {
+  it('allows an uncosted count only at the verified negative-to-zero boundary', async () => {
+    const { service, profit } = makeService();
+    profit.assertInventoryMovementHasCost.mockRejectedValue(
+      new BadRequestException('positive cost required'),
+    );
+    const { tx, updateCalls } = makeTx(row({ quantityOnHand: new Prisma.Decimal(-2) }));
+    tx.inventoryBalance.findUnique = jest
+      .fn()
+      .mockResolvedValue({ quantityOnHand: new Prisma.Decimal(-2) });
+    await service.createMovement({
+      ...base,
+      quantity: 2,
+      movementType: 'ADJUSTMENT_IN',
+      referenceType: 'StockAdjustment',
+      tx,
+    });
+    expect(profit.assertInventoryMovementHasCost).not.toHaveBeenCalled();
+    expect(updateCalls[0].data.totalValue.toString()).toBe('0');
+    tx.inventoryBalance.findUnique.mockResolvedValue({ quantityOnHand: new Prisma.Decimal(0) });
+    await expect(
+      service.createMovement({
+        ...base,
+        quantity: 2,
+        movementType: 'ADJUSTMENT_IN',
+        referenceType: 'StockAdjustment',
+        tx,
+      }),
+    ).rejects.toThrow('positive cost required');
+    expect(profit.assertInventoryMovementHasCost).toHaveBeenCalledTimes(1);
+  });
+  it('corrects negative on-hand to zero without manufacturing a residual asset', async () => {
+    const { service } = makeService();
+    const { tx, updateCalls } = makeTx(row({ quantityOnHand: new Prisma.Decimal(-2) }));
+    await service.createMovement({
+      ...base,
+      quantity: 2,
+      unitCost: 10,
+      movementType: 'ADJUSTMENT_IN',
+      tx,
+    });
+    expect(updateCalls[0].data.quantityOnHand).toBe(0);
+    expect(updateCalls[0].data.totalValue.toString()).toBe('0');
+    expect(updateCalls[0].data.averageCost.toString()).toBe('0');
+    expect(tx.$queryRaw.mock.calls[0][0].strings.join('')).toContain('FROM products');
+  });
   it('relieves outbound totalValue ADDITIVELY (does not increase value on outbound)', async () => {
     // Reproduces the finding scenario: qty=10, averageCost=8, but totalValue is
     // only 40 (invariant broken by a prior cost-less inbound). A SALE_ISSUE of 4
@@ -336,6 +381,7 @@ describe('InventoryMovementsService reserved-stock guard (#25)', () => {
     const { service } = makeService();
     const { tx, updateCalls } = makeTx(row());
     tx.$queryRaw
+      .mockResolvedValueOnce([{ id: 'product-1' }])
       .mockResolvedValueOnce([
         row({
           quantityOnHand: new Prisma.Decimal(10),

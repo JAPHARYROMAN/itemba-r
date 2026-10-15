@@ -99,6 +99,7 @@ describe('StockDamageService.post GL swing', () => {
     // Subledger: totalValue 1000.00 before the DAMAGE, 550.25 after.
     // Measured relief = 449.75. A naive min(qty*avgCost, totalValue) could differ.
     tx.$queryRaw
+      .mockResolvedValueOnce([{ id: 'product-1' }])
       .mockResolvedValueOnce([{ totalValue: new Prisma.Decimal('1000.00') }])
       .mockResolvedValueOnce([{ totalValue: new Prisma.Decimal('550.25') }]);
 
@@ -106,7 +107,8 @@ describe('StockDamageService.post GL swing', () => {
 
     // Movement applied exactly once, between the two FOR UPDATE reads.
     expect(inventoryMovements.createMovement).toHaveBeenCalledTimes(1);
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(tx.$queryRaw.mock.calls[0][0].strings.join('')).toContain('FROM products');
 
     const lines = legs(postingEngine.postLines);
     const expense = lines.find((l) => l.accountId === 'acct-GENERAL_EXPENSE')!;
@@ -126,6 +128,7 @@ describe('StockDamageService.post GL swing', () => {
     // is the ENTIRE existing value regardless of qty*avgCost.
     const { service, tx, postingEngine } = makeService();
     tx.$queryRaw
+      .mockResolvedValueOnce([{ id: 'product-1' }])
       .mockResolvedValueOnce([{ totalValue: new Prisma.Decimal('730.00') }])
       .mockResolvedValueOnce([{ totalValue: new Prisma.Decimal('0') }]);
 
@@ -140,6 +143,7 @@ describe('StockDamageService.post GL swing', () => {
   it('skips the GL entry entirely when there is no cost basis (before == after)', async () => {
     const { service, tx, postingEngine, accountResolver } = makeService();
     tx.$queryRaw
+      .mockResolvedValueOnce([{ id: 'product-1' }])
       .mockResolvedValueOnce([{ totalValue: new Prisma.Decimal('0') }])
       .mockResolvedValueOnce([{ totalValue: new Prisma.Decimal('0') }]);
 
@@ -151,7 +155,10 @@ describe('StockDamageService.post GL swing', () => {
 
   it('treats a missing balance row (no rows) as zero value on both reads', async () => {
     const { service, tx, postingEngine } = makeService();
-    tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    tx.$queryRaw
+      .mockResolvedValueOnce([{ id: 'product-1' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
 
     await service.post('dmg-1', user);
 
@@ -162,6 +169,10 @@ describe('StockDamageService.post GL swing', () => {
     const { service, tx, inventoryMovements } = makeService();
     const order: string[] = [];
     tx.$queryRaw
+      .mockImplementationOnce(async () => {
+        order.push('product');
+        return [{ id: 'product-1' }];
+      })
       .mockImplementationOnce(async () => {
         order.push('before');
         return [{ totalValue: new Prisma.Decimal('500.00') }];
@@ -176,7 +187,7 @@ describe('StockDamageService.post GL swing', () => {
 
     await service.post('dmg-1', user);
 
-    expect(order).toEqual(['before', 'movement', 'after']);
+    expect(order).toEqual(['product', 'before', 'movement', 'after']);
   });
 
   it('rejects posting a record that is not APPROVED', async () => {

@@ -100,6 +100,7 @@ export function productBody(
   if (editing && initial.productCode && !form.productCode.trim())
     throw new Error('Product code cannot be cleared.');
   for (const key of PRODUCT_NUMBERS) {
+    if (editing && form[key] === initial[key]) continue;
     if (form[key].trim() && (!Number.isFinite(Number(form[key])) || Number(form[key]) < 0))
       throw new Error(
         `${productLabel(key.replace(/([A-Z])/g, '_$1'))} must be a finite, non-negative amount.`,
@@ -107,6 +108,19 @@ export function productBody(
   }
   const requiresCost =
     form.trackInventory && !['SERVICE', 'NON_STOCK_ITEM'].includes(form.productType);
+  const pricingChanged =
+    !editing ||
+    (
+      [
+        'defaultPurchasePrice',
+        ...SELLING_PRICES,
+        'productType',
+        'trackInventory',
+        'productFamilyId',
+        'productFamilyName',
+        'useFamilyPrice',
+      ] as const
+    ).some((key) => form[key] !== initial[key]);
   const clearingCost =
     editing &&
     form.defaultPurchasePrice !== initial.defaultPurchasePrice &&
@@ -114,16 +128,22 @@ export function productBody(
   const cost = Number(
     form.defaultPurchasePrice || (clearingCost ? 0 : family?.defaultPurchasePrice) || 0,
   );
-  if (requiresCost && cost <= 0)
+  if (pricingChanged && requiresCost && cost <= 0)
     throw new Error('Stock products must have a purchase price greater than zero.');
-  if (form.useFamilyPrice && !form.productFamilyId)
+  if (pricingChanged && form.useFamilyPrice && !form.productFamilyId)
     throw new Error('Select a family before inheriting its prices.');
   const inherits =
     !!form.productFamilyId &&
     (form.useFamilyPrice || SELLING_PRICES.every((key) => Number(form[key]) <= 0));
-  if (requiresCost && inherits && familySelling(family) > 0 && familySelling(family) <= cost)
+  if (
+    pricingChanged &&
+    requiresCost &&
+    inherits &&
+    familySelling(family) > 0 &&
+    familySelling(family) <= cost
+  )
     throw new Error('The inherited family selling price must be greater than purchase price.');
-  if (requiresCost && !form.useFamilyPrice)
+  if (pricingChanged && requiresCost && !form.useFamilyPrice)
     for (const key of SELLING_PRICES) {
       const amount = Number(form[key]);
       if (amount > 0 && amount <= cost)

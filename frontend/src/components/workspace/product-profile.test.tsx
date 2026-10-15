@@ -164,7 +164,7 @@ describe('product profile', () => {
     await screen.findByText('MOV-01');
     expect(screen.getByRole('link', { name: 'Open inventory movements →' })).toHaveAttribute(
       'href',
-      '/inventory?tab=stock&view=movements&companyId=company',
+      '/inventory?tab=stock&view=movements&companyId=company&productId=product',
     );
     capture('product-profile-movements');
     expect(state.get.mock.calls.filter(([path]) => path.includes('/ledger'))).toHaveLength(0);
@@ -402,5 +402,70 @@ describe('product profile', () => {
     await screen.findByText('“Coral white” updated.');
     expect(state.patch).toHaveBeenLastCalledWith('/products/product', { name: 'Coral revised' });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+  it('keeps explicit origin scope in stock, movement and profit reads and linked workspaces', async () => {
+    render(
+      <UnsavedWorkProvider>
+        <ProductProfile
+          productId="product"
+          backHref={backHref}
+          scope={{ companyId: 'company', divisionId: 'division', branchId: 'branch' }}
+        />
+      </UnsavedWorkProvider>,
+    );
+    await screen.findByRole('heading', { name: product.name });
+    expect(screen.getByText('Stock and activity stay in the selected branch.')).toBeVisible();
+    await section('Stock by branch');
+    await screen.findByText('Central warehouse');
+    expect(state.page).toHaveBeenCalledWith(
+      '/inventory-balances',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          companyId: 'company',
+          productId: 'product',
+          divisionId: 'division',
+          branchId: 'branch',
+        }),
+      }),
+    );
+    await section('Movement history');
+    await screen.findByText('MOV-01');
+    expect(state.get).toHaveBeenCalledWith(
+      '/inventory-movements',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          companyId: 'company',
+          productId: 'product',
+          divisionId: 'division',
+          branchId: 'branch',
+        }),
+      }),
+    );
+    expect(screen.getByRole('link', { name: 'Open inventory movements →' })).toHaveAttribute(
+      'href',
+      '/inventory?tab=stock&view=movements&companyId=company&divisionId=division&branchId=branch&productId=product',
+    );
+    await section('Profitability');
+    await screen.findByText('SO-001');
+    expect(state.get).toHaveBeenCalledWith(
+      '/profit/products/product/ledger',
+      expect.objectContaining({
+        query: { companyId: 'company', divisionId: 'division', branchId: 'branch' },
+      }),
+    );
+  });
+  it('refuses to present a product as belonging to a different explicit organisation scope', async () => {
+    render(
+      <UnsavedWorkProvider>
+        <ProductProfile
+          productId="product"
+          backHref={backHref}
+          scope={{ companyId: 'foreign', divisionId: '', branchId: '' }}
+        />
+      </UnsavedWorkProvider>,
+    );
+    expect(await screen.findByText('Product unavailable in the selected scope.')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: product.name })).not.toBeInTheDocument();
+    expect(state.page).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InventoryDraftWorkspace, useInventoryDraftEditor } from './inventory-drafts';
+import type { CountRequest } from './inventory-adjustment-save';
 import { WorkspaceSessionProvider } from '@/components/workspace/workspace-session';
 import { WorkspaceDraftsProvider } from '@/components/workspace/workspace-drafts';
 import {
@@ -14,6 +15,7 @@ import {
   changeSelectField,
   getSelectField,
   selectFieldOptions,
+  selectFieldText,
   selectFieldValue,
 } from '@/test/select-field';
 
@@ -21,6 +23,7 @@ const api = vi.hoisted(() => ({
   get: vi.fn(),
   page: vi.fn(),
   post: vi.fn(),
+  patch: vi.fn(),
   saved: vi.fn(),
   balance: '10',
   denied: new Set<string>(),
@@ -42,12 +45,15 @@ vi.mock('@/lib/api-client', () => ({
   backendGet: api.get,
   backendPage: api.page,
   backendPost: api.post,
+  backendPatch: api.patch,
   backendList: async (...args: unknown[]) => (await api.page(...args)).data,
 }));
 const scope = { companyId: 'company', divisionId: 'division', branchId: 'branch' };
 const product = {
   id: 'milk',
   name: 'Fresh milk',
+  baseUnitId: 'unit',
+  baseUnit: { id: 'unit', name: 'Litre', symbol: 'L' },
   defaultUnitId: 'unit',
   effectivePurchasePrice: 12,
 };
@@ -97,6 +103,7 @@ function App({ legacy = false }: { legacy?: boolean }) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  api.post.mockReset();
   api.balance = '10';
   api.denied = new Set();
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
@@ -107,7 +114,29 @@ beforeEach(() => {
     this.removeAttribute('open');
   };
   api.get.mockResolvedValue(product);
-  api.post.mockResolvedValue({ id: 'saved' });
+  api.post.mockImplementation(async (path: string, body: CountRequest) =>
+    path === '/stock-adjustments'
+      ? {
+          ...body,
+          id: 'saved',
+          status: 'DRAFT',
+          divisionId: body.divisionId ?? 'division',
+          notes: body.notes ?? null,
+          updatedAt: '2026-10-13T12:00:00.000Z',
+          lines: body.lines.map((line, index) => ({
+            id: `saved-line-${index}`,
+            productId: line.productId,
+            unitId: line.unitId,
+            systemQuantity: String(line.systemQuantity),
+            countedQuantity: String(line.countedQuantity),
+            varianceQuantity: (line.countedQuantity - line.systemQuantity).toFixed(4),
+            unitCost: line.unitCost ?? null,
+            reason: line.reason ?? null,
+          })),
+        }
+      : { id: 'saved', status: 'DRAFT' },
+  );
+  api.patch.mockResolvedValue({ id: 'saved', status: 'PENDING_APPROVAL' });
   api.page.mockImplementation(async (path: string) => {
     const rows: Record<string, unknown[]> = {
       '/companies': [
@@ -128,7 +157,7 @@ beforeEach(() => {
           remainingQuantity: '10',
         },
       ],
-      '/inventory-balances': [{ quantityOnHand: api.balance }],
+      '/inventory-balances': [{ quantityOnHand: api.balance, physicalRevision: 1 }],
     };
     const data = rows[path] ?? [];
     return { data, total: data.length, page: 1, limit: 100 };
@@ -136,14 +165,14 @@ beforeEach(() => {
 });
 async function beginCount() {
   fireEvent.click(screen.getByRole('button', { name: 'Start adjustment' }));
-  await waitFor(() =>
-    expect(selectFieldOptions(getSelectField('Unit, line 1'))).toContain('Litre (L)'),
-  );
-  fireEvent.focus(screen.getByRole('combobox', { name: 'Product, line 1' }));
-  fireEvent.click(
-    within(await screen.findByRole('option', { name: /Fresh milk/ })).getByRole('button'),
-  );
-  await waitFor(() => expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(10));
+  await waitFor(() => {
+    const unit = getSelectField('Unit, line 1');
+    expect(unit).toBeDisabled();
+    expect(selectFieldText(unit)).toBe('Litre (L)');
+    const systemQuantity = screen.getByLabelText(/System quantity, line 1/);
+    expect(systemQuantity).toHaveValue(10);
+    expect(systemQuantity).toBeDisabled();
+  });
   fireEvent.change(screen.getByLabelText(/Adjustment reason/), {
     target: { value: 'Branch stock count' },
   });
@@ -158,6 +187,49 @@ async function returnToDraft(title: string) {
 }
 
 describe('Inventory session drafts', () => {
+  it('preserves the loaded base unit and entered count when the same product is selected again', async () => {
+    render(<App />);
+    await beginCount();
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Product, line 1' }));
+    fireEvent.click(
+      within(await screen.findByRole('option', { name: /Fresh milk/ })).getByRole('button'),
+    );
+    expect(selectFieldText(getSelectField('Unit, line 1'))).toBe('Litre (L)');
+    expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(10);
+    expect(screen.getByLabelText(/Counted quantity, line 1/)).toHaveValue(8);
+    expect(screen.getByText('Difference:', { exact: false })).toHaveTextContent('-2');
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft', exact: true }));
+    await screen.findByRole('button', { name: 'Done' });
+    expect(api.post).toHaveBeenCalledWith(
+      '/stock-adjustments',
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            productId: 'milk',
+            unitId: 'unit',
+            systemQuantity: 10,
+            countedQuantity: 8,
+          }),
+        ],
+      }),
+    );
+  });
+  it('keeps the original discrepancy visible during uncertain creation recovery after stock changes', async () => {
+    render(<App />);
+    await beginCount();
+    api.post.mockRejectedValueOnce(new Error('Creation response lost'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save and submit', exact: true }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Creation response lost');
+    const original = api.post.mock.calls[0][1];
+    api.balance = '12';
+    await returnToDraft('Stock count');
+    await waitFor(() => expect(screen.getByLabelText(/System quantity, line 1/)).toHaveValue(10));
+    expect(screen.getByLabelText(/Counted quantity, line 1/)).toHaveValue(8);
+    expect(screen.getByText('Difference:', { exact: false })).toHaveTextContent('-2');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry save and submit' }));
+    await screen.findByRole('button', { name: 'Done' });
+    expect(api.post.mock.calls[1][1]).toEqual(original);
+  });
   it('shares one kept count between Inventory and the legacy ERP register without duplicate editors', async () => {
     render(
       <WorkspaceSessionProvider>
@@ -199,7 +271,7 @@ describe('Inventory session drafts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Keep draft', exact: true }));
     fireEvent.click(erp.getByRole('button', { name: 'Resume Stock count' }));
     expect(await screen.findByLabelText(/Adjustment reason/)).toHaveValue('Updated count notes');
-    expect(screen.getAllByRole('dialog', { name: 'New stock adjustment' })).toHaveLength(1);
+    expect(screen.getAllByRole('dialog', { name: 'Adjust stock' })).toHaveLength(1);
     expect(api.post).not.toHaveBeenCalled();
   });
   it('reloads a changed balance, preserves the count and requires explicit review before saving', async () => {
@@ -218,7 +290,8 @@ describe('Inventory session drafts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save draft', exact: true }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Stock service unavailable');
     expect(screen.getByLabelText(/Counted quantity, line 1/)).toHaveValue(8);
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry save and submit', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Done' }));
     await waitFor(() => expect(api.saved).toHaveBeenCalledOnce());
     expect(api.post).toHaveBeenLastCalledWith(
       '/stock-adjustments',
@@ -333,7 +406,7 @@ describe('Inventory session drafts', () => {
     api.denied.add('inventory.adjustments.create');
     fireEvent.click(screen.getByRole('button', { name: 'Resume Stock count' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Your current role cannot open');
-    expect(screen.queryByRole('dialog', { name: 'New stock adjustment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Adjust stock' })).not.toBeInTheDocument();
     expect(api.post).not.toHaveBeenCalled();
   });
   it('requires review if the draft was kept while the original stock balance was still loading', async () => {

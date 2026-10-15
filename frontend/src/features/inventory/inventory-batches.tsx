@@ -96,21 +96,30 @@ function Batches() {
     productId: params.get('productId') || '',
     search: workspace?.searchQuery ?? params.get('q') ?? params.get('search') ?? '',
   };
-  const externalKey = JSON.stringify([external, workspace?.scope]);
+  const externalKey = JSON.stringify([{ ...external, search: undefined }, workspace?.scope]);
   const stateKey = useInventoryStateKey('batches');
   const [local, setLocal] = useWorkspaceState(`${stateKey}.filters`, {
     key: externalKey,
     value: external,
   });
-  const state = local.key === externalKey ? local.value : external;
+  const [localSearch, setLocalSearch] = useWorkspaceState(`${stateKey}.search`, {
+    key: external.search,
+    value: external.search,
+  });
+  const state = {
+    ...(local.key === externalKey ? local.value : external),
+    search: localSearch.key === external.search ? localSearch.value : external.search,
+  };
   const scope = workspace?.scope || {
     companyId: state.companyId,
     divisionId: state.divisionId,
     branchId: state.branchId,
   };
   const scopeKey = JSON.stringify(scope);
-  const change = (values: Partial<typeof external>) =>
+  const change = (values: Partial<typeof external>) => {
+    if (values.search !== undefined) setLocalSearch({ key: external.search, value: values.search });
     setLocal({ key: externalKey, value: { ...state, ...values } });
+  };
   const [reviewState, setReview] = useWorkspaceState(`${stateKey}.review`, {
     key: scopeKey,
     review: 'all',
