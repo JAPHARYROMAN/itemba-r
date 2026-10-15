@@ -144,11 +144,15 @@ describe.each(cases)('$path', (page) => {
     const section = html.match(/<section[^>]*id="enquire"[\s\S]*?<\/section>/)?.[0] ?? '';
     expect(section).toContain('data-enquiry-router=""');
     expect(section).toContain('data-default-intent="general"');
-    expect(section).toContain('name="organization"');
+    expect(section).toContain('data-contact-mode="direct"');
     expect(textOf(section)).toContain(page.routerTitle);
     expect(html.match(/data-enquiry-router=""/g)).toHaveLength(1);
-    // The no-JS guard: the submit button is disabled in the server HTML.
-    expect(section).toMatch(/<button type="submit" disabled=""/);
+    // Direct channels are server-rendered; visitors do not submit details here.
+    expect(section).not.toContain('<form');
+    expect(section).not.toContain('type="submit"');
+    expect(section).toContain('href="mailto:');
+    expect(section).toContain('href="tel:');
+    expect(section).toContain('wa.me/');
   });
 
   it('lands every in-page link on an id that exists', () => {

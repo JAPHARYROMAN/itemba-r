@@ -10,13 +10,11 @@
  *     window-level listener that runs after the tracker's document listener);
  *   - page_view {page_path, page_location} after a client-side navigation
  *     (the same document, proven by a marker that survives the navigation);
- *   - website_conversion {conversion_action: enquiry_submit, intent_id,
- *     page_path} after a successful enquiry, with the POST /api/enquiries
- *     payload keeping its contract. The API is stubbed, so nothing is stored
- *     or emailed.
+ *   - the direct-contact card on contact and company pages records only
+ *     those channel clicks. It never posts to /api/enquiries or reports
+ *     enquiry_submit. Unexpected API calls are aborted before they can send.
  */
 import type { Locator, Page } from '@playwright/test';
-import { baselineRoute } from './support/baseline';
 import { markQuickContact } from './support/dom';
 import { expect, test } from './support/fixtures';
 import { SITEMAP_PATHS } from './support/routes';
@@ -42,14 +40,6 @@ const dataLayer = (page: Page): Promise<DataLayerEvent[]> =>
       .map((e) => JSON.parse(JSON.stringify(e)) as Record<string, unknown>),
   );
 
-async function firstVisible(page: Page, selector: string): Promise<Locator> {
-  const inMain = page.locator(`main ${selector}`).filter({ visible: true });
-  if (await inMain.count()) return inMain.first();
-  const anywhere = page.locator(selector).filter({ visible: true });
-  expect(await anywhere.count(), `no visible ${selector} on ${page.url()}`).toBeGreaterThan(0);
-  return anywhere.first();
-}
-
 async function settle(page: Page, pathname: string): Promise<void> {
   const response = await page.goto(pathname, { waitUntil: 'load' });
   expect(response?.status()).toBe(200);
@@ -69,25 +59,40 @@ test.describe('contract › analytics', { tag: '@contract' }, () => {
     await installSpy(page);
   });
 
-  for (const { action, selector, url } of CONTACT_CLICKS) {
-    test(`${action}: clicking a ${selector.slice(2, -1)} link pushes website_conversion`, async ({ page }) => {
-      await settle(page, '/contact');
-      const link = await firstVisible(page, selector);
-      // A click that lands before hydration is simply not tracked yet;
-      // retry until the tracker's listener is attached.
-      await expect(async () => {
-        await link.click({ timeout: 5_000 });
-        const events = (await dataLayer(page)).filter(
-          (e) => e.event === 'website_conversion' && e.conversion_action === action,
-        );
-        expect(events.length).toBeGreaterThan(0);
-      }).toPass({ timeout: 20_000 });
+  for (const pathname of ['/contact', '/companies/mwanjalisi-oil']) {
+    for (const { action, selector, url } of CONTACT_CLICKS) {
+      test(`${action} on ${pathname} records the direct channel without an enquiry submission`, async ({ page }) => {
+        const requests: string[] = [];
+        await page.route('**/api/enquiries', (route) => {
+          requests.push(route.request().method());
+          return route.abort('blockedbyclient');
+        });
+        await settle(page, pathname);
+        const router = page.locator('[data-enquiry-router][data-contact-mode="direct"]').first();
+        const link: Locator = router.locator(selector);
+        await expect(link).toBeVisible();
+        const expectedHref = await link.getAttribute('href');
+        // A click that lands before hydration is simply not tracked yet;
+        // retry until the tracker's listener is attached. The window listener
+        // cancels navigation after the document listener records the click.
+        await expect(async () => {
+          await link.click({ timeout: 5_000 });
+          const events = (await dataLayer(page)).filter(
+            (event) => event.event === 'website_conversion' && event.conversion_action === action,
+          );
+          expect(events.length).toBeGreaterThan(0);
+        }).toPass({ timeout: 20_000 });
 
-      const event = (await dataLayer(page)).find((e) => e.event === 'website_conversion' && e.conversion_action === action);
-      expect(event?.page_path).toBe('/contact');
-      expect(String(event?.link_url)).toMatch(url);
-      expect(page.url(), 'the contact click must not leave the page').toMatch(/\/contact$/);
-    });
+        const events = await dataLayer(page);
+        const event = events.find((item) => item.event === 'website_conversion' && item.conversion_action === action);
+        expect(event?.page_path).toBe(pathname);
+        expect(event?.link_url).toBe(expectedHref);
+        expect(String(event?.link_url)).toMatch(url);
+        expect(events.filter((item) => item.event === 'enquiry_submit' || item.conversion_action === 'enquiry_submit')).toEqual([]);
+        expect(requests, 'direct contact must not call the enquiry API').toEqual([]);
+        expect(new URL(page.url()).pathname, 'the test must not open an external contact app').toBe(pathname);
+      });
+    }
   }
 
   test('QuickContact call link on home pushes phone_click', async ({ page }, testInfo) => {
@@ -135,68 +140,4 @@ test.describe('contract › analytics', { tag: '@contract' }, () => {
     }).toPass({ timeout: 60_000 });
   });
 
-  for (const pathname of ['/contact', '/companies/mwanjalisi-oil']) {
-    test(`enquiry_submit on ${pathname} keeps the API payload and pushes the conversion`, async ({ page }) => {
-      const expectedIntent = baselineRoute(pathname).enquiryRouter.defaultIntent;
-      const payloads: Record<string, unknown>[] = [];
-      await page.route('**/api/enquiries', async (route) => {
-        if (route.request().method() !== 'POST') return route.fallback();
-        payloads.push(route.request().postDataJSON() as Record<string, unknown>);
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ ok: true, id: 'e2e-contract', emailStatus: 'skipped', storageStatus: 'stored' }),
-        });
-      });
-
-      // A submit that lands before hydration becomes a native form
-      // submission (a reload, no payload); start over until the island is live.
-      await expect(async () => {
-        payloads.length = 0;
-        await settle(page, pathname);
-        const form = page.locator('form:has(textarea)').first();
-        await form.scrollIntoViewIfNeeded();
-        const fields = form
-          .locator('input:not([type]), input[type="text"], input[type="email"], input[type="tel"], textarea')
-          .filter({ visible: true });
-        for (let i = 0; i < (await fields.count()); i += 1) {
-          const field = fields.nth(i);
-          if (!(await field.isEditable())) continue;
-          const type = await field.evaluate((el) => (el.tagName === 'TEXTAREA' ? 'textarea' : (el as HTMLInputElement).type));
-          await field.fill(
-            type === 'email'
-              ? 'e2e@example.com'
-              : type === 'tel'
-                ? '+255700000000'
-                : type === 'textarea'
-                  ? 'Automated contract test, please ignore.'
-                  : 'E2E contract test',
-          );
-        }
-        const submit = form.locator('button[type="submit"], button:not([type])').filter({ visible: true }).first();
-        await expect(submit).toBeEnabled({ timeout: 15_000 });
-        await submit.click();
-        await expect.poll(() => payloads.length, { timeout: 10_000 }).toBeGreaterThan(0);
-      }).toPass({ timeout: 60_000 });
-
-      const body = payloads[0] ?? {};
-      for (const key of ['intentId', 'name', 'organization', 'contactMethod', 'message', 'sourcePath', 'website']) {
-        expect(body, `POST /api/enquiries payload keeps "${key}"`).toHaveProperty(key);
-      }
-      expect(body.intentId).toBe(expectedIntent);
-      expect(body.sourcePath).toBe(pathname);
-      expect(body.website, 'the honeypot stays empty for a person').toBe('');
-      expect(String(body.contactMethod).trim()).not.toBe('');
-      expect(String(body.message).trim()).not.toBe('');
-
-      await expect
-        .poll(async () => (await dataLayer(page)).find((e) => e.event === 'website_conversion' && e.conversion_action === 'enquiry_submit') ?? null)
-        .not.toBeNull();
-      const event = (await dataLayer(page)).find((e) => e.conversion_action === 'enquiry_submit');
-      expect(event?.intent_id).toBe(expectedIntent);
-      expect(event?.page_path).toBe(pathname);
-      expect(event?.enquiry_id).toBe('e2e-contract');
-      expect(new URL(page.url()).pathname).toBe(pathname);
-    });
-  }
 });

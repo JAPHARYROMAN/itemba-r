@@ -1,182 +1,130 @@
 /**
- * @contract The EnquiryRouter island in a real browser (src/islands/EnquiryRouter.tsx,
- * logic in src/lib/enquiry-client.ts). The API is always stubbed, so nothing
- * is stored or emailed. analytics.spec.ts covers the happy path's payload and
- * the enquiry_submit conversion on two pages; this spec covers the rest:
- *
- *   - a blank required field never reaches the API: the status line says
- *     why, the fields are aria-invalid and described by their own error
- *     lines, and focus moves to the first one;
- *   - a response that is not JSON (a proxy's 502 page) shows the form's own
- *     failure copy, never a parser error, and fires no conversion;
- *   - choosing a company routes everything to it: the payload's intentId,
- *     the email subject and the prepared WhatsApp message;
- *   - the submit button is disabled until the island hydrates;
- *   - while it sends, the button is aria-disabled, not disabled, so it keeps
- *     keyboard focus, and a second submit sends nothing.
+ * @contract The direct-contact EnquiryRouter in a real browser. Its default
+ * company and all three channel links ship in server HTML. Choosing another
+ * company prepares its email subject and WhatsApp message, without collecting
+ * personal details, posting to the retained API or reporting enquiry_submit.
+ * analytics.spec.ts covers actual channel-click conversions; no test sends a
+ * message or opens an external contact app.
  */
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { contact, contactActionLabels } from '../../src/content/contact';
 import { enquiryFormCopy as copy, enquiryIntents } from '../../src/content/enquiry';
+import { baselineRoute } from './support/baseline';
 import { expect, test } from './support/fixtures';
 
 type DataLayerEvent = Record<string, unknown> & { event?: string };
 
+const DEFAULT_ROUTES = [
+  '/contact',
+  '/companies/mwanjalisi-oil',
+  '/companies/westsides-company',
+  '/companies/itemba-enterprises',
+] as const;
+
 async function installSpy(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const w = window as unknown as { dataLayer?: unknown[] };
-    w.dataLayer = w.dataLayer || [];
+    (window as unknown as { dataLayer?: unknown[] }).dataLayer = [];
   });
 }
 
 const conversions = (page: Page): Promise<DataLayerEvent[]> =>
   page.evaluate(() =>
     ((window as unknown as { dataLayer?: DataLayerEvent[] }).dataLayer ?? []).filter(
-      (e) => e && e.event === 'website_conversion' && e.conversion_action === 'enquiry_submit',
+      (event) => event && (event.event === 'website_conversion' || event.event === 'enquiry_submit'),
     ),
   );
 
-/** Opens /contact and waits until the form is live (its submit button enables on hydration). */
-async function openForm(page: Page) {
-  const response = await page.goto('/contact', { waitUntil: 'load' });
-  expect(response?.status()).toBe(200);
-  const form = page.locator('form[data-enquiry-router]').first();
-  await form.scrollIntoViewIfNeeded();
-  await expect(form.getByRole('button', { name: copy.submit })).toBeEnabled({ timeout: 15_000 });
-  return form;
+/** Abort any accidental API call before it can store or email anything. */
+async function guardEnquiryApi(page: Page): Promise<string[]> {
+  const requests: string[] = [];
+  await page.route('**/api/enquiries', (route) => {
+    requests.push(route.request().method());
+    return route.abort('blockedbyclient');
+  });
+  return requests;
 }
 
-test.describe('contract › enquiry form', { tag: '@contract' }, () => {
-  // Instant scrolling: a tap that lands while the page is still smooth-
-  // scrolling the form into view can miss its button on a busy machine.
+async function openRouter(page: Page, pathname = '/contact'): Promise<Locator> {
+  const response = await page.goto(pathname, { waitUntil: 'load' });
+  expect(response?.status()).toBe(200);
+  const router = page.locator('section[data-enquiry-router][data-contact-mode="direct"]').first();
+  await router.scrollIntoViewIfNeeded();
+  await expect(router.getByRole('radio').first()).toBeEnabled({ timeout: 15_000 });
+  return router;
+}
+
+async function expectPreparedLinks(router: Locator, intentId: string): Promise<void> {
+  const intent = enquiryIntents.find((item) => item.id === intentId)!;
+  await expect(router.getByRole('radio', { name: intent.segmentLabel, exact: true })).toBeChecked();
+  await expect(router).toContainText(`${copy.routedToPrefix} ${intent.routeTo}`);
+
+  const email = new URL((await router.locator('a[href^="mailto:"]').getAttribute('href')) ?? '');
+  expect(email.protocol).toBe('mailto:');
+  expect(email.pathname).toBe(contact.email);
+  expect(email.searchParams.get('subject')).toBe(intent.subject);
+  const message = email.searchParams.get('body');
+  expect(message).toContain(`${copy.preparedMessage.intent}: ${intent.label}`);
+  expect(message).toContain(`${copy.preparedMessage.routeTo}: ${intent.routeTo}`);
+
+  const whatsapp = new URL((await router.locator('a[href*="wa.me/"]').getAttribute('href')) ?? '');
+  expect(whatsapp.origin).toBe('https://wa.me');
+  expect(whatsapp.pathname).toBe(`/${contact.primaryPhone.replace('+', '')}`);
+  expect(whatsapp.searchParams.get('text')).toBe(message);
+  await expect(router.locator('a[href^="tel:"]')).toHaveAttribute('href', `tel:${contact.primaryPhone}`);
+}
+
+test.describe('contract › direct contact routing', { tag: '@contract' }, () => {
   test.use({ contextOptions: { reducedMotion: 'reduce' } });
 
   test.beforeEach(async ({ page }) => {
     await installSpy(page);
   });
 
-  test('ships its submit button disabled until hydration', async ({ request }) => {
-    const html = await (await request.get('/contact')).text();
-    const submit = /<button type="submit"[^>]*>/.exec(html)?.[0] ?? '';
-    expect(submit, 'server-rendered submit button').not.toBe('');
-    expect(submit).toContain('disabled');
-  });
-
-  test('keeps a blank enquiry on the page and says why', async ({ page }) => {
-    const posts: string[] = [];
-    await page.route('**/api/enquiries', (route) => {
-      posts.push(route.request().method());
-      return route.abort();
-    });
-    const form = await openForm(page);
-    const status = form.getByRole('status');
-    await expect(status).toHaveText('');
-
-    await form.getByRole('button', { name: copy.submit }).click();
-
-    await expect(status).toHaveText(copy.messages.required);
-    const contact = form.locator('[name="contactMethod"]');
-    const message = form.locator('[name="message"]');
-    for (const [field, error] of [
-      [contact, copy.fields.contactMethod.error],
-      [message, copy.fields.message.error],
-    ] as const) {
-      await expect(field).toHaveAttribute('aria-invalid', 'true');
-      // The accessible description is the field's own error line.
-      await expect(field).toHaveAccessibleDescription(error);
+  test('server-renders all channels with the contact and company defaults', async ({ request }) => {
+    for (const pathname of DEFAULT_ROUTES) {
+      const response = await request.get(pathname);
+      expect(response.status()).toBe(200);
+      const html = await response.text();
+      const router = /<section\b(?=[^>]*\bdata-enquiry-router)[^>]*>[\s\S]*?<\/section>/.exec(html)?.[0] ?? '';
+      const intentId = baselineRoute(pathname).enquiryRouter.defaultIntent;
+      const intent = enquiryIntents.find((item) => item.id === intentId)!;
+      expect(router, `${pathname}: server-rendered direct contact card`).not.toBe('');
+      expect(router).toContain('data-contact-mode="direct"');
+      expect(router).toContain(`data-default-intent="${intentId}"`);
+      expect(router).toContain(`href="mailto:${contact.email}?subject=${encodeURIComponent(intent.subject)}`);
+      expect(router).toContain(`href="https://wa.me/${contact.primaryPhone.replace('+', '')}?text=`);
+      expect(router).toContain(encodeURIComponent(`${copy.preparedMessage.routeTo}: ${intent.routeTo}`));
+      expect(router).toContain(`href="tel:${contact.primaryPhone}"`);
+      expect(router).not.toMatch(/<form\b|<textarea\b|<button\b|<input\b(?![^>]*type="radio")/);
     }
-    await expect(contact).toBeFocused();
+  });
 
-    // Typing clears that field's error; the other stays flagged.
-    await contact.fill('+255700000000');
-    await expect(contact).not.toHaveAttribute('aria-invalid', 'true');
-    await expect(contact).toHaveAccessibleDescription('');
-    await expect(message).toHaveAttribute('aria-invalid', 'true');
-    expect(posts, 'no request reaches the API').toEqual([]);
+  for (const pathname of DEFAULT_ROUTES) {
+    test(`${pathname} opens with its company context and three direct channels`, async ({ page }) => {
+      const requests = await guardEnquiryApi(page);
+      const router = await openRouter(page, pathname);
+      await expect(router.getByRole('radio')).toHaveCount(enquiryIntents.length);
+      await expect(router.locator('form, input:not([type="radio"]), textarea, select, button')).toHaveCount(0);
+      await expect(router.getByRole('link')).toHaveCount(3);
+      for (const label of [contactActionLabels.whatsapp, contactActionLabels.email, contactActionLabels.call]) {
+        await expect(router.getByRole('link', { name: label, exact: true })).toBeVisible();
+      }
+      await expectPreparedLinks(router, baselineRoute(pathname).enquiryRouter.defaultIntent!);
+      expect(requests, 'opening a contact card never calls the enquiry API').toEqual([]);
+      expect(await conversions(page), 'opening a contact card is not a conversion').toEqual([]);
+    });
+  }
+
+  test('changing companies updates the subject and prepared message without submitting an enquiry', async ({ page }) => {
+    const requests = await guardEnquiryApi(page);
+    const router = await openRouter(page);
+    for (const intent of enquiryIntents) {
+      // The radio is visually hidden; select the same labelled tile people use.
+      await router.getByText(intent.segmentLabel, { exact: true }).click();
+      await expectPreparedLinks(router, intent.id);
+    }
+    expect(requests, 'company selection never calls the enquiry API').toEqual([]);
+    expect(await conversions(page), 'company selection never reports enquiry_submit or a channel conversion').toEqual([]);
     expect(new URL(page.url()).pathname).toBe('/contact');
-  });
-
-  test('shows its own failure copy for a non-JSON error page, and converts nothing', async ({ page }) => {
-    await page.route('**/api/enquiries', (route: Route) =>
-      route.request().method() === 'POST'
-        ? route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body><h1>502 Bad Gateway</h1></body></html>' })
-        : route.fallback(),
-    );
-    const form = await openForm(page);
-    await form.locator('[name="contactMethod"]').fill('e2e@example.com');
-    await form.locator('[name="message"]').fill('Automated contract test, please ignore.');
-    await form.getByRole('button', { name: copy.submit }).click();
-
-    await expect(form.getByRole('status')).toHaveText(copy.messages.failed);
-    await expect(form.locator('[name="message"]'), 'the message is kept for a retry').toHaveValue('Automated contract test, please ignore.');
-    expect(await conversions(page)).toEqual([]);
-  });
-
-  test('keeps keyboard focus on the submit button while it sends, and sends once', async ({ page }) => {
-    let release: () => void = () => {};
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let posts = 0;
-    await page.route('**/api/enquiries', async (route) => {
-      if (route.request().method() !== 'POST') return route.fallback();
-      posts += 1;
-      await held;
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ ok: true, id: 'e2e-focus', emailStatus: 'not_configured', storageStatus: 'stored' }),
-      });
-    });
-    const form = await openForm(page);
-    await form.locator('[name="contactMethod"]').fill('e2e@example.com');
-    await form.locator('[name="message"]').fill('Automated contract test, please ignore.');
-    const submit = form.locator('button[type="submit"]');
-    await submit.focus();
-    await page.keyboard.press('Enter');
-
-    await expect(submit).toHaveAttribute('aria-disabled', 'true');
-    await expect(submit, 'focus stays on the button while it sends (not dropped to <body>)').toBeFocused();
-    await page.keyboard.press('Enter');
-    release();
-    await expect(form.getByRole('status')).toHaveText(copy.messages.sentAndStored);
-    await expect(submit).not.toHaveAttribute('aria-disabled', 'true');
-    await expect(submit).toBeFocused();
-    expect(posts, 'a second Enter while sending posts nothing').toBe(1);
-  });
-
-  test('routes the payload, the email and the WhatsApp message to the chosen company', async ({ page }) => {
-    const payloads: Record<string, unknown>[] = [];
-    await page.route('**/api/enquiries', async (route) => {
-      if (route.request().method() !== 'POST') return route.fallback();
-      payloads.push(route.request().postDataJSON() as Record<string, unknown>);
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ ok: true, id: 'e2e-intent', emailStatus: 'not_configured', storageStatus: 'stored' }),
-      });
-    });
-    const form = await openForm(page);
-    const fuel = enquiryIntents.find((intent) => intent.id === 'mwanjalisi')!;
-
-    // The radio itself is visually hidden; people click its option tile.
-    await form.getByText(fuel.segmentLabel, { exact: true }).click();
-    await expect(form.getByRole('radio', { name: fuel.segmentLabel })).toBeChecked();
-    await expect(form).toContainText(`${copy.routedToPrefix} ${fuel.routeTo}`);
-
-    const mailto = decodeURIComponent((await form.locator('a[href^="mailto:"]').getAttribute('href')) ?? '');
-    expect(mailto).toContain(`subject=${fuel.subject}`);
-    const whatsapp = decodeURIComponent((await form.locator('a[href*="wa.me/"]').getAttribute('href')) ?? '');
-    expect(whatsapp).toContain(`${copy.preparedMessage.routeTo}: ${fuel.routeTo}`);
-
-    await form.locator('[name="contactMethod"]').fill('+255700000000');
-    await form.locator('[name="message"]').fill('Automated contract test, please ignore.');
-    await form.getByRole('button', { name: copy.submit }).click();
-
-    await expect(form.getByRole('status')).toHaveText(copy.messages.sentAndStored);
-    expect(payloads).toHaveLength(1);
-    expect(payloads[0]).toMatchObject({ intentId: 'mwanjalisi', sourcePath: '/contact', website: '' });
-    await expect(form.locator('[name="message"]'), 'the message clears after a successful submit, as before').toHaveValue('');
-    const [event] = await conversions(page);
-    expect(event).toMatchObject({ intent_id: 'mwanjalisi', route_to: fuel.routeTo, enquiry_id: 'e2e-intent', email_status: 'not_configured' });
   });
 });

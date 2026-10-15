@@ -3,6 +3,7 @@
  * plus the copy of /locations and /locations/[slug].
  */
 import 'server-only';
+import { directEnquirySteps } from './enquiry';
 import { mediaImage, type MediaImage } from './media';
 import { contentUpdatedAt } from './site';
 import type { CompanySlug, ContentIcon, Faq, LinkItem, SplitHeadline, TypeVisual } from './types';
@@ -193,7 +194,7 @@ export const locationsPage = {
 /** /locations/[slug] copy. */
 export const locationPageCopy = {
   hero: {
-    /** The pill: down to the form. Not "Enquire", which the global nav's pill (to /contact) already says. */
+    /** The pill: down to the location's direct contact card. */
     enquire: 'Ask about this location',
   },
   glanceTitle: 'At a glance',
@@ -218,10 +219,6 @@ export const locationPageCopy = {
     eyebrow: 'Enquire',
     body: 'One group office routes every enquiry to the right company.',
     stepsLabel: 'How it works',
-    steps: [
-      { title: 'Choose who it is for', body: 'The form starts with General. Pick a company if you already know which one you need.' },
-      { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
-      { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
-    ],
+    steps: directEnquirySteps,
   },
 } as const;

@@ -32,8 +32,8 @@ export const groupFaqs: Faq[] = [
     answer: groupSectorsAnswer,
   },
   {
-    question: 'How can business enquiries be submitted?',
-    answer: 'Business enquiries can be submitted by phone, WhatsApp, or email through the contact details listed on the website.',
+    question: 'How can I contact Itemba Group about a business enquiry?',
+    answer: 'Contact the group office by WhatsApp, email or phone using the links on this website.',
   },
 ];
 
@@ -41,7 +41,7 @@ export const partnershipFaqs: Faq[] = [
   {
     question: 'Can suppliers introduce products to Itemba Group?',
     answer:
-      'Yes. Suppliers can submit introductions through the partnerships page or contact channels, and the enquiry can be routed to the relevant company or division.',
+      'Yes. Use the WhatsApp, email or phone links on the partnerships page to introduce your products to the group office and name the relevant company or service.',
   },
   {
     question: 'Which partnership enquiries are most relevant?',
@@ -56,7 +56,7 @@ export const partnershipFaqs: Faq[] = [
   {
     question: 'Can one partnership enquiry cover multiple sectors?',
     answer:
-      'Yes. If an enquiry covers multiple sectors, it can be submitted once and routed internally to the relevant operating teams.',
+      'Yes. Describe the relevant sectors in one WhatsApp message, email or phone call so the group office can direct the enquiry to the operating teams involved.',
   },
 ];
 
@@ -172,7 +172,7 @@ export const faqPage = {
     eyebrow: 'Frequently asked questions',
     headline: { lead: 'Answers for', accent: 'customers and partners.' } satisfies SplitHeadline,
     lede: 'Quick answers about Itemba Group companies, services, location, and how to route business enquiries to the right operating team.',
-    /** The hero's link to the enquiry form at the foot of the page. */
+    /** The hero's link to the direct contact card at the foot of the page. */
     ask: 'Ask the group office',
   },
   /** The breadcrumb trail's name for the page. */

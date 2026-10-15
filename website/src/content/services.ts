@@ -4,6 +4,7 @@
  */
 import 'server-only';
 import type { CompanySite, CompanyVisual } from './companies';
+import { directEnquirySteps } from './enquiry';
 import { flags } from './flags';
 import { mediaFigure, mediaImage, type MediaFigure, type MediaImage } from './media';
 import { contentUpdatedAt } from './site';
@@ -176,7 +177,7 @@ export const serviceAreas: ServiceArea[] = [
           'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, managed by Mwanjalisi Oil, handle diesel, petrol, kerosene, and lubricants for retail customers and business enquiries. Mwanjalisi Oil also manages UZUNGUNI PARKING YARD for corridor parking and vehicle staging.',
       },
       {
-        question: 'Can transport operators submit fuel or parking enquiries?',
+        question: 'Can transport operators make fuel or parking enquiries?',
         answer:
           'Yes. Transport operators can contact the group office by phone, WhatsApp, or email and fuel or UZUNGUNI PARKING YARD enquiries will be routed to Mwanjalisi Oil.',
       },
@@ -781,17 +782,10 @@ export const servicePageCopy = {
   faqHeading: 'Frequently asked questions',
   enquire: {
     eyebrow: 'Enquire',
-    /** The group's routing promise, beside the form. */
+    /** The group's routing context, beside the direct contact card. */
     body: 'One group office routes every enquiry to the right company.',
     /** How an enquiry travels, as numbered steps under the promise. */
     stepsLabel: 'How it works',
-    steps: [
-      {
-        title: 'Choose who it is for',
-        body: 'The form starts with the company that runs this service. Pick another, or General, at any time.',
-      },
-      { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
-      { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
-    ],
+    steps: directEnquirySteps,
   },
 } as const;

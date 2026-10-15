@@ -248,13 +248,15 @@ describe('error copy', () => {
 });
 
 describe('deploy documents', () => {
-  it('DEPLOY.md: 308 redirects, and enquiry_submit as a conversion_action value', () => {
+  it('DEPLOY.md: 308 redirects and direct-channel conversion semantics', () => {
     const doc = read('DEPLOY.md');
     // 301 may only appear to say the redirects are not 301.
     const claims = [...doc.matchAll(/(\S+\s+)?\b301\b/g)].filter((m) => !/^not\s/.test(m[1] ?? ''));
     expect(claims.map((m) => m[0])).toEqual([]);
     expect(doc).toMatch(/sends as\s+\*\*308\*\*/);
-    expect(doc).toMatch(/`conversion_action` set to\s+`enquiry_submit`/);
+    expect(doc).toMatch(/`conversion_action` set to\s+`phone_click`/);
+    expect(doc).toContain('`email_click` or `whatsapp_click`');
+    expect(doc).toContain('does not emit `enquiry_submit`');
     expect(doc).toContain('X-Robots-Tag: noindex');
     expect(doc).not.toContain('src/app/company-profile/page.tsx');
   });

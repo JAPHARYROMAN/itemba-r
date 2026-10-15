@@ -112,34 +112,15 @@ test.describe('quality › no JavaScript', { tag: '@quality' }, () => {
     });
 
     if (baselineRoute(pathname).enquiryRouter.present) {
-      test(`${pathname}: Enter in the enquiry form does not navigate`, async ({ page }) => {
+      test(`${pathname}: direct contact works without JavaScript and collects no details`, async ({ page }) => {
         await openRoute(page, pathname);
-        const startUrl = page.url();
-        const form = page.locator('form:has(textarea)').first();
-        await expect(form, 'the enquiry form is server-rendered').toHaveCount(1);
-        const field = form
-          .locator('input:not([type]), input[type="text"], input[type="email"], input[type="tel"]')
-          .filter({ visible: true })
-          .first();
-        await expect(field, 'the enquiry form has a visible text field').toHaveCount(1);
-
-        const navigations: string[] = [];
-        page.on('request', (req) => {
-          if (req.isNavigationRequest() && req.frame() === page.mainFrame()) navigations.push(`${req.method()} ${req.url()}`);
-        });
-        await field.fill('E2E No-JS Visitor');
-        await field.press('Enter');
-        await page.waitForTimeout(1_500);
-
-        expect(navigations, 'pressing Enter submitted the form as a page navigation').toEqual([]);
-        expect(page.url()).toBe(startUrl);
-
-        const fallbacks = await page.evaluate(() => ({
-          whatsapp: !!document.querySelector('a[href*="wa.me/"]'),
-          email: !!document.querySelector('a[href^="mailto:"]'),
-          call: !!document.querySelector('a[href^="tel:"]'),
-        }));
-        expect(fallbacks, 'WhatsApp, email and call fallbacks without JavaScript').toEqual({ whatsapp: true, email: true, call: true });
+        const card = page.locator('[data-enquiry-router][data-contact-mode="direct"]');
+        await expect(card).toHaveCount(1);
+        await expect(card.locator('form, textarea, input:not([type="radio"]), button[type="submit"]')).toHaveCount(0);
+        await expect(card.locator('a[href*="wa.me/"]')).toBeVisible();
+        await expect(card.locator('a[href^="mailto:"]')).toBeVisible();
+        await expect(card.locator('a[href^="tel:"]')).toBeVisible();
+        await expect(card.getByRole('radio').first()).toBeDisabled();
       });
     }
   }

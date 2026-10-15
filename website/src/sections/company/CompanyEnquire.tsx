@@ -1,5 +1,5 @@
 import { companyPageCopy, type Company } from '@/content/companies';
-import { enquiryPrompts, enquiryFormCopy } from '@/content/enquiry';
+import { directEnquirySteps, enquiryPrompts, enquiryFormCopy } from '@/content/enquiry';
 import EnquiryRouter from '@/islands/EnquiryRouter';
 import { Container, Eyebrow, Heading, Lede, Section } from '@/ui';
 import { companySectionIds } from './CompanySubNav';
@@ -28,7 +28,7 @@ export function CompanyEnquire({ company }: { company: Company }) {
           </Lede>
           <h3 className="mt-10 text-eyebrow text-fg-muted">{enquire.stepsLabel}</h3>
           <ol role="list" className="mt-4 space-y-5">
-            {enquire.steps.map((step, index) => (
+            {directEnquirySteps.map((step, index) => (
               <li key={step.title} className="flex gap-4">
                 <span
                   aria-hidden="true"

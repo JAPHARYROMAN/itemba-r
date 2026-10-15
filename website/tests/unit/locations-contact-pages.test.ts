@@ -270,8 +270,8 @@ describe('/contact', () => {
     expect(sections[1]).toContain('id="enquire"');
     expect(html.match(/data-enquiry-router=""/g)).toHaveLength(1);
     expect(html).toContain('data-default-intent="general"');
-    expect(html).toContain('name="name"');
-    expect(html).toContain('name="organization"');
+    expect(html).not.toContain('name="name"');
+    expect(html).toContain('data-contact-mode="direct"');
   });
 
   it('shows the contact cards from src/content/contact.ts, in the forms ConversionTracker classifies', () => {

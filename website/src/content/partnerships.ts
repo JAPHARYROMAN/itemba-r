@@ -12,7 +12,7 @@ export type PartnershipArea = {
   /** The route's line icon. */
   icon: ContentIcon;
   routeTo: string;
-  /** The enquiry type to choose in the form for this route. */
+  /** The enquiry type that gives a direct message its operating context. */
   intentId: IntentId;
   summary: string;
   goodFit: string[];
@@ -90,7 +90,7 @@ export const partnershipsPage = {
     headline: { lead: 'Partner with', accent: 'Itemba Group.' } satisfies SplitHeadline,
     lede:
       'A clear route for suppliers, commercial buyers, contractors, transport operators, hospitality customers, property stakeholders and regional business partners.',
-    /** The pill: the page's own enquiry form. */
+    /** The pill: the page's direct contact card. */
     enquire: 'Route an enquiry',
     link: { label: 'See capabilities', href: '/capabilities' },
     /** Name of the row of route shortcuts under the actions. */
@@ -103,8 +103,8 @@ export const partnershipsPage = {
     goodFitLabel: 'Good fit for',
     companiesLabel: 'Companies',
     servicesLabel: 'Services',
-    /** Before the enquiry type to pick in the form ("In the form, choose ● Westsides"). */
-    formHint: 'In the form, choose',
+    /** Before the enquiry type to select on the contact card. */
+    formHint: 'Enquiry type:',
     action: 'Enquire',
   },
   process: {
@@ -121,16 +121,16 @@ export const partnershipsPage = {
         body: 'Suppliers, bulk buyers, fuel and logistics customers, or property and hospitality.',
       },
       {
-        title: 'Send details by WhatsApp, email, or phone',
-        body: 'Or submit the form on this page. Each channel carries the same prepared message.',
+        title: 'Contact us by WhatsApp, email or phone',
+        body: 'Choose a channel below to open your own app, then send the message or make a call.',
       },
       {
-        title: 'The group office routes the enquiry internally',
-        body: 'The office reviews the enquiry type and passes it to the company or division that handles it.',
+        title: 'Include the operating area you need',
+        body: 'Name the service or company so the group office can direct your enquiry to the relevant team.',
       },
       {
-        title: 'The relevant company or division follows up',
-        body: 'Mwanjalisi Oil, Westsides or Itemba Enterprises takes it from there.',
+        title: 'Discuss the next step',
+        body: 'The relevant operating team can discuss your requirements, availability and next steps.',
       },
     ],
   },
@@ -141,7 +141,7 @@ export const partnershipsPage = {
   enquire: {
     eyebrow: 'Partnership enquiry',
     title: 'Ready to talk to Itemba Group?',
-    body: 'Choose the closest route and add a few details. The group office passes the enquiry to the company or division that can act on it.',
+    body: 'Choose the closest route, then contact the group office by WhatsApp, email or phone.',
     checklistLabel: 'What to include',
   },
 } as const;

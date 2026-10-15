@@ -5,6 +5,16 @@ project. `website/` is an independent Next.js 15 app; its package and lockfile a
 separate from the ERP `frontend/` and `backend/`. A public-site release uses the
 Vercel procedure below and does not run the ERP/droplet deployment workflow.
 
+**Launch decision, 15 October 2026:** the public site offers WhatsApp, email and
+phone contact only. Its contact cards have no forms or personal-detail fields and
+make no `POST /api/enquiries` requests. Company selection prepares message context;
+visitors send in their own messaging/email app or place a call. Resend terms were
+accepted by the user, but Resend must not be provisioned for this unused launch
+path. Server-side email configuration and inbox receipt are not launch prerequisites.
+This contact change requires a new production-target build. Record its source,
+staged deployment, validation and promotion in the
+[release verification record](../docs/public-site/rebuild-verification-2026-10-14.md).
+
 Verified hosting configuration on **14 October 2026**:
 
 | Setting | Value |
@@ -41,30 +51,24 @@ effect — Docker builds require `--build-arg`s.
 If neither analytics ID is set, the `<Analytics />` component renders nothing
 (no tracking, no errors).
 
-### Runtime (Vercel environment settings, or container environment)
+### Retained API runtime settings — future use
+
+`POST /api/enquiries` retains its payload, routing intents and response statuses
+for compatibility. The current public contact card does not call it. The
+following settings apply to future API use, not the direct-contact launch:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `RESEND_API_KEY` | for email | Sends enquiry emails via Resend. Without it, enquiries can only rely on durable file storage in Docker/self-hosted deployments. |
-| `ENQUIRY_EMAIL_TO` | for email | Destination inbox for enquiry submissions. |
-| `ENQUIRY_EMAIL_FROM` | for email | Verified sender address for Resend. |
-| `ENQUIRY_STORAGE_DIR` | optional | Where each enquiry is appended (`enquiries.jsonl`). Defaults to **`/app/data`** in the container (pre-created and writable by the runtime user; declared as a `VOLUME`), and `.env.example` sets the same path. Every `POST /api/enquiries` writes here — even when email is configured — so the dir must stay writable. Mount a volume at `/app/data`, or point this at a mounted path, to persist enquiries across deploys. |
+| `RESEND_API_KEY` | future API email only | Sends API enquiry emails via Resend. No provider/key is needed for the direct contact links. |
+| `ENQUIRY_EMAIL_TO` | future API email only | Destination inbox for API enquiry submissions. |
+| `ENQUIRY_EMAIL_FROM` | future API email only | Verified sender address for future Resend API delivery. |
+| `ENQUIRY_STORAGE_DIR` | future self-hosted API storage | Append location for `enquiries.jsonl`; defaults to **`/app/data`** in Docker. Keep it writable and mount a volume when exercising the retained API, including when API email is enabled. Vercel filesystem storage is not durable. |
 
-> **Vercel note:** Vercel/serverless filesystem writes are temporary, so the app
-> does not use file storage there as a trustworthy fallback. On Vercel, configure
-> `RESEND_API_KEY`, `ENQUIRY_EMAIL_TO`, and `ENQUIRY_EMAIL_FROM`; if email is not
-> configured or fails, the enquiry API returns an error and the visitor is told to
-> use WhatsApp, email, or phone instead of seeing a false "saved" confirmation.
-
-Before accepting a Vercel release, configure all three email variables in the
-intended **Production and Preview** environments using a Resend
-account. Use a sender on a verified sending domain and a confirmed monitored
-recipient inbox. Enter the API key directly through secure environment settings;
-do not put it in chat, source control or deployment command arguments. The default
-`onboarding@resend.dev` sender is for account-owner testing, not live enquiries.
-After a controlled form submission, verify receipt in the intended inbox; a
-successful browser response alone does not establish delivery. Environment changes
-require a new deployment; promotion keeps the candidate's existing environment.
+Vercel/serverless filesystem writes are temporary and are not a durable API
+fallback. The retained API returns its existing delivery-error response when no
+working transport is configured. This does not affect WhatsApp, email or phone
+links. A future decision to enable website submissions requires its own provider,
+verified sender, secure environment configuration and delivery validation.
 
 ---
 
@@ -88,8 +92,10 @@ artifacts and environment files. Deploy source rather than a local prebuilt outp
    vercel env ls preview --scope team_TeJHOALxYDLMBE2VNoy81baj
    ```
 
-2. Complete `npm run verify` from `website/`, production dependency audit,
-   Lighthouse review, PDF regeneration/relocking and visual acceptance. The
+2. Commit the direct-contact source and complete `npm run verify` from `website/`,
+   production dependency audit, Lighthouse review, PDF regeneration/relocking
+   when PDF inputs changed, and visual acceptance. Prior form-based build/staging
+   evidence does not verify this new contact UI. The
    separate Website CI Docker smoke verifies container health and enquiry-volume
    persistence; `npm run verify` does not run that job.
 
@@ -102,8 +108,12 @@ artifacts and environment files. Deploy source rather than a local prebuilt outp
    ```
 
 4. Record the candidate ID/URL and test that deployment: all public pages, mobile
-   navigation, health, metadata, OG cards, redirects, four PDF downloads and
-   enquiry receipt. If deployment protection applies, use authenticated
+   navigation, health, metadata, OG cards, redirects and four PDF downloads.
+   Verify all company/service defaults and the WhatsApp, email and phone targets,
+   prepared message context, keyboard and no-JavaScript contact links. Confirm
+   the public UI has no forms, personal-detail fields, submit controls or enquiry
+   POST requests; do not claim message receipt from a channel click.
+   If deployment protection applies, use authenticated
    `vercel curl / --deployment <candidate-url>` rather than weakening protection.
    Confirm the public domains still resolve to the recorded prior deployment.
 
@@ -114,10 +124,12 @@ artifacts and environment files. Deploy source rather than a local prebuilt outp
    ```
 
    Reinspect `www.itembagrouptz.com` to confirm the candidate ID now owns the public
-   aliases, then repeat public smoke checks and verify enquiry receipt. Restore
-   the original `autoAssignCustomDomains=true` setting after promotion and smoke
-   checks. If launch is blocked, restore it before ending the attempt and leave
-   the release PR unmerged. The staging guard is temporary, not a permanent
+   aliases, then repeat public smoke and direct-contact checks. Restore the
+   recorded original `autoAssignCustomDomains` setting after promotion and smoke
+   checks (`true` at the 14 October checkpoint). If launch is blocked, restore
+   it before ending the attempt and leave the release PR unmerged. Revoke only
+   temporary automation-bypass credentials created for this staging attempt and
+   verify they are absent. The staging guard is temporary, not a permanent
    hosting change.
 
 6. If acceptance fails after promotion, roll back to the **exact recorded prior
@@ -154,21 +166,17 @@ Omit the `--build-arg`s for a build without analytics (e.g. a staging preview).
 ```bash
 docker run -d --name itemba-website \
   -p 3001:3001 \
-  -e RESEND_API_KEY \
-  -e ENQUIRY_EMAIL_TO \
-  -e ENQUIRY_EMAIL_FROM \
-  -v itemba-enquiries:/app/data \
   itemba-website:latest
 ```
 
-The `-v itemba-enquiries:/app/data` mount persists submitted enquiries
-(`enquiries.jsonl`) across container recreations. Without it they are still
-written, but live only as long as the container.
+If the retained API is exercised in a future self-hosted workflow, add
+`-v itemba-enquiries:/app/data` to persist its `enquiries.jsonl` records across
+container recreations. API email settings can be inherited from the operator's
+secure environment for that separate workflow.
 
 The site is now on `http://<host>:3001`.
 
-The example inherits the three email settings from the operator's securely
-configured environment; it contains no credentials.
+The direct-contact example requires no email-provider credentials.
 
 ## 5. Docker alternative: domain & TLS
 
@@ -208,14 +216,13 @@ curl -sI https://staging-www.itembagrouptz.com/ | grep -i x-robots-tag  # stagin
   - a `page_view` event on client-side navigation;
   - a `website_conversion` event with `conversion_action` set to `phone_click`,
     `email_click` or `whatsapp_click` when a phone, email or WhatsApp link is
-    clicked;
-  - a `website_conversion` event with `conversion_action` set to
-    `enquiry_submit` after a successful enquiry form submission.
+    clicked.
 
-  `enquiry_submit` is a value of `conversion_action`, not an event of its own.
-  The events are wired in `src/components/ConversionTracker.tsx` and
-  `src/islands/EnquiryRouter.tsx`, and they only emit once a GA/GTM ID is
-  present in the build.
+  The direct-contact card does not emit `enquiry_submit`; a channel click does
+  not establish sending, inbox receipt or an answered call. Channel events are
+  wired in `src/components/ConversionTracker.tsx` and emit when a GA/GTM ID is
+  present in the build. The retained API and conversion helper do not imply an
+  active website-submission journey.
 - **Social cards:** paste a page URL into the
   [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/) or
   [X Card Validator](https://cards-dev.twitter.com/validator) — every route now

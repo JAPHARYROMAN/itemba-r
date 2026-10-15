@@ -127,10 +127,10 @@ describe('/company-profile: the screen view', () => {
     for (const option of printProfileOptions) expect(screen).toMatch(new RegExp(`<option value="${option.id}"`));
   });
 
-  it('has one compact enquiry form at #enquire: general, print-hidden', () => {
+  it('has one compact direct-contact card at #enquire: general, print-hidden', () => {
     expect(screen.match(/data-enquiry-router=""/g)).toHaveLength(1);
     const enquire = screen.slice(screen.indexOf(' id="enquire"'));
-    const form = /^[^>]*>\s*(<form\b[^>]*>)/.exec(enquire)?.[1] ?? '';
+    const form = /^[^>]*>\s*(<section\b[^>]*>)/.exec(enquire)?.[1] ?? '';
     expect(form).toContain('data-enquiry-router=""');
     expect(form).toMatch(/class="[^"]*\bprint-hidden\b/);
     expect(screen).toContain('data-default-intent="general"');
