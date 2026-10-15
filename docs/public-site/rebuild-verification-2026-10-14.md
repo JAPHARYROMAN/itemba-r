@@ -1,20 +1,24 @@
 # Public-site rebuild verification - 14 October 2026
 
-The local release candidate on `codex/public-site-rebuild` has passed the checks
-below. Remote staging checks, the Lighthouse comparison, real enquiry email
-delivery and production promotion remain pending. Local test success does not
-establish that the candidate is deployed or that the production inbox receives
-enquiries.
+The release candidate on `codex/public-site-rebuild` has passed local verification
+and Linux Website CI. A production-target build is staged on Vercel without the
+public domains. The Lighthouse comparison is complete. Real enquiry email
+delivery and production promotion remain pending; the missing email environment
+must be configured and a new candidate tested before launch.
+
+Staged HTTP verification completed on 15 October 2026 after the workstation
+resumed. The deployment ID is immutable; checks before and after the pause used
+the same candidate.
 
 ## Completed local evidence
 
 | Check | Result |
 | --- | --- |
 | Full verification (`npm run verify` from `website/`) | Passed: typecheck, lint, unit tests, production build, budgets and Playwright |
-| Unit suite | 710 passed |
+| Unit suite | 710 passed locally; 711 passed in Linux CI |
 | Full Playwright suite | 416 passed, 16 explicitly skipped, no failures |
 | Focused print suite after pagination repair | 20 passed, 2 explicitly skipped |
-| Dependency audit | Zero reported vulnerabilities; Next.js pinned to 15.5.27 |
+| Production dependency audit | Zero reported production vulnerabilities; Next.js pinned to 15.5.27 |
 | Public URL contract | All 25 sitemap routes covered; company/service/article URLs retained |
 | Accessibility | No serious or critical axe violations in tested phone/desktop routes |
 | Interaction contracts | No-JavaScript navigation/contact fallbacks, keyboard focus containment/restoration, Escape and mobile quick contact passed; axe/keyboard checks ran with reduced-motion emulation |
@@ -39,11 +43,9 @@ a recorded deviation, not an achieved result.
 | Total first-load JavaScript, enquiry/profile routes | 135 kB | All measured routes passed |
 | Stylesheets per page | 30 kB | 14.8 kB, passed |
 
-HTML and client-island checks also passed. The existing checker permits the
-known Windows font-manifest limitation; Linux CI and the Vercel build still
-need to establish production font preloads. These build budgets do not prove
-mobile LCP, CLS or blocking-time targets; those require the pending Lighthouse
-comparison and remote measurements.
+HTML and client-island checks also passed. Linux CI passed the font-preload
+checks that the Windows checker conditionally permits. These build budgets are
+separate from the mobile Lighthouse measurements below.
 
 ## Content and downloadable profiles
 
@@ -75,22 +77,53 @@ Future PDF-input edits require regeneration, visual review and a new input lock.
 
 | Release evidence | Status / slot to update |
 | --- | --- |
-| Candidate source commit | Pending final commit |
-| Linux website CI / Docker smoke | Pending GitHub CI; local Docker Desktop engine unavailable |
-| Preview/staging deployment ID and URL | Pending |
-| Remote route, asset, health, 404, metadata and PDF checks | Pending against the actual candidate deployment |
-| Remote accessibility and enquiry UI checks | Pending |
-| Lighthouse baseline/candidate comparison | Pending: same four configured URLs and mobile settings, median of three runs; record baseline and candidate performance/accessibility/SEO, LCP, CLS and TBT |
-| Real enquiry email delivery | Pending: send an identified release-test enquiry, confirm receipt in the intended mailbox and record the lead ID; mocked/local storage success is insufficient |
-| Production promotion | Pending: record promoted deployment ID, time and resulting aliases |
-| Post-promotion verification | Pending: both public hosts, key routes, health, downloads, enquiry delivery and live metadata |
-| Rollback verification | Pending: retain and verify the original deployment below |
+| Candidate source commit | `21c229d815e16239297e0bb9fb6f74d3c10e591b` |
+| Linux website CI / Docker smoke | [Website CI passed](https://github.com/JAPHARYROMAN/itemba-r/actions/runs/38601224580), including 416 browser tests, build/budgets, 711 unit tests and Docker image/volume/health checks |
+| Production dependency audit | [Passed with zero vulnerabilities](https://github.com/JAPHARYROMAN/itemba-r/actions/runs/38601224468/job/115980678569) |
+| Preview/staging deployment ID and URL | READY production-target `dpl_Cd9YP4XnYnM4g8Af7bFvWJELA1Q7`; [protected staged site](https://itemba-f3nadyxrn-japharyromans-projects.vercel.app) |
+| Remote route, asset, health, 404, metadata and PDF checks | Passed: 25 pages and 25 valid 1200×630 OG PNGs; titles, descriptions, single H1, JSON-LD and canonical/OG URLs; health/robots/25-URL sitemap/manifest; 404 and enquiry GET 405; CSS/font/script/optimized hero image/favicon assets; all four PDF SHA256 hashes match the reviewed repository files. Each page has one font preload and stylesheet. |
+| Remote accessibility and enquiry UI checks | Actual staged Home/Contact reviewed at mobile and desktop widths. Existing Linux CI axe/keyboard checks passed. Additional remote axe harness ran zero tests because its Vercel metadata lookup encountered a DNS failure after host suspension. |
+| Lighthouse baseline/candidate comparison | [24 audits and comparison](mobile-performance-2026-10-14.md), same four URLs/settings, three runs each before/after. Candidate representative scores 94–97; accessibility/SEO 100. |
+| Real enquiry email delivery | Blocked: Production and Preview email keys are absent, reconfirmed 15 October. A controlled staged submission displayed the real delivery-failure message, retained the visitor's message and presented WhatsApp/email/phone alternatives. No inbox receipt is claimed. Resend Free-plan provisioning is prepared and requires human Marketplace terms acceptance, then sender-domain verification/configuration, redeployment and confirmed receipt in the intended mailbox. |
+| Production promotion | Not performed; release PR remains unmerged. |
+| Post-promotion verification | Not performed; requires actual promotion and inbox delivery. |
+| Rollback verification | Original READY deployment retained; `www` still points to its ID after staging. |
+| Temporary settings / credentials | Original `autoAssignCustomDomains=true` restored; the sole CLI-created automation bypass credential was identified by its creation timestamp, revoked and verified absent after HTTP checks. Local owned preview/baseline servers and audit processes stopped. |
 
 The configured Lighthouse targets are performance >= 90, accessibility/SEO >= 95,
 LCP <= 2.5 s, CLS <= 0.05 and TBT <= 200 ms. Existing Lighthouse CI is
-nonblocking; record any misses and the baseline comparison before promotion.
-CLI authentication was reconfirmed. The connector remains unauthorized and its
-OAuth connection is pending; this is not evidence of a deployment result.
+nonblocking. The local candidate comparison misses Home/Profile LCP and Fuel CLS;
+the Linux CI advisory job misses Fuel LCP (2672 ms) and Profile LCP (2950 ms).
+The blocking bundle budgets and all Website CI blocking jobs passed.
+
+Vercel CLI authentication and the existing project link work. The official shared
+MCP endpoint is configured, but its separate human OAuth consent timed out; the
+connector still requests reauthentication. This does not prevent CLI deployment.
+
+### Prepared email onboarding
+
+Current official Vercel CLI 64.2.0 discovery identifies `resend/resend-email` in
+the messaging category. The existing enquiry API already uses Resend. The
+prepared installation targets this linked website project, the Free plan,
+`itembagrouptz.com` sending domain, `us-east-1` and Production/Preview only:
+
+```bash
+npx --yes vercel@64.2.0 integration add resend/resend-email \
+  --plan free --name itemba-public-site-enquiries \
+  --metadata domain=itembagrouptz.com --metadata region=us-east-1 \
+  --environment production --environment preview --no-claim --no-env-pull \
+  --scope team_TeJHOALxYDLMBE2VNoy81baj --non-interactive
+```
+
+Vercel returned `integration_terms_acceptance_required`; no resource or email
+credential was provisioned. The account owner must review and accept the
+[Resend Marketplace agreement](https://vercel.com/japharyromans-projects/~/integrations/accept-terms/resend?source=cli)
+before retrying that command. This includes Vercel/Resend terms and the stated
+sharing of account ID, email and usage information. After installation, inspect
+key names, complete sender-domain verification using the existing Cloudflare
+DNS, set the verified sender and group recipient, and test a new staged build.
+Do not promote the current environment snapshot expecting later environment
+changes to appear in it.
 
 ## Original production / rollback target
 
