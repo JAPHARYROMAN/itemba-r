@@ -2,7 +2,6 @@ import { insightArticles, insightsPage, type InsightArticle } from '@/content/in
 import { insightUrl } from '@/content/site';
 import {
   ButtonLink,
-  CardLink,
   ChevronLink,
   Container,
   CtaBand,
@@ -11,6 +10,7 @@ import {
   HeadlineText,
   PageHero,
   Section,
+  SmartLink,
   keepCompounds,
 } from '@/ui';
 import { ArticleMeta } from './ArticleMeta';
@@ -26,9 +26,11 @@ export function InsightsHero() {
   const { hero } = insightsPage;
   return (
     <PageHero
+      align="start"
       eyebrow={hero.eyebrow}
       title={<HeadlineText headline={hero.headline} variant="break" />}
       titleSize="display"
+      titleMeasure="wide"
       lede={hero.lede}
     />
   );
@@ -44,13 +46,13 @@ export function InsightsFeatured({ article }: { article: InsightArticle }) {
   return (
     <Section space="none" labelledBy="featured-title" className="pb-section">
       <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-2 lg:gap-16">
-        <div className="text-center lg:text-left">
+        <div>
           <Eyebrow tone="gold">{featured.eyebrow}</Eyebrow>
           <Heading as="h2" id="featured-title" size="h1" className="mt-3">
             {article.displayTitle}
           </Heading>
-          <p className="mx-auto mt-5 max-w-[38rem] text-body-lg text-fg-muted lg:mx-0">{keepCompounds(article.summary)}</p>
-          <ArticleMeta article={article} className="mt-5 justify-center lg:justify-start" />
+          <p className="mt-5 max-w-[38rem] text-body-lg text-fg-muted">{keepCompounds(article.summary)}</p>
+          <ArticleMeta article={article} className="mt-5" />
           <ChevronLink href={insightUrl(article.slug)} context={article.displayTitle} className="mt-7">
             {featured.action}
           </ChevronLink>
@@ -62,9 +64,8 @@ export function InsightsFeatured({ article }: { article: InsightArticle }) {
 }
 
 /**
- * "Guides by need": the other guides as cards on the alternate grey, three
- * across from `lg`. Each card is one link named by its title; the date line
- * sits under the summary.
+ * "Guides by need": numbered editorial rows with the guide title, date,
+ * summary and a descriptive route to the full article.
  */
 export function InsightsGuides({ articles }: { articles: readonly InsightArticle[] }) {
   const { more } = insightsPage;
@@ -77,19 +78,21 @@ export function InsightsGuides({ articles }: { articles: readonly InsightArticle
             {more.title}
           </Heading>
         </div>
-        <ul role="list" className="mt-10 grid gap-4 md:mt-14 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
-          {articles.map((article) => (
-            <li key={article.slug} className="flex">
-              <CardLink
-                href={insightUrl(article.slug)}
-                eyebrow={article.eyebrow}
-                title={article.displayTitle}
-                description={keepCompounds(article.summary)}
-                cta={more.action}
-                className="w-full"
-              >
+        <ul role="list" className="mt-10 border-b border-line md:mt-14">
+          {articles.map((article, index) => (
+            <li key={article.slug} className="grid gap-4 border-t border-line py-7 md:grid-cols-[3rem_minmax(0,5fr)_minmax(0,7fr)] md:gap-8 md:py-10">
+              <span aria-hidden="true" className="text-h3 tabular-nums text-gold-fg">{String(index + 2).padStart(2, '0')}</span>
+              <div>
+                <Eyebrow>{article.eyebrow}</Eyebrow>
+                <Heading as="h3" size="h3" className="mt-3">
+                  <SmartLink href={insightUrl(article.slug)} className="decoration-1 underline-offset-4 hover:underline">{article.displayTitle}</SmartLink>
+                </Heading>
                 <ArticleMeta article={article} className="mt-4" />
-              </CardLink>
+              </div>
+              <div>
+                <p className="text-body-lg text-fg-muted">{keepCompounds(article.summary)}</p>
+                <ChevronLink href={insightUrl(article.slug)} context={article.displayTitle} className="mt-5">{more.action}</ChevronLink>
+              </div>
             </li>
           ))}
         </ul>

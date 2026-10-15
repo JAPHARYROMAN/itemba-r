@@ -21,6 +21,7 @@ export function CompanyHero({ company }: { company: Company }) {
   return (
     <PageHero
       accent={company.accent}
+      align="start"
       eyebrow={company.eyebrow}
       eyebrowDot
       title={company.shortName}

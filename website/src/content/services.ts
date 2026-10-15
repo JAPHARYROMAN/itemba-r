@@ -4,6 +4,7 @@
  */
 import 'server-only';
 import type { CompanySite, CompanyVisual } from './companies';
+import { directEnquirySteps } from './enquiry';
 import { flags } from './flags';
 import { mediaFigure, mediaImage, type MediaFigure, type MediaImage } from './media';
 import { contentUpdatedAt } from './site';
@@ -99,7 +100,7 @@ export const serviceAreas: ServiceArea[] = [
     companyName: 'Mwanjalisi Oil Co Ltd',
     visual: 'fuel',
     summary:
-      'Petroleum retail and parking services through high-visibility ITEMBA-branded stations and UZUNGUNI PARKING YARD managed by Mwanjalisi Oil Company Ltd for motorists, commercial transport operators, local businesses, and corridor customers.',
+      'Petroleum retail and parking services through high-visibility ITEMBA-branded stations and UZUNGUNI PARKING YARD managed by Mwanjalisi Oil Co Ltd for motorists, commercial transport operators, local businesses, and corridor customers.',
     detail:
       'Mwanjalisi Oil manages the legal and operational side of the fuel business, while the public filling station names use the ITEMBA brand with the location name. ITEMBA-MPEMBA is positioned near the Tunduma Bus Station along the Tunduma-Ileje Highway, while ITEMBA-UZUNGUNI serves the TANZAM Highway corridor in Uzunguni Area, Mpemba. UZUNGUNI PARKING YARD is also managed by Mwanjalisi Oil for corridor motorists, buses, trucks, and logistics companies.',
     lede: 'Diesel, petrol, kerosene and lubricants at the ITEMBA stations, and truck parking at UZUNGUNI PARKING YARD.',
@@ -112,8 +113,8 @@ export const serviceAreas: ServiceArea[] = [
     offerings: ['ITEMBA-MPEMBA filling station', 'ITEMBA-UZUNGUNI filling station', 'UZUNGUNI PARKING YARD', 'Diesel and petrol retail', 'Kerosene supply', 'Lubricants', 'Business fuel enquiries', 'Fleet, logistics, and parking support'],
     audience: ['Motorists', 'Transport operators', 'Commercial customers', 'Local businesses', 'Cross-border logistics companies', 'Parking and vehicle-staging customers'],
     image: mediaImage('mpemba-station-wide', {
-      alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd',
-      caption: 'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI are managed by Mwanjalisi Oil Company Ltd.',
+      alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Co Ltd',
+      caption: 'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI are managed by Mwanjalisi Oil Co Ltd.',
     }),
     // The dusk "24 hours" frame, a 2400px master: the plan's lead for energy.
     heroVisual: mediaImage('mpemba-dusk'),
@@ -162,13 +163,6 @@ export const serviceAreas: ServiceArea[] = [
         detail: 'Truck and vehicle parking in Uzunguni Area, Mpemba-Tunduma.',
         image: mediaImage('parking-container-trucks', { alt: 'Container trucks parked at UZUNGUNI PARKING YARD' }),
       },
-      {
-        name: 'New ITEMBA stations',
-        kind: 'Planned expansion',
-        detail: 'Three more stations will carry the ITEMBA-location name, under Mwanjalisi Oil management.',
-        icon: 'energy',
-        figure: { value: '3', label: 'planned' },
-      },
     ],
     // Its strong photographs are all forecourts, and the page already shows two: typographic.
     companyVisual: {
@@ -183,7 +177,7 @@ export const serviceAreas: ServiceArea[] = [
           'ITEMBA-MPEMBA and ITEMBA-UZUNGUNI, managed by Mwanjalisi Oil, handle diesel, petrol, kerosene, and lubricants for retail customers and business enquiries. Mwanjalisi Oil also manages UZUNGUNI PARKING YARD for corridor parking and vehicle staging.',
       },
       {
-        question: 'Can transport operators submit fuel or parking enquiries?',
+        question: 'Can transport operators make fuel or parking enquiries?',
         answer:
           'Yes. Transport operators can contact the group office by phone, WhatsApp, or email and fuel or UZUNGUNI PARKING YARD enquiries will be routed to Mwanjalisi Oil.',
       },
@@ -203,7 +197,7 @@ export const serviceAreas: ServiceArea[] = [
     summary:
       'Wholesale beverage distribution, ITEMBA-HARDWARE, and hospitality trade support for stockists, bars, night clubs, cross-border bulk buyers, and construction customers.',
     detail:
-      'Westsides Company connects more than 50 stockists across Songwe Region with large-volume beverage supply at distributor pricing. A stockist is a wholesale customer with area-based distribution ability who depends on Westsides as a distributor specialist. The same trade platform serves bars and night clubs in Tunduma, Mlowo, Vwawa, and other urban centres, international customers buying beverages and hardware for cross-border movement, and construction companies serving the growing real estate, filling station, residential, commercial, and public infrastructure markets.',
+      'Westsides Company connects more than 50 stockists across Songwe Region with large-volume beverage supply at distributor pricing. A stockist is a wholesale customer with area-based distribution ability who depends on Westsides as a distributor specialist. The same trade platform serves bars and night clubs in Tunduma, Mlowo, Vwawa, and other urban centres, international customers buying beverages and hardware for cross-border movement, and construction companies serving the real estate, filling station, residential, commercial, and public infrastructure markets.',
     lede: 'Wholesale beverages at distributor pricing for stockists, bars, night clubs and cross-border bulk buyers.',
     tags: 'Beer · Spirits · Soft drinks · Bottled water',
     overview:
@@ -314,11 +308,11 @@ export const serviceAreas: ServiceArea[] = [
     summary:
       'Local logistics from Dar es Salaam to the Southern Highlands and cross-border transit support connected to the Tunduma corridor.',
     detail:
-      'Itemba Enterprises anchors the group logistics capability for local businesses that buy or source goods from Dar es Salaam and need movement into Songwe, Mbeya, Rukwa, Ruvuma, and Iringa. The company also supports a growing transit market to and from neighbouring countries including Zambia, DRC, Zimbabwe, and Malawi through the Tunduma corridor.',
+      'Itemba Enterprises anchors the group logistics capability for local businesses that buy or source goods from Dar es Salaam and need movement into Songwe, Mbeya, Rukwa, Ruvuma, and Iringa. The company also supports transit customers to and from neighbouring countries including Zambia, DRC, Zimbabwe, and Malawi through the Tunduma corridor.',
     lede: 'Moving goods from Dar es Salaam into the Southern Highlands, and across the border at Tunduma.',
     tags: 'Dar es Salaam · Southern Highlands · Tunduma',
     overview:
-      "Itemba Enterprises anchors the group's logistics, for local businesses that buy or source their goods in Dar es Salaam and for a growing transit market.",
+      "Itemba Enterprises anchors the group's logistics, for local businesses that buy or source their goods in Dar es Salaam and for transit customers.",
     metaDescription:
       'Logistics from Dar es Salaam to Songwe, Mbeya, Rukwa, Ruvuma, and Iringa plus cross-border transit from Itemba Enterprises Co Ltd through Tunduma.',
     keywords: ['Tunduma logistics', 'Dar es Salaam logistics', 'Southern Highlands transport', 'Songwe logistics', 'Mbeya logistics', 'Rukwa logistics', 'Ruvuma logistics', 'Iringa logistics', 'cross-border transit'],
@@ -357,7 +351,7 @@ export const serviceAreas: ServiceArea[] = [
       {
         icon: 'globe',
         title: 'Cross-border transit',
-        body: 'A growing transit market to and from neighbouring countries, through the Tunduma corridor.',
+        body: 'Transit customers to and from neighbouring countries, through the Tunduma corridor.',
       },
       {
         icon: 'map-pin',
@@ -387,7 +381,7 @@ export const serviceAreas: ServiceArea[] = [
       {
         question: 'Which logistics routes are most relevant?',
         answer:
-          'The key local route is Dar es Salaam to Southern Highlands regions including Songwe, Mbeya, Rukwa, Ruvuma, and Iringa. The growing transit market connects to and from Zambia, DRC, Zimbabwe, and Malawi.',
+          'The key local route is Dar es Salaam to Southern Highlands regions including Songwe, Mbeya, Rukwa, Ruvuma, and Iringa. The transit routes connects to and from Zambia, DRC, Zimbabwe, and Malawi.',
       },
       {
         question: 'Where are the logistics operations based?',
@@ -407,13 +401,13 @@ export const serviceAreas: ServiceArea[] = [
     companyName: 'Westsides Company Ltd',
     visual: 'hardware',
     summary:
-      'Hardware, tools, construction equipment, and construction supply support under the ITEMBA-HARDWARE brand managed by Westsides Company Ltd for contractors and the growing real estate market.',
+      'Hardware, tools, construction equipment, and construction supply support under the ITEMBA-HARDWARE brand managed by Westsides Company Ltd for contractors and the real estate market.',
     detail:
-      'ITEMBA-HARDWARE is the public hardware and construction supply brand managed by Westsides Company Ltd, supporting demand from construction companies, contractors, property developers, cross-border bulk buyers, and the growing real estate market, including filling stations, residential homes, commercial properties, and public infrastructure.',
+      'ITEMBA-HARDWARE is the public hardware and construction supply brand managed by Westsides Company Ltd, supporting demand from construction companies, contractors, property developers, cross-border bulk buyers, and the real estate market, including filling stations, residential homes, commercial properties, and public infrastructure.',
     lede: 'Steel, roofing, paints and tools from ITEMBA-HARDWARE, for contractors, builders and developers.',
     tags: 'Steel · Roofing · Paints · Tools',
     overview:
-      "ITEMBA-HARDWARE is the group's hardware and construction supply brand, run by Westsides for a growing real estate and construction market.",
+      "ITEMBA-HARDWARE is the group's hardware and construction supply brand, run by Westsides for real estate and construction customers.",
     metaDescription:
       'ITEMBA-HARDWARE under Westsides Company Ltd supplies construction materials, hardware, tools, and construction equipment in Songwe Region, Tanzania.',
     keywords: ['ITEMBA-HARDWARE', 'hardware Tanzania', 'building materials', 'construction supplies', 'electrical supplies', 'tools'],
@@ -510,24 +504,7 @@ export const serviceAreas: ServiceArea[] = [
     keywords: ['Uzunguni Inn', 'lodging Songwe', 'hospitality Tunduma', 'hotel services'],
     offerings: ['Accommodation', 'Restaurant services', 'Business guest support', 'Traveller services'],
     audience: ['Travellers', 'Business guests', 'Regional visitors', 'Transport corridor customers'],
-    image: mediaImage('inn-lodge-room', {
-      alt: 'UZUNGUNI INN lodging room managed by Westsides Company Ltd',
-      caption: 'UZUNGUNI INN provides lodging, restaurant, and bar services in Mpemba-Tunduma.',
-    }),
-    gallery: [
-      mediaFigure('inn-lodge-room', {
-        alt: 'UZUNGUNI INN lodging room',
-        caption: 'Accommodation for regional visitors and corridor business guests.',
-      }),
-      mediaFigure('inn-bar-restaurant', {
-        alt: 'UZUNGUNI INN bar and restaurant seating',
-        caption: 'Restaurant and bar services for local and travelling customers.',
-      }),
-      mediaFigure('inn-bar-night', {
-        alt: 'UZUNGUNI INN bar area at night',
-        caption: 'Evening hospitality environment at UZUNGUNI INN.',
-      }),
-    ],
+    gallery: [],
     // The room photograph is 600px wide, stock-looking and unconfirmed
     // (flags.useUnverifiedHospitalityPhotos), the restaurant frame carries
     // third-party beverage branding and the night bar is soft and blue-cast:
@@ -669,7 +646,7 @@ export const serviceAreas: ServiceArea[] = [
       kind: 'type',
       icon: 'logistics',
       statement: 'Logistics and Itemba Estate, in one company.',
-      caption: 'Itemba Logistics · Itemba Estate · Emerging businesses',
+      caption: 'Itemba Logistics · Itemba Estate',
     },
     faqs: [
       {
@@ -791,6 +768,7 @@ export const servicePageCopy = {
   },
   company: {
     eyebrow: 'The company behind it',
+    companyName: 'Company',
     registeredName: 'Registered name',
     incorporated: 'Incorporated',
     /** Above the company's other service areas: "Also from Westsides". */
@@ -804,17 +782,10 @@ export const servicePageCopy = {
   faqHeading: 'Frequently asked questions',
   enquire: {
     eyebrow: 'Enquire',
-    /** The group's routing promise, beside the form. */
+    /** The group's routing context, beside the direct contact card. */
     body: 'One group office routes every enquiry to the right company.',
     /** How an enquiry travels, as numbered steps under the promise. */
     stepsLabel: 'How it works',
-    steps: [
-      {
-        title: 'Choose who it is for',
-        body: 'The form starts with the company that runs this service. Pick another, or General, at any time.',
-      },
-      { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
-      { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
-    ],
+    steps: directEnquirySteps,
   },
 } as const;

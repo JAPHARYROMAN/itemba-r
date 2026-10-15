@@ -63,6 +63,12 @@ describe('counts', () => {
 });
 
 describe('identity and cross-references', () => {
+  it('describes current operations without speculative emerging-business claims', () => {
+    const published = JSON.stringify([profile, aboutPage, enquiryIntents, insightArticles]);
+    expect(published).not.toMatch(/emerging[- ]business/i);
+    expect(published).toContain('Property Enquiries');
+  });
+
   it('slugs and ids are unique', () => {
     for (const list of [serviceAreas.map((s) => s.slug), companies.map((c) => c.slug), companies.map((c) => c.id), insightArticles.map((a) => a.slug), enquiryIntents.map((i) => i.id), partnershipAreas.map((p) => p.id)]) {
       expect(new Set(list).size).toBe(list.length);
@@ -123,7 +129,7 @@ describe('identity and cross-references', () => {
     expect(profile.legalCompanyProfiles.map((p) => p.id)).toEqual(['westsides', 'mwanjalisi', 'enterprises']);
     for (const legal of profile.legalCompanyProfiles) {
       const company = companies.find((c) => c.id === legal.id);
-      expect(legal.name).toBe(company?.legalName);
+      expect(legal.name).toBe(flags.publishLegalIdentifiers ? company?.legalName : company?.name);
       expect(legal.tin).toBe(company?.legal.tin);
       expect(legal.directors).toEqual(company?.legal.directors);
       expect(legal.tin).toMatch(/^\d{3}-\d{3}-\d{3}$/);
@@ -136,7 +142,10 @@ describe('identity and cross-references', () => {
     expect(ids).toEqual(['group', 'westsides', 'mwanjalisi', 'enterprises']);
     for (const id of ids) expect(existsSync(path.join(PUBLIC, profile.profilePdfHref(id)))).toBe(true);
     expect(profile.printableProfiles[0]?.directors).toBeUndefined();
-    for (const doc of profile.printableProfiles.slice(1)) expect(doc.directors?.length).toBeGreaterThan(0);
+    for (const doc of profile.printableProfiles.slice(1)) {
+      if (flags.publishLegalIdentifiers) expect(doc.directors?.length).toBeGreaterThan(0);
+      else expect(doc.directors).toBeUndefined();
+    }
   });
 
   it('each profile section with a lead is in the outline', () => {
@@ -217,10 +226,10 @@ describe('flags and facts', () => {
     expect(flags).toEqual({
       showDivisionsStat: false,
       mentionManufacturing: false,
-      publishLegalIdentifiers: true,
+      publishLegalIdentifiers: false,
       stateHqIsItembaMpemba: false,
       showEnterprisesMapPin: false,
-      useUnverifiedHospitalityPhotos: true,
+      useUnverifiedHospitalityPhotos: false,
       estateImagery: 'typographic',
       songweGrowthClaim: false,
     });

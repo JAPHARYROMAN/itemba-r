@@ -3,6 +3,7 @@
  * Dates are ISO (YYYY-MM-DD); the article page shows them and JSON-LD publishes them.
  */
 import 'server-only';
+import { directEnquirySteps } from './enquiry';
 import { mediaImage, type MediaImage } from './media';
 import type { CompanySlug, SplitHeadline, TypeVisual } from './types';
 
@@ -56,7 +57,7 @@ export type InsightArticle = {
   }>;
   /**
    * The next step after reading. A general enquiry lands on the article's
-   * own form (`#enquire`); partnership and profile routes keep their pages.
+   * own contact card (`#enquire`); partnership and profile routes keep their pages.
    */
   cta: {
     label: string;
@@ -86,7 +87,7 @@ export const insightArticles: InsightArticle[] = [
       kind: 'type',
       icon: 'arrow-up-right',
       statement: 'One group office routes every enquiry to the right company.',
-      caption: 'By phone, WhatsApp, email or the enquiry form.',
+      caption: 'Contact us by WhatsApp, email or phone.',
     },
     sections: [
       {
@@ -110,7 +111,7 @@ export const insightArticles: InsightArticle[] = [
           'A good enquiry should include the service area, the company or division you think is relevant, the location or delivery context, and the preferred contact method.',
         points: [
           'For urgent requests, use phone or WhatsApp.',
-          'For detailed commercial requests, include the scope, timing, and contact details in the enquiry form or email.',
+          'For detailed commercial requests, email the scope, timing and your contact details to the group office.',
           'For multi-sector requests, use the partnerships page so the group office can route it internally.',
         ],
       },
@@ -203,12 +204,12 @@ export const insightArticles: InsightArticle[] = [
       {
         heading: 'Westsides Company Ltd',
         body:
-          'Westsides Company handles wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN for more than 50 Songwe stockists, bars and night clubs, international bulk buyers, and construction companies serving the growing real estate market.',
+          'Westsides Company handles wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN for more than 50 Songwe stockists, bars and night clubs, international bulk buyers, and construction companies.',
       },
       {
         heading: 'Itemba Enterprises Co Ltd',
         body:
-          'Itemba Enterprises covers local logistics, cross-border transit, and emerging businesses. Its logistics market includes customers sourcing goods from Dar es Salaam to the Southern Highlands and transit customers moving to and from Zambia, DRC, Zimbabwe, and Malawi. ITEMBA-HARDWARE and UZUNGUNI INN are managed under Westsides Company Ltd, while UZUNGUNI PARKING YARD is managed under Mwanjalisi Oil Co Ltd.',
+          'Itemba Enterprises covers local logistics, cross-border transit, and property-related enquiries through Itemba Estate. Its logistics market includes customers sourcing goods from Dar es Salaam to the Southern Highlands and transit customers moving to and from Zambia, DRC, Zimbabwe, and Malawi. ITEMBA-HARDWARE and UZUNGUNI INN are managed under Westsides Company Ltd, while UZUNGUNI PARKING YARD is managed under Mwanjalisi Oil Co Ltd.',
       },
       {
         heading: 'If the enquiry spans more than one company',
@@ -333,16 +334,11 @@ export const insightPageCopy = {
 
 /**
  * The enquiry section on an insight article and on /faq: the group's
- * routing promise and how an enquiry travels, beside the compact form
- * (which starts on General there).
+ * routing context and direct contact channels, starting on General.
  */
 export const routedEnquiryCopy = {
   eyebrow: 'Enquire',
   body: 'One group office routes every enquiry to the right company.',
   stepsLabel: 'How it works',
-  steps: [
-    { title: 'Choose who it is for', body: 'The form starts with General. Pick a company if you already know which one.' },
-    { title: 'Say how to reach you', body: 'A phone number, email or WhatsApp number, and a short message.' },
-    { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
-  ],
+  steps: directEnquirySteps,
 } as const;

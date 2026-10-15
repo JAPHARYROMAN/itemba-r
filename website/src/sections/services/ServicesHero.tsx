@@ -15,6 +15,7 @@ export function ServicesHero() {
   return (
     <PageHero
       eyebrow={hero.eyebrow}
+      align="start"
       title={<HeadlineText headline={hero.headline} variant="muted-break" />}
       titleSize="display"
       lede={hero.lede}

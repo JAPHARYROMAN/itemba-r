@@ -90,7 +90,7 @@ const listFormat = new Intl.ListFormat('en-GB', { style: 'long', type: 'conjunct
 const inlineLink = 'text-fg/80 underline decoration-fg/30 underline-offset-2 transition-colors duration-fast hover:text-fg hover:decoration-fg';
 
 /**
- * The global footer, Apple-dense: 12px type on the #f5f5f7 alt tile.
+ * The global directory footer: readable 14px type on charcoal.
  *
  * 1. The crest (the shield and ITEMBA mark, legible at footer size) and
  *    the group's structure in one line.
@@ -109,11 +109,11 @@ export function SiteFooter() {
   const year = new Date().getFullYear();
 
   return (
-    <footer data-tone="alt" className="site-footer text-legal text-fg-muted">
-      <Container size="content" className="pb-6 pt-5 md:pb-5">
+    <footer data-tone="cinema" className="site-footer text-caption text-fg-muted">
+      <Container size="content" className="pb-8 pt-12 md:pb-8">
         <div className="flex flex-col gap-3 border-b border-line pb-4 md:flex-row md:items-center md:gap-8">
           <Link href="/" aria-label={brandLabel} className="-ml-1 flex h-11 w-fit shrink-0 items-center px-1">
-            <Crest variant="nav" />
+            <Crest variant="nav" className="brightness-100" />
           </Link>
           {/* Short names: the registered legal forms appear on each company's page, once. */}
           <p className="max-w-[46rem]">

@@ -63,17 +63,17 @@ export const printProfileOptions = [
   {
     id: 'westsides',
     label: 'Westsides Company Ltd',
-    description: 'Legal company profile for beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN.',
+    description: 'Company profile for beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN.',
   },
   {
     id: 'mwanjalisi',
-    label: 'Mwanjalisi Oil Company Ltd',
-    description: 'Legal company profile for ITEMBA fuel stations, lubricants, and UZUNGUNI PARKING YARD.',
+    label: 'Mwanjalisi Oil Co Ltd',
+    description: 'Company profile for ITEMBA fuel stations, lubricants, and UZUNGUNI PARKING YARD.',
   },
   {
     id: 'enterprises',
     label: 'Itemba Enterprises Co Ltd',
-    description: 'Legal company profile for logistics, cross-border transit, and emerging businesses.',
+    description: 'Company profile for logistics, cross-border transit, and property enquiries.',
   },
 ] as const;
 
@@ -100,14 +100,14 @@ export const groupPrintProfile: PrintProfile = {
   facts: [
     { label: 'Profile Type', value: 'Group profile and capability statement' },
     { label: 'Head Office', value: contact.headOffice },
-    { label: 'Operating Companies', value: 'Mwanjalisi Oil Company Ltd, Westsides Company Ltd, Itemba Enterprises Co Ltd' },
+    { label: 'Operating Companies', value: 'Mwanjalisi Oil Co Ltd, Westsides Company Ltd, Itemba Enterprises Co Ltd' },
     { label: 'Website', value: site.domain },
     { label: 'Public Contact', value: `${contact.primaryPhoneDisplay} / ${contact.email}` },
   ],
   images: [
     mediaFigure('mpemba-station-wide', {
       alt: 'ITEMBA fuel station forecourt',
-      caption: 'Fuel retail operations under Mwanjalisi Oil Company Ltd.',
+      caption: 'Fuel retail operations under Mwanjalisi Oil.',
     }),
     mediaFigure('westsides-warehouse-stock', {
       alt: 'Westsides beverage warehouse stock',
@@ -119,14 +119,14 @@ export const groupPrintProfile: PrintProfile = {
     }),
     mediaFigure('parking-container-trucks', {
       alt: 'Container trucks at UZUNGUNI PARKING YARD',
-      caption: 'Parking and staging facilities under Mwanjalisi Oil Company Ltd.',
+      caption: 'Parking and staging facilities under Mwanjalisi Oil.',
     }),
   ],
   sections: [
     {
       title: 'Company Overview',
       body:
-        'Itemba Group operates as a shared business identity and governance platform for legally independent Tanzanian companies active in fuel, parking, trade, logistics, construction supply, hospitality, real estate-related services, and emerging businesses.',
+        'Itemba Group operates as a shared business identity and governance platform for independent Tanzanian companies across fuel, parking, trade, logistics, construction supply and hospitality, with property-related enquiries handled through Itemba Estate.',
     },
     {
       title: 'Vision and Mission',
@@ -153,7 +153,7 @@ export const groupPrintProfile: PrintProfile = {
       })),
     },
     {
-      title: 'Company History',
+      title: 'Company Story',
       pageBreakBefore: true,
       points: history.map((item) => `${item.date} - ${item.title}: ${item.body}`),
     },
@@ -196,20 +196,20 @@ export const companyPrintProfiles: PrintProfile[] = legalCompanyProfiles.map((co
   subtitle: `${company.sector}. ${company.summary}`,
   coverImage: company.coverImage,
   facts: [
-    { label: 'Legal Name', value: company.name },
+    { label: 'Company', value: company.name },
     // The statutory identifiers print only while the owner allows them (flags.publishLegalIdentifiers).
     ...(flags.publishLegalIdentifiers
       ? [
           { label: 'TIN', value: company.tin },
           { label: 'Incorporated', value: company.incorporationDate },
           { label: 'Incorporation No.', value: company.incorporationNumber },
+          { label: 'Legal Status', value: company.status },
         ]
       : []),
-    { label: 'Legal Status', value: company.status },
     { label: 'Website', value: site.domain },
     { label: 'Head Office Contact', value: contact.headOffice },
   ],
-  directors: company.directors,
+  directors: flags.publishLegalIdentifiers ? company.directors : undefined,
   images: company.images,
   sections: [
     {
@@ -224,9 +224,9 @@ export const companyPrintProfiles: PrintProfile[] = legalCompanyProfiles.map((co
     {
       title: 'Compliance Information',
       points: [
-        `${company.name} maintains company-level statutory, tax, licensing, and business records.`,
+        `Contact the group office for the ${company.name} documents required for your review.`,
         ...(flags.publishLegalIdentifiers ? [`TIN: ${company.tin}. Incorporation number: ${company.incorporationNumber}.`] : []),
-        'Supporting compliance documents can be provided directly to authorized counterparties when required.',
+        'Specify the statutory, tax, licensing or other supporting records needed for your review.',
       ],
     },
     {
@@ -246,12 +246,12 @@ export const printableProfiles: readonly PrintProfile[] = [groupPrintProfile, ..
 export const printCopy = {
   logoAlt: 'Itemba Group logo',
   /** Tag under the logo mark. */
-  established: `EST. ${site.established}`,
+  locationMark: 'TANZANIA',
   letterheadTitle: 'ITEMBA GROUP',
   letterheadSubtitle: 'Company Profile and Capability Statement',
   kicker: 'Prepared for institutional review',
   factsHeading: 'Key Profile Facts',
-  legalCompaniesHeading: 'Independent Legal Companies',
+  legalCompaniesHeading: 'Operating Companies',
   legalTableHeads: ['Company', 'TIN', 'Incorporation', 'Directors'],
   directorsHeading: 'Directors',
   imagesHeading: 'Related Operating Images',

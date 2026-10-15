@@ -1,0 +1,9 @@
+*
+!website
+!website/**
+website/node_modules
+website/.next
+website/.vercel
+website/.env*
+website/test-results
+website/playwright-report

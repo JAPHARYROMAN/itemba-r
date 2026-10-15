@@ -7,6 +7,7 @@ import { HomeCorridor } from '@/sections/home/HomeCorridor';
 import { HomeHero } from '@/sections/home/HomeHero';
 import { HomeInsights } from '@/sections/home/HomeInsights';
 import { HomeNumbers } from '@/sections/home/HomeNumbers';
+import { HomeProfile } from '@/sections/home/HomeProfile';
 import { HomeSectors } from '@/sections/home/HomeSectors';
 import { HomeStatement } from '@/sections/home/HomeStatement';
 
@@ -32,11 +33,12 @@ export default function HomePage() {
   return (
     <>
       <HomeHero />
+      <HomeNumbers />
       <HomeStatement />
       <HomeCompanies />
       <HomeSectors />
       <HomeCorridor />
-      <HomeNumbers />
+      <HomeProfile />
       <HomeInsights />
       <HomeClosing />
     </>

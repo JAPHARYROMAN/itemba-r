@@ -14,7 +14,7 @@ export function HomeClosing() {
       titleId="closing-title"
       title={homeClosing.title}
       lede={homeClosing.body}
-      tone="light"
+      tone="cinema"
       actions={
         <>
           {enquire ? (

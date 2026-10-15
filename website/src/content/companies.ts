@@ -134,7 +134,7 @@ export const companies: readonly Company[] = [
     id: 'mwanjalisi',
     slug: 'mwanjalisi-oil',
     name: 'Mwanjalisi Oil Co Ltd',
-    legalName: 'Mwanjalisi Oil Company Ltd',
+    legalName: 'Mwanjalisi Oil Co Ltd',
     shortName: 'Mwanjalisi Oil',
     accent: 'mwanjalisi',
     sector: 'Energy, Fuel & Parking',
@@ -159,19 +159,19 @@ export const companies: readonly Company[] = [
       'Runs the ITEMBA stations and UZUNGUNI PARKING YARD',
       'Located along major corridor routes and near a major bus stand',
       'Serves motorists, fleets, and logistics operators',
-      'Two operating stations with three upcoming fuel locations',
+      'Two operating ITEMBA stations',
     ],
     image: mediaImage('mpemba-station-wide', {
-      alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+      alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Co Ltd',
     }),
     gallery: [
       mediaFigure('mpemba-station-wide', {
         alt: 'ITEMBA filling station forecourt and canopy',
         caption: 'ITEMBA-branded fuel station presence under Mwanjalisi Oil management.',
       }),
-      mediaFigure('mpemba-truck-canopy', {
-        alt: 'Truck refuelling under the ITEMBA-MPEMBA canopy',
-        caption: 'Forecourt access for trucks, buses, motorists, and corridor logistics operators.',
+      mediaFigure('parking-container-trucks', {
+        alt: 'Container trucks parked at UZUNGUNI PARKING YARD',
+        caption: 'Truck and vehicle parking at UZUNGUNI PARKING YARD.',
       }),
       mediaFigure('parking-yard-trucks', {
         alt: 'Truck parking at Uzunguni Parking Yard',
@@ -193,7 +193,7 @@ export const companies: readonly Company[] = [
     keyStat: {
       value: '2',
       label: 'Operating ITEMBA stations',
-      restates: 'Two operating stations with three upcoming fuel locations',
+      restates: 'Two operating ITEMBA stations',
     },
     offerings: [
       {
@@ -234,13 +234,6 @@ export const companies: readonly Company[] = [
         detail: 'Truck and vehicle parking in Uzunguni Area, Mpemba-Tunduma.',
         image: mediaImage('parking-truck-line'),
       },
-      {
-        name: 'New ITEMBA stations',
-        kind: 'Planned expansion',
-        detail: 'Three more stations will carry the ITEMBA-location name, under Mwanjalisi Oil management.',
-        icon: 'energy',
-        figure: { value: '3', label: 'planned' },
-      },
     ],
     enquiryLabel: 'Fuel supply enquiry',
     faqs: [
@@ -268,7 +261,7 @@ export const companies: readonly Company[] = [
         "Tanzania's petroleum retail and corridor parking arm — managing ITEMBA-branded filling stations and UZUNGUNI PARKING YARD for businesses, transport operators, and communities across Songwe Region.",
       chips: ['ITEMBA-MPEMBA', 'ITEMBA-UZUNGUNI', 'UZUNGUNI PARKING YARD', 'Diesel', 'Petrol', 'Lubricants'],
       image: mediaImage('mpemba-station-wide', {
-        alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+        alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Co Ltd',
       }),
     },
     legal: {
@@ -297,7 +290,7 @@ export const companies: readonly Company[] = [
     summary:
       'Wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN operations for stockists, bars, night clubs, contractors, hospitality customers, and cross-border bulk buyers.',
     detail:
-      "Westsides Company Ltd manages the group's trading and hospitality brands, including wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN. Its market includes more than 50 stockists across Songwe Region, bars and night clubs in urban centres such as Tunduma, Mlowo, and Vwawa, international bulk buyers moving goods through Tunduma border, and construction companies serving the growing real estate and infrastructure market.",
+      "Westsides Company Ltd manages the group's trading and hospitality brands, including wholesale beverage distribution, ITEMBA-HARDWARE, and UZUNGUNI INN. Its market includes more than 50 stockists across Songwe Region, bars and night clubs in urban centres such as Tunduma, Mlowo, and Vwawa, international bulk buyers moving goods through Tunduma border, and construction companies serving the real estate and infrastructure market.",
     lede: 'Beverage wholesale, hardware and hospitality for stockists, builders and travellers in Songwe.',
     overview: {
       lead: "The group's trading and hospitality company: wholesale beverages, ITEMBA-HARDWARE and UZUNGUNI INN.",
@@ -332,18 +325,8 @@ export const companies: readonly Company[] = [
         alt: 'ITEMBA-HARDWARE paint and construction supply stock',
         caption: 'ITEMBA-HARDWARE supports contractors, real estate, and infrastructure customers.',
       }),
-      mediaFigure('inn-bar-restaurant', {
-        alt: 'UZUNGUNI INN restaurant and bar seating',
-        caption: 'UZUNGUNI INN adds lodging, restaurant, and bar services under Westsides.',
-      }),
     ],
-    // No Westsides photograph is strong enough for a home tile: its tile is typographic.
-    tileVisual: {
-      kind: 'type',
-      icon: 'trade',
-      statement: 'Four branches across Songwe Region.',
-      caption: 'Mpemba · Mlowo · Sogea · Tunduma',
-    },
+    tileVisual: mediaImage('westsides-order-truck'),
     // The one frame that names the company: the WESTSIDES COMPANY LIMITED signboard.
     heroImage: mediaImage('hardware-storefront', {
       alt: 'The WESTSIDES COMPANY LIMITED signboard above the ITEMBA-HARDWARE storefront and its stock',
@@ -457,12 +440,12 @@ export const companies: readonly Company[] = [
     eyebrow: 'Logistics and cross-border transit',
     visual: 'logistics',
     summary:
-      "The group's logistics and emerging-business company, anchored by Dar es Salaam-to-Southern Highlands movement and cross-border transit through the Tunduma corridor.",
+      "The group's logistics and property company, anchored by Dar es Salaam-to-Southern Highlands movement and cross-border transit through the Tunduma corridor.",
     detail:
-      'Itemba Enterprises focuses on logistics services, cross-border transit, and emerging businesses after trading and hospitality operations were placed under Westsides Company Ltd and UZUNGUNI PARKING YARD came under Mwanjalisi Oil Co Ltd management. Its logistics target market includes local businesses sourcing goods from Dar es Salaam into the Southern Highlands regions of Songwe, Mbeya, Rukwa, Ruvuma, and Iringa, plus transit customers moving goods to and from Zambia, DRC, Zimbabwe, and Malawi.',
+      'Itemba Enterprises focuses on logistics services, cross-border transit, and property-related enquiries through Itemba Estate. Its logistics target market includes local businesses sourcing goods from Dar es Salaam into the Southern Highlands regions of Songwe, Mbeya, Rukwa, Ruvuma, and Iringa, plus transit customers moving goods to and from Zambia, DRC, Zimbabwe, and Malawi.',
     lede: 'Logistics from Dar es Salaam to the Southern Highlands, and cross-border transit via Tunduma.',
     overview: {
-      lead: "The group's logistics and emerging-business company, moving goods for local businesses and transit customers.",
+      lead: "The group's logistics and property company, moving goods for local businesses and transit customers.",
       label: 'Markets',
       points: [
         'Local businesses sourcing goods from Dar es Salaam',
@@ -470,12 +453,12 @@ export const companies: readonly Company[] = [
         'Transit customers for Zambia, DRC, Zimbabwe and Malawi',
       ],
     },
-    services: ['Local logistics', 'Cross-border transit', 'Emerging businesses'],
+    services: ['Local logistics', 'Cross-border transit', 'Itemba Estate'],
     highlights: [
       'Dar es Salaam to Southern Highlands logistics',
       'Transit routes to Zambia, DRC, Zimbabwe, and Malawi',
       'Direct access to the Tunduma border corridor',
-      'Emerging businesses and Itemba Estate in one company',
+      'Property-related enquiries through Itemba Estate',
     ],
     image: mediaImage('logistics-tanker', {
       alt: 'Itemba Logistics fuel tanker supporting goods movement and transit operations',
@@ -546,18 +529,12 @@ export const companies: readonly Company[] = [
         detail: 'Property development, real estate and property-related services.',
         icon: 'realestate',
       },
-      {
-        name: 'Emerging businesses',
-        kind: 'New opportunities',
-        detail: 'Emerging business activities, developed under the Itemba Enterprises structure.',
-        icon: 'arrow-up-right',
-      },
     ],
     enquiryLabel: 'Operations enquiry',
     faqs: [
       {
         question: 'What are the Itemba Enterprises divisions?',
-        answer: 'Itemba Enterprises focuses on Itemba Logistics, cross-border transit, and emerging business opportunities.',
+        answer: 'Itemba Enterprises focuses on Itemba Logistics, cross-border transit, and property-related enquiries through Itemba Estate.',
       },
       {
         question: 'Does Itemba Enterprises handle cross-border logistics?',
@@ -575,8 +552,8 @@ export const companies: readonly Company[] = [
     band: {
       sector: 'Logistics & Transit',
       summary:
-        "The group's logistics and emerging-business company — anchored by Dar es Salaam-to-Southern Highlands goods movement and cross-border transit through the Tunduma corridor.",
-      chips: ['Dar → Southern Highlands', 'Cross-border transit', 'Emerging businesses'],
+        "The group's logistics and property company — anchored by Dar es Salaam-to-Southern Highlands goods movement and cross-border transit through the Tunduma corridor.",
+      chips: ['Dar → Southern Highlands', 'Cross-border transit', 'Itemba Estate'],
       image: mediaImage('logistics-tanker', {
         alt: 'Itemba Logistics tanker truck supporting local and transit movement',
       }),
@@ -629,6 +606,7 @@ export const companiesPage = {
   },
   /** Accessible name of the hero's row of links to the three company tiles. */
   jumpLabel: 'Jump to a company',
+  directory: { explore: 'Explore the company', enquire: 'Make an enquiry' },
 } as const;
 
 /** /companies/[slug] copy. */
@@ -640,6 +618,7 @@ export const companyPageCopy = {
     whatWeDo: 'What we do',
     sites: 'Brands & sites',
     strengths: 'Strengths',
+    gallery: 'Gallery',
     faq: 'FAQ',
     enquire: 'Enquire',
     /** The chevron beside the company name on phones, which lists the anchors above. */
@@ -654,6 +633,7 @@ export const companyPageCopy = {
   glance: {
     title: 'At a glance',
     registeredName: 'Registered name',
+    companyName: 'Company',
     incorporated: 'Incorporated',
     status: 'Status',
   },
@@ -666,6 +646,18 @@ export const companyPageCopy = {
   branchesHeading: 'Branches',
   faqHeading: 'Frequently asked questions',
   strengthsHeading: 'Key strengths',
+  gallery: {
+    eyebrow: 'Our operations',
+    title: 'On the ground.',
+    body: 'A closer look at the places, products and vehicles behind our work.',
+  },
+  downloads: {
+    eyebrow: 'Company profile',
+    title: 'Get the full picture.',
+    body: 'Take a company overview with you, or explore the wider Itemba Group profile.',
+    action: 'Download profile (PDF)',
+    groupAction: 'View group profile',
+  },
   sectorLabel: 'Sector',
   facts: [
     { label: 'Structure', value: 'Subsidiary of Itemba Group' },

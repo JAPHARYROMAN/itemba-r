@@ -2,10 +2,9 @@
  * flags.publishLegalIdentifiers covers the print documents, not only the
  * screen view: with the flag off, the hidden print documents on
  * /company-profile (page source, Ctrl+P, and the PDFs once regenerated)
- * carry no TIN, identifier table or director (the history narrative keeps
- * its incorporation dates: flags.ts says so), and still name each
- * company by its registered name. With the default (on) they carry all of
- * them (tests/unit/pdf-contract.test.ts checks the committed PDFs).
+ * carry no TIN, incorporation date/number, identifier table or director.
+ * Unverified founding and historical dates stay omitted from narratives.
+ * Each company remains named by its established public name.
  */
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -33,16 +32,19 @@ describe('print documents with flags.publishLegalIdentifiers off', () => {
     expect(html.match(/<article class="print-profile-document"/g)).toHaveLength(4);
     for (const company of companies) {
       expect(printed, company.slug).not.toContain(company.legal.tin);
+      expect(printed, company.slug).not.toContain(company.legal.incorporationNumber);
+      expect(printed, company.slug).not.toContain(company.legal.incorporationDate);
       for (const director of company.legal.directors) expect(printed, director).not.toContain(director);
     }
     expect(printed).not.toMatch(/\bTIN\b/);
+    expect(printed).not.toContain('EST. 2012');
     expect(html).not.toContain('print-table');
     for (const profile of printableProfiles) {
       expect(profile.facts.map((fact) => fact.label)).not.toEqual(expect.arrayContaining(['TIN']));
     }
   });
 
-  it('still names every company by its registered name', () => {
-    for (const company of companies) expect(printed).toContain(company.legalName);
+  it('still names every company by its public name', () => {
+    for (const company of companies) expect(printed).toContain(company.name);
   });
 });

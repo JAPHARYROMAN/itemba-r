@@ -1,38 +1,14 @@
-import type { ReactNode } from 'react';
 import { contact } from '@/content/contact';
 import { contactPage } from '@/content/contactPage';
 import { businessEnquirySubject } from '@/content/enquiry';
 import { withFlags } from '@/content/flags';
-import { Bento, BentoCell, ContactLink, Container, DirectionsLink, Eyebrow, Heading, Icon, MapFacade, Section, keepCompounds, type BentoSpan, type IconName } from '@/ui';
+import { ContactLink, Container, DirectionsLink, Eyebrow, Heading, Icon, MapFacade, Section, keepCompounds } from '@/ui';
 import { contactSectionIds } from './ids';
 
-/** A contact card: its line icon, what it is, then the way to use it. */
-function ContactCard({ icon, title, span = 'third', children }: { icon: IconName; title: string; span?: BentoSpan; children: ReactNode }) {
-  return (
-    <BentoCell span={span}>
-      <Icon name={icon} size="lg" strokeWidth={1.4} className="text-accent" />
-      <Heading as="h3" size="h4" className="mt-5 md:mt-8">
-        {title}
-      </Heading>
-      <div className="mt-2 flex flex-1 flex-col">{children}</div>
-    </BentoCell>
-  );
-}
-
-/** A phone number or the email address as a plain link, 44px tall. */
 const valueLink =
-  'inline-flex min-h-11 items-center self-start break-all text-body-lg text-accent-fg decoration-1 underline-offset-4 hover:underline';
+  'inline-flex min-h-11 items-center self-start break-all text-body-lg text-gold-fg decoration-1 underline-offset-4 hover:underline md:text-lede';
 
-/**
- * "Group headquarters": the contact cards, as a bento on the six-column
- * grid (lg): phone · WhatsApp · email (a third each), then the head office
- * with its directions link and the postal address (half each), then the
- * map facade across the row, a slim bar until it is opened.
- * Every number, address and href comes from src/content/contact.ts (the
- * tel:, wa.me/ and mailto: forms ConversionTracker classifies). Under it,
- * why the group is based at Mpemba-Tunduma; the unsourced growth claim
- * stays out (flags.songweGrowthClaim).
- */
+/** Direct contact channels beside the office address; the map stays optional and works without JavaScript. */
 export function ContactFindUs() {
   const { findUs, mapTitle, contextHeading, contextCards } = contactPage;
   return (
@@ -43,57 +19,53 @@ export function ContactFindUs() {
           {findUs.title}
         </Heading>
 
-        <Bento className="mt-10 md:mt-14">
-          <ContactCard icon="phone" title={findUs.phoneLabel}>
-            <ContactLink kind="tel" phone={contact.primaryPhone} appearance="plain" className={valueLink}>
-              {contact.primaryPhoneDisplay}
-            </ContactLink>
-            <ContactLink kind="tel" phone={contact.secondaryPhone} appearance="plain" className={valueLink}>
-              {contact.secondaryPhoneDisplay}
-            </ContactLink>
-          </ContactCard>
+        <div className="mt-10 grid items-start gap-10 md:mt-14 lg:grid-cols-[minmax(0,6fr)_minmax(0,6fr)] lg:gap-16">
+          <div className="border-b border-line">
+            <div className="border-t border-line py-6 md:py-8">
+              <Heading as="h3" size="h5" className="flex items-center gap-3">
+                <Icon name="phone" size="md" className="text-accent" />{findUs.phoneLabel}
+              </Heading>
+              <div className="mt-3 flex flex-col items-start">
+                <ContactLink kind="tel" phone={contact.primaryPhone} appearance="plain" className={valueLink}>{contact.primaryPhoneDisplay}</ContactLink>
+                <ContactLink kind="tel" phone={contact.secondaryPhone} appearance="plain" className={valueLink}>{contact.secondaryPhoneDisplay}</ContactLink>
+              </div>
+            </div>
+            <div className="border-t border-line py-6 md:py-8">
+              <Heading as="h3" size="h5" className="flex items-center gap-3">
+                <Icon name="whatsapp" size="md" className="text-accent" />{findUs.whatsappLabel}
+              </Heading>
+              <p className="mt-3 text-body-lg text-fg-muted">{contact.primaryPhoneDisplay}</p>
+              <ContactLink kind="whatsapp" appearance="chevron" className="mt-3">{findUs.whatsappAction}</ContactLink>
+            </div>
+            <div className="border-t border-line py-6 md:py-8">
+              <Heading as="h3" size="h5" className="flex items-center gap-3">
+                <Icon name="mail" size="md" className="text-accent" />{findUs.emailLabel}
+              </Heading>
+              <ContactLink kind="mailto" subject={businessEnquirySubject} appearance="plain" className={`mt-3 ${valueLink}`}>{contact.email}</ContactLink>
+            </div>
+          </div>
 
-          <ContactCard icon="whatsapp" title={findUs.whatsappLabel}>
-            <p className="text-body text-fg-muted">{contact.primaryPhoneDisplay}</p>
-            <ContactLink kind="whatsapp" appearance="chevron" className="mt-auto self-start pt-4">
-              {findUs.whatsappAction}
-            </ContactLink>
-          </ContactCard>
+          <div>
+            <div data-tone="cinema" className="rounded-tile bg-surface p-7 md:p-10">
+              <Icon name="map-pin" size="lg" strokeWidth={1.4} className="text-accent" />
+              <Heading as="h3" size="h4" className="mt-5">{findUs.headOfficeLabel}</Heading>
+              <address className="mt-3 text-body-lg not-italic text-fg md:text-lede">
+                {contact.headOfficeLines.map((line) => <span key={line} className="block">{line}</span>)}
+              </address>
+              <DirectionsLink className="mt-5" />
+              <div className="mt-8 border-t border-line pt-6">
+                <Heading as="h3" size="h5">{findUs.postalLabel}</Heading>
+                <address className="mt-2 text-body not-italic text-fg-muted">
+                  {contact.postalLines.map((line) => <span key={line} className="block">{line}</span>)}
+                </address>
+              </div>
+            </div>
+          </div>
+        </div>
+        <MapFacade title={mapTitle} layout="bar" icon="globe" className="mt-6" />
 
-          <ContactCard icon="mail" title={findUs.emailLabel}>
-            <ContactLink kind="mailto" subject={businessEnquirySubject} appearance="plain" className={valueLink}>
-              {contact.email}
-            </ContactLink>
-          </ContactCard>
-
-          <ContactCard icon="map-pin" title={findUs.headOfficeLabel} span="half">
-            <address className="text-body-lg not-italic text-fg">
-              {contact.headOfficeLines.map((line) => (
-                <span key={line} className="block">
-                  {line}
-                </span>
-              ))}
-            </address>
-            <DirectionsLink className="mt-auto self-start pt-5" />
-          </ContactCard>
-
-          <ContactCard icon="document" title={findUs.postalLabel} span="half">
-            <address className="text-body-lg not-italic text-fg">
-              {contact.postalLines.map((line) => (
-                <span key={line} className="block">
-                  {line}
-                </span>
-              ))}
-            </address>
-          </ContactCard>
-
-          <MapFacade title={mapTitle} layout="bar" icon="globe" className="md:col-span-6" />
-        </Bento>
-
-        <div className="mt-16 md:mt-20">
-          <Heading as="h3" size="h3">
-            {contextHeading}
-          </Heading>
+        <div className="mt-16 border-t border-line pt-8 md:mt-20">
+          <Heading as="h3" size="h3">{contextHeading}</Heading>
           <ul role="list" className="mt-6 grid gap-x-10 gap-y-2 md:grid-cols-2">
             {withFlags(contextCards).map((card) => (
               <li key={card.id} className="flex gap-4 border-t border-line py-6">

@@ -1,5 +1,5 @@
 /**
- * Enquiry intents and the enquiry form's copy. Client-safe: the EnquiryRouter
+ * Enquiry intents, direct contact copy and retained submission-helper strings. Client-safe: the EnquiryRouter
  * island imports this module directly, and the frozen POST /api/enquiries
  * handler reads `enquiryIntents` through the @/lib/site barrel.
  *
@@ -12,7 +12,7 @@ export type EnquiryIntent = {
   id: IntentId;
   label: string;
   shortLabel: string;
-  /** The option's name in the form's intent control: the group office or the company it routes to. */
+  /** The company label in the intent selector. */
   segmentLabel: string;
   subject: string;
   routeTo: string;
@@ -54,7 +54,7 @@ export const enquiryIntents: readonly [EnquiryIntent, ...EnquiryIntent[]] = [
     segmentLabel: 'Itemba Enterprises',
     subject: 'Itemba Enterprises operations enquiry',
     routeTo: 'Itemba Enterprises Co Ltd',
-    summary: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, Itemba Estate property, and emerging-business enquiries.',
+    summary: 'Dar es Salaam-to-Southern Highlands logistics, cross-border transit, and property enquiries through Itemba Estate.',
   },
 ];
 
@@ -67,13 +67,14 @@ export function findIntent(id: string | undefined): EnquiryIntent {
 /** Subject for the generic "email us" links (footer, quick contact, contact page). */
 export const businessEnquirySubject = 'Business enquiry';
 
-/** The enquiry form's fixed copy. */
+/** Direct-contact copy plus retained strings for the frozen submission helper. */
 export const enquiryFormCopy = {
   eyebrow: 'Business enquiry',
-  title: 'Route an enquiry',
-  description: 'Choose the area that best matches your enquiry and contact the right team with a prepared message.',
+  title: 'Contact the group office',
+  description: 'Choose an enquiry type, then contact the group office by WhatsApp, email or phone.',
+  directLead: 'The links open your own app. Send the message or make the call there.',
   intentLegend: 'Enquiry type',
-  routedToPrefix: 'Routed to',
+  routedToPrefix: 'Enquiry for',
   /** Appended to the labels of the fields a visitor may leave empty. */
   optional: 'optional',
   fields: {
@@ -98,8 +99,8 @@ export const enquiryFormCopy = {
     email: 'Email',
     call: 'Call',
   },
-  /** Lead-in to the WhatsApp, email and call fallbacks under the form. */
-  fallbackLead: 'Or reach the group office directly.',
+  /** Retained for callers that present the direct contact channels. */
+  fallbackLead: 'Contact the group office directly.',
   messages: {
     required: 'Preferred contact and message are required.',
     failed: 'The enquiry could not be submitted.',
@@ -108,7 +109,7 @@ export const enquiryFormCopy = {
     sent: 'Enquiry submitted. Use WhatsApp for urgent follow-up.',
   },
   noScript:
-    'This form needs JavaScript. You can still reach the group office directly by WhatsApp, email or phone.',
+    'You can contact the group office by WhatsApp, email or phone without JavaScript.',
   /** Lines of the prepared WhatsApp/email message. */
   preparedMessage: {
     greeting: 'Hello Itemba Group,',
@@ -122,38 +123,45 @@ export const enquiryFormCopy = {
   },
 } as const;
 
-/** Per-page title and description for the enquiry form (verbatim from each page). */
+/** Shared steps for direct-contact cards; the website does not collect a message. */
+export const directEnquirySteps = [
+  { title: 'Choose the enquiry type', body: 'The company selection adds context to your WhatsApp message or email.' },
+  { title: 'Choose WhatsApp, email or phone', body: 'Open your preferred app to send the message or make a call.' },
+  { title: 'Tell us what you need', body: 'Include your request, location, timing and how the group office can reach you.' },
+] as const;
+
+/** Per-page title and description for the direct contact card. */
 export const enquiryPrompts = {
   capabilities: {
     title: 'Route a capability enquiry',
-    description: 'Choose the area that best matches the capability, service, or operating company you need.',
+    description: 'Choose the operating area you need, then contact the group office by WhatsApp, email or phone.',
   },
   company: {
     description:
-      'Contact the group office with a prepared message that can be routed to the relevant operating team.',
+      'Contact the group office by WhatsApp, email or phone about this operating company.',
   },
   companyProfile: {
-    title: 'Send a routed enquiry',
-    description: 'Select the relevant operating area and contact the group office with a prepared message.',
+    title: 'Contact the group office',
+    description: 'Select the relevant operating area, then contact the group office by WhatsApp, email or phone.',
   },
   faq: {
     title: 'Still need help?',
-    description: 'Choose the relevant enquiry type and send a prepared message to the group office.',
+    description: 'Choose an enquiry type, then ask the group office by WhatsApp, email or phone.',
   },
   insightArticle: {
     title: 'Ask about this topic',
-    description: 'Route a focused enquiry to the closest Itemba Group operating area.',
+    description: 'Ask the group office about this topic by WhatsApp, email or phone.',
   },
   location: {
     title: 'Ask about this location',
-    description: 'Contact the group office for enquiries connected to the Songwe-Tunduma operating base.',
+    description: 'Contact the group office by WhatsApp, email or phone about the Songwe-Tunduma operating base.',
   },
   partnerships: {
     title: 'Route a partnership enquiry',
-    description: 'Choose the closest enquiry type and send a prepared message to the group office.',
+    description: 'Choose the closest enquiry type, then contact the group office by WhatsApp, email or phone.',
   },
   service: {
     title: 'Start a service enquiry',
-    description: 'Choose a contact route and send a prepared message to the group office.',
+    description: 'Contact the group office by WhatsApp, email or phone about this service.',
   },
 } as const;

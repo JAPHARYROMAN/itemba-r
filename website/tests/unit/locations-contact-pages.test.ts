@@ -265,13 +265,13 @@ describe('/contact', () => {
   it('puts the full enquiry form (general intent) straight after the hero', () => {
     const tones = commonChecks(html, ['Home', 'Contact']);
     expect(tags(html, 'h1')).toEqual([headlineText(contactPage.hero.headline)]);
-    expect(tones).toEqual(['light', 'alt', 'light', 'alt', 'light']);
+    expect(tones).toEqual(['cinema', 'alt', 'light', 'alt', 'light']);
     const sections = [...html.matchAll(/<section\b([^>]*)>/g)].map((m) => m[1] ?? '');
     expect(sections[1]).toContain('id="enquire"');
     expect(html.match(/data-enquiry-router=""/g)).toHaveLength(1);
     expect(html).toContain('data-default-intent="general"');
-    expect(html).toContain('name="name"');
-    expect(html).toContain('name="organization"');
+    expect(html).not.toContain('name="name"');
+    expect(html).toContain('data-contact-mode="direct"');
   });
 
   it('shows the contact cards from src/content/contact.ts, in the forms ConversionTracker classifies', () => {

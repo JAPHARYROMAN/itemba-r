@@ -41,9 +41,9 @@ export const businessActivities = [
   {
     companyId: 'enterprises' as CompanyId,
     company: 'Itemba Enterprises Co Ltd',
-    title: 'Logistics and Emerging Businesses',
+    title: 'Logistics and Property Enquiries',
     summary:
-      'Local distribution, cross-border transit, logistics services, and emerging businesses after trading and hospitality activities moved under Westsides Company Ltd.',
-    points: ['Local logistics', 'Cross-border transit', 'Emerging business opportunities'],
+      'Local distribution, cross-border transit, logistics services, and property enquiries through Itemba Estate.',
+    points: ['Local logistics', 'Cross-border transit', 'Property enquiries'],
   },
 ] as const;

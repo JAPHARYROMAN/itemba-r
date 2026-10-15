@@ -5,8 +5,7 @@ import { ArticleMeta } from './ArticleMeta';
 import { InsightLeadVisual } from './InsightLeadVisual';
 
 /**
- * The article itself, as Apple's newsroom sets a story: everything in one
- * 680px reading column, flush left and centred on the page.
+ * A broad editorial header above a 680px reading column.
  * - The header: the guide's category, its title (the page's one h1, in the
  *   site's sentence case), the summary as the lede and the date line (the
  *   visible <time> the Article JSON-LD dates must match).
@@ -20,18 +19,19 @@ import { InsightLeadVisual } from './InsightLeadVisual';
 export function InsightArticleBody({ article }: { article: InsightArticle }) {
   return (
     <Section as="article" labelledBy="page-title" space="none" className="pb-section pt-10 md:pt-14">
-      <Container size="measure">
-        <header>
+      <Container>
+        <header className="max-w-prose border-b border-line pb-8 md:pb-10">
           <Eyebrow>{article.eyebrow}</Eyebrow>
-          <Heading as="h1" id="page-title" size="h1" className="mt-3">
+          <Heading as="h1" id="page-title" size="display" className="mt-3">
             {article.displayTitle}
           </Heading>
-          <Lede className="mt-5 max-md:text-body-lg md:mt-6">
+          <Lede className="mt-5 max-w-2xl max-md:text-body-lg md:mt-6">
             {article.summary}
           </Lede>
-          <ArticleMeta article={article} className="mt-6 border-t border-line pt-5 md:mt-8" />
+          <ArticleMeta article={article} className="mt-6 md:mt-8" />
         </header>
-
+      </Container>
+      <Container size="measure">
         <InsightLeadVisual article={article} frame="article" className="mt-10 md:mt-12" />
 
         <Prose className="mt-12 md:mt-16">

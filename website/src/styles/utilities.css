@@ -226,3 +226,18 @@ html:has([data-subnav]) .site-nav-cta {
     display: none !important;
   }
 }
+
+/* Photographic homepage: a solid reading panel keeps text contrast independent of the photograph. */
+.home-hero { position: relative; isolation: isolate; overflow: hidden; }
+.home-hero-photo { position: absolute; inset: 0 0 0 36%; }
+.home-hero-copy { position: relative; width: 56%; padding: 72px 36px 80px 0; background-color: rgb(var(--surface)); }
+.home-hero-copy h1 { font-size: clamp(3rem, 5.2vw, 4.5rem); line-height: 1.04; }
+.site-footer img { filter: brightness(1); }
+.page-hero h1 { max-width: 64rem; }
+@media (max-width: 1023px) {
+  .home-hero { display: flex; flex-direction: column; }
+  .home-hero-photo { order: 2; position: relative; inset: auto; height: clamp(240px, 48vw, 460px); margin: 0 22px 22px; }
+  .home-hero > .relative { margin: 0; }
+  .home-hero-copy { width: 100%; padding: 48px 0; }
+  .home-hero-copy h1 { font-size: clamp(2.625rem, 6vw, 4.25rem); }
+}

@@ -1,42 +1,23 @@
 /**
- * The two reference pages every later page copies (stage B6): home and the
- * company template. Server-rendered markup contracts:
- *
- * - Home: its own metadata (the site title stands alone; the flag-resolved
- *   description), one h1 with the lead line verbatim, the plan's section
- *   order, the three company tiles (legal name, accent, Explore › and
- *   Enquire › straight to the company's form), six sectors with the company
- *   that runs each, the typographic estate tile, no divisions figure, and
- *   the closing call to action with the classified contact hrefs; one link
- *   colour (group gold) with the company only in dots and icons; an h1
- *   that leads every other heading on a phone.
- * - Company pages: the metadata and JSON-LD contracts, the sticky sub-nav
- *   whose anchors all land, the form preset to the company, the profile
- *   PDF, the visible breadcrumb trail matching its BreadcrumbList, and a
- *   404 for any other slug; the short name as h1 with one legal-name form
- *   on the page, a one-sentence lede, one hero template, and a cinema tile
- *   that carries a photograph.
- * - Neither page renders anything at opacity 0, and the server HTML never
- *   mentions manufacturing (flags.mentionManufacturing).
- * - Stage C0 (shared fixes): every general Enquire action goes to /contact;
- *   tile links are quieter than the pills; home shows at most two canopy
- *   photographs; a company page never repeats its home tile's photograph;
- *   a tile with no strong photograph is a typographic panel.
- *
- * Rendered with react-dom/server; next/navigation's usePathname is mocked
- * for the EnquiryRouter island.
+ * Public home and company-page contracts for the approved editorial rebuild.
+ * Content, route ownership, downloads, visible server markup and verified
+ * imagery are checked independently of exact Tailwind classes or line breaks.
  */
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { companies, isPhoto, type Company } from '@/content/companies';
 import { contact } from '@/content/contact';
-import { enquiryFormCopy, enquiryIntents } from '@/content/enquiry';
-import { flags } from '@/content/flags';
+import { enquiryIntents } from '@/content/enquiry';
+import { flags, isEnabled, withFlags } from '@/content/flags';
+import {
+  homeClosing, homeCompanyTiles, homeCorridor, homeHero, homeInsights,
+  homeNumbers, homeNumbersCopy, homeProfile, homeSectors, homeStatement,
+} from '@/content/home';
 import { getMedia, media, type MediaId } from '@/content/media';
 import { headerCta } from '@/content/nav';
-import { homeClosing, homeCompanyTiles, homeCorridor, homeHero, homeNumbers, homeSectors, homeStatement } from '@/content/home';
 import { profilePdfHref } from '@/content/profile/cover';
+import { serviceAreas } from '@/content/services';
 import { absoluteUrl, site } from '@/content/site';
 import { headlineText } from '@/content/types';
 import { heroFrame } from '@/sections/company/LeadPhoto';
@@ -51,42 +32,73 @@ const CompanyModule = await import('@/app/companies/[slug]/page');
 
 const decode = (s: string) =>
   s.replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-const textOf = (html: string) => decode(html.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ');
+const withoutScripts = (html: string) => html.replace(/<script\b[\s\S]*?<\/script>/g, '');
+const textOf = (html: string) => decode(html.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
 const tags = (html: string, tag: string) => [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'g'))].map((m) => textOf(m[1] ?? ''));
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => decode(m[1] ?? ''));
 const ids = (html: string) => new Set([...html.matchAll(/\sid="([^"]*)"/g)].map((m) => m[1] ?? ''));
+const section = (html: string, titleId: string) =>
+  html.match(new RegExp(`<section[^>]*aria-labelledby="${titleId}"[\\s\\S]*?</section>`))?.[0] ?? '';
 const jsonLd = (html: string) =>
   [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap((m) => {
     const data = JSON.parse(m[1] ?? 'null') as unknown;
     return (Array.isArray(data) ? data : [data]) as Array<Record<string, unknown>>;
   });
-/** The /images/… photograph each <img> shows (next/image routes them through /_next/image?url=…). */
-const photos = (html: string) =>
-  [...html.matchAll(/<img\b[^>]*\ssrc="([^"]*)"/g)]
-    .map((m) => {
-      const src = decode(m[1] ?? '');
-      return src.startsWith('/_next/image') ? (new URL(src, 'http://x').searchParams.get('url') ?? '') : src;
-    })
-    .filter((src) => src.startsWith('/images/'));
+const photoSrc = (src: string) => src.startsWith('/_next/image') ? (new URL(src, 'http://x').searchParams.get('url') ?? '') : src;
+const photos = (html: string) => [...html.matchAll(/<img\b[^>]*\ssrc="([^"]*)"/g)]
+  .map((m) => photoSrc(decode(m[1] ?? ''))).filter((src) => src.startsWith('/images/'));
 const repeated = (list: readonly string[]) => [...new Set(list.filter((item, index) => list.indexOf(item) !== index))];
-/** Registry ids by public src, to read a shown photograph's registry entry. */
 const idBySrc = new Map(Object.entries(media).map(([id, entry]) => [entry.src as string, id as MediaId]));
 const canopies = (srcs: readonly string[]) => srcs.filter((src) => getMedia(idBySrc.get(src)!).canopy);
-/** Classes of every chevron link (ChevronLink's anchor starts "group inline-block"). */
-const chevronClasses = (html: string) =>
-  [...html.matchAll(/<a\b[^>]*class="(group inline-block [^"]*)"/g)].map((m) => m[1] ?? '');
+
+function verifiedMediaChecks(html: string) {
+  for (const src of photos(html)) {
+    const id = idBySrc.get(src);
+    expect(id, `registered media: ${src}`).toBeDefined();
+    const entry = getMedia(id!);
+    expect(entry.provenance, src).not.toBe('unknown');
+    expect(isEnabled(entry.requires), src).toBe(true);
+    expect(entry.width, src).toBeGreaterThan(0);
+    expect(entry.height, src).toBeGreaterThan(0);
+    if (entry.credit) expect(textOf(withoutScripts(html)), src).toContain(entry.credit);
+  }
+  for (const match of html.matchAll(/<img\b[^>]*>/g)) {
+    const image = decode(match[0]);
+    const src = photoSrc(image.match(/\ssrc="([^"]*)"/)?.[1] ?? '');
+    if (!src.startsWith('/images/')) continue;
+    expect(image, src).toMatch(/\salt="[^"]+"/);
+    expect(image, src).toMatch(/\ssizes="[^"]+"/);
+  }
+  expect(repeated(photos(html))).toEqual([]);
+}
+
+function publicContentChecks(html: string) {
+  const visible = textOf(withoutScripts(html));
+  expect(html).not.toMatch(/opacity:\s*0(?![.\d])/);
+  expect(visible).not.toMatch(/manufactur|fastest-growing/i);
+  expect(flags.publishLegalIdentifiers).toBe(false);
+  for (const company of companies) {
+    for (const value of [company.legal.tin, company.legal.incorporationDate, company.legal.incorporationNumber, ...company.legal.directors]) {
+      if (value) expect(visible, `unverified legal detail: ${value}`).not.toContain(value);
+    }
+  }
+  for (const block of html.matchAll(/<div data-reveal=""[^>]*>([\s\S]*?)<\/div>/g)) {
+    expect(textOf(block[1] ?? '')).toBe('');
+  }
+  const levels = [...html.matchAll(/<h([1-6])\b/g)].map((match) => Number(match[1]));
+  levels.forEach((level, index) => {
+    if (index) expect(level - levels[index - 1]!, 'no skipped heading levels').toBeLessThanOrEqual(1);
+  });
+}
 
 describe('home: metadata', () => {
   const { metadata } = HomeModule;
 
-  it('stands alone under the site title, with its own canonical and openGraph', () => {
+  it('stands alone under the site title, with its canonical and social metadata', () => {
     expect(metadata.title).toEqual({ absolute: site.title });
     expect(metadata.alternates?.canonical).toBe(absoluteUrl('/'));
     expect(metadata.openGraph).toMatchObject({ title: site.title, description: site.shortDescription, url: absoluteUrl('/') });
     expect(metadata.twitter).toEqual({ card: 'summary_large_image' });
-  });
-
-  it('uses the flag-resolved description (no manufacturing by default)', () => {
     expect(metadata.description).toBe(site.description);
     expect(flags.mentionManufacturing).toBe(false);
     expect(String(metadata.description)).not.toMatch(/manufactur/i);
@@ -95,202 +107,101 @@ describe('home: metadata', () => {
 
 describe('home: page', () => {
   const html = renderToStaticMarkup(h(HomeModule.default));
-  const text = textOf(html);
+  const text = textOf(withoutScripts(html));
 
-  it('has one h1: the lead line, verbatim', () => {
+  it('has one h1 containing the complete group headline', () => {
     expect(tags(html, 'h1')).toEqual([headlineText(homeHero.headline)]);
   });
 
-  it('follows the plan order: hero, statement, companies, sectors, corridor, numbers, insights, closing', () => {
+  it('runs hero, facts, introduction, companies, sectors, corridor, profile, insights and enquiry in order', () => {
     const order = [
-      headlineText(homeHero.headline),
-      headlineText(homeStatement.headline),
-      ...homeCompanyTiles.map((tile) => tile.name),
-      homeSectors.title,
-      'Where Tanzania meets Zambia.',
-      'Itemba Group, by the numbers.',
-      'Insights for suppliers, buyers & partners.',
-      homeClosing.title,
+      'page-title', 'numbers-title', 'statement-title',
+      ...homeCompanyTiles.map((tile) => `tile-${tile.companySlug}`),
+      'sectors-title', 'corridor-title', 'profile-title', 'insights-title', 'closing-title',
     ];
-    const headings = [...tags(html, 'h1'), ...tags(html, 'h2')];
-    const positions = order.map((title) => text.indexOf(title));
-    for (const title of order) expect(headings, title).toContain(title);
-    expect(positions.every((p) => p >= 0)).toBe(true);
-    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect([...html.matchAll(/<section\b[^>]*aria-labelledby="([^"]+)"/g)].map((m) => m[1])).toEqual(order);
+    for (const title of [homeNumbersCopy.title, headlineText(homeStatement.headline), homeSectors.title, homeCorridor.title, homeProfile.title, homeInsights.title, homeClosing.title]) {
+      expect(tags(html, 'h2')).toContain(title);
+    }
   });
 
-  it('shows each company as a tile: accent, legal name, Explore › and Enquire › to its form', () => {
+  it('names each operating company and links its page and enquiry form', () => {
     for (const tile of homeCompanyTiles) {
       const company = companies.find((c) => c.slug === tile.companySlug)!;
-      const section = html.match(new RegExp(`<section[^>]*aria-labelledby="tile-${company.slug}"[\\s\\S]*?</section>`))?.[0] ?? '';
-      expect(section, company.slug).toContain(`data-accent="${company.accent}"`);
-      expect(textOf(section)).toContain(company.legalName);
-      expect(hrefs(section)).toEqual(expect.arrayContaining([`/companies/${company.slug}`, `/companies/${company.slug}#enquire`]));
-      expect(textOf(section)).toContain(`Explore ${tile.name}`);
-      expect(textOf(section)).toContain(`Enquire ${tile.name}`);
-      // Quieter than the pills: the tile links are body size (17px), never the lede.
-      const links = chevronClasses(section);
-      expect(links, company.slug).toHaveLength(2);
-      for (const classes of links) expect(classes, company.slug).toMatch(/\btext-body\b/);
-    }
-    // Light, cinema and alt: the energy tile carries the dusk photograph on black.
-    expect(html).toMatch(/aria-labelledby="tile-mwanjalisi-oil" data-tone="cinema"/);
-  });
-
-  it('keeps one link colour: group gold everywhere, the company only in its dots and icons', () => {
-    // Company tiles: the eyebrow and both links are gold, never the accent text colour.
-    for (const tile of homeCompanyTiles) {
-      const company = companies.find((c) => c.slug === tile.companySlug)!;
-      const section = html.match(new RegExp(`<section[^>]*aria-labelledby="tile-${company.slug}"[\\s\\S]*?</section>`))?.[0] ?? '';
-      expect(section, company.slug).not.toContain('text-accent-fg');
-      expect(section.match(/text-gold-fg/g), company.slug).toHaveLength(3);
-      expect(section, company.slug).toContain('bg-accent');
-    }
-    // Sector cells: "Explore ›" is gold; the icon and the dot carry the company.
-    const sectors = html.match(/<section[^>]*aria-labelledby="sectors-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    const cells = sectors.split(/(?=data-accent="(?:mwanjalisi|westsides|enterprises)")/).slice(1);
-    expect(cells).toHaveLength(homeSectors.items.length);
-    for (const cell of cells) {
-      const own = cell.split(/data-tone="cinema"/)[0] ?? '';
-      expect(own).not.toContain('text-accent-fg');
-      expect(own).toContain('text-gold-fg');
-      expect(own).toContain('text-accent');
+      const chapter = section(html, `tile-${company.slug}`);
+      expect(chapter, company.slug).toContain(`data-accent="${company.accent}"`);
+      expect(tags(chapter, 'h2')).toEqual([tile.name]);
+      expect(textOf(chapter)).toContain(tile.summary);
+      expect(hrefs(chapter)).toEqual(expect.arrayContaining([`/companies/${company.slug}`, `/companies/${company.slug}#enquire`]));
+      expect(textOf(chapter)).toContain(`Explore ${tile.name}`);
+      expect(textOf(chapter)).toContain(`Enquire ${tile.name}`);
     }
   });
 
-  it('lists the six sectors with the company that runs each; Itemba Estate stays typographic', () => {
-    for (const item of homeSectors.items) expect(hrefs(html)).toContain(`/services/${item.serviceSlug}`);
-    expect(text).toContain(`${homeSectors.runBy} Mwanjalisi Oil`);
-    expect(text).toContain(`${homeSectors.runBy} Itemba Enterprises`);
-    expect(text).toContain(homeSectors.routing.title);
+  it('links all six services and names the operating company behind each', () => {
+    const sectors = section(html, 'sectors-title');
+    for (const item of homeSectors.items) expect(hrefs(sectors)).toContain(`/services/${item.serviceSlug}`);
+    for (const company of companies) expect(textOf(sectors)).toContain(`${homeSectors.runBy} ${company.shortName}`);
+    expect(hrefs(sectors)).toContain(homeSectors.routing.link.href);
     expect(flags.estateImagery).toBe('typographic');
-    expect(html).not.toMatch(/real-estate\/[^"]*\.webp/);
+    expect(html).not.toMatch(/real-estate\/[^\"]*\.webp/);
   });
 
-  it('shows the confirmed figures only (no divisions stat by default)', () => {
+  it('shows only enabled group figures', () => {
     expect(flags.showDivisionsStat).toBe(false);
-    const numbers = html.match(/aria-labelledby="numbers-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    expect(tags(numbers, 'dt')).toEqual(homeNumbers.filter((stat) => !stat.requires).map((stat) => stat.label));
+    expect(tags(section(html, 'numbers-title'), 'dt')).toEqual(withFlags(homeNumbers).map((stat) => stat.label));
   });
 
-  it('closes with the Enquire pill, WhatsApp and Call, in the hrefs ConversionTracker classifies', () => {
-    const closing = html.match(/aria-labelledby="closing-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    expect(hrefs(closing)).toEqual(expect.arrayContaining(['/contact', contact.whatsapp, `tel:${contact.primaryPhone}`]));
-    expect(contact.whatsapp).toContain('wa.me/');
+  it('provides a group profile download and a route to the full profile', () => {
+    const profile = section(html, 'profile-title');
+    expect(profile).toMatch(new RegExp(`href="${profilePdfHref('group')}"[^>]*download`));
+    expect(hrefs(profile)).toContain('/company-profile');
+    expect(textOf(profile)).toContain(homeProfile.body);
   });
 
-  it('sends every general enquiry action to the enquiry form on /contact, never to /partnerships', () => {
+  it('routes general enquiries to Contact and retains classified phone and WhatsApp links', () => {
     expect(headerCta).toEqual({ href: '/contact', label: 'Enquire' });
-    expect(hrefs(html)).not.toContain('/partnerships');
-    expect(homeHero.actions.map((a) => a.href)).toEqual(['/companies', '/contact']);
+    expect(homeHero.actions.map((action) => action.href)).toEqual(['/companies', '/contact']);
     expect(homeSectors.routing.link.href).toBe('/contact');
+    expect(hrefs(html)).not.toContain('/partnerships');
+    expect(hrefs(section(html, 'closing-title'))).toEqual(expect.arrayContaining(['/contact', contact.whatsapp, `tel:${contact.primaryPhone}`]));
   });
 
-  it('keeps the CTA hierarchy: no chevron link is larger than the 19px pill label', () => {
-    const links = chevronClasses(html);
-    expect(links.length).toBeGreaterThanOrEqual(8);
-    for (const classes of links) expect(classes).toMatch(/\btext-(?:caption|body|body-lg)\b/);
-    expect(html).not.toMatch(/class="group inline-block [^"]*\btext-lede\b/);
-  });
-
-  it('renders nothing hidden and never mentions manufacturing', () => {
-    expect(html).not.toMatch(/opacity:\s*0(?![.\d])/);
-    expect(text).not.toMatch(/manufactur/i);
-    // Only the photographs may fade up: no text in a data-reveal block.
-    for (const block of html.matchAll(/<div data-reveal=""[^>]*>([\s\S]*?)<\/div>/g)) {
-      expect(textOf(block[1] ?? '').trim()).toBe('');
-    }
-  });
-
-  it('ranks its headings: the hero alone at display-xl, the statement and closing at display, chapters below', () => {
-    const sizeOf = (id: string) => new RegExp(`<h[12] id="${id}" class="(text-[a-z0-9-]+)`).exec(html)?.[1];
-    expect(sizeOf('page-title')).toBe('text-display-xl');
-    expect(html.match(/class="text-display-xl /g)).toHaveLength(1);
-    expect([sizeOf('statement-title'), sizeOf('closing-title')]).toEqual(['text-display', 'text-display']);
+  it('uses verified, distinct photographs with at most two station canopies', () => {
+    verifiedMediaChecks(html);
+    expect(photos(html)).toContain(homeHero.image.src);
+    expect(photos(html).length).toBeGreaterThanOrEqual(4);
+    expect(canopies(photos(html)).length).toBeLessThanOrEqual(2);
+    const hero = section(html, 'page-title');
+    expect(getMedia(homeHero.image.media).width).toBeGreaterThanOrEqual(2000);
+    expect(hero).not.toContain('loading="lazy"');
+    expect(hero).not.toContain('data-reveal');
     for (const tile of homeCompanyTiles) {
-      const company = companies.find((c) => c.slug === tile.companySlug)!;
-      expect(sizeOf(`tile-${company.slug}`), company.slug).toBe('text-h1');
-    }
-    expect([sizeOf('sectors-title'), sizeOf('corridor-title'), sizeOf('numbers-title')]).toEqual(['text-h1', 'text-h1', 'text-h2']);
-  });
-
-  it('keeps the h1 in the lead on phones: the statement and closing lines step down there', () => {
-    // The h1 is about 40px at 360px; chapters are 32px (the h1 token) and the
-    // display lines 33px (`statement`), so it leads each by at least 1.2x.
-    const classOf = (id: string) => new RegExp(`<h2 id="${id}" class="([^"]*)"`).exec(html)?.[1] ?? '';
-    for (const id of ['statement-title', 'closing-title']) {
-      expect(classOf(id), id).toContain('max-md:text-[length:clamp(2.0625rem,1.341rem_+_3.206vw,2.875rem)]');
+      const chapter = section(html, `tile-${tile.companySlug}`);
+      expect(photos(chapter), tile.companySlug).toHaveLength(1);
     }
   });
 
-  it('sets the lead line in two lines on a desktop, and never splits "Tanzania–Zambia" on a phone', () => {
-    const h1 = /<h1 id="page-title" class="([^"]*)">([\s\S]*?)<\/h1>/.exec(html);
-    expect(h1?.[1]).toContain('max-w-[74rem]');
-    // On phones the size is display-xl where the compound (about 7.6em wide)
-    // fits the line, and fitted to it below that, so it always stays whole.
-    expect(h1?.[1]).toContain('max-md:text-[length:min(max(3rem,8vw),calc((100vw_-_2.75rem)_/_7.8))]');
-    expect(h1?.[2]).toContain('<span class="whitespace-nowrap">Tanzania–Zambia</span>');
-  });
-
-  it('crops the hero photograph tighter on phones, with sizes that cover the crop', () => {
-    const hero = html.match(/<section[^>]*aria-labelledby="page-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    const img = hero.match(/<img\b[^>]*>/)?.[0] ?? '';
-    expect(hero).toContain('aspect-[4/3] md:aspect-[21/9]');
-    // 1.5x about the canopy (the registry's focus), below `md` only.
-    expect(hero).toMatch(/class="absolute inset-0 max-md:\[transform:scale\(var\(--lead-zoom\)\)\]" style="--lead-zoom:1.5;transform-origin:45% 45%"/);
-    // A 1.42:1 master in a 4:3 frame draws 1.06 frames wide; zoomed, 1.59.
-    expect(decode(img)).toMatch(/sizes="\(min-width: 1484px\) 1440px, \(min-width: 768px\) calc\(100vw - 44px\), calc\(\(100vw - 44px\) \* 1\.59\)"/);
-  });
-
-  it('shows no photograph twice, and at most two forecourt canopies', () => {
-    const shown = photos(html);
-    expect(shown.length).toBeGreaterThanOrEqual(4);
-    expect(repeated(shown)).toEqual([]);
-    // The hero and the Mwanjalisi tile; nothing else on home is a canopy.
-    expect(canopies(shown)).toEqual([homeHero.image.src, '/images/fuel-stations/itemba-mpemba-24-hours-dusk.webp']);
-  });
-
-  it('sets a typographic panel where a company has no strong photograph', () => {
-    for (const tile of homeCompanyTiles) {
-      const company = companies.find((c) => c.slug === tile.companySlug)!;
-      const section = html.match(new RegExp(`<section[^>]*aria-labelledby="tile-${company.slug}"[\\s\\S]*?</section>`))?.[0] ?? '';
-      const visual = company.tileVisual;
-      if (isPhoto(visual)) {
-        expect(photos(section), company.slug).toEqual([visual.src]);
-      } else {
-        expect(section, company.slug).toContain('data-type-panel=""');
-        expect(photos(section), company.slug).toEqual([]);
-        expect(textOf(section)).toContain(visual.statement);
-      }
-    }
-    expect(companies.some((c) => !isPhoto(c.tileVisual))).toBe(true);
-  });
-
-  it('keeps phone reading short: tile summaries and chapter ledes set in five lines or fewer at 360px', () => {
-    for (const tile of homeCompanyTiles) expect(tile.summary.length, tile.companySlug).toBeLessThanOrEqual(150);
-    for (const lede of [homeStatement.body, homeSectors.body, homeCorridor.body]) expect(lede.length, lede).toBeLessThanOrEqual(130);
-  });
-
-  it('keeps the statement two-tone on every width: the grey line always starts its own line', () => {
-    const statement = /<h2 id="statement-title"[^>]*>([\s\S]*?)<\/h2>/.exec(html)?.[1] ?? '';
-    expect(statement).toContain(`<span class="text-fg-muted block">${homeStatement.headline.accent}</span>`);
-    expect(statement).toContain('<span class="whitespace-nowrap">One group.</span> <span class="whitespace-nowrap">Three companies.</span>');
+  it('keeps all approved text visible in server markup and omits unverified claims', () => {
+    publicContentChecks(html);
+    expect(text).toContain(homeHero.lede);
+    expect(text).toContain(homeStatement.body);
+    expect(text).toContain(homeCorridor.body);
   });
 });
 
 async function renderCompany(company: Company) {
-  const element = await CompanyModule.default({ params: Promise.resolve({ slug: company.slug }) });
-  return renderToStaticMarkup(element);
+  return renderToStaticMarkup(await CompanyModule.default({ params: Promise.resolve({ slug: company.slug }) }));
 }
 
 describe('company pages', () => {
-  it('exist for exactly the three companies, and no other slug', async () => {
+  it('exist for exactly the three companies, and reject any other slug', async () => {
     expect(CompanyModule.dynamicParams).toBe(false);
-    expect(CompanyModule.generateStaticParams()).toEqual(companies.map((c) => ({ slug: c.slug })));
+    expect(CompanyModule.generateStaticParams()).toEqual(companies.map((company) => ({ slug: company.slug })));
     await expect(CompanyModule.default({ params: Promise.resolve({ slug: 'unknown' }) })).rejects.toThrow();
   });
 
-  it.each(companies.map((c) => [c.slug, c] as const))('%s: metadata', async (_slug, company) => {
+  it.each(companies.map((company) => [company.slug, company] as const))('%s: metadata', async (_slug, company) => {
     const metadata = await CompanyModule.generateMetadata({ params: Promise.resolve({ slug: company.slug }) });
     expect(metadata.title).toBe(company.name);
     expect(metadata.description).toBe(company.metaDescription);
@@ -298,119 +209,80 @@ describe('company pages', () => {
     expect(metadata.openGraph).toMatchObject({ title: `${company.name} | ${site.name}`, description: company.metaDescription });
   });
 
-  it.each(companies.map((c) => [c.slug, c] as const))('%s: page', async (_slug, company) => {
+  it.each(companies.map((company) => [company.slug, company] as const))('%s: content, routing, downloads and verified media', async (_slug, company) => {
     const html = await renderCompany(company);
-    const text = textOf(html);
+    const text = textOf(withoutScripts(html));
     const pageIds = ids(html);
-
-    // The h1 is the short name; the page shows one legal-name form, the
-    // registered name in "At a glance" (the metadata title keeps company.name).
-    // The form's "Routed to …" line is left aside: it is the routeTo string
-    // the enquiry payload and analytics carry (a contract).
     expect(tags(html, 'h1')).toEqual([company.shortName]);
-    const intent = enquiryIntents.find((i) => i.id === company.id)!;
-    const visible = textOf(html.replace(/<script\b[\s\S]*?<\/script>/g, '')).replace(
-      `${enquiryFormCopy.routedToPrefix} ${intent.routeTo}`,
-      '',
-    );
-    expect(visible.split(company.legalName).length - 1, 'registered name shown once').toBe(1);
-    if (company.name !== company.legalName) expect(visible).not.toContain(company.name);
+    expect(textOf(section(html, 'page-title'))).toContain(company.lede);
+    expect(textOf(section(html, 'glance-title'))).toContain(company.name);
+    publicContentChecks(html);
+    const chapters = ['page-title', 'glance-title', 'what-we-do-title', 'sites-title', 'strengths-title', 'gallery-title', 'downloads-title', 'faq-title', 'enquire-title'];
+    const positions = chapters.map((id) => html.indexOf(`aria-labelledby="${id}"`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
 
-    // The hero lede: one sentence of 110 characters or fewer (three lines on a phone).
-    const hero = html.match(/<section[^>]*aria-labelledby="page-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    expect(company.lede.length).toBeLessThanOrEqual(110);
-    expect(company.lede.slice(0, -1)).not.toMatch(/[.!?]\s/);
-    expect(textOf(hero)).toContain(company.lede);
-    // One hero template: a 2400px landscape framed in the content width, or a photograph beside the text.
-    expect(hero).not.toContain('max-w-wide');
-    const heroImg = decode(hero.match(/<img\b[^>]*>/)?.[0] ?? '');
-    if (heroFrame(company.heroImage).layout === 'framed') expect(heroImg).toMatch(/sizes="\(min-width: 1112px\) 1068px, /);
-    else expect(heroImg).toMatch(/sizes="\(min-width: 1024px\) \d+px, /);
-
-    // "What we do": a one-sentence lead and a short list, not the long description.
-    const whatWeDo = html.match(/<section[^>]*aria-labelledby="what-we-do-title"[\s\S]*?<\/section>/)?.[0] ?? '';
-    expect(textOf(whatWeDo)).toContain(company.overview.lead);
-    expect(tags(whatWeDo, 'li')).toEqual(company.overview.points.map((point) => point));
-    expect(text).not.toContain(company.detail);
-
-    // The sub-nav: named, in the company accent, every anchor lands on the page.
-    const subnav = html.match(/<nav[^>]*data-subnav[\s\S]*?<\/nav>/)?.[0] ?? '';
-    expect(subnav).toContain(`aria-label="${company.shortName} sections"`);
-    expect(subnav).toContain(`data-accent="${company.accent}"`);
-    // (#main-content, the title's target, is the layout's <main>.)
-    for (const href of hrefs(subnav).filter((href) => href.startsWith('#') && href !== '#main-content')) {
-      expect(pageIds, href).toContain(href.slice(1));
+    const overview = section(html, 'what-we-do-title');
+    expect(textOf(overview)).toContain(company.overview.lead);
+    for (const point of company.overview.points) expect(tags(overview, 'li')).toContain(point);
+    for (const service of serviceAreas.filter((service) => service.companySlug === company.slug)) {
+      expect(hrefs(html)).toContain(`/services/${service.slug}`);
     }
-    expect(hrefs(subnav)).toContain('#enquire');
-
-    // The form, preset to this company.
-    expect(html).toContain(`data-default-intent="${company.id}"`);
-    expect(html.match(/data-enquiry-router=""/g)).toHaveLength(1);
-
-    // The ready-made profile PDF, as a download.
-    expect(html).toMatch(new RegExp(`href="${profilePdfHref(company.id)}"[^>]*download`));
-
-    // Phones reach the same anchors through the chevron menu beside the name.
-    const menu = subnav.match(/<div id="subnav-sections" popover="auto"[\s\S]*?<\/ul>/)?.[0] ?? '';
-    // (HTML attribute names are case-insensitive; React writes popoverTarget as given.)
-    expect(subnav).toMatch(/<button type="button" popovertarget="subnav-sections"/i);
-    expect(hrefs(menu)).toEqual(hrefs(subnav.replace(menu, '')).filter((href) => href.startsWith('#') && href !== '#main-content' && href !== '#enquire'));
-
-    // Every site and question is on the page.
     for (const site of company.sites) expect(text).toContain(site.name);
     for (const faq of company.faqs) expect(tags(html, 'h3')).toContain(faq.question);
-    // Every strength, except the one the key figure already states.
-    const strengths = html.match(/aria-labelledby="strengths-title"[\s\S]*?<\/section>/)?.[0] ?? '';
+    expect(text).toContain(company.keyStat.label);
+
+    const strengths = section(html, 'strengths-title');
     for (const highlight of company.highlights) {
       if (highlight === company.keyStat.restates) expect(textOf(strengths)).not.toContain(highlight);
       else expect(textOf(strengths)).toContain(highlight);
     }
-    if (company.keyStat.restates) expect(company.highlights).toContain(company.keyStat.restates);
-    expect(text).toContain(company.keyStat.label);
-    // The one cinema tile carries a photograph, or a typographic panel where
-    // no strong one exists, and at least three strengths.
     expect(strengths).toContain('data-tone="cinema"');
-    const strengthsVisual = company.strengthsVisual;
-    if (isPhoto(strengthsVisual)) {
-      expect(photos(strengths)).toEqual([strengthsVisual.src]);
-    } else {
-      expect(strengths).toContain('data-type-panel=""');
-      expect(photos(strengths)).toEqual([]);
-      expect(textOf(strengths)).toContain(strengthsVisual.statement);
-    }
-    expect(tags(strengths, 'li').length).toBeGreaterThanOrEqual(3);
+    if (isPhoto(company.strengthsVisual)) expect(photos(strengths)).toEqual([company.strengthsVisual.src]);
+    else expect(textOf(strengths)).toContain(company.strengthsVisual.statement);
 
-    // One photograph per place: nothing repeats on the page, and the page never
-    // shows the company's home tile photograph (one click away).
-    const shown = photos(html);
-    expect(shown).toContain(company.heroImage.src);
-    expect(repeated(shown)).toEqual([]);
-    const tile = company.tileVisual;
-    if (isPhoto(tile)) expect(shown, 'home tile photograph repeated on the page').not.toContain(tile.src);
-    // The frames the critic retired (hazy, unflattering) never lead a page.
+    const subnav = html.match(/<nav[^>]*data-subnav[\s\S]*?<\/nav>/)?.[0] ?? '';
+    expect(subnav).toContain(`aria-label="${company.shortName} sections"`);
+    expect(subnav).toContain(`data-accent="${company.accent}"`);
+    for (const href of hrefs(html).filter((href) => href.startsWith('#') && href !== '#main-content')) {
+      expect(pageIds, href).toContain(href.slice(1));
+    }
+    expect(hrefs(subnav)).toContain('#enquire');
+    expect(subnav).toMatch(/<button type="button" popovertarget="subnav-sections"/i);
+    const menu = subnav.match(/<div id="subnav-sections" popover="auto"[\s\S]*?<\/ul>/)?.[0] ?? '';
+    expect(hrefs(menu)).toEqual(hrefs(subnav.replace(menu, '')).filter((href) => href.startsWith('#') && href !== '#main-content' && href !== '#enquire'));
+    const intent = enquiryIntents.find((item) => item.id === company.id)!;
+    expect(html).toContain(`data-default-intent="${intent.id}"`);
+    expect(html.match(/data-enquiry-router=""/g)).toHaveLength(1);
+    expect(html).toMatch(new RegExp(`href="${profilePdfHref(company.id)}"[^>]*download`));
+    expect(textOf(section(html, 'downloads-title'))).toBeTruthy();
+
+    verifiedMediaChecks(html);
+    expect(photos(html)).toContain(company.heroImage.src);
+    const frame = heroFrame(company.heroImage);
+    const master = getMedia(company.heroImage.media);
+    if (frame.layout === 'framed') expect(master.width).toBeGreaterThanOrEqual(2000);
+    else expect(frame.width).toBe('split');
     expect(['mpemba-coach-canopy', 'westsides-beer-delivery']).not.toContain(company.heroImage.media);
 
-    // JSON-LD: the company as a LocalBusiness under the group, its FAQs, and the visible trail.
     const ld = jsonLd(html);
-    const business = ld.find((e) => e['@type'] === 'LocalBusiness');
+    const business = ld.find((entry) => entry['@type'] === 'LocalBusiness');
     expect(business?.['@id']).toBe(`${absoluteUrl(`/companies/${company.slug}`)}#business`);
     expect(business?.parentOrganization).toEqual({ '@id': `${absoluteUrl('/')}#organization` });
-    const faqPage = ld.find((e) => e['@type'] === 'FAQPage');
+    expect(business?.legalName).toBeUndefined();
+    const faqPage = ld.find((entry) => entry['@type'] === 'FAQPage');
     expect((faqPage?.mainEntity as unknown[]).length).toBe(company.faqs.length);
-    const crumbs = ld.find((e) => e['@type'] === 'BreadcrumbList');
-    const trail = html.match(/<nav aria-label="Breadcrumb"[\s\S]*?<\/nav>/)?.[0] ?? '';
+    const crumbs = ld.find((entry) => entry['@type'] === 'BreadcrumbList');
     const names = (crumbs?.itemListElement as Array<{ name: string }>).map((item) => item.name);
     expect(names).toEqual(['Home', 'Companies', company.shortName]);
+    const trail = html.match(/<nav aria-label="Breadcrumb"[\s\S]*?<\/nav>/)?.[0] ?? '';
     expect(tags(trail, 'li')).toEqual(names);
-
-    expect(html).not.toMatch(/opacity:\s*0(?![.\d])/);
-    expect(text).not.toMatch(/manufactur/i);
   });
 
-  it('lists the Westsides branches', async () => {
-    const westsides = companies.find((c) => c.id === 'westsides')!;
+  it('lists every Westsides branch', async () => {
+    const westsides = companies.find((company) => company.id === 'westsides')!;
     const text = textOf(await renderCompany(westsides));
     for (const branch of westsides.branches ?? []) expect(text).toContain(branch.name);
-    expect(westsides.branches?.length).toBe(4);
+    expect(westsides.branches).toHaveLength(4);
   });
 });

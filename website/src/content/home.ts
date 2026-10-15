@@ -35,12 +35,12 @@ export type HomeSector = {
 
 export const homeHero = {
   eyebrow: 'Songwe Region · Tanzania–Zambia corridor',
-  headline: { lead: 'Fuel, trade & logistics on the', accent: 'Tanzania–Zambia corridor.' } satisfies SplitHeadline,
+  headline: { lead: 'Fuel, trade & logistics.', accent: 'One connected group.' } satisfies SplitHeadline,
   /** Two lines on desktop: the group in one sentence. The sectors follow further down the page. */
   lede: 'Itemba Group is a diversified Tanzanian holding group: three companies, six sectors, one base in Mpemba-Tunduma.',
   actions: [
-    { label: 'Explore the group', href: '/companies' },
-    { label: 'Start a business enquiry', href: '/contact' },
+    { label: 'Explore our companies', href: '/companies' },
+    { label: 'Make an enquiry', href: '/contact' },
   ] satisfies LinkItem[],
   image: mediaImage('mpemba-hero', {
     alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
@@ -74,7 +74,7 @@ export const homeCompanyTiles: HomeCompanyTile[] = [
     name: 'Itemba Enterprises',
     eyebrow: 'Logistics · Cross-border transit',
     summary:
-      'Goods moved from Dar es Salaam to the Southern Highlands, and cross-border transit through Tunduma to four neighbouring countries.',
+      'Regional goods transport and cross-border transit, coordinated from Mpemba-Tunduma.',
   },
 ];
 
@@ -95,7 +95,7 @@ export const homeSectors = {
   routing: {
     title: 'Every sector. One front door.',
     body: 'One group office routes every enquiry to the right company.',
-    link: { label: 'Start a business enquiry', href: '/contact' } satisfies LinkItem,
+    link: { label: 'Make an enquiry', href: '/contact' } satisfies LinkItem,
   },
   items: [
     {
@@ -168,7 +168,7 @@ export const homeNumbers: HomeStat[] = [
   { value: '3', label: 'Operating companies' },
   { value: '6', label: 'Business sectors' },
   { value: '50+', label: 'Stockists served' },
-  { value: '4', label: 'Countries of transit' },
+  { value: 'Songwe', label: 'Regional base' },
   { value: '5', label: 'Specialised divisions', requires: 'showDivisionsStat' },
 ];
 
@@ -189,7 +189,7 @@ export const homeClosing = {
   body: 'Suppliers, bulk buyers, fuel and logistics customers — start from your need and reach the right company faster.',
   actions: [
     // The general enquiry form (/contact), as every site-wide Enquire action.
-    { label: 'Start a business enquiry', href: '/contact' },
+    { label: 'Make an enquiry', href: '/contact' },
   ] satisfies LinkItem[],
   /** Visible labels of the direct channels beside the Enquire pill. */
   channels: {
@@ -198,3 +198,11 @@ export const homeClosing = {
   },
   link: { label: 'Browse frequently asked questions', href: '/faq' } satisfies LinkItem,
 };
+
+export const homeProfile = {
+  eyebrow: 'The group, in detail',
+  title: 'A clearer picture of Itemba.',
+  body: 'Explore our companies, business activities and operating base in one profile. Prepared for customers, suppliers and prospective partners.',
+  download: 'Download group profile',
+  explore: 'Explore the company profile',
+} as const;

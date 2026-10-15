@@ -1,127 +1,48 @@
 import { companies, type Company } from '@/content/companies';
-import type { MediaImage } from '@/content/media';
 import { serviceAreas, serviceIcons, servicesPage, type ServiceArea } from '@/content/services';
 import { companyUrl, serviceUrl } from '@/content/site';
-import {
-  Bento,
-  BentoCell,
-  Chevron,
-  ChevronLink,
-  Container,
-  Eyebrow,
-  Heading,
-  Icon,
-  Media,
-  Reveal,
-  Section,
-  SmartLink,
-  cn,
-  keepCompounds,
-  type BentoSpan,
-} from '@/ui';
+import { Chevron, ChevronLink, Container, Eyebrow, Heading, Icon, Media, Section, SmartLink, keepCompounds } from '@/ui';
 
-/** A stretched title link: the whole card is one target, named by the service. */
-const stretchedLink =
-  'after:absolute after:inset-0 after:rounded-tile focus-visible:outline-none focus-visible:after:outline focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-focus';
-
-/** One company's cards share a row: one runs full width, two by halves, three by thirds. */
-const spanFor = (count: number): BentoSpan => (count >= 3 ? 'third' : count === 2 ? 'half' : 'full');
-
-/**
- * A service card: the sector's line icon in the company accent, the service
- * (one link, stretched over the card), the sentence that says what it is,
- * a short line of what it covers and "Learn more ›" (decorative: the link's
- * name is the title). The featured card runs full width with its
- * photograph beside the text from `md`, above it on phones.
- */
-function ServiceCard({ service, span, photo }: { service: ServiceArea; span: BentoSpan; photo?: MediaImage }) {
+function ServiceRow({ service, index }: { service: ServiceArea; index: number }) {
+  const photo = service.slug === servicesPage.directory.feature.serviceSlug ? servicesPage.directory.feature.image : undefined;
   return (
-    <BentoCell
-      as="li"
-      span={span}
-      padding="none"
-      className={cn('group transition-shadow duration-base ease-apple hover:shadow-card', photo && 'lg:flex-row')}
-    >
-      {photo ? (
-        // Kept from the top (the canopy, its ITEMBA sign and the sky) in a
-        // wide frame: about 5:3 beside the text from `lg`, 2:1 above it from
-        // `sm`, 3:2 on phones. The bare forecourt at the foot is trimmed.
-        <Reveal className="relative aspect-[3/2] sm:aspect-[2/1] lg:order-2 lg:aspect-auto lg:min-h-96 lg:w-3/5 lg:shrink-0">
-          <Media
-            media={photo}
-            alt={photo.alt}
-            fill
-            position="top"
-            sizes="(min-width: 1112px) 641px, (min-width: 1024px) calc((100vw - 44px) * 0.6), calc(100vw - 44px)"
-          />
-        </Reveal>
-      ) : null}
-      <div className={cn('flex flex-1 flex-col p-7 md:p-8', photo && 'lg:p-10')}>
-        <Icon name={serviceIcons[service.visual]} size="lg" strokeWidth={1.4} className="text-accent" />
-        <Heading as="h3" size="h3" className="mt-8 md:mt-10">
-          <SmartLink href={serviceUrl(service.slug)} className={stretchedLink}>
-            {keepCompounds(service.title)}
-          </SmartLink>
-        </Heading>
-        <p className={cn('mt-3 text-body text-fg-muted', photo && 'md:text-body-lg')}>{keepCompounds(service.lede)}</p>
-        <p className="mt-4 text-caption text-fg">{service.tags}</p>
-        <span aria-hidden="true" className="mt-auto inline-flex items-center gap-[0.3em] pt-8 text-body text-gold-fg">
-          {servicesPage.directory.cardAction}
-          <Chevron />
-        </span>
+    <li className="group relative border-t border-line py-7 first:border-t-0 md:py-8">
+      {photo ? <Media media={photo} alt={photo.alt} sizes="(min-width: 1280px) 720px, (min-width: 1024px) 60vw, calc(100vw - 44px)" aspect="2/1" className="mb-7 overflow-hidden rounded-card" /> : null}
+      <div className="flex items-start gap-4 md:gap-5">
+        <span aria-hidden="true" className="pt-1 text-caption tabular-nums text-accent-fg">{String(index + 1).padStart(2, '0')}</span>
+        <div className="min-w-0 flex-1">
+          <Heading as="h3" size="h3">
+            <SmartLink href={serviceUrl(service.slug)} className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:outline focus-visible:after:outline-2 focus-visible:after:outline-focus">{keepCompounds(service.title)}</SmartLink>
+          </Heading>
+          <p className="mt-3 max-w-xl text-body-lg text-fg-muted">{keepCompounds(service.lede)}</p>
+          <p className="mt-4 text-caption text-fg">{service.tags}</p>
+          <span aria-hidden="true" className="mt-5 inline-flex items-center gap-2 text-body text-accent-fg">{servicesPage.directory.cardAction}<Chevron /></span>
+        </div>
+        <Icon name={serviceIcons[service.visual]} size="md" className="mt-1 shrink-0 text-accent" />
       </div>
-    </BentoCell>
+    </li>
   );
 }
 
-/** One company and the services it runs, in its accent. */
 function CompanyGroup({ company, services }: { company: Company; services: readonly ServiceArea[] }) {
-  const { directory } = servicesPage;
-  const titleId = `services-${company.slug}`;
-  const span = spanFor(services.length);
   return (
-    <div data-accent={company.accent}>
-      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
-        <div>
-          <Eyebrow dot tone="gold">
-            {company.sector}
-          </Eyebrow>
-          <Heading as="h2" id={titleId} size="h2" className="mt-2">
-            {company.shortName}
-          </Heading>
-        </div>
-        <ChevronLink href={companyUrl(company.slug)} tone="gold" className="md:mb-1">
-          {`${directory.explore} ${company.shortName}`}
-        </ChevronLink>
+    <div data-accent={company.accent} className="grid gap-8 border-t border-line pt-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16 md:pt-12">
+      <div>
+        <Eyebrow dot>{company.sector}</Eyebrow>
+        <Heading as="h2" id={`services-${company.slug}`} size="h2" className="mt-4">{company.shortName}</Heading>
+        <ChevronLink href={companyUrl(company.slug)} className="mt-6">{`${servicesPage.directory.explore} ${company.shortName}`}</ChevronLink>
       </div>
-      <Bento as="ul" className="mt-6 md:mt-8">
-        {services.map((service) => (
-          <ServiceCard
-            key={service.slug}
-            service={service}
-            span={span}
-            photo={service.slug === directory.feature.serviceSlug ? directory.feature.image : undefined}
-          />
-        ))}
-      </Bento>
+      <ul role="list">
+        {services.map((service, index) => <ServiceRow key={service.slug} service={service} index={index} />)}
+      </ul>
     </div>
   );
 }
 
-/**
- * The directory: every service, grouped under the company that runs it, so
- * the page answers its headline (find the service, meet the team behind
- * it) in one screen per company. Mwanjalisi Oil's one service runs full
- * width with the page's one photograph; Westsides' three and Itemba
- * Enterprises' two share their rows. The company names are the h2s, the
- * services their h3s. White cards on the alternate grey. As on home (a
- * group page), links and eyebrows are group gold and each company shows in
- * its dots and line icons only.
- */
 export function ServicesDirectory() {
   return (
     <Section tone="alt" label={servicesPage.directory.label}>
-      <Container className="space-y-16 md:space-y-24">
+      <Container className="space-y-12 md:space-y-16">
         {companies.map((company) => {
           const services = serviceAreas.filter((service) => service.companySlug === company.slug);
           return services.length ? <CompanyGroup key={company.slug} company={company} services={services} /> : null;

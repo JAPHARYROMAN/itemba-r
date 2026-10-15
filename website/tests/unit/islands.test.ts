@@ -192,8 +192,8 @@ describe('enquiry-client: postEnquiry', () => {
 describe('EnquiryRouter island: server HTML', () => {
   const full = renderToStaticMarkup(h(EnquiryRouter));
 
-  it('marks the form for the snapshot with its resolved default intent', () => {
-    expect(full).toMatch(/^<form data-enquiry-router="" data-default-intent="general"/);
+  it('marks direct contact with its resolved default intent', () => {
+    expect(full).toMatch(/^<section data-enquiry-router="" data-default-intent="general"/);
     expect(renderToStaticMarkup(h(EnquiryRouter, { defaultIntentId: 'mwanjalisi' }))).toContain('data-default-intent="mwanjalisi"');
     expect(renderToStaticMarkup(h(EnquiryRouter, { defaultIntentId: 'unknown' }))).toContain('data-default-intent="general"');
   });
@@ -224,50 +224,22 @@ describe('EnquiryRouter island: server HTML', () => {
     expect(full).toContain(`${copy.routedToPrefix} <span class="font-semibold">${enquiryIntents[0].routeTo}</span>`);
   });
 
-  it('gives every field a name, a label and autocomplete; required where the API requires', () => {
-    const fields = [
-      { name: 'name', autocomplete: 'name', required: false },
-      { name: 'organization', autocomplete: 'organization', required: false },
-      { name: 'contactMethod', autocomplete: 'tel', required: true },
-      { name: 'message', autocomplete: 'off', required: true },
-    ];
-    const controls = [...tags(full, 'input'), ...tags(full, 'textarea')].map(attrs);
-    for (const field of fields) {
-      const control = controls.find((a) => a.name === field.name);
-      expect(control, field.name).toBeDefined();
-      expect(control!.autocomplete).toBe(field.autocomplete);
-      expect('required' in control!, `${field.name} required`).toBe(field.required);
-      expect(control!['aria-invalid']).toBeUndefined();
-      expect(full, `${field.name} has a label`).toContain(`for="${control!.id}"`);
-      if (field.required) {
-        // The error line is server-rendered (empty) and always referenced.
-        expect(control!['aria-describedby'], `${field.name} error line`).toBeTruthy();
-        expect(full).toContain(`<p id="${control!['aria-describedby']}" class="mt-1.5 px-1 text-caption text-danger empty:hidden"></p>`);
-      }
-    }
-    expect('novalidate' in attrs(tags(full, 'form')[0]!)).toBe(true);
-    expect(full).toContain(`(${copy.optional})`);
+  it('offers direct channels without collecting details or submitting to the API', () => {
+    expect(full).toContain('data-contact-mode="direct"');
+    expect(full).not.toContain('<form');
+    expect(full).not.toContain('<textarea');
+    expect(full).not.toContain('type="submit"');
+    const controls = tags(full, 'input').map(attrs);
+    expect(controls.every((control) => control.type === 'radio')).toBe(true);
+    expect(full).toContain(copy.directLead);
+    expect(full).toContain(contact.email);
   });
 
-  it('hides the honeypot from people', () => {
-    const honeypot = attrs(tagWith(full, /name="website"/));
-    expect(honeypot).toMatchObject({ type: 'text', class: 'hidden', tabindex: '-1', 'aria-hidden': 'true', autocomplete: 'off' });
-  });
-
-  it('drops name and organisation in the compact form, as before', () => {
+  it('keeps the direct channels in the compact variant', () => {
     const compact = renderToStaticMarkup(h(EnquiryRouter, { compact: true }));
-    expect(compact).not.toContain('name="name"');
-    expect(compact).not.toContain('name="organization"');
-    expect(compact).toContain('name="contactMethod"');
-    expect(compact).toContain('name="message"');
-  });
-
-  it('keeps submit disabled until hydration and the status line always mounted', () => {
-    const submit = attrs(tagWith(full, /type="submit"/));
-    expect('disabled' in submit).toBe(true);
-    expect(submit.style).toBeUndefined();
-    expect(full).toContain(`>${copy.submit}</button>`);
-    expect(full).toMatch(/<p id="[^"]+" role="status" aria-live="polite" aria-atomic="true" class="[^"]*sr-only[^"]*"><\/p>/);
+    expect(compact).toContain('data-contact-mode="direct"');
+    expect(hrefs(compact).map(classifyHref).filter(Boolean).sort()).toEqual(['email_click', 'phone_click', 'whatsapp_click']);
+    expect(compact).not.toContain('<form');
   });
 
   it('keeps the no-JS fallbacks: a noscript note and WhatsApp, email and call links with the prepared message', () => {

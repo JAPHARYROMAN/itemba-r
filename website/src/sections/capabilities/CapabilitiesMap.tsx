@@ -27,7 +27,7 @@ function ServiceRow({ service }: { service: ServiceArea }) {
     >
       <div className="md:col-span-7 lg:col-span-6">
         <Icon name={serviceIcons[service.visual]} size="lg" strokeWidth={1.4} className="text-accent" />
-        <Heading as="h3" size="h3" className="mt-5">
+        <Heading as="h3" size="h2" className="mt-5">
           {service.title}
         </Heading>
         <p className="mt-3 max-w-xl text-body text-fg-muted">{keepCompounds(service.summary)}</p>

@@ -23,6 +23,7 @@ export function CompanyCards({ companies, action, className }: { companies: read
           title={company.shortName}
           description={company.lede}
           cta={action}
+          className="border-t-2 border-accent"
         />
       ))}
     </ul>

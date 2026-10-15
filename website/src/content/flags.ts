@@ -1,14 +1,9 @@
 /**
  * Build-time content flags for facts the owner has not confirmed yet.
  *
- * Every default is the conservative, internally consistent option (plan:
- * "Facts the owner should confirm later"). Content modules mark the items a
+ * Unconfirmed facts stay out of public pages and documents. Content modules mark the items a
  * flag governs (`requires: '<flag>'` on list items, or a flag-resolved value
  * such as `site.description`); renderers decide what to show.
- *
- * WP1.1 note: the legacy pages still render the origin/main copy verbatim
- * (see ./legacy.ts). The rebuilt pages (Phase C) apply these flags, and any
- * visible change they cause goes on tests/baseline/approved-changes.json.
  *
  * `npm run content:report` prints the flags in effect and every unconfirmed
  * fact they cover (src/content/facts.ts).
@@ -23,8 +18,8 @@ export type FlagValues = {
    * view, /about leadership and the company glance, and the print documents
    * (page source, Ctrl+P and, after `npm run pdf`, the four PDFs; flags.ts is
    * a PDF input, so flipping it fails the lock until they are regenerated).
-   * The incorporation dates and numbers told in the company history
-   * narrative are not covered: that stays on the owner's list.
+   * Unverified dated history is omitted from public narratives independently
+   * of this flag; enabling identifiers does not verify that chronology.
    */
   publishLegalIdentifiers: boolean;
   /** Copy that equates the head office (Itemba Filling Station) with the ITEMBA-MPEMBA station. */
@@ -42,10 +37,10 @@ export type FlagValues = {
 export const flags: Readonly<FlagValues> = {
   showDivisionsStat: false,
   mentionManufacturing: false,
-  publishLegalIdentifiers: true,
+  publishLegalIdentifiers: false,
   stateHqIsItembaMpemba: false,
   showEnterprisesMapPin: false,
-  useUnverifiedHospitalityPhotos: true,
+  useUnverifiedHospitalityPhotos: false,
   estateImagery: 'typographic',
   songweGrowthClaim: false,
 };

@@ -100,7 +100,7 @@ export const capabilitiesPage = {
     headline: { lead: 'Verify the fit.', accent: 'Contact the right team.' } satisfies SplitHeadline,
     lede:
       "A practical guide for customers, suppliers, contractors, transport operators and partners who need to understand Itemba Group's operating coverage before sending a business enquiry.",
-    /** The pill: the page's own enquiry form. */
+    /** The pill: the page's direct contact card. */
     enquire: 'Route an enquiry',
     /** The group's ready-made profile and capability statement (a download link: the verb is implied). */
     download: 'Group profile',
@@ -150,9 +150,9 @@ export const capabilitiesPage = {
     eyebrow: 'Route an enquiry',
     title: 'Ready to contact the group?',
     body:
-      'Use the enquiry router to send the request to the closest business area, or continue through the partnerships page for supplier and commercial routes.',
+      'Choose an enquiry type, then contact the group office by WhatsApp, email or phone. Visit partnerships for supplier and commercial routes.',
     link: { label: 'View partnership routes', href: '/partnerships' },
-    /** Over the legend of the form's enquiry types (each with what it covers). */
+    /** Over the guide to enquiry types and the areas they cover. */
     optionsLabel: 'Which option to choose',
   },
 } as const;

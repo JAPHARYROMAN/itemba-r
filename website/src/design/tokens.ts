@@ -13,21 +13,21 @@
  * The file is plain data with no imports, so tailwind.config.ts (loaded
  * through jiti), satori and client code can all read it.
  *
- * Direction ("Itemba, the Apple way"): calm light canvases, a few black
- * cinema tiles for photography, ink type, and one group gold used sparingly.
+ * Direction: warm paper surfaces, charcoal photographic chapters,
+ * clear company accents and group gold for shared actions.
  */
 
 /* ── Surfaces ─────────────────────────────────────────────────────────── */
 
 export const surfaces = {
   /** Page canvas. */
-  canvas: '#ffffff',
+  canvas: '#fcfaf6',
   /** Alternate tile; alternates with the canvas down a page. */
-  alt: '#f5f5f7',
+  alt: '#f3f0e9',
   /** Cinema tile, for photography. Use at most once per two screens. */
-  cinema: '#000000',
+  cinema: '#171b19',
   /** Raised tile or card inside a cinema tile. */
-  cinemaRaised: '#101014',
+  cinemaRaised: '#232824',
 } as const;
 
 /**
@@ -44,20 +44,20 @@ export const hairlines = {
 
 export const text = {
   light: {
-    primary: '#1d1d1f',
-    secondary: '#6e6e73',
+    primary: '#20251f',
+    secondary: '#625e58',
     /**
      * Tertiary text is 3.62:1 on the canvas and 3.33:1 on the alt tile. It
      * is only for large text (24px and up), icons and control borders, never
      * for body copy, captions or placeholders on a light tone.
      */
-    tertiary: '#86868b',
+    tertiary: '#80796f',
   },
   cinema: {
-    primary: '#f5f5f7',
-    secondary: '#a1a1a6',
+    primary: '#faf8f2',
+    secondary: '#babeb6',
     /** Clears 4.5:1 on both cinema surfaces, so any size may use it there. */
-    tertiary: '#86868b',
+    tertiary: '#80796f',
   },
 } as const;
 
@@ -75,8 +75,8 @@ export type AccentSwatch = { graphic: string; text: string; cinema: string };
 export const gold = {
   graphic: '#c8860a',
   /** 5.64:1 on the canvas, 5.18:1 on the alt tile. */
-  text: '#8c5e0a',
-  cinema: '#e8b52e',
+  text: '#80570b',
+  cinema: '#edbd54',
 } as const satisfies AccentSwatch;
 
 /**
@@ -91,21 +91,21 @@ export const companyAccents = {
      * AA for body-size links there. This value keeps the same hue about 4%
      * darker: 5.03:1 on the canvas and 4.62:1 on the alt tile.
      */
-    text: '#aa5a08',
+    text: '#9a5107',
     cinema: '#f08c00',
   },
   westsides: {
     graphic: '#0071e3',
-    text: '#0066cc',
+    text: '#005fbe',
     /**
      * The graphic blue is 4.47:1 on black, just under AA, so cinema text
      * uses the lighter link blue instead.
      */
-    cinema: '#2997ff',
+    cinema: '#54a8ff',
   },
   enterprises: {
     graphic: '#00a36c',
-    text: '#0a7a52',
+    text: '#096b47',
     cinema: '#00a36c',
   },
 } as const satisfies Record<string, AccentSwatch>;
@@ -121,14 +121,14 @@ export const accentNames = Object.keys(accents) as AccentName[];
 /* ── Status and interaction ──────────────────────────────────────────── */
 
 export const status = {
-  light: { danger: '#d70015', success: '#1a7f37' },
-  cinema: { danger: '#ff453a', success: '#30d158' },
+  light: { danger: '#d70015', success: '#176f30' },
+  cinema: { danger: '#ff655b', success: '#30d158' },
 } as const;
 
 /** Focus ring colour; it must clear 3:1 against every surface of its tone. */
 export const focus = {
   light: '#0071e3',
-  cinema: '#2997ff',
+  cinema: '#54a8ff',
 } as const;
 
 /**
@@ -140,8 +140,8 @@ export const focus = {
  */
 export const buttons = {
   primary: {
-    light: { bg: '#1d1d1f', fg: '#ffffff', hover: '#333336' },
-    cinema: { bg: '#ffffff', fg: '#1d1d1f', hover: '#e8e8ed' },
+    light: { bg: '#20251f', fg: '#fcfaf6', hover: '#343c31' },
+    cinema: { bg: '#edbd54', fg: '#171b19', hover: '#f4cb72' },
   },
 } as const;
 
@@ -151,9 +151,9 @@ export const buttons = {
  */
 export const materials = {
   nav: {
-    background: 'rgba(255, 255, 255, 0.72)',
+    background: 'rgba(252, 250, 246, 0.96)',
     backdropFilter: 'saturate(180%) blur(20px)',
-    fallback: '#ffffff',
+    fallback: '#fcfaf6',
   },
 } as const;
 
@@ -215,7 +215,7 @@ export const tones = {
     fgMuted: text.cinema.secondary,
     fgSubtle: text.cinema.tertiary,
     line: hairlines.cinema,
-    lineStrong: text.light.secondary,
+    lineStrong: text.cinema.tertiary,
     focus: focus.cinema,
     danger: status.cinema.danger,
     success: status.cinema.success,
@@ -351,17 +351,17 @@ export const sectionSpace = {
 /** Chrome heights, in px. */
 export const chrome = {
   /** Translucent global nav bar. */
-  nav: 48,
+  nav: 80,
   /** Sticky local sub-nav on company, service and profile pages. */
   subnav: 52,
   /** Mobile quick-contact bar. */
   quickBar: 56,
 } as const;
 
-/** Corner radii, in px. Tiles and media are 20px on mobile and 28px from `md`. */
+/** Corner radii, in px. Media and cards have modest corners; controls retain comfortable hit areas. */
 export const radii = {
-  tile: [20, 28],
-  card: 18,
+  tile: [4, 8],
+  card: 4,
   input: 12,
   pill: 9999,
 } as const;

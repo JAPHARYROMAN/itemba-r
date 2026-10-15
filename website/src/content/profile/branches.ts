@@ -44,38 +44,33 @@ export const branchOperations = [
   },
   {
     companyId: 'mwanjalisi' as CompanyId,
-    company: 'Mwanjalisi Oil Company Ltd',
+    company: 'Mwanjalisi Oil Co Ltd',
     summary:
-      'Mwanjalisi Oil Company Ltd manages the retail fuel station business. Each filling station carries the ITEMBA brand name followed by its location name only.',
+      'Mwanjalisi Oil Co Ltd manages the retail fuel station business. Each filling station carries the ITEMBA brand name followed by its location name only.',
     branches: [
       {
         name: 'ITEMBA-UZUNGUNI',
-        focus: 'Operating retail fuel station managed by Mwanjalisi Oil Company Ltd.',
+        focus: 'Operating retail fuel station managed by Mwanjalisi Oil Co Ltd.',
         coverage: 'Located along the TANZAM Highway in Uzunguni Area, Mpemba.',
-        image: mediaImage('uzunguni-pump-island', { alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Company Ltd' }),
+        image: mediaImage('uzunguni-pump-island', { alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Co Ltd' }),
       },
       {
         name: 'ITEMBA-MPEMBA',
-        focus: 'Operating retail fuel station managed by Mwanjalisi Oil Company Ltd.',
+        focus: 'Operating retail fuel station managed by Mwanjalisi Oil Co Ltd.',
         coverage: 'Located near the Tunduma Bus Station along the Tunduma-Ileje Highway.',
-        image: mediaImage('mpemba-service-yard', { alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd' }),
-      },
-      {
-        name: 'Three Upcoming ITEMBA-Branded Fuel Station Locations',
-        focus: 'Planned expansion locations.',
-        coverage: 'Additional retail fuel station locations will follow the ITEMBA-location naming system while remaining under Mwanjalisi Oil Company Ltd management.',
+        image: mediaImage('mpemba-service-yard', { alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Co Ltd' }),
       },
     ],
   },
   {
     companyId: 'mwanjalisi' as CompanyId,
-    company: 'Mwanjalisi Oil Company Ltd – parking facilities',
+    company: 'Mwanjalisi Oil Co Ltd – parking facilities',
     summary:
-      'Parking facilities trade publicly as UZUNGUNI PARKING YARD and are managed by Mwanjalisi Oil Company Ltd for corridor movement and fuel customers.',
+      'Parking facilities trade publicly as UZUNGUNI PARKING YARD and are managed by Mwanjalisi Oil Co Ltd for corridor movement and fuel customers.',
     branches: [
       {
         name: 'UZUNGUNI PARKING YARD',
-        focus: 'Parking yard facility managed by Mwanjalisi Oil Company Ltd.',
+        focus: 'Parking yard facility managed by Mwanjalisi Oil Co Ltd.',
         coverage: 'Located in Uzunguni Area, Mpemba-Tunduma.',
         image: mediaImage('parking-container-trucks', { alt: 'Container trucks parked at UZUNGUNI PARKING YARD' }),
       },

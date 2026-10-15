@@ -49,6 +49,7 @@ export function ServiceHero({ service, company }: { service: ServiceArea; compan
   return (
     <PageHero
       accent={company.accent}
+      align="start"
       eyebrow={service.eyebrow}
       eyebrowDot
       // "Cross-Border" (about 6.6em) fits a phone's line at the h1's size: never split it at the dash.

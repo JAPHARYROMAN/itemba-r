@@ -3,6 +3,7 @@
  * come from ./contact, the one place they are spelled out.
  */
 import 'server-only';
+import { directEnquirySteps } from './enquiry';
 import type { ContentIcon, Gated, LinkItem, SplitHeadline } from './types';
 
 export type ContextCard = Gated & {
@@ -29,20 +30,16 @@ export const contactPage = {
     eyebrow: 'Get in touch',
     headline: { lead: 'Contact', accent: 'Itemba Group.' } satisfies SplitHeadline,
     lede: 'Reach out for business enquiries, partnerships, or general information about our companies and operations.',
-    /** The pill: down to the enquiry form on this page. */
+    /** The pill: down to the direct contact card on this page. */
     enquire: 'Start an enquiry',
   },
-  /** The enquiry form's section: the routing promise and how an enquiry travels, beside the full form. */
+  /** Direct contact channels and the context to include in a message. */
   enquire: {
     eyebrow: 'Enquire',
     title: 'Tell us what you need.',
     body: 'One group office routes every enquiry to the right company.',
     stepsLabel: 'How it works',
-    steps: [
-      { title: 'Choose who it is for', body: 'Start with General, or pick the company you already know you need.' },
-      { title: 'Say how to reach you', body: 'Your name, a phone number, email or WhatsApp number, and a short message.' },
-      { title: 'The group office routes it', body: 'Your enquiry reaches the right company team through one front door.' },
-    ],
+    steps: directEnquirySteps,
   },
   findUs: {
     eyebrow: 'Find us',
@@ -66,7 +63,7 @@ export const contactPage = {
     lede: 'Three legally independent companies, one group office. Every enquiry reaches the right company team through it.',
     action: 'Learn more',
   },
-  /** Where to go next for what the form does not cover (the legacy "Business enquiries" links, plus the profile). */
+  /** Further guidance for partnerships, company information and documents. */
   help: {
     heading: 'More ways we can help',
     action: 'Learn more',

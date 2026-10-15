@@ -18,7 +18,7 @@ import { cn } from '@/ui/cn';
  */
 const CRESTS = {
   lockup: { src: '/logo.png', width: 930, height: 360, display: 28, className: 'h-7' },
-  nav: { src: '/logo-nav.png', width: 854, height: 301, display: 30, className: 'h-[1.875rem]' },
+  nav: { src: '/logo-nav.png', width: 854, height: 301, display: 40, className: 'h-10' },
 } as const;
 
 export type CrestVariant = keyof typeof CRESTS;

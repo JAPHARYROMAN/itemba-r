@@ -3,8 +3,6 @@ import { companies, getCompanyBySlug } from '@/content/companies';
 import { serviceAreas, serviceIcons } from '@/content/services';
 import { serviceUrl } from '@/content/site';
 import {
-  Bento,
-  BentoCell,
   Container,
   Eyebrow,
   Heading,
@@ -14,7 +12,6 @@ import {
   SmartLink,
   Stat,
   keepCompounds,
-  type BentoSpan,
 } from '@/ui';
 
 /**
@@ -44,7 +41,7 @@ function SectorRow() {
   );
 }
 
-/** The three companies as their accent dots: three independent revenue streams. */
+/** The operating companies as their accent dots. */
 function CompanyDots() {
   return (
     <p aria-hidden="true" className="flex h-8 items-center gap-2">
@@ -61,58 +58,41 @@ function PillarVisual({ visual }: { visual: Pillar['visual'] }) {
   return <Icon name={visual} size="lg" strokeWidth={1.4} className="text-gold" />;
 }
 
-/**
- * The bento's shape on the six-column grid (lg):
- *   risk reduction, with the six sectors (2/3) · the sectors figure (1/3)
- *   revenue · reach · scalability (1/3 each)
- * The cells sit on the alternate grey inside the white tile.
- */
-const spans: readonly BentoSpan[] = ['two-thirds', 'third', 'third', 'third'];
-
-/** "Why diversification?": four reasons as a bento, the first beside the six-sector figure. */
+/** The strategy beside its evidence: a large sector figure and four clear reasons. */
 export function AboutApproach() {
   const { approach } = aboutPage;
-  const [lead, ...rest] = approach.pillars;
   return (
     <Section labelledBy="approach-title">
-      <Container>
-        <div className="mx-auto max-w-prose text-center">
+      <Container className="grid gap-10 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)] lg:gap-16">
+        <div>
           <Eyebrow>{approach.eyebrow}</Eyebrow>
           <Heading as="h2" id="approach-title" size="h1" className="mt-2">
             {approach.title}
           </Heading>
-          <Lede tone="muted" className="mx-auto mt-5 max-w-[40rem] md:mt-6">
+          <Lede tone="muted" className="mt-5 md:mt-6">
             {approach.lede}
           </Lede>
+          <dl className="mt-8 border-t border-line pt-7 md:mt-10">
+            <Stat value={approach.figure.value} label={approach.figure.label} note={approach.figure.note} size="display-xl" />
+          </dl>
         </div>
-
-        <Bento className="mt-10 md:mt-16">
-          <BentoCell span={spans[0] ?? 'two-thirds'} padding="lg">
-            <Heading as="h3" size="h3">
-              {lead.title}
-            </Heading>
-            <p className="mt-3 max-w-[34rem] text-body-lg text-fg-muted">{keepCompounds(lead.summary)}</p>
-            <div className="mt-8 md:mt-10">
-              <SectorRow />
-            </div>
-          </BentoCell>
-
-          <BentoCell span="third" padding="lg" className="justify-center">
-            <dl>
-              <Stat value={approach.figure.value} label={approach.figure.label} note={approach.figure.note} size="display-xl" />
-            </dl>
-          </BentoCell>
-
-          {rest.map((pillar, index) => (
-            <BentoCell key={pillar.title} span={spans[index + 1] ?? 'third'}>
-              <PillarVisual visual={pillar.visual} />
-              <Heading as="h3" size="h4" className="mt-8">
-                {pillar.title}
-              </Heading>
-              <p className="mt-2 text-body text-fg-muted">{keepCompounds(pillar.summary)}</p>
-            </BentoCell>
-          ))}
-        </Bento>
+        <div>
+          <ol role="list" className="border-b border-line">
+            {approach.pillars.map((pillar, index) => (
+              <li key={pillar.title} className="grid gap-3 border-t border-line py-6 sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-5 md:py-8">
+                <p aria-hidden="true" className="text-h3 tabular-nums text-gold-fg">{String(index + 1).padStart(2, '0')}</p>
+                <div>
+                  <div className="flex items-center justify-between gap-4">
+                    <Heading as="h3" size="h3">{pillar.title}</Heading>
+                    <PillarVisual visual={pillar.visual} />
+                  </div>
+                  <p className="mt-2 text-body-lg text-fg-muted">{keepCompounds(pillar.summary)}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-7"><SectorRow /></div>
+        </div>
       </Container>
     </Section>
   );

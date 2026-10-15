@@ -4,20 +4,17 @@ import { headlineText } from '@/content/types';
 import { ButtonLink, ContactLink, PageHero } from '@/ui';
 import { contactSectionIds } from './ids';
 
-/**
- * The /contact hero, as an Apple support page opens: the page's name as
- * the h1, one sentence, then the ways in: the enquiry form just below (the
- * pill), or WhatsApp and a call straight away (the quick-contact bar steps
- * aside on this page, so a phone visitor gets them here). No photograph:
- * the form is the point of the page and follows directly.
- */
+/** Charcoal contact introduction with immediate form, WhatsApp and phone actions. */
 export function ContactHero() {
   const { hero, quickActions } = contactPage;
   return (
     <PageHero
+      align="start"
+      tone="cinema"
       eyebrow={hero.eyebrow}
       title={headlineText(hero.headline)}
       titleSize="display"
+      titleMeasure="wide"
       lede={hero.lede}
       actions={
         <>

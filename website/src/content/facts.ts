@@ -46,8 +46,23 @@ export const facts = {
   legalIdentifiers: fact('TINs, incorporation numbers and directors of the three companies', {
     status: 'unconfirmed',
     flag: 'publishLegalIdentifiers',
-    note: 'Published on /company-profile (screen and print source) and in all four PDFs today. Owner to confirm they may stay on the public web page and in the downloads. The flag gates the screen view and the print documents; turning it off needs `npm run pdf` to take them out of the PDFs (the input lock enforces it). The incorporation numbers in the history narrative are not gated.',
-    publicUse: ['/company-profile', '/about (leadership)', 'public/downloads/*.pdf'],
+    note: 'Unverified statutory identifiers and named directors/leadership are omitted from screen, structured data and print source. The flag remains off. All four downloadable PDFs must be regenerated and reviewed before release; archived values remain internal data and are not evidence of verification.',
+    publicUse: [],
+  }),
+  datedHistory: fact('Founding, company incorporation, opening and reorganisation dates from 2012 to 2025', {
+    status: 'unconfirmed',
+    note: 'No supporting records were supplied for the chronology. Removed from About, profile narratives and print source, including EST. 2012. Current operating responsibilities replace the dated timeline. Do not restore dates without verified records.',
+    publicUse: [],
+  }),
+  exclusiveSupplierRights: fact('Exclusive supplier contracts, territorial rights and little or no direct competition', {
+    status: 'unconfirmed',
+    note: 'Contract scope and competition claims were not independently supported. Omitted; the established beverage distribution and more-than-50-stockists description remains.',
+    publicUse: [],
+  }),
+  plannedFuelLocations: fact('Three upcoming ITEMBA fuel station locations', {
+    status: 'unconfirmed',
+    note: 'No verified locations or opening status were supplied. Omitted from public branch, asset and company descriptions; retain the operating ITEMBA-MPEMBA and ITEMBA-UZUNGUNI stations.',
+    publicUse: [],
   }),
   hqIsItembaMpemba: fact('The head office (Itemba Filling Station) is the ITEMBA-MPEMBA station', {
     status: 'unconfirmed',
@@ -64,8 +79,8 @@ export const facts = {
   hospitalityPhotos: fact('The UZUNGUNI INN room photos show UZUNGUNI INN', {
     status: 'unconfirmed',
     flag: 'useUnverifiedHospitalityPhotos',
-    note: 'uzunguni-lodge-room.webp is 600x449 with a different JPEG provenance from the company phone photos (stock-looking).',
-    publicUse: ['/services/hospitality-and-lodging (hero, gallery)', '/ (sector card)'],
+    note: 'Room-photo provenance and permission have not been verified. The flag is off and the room image is omitted from public pages and print documents. Hospitality services remain described. Other photographs recorded as owned remain eligible; their inclusion is an editorial choice, not confirmation of this room photo.',
+    publicUse: [],
   }),
   estateImagery: fact('The real-estate photos depict Itemba Estate work', {
     status: 'unconfirmed',
@@ -81,17 +96,17 @@ export const facts = {
   }),
   corridorWording: fact('Tanzania–Zambia corridor', {
     status: 'unconfirmed',
-    note: 'Copy mixes "Tanzania-Zambia corridor", "Tunduma corridor", "TANZAM Highway corridor" and "southern corridor". One canonical phrase to confirm.',
+    note: 'Tanzania–Zambia corridor is used as a consistent descriptive phrase for the existing Tunduma border context. It does not verify new geographic coverage or a formal route designation.',
     publicUse: ['site-wide'],
   }),
   mwanjalisiLegalName: fact('Mwanjalisi Oil Company Ltd', {
     status: 'unconfirmed',
-    note: 'Page titles use "Mwanjalisi Oil Co Ltd"; the legal profile and PDFs use "Mwanjalisi Oil Company Ltd".',
-    publicUse: ['/companies/mwanjalisi-oil', '/company-profile', 'public/downloads/*.pdf'],
+    note: 'The legal-name variant is unresolved. Public copy and new print documents use the established public name Mwanjalisi Oil Co Ltd or the brand Mwanjalisi Oil; no legalName metadata assertion is made while the legal flag is off.',
+    publicUse: [],
   }),
   thirdPartyBrands: fact('Third-party beverage and paint brands may appear prominently in imagery', {
     status: 'unconfirmed',
-    note: 'Coca-Cola, Heineken, Konyagi, K-Vant and Coral Paints appear in the Westsides photographs.',
+    note: 'Brands visible on existing owned product/stock photographs identify the photographed stock. No exclusive relationship, endorsement or sponsorship is inferred from their appearance.',
     publicUse: ['/companies/westsides-company', '/services/trade-and-distribution'],
   }),
   stockists: fact('More than 50 beverage stockists across Songwe Region', {

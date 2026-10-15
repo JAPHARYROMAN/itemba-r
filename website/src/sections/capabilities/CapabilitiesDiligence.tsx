@@ -16,7 +16,7 @@ export function CapabilitiesDiligence() {
   const { visual, actions } = diligence;
   return (
     <Section tone="cinema" id={ids.diligence} labelledBy="diligence-title">
-      <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-[minmax(0,27.5rem)_minmax(0,1fr)] lg:gap-16">
+      <Container className="grid items-center gap-10 md:gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
         <div>
           <Eyebrow>{diligence.eyebrow}</Eyebrow>
           <Heading as="h2" id="diligence-title" size="h1" className="mt-3">
@@ -36,7 +36,7 @@ export function CapabilitiesDiligence() {
           icon={visual.icon}
           statement={visual.statement}
           caption={visual.caption}
-          className="order-first mx-auto aspect-[4/3] w-full max-w-md sm:aspect-square lg:mx-0 lg:max-w-none"
+          className="aspect-[4/3] w-full border border-line lg:aspect-square"
         />
       </Container>
     </Section>

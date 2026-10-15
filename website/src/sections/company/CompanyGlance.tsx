@@ -1,4 +1,5 @@
 import { companyPageCopy, type Company } from '@/content/companies';
+import { flags } from '@/content/flags';
 import { Container, FactList, Heading, Section, type Fact } from '@/ui';
 
 /**
@@ -11,14 +12,14 @@ import { Container, FactList, Heading, Section, type Fact } from '@/ui';
 export function CompanyGlance({ company }: { company: Company }) {
   const { glance, sectorLabel, facts } = companyPageCopy;
   const items: Fact[] = [
-    { key: 'name', term: glance.registeredName, detail: company.legalName },
+    { key: 'name', term: flags.publishLegalIdentifiers ? glance.registeredName : glance.companyName, detail: company.name },
     { key: 'sector', term: sectorLabel, detail: company.sector },
-    { key: 'incorporated', term: glance.incorporated, detail: company.legal.incorporationDate },
+    ...(flags.publishLegalIdentifiers ? [{ key: 'incorporated', term: glance.incorporated, detail: company.legal.incorporationDate }] : []),
     ...facts.map((fact) => ({ key: fact.label, term: fact.label, detail: fact.value })),
-    { key: 'status', term: glance.status, detail: company.legal.status },
+    ...(flags.publishLegalIdentifiers ? [{ key: 'status', term: glance.status, detail: company.legal.status }] : []),
   ];
   return (
-    <Section space="none" labelledBy="glance-title" className="pb-section-tight">
+    <Section space="tight" labelledBy="glance-title" className="border-y border-line">
       <Container>
         <Heading as="h2" id="glance-title" size="h5">
           {glance.title}

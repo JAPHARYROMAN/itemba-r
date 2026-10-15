@@ -1,4 +1,5 @@
 import { isPhoto, type Company } from '@/content/companies';
+import { flags } from '@/content/flags';
 import { profilePdfHref } from '@/content/profile/cover';
 import { servicePageCopy, siblingServices, type ServiceArea } from '@/content/services';
 import { companyUrl, serviceUrl } from '@/content/site';
@@ -35,8 +36,8 @@ export function ServiceCompany({ service, company }: { service: ServiceArea; com
             layout="grid"
             className="mt-8 lg:grid-cols-2"
             items={[
-              { key: 'name', term: copy.registeredName, detail: company.legalName },
-              { key: 'incorporated', term: copy.incorporated, detail: company.legal.incorporationDate },
+              { key: 'name', term: copy.companyName, detail: company.name },
+              ...(flags.publishLegalIdentifiers ? [{ key: 'incorporated', term: copy.incorporated, detail: company.legal.incorporationDate }] : []),
             ]}
           />
           {siblings.length ? (

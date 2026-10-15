@@ -156,41 +156,41 @@ describe('contrast: roles with restricted use', () => {
   });
 });
 
-describe('spec fidelity (plan: "Itemba, the Apple way")', () => {
+describe('spec fidelity (plan: "Itemba, photographic and editorial")', () => {
   it('surfaces and hairlines', () => {
-    expect(surfaces).toEqual({ canvas: '#ffffff', alt: '#f5f5f7', cinema: '#000000', cinemaRaised: '#101014' });
+    expect(surfaces).toEqual({ canvas: '#fcfaf6', alt: '#f3f0e9', cinema: '#171b19', cinemaRaised: '#232824' });
     expect(hairlines).toEqual({ light: '#d2d2d7', cinema: '#424245' });
   });
 
   it('text colours', () => {
-    expect(text.light).toMatchObject({ primary: '#1d1d1f', secondary: '#6e6e73', tertiary: '#86868b' });
-    expect(text.cinema).toMatchObject({ primary: '#f5f5f7', secondary: '#a1a1a6' });
+    expect(text.light).toMatchObject({ primary: '#20251f', secondary: '#625e58', tertiary: '#80796f' });
+    expect(text.cinema).toMatchObject({ primary: '#faf8f2', secondary: '#babeb6' });
   });
 
   it('group gold', () => {
-    expect(gold).toEqual({ graphic: '#c8860a', text: '#8c5e0a', cinema: '#e8b52e' });
+    expect(gold).toEqual({ graphic: '#c8860a', text: '#80570b', cinema: '#edbd54' });
     expect(contrastRatio(gold.text, surfaces.canvas)).toBeGreaterThanOrEqual(5.5);
   });
 
   it('company accents (graphic and text-safe)', () => {
     expect(companyAccents.mwanjalisi.graphic).toBe('#f08c00');
-    expect(companyAccents.westsides).toMatchObject({ graphic: '#0071e3', text: '#0066cc' });
-    expect(companyAccents.enterprises).toMatchObject({ graphic: '#00a36c', text: '#0a7a52' });
+    expect(companyAccents.westsides).toMatchObject({ graphic: '#0071e3', text: '#005fbe' });
+    expect(companyAccents.enterprises).toMatchObject({ graphic: '#00a36c', text: '#096b47' });
     // Documented deviation: the plan's #b25e09 is 4.29:1 on the alt tile.
     expect(contrastRatio('#b25e09', surfaces.alt)).toBeLessThan(4.5);
-    expect(companyAccents.mwanjalisi.text).toBe('#aa5a08');
+    expect(companyAccents.mwanjalisi.text).toBe('#9a5107');
   });
 
   it('buttons are ink pills, inverted on cinema', () => {
-    expect(buttons.primary.light).toMatchObject({ bg: '#1d1d1f', fg: '#ffffff' });
-    expect(buttons.primary.cinema).toMatchObject({ bg: '#ffffff', fg: '#1d1d1f' });
+    expect(buttons.primary.light).toMatchObject({ bg: '#20251f', fg: '#fcfaf6' });
+    expect(buttons.primary.cinema).toMatchObject({ bg: '#edbd54', fg: '#171b19' });
   });
 
   it('nav material', () => {
     expect(materials.nav).toEqual({
-      background: 'rgba(255, 255, 255, 0.72)',
+      background: 'rgba(252, 250, 246, 0.96)',
       backdropFilter: 'saturate(180%) blur(20px)',
-      fallback: '#ffffff',
+      fallback: '#fcfaf6',
     });
   });
 
@@ -231,7 +231,7 @@ describe('spec fidelity (plan: "Itemba, the Apple way")', () => {
   });
 
   it('shape, containers and spacing', () => {
-    expect(radii).toEqual({ tile: [20, 28], card: 18, input: 12, pill: 9999 });
+    expect(radii).toEqual({ tile: [4, 8], card: 4, input: 12, pill: 9999 });
     expect(containers).toMatchObject({ prose: 980, content: 1068, wide: 1440 });
     expect(gutter).toBe(22);
     expect(sectionSpace.default).toEqual([80, 120]);
@@ -275,7 +275,7 @@ describe('CSS variables written by the Tailwind plugin', () => {
     const root = styles[':root']!;
     expect(root).toMatchObject(toneDeclarations('light'));
     expect(root).toMatchObject(accentDeclarations('group'));
-    expect(root['--fg']).toBe('29 29 31');
+    expect(root['--fg']).toBe('32 37 31');
     expect(root['--accent-text']).toBe(hexToChannels(gold.text));
   });
 
@@ -336,8 +336,8 @@ describe('Tailwind compiles the tokens from the real config', () => {
 
   it('emits the variables, tone maps and accent swatches', async () => {
     const out = await compile();
-    expect(out).toMatch(/:root\s*\{[^}]*--surface: 255 255 255;/);
-    expect(out).toMatch(/@media \(min-width: 768px\)\s*\{\s*:root\s*\{[^}]*--space-section: 120px;[^}]*--radius-tile: 28px;/);
+    expect(out).toMatch(/:root\s*\{[^}]*--surface: 252 250 246;/);
+    expect(out).toMatch(/@media \(min-width: 768px\)\s*\{\s*:root\s*\{[^}]*--space-section: 120px;[^}]*--radius-tile: 8px;/);
     for (const tone of toneNames) expect(out).toContain(`[data-tone="${tone}"]`);
     for (const accent of accentNames) expect(out).toContain(`[data-accent="${accent}"]`);
     // Preflight's default border colour is the hairline token.

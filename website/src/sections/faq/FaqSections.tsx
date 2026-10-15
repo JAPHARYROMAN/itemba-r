@@ -19,9 +19,11 @@ export function FaqHero() {
   const { hero } = faqPage;
   return (
     <PageHero
+      align="start"
       eyebrow={hero.eyebrow}
       title={<HeadlineText headline={hero.headline} variant="break" />}
       titleSize="display"
+      titleMeasure="wide"
       lede={hero.lede}
       actions={<ChevronLink href="#enquire">{hero.ask}</ChevronLink>}
     />
@@ -58,7 +60,7 @@ export function FaqTopics({ sections }: { sections: readonly FaqSection[] }) {
                     <li key={topic.id} data-accent={topic.accent} className="flex">
                       <a
                         href={`#${topic.id}`}
-                        className="flex min-h-11 w-full items-center gap-3 rounded-card bg-surface-alt px-4 py-2.5 text-body text-fg transition-shadow duration-base ease-apple hover:shadow-card md:w-auto md:gap-2 md:rounded-pill md:py-2"
+                        className="flex min-h-11 w-full items-center gap-3 rounded-card border border-line bg-surface-alt px-4 py-2.5 text-body text-fg transition-colors duration-base ease-apple hover:border-accent md:w-auto md:gap-2 md:py-2"
                       >
                         <Icon name={topic.icon} size="sm" strokeWidth={1.6} className="text-accent" />
                         <span className="flex-1 md:flex-none">{keepCompounds(topic.title)}</span>
@@ -124,7 +126,7 @@ export function FaqFamily({ kind, sections }: { kind: FaqSectionKind; sections: 
   return (
     <Section tone={familyTones[kind]} labelledBy={familyTitleId(kind)}>
       <Container>
-        <Heading as="h2" id={familyTitleId(kind)} size="h1">
+        <Heading as="h2" id={familyTitleId(kind)} size="h1" className="border-l-2 border-gold pl-6 md:pl-8">
           {faqPage.groups[kind]}
         </Heading>
         <div className="mt-10 lg:mt-12">

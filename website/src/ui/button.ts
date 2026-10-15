@@ -18,7 +18,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'inverse';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const base =
-  'relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-pill text-center transition-colors duration-fast ease-apple disabled:cursor-not-allowed disabled:opacity-50';
+  'relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-card text-center font-semibold transition-colors duration-fast ease-apple disabled:cursor-not-allowed disabled:opacity-50';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'bg-btn text-btn-fg hover:bg-btn-hover',

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { companies, companyPageCopy, type Company } from '@/content/companies';
+import { flags } from '@/content/flags';
 import { homeSectors, homeTileActions } from '@/content/home';
 import { companyUrl } from '@/content/site';
 import { ButtonLink, Card, ChevronLink, Container, Heading, Section, keepCompounds } from '@/ui';
@@ -22,7 +23,7 @@ function CompanyColumn({ company }: { company: Company }) {
       tone="alt"
       accent={company.accent}
       padding="none"
-      className="flex flex-col px-6 pb-6 pt-7 md:row-span-6 md:grid md:grid-rows-subgrid md:gap-y-0 md:px-7 md:pb-7"
+      className="flex flex-col border-t-2 border-accent px-6 pb-6 pt-7 md:row-span-6 md:grid md:grid-rows-subgrid md:gap-y-0 md:px-7 md:pb-7"
     >
       <div className="pb-5">
         <div className="flex items-center gap-2">
@@ -31,10 +32,10 @@ function CompanyColumn({ company }: { company: Company }) {
             {company.shortName}
           </Heading>
         </div>
-        <p className="mt-1 text-caption text-fg-muted">{company.legalName}</p>
+        <p className="mt-1 text-caption text-fg-muted">{company.name}</p>
       </div>
       <Row term={copy.sectorLabel}>{company.sector}</Row>
-      <Row term={copy.glance.incorporated}>{company.legal.incorporationDate}</Row>
+      {flags.publishLegalIdentifiers ? <Row term={copy.glance.incorporated}>{company.legal.incorporationDate}</Row> : <Row term={copy.facts[1].label}>{copy.facts[1].value}</Row>}
       <Row term={copy.sitesHeading}>
         <ul role="list" className="space-y-0.5">
           {company.sites.map((site) => (

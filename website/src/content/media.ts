@@ -76,7 +76,7 @@ export const media = {
   // ── Mwanjalisi Oil: ITEMBA stations ──────────────────────────────────────
   'mpemba-station-wide': {
     src: '/images/fuel-stations/itemba-filling-station-wide.webp',
-    alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+    alt: 'ITEMBA-MPEMBA filling station forecourt and canopy managed by Mwanjalisi Oil Co Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
     canopy: true,
@@ -85,7 +85,7 @@ export const media = {
   },
   'mpemba-hero': {
     src: '/images/fuel-stations/itemba-mpemba-hero.webp',
-    alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Company Ltd',
+    alt: 'ITEMBA-MPEMBA filling station under a wide Songwe sky, managed by Mwanjalisi Oil Co Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
     canopy: true,
@@ -104,7 +104,7 @@ export const media = {
   },
   'mpemba-coach-canopy': {
     src: '/images/fuel-stations/itemba-mpemba-coach-canopy.webp',
-    alt: 'A coach at the pumps under the ITEMBA-MPEMBA canopy, managed by Mwanjalisi Oil Company Ltd',
+    alt: 'A coach at the pumps under the ITEMBA-MPEMBA canopy, managed by Mwanjalisi Oil Co Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
     canopy: true,
@@ -132,21 +132,21 @@ export const media = {
   },
   'mpemba-forecourt': {
     src: '/images/fuel-stations/itemba-mpemba-forecourt.webp',
-    alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Company Ltd',
+    alt: 'ITEMBA-MPEMBA forecourt and canopy managed by Mwanjalisi Oil Co Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
     canopy: true,
   },
   'mpemba-service-yard': {
     src: '/images/fuel-stations/itemba-mpemba-service-yard.webp',
-    alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Company Ltd',
+    alt: 'ITEMBA-MPEMBA filling station managed by Mwanjalisi Oil Co Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
     canopy: true,
   },
   'uzunguni-pump-island': {
     src: '/images/fuel-stations/itemba-uzunguni-pump-island.webp',
-    alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Company Ltd',
+    alt: 'ITEMBA-UZUNGUNI filling station managed by Mwanjalisi Oil Co Ltd',
     entity: 'mwanjalisi',
     provenance: 'own',
     canopy: true,
