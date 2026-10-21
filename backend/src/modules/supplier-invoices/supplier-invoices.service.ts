@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AccessLevel, CurrencyCode, Prisma } from '@prisma/client';
+import { AccessLevel, CurrencyCode, Payable, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -1034,7 +1034,7 @@ export class SupplierInvoicesService {
       payableId?: string | null;
     },
     source: InvoiceReceiptSource,
-  ): Promise<Prisma.PayableGetPayload<{}> | null> {
+  ): Promise<Payable | null> {
     const otherInvoice = await tx.supplierInvoice.findFirst({
       where: {
         companyId: invoice.companyId,
