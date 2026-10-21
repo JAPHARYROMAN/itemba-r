@@ -238,11 +238,11 @@ export class InventoryMovementsService {
       await this.profit.assertInventoryMovementHasCost(data, db);
 
       if (
-        data.receiptValue &&
+        data.receiptValue != null &&
         (!data.tx ||
           data.movementType !== 'PURCHASE_RECEIPT' ||
           data.unitCost == null ||
-          !data.receiptValue.gt(0) ||
+          data.receiptValue.lt(0) ||
           data.receiptValue.decimalPlaces() > 2)
       )
         throw new BadRequestException(

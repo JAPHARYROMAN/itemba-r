@@ -241,6 +241,47 @@ describe('InventoryMovementsService WAC valuation (#3, #13)', () => {
     expect(Number(written.averageCost)).toBe(8); // held
   });
 
+  it('uses an exact zero-cent receipt delta to recompute WAC from the rounded balance', async () => {
+    const { service } = makeService();
+    const { tx, updateCalls } = makeTx(
+      row({
+        quantityOnHand: new Prisma.Decimal(1),
+        averageCost: new Prisma.Decimal('0.01'),
+        totalValue: new Prisma.Decimal('0.01'),
+      }),
+    );
+
+    const movement = await service.createMovement({
+      ...base,
+      quantity: 1,
+      unitCost: 0.0049,
+      receiptValue: new Prisma.Decimal(0),
+      movementType: 'PURCHASE_RECEIPT',
+      tx,
+    });
+
+    expect(movement.totalCost?.toString()).toBe('0');
+    expect(updateCalls[0].data.quantityOnHand).toBe(2);
+    expect(updateCalls[0].data.totalValue.toString()).toBe('0.01');
+    expect(updateCalls[0].data.averageCost.toString()).toBe('0.005');
+  });
+
+  it.each([
+    { receiptValue: new Prisma.Decimal('-0.01'), movementType: 'PURCHASE_RECEIPT' as const },
+    { receiptValue: new Prisma.Decimal('0.001'), movementType: 'PURCHASE_RECEIPT' as const },
+    { receiptValue: new Prisma.Decimal(0), movementType: 'ADJUSTMENT_IN' as const },
+  ])('keeps exact receipt value bounds and movement restrictions (%j)', async (input) => {
+    const { service } = makeService();
+    const { tx, updateCalls } = makeTx(row());
+
+    await expect(
+      service.createMovement({ ...base, quantity: 1, unitCost: 0.0049, ...input, tx }),
+    ).rejects.toThrow('An exact receipt value requires a costed purchase receipt');
+
+    expect(tx.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(updateCalls).toHaveLength(0);
+  });
+
   it('writes Prisma.Decimal instances (not raw floats) into the balance columns', async () => {
     const { service } = makeService();
     const { tx, updateCalls } = makeTx(

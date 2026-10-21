@@ -135,8 +135,12 @@ describe('Cash Desk account registers', () => {
     const pay = vi.fn();
     render(<CashSupplierInvoiceAccounts {...paging} onPay={pay} />);
     const table = await screen.findByRole('table', { name: 'Supplier invoice accounts' });
-    expect(within(table).getAllByRole('row')).toHaveLength(2);
-    expect(within(table).getByText('TZS 150.00')).toBeInTheDocument();
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(2);
+    const outstandingColumn = within(table)
+      .getAllByRole('columnheader')
+      .indexOf(within(table).getByRole('columnheader', { name: 'Outstanding', exact: true }));
+    expect(within(rows[1]).getAllByRole('cell')[outstandingColumn]).toHaveTextContent('TZS 150.00');
     fireEvent.click(within(table).getByRole('button', { name: 'View transactions for Supplier' }));
     fireEvent.click(screen.getByRole('button', { name: 'Inspect INV-2' }));
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));

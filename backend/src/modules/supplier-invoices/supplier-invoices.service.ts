@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AccessLevel, CurrencyCode, Prisma } from '@prisma/client';
+import { AccessLevel, CurrencyCode, Payable, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -30,6 +30,13 @@ import { computeThreeWayMatch } from '../three-way-matching/three-way-match-calc
 import { sourceSettlement } from '../../common/utils/source-settlement';
 
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
+
+type InvoiceReceiptSource = {
+  sourceType: 'PurchaseOrder' | 'GoodsReceivedNote';
+  sourceId: string;
+  payableId: string | null;
+  status?: string;
+};
 
 @Injectable()
 export class SupplierInvoicesService {
@@ -406,6 +413,8 @@ export class SupplierInvoicesService {
     let match: any = null;
     const updated = await this.prisma.$transaction(async (tx) => {
       const payableId = await this.resolvePurchaseOrderPayable(existing, tx);
+      const receiptSource = await this.lockInvoiceReceiptSource(tx, existing);
+      if (receiptSource) receiptSource.payableId ??= payableId;
       // Claim the exact invoice version evaluated above. Matching and editing both
       // advance updatedAt, so neither a runMatch() nor an update() that wins after
       // findOne() can be silently posted from this stale snapshot.
@@ -423,6 +432,10 @@ export class SupplierInvoicesService {
           'Supplier invoice was already approved or changed by another action',
         );
       }
+
+      const receiptPayable = receiptSource
+        ? await this.findReceiptPayableForApproval(tx, existing, receiptSource)
+        : null;
 
       if (existing.purchaseOrderId) {
         if (['MATCHED', 'DISPUTED'].includes(existing.status as string)) {
@@ -460,54 +473,56 @@ export class SupplierInvoicesService {
           })
         : null;
 
-      const payable = payableId
-        ? await tx.payable.update({
-            where: { id: payableId },
-            data: {
-              supplierId: supplier.id,
-              supplierName: supplier.name,
-              divisionId: existing.divisionId,
-              branchId: existing.branchId,
-              amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
-              // Derive outstanding from the PAYABLE's own paidAmount, never the
-              // invoice's. The payable tracks payments applied directly against it
-              // (recordPayment), which the invoice row does not see. Recomputing
-              // outstanding from the invoice would resurrect already-paid amounts.
-              outstandingAmount: new Prisma.Decimal(existing.totalAmount)
-                .minus(oldPayable?.paidAmount ?? 0)
-                .toDecimalPlaces(2),
-              currency: existing.currency as CurrencyCode,
-              issueDate: existing.invoiceDate,
-              dueDate: existing.dueDate,
-              sourceType: 'SupplierInvoice',
-              sourceId: existing.id,
-              notes: `Supplier invoice ${existing.supplierInvoiceNumber}`,
-            },
-          })
-        : await tx.payable.create({
-            data: {
-              payableNumber: await this.codes.next({
-                entityType: 'Payable',
+      const payable =
+        receiptPayable ??
+        (payableId
+          ? await tx.payable.update({
+              where: { id: payableId },
+              data: {
+                supplierId: supplier.id,
+                supplierName: supplier.name,
+                divisionId: existing.divisionId,
+                branchId: existing.branchId,
+                amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
+                // Derive outstanding from the PAYABLE's own paidAmount, never the
+                // invoice's. The payable tracks payments applied directly against it
+                // (recordPayment), which the invoice row does not see. Recomputing
+                // outstanding from the invoice would resurrect already-paid amounts.
+                outstandingAmount: new Prisma.Decimal(existing.totalAmount)
+                  .minus(oldPayable?.paidAmount ?? 0)
+                  .toDecimalPlaces(2),
+                currency: existing.currency as CurrencyCode,
+                issueDate: existing.invoiceDate,
+                dueDate: existing.dueDate,
+                sourceType: 'SupplierInvoice',
+                sourceId: existing.id,
+                notes: `Supplier invoice ${existing.supplierInvoiceNumber}`,
+              },
+            })
+          : await tx.payable.create({
+              data: {
+                payableNumber: await this.codes.next({
+                  entityType: 'Payable',
+                  companyId: existing.companyId,
+                  tx,
+                }),
                 companyId: existing.companyId,
-                tx,
-              }),
-              companyId: existing.companyId,
-              divisionId: existing.divisionId,
-              branchId: existing.branchId,
-              supplierId: supplier.id,
-              supplierName: supplier.name,
-              sourceType: 'SupplierInvoice',
-              sourceId: existing.id,
-              amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
-              paidAmount: 0,
-              outstandingAmount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
-              currency: existing.currency as CurrencyCode,
-              issueDate: existing.invoiceDate,
-              dueDate: existing.dueDate,
-              status: 'OPEN',
-              notes: `Supplier invoice ${existing.supplierInvoiceNumber}`,
-            },
-          });
+                divisionId: existing.divisionId,
+                branchId: existing.branchId,
+                supplierId: supplier.id,
+                supplierName: supplier.name,
+                sourceType: 'SupplierInvoice',
+                sourceId: existing.id,
+                amount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
+                paidAmount: 0,
+                outstandingAmount: new Prisma.Decimal(existing.totalAmount).toDecimalPlaces(2),
+                currency: existing.currency as CurrencyCode,
+                issueDate: existing.invoiceDate,
+                dueDate: existing.dueDate,
+                status: 'OPEN',
+                notes: `Supplier invoice ${existing.supplierInvoiceNumber}`,
+              },
+            }));
 
       if (existing.purchaseOrderId) {
         await tx.purchaseOrder.updateMany({
@@ -540,10 +555,20 @@ export class SupplierInvoicesService {
       const invoice = await tx.supplierInvoice.update({
         where: { id },
         data: {
-          status: 'APPROVED',
+          status: receiptPayable
+            ? receiptPayable.status === 'PAID'
+              ? 'PAID'
+              : new Prisma.Decimal(receiptPayable.paidAmount).gt(0)
+                ? 'PARTIALLY_PAID'
+                : 'APPROVED'
+            : 'APPROVED',
           payableId: payable.id,
-          paidAmount: payable.paidAmount,
-          outstandingAmount: payable.outstandingAmount,
+          ...(receiptPayable
+            ? {
+                paidAmount: receiptPayable.paidAmount,
+                outstandingAmount: receiptPayable.outstandingAmount,
+              }
+            : {}),
         },
         include: { lines: true },
       });
@@ -630,9 +655,7 @@ export class SupplierInvoicesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      if (existing.purchaseOrderId) {
-        await tx.$queryRaw`SELECT id FROM purchase_orders WHERE id = ${existing.purchaseOrderId} FOR UPDATE`;
-      }
+      await this.lockInvoiceReceiptSource(tx, existing);
       // Atomic claim pinned to the exact version findOne() read: flip
       // APPROVED -> CANCELLED under a guarded write so a concurrent void (or a
       // payment that just moved the invoice) can't race this one into posting a
@@ -662,9 +685,9 @@ export class SupplierInvoicesService {
       // blocks on this lock until the void commits and its own status gate
       // then sees CANCELLED and rejects. A plain findUnique would let cash go
       // out against a voided invoice while the full approve JE is reversed
-      // (AP over-relieved). Lock order is deadlock-free: void claims the
-      // invoice row then the payable row; recordPayment takes only the
-      // payable row.
+      // (AP over-relieved). Receipt source -> invoice -> payable is also the
+      // approval order; receipt posting takes source -> payable and payments
+      // take only the payable row.
       const payable = existing.payableId
         ? ((
             await tx.$queryRaw<
@@ -675,8 +698,10 @@ export class SupplierInvoicesService {
                 status: string;
                 paidAmount: Prisma.Decimal | null;
                 journalEntryId: string | null;
+                sourceType: string | null;
+                sourceId: string | null;
               }>
-            >`SELECT "id", "companyId", "supplierId", "status", "paidAmount", "journalEntryId"
+            >`SELECT "id", "companyId", "supplierId", "status", "paidAmount", "journalEntryId", "sourceType", "sourceId"
               FROM "payables"
               WHERE "id" = ${existing.payableId} AND "deletedAt" IS NULL
               FOR UPDATE`
@@ -685,6 +710,14 @@ export class SupplierInvoicesService {
 
       let reusedReceiptPayable = false;
       if (payable) {
+        if (
+          payable.companyId !== existing.companyId ||
+          payable.supplierId !== existing.supplierId
+        ) {
+          throw new ConflictException(
+            'The invoice payable belongs to a different company or supplier; void aborted',
+          );
+        }
         // Block a void once money has moved against the payable. A partly/fully
         // paid liability can't just be reversed away — the cash side must be
         // unwound first (void the supplier payment), otherwise Cash and AP drift.
@@ -947,24 +980,201 @@ export class SupplierInvoicesService {
     return reversal;
   }
 
+  private async lockInvoiceReceiptSource(
+    tx: Prisma.TransactionClient,
+    invoice: {
+      companyId: string;
+      purchaseOrderId?: string | null;
+      goodsReceivedNoteId?: string | null;
+    },
+  ): Promise<InvoiceReceiptSource | null> {
+    let purchaseOrderId = invoice.purchaseOrderId;
+    if (!purchaseOrderId && invoice.goodsReceivedNoteId) {
+      const grn = await tx.goodsReceivedNote.findFirst({
+        where: { id: invoice.goodsReceivedNoteId, companyId: invoice.companyId, deletedAt: null },
+        select: { purchaseOrderId: true },
+      });
+      if (!grn) throw new ConflictException('Linked goods receipt is no longer available');
+      purchaseOrderId = grn.purchaseOrderId;
+    }
+    if (purchaseOrderId) {
+      const [order] = await tx.$queryRaw<
+        Array<{ id: string; payableId: string | null; status: string }>
+      >(Prisma.sql`
+        SELECT "id", "payableId", "status" FROM "purchase_orders"
+        WHERE "id" = ${purchaseOrderId} AND "companyId" = ${invoice.companyId}
+          AND "deletedAt" IS NULL FOR UPDATE`);
+      if (!order) throw new ConflictException('Linked purchase order is no longer available');
+      return {
+        sourceType: 'PurchaseOrder',
+        sourceId: order.id,
+        payableId: order.payableId,
+        status: order.status,
+      };
+    }
+    if (invoice.goodsReceivedNoteId) {
+      const [grn] = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "goods_received_notes"
+        WHERE "id" = ${invoice.goodsReceivedNoteId} AND "companyId" = ${invoice.companyId}
+          AND "deletedAt" IS NULL FOR UPDATE`);
+      if (!grn) throw new ConflictException('Linked goods receipt is no longer available');
+      return { sourceType: 'GoodsReceivedNote', sourceId: grn.id, payableId: null };
+    }
+    return null;
+  }
+
+  private async findReceiptPayableForApproval(
+    tx: Prisma.TransactionClient,
+    invoice: {
+      id: string;
+      companyId: string;
+      supplierId: string;
+      currency: string;
+      totalAmount: Prisma.Decimal | number | string;
+      payableId?: string | null;
+    },
+    source: InvoiceReceiptSource,
+  ): Promise<Payable | null> {
+    const otherInvoice = await tx.supplierInvoice.findFirst({
+      where: {
+        companyId: invoice.companyId,
+        id: { not: invoice.id },
+        deletedAt: null,
+        status: { in: ['APPROVED', 'PARTIALLY_PAID', 'PAID'] },
+        ...(source.sourceType === 'PurchaseOrder'
+          ? {
+              OR: [
+                { purchaseOrderId: source.sourceId },
+                { goodsReceivedNote: { purchaseOrderId: source.sourceId } },
+              ],
+            }
+          : { goodsReceivedNoteId: source.sourceId }),
+      },
+      select: { supplierInvoiceNumber: true },
+    });
+    if (otherInvoice) {
+      throw new ConflictException(
+        `This receipt already has approved supplier invoice ${otherInvoice.supplierInvoiceNumber}. ` +
+          'Multiple or partial invoices require an allocation review before approval.',
+      );
+    }
+    const linkedIds = [
+      ...new Set([invoice.payableId, source.payableId].filter((id): id is string => !!id)),
+    ];
+    // Include deleted/cancelled rows deliberately: a missing display link is not
+    // evidence that the original accounting liability may safely be re-created.
+    const candidates = await tx.payable.findMany({
+      where: {
+        OR: [
+          ...(linkedIds.length ? [{ id: { in: linkedIds } }] : []),
+          {
+            companyId: invoice.companyId,
+            sourceType: source.sourceType,
+            sourceId: source.sourceId,
+          },
+        ],
+      },
+    });
+    if (
+      candidates.length > 1 ||
+      linkedIds.some((id) => !candidates.some((item) => item.id === id))
+    ) {
+      throw new ConflictException(
+        'Receipt payable links are missing or ambiguous; reconcile existing liabilities before approval',
+      );
+    }
+    if (!candidates.length) return null;
+    if (source.status === 'PARTIALLY_RECEIVED') {
+      throw new ConflictException(
+        'This purchase order is only partially received. Complete its receipts or review partial invoice allocation before approving the supplier invoice.',
+      );
+    }
+    const candidate = candidates[0];
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "payables" WHERE "id" = ${candidate.id} FOR UPDATE`,
+    );
+    const payable = await tx.payable.findUnique({ where: { id: candidate.id } });
+    if (
+      !payable ||
+      payable.deletedAt ||
+      payable.companyId !== invoice.companyId ||
+      payable.supplierId !== invoice.supplierId ||
+      payable.currency !== invoice.currency ||
+      !['OPEN', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'].includes(payable.status)
+    ) {
+      throw new ConflictException(
+        'The receipt payable is cancelled, deleted, or belongs to a different company, supplier, or currency; reconcile it before approval',
+      );
+    }
+    const journal = payable.journalEntryId
+      ? await tx.journalEntry.findFirst({
+          where: { id: payable.journalEntryId, companyId: invoice.companyId, deletedAt: null },
+          select: { status: true, referenceType: true, referenceId: true },
+        })
+      : null;
+    if (!journal || journal.status !== 'POSTED') {
+      throw new ConflictException(
+        'The receipt payable has no posted accounting entry; reconcile it before invoice approval',
+      );
+    }
+    if (journal.referenceType !== 'Payable' || journal.referenceId !== payable.id) {
+      // Recover this invoice's existing liability even if an older write left
+      // only the PO backlink. Returning no coverage would create it twice.
+      if (journal.referenceType !== 'SupplierInvoice' || journal.referenceId !== invoice.id) {
+        throw new ConflictException(
+          'The linked payable is already covered by another accounting source; reconcile it before approval',
+        );
+      }
+    }
+    if (
+      ['PurchaseOrder', 'GoodsReceivedNote'].includes(payable.sourceType ?? '') &&
+      (payable.sourceType !== source.sourceType || payable.sourceId !== source.sourceId)
+    ) {
+      throw new ConflictException(
+        'The linked payable belongs to a different goods receipt; reconcile its source before approval',
+      );
+    }
+    if (
+      !new Prisma.Decimal(payable.amount)
+        .toDecimalPlaces(2)
+        .eq(new Prisma.Decimal(invoice.totalAmount).toDecimalPlaces(2))
+    ) {
+      throw new ConflictException(
+        'Supplier invoice total differs from the posted receipt payable. Partial invoices and amount variances require an accounting review; the existing liability has been preserved.',
+      );
+    }
+    return payable;
+  }
+
   /**
    * Restore a receipt-created payable to its pre-invoice state after the
    * supplier invoice that reused it is voided. The receipt obligation itself
    * stands — goods were received on supplier credit and its accrual JE
    * (DR Inventory / CR AP, referenceType 'Payable') remains POSTED — so this
-   * only rewinds what approve() overwrote on the subledger row: amount and
-   * outstanding back to the receipt-created amount (read from the receipt JE's
-   * own AP_CONTROL credit, so an approve that re-stated the amount to the
-   * invoice total is exactly undone), and the source link back to the purchase
-   * order that created it.
+   * preserves the cumulative receipt obligation and original PO/GRN source.
+   * Reading all posted accruals also repairs legacy approvals that overwrote
+   * the payable amount with an invoice total.
    */
   private async restoreReceiptPayable(
     tx: Prisma.TransactionClient,
-    invoice: { companyId: string; purchaseOrderId?: string | null },
-    payable: { id: string; paidAmount: Prisma.Decimal | number | null },
+    invoice: {
+      companyId: string;
+      purchaseOrderId?: string | null;
+      goodsReceivedNoteId?: string | null;
+    },
+    payable: {
+      id: string;
+      paidAmount: Prisma.Decimal | number | null;
+      sourceType?: string | null;
+      sourceId?: string | null;
+    },
     receiptJournal: {
       transactionDate: Date;
-      lines: Array<{ accountId: string; credit: Prisma.Decimal | number | null }>;
+      lines: Array<{
+        accountId: string;
+        credit: Prisma.Decimal | number | null;
+        debit?: Prisma.Decimal | number | null;
+      }>;
     },
   ) {
     // The PO that received on credit still points at this payable — approve()
@@ -983,17 +1193,31 @@ export class SupplierInvoicesService {
       },
     });
 
-    // Receipt-created amount: the AP_CONTROL credit on the receipt accrual JE
-    // (createCreditPurchasePayable posts exactly amount = PO total there).
+    // Each partial GRN accrues another delta against this same payable. The
+    // first backing journal identifies its origin, not its cumulative amount.
     const apAccount = await this.accountResolver.resolve(invoice.companyId, 'AP_CONTROL', tx);
+    const receiptJournals = await tx.journalEntry.findMany({
+      where: {
+        companyId: invoice.companyId,
+        referenceType: 'Payable',
+        referenceId: payable.id,
+        status: 'POSTED',
+        deletedAt: null,
+      },
+      include: { lines: true },
+    });
     let receiptCents = 0;
-    for (const line of receiptJournal.lines) {
-      if (line.accountId === apAccount.id) {
-        receiptCents += this.moneyToCents(line.credit ?? 0);
+    for (const journal of receiptJournals) {
+      let journalApCents = 0;
+      for (const line of journal.lines) {
+        if (line.accountId === apAccount.id) {
+          journalApCents +=
+            this.moneyToCents(line.credit ?? 0) - this.moneyToCents(line.debit ?? 0);
+        }
       }
-    }
-    if (receiptCents <= 0) {
-      receiptCents = this.moneyToCents(receiptPo?.totalAmount ?? 0);
+      // Legacy settlements also use a Payable reference. Only AP-increasing
+      // entries are receipt accruals; settlement/reversal debits are not receipts.
+      if (journalApCents > 0) receiptCents += journalApCents;
     }
     if (receiptCents <= 0) {
       throw new ConflictException(
@@ -1002,6 +1226,23 @@ export class SupplierInvoicesService {
     }
 
     const receiptAmount = new Prisma.Decimal(this.fromCents(receiptCents)).toDecimalPlaces(2);
+    const receiptSourceType =
+      payable.sourceType === 'GoodsReceivedNote'
+        ? 'GoodsReceivedNote'
+        : receiptPo || payable.sourceType === 'PurchaseOrder' || invoice.purchaseOrderId
+          ? 'PurchaseOrder'
+          : 'GoodsReceivedNote';
+    const receiptSourceId =
+      receiptSourceType === 'PurchaseOrder'
+        ? (receiptPo?.id ??
+          (payable.sourceType === 'PurchaseOrder' ? payable.sourceId : null) ??
+          invoice.purchaseOrderId)
+        : payable.sourceType === 'GoodsReceivedNote'
+          ? payable.sourceId
+          : invoice.goodsReceivedNoteId;
+    if (!receiptSourceId) {
+      throw new ConflictException('Cannot determine the original receipt source; void aborted');
+    }
     await tx.payable.update({
       where: { id: payable.id },
       data: {
@@ -1009,10 +1250,9 @@ export class SupplierInvoicesService {
         // paidAmount is guaranteed 0 by the void guard, but derive outstanding
         // from it anyway so the arithmetic can never resurrect paid money.
         outstandingAmount: receiptAmount.minus(payable.paidAmount ?? 0).toDecimalPlaces(2),
-        sourceType: 'PurchaseOrder',
-        sourceId: receiptPo?.id ?? invoice.purchaseOrderId ?? null,
+        sourceType: receiptSourceType,
+        sourceId: receiptSourceId,
         issueDate: receiptJournal.transactionDate,
-        dueDate: receiptPo?.expectedDate ?? null,
         ...(receiptPo
           ? {
               divisionId: receiptPo.divisionId,

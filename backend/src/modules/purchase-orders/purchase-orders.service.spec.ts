@@ -32,6 +32,7 @@ function makeService() {
     },
     goodsReceivedNote: {
       findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     payable: {
       findUniqueOrThrow: jest.fn(async () => ({ outstandingAmount: new Prisma.Decimal(200) })),
@@ -46,6 +47,7 @@ function makeService() {
     },
     purchaseOrderLine: {
       deleteMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     division: {
       findFirst: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
@@ -110,6 +112,15 @@ function makeService() {
   const profit = {
     assertPurchaseLinesHaveCost: jest.fn().mockResolvedValue(undefined),
   } as any;
+  const receiptPayables = {
+    ensureForPurchaseOrder: jest.fn(async () => {
+      const order = await prisma.purchaseOrder.findFirst.mock.results.at(-1)?.value;
+      return {
+        payableId: order?.payableId ?? 'payable-1',
+        journalEntryId: order?.journalEntryId ?? 'je-1',
+      };
+    }),
+  } as any;
   const payments = {
     createInTransaction: jest.fn(async () => ({ payment: { id: 'payment-1' } })),
     syncPurchaseOrders: jest.fn(),
@@ -125,6 +136,7 @@ function makeService() {
     postingEngine,
     accountResolver,
     profit,
+    receiptPayables,
     undefined,
     payments,
     cashPurchases,
@@ -140,6 +152,7 @@ function makeService() {
     auditLogs,
     payments,
     cashPurchases,
+    receiptPayables,
   };
 }
 
@@ -750,6 +763,23 @@ describe('PurchaseOrdersService invoice reference metadata', () => {
 });
 
 describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
+  it('does not move stock for a service product even if inventory tracking was enabled', async () => {
+    const { service, prisma, inventoryMovements, receiptPayables } = makeService();
+    prisma.product.findUnique.mockResolvedValue({
+      id: 'product-1',
+      trackInventory: true,
+      productType: 'SERVICE',
+    });
+    prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder());
+
+    await service.receive('po-1', user);
+
+    expect(inventoryMovements.createMovement).not.toHaveBeenCalled();
+    expect(receiptPayables.ensureForPurchaseOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ purchaseOrderId: 'po-1', tx: prisma }),
+    );
+  });
+
   function creditOrder(extra: Record<string, unknown> = {}) {
     return {
       id: 'po-1',
@@ -780,84 +810,54 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
     };
   }
 
-  it('creates a linked payable and AP ledger when receiving a credit purchase', async () => {
-    const { service, prisma, postingEngine, inventoryMovements, codes } = makeService();
-    prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
-    prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder());
+  it.each(['CREDIT_PURCHASE', 'STOCK_PURCHASE'])(
+    'links shared receipt accounting when receiving a %s',
+    async (purchaseType) => {
+      const { service, prisma, postingEngine, inventoryMovements, receiptPayables } = makeService();
+      prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
+      prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder({ purchaseType }));
 
-    await service.receive('po-1', user);
+      await service.receive('po-1', user);
 
-    // Inventory side is still posted via the movements service (WAC subledger).
-    expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
-      expect.objectContaining({
-        movementType: 'PURCHASE_RECEIPT',
-        quantity: 10,
-        referenceType: 'PurchaseOrder',
-        referenceId: 'po-1',
-      }),
-    );
-    expect(codes.next).toHaveBeenCalledWith(
-      expect.objectContaining({ entityType: 'Payable', companyId: 'company-1' }),
-    );
-    expect(prisma.payable.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          payableNumber: 'AP-2026-000001',
-          companyId: 'company-1',
-          divisionId: 'division-1',
-          branchId: 'branch-1',
-          supplierId: 'supplier-1',
-          supplierName: 'Supplier Ltd',
-          sourceType: 'PurchaseOrder',
-          sourceId: 'po-1',
-          amount: expect.anything(),
-          outstandingAmount: expect.anything(),
-          status: 'OPEN',
+      // Inventory side is still posted via the movements service (WAC subledger).
+      expect(inventoryMovements.createMovement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          movementType: 'PURCHASE_RECEIPT',
+          quantity: 10,
+          referenceType: 'PurchaseOrder',
+          referenceId: 'po-1',
         }),
-      }),
-    );
-    expect(postingEngine.postLines).toHaveBeenCalledWith(
-      expect.objectContaining({
-        companyId: 'company-1',
-        referenceType: 'Payable',
-        referenceId: 'payable-1',
-        lines: expect.arrayContaining([
-          expect.objectContaining({
-            accountId: 'inventory-account',
-            debit: expect.anything(),
-            credit: 0,
-          }),
-          expect.objectContaining({ accountId: 'ap-account', debit: 0, credit: expect.anything() }),
-        ]),
-      }),
-      prisma,
-    );
-    const updateArg = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
-    expect(updateArg.data.status).toBe('RECEIVED');
-    expect(updateArg.data.journalEntryId).toBe('je-1');
-    expect(updateArg.data.payableId).toBe('payable-1');
-  });
+      );
+      expect(receiptPayables.ensureForPurchaseOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purchaseOrderId: 'po-1',
+          companyId: 'company-1',
+          transactionDate: expect.any(Date),
+          userId: 'user-1',
+          tx: prisma,
+        }),
+      );
+      expect(postingEngine.postLines).not.toHaveBeenCalled();
+      const updateArg = prisma.purchaseOrder.update.mock.calls.at(-1)?.[0];
+      expect(updateArg.data.status).toBe('RECEIVED');
+      expect(updateArg.data.journalEntryId).toBe('je-1');
+      expect(updateArg.data.payableId).toBe('payable-1');
+    },
+  );
 
-  it('does not re-post AP or touch the linked payable when the PO already has one', async () => {
-    const { service, prisma, postingEngine } = makeService();
+  it('asks shared accounting to validate existing coverage and retains its payable link', async () => {
+    const { service, prisma, postingEngine, receiptPayables } = makeService();
     prisma.product.findUnique.mockResolvedValue({ id: 'product-1', trackInventory: true });
     prisma.purchaseOrder.findFirst.mockResolvedValue(
       creditOrder({ payableId: 'payable-existing' }),
     );
-    prisma.payable.findFirst.mockResolvedValue({
-      id: 'payable-existing',
-      companyId: 'company-1',
-      supplierId: 'supplier-1',
-      currency: 'TZS',
-      amount: 1000000,
-      journalEntryId: 'covered-je',
-    });
-    prisma.journalEntry.findFirst.mockResolvedValue({ id: 'covered-je', totalDebit: 1000000 });
 
     await service.receive('po-1', user);
 
-    // The pre-existing payable (created by the supplier-invoice flow) is left alone:
-    // no second AP_CONTROL credit, no journalEntryId overwrite.
+    expect(receiptPayables.ensureForPurchaseOrder).toHaveBeenCalledTimes(1);
+    expect(prisma.purchaseOrder.update.mock.calls.at(-1)[0].data.payableId).toBe(
+      'payable-existing',
+    );
     expect(postingEngine.postLines).not.toHaveBeenCalled();
     expect(prisma.payable.create).not.toHaveBeenCalled();
     expect(prisma.payable.update).not.toHaveBeenCalled();
@@ -914,26 +914,17 @@ describe('PurchaseOrdersService.receive credit purchase payable sync', () => {
       }),
     );
   });
-  it.each([
-    ['companyId', 'other-company'],
-    ['supplierId', 'other-supplier'],
-    ['currency', 'USD'],
-    ['amount', 500000],
-    ['journalEntryId', null],
-  ])('rejects incompatible existing payable coverage for %s', async (field, value) => {
-    const { service, prisma, postingEngine } = makeService();
-    prisma.purchaseOrder.findFirst.mockResolvedValue(creditOrder({ payableId: 'covered-payable' }));
-    prisma.payable.findFirst.mockResolvedValue({
-      companyId: 'company-1',
-      supplierId: 'supplier-1',
-      currency: 'TZS',
-      amount: 1000000,
-      journalEntryId: 'covered-je',
-      [field]: value,
-    });
-    await expect(service.receive('po-1', user)).rejects.toThrow('coverage does not match');
-    expect(prisma.payable.create).not.toHaveBeenCalled();
-    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  it('propagates unresolved accounting coverage so a receipt cannot silently commit without AP', async () => {
+    const { service, prisma, receiptPayables } = makeService();
+    prisma.purchaseOrder.findFirst.mockResolvedValue(
+      creditOrder({ purchaseType: 'STOCK_PURCHASE' }),
+    );
+    receiptPayables.ensureForPurchaseOrder.mockRejectedValueOnce(
+      new Error('Existing liability requires review'),
+    );
+    await expect(service.receive('po-1', user)).rejects.toThrow(
+      'Existing liability requires review',
+    );
     expect(prisma.purchaseOrder.update).not.toHaveBeenCalled();
   });
 });
@@ -1052,6 +1043,132 @@ describe('PurchaseOrdersService.cancel outstanding reset (finding #19)', () => {
 });
 
 describe('PurchaseOrdersService.summary', () => {
+  const partialPayable = (overrides: Record<string, unknown> = {}) => ({
+    id: 'ap-partial',
+    companyId: 'company-1',
+    supplierId: 'supplier-1',
+    currency: 'TZS',
+    amount: new Prisma.Decimal(40),
+    paidAmount: new Prisma.Decimal(0),
+    outstandingAmount: new Prisma.Decimal(40),
+    status: 'OPEN',
+    journalEntryId: 'je-partial',
+    deletedAt: null,
+    ...overrides,
+  });
+  const partialReceipt = (purchaseOrderId = 'po-1', unitCost: number | null = 4) => ({
+    purchaseOrderId,
+    companyId: 'company-1',
+    lines: [
+      {
+        productId: 'product-1',
+        unitId: 'unit-1',
+        acceptedQuantity: new Prisma.Decimal(10),
+        unitCost: unitCost == null ? null : new Prisma.Decimal(unitCost),
+      },
+    ],
+  });
+
+  it.each([
+    ['posted receipt coverage', partialPayable(), 0],
+    ['missing coverage', null, 40],
+    ['unposted coverage', partialPayable({ journalEntryId: null }), 40],
+    ['invalid supplier coverage', partialPayable({ supplierId: 'other-supplier' }), 40],
+  ])(
+    'counts only received value for a partial order with %s',
+    async (_label, payable, expected) => {
+      const { service, prisma } = makeService();
+      prisma.purchaseOrder.findMany.mockResolvedValue([
+        order({ status: 'PARTIALLY_RECEIVED', payable }),
+      ]);
+      prisma.goodsReceivedNote.findMany.mockResolvedValue([partialReceipt()]);
+      const result = await service.summary({} as any, user);
+      expect(result.perCurrency).toEqual([expect.objectContaining({ unbilledAmount: expected })]);
+    },
+  );
+
+  it('values partial GRNs at persisted receipt cost before the agreed gross order price', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([order({ status: 'PARTIALLY_RECEIVED' })]);
+    prisma.goodsReceivedNote.findMany.mockResolvedValue([partialReceipt('po-1', 5)]);
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      {
+        purchaseOrderId: 'po-1',
+        productId: 'product-1',
+        unitId: 'unit-1',
+        quantity: new Prisma.Decimal(25),
+        lineTotal: new Prisma.Decimal(100),
+      },
+    ]);
+    const result = await service.summary({} as any, user);
+    expect(result.perCurrency).toEqual([expect.objectContaining({ unbilledAmount: 50 })]);
+  });
+
+  it('batches partial receipt evidence and uses weighted gross order prices when receipt cost is absent', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order({ status: 'PARTIALLY_RECEIVED' }),
+      order({ id: 'po-2', status: 'PARTIALLY_RECEIVED', payable: partialPayable() }),
+    ]);
+    prisma.goodsReceivedNote.findMany.mockResolvedValue([
+      {
+        ...partialReceipt('po-1', null),
+        lines: [
+          { ...partialReceipt().lines[0], acceptedQuantity: new Prisma.Decimal(4), unitCost: null },
+        ],
+      },
+      partialReceipt('po-2'),
+    ]);
+    prisma.purchaseOrderLine.findMany.mockResolvedValue([
+      {
+        purchaseOrderId: 'po-1',
+        productId: 'product-1',
+        unitId: 'unit-1',
+        quantity: new Prisma.Decimal(5),
+        lineTotal: new Prisma.Decimal(30),
+      },
+      {
+        purchaseOrderId: 'po-1',
+        productId: 'product-1',
+        unitId: 'unit-1',
+        quantity: new Prisma.Decimal(5),
+        lineTotal: new Prisma.Decimal(70),
+      },
+    ]);
+    const result = await service.summary({} as any, user);
+    expect(result.perCurrency).toEqual([expect.objectContaining({ unbilledAmount: 40 })]);
+    expect(prisma.goodsReceivedNote.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.purchaseOrderLine.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.goodsReceivedNote.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          purchaseOrderId: { in: ['po-1', 'po-2'] },
+          status: 'POSTED',
+          deletedAt: null,
+        }),
+      }),
+    );
+  });
+
+  it('retains the uncovered commitment when partial accounting has no posted receipt evidence', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order({ status: 'PARTIALLY_RECEIVED', payable: partialPayable() }),
+    ]);
+    const result = await service.summary({} as any, user);
+    expect(result.perCurrency).toEqual([expect.objectContaining({ unbilledAmount: 60 })]);
+  });
+
+  it('preserves other posted order-journal coverage for a partially received legacy purchase', async () => {
+    const { service, prisma } = makeService();
+    prisma.purchaseOrder.findMany.mockResolvedValue([
+      order({ status: 'PARTIALLY_RECEIVED', journalEntryId: 'legacy-posting' }),
+    ]);
+    prisma.goodsReceivedNote.findMany.mockResolvedValue([partialReceipt()]);
+    const result = await service.summary({} as any, user);
+    expect(result.perCurrency).toEqual([expect.objectContaining({ unbilledAmount: 0 })]);
+  });
+
   it('keeps invoice coverage facets consistent with canonical payment filtering', async () => {
     const { service, prisma } = makeService();
     prisma.purchaseOrder.findMany.mockResolvedValue([
@@ -1175,7 +1292,7 @@ describe('PurchaseOrdersService explicit payment deadline', () => {
   it.each([undefined, '2026-11-30'])(
     'creates receipt AP using explicit paymentDueDate %s instead of expected delivery',
     async (paymentDueDate) => {
-      const { service, prisma } = makeService();
+      const { service, prisma, receiptPayables } = makeService();
       prisma.purchaseOrder.findFirst.mockResolvedValue({
         id: 'po-1',
         purchaseOrderNumber: 'PO-1',
@@ -1195,13 +1312,15 @@ describe('PurchaseOrdersService explicit payment deadline', () => {
         lines: [],
       });
       await service.receive('po-1', user, { paymentDueDate });
-      expect(prisma.payable.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            dueDate: paymentDueDate ? new Date(paymentDueDate) : undefined,
-          }),
-        }),
-      );
+      expect(receiptPayables.ensureForPurchaseOrder).toHaveBeenCalled();
+      if (paymentDueDate) {
+        expect(prisma.payable.update).toHaveBeenCalledWith({
+          where: { id: 'payable-1' },
+          data: { dueDate: new Date(paymentDueDate) },
+        });
+      } else {
+        expect(prisma.payable.update).not.toHaveBeenCalled();
+      }
     },
   );
 });

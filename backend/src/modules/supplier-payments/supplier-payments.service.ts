@@ -252,8 +252,23 @@ export class SupplierPaymentsService {
   async lockPayable(tx: Tx, id: string): Promise<LockedPayable | undefined> {
     await tx.$queryRaw`SELECT po.id FROM purchase_orders po
       WHERE po."payableId" = ${id} OR po.id IN
-        (SELECT "purchaseOrderId" FROM supplier_invoices WHERE "payableId" = ${id} AND "purchaseOrderId" IS NOT NULL)
+        (SELECT COALESCE(invoice."purchaseOrderId", grn."purchaseOrderId")
+         FROM supplier_invoices invoice
+         LEFT JOIN goods_received_notes grn ON grn.id = invoice."goodsReceivedNoteId"
+         WHERE invoice."payableId" = ${id} OR invoice.id IN
+           (SELECT "sourceId" FROM payables WHERE id = ${id} AND "sourceType" = 'SupplierInvoice'))
       ORDER BY po.id FOR UPDATE`;
+    // Approval/void locks a standalone GRN before its invoice and payable.
+    // Settlement later updates that invoice, so it must take the same source
+    // lock first, including older invoice-origin liabilities linked via a GRN.
+    await tx.$queryRaw`SELECT grn.id FROM goods_received_notes grn
+      WHERE grn."purchaseOrderId" IS NULL AND
+        (grn.id IN (SELECT "sourceId" FROM payables
+                    WHERE id = ${id} AND "sourceType" = 'GoodsReceivedNote')
+         OR grn.id IN (SELECT "goodsReceivedNoteId" FROM supplier_invoices
+           WHERE "payableId" = ${id} OR id IN
+             (SELECT "sourceId" FROM payables WHERE id = ${id} AND "sourceType" = 'SupplierInvoice')))
+      ORDER BY grn.id FOR UPDATE`;
     const [locked] = await tx.$queryRaw<LockedPayable[]>`
       SELECT "id", "companyId", "divisionId", "branchId", "supplierId", "supplierName",
              "payableNumber", "sourceType", "outstandingAmount", "paidAmount", "status", "currency"

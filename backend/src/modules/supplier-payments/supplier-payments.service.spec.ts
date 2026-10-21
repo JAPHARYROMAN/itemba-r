@@ -115,6 +115,34 @@ const baseInput = () => ({
 });
 
 describe('SupplierPaymentsService.createInTransaction', () => {
+  it.each(['GoodsReceivedNote', 'SupplierInvoice'])(
+    'locks a standalone GRN before payable settlement and invoice synchronization for %s coverage',
+    async (sourceType) => {
+      const { service, tx } = setup({
+        locked: { sourceType },
+        invoices: [{ id: 'invoice-grn', totalAmount: d(500) }],
+      });
+      await service.createInTransaction(tx, user, baseInput());
+      const sql = tx.$queryRaw.mock.calls.map(([strings]: any[]) => Array.from(strings).join('?'));
+      const grnLock = sql.findIndex((query: string) =>
+        query.startsWith('SELECT grn.id FROM goods_received_notes'),
+      );
+      const payableLock = sql.findIndex((query: string) => query.includes('FROM "payables"'));
+      expect(grnLock).toBeGreaterThanOrEqual(0);
+      expect(sql[grnLock]).toContain('"purchaseOrderId" IS NULL');
+      expect(sql[grnLock]).toContain("'GoodsReceivedNote'");
+      expect(sql[grnLock]).toContain("'SupplierInvoice'");
+      expect(sql[grnLock]).toContain('"goodsReceivedNoteId" FROM supplier_invoices');
+      expect(sql[grnLock]).toContain('FOR UPDATE');
+      expect(tx.$queryRaw.mock.invocationCallOrder[grnLock]).toBeLessThan(
+        tx.$queryRaw.mock.invocationCallOrder[payableLock],
+      );
+      expect(tx.$queryRaw.mock.invocationCallOrder[payableLock]).toBeLessThan(
+        tx.supplierInvoice.update.mock.invocationCallOrder[0],
+      );
+    },
+  );
+
   it.each([
     { companyId: 'other' },
     { supplierId: 'other' },

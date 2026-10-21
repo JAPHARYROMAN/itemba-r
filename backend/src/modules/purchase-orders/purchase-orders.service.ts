@@ -31,6 +31,7 @@ import {
 } from './dto/receive-purchase-order.dto';
 import { AccessLevel, AuditSeverity, CashAccountType, Prisma, PurchaseType } from '@prisma/client';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
+import { ReceiptPayablesService } from '../receipt-payables/receipt-payables.service';
 
 type PurchaseOrderReferenceIds = {
   divisionId?: string | null;
@@ -126,6 +127,7 @@ export class PurchaseOrdersService {
     private readonly postingEngine: PostingEngineService,
     private readonly accountResolver: AccountResolverService,
     private readonly profit: ProfitService,
+    private readonly receiptPayables: ReceiptPayablesService,
     private readonly advances?: SupplierPurchaseAdvancesService,
     private readonly payments?: SupplierPaymentsService,
     private readonly cashPurchases?: CashPurchasePaymentsService,
@@ -410,6 +412,91 @@ export class PurchaseOrdersService {
     const documents = scopedDocuments.filter(
       (record) => !invoiceStatus || invoiceCoverage(record) === invoiceStatus,
     );
+    const partialOrders = documents.filter((record) => record.status === 'PARTIALLY_RECEIVED');
+    const receivedUnbilledByOrder = new Map<string, Prisma.Decimal>();
+    if (partialOrders.length) {
+      const partialIds = partialOrders.map((record) => record.id);
+      // A partially received order still carries its full commitment total. Read
+      // the actual posted receipts in batches so unreceived goods never inflate
+      // the "received without posted payable" amount.
+      const [receipts, orderedLines] = await Promise.all([
+        this.prisma.goodsReceivedNote.findMany({
+          where: {
+            purchaseOrderId: { in: partialIds },
+            companyId: { in: [...new Set(partialOrders.map((record) => record.companyId))] },
+            status: 'POSTED',
+            deletedAt: null,
+          },
+          select: {
+            purchaseOrderId: true,
+            companyId: true,
+            lines: {
+              select: { productId: true, unitId: true, acceptedQuantity: true, unitCost: true },
+            },
+          },
+        }),
+        this.prisma.purchaseOrderLine.findMany({
+          where: { purchaseOrderId: { in: partialIds } },
+          select: {
+            purchaseOrderId: true,
+            productId: true,
+            unitId: true,
+            quantity: true,
+            lineTotal: true,
+          },
+        }),
+      ]);
+      const agreedPrices = new Map<string, { quantity: Prisma.Decimal; total: Prisma.Decimal }>();
+      for (const line of orderedLines) {
+        const key = `${line.purchaseOrderId}:${line.productId}:${line.unitId}`;
+        const prior = agreedPrices.get(key);
+        agreedPrices.set(key, {
+          quantity: (prior?.quantity ?? new Prisma.Decimal(0)).plus(line.quantity),
+          total: (prior?.total ?? new Prisma.Decimal(0)).plus(line.lineTotal),
+        });
+      }
+      const partialById = new Map(partialOrders.map((record) => [record.id, record]));
+      const receivedValues = new Map<string, { amount: Prisma.Decimal; complete: boolean }>();
+      for (const receipt of receipts) {
+        if (!receipt.purchaseOrderId) continue;
+        const order = partialById.get(receipt.purchaseOrderId);
+        if (!order || receipt.companyId !== order.companyId) continue;
+        const value = receivedValues.get(order.id) ?? {
+          amount: new Prisma.Decimal(0),
+          complete: true,
+        };
+        for (const line of receipt.lines) {
+          const accepted = new Prisma.Decimal(line.acceptedQuantity);
+          if (accepted.lte(0)) continue;
+          const agreed = agreedPrices.get(`${order.id}:${line.productId}:${line.unitId}`);
+          if (line.unitCost != null && new Prisma.Decimal(line.unitCost).gte(0)) {
+            value.amount = value.amount.plus(accepted.mul(line.unitCost));
+          } else if (agreed && agreed.quantity.gt(0)) {
+            value.amount = value.amount.plus(accepted.mul(agreed.total).div(agreed.quantity));
+          } else {
+            value.complete = false;
+          }
+        }
+        receivedValues.set(order.id, value);
+      }
+      for (const record of partialOrders) {
+        const received = receivedValues.get(record.id);
+        // Missing receipt/cost evidence keeps the existing projection visible;
+        // a partial payable alone is not proof of how much stock arrived.
+        if (!received?.complete) continue;
+        const receivedAmount = received.amount.toDecimalPlaces(2);
+        const postedCoverage =
+          record.accountingCoverage !== 'CONFLICT' && record.payable?.journalEntryId
+            ? new Prisma.Decimal(record.payable.amount).toDecimalPlaces(2)
+            : record.accountingCoverage === 'POSTED' && record.journalEntryId
+              ? receivedAmount
+              : new Prisma.Decimal(0);
+        receivedUnbilledByOrder.set(
+          record.id,
+          Prisma.Decimal.max(0, receivedAmount.minus(postedCoverage)).toDecimalPlaces(2),
+        );
+      }
+    }
     const amounts = new Map<
       string,
       {
@@ -457,7 +544,9 @@ export class PurchaseOrdersService {
         row.receivedOutstandingAmount = row.receivedOutstandingAmount.plus(
           record.outstandingAmount,
         );
-        row.unbilledAmount = row.unbilledAmount.plus(record.unbilledAmount);
+        row.unbilledAmount = row.unbilledAmount.plus(
+          receivedUnbilledByOrder.get(record.id) ?? record.unbilledAmount,
+        );
       }
       amounts.set(currency, row);
       const statusCurrency = bucket.byCurrency.get(currency) ?? {
@@ -1446,6 +1535,7 @@ export class PurchaseOrdersService {
           select: {
             id: true,
             name: true,
+            productType: true,
             trackInventory: true,
             category: { select: { categoryType: true } },
           },
@@ -1455,7 +1545,10 @@ export class PurchaseOrdersService {
           throw new NotFoundException(`Product ${line.productId} not found`);
         }
 
-        if (product.trackInventory) {
+        if (
+          product.trackInventory &&
+          !['SERVICE', 'NON_STOCK_ITEM'].includes(product.productType)
+        ) {
           const unitCost =
             Number(line.quantity) > 0
               ? Number(line.lineTotal) / Number(line.quantity)
@@ -1548,7 +1641,12 @@ export class PurchaseOrdersService {
       // Supplier invoices reuse this coverage instead of posting goods twice.
       let journalEntry: { id: string } | null = null;
       let payable: { id: string; journalEntryId: string | null } | null = null;
-      if (existing.payableId) {
+      if (
+        existing.payableId &&
+        ![PurchaseType.CREDIT_PURCHASE, PurchaseType.STOCK_PURCHASE].includes(
+          existing.purchaseType as any,
+        )
+      ) {
         const covered = await tx.payable.findFirst({
           where: { id: existing.payableId, deletedAt: null },
         });
@@ -1585,12 +1683,7 @@ export class PurchaseOrdersService {
         throw new BadRequestException(
           'This order already has a legacy cash journal. Review its accounting coverage before receiving.',
         );
-      if (
-        [PurchaseType.CASH_PURCHASE, PurchaseType.CREDIT_PURCHASE].includes(
-          existing.purchaseType as any,
-        ) &&
-        !existing.payableId
-      ) {
+      if (existing.purchaseType === PurchaseType.CASH_PURCHASE && !existing.payableId) {
         payable = await this.createPurchasePayable({
           order: existing as any,
           transactionDate: receivedAt,
@@ -1600,6 +1693,29 @@ export class PurchaseOrdersService {
         });
         if (payable.journalEntryId) {
           journalEntry = { id: payable.journalEntryId };
+        }
+      }
+      if (
+        [PurchaseType.CREDIT_PURCHASE, PurchaseType.STOCK_PURCHASE].includes(
+          existing.purchaseType as any,
+        )
+      ) {
+        const coverage = await this.receiptPayables.ensureForPurchaseOrder({
+          purchaseOrderId: id,
+          companyId: existing.companyId,
+          transactionDate: receivedAt,
+          userId,
+          user,
+          tx,
+        });
+        if (coverage) {
+          payable = { id: coverage.payableId, journalEntryId: coverage.journalEntryId };
+          journalEntry = { id: coverage.journalEntryId };
+          if (dto.paymentDueDate)
+            await tx.payable.update({
+              where: { id: coverage.payableId },
+              data: { dueDate: new Date(dto.paymentDueDate) },
+            });
         }
       }
 
