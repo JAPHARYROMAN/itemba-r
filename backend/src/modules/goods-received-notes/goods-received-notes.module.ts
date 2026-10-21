@@ -5,9 +5,10 @@ import { GoodsReceivedNotesController } from './goods-received-notes.controller'
 import { GoodsReceivedNotesService } from './goods-received-notes.service';
 import { CompanyScopeService } from '../../common/services';
 import { InventoryMovementsModule } from '../inventory-movements/inventory-movements.module';
+import { ReceiptPayablesModule } from '../receipt-payables/receipt-payables.module';
 
 @Module({
-  imports: [PrismaModule, AuditLogsModule, InventoryMovementsModule],
+  imports: [PrismaModule, AuditLogsModule, InventoryMovementsModule, ReceiptPayablesModule],
   controllers: [GoodsReceivedNotesController],
   providers: [GoodsReceivedNotesService, CompanyScopeService],
   exports: [GoodsReceivedNotesService],

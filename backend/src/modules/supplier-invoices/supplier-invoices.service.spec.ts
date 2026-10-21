@@ -27,7 +27,7 @@ function approvableInvoice(overrides: Record<string, unknown> = {}) {
 function makeService(txOverrides: Record<string, any> = {}) {
   const prisma: any = {
     supplierInvoice: {
-      findFirst: jest.fn(async () => approvableInvoice()),
+      findFirst: jest.fn(async () => null),
       updateMany: jest.fn(async () => ({ count: 1 })),
       update: jest.fn(async ({ data }: any) => ({ id: 'si-1', ...data, lines: [] })),
     },
@@ -46,7 +46,12 @@ function makeService(txOverrides: Record<string, any> = {}) {
       })),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
-    $queryRaw: jest.fn(async () => [{ id: 'po-1' }]),
+    $queryRaw: jest.fn(async () => [
+      (await prisma.purchaseOrder.findFirst.mock.results.at(-1)?.value) ?? {
+        id: 'po-1',
+        payableId: null,
+      },
+    ]),
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     ...txOverrides,
   };
@@ -63,6 +68,13 @@ function makeService(txOverrides: Record<string, any> = {}) {
       updateMany: jest.fn(async () => ({ count: 1 })),
       ...txOverrides.purchaseOrder,
     };
+  prisma.payable ??= {};
+  prisma.payable.findMany ??= jest.fn(async ({ where }: any) => {
+    const ids = where.OR.flatMap((item: any) => item.id?.in ?? []);
+    return (
+      await Promise.all(ids.map((id: string) => prisma.payable.findUnique({ where: { id } })))
+    ).filter(Boolean);
+  });
   const auditLogs = {
     log: jest.fn().mockResolvedValue(undefined),
     logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
@@ -99,9 +111,14 @@ describe('SupplierInvoicesService approve atomic claim', () => {
       outstandingAmount: new Prisma.Decimal(60),
       sourceType: 'PurchaseOrder',
       sourceId: 'po-1',
-      status: 'PARTIAL',
+      status: 'PARTIALLY_PAID',
       journalEntryId: 'je-receipt',
-      journalEntry: { status: 'POSTED', companyId: 'company-1' },
+      journalEntry: {
+        status: 'POSTED',
+        companyId: 'company-1',
+        referenceType: 'Payable',
+        referenceId: 'pay-receipt',
+      },
     };
     const { service, prisma } = makeService({
       purchaseOrder: {
@@ -119,6 +136,7 @@ describe('SupplierInvoicesService approve atomic claim', () => {
         create: jest.fn(),
         update: jest.fn(async ({ data }: any) => ({ ...covered, ...data })),
       },
+      journalEntry: { findFirst: jest.fn(async () => covered.journalEntry) },
     });
     jest
       .spyOn(service, 'findOne')
@@ -346,6 +364,220 @@ describe('SupplierInvoicesService approve atomic claim', () => {
     expect(auditLogs.log).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: 'SUPPLIER_INVOICE_APPROVE' }),
     );
+  });
+});
+
+describe('SupplierInvoicesService receipt payable reuse', () => {
+  function setup(
+    options: {
+      payable?: Record<string, unknown>;
+      invoice?: Record<string, unknown>;
+      journal?: Record<string, unknown> | null;
+      otherInvoice?: Record<string, unknown>;
+      orderStatus?: string;
+      sourceType?: 'PurchaseOrder' | 'GoodsReceivedNote';
+    } = {},
+  ) {
+    const sourceType = options.sourceType ?? 'PurchaseOrder';
+    const payable = {
+      id: 'pay-receipt',
+      companyId: 'company-1',
+      supplierId: 'supplier-1',
+      currency: 'TZS',
+      status: 'OPEN',
+      amount: new Prisma.Decimal(100),
+      paidAmount: new Prisma.Decimal(0),
+      outstandingAmount: new Prisma.Decimal(100),
+      sourceType,
+      sourceId: sourceType === 'PurchaseOrder' ? 'po-1' : 'grn-1',
+      journalEntryId: 'je-receipt',
+      deletedAt: null,
+      ...options.payable,
+    };
+    const { service, prisma } = makeService({
+      supplierInvoice: {
+        findFirst: jest.fn(async () => options.otherInvoice ?? null),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        update: jest.fn(async ({ data }: any) => data),
+      },
+      purchaseOrder: { updateMany: jest.fn(async () => ({ count: 1 })) },
+      goodsReceivedNote: { findFirst: jest.fn(async () => ({ purchaseOrderId: null })) },
+      payable: {
+        findMany: jest.fn(async () => [payable]),
+        findUnique: jest.fn(async () => payable),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      journalEntry: {
+        findFirst: jest.fn(async () =>
+          options.journal === null
+            ? null
+            : {
+                status: 'POSTED',
+                referenceType: 'Payable',
+                referenceId: 'pay-receipt',
+                ...options.journal,
+              },
+        ),
+      },
+      $queryRaw: jest.fn(async (query: any) => {
+        const sql = Array.from(query.strings ?? query).join('?');
+        if (sql.includes('purchase_orders'))
+          return [
+            { id: 'po-1', payableId: 'pay-receipt', status: options.orderStatus ?? 'RECEIVED' },
+          ];
+        if (sql.includes('goods_received_notes')) return [{ id: 'grn-1' }];
+        return [{ id: 'pay-receipt' }];
+      }),
+    });
+    jest.spyOn(service, 'findOne').mockResolvedValue(
+      approvableInvoice({
+        purchaseOrderId: sourceType === 'PurchaseOrder' ? 'po-1' : null,
+        goodsReceivedNoteId: sourceType === 'GoodsReceivedNote' ? 'grn-1' : null,
+        ...options.invoice,
+      }) as any,
+    );
+    jest.spyOn(service as any, 'createThreeWayMatch').mockResolvedValue({ matchStatus: 'MATCHED' });
+    const post = jest.spyOn(service as any, 'postSupplierInvoicePayable');
+    jest.spyOn(service as any, 'syncSupplierBalance').mockResolvedValue(undefined);
+    return { service, prisma, post, payable };
+  }
+
+  it('discovers the receipt payable after the invoice draft was created and preserves its settlement and origin', async () => {
+    const { service, prisma, post } = setup({
+      payable: {
+        paidAmount: new Prisma.Decimal(40),
+        outstandingAmount: new Prisma.Decimal(60),
+        status: 'PARTIALLY_PAID',
+      },
+    });
+    await service.approve('si-1', undefined, user);
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    expect(prisma.supplierInvoice.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'PARTIALLY_PAID',
+          payableId: 'pay-receipt',
+          paidAmount: new Prisma.Decimal(40),
+          outstandingAmount: new Prisma.Decimal(60),
+        }),
+      }),
+    );
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.supplierInvoice.updateMany.mock.invocationCallOrder[0],
+    );
+    expect(prisma.supplierInvoice.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.$queryRaw.mock.invocationCallOrder.at(-1),
+    );
+  });
+
+  it('reuses the standalone GRN payable without changing its GoodsReceivedNote source', async () => {
+    const { service, prisma, post } = setup({ sourceType: 'GoodsReceivedNote' });
+    await service.approve('si-1', undefined, user);
+    expect(prisma.payable.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [{ companyId: 'company-1', sourceType: 'GoodsReceivedNote', sourceId: 'grn-1' }],
+        },
+      }),
+    );
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("recovers this invoice's posted payable from the PO backlink when the invoice link is absent", async () => {
+    const { service, prisma, post } = setup({
+      payable: { sourceType: 'SupplierInvoice', sourceId: 'si-1' },
+      journal: { referenceType: 'SupplierInvoice', referenceId: 'si-1' },
+    });
+    await service.approve('si-1', undefined, user);
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    expect(prisma.supplierInvoice.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ payableId: 'pay-receipt' }),
+      }),
+    );
+  });
+
+  it('rejects partial invoices or amount variance even with allowVariance, preserving the posted obligation', async () => {
+    const { service, prisma } = setup({ invoice: { totalAmount: 90 } });
+    await expect(service.approve('si-1', { allowVariance: true }, user)).rejects.toThrow(
+      'Partial invoices and amount variances',
+    );
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invoice against an unfinished partial receipt even if it matches the current accrual', async () => {
+    const { service, prisma } = setup({ orderStatus: 'PARTIALLY_RECEIVED' });
+    await expect(service.approve('si-1', undefined, user)).rejects.toThrow(
+      'only partially received',
+    );
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { status: 'CANCELLED' },
+    { status: 'WRITTEN_OFF' },
+    { deletedAt: new Date() },
+    { companyId: 'company-other' },
+    { supplierId: 'supplier-other' },
+    { currency: 'USD' },
+  ])('does not replace invalid receipt coverage: %j', async (payable) => {
+    const { service, prisma } = setup({ payable });
+    await expect(service.approve('si-1', undefined, user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { status: 'REVERSED' }, { status: 'DRAFT' }])(
+    'rejects unposted or reversed journal coverage: %j',
+    async (journal) => {
+      const { service, prisma } = setup({ journal });
+      await expect(service.approve('si-1', undefined, user)).rejects.toThrow(
+        'no posted accounting entry',
+      );
+      expect(prisma.payable.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a second approved invoice against the same receipt rather than sharing or duplicating its liability', async () => {
+    const { service, prisma } = setup({
+      otherInvoice: { supplierInvoiceNumber: 'SI-already-approved' },
+    });
+    await expect(service.approve('si-1', undefined, user)).rejects.toThrow(
+      'already has approved supplier invoice',
+    );
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+    expect(prisma.supplierInvoice.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ['APPROVED', 'PARTIALLY_PAID', 'PAID'] } }),
+      }),
+    );
+  });
+
+  it('recognizes an approved sibling linked only through another GRN on the same purchase order', async () => {
+    const { service, prisma } = setup();
+    prisma.supplierInvoice.findFirst.mockImplementation(async ({ where }: any) =>
+      where.OR?.some((condition: any) => condition.goodsReceivedNote?.purchaseOrderId === 'po-1')
+        ? { supplierInvoiceNumber: 'SI-GRN-only' }
+        : null,
+    );
+    await expect(service.approve('si-1', undefined, user)).rejects.toThrow('SI-GRN-only');
+    expect(prisma.payable.create).not.toHaveBeenCalled();
+    expect(prisma.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing or conflicting payable links rather than creating a duplicate', async () => {
+    const { service, prisma } = setup({ invoice: { payableId: 'pay-different' } });
+    await expect(service.approve('si-1', undefined, user)).rejects.toThrow('missing or ambiguous');
+    expect(prisma.payable.create).not.toHaveBeenCalled();
   });
 });
 
@@ -1048,6 +1280,7 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
       supplierInvoiceNumber: 'SI-2026-000001',
       status: 'APPROVED',
       purchaseOrderId: null,
+      goodsReceivedNoteId: null,
       payableId: 'pay-1',
       totalAmount: 10000,
       paidAmount: 0,
@@ -1147,6 +1380,7 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
       invoiceJournal?: any;
       receiptPo?: any;
       receiptPayable?: any;
+      receiptJournals?: any[];
       overrides?: Record<string, any>;
     } = {},
   ) {
@@ -1183,25 +1417,35 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
         }),
       },
       // void() reads the payable via SELECT ... FOR UPDATE (row lock).
-      $queryRaw: jest.fn(async () => (payable ? [payable] : [])),
+      $queryRaw: jest.fn(async (query: any) => {
+        const sql = Array.from(query.strings ?? query).join('?');
+        if (sql.includes('purchase_orders'))
+          return [{ id: invoice.purchaseOrderId, payableId: payable?.id ?? null }];
+        if (sql.includes('goods_received_notes')) return [{ id: invoice.goodsReceivedNoteId }];
+        return payable ? [payable] : [];
+      }),
       journalEntry: {
         // The by-id lookup fetches the payable's backing JE; the by-reference
         // lookup finds a JE this invoice's approve posted (if any).
         findFirst: jest.fn(async ({ where }: any) => (where?.id ? backingJournal : invoiceJournal)),
+        findMany: jest.fn(
+          async () => opts.receiptJournals ?? (backingJournal ? [backingJournal] : []),
+        ),
         updateMany: jest.fn(async () => ({ count: 1 })),
         update: jest.fn(async () => ({ id: 'je-rev-1' })),
       },
       purchaseOrder: {
-        findFirst: jest.fn(
-          async () =>
-            opts.receiptPo ?? {
-              id: 'po-1',
-              purchaseOrderNumber: 'PO-2026-000009',
-              divisionId: 'division-1',
-              branchId: 'branch-1',
-              expectedDate: new Date('2026-06-15T00:00:00.000Z'),
-              totalAmount: new Prisma.Decimal(12000),
-            },
+        findFirst: jest.fn(async () =>
+          opts.receiptPo === undefined
+            ? {
+                id: 'po-1',
+                purchaseOrderNumber: 'PO-2026-000009',
+                divisionId: 'division-1',
+                branchId: 'branch-1',
+                expectedDate: new Date('2026-06-15T00:00:00.000Z'),
+                totalAmount: new Prisma.Decimal(12000),
+              }
+            : opts.receiptPo,
         ),
         update: jest.fn(async ({ data }: any) => ({ id: 'po-1', ...data })),
       },
@@ -1513,6 +1757,107 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
     expect(finalUpdate.data).toEqual(
       expect.objectContaining({ status: 'CANCELLED', outstandingAmount: 0, payableId: null }),
     );
+  });
+
+  it('keeps the cumulative obligation from multiple partial GRNs when voiding the invoice', async () => {
+    const firstReceipt = receiptJournal(4000);
+    const secondReceipt = { ...receiptJournal(8000), id: 'je-receipt-2' };
+    const settlement = {
+      ...receiptJournal(0),
+      id: 'je-old-settlement',
+      lines: [
+        {
+          accountId: 'acc-AP_CONTROL',
+          debit: new Prisma.Decimal(2000),
+          credit: new Prisma.Decimal(0),
+        },
+      ],
+    };
+    const { service, prisma, postingEngine, captured } = makeVoidService({
+      invoice: { purchaseOrderId: 'po-1', totalAmount: 12000 },
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-receipt-1',
+        sourceType: 'PurchaseOrder',
+        sourceId: 'po-1',
+      },
+      backingJournal: firstReceipt,
+      receiptJournals: [firstReceipt, secondReceipt, settlement],
+    });
+    await service.void('si-1', undefined, user);
+    expect(Number(captured.payableUpdates[0].amount)).toBe(12000);
+    expect(Number(captured.payableUpdates[0].outstandingAmount)).toBe(12000);
+    expect(prisma.journalEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          referenceType: 'Payable',
+          referenceId: 'pay-1',
+          status: 'POSTED',
+        }),
+      }),
+    );
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.supplierInvoice.updateMany.mock.invocationCallOrder[0],
+    );
+    expect(prisma.supplierInvoice.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.$queryRaw.mock.invocationCallOrder[1],
+    );
+  });
+
+  it('preserves a standalone GRN source and currency when detaching a voided invoice', async () => {
+    const { service, captured, postingEngine } = makeVoidService({
+      invoice: { goodsReceivedNoteId: 'grn-1', currency: 'USD' },
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-receipt-1',
+        sourceType: 'GoodsReceivedNote',
+        sourceId: 'grn-1',
+        currency: 'USD',
+      },
+      receiptPo: null,
+      backingJournal: receiptJournal(12000),
+      overrides: {
+        goodsReceivedNote: { findFirst: jest.fn(async () => ({ purchaseOrderId: null })) },
+      },
+    });
+    await service.void('si-1', undefined, user);
+    expect(captured.payableUpdates[0]).toEqual(
+      expect.objectContaining({
+        sourceType: 'GoodsReceivedNote',
+        sourceId: 'grn-1',
+      }),
+    );
+    expect(captured.payableUpdates[0].currency).toBeUndefined();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('refuses to infer a receipt liability from the whole PO when its posted accruals are missing', async () => {
+    const { service, prisma } = makeVoidService({
+      invoice: { purchaseOrderId: 'po-1' },
+      payable: {
+        id: 'pay-1',
+        companyId: 'company-1',
+        supplierId: 'supplier-1',
+        status: 'OPEN',
+        paidAmount: new Prisma.Decimal(0),
+        journalEntryId: 'je-receipt-1',
+      },
+      backingJournal: receiptJournal(4000),
+      receiptJournals: [],
+    });
+    await expect(service.void('si-1', undefined, user)).rejects.toThrow(
+      'Cannot determine the receipt-created payable amount',
+    );
+    expect(prisma.payable.update).not.toHaveBeenCalled();
   });
 
   it('defensively reverses an invoice-referenced POSTED JE on the reuse path, leaving the receipt JE alone', async () => {

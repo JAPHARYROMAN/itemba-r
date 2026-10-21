@@ -7,6 +7,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService } from '../../common/services';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryMovementsService } from '../inventory-movements/inventory-movements.service';
+import { ReceiptPayablesService } from '../receipt-payables/receipt-payables.service';
 import { UpdateGoodsReceivedNoteDto } from './dto/update-goods-received-note.dto';
 import { CreateGoodsReceivedNoteDto } from './dto/create-goods-received-note.dto';
 import { QueryGoodsReceivedNotesDto } from './dto/query-goods-received-notes.dto';
@@ -37,11 +38,20 @@ export class GoodsReceivedNotesService {
     private readonly auditLogs: AuditLogsService,
     private readonly companyScope: CompanyScopeService,
     private readonly inventoryMovements: InventoryMovementsService,
+    private readonly receiptPayables: ReceiptPayablesService,
   ) {}
 
   async findAll(query: QueryGoodsReceivedNotesDto, user: AuthUser) {
-    const { companyId, divisionId, branchId, status, supplierId, search, page = 1, limit = 20 } =
-      query;
+    const {
+      companyId,
+      divisionId,
+      branchId,
+      status,
+      supplierId,
+      search,
+      page = 1,
+      limit = 20,
+    } = query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = {
       deletedAt: null,
@@ -364,6 +374,7 @@ export class GoodsReceivedNotesService {
               unitId: true,
               quantity: true,
               unitCost: true,
+              lineTotal: true,
               batchNumber: true,
               expiryDate: true,
             },
@@ -377,15 +388,34 @@ export class GoodsReceivedNotesService {
       // carry the same product on multiple lines/units, so we accumulate.
       const orderedByProductUnit = new Map<string, number>();
       const orderedProductIds = new Set<string>();
+      const grossPriceByProductUnit = new Map<
+        string,
+        { quantity: Prisma.Decimal; total: Prisma.Decimal }
+      >();
       for (const poLine of poLines) {
         const key = `${poLine.productId}:${poLine.unitId}`;
-        orderedByProductUnit.set(key, (orderedByProductUnit.get(key) ?? 0) + Number(poLine.quantity));
+        orderedByProductUnit.set(
+          key,
+          (orderedByProductUnit.get(key) ?? 0) + Number(poLine.quantity),
+        );
         orderedProductIds.add(poLine.productId);
+        const previousPrice = grossPriceByProductUnit.get(key);
+        grossPriceByProductUnit.set(key, {
+          quantity: (previousPrice?.quantity ?? new Prisma.Decimal(0)).plus(poLine.quantity),
+          total: (previousPrice?.total ?? new Prisma.Decimal(0)).plus(poLine.lineTotal),
+        });
       }
+      const agreedGrossUnitCost = (key: string) => {
+        const price = grossPriceByProductUnit.get(key);
+        return price?.quantity.gt(0)
+          ? price.total.div(price.quantity).toDecimalPlaces(4)
+          : undefined;
+      };
 
       // Quantity already accepted on this PO by *prior* POSTED GRNs. This GRN was
       // just flipped to POSTED above, so we exclude it explicitly by id.
       const priorReceivedByProductUnit = new Map<string, number>();
+      let cumulativeReceiptValue = new Prisma.Decimal(0);
       if (existing.purchaseOrderId) {
         const priorLines = await tx.goodsReceivedNoteLine.findMany({
           where: {
@@ -397,8 +427,23 @@ export class GoodsReceivedNotesService {
               id: { not: existing.id },
             },
           },
-          select: { productId: true, unitId: true, acceptedQuantity: true },
+          select: { productId: true, unitId: true, acceptedQuantity: true, unitCost: true },
         });
+        const priorStockById = new Map(
+          products.map((product) => [product.id, isStockProduct(product)]),
+        );
+        const missingProductIds = [...new Set(priorLines.map((line) => line.productId))].filter(
+          (productId) => !priorStockById.has(productId),
+        );
+        if (missingProductIds.length) {
+          const priorProducts = await tx.product.findMany({
+            where: { id: { in: missingProductIds }, companyId: existing.companyId },
+            select: { id: true, productType: true, trackInventory: true },
+          });
+          for (const product of priorProducts) {
+            priorStockById.set(product.id, isStockProduct(product));
+          }
+        }
         for (const priorLine of priorLines) {
           const key = `${priorLine.productId}:${priorLine.unitId}`;
           priorReceivedByProductUnit.set(
@@ -406,6 +451,14 @@ export class GoodsReceivedNotesService {
             (priorReceivedByProductUnit.get(key) ?? 0) +
               Math.max(0, Number(priorLine.acceptedQuantity)),
           );
+          const accepted = new Prisma.Decimal(priorLine.acceptedQuantity);
+          if (accepted.gt(0) && priorStockById.get(priorLine.productId) === true) {
+            const cost = priorLine.unitCost ?? agreedGrossUnitCost(key);
+            if (cost == null) {
+              throw new BadRequestException('A prior receipt has no reliable purchase value');
+            }
+            cumulativeReceiptValue = cumulativeReceiptValue.plus(accepted.mul(cost));
+          }
         }
       }
 
@@ -428,10 +481,7 @@ export class GoodsReceivedNotesService {
           // over-receipt total and let a positive line slip past the ceiling
           // (the movement loop skips non-positive lines, so they post no stock).
           const accepted = Math.max(0, Number(line.acceptedQuantity));
-          thisReceiptByProductUnit.set(
-            key,
-            (thisReceiptByProductUnit.get(key) ?? 0) + accepted,
-          );
+          thisReceiptByProductUnit.set(key, (thisReceiptByProductUnit.get(key) ?? 0) + accepted);
         }
         for (const [key, accepted] of thisReceiptByProductUnit) {
           if (!orderedByProductUnit.has(key)) {
@@ -462,20 +512,13 @@ export class GoodsReceivedNotesService {
       for (const line of existing.lines) {
         const product = productById.get(line.productId);
         if (!product) continue;
-        // Gate on the SAME stock-product predicate the valuation/cost layer uses,
-        // not just trackInventory. A SERVICE / NON_STOCK_ITEM typed product is
-        // exempt from assertInventoryMovementHasCost, so posting a movement for it
-        // would inflate quantityOnHand with a held (zero-added) totalValue and a
-        // stuck average. Such a product never carries stock value, so skip the
-        // receipt rather than corrupt its balance. (PO received-to-date tracking
-        // below still counts the line so PO closure is unaffected.)
-        if (!isStockProduct(product)) continue;
         const acceptedQuantity = Number(line.acceptedQuantity);
         if (acceptedQuantity <= 0) continue;
         const poLine = poLineByProductUnit.get(`${line.productId}:${line.unitId}`);
         // Resolve a real per-unit cost for this receipt, in priority order:
         //   1. the GRN line's own captured unitCost (an explicit landed cost),
-        //   2. the matching PO line's unitCost (keyed by product:unit, so unit-safe),
+        //   2. the PO's agreed gross price after discount/tax, weighted across
+        //      duplicate product:unit lines,
         //   3. the product (then family) default purchase price.
         // The product/family defaults are denominated in the product's BASE unit and
         // there is no UoM conversion in this path, so they are only valid when the
@@ -490,24 +533,45 @@ export class GoodsReceivedNotesService {
                 ? Number(product.productFamily.defaultPurchasePrice)
                 : undefined
             : undefined;
-        // Guard on poLine.unitCost being non-null (not just poLine existing): a PO
-        // line with a NULL unitCost must fall through to the base-unit default,
-        // otherwise Number(null)=0 would value the receipt at 0 and corrupt WAC. An
-        // explicit 0 (genuinely free goods) is honoured.
-        const resolvedUnitCost =
+        const poGrossUnitCost = agreedGrossUnitCost(`${line.productId}:${line.unitId}`);
+        const candidateUnitCost =
           line.unitCost != null
             ? Number(line.unitCost)
-            : poLine?.unitCost != null
-              ? Number(poLine.unitCost)
+            : poGrossUnitCost != null
+              ? Number(poGrossUnitCost)
               : baseUnitDefaultCost;
+        // Store and value the same four-decimal cost the GRN schema retains so
+        // the payable sees exactly the authoritative landed cost used by stock.
+        const resolvedUnitCost =
+          candidateUnitCost == null
+            ? undefined
+            : new Prisma.Decimal(candidateUnitCost).toDecimalPlaces(4).toNumber();
         // Persist the resolved cost back onto the GRN line so the posted receipt
         // carries the cost it was valued at (lines without their own unitCost yet).
-        if (line.unitCost == null && resolvedUnitCost != null) {
+        if (
+          resolvedUnitCost != null &&
+          (line.unitCost == null || !new Prisma.Decimal(line.unitCost).equals(resolvedUnitCost))
+        ) {
           await tx.goodsReceivedNoteLine.update({
             where: { id: line.id },
             data: { unitCost: resolvedUnitCost },
           });
         }
+        if (!isStockProduct(product)) {
+          // Accepted services still owe the supplier and need a persisted price;
+          // their expense debit must not add stock or affect stock cent rounding.
+          if (resolvedUnitCost == null) {
+            throw new BadRequestException('Received services have no reliable purchase value');
+          }
+          continue;
+        }
+        const previousRoundedValue = cumulativeReceiptValue.toDecimalPlaces(2);
+        if (resolvedUnitCost != null) {
+          cumulativeReceiptValue = cumulativeReceiptValue.plus(
+            new Prisma.Decimal(line.acceptedQuantity).mul(resolvedUnitCost),
+          );
+        }
+        const receiptValue = cumulativeReceiptValue.toDecimalPlaces(2).minus(previousRoundedValue);
         await this.inventoryMovements.createMovement({
           companyId: existing.companyId,
           divisionId: existing.divisionId ?? undefined,
@@ -517,6 +581,7 @@ export class GoodsReceivedNotesService {
           quantity: acceptedQuantity,
           unitId: line.unitId,
           unitCost: resolvedUnitCost,
+          ...(resolvedUnitCost != null ? { receiptValue } : {}),
           movementDate: existing.receivedDate,
           createdById: user.id,
           referenceType: 'GoodsReceivedNote',
@@ -554,12 +619,30 @@ export class GoodsReceivedNotesService {
           data: {
             status: nextStatus as any,
             // Only stamp the received-by/at fields once the PO is fully received.
-            ...(fullyReceived
-              ? { receivedAt: existing.receivedDate, receivedById: user.id }
-              : {}),
+            ...(fullyReceived ? { receivedAt: existing.receivedDate, receivedById: user.id } : {}),
           },
         });
       }
+
+      // Stock valuation, the receipt lifecycle, and its supplier liability must
+      // commit together. The helper uses persisted accepted costs and cumulative
+      // PO receipts, and only posts amounts not already covered by liabilities.
+      await this.receiptPayables.ensureForGrn({
+        goodsReceivedNoteId: existing.id,
+        companyId: existing.companyId,
+        transactionDate: existing.receivedDate,
+        userId: user.id,
+        user,
+        tx,
+      });
+
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'GOODS_RECEIVED_NOTE_POST',
+        entityType: 'GoodsReceivedNote',
+        entityId: id,
+        userId: user.id,
+        companyId: existing.companyId,
+      });
 
       return tx.goodsReceivedNote.findFirst({
         where: { id },
@@ -571,13 +654,6 @@ export class GoodsReceivedNotesService {
       });
     });
 
-    await this.auditLogs.log({
-      action: 'GOODS_RECEIVED_NOTE_POST',
-      entityType: 'GoodsReceivedNote',
-      entityId: id,
-      userId: user.id,
-      companyId: existing.companyId,
-    });
     return updated;
   }
 

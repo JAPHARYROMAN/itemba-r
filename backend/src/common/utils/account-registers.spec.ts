@@ -92,6 +92,7 @@ describe('Consolidated register access and pagination', () => {
           {} as any,
           {} as any,
           {} as any,
+          {} as any,
         ).findAll({ view: 'accounts', limit: 1 }, user);
       expect(model.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
