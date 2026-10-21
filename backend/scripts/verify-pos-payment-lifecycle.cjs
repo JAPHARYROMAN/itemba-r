@@ -265,14 +265,16 @@ async function main() {
     const documents = new Generated(db, audit, null, companies);
     const Purchases = load('modules/purchase-orders/purchase-orders.service', 'PurchaseOrdersService');
     const GoodsReceived = load('modules/goods-received-notes/goods-received-notes.service', 'GoodsReceivedNotesService');
+    const ReceiptPayables = load('modules/receipt-payables/receipt-payables.service', 'ReceiptPayablesService');
+    const receiptPayables = new ReceiptPayables(codes, resolver, engine, audit);
     const Adjustments = load('modules/stock-adjustments/stock-adjustments.service', 'StockAdjustmentsService');
     const pos = new Mobile(
       db,
       companies,
       audit,
       sales,
-      new Purchases(db, audit, movements, new Tax(db, companies, audit), codes, companies, engine, resolver, profit),
-      new GoodsReceived(db, audit, companies, movements),
+      new Purchases(db, audit, movements, new Tax(db, companies, audit), codes, companies, engine, resolver, profit, receiptPayables),
+      new GoodsReceived(db, audit, companies, movements, receiptPayables),
       codes,
       documents,
       new Adjustments(db, audit, movements, companies, engine, resolver),
@@ -836,10 +838,19 @@ async function main() {
     assert.equal(Number((await db.inventoryBalance.findFirst({ where: { productId: product.id, branchId: branch.id } })).quantityOnHand), beforeReceive + 2);
     assert.equal(await db.purchaseOrder.count(), 1);
     assert.equal(await db.goodsReceivedNote.count(), 1);
+    const receivedOrder = await db.purchaseOrder.findUniqueOrThrow({
+      where: { id: purchase.id },
+      include: { payable: { include: { journalEntry: true } } },
+    });
+    assert(receivedOrder.payable, 'Supplier-credit receipt must create its payable');
+    assert.equal(Number(receivedOrder.payable.amount), 1000);
+    assert.equal(receivedOrder.payable.journalEntry.status, 'POSTED');
+    assert.equal(await db.payable.count({ where: { sourceType: 'PurchaseOrder', sourceId: purchase.id } }), 1);
+    assert.equal(await db.journalEntry.count({ where: { referenceType: 'Payable', referenceId: receivedOrder.payable.id } }), 1);
     const deliveryHistory = await pos.purchaseHistory(terminal.terminalCode, secret, user);
     assert.equal(deliveryHistory.purchases[0].id, purchase.id);
     assert.equal(JSON.stringify(deliveryHistory).includes('unitCost'), false);
-    checks.push('Native receiving creates one shared PO and posted GRN, increases stock once and exposes cost-blind history');
+    checks.push('Native receiving creates one shared PO, posted GRN and posted payable, replays stock and liability once and exposes cost-blind history');
     const countRequest = { idempotencyKey: randomUUID(), countedAt: new Date().toISOString(), lines: [{ productId: product.id, countedQuantity: beforeReceive + 1 }] };
     const count = await pos.createStockCount(terminal.terminalCode, secret, countRequest, user);
     const countReplay = await pos.createStockCount(terminal.terminalCode, secret, countRequest, user);
