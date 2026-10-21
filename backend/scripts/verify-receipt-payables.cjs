@@ -314,62 +314,102 @@ async function main() {
     assert(repeatedEnsure.every((result) => result.postedAmount === '0.00'));
 
     console.log('Checking reuse of the existing approved invoice liability.');
-    const invoiceOrder = await createOrder(1, 75);
-    const invoice = await db.supplierInvoice.create({
-      data: {
-        ...base,
-        purchaseOrderId: invoiceOrder.id,
-        supplierInvoiceNumber: 'INV-PROOF',
-        invoiceDate: date,
-        totalAmount: 75,
-        outstandingAmount: 75,
-        status: 'APPROVED',
-        createdById: user.id,
-      },
-    });
-    const invoicePayable = await db.payable.create({
-      data: {
-        ...base,
-        payableNumber: 'AP-INVOICE-PROOF',
-        sourceType: 'SupplierInvoice',
-        sourceId: invoice.id,
-        supplierName: supplier.name,
-        amount: 75,
-        outstandingAmount: 75,
-        issueDate: date,
-      },
-    });
-    await db.$transaction(async (tx) => {
-      const journal = await engine.postLines(
-        {
-          companyId: company.id,
-          transactionDate: date,
-          userId: user.id,
-          moduleName: 'supplier-invoices',
-          description: 'Invoice fixture liability',
-          referenceType: 'SupplierInvoice',
-          referenceId: invoice.id,
-          lines: [
-            { accountId: accounts.INVENTORY_ASSET.id, debit: 75, credit: 0 },
-            { accountId: accounts.AP_CONTROL.id, debit: 0, credit: 75 },
-          ],
+    const createInvoiceLiability = async (invoiceOrder, amount, debitAccountId) => {
+      const invoice = await db.supplierInvoice.create({
+        data: {
+          ...base,
+          purchaseOrderId: invoiceOrder.id,
+          supplierInvoiceNumber: `INV-PROOF-${++sequence}`,
+          invoiceDate: date,
+          totalAmount: amount,
+          outstandingAmount: amount,
+          status: 'APPROVED',
+          createdById: user.id,
         },
-        tx,
-      );
-      await tx.payable.update({
-        where: { id: invoicePayable.id },
-        data: { journalEntryId: journal.id },
       });
-      await tx.supplierInvoice.update({
-        where: { id: invoice.id },
-        data: { payableId: invoicePayable.id },
+      const invoicePayable = await db.payable.create({
+        data: {
+          ...base,
+          payableNumber: `AP-INVOICE-PROOF-${++sequence}`,
+          sourceType: 'SupplierInvoice',
+          sourceId: invoice.id,
+          supplierName: supplier.name,
+          amount,
+          outstandingAmount: amount,
+          issueDate: date,
+        },
       });
-    });
+      await db.$transaction(async (tx) => {
+        const journal = await engine.postLines(
+          {
+            companyId: company.id,
+            transactionDate: date,
+            userId: user.id,
+            moduleName: 'supplier-invoices',
+            description: 'Invoice fixture liability',
+            referenceType: 'SupplierInvoice',
+            referenceId: invoice.id,
+            lines: [
+              { accountId: debitAccountId, debit: amount, credit: 0 },
+              { accountId: accounts.AP_CONTROL.id, debit: 0, credit: amount },
+            ],
+          },
+          tx,
+        );
+        await tx.payable.update({
+          where: { id: invoicePayable.id },
+          data: { journalEntryId: journal.id },
+        });
+        await tx.supplierInvoice.update({
+          where: { id: invoice.id },
+          data: { payableId: invoicePayable.id },
+        });
+      });
+      return invoicePayable;
+    };
+    const invoiceOrder = await createOrder(2, 75);
+    const invoicePayable = await createInvoiceLiability(
+      invoiceOrder,
+      75,
+      accounts.INVENTORY_ASSET.id,
+    );
     const invoiceGrn = await createGrn(invoiceOrder, 1);
     const journalsBeforeInvoiceReceipt = await db.journalEntry.count();
     await grns.post(invoiceGrn.id, auth);
     assert.equal((await currentPayable(invoiceOrder)).id, invoicePayable.id);
     assert.equal(await db.journalEntry.count(), journalsBeforeInvoiceReceipt);
+    const secondInvoiceGrn = await createGrn(invoiceOrder, 1);
+    await grns.post(secondInvoiceGrn.id, auth);
+    assert.equal((await currentPayable(invoiceOrder)).id, invoicePayable.id);
+    assert.equal(await db.journalEntry.count(), journalsBeforeInvoiceReceipt);
+
+    console.log('Checking misclassified invoice receipt rejection and complete rollback.');
+    const expenseInvoiceOrder = await createOrder(1, 80);
+    const expenseInvoicePayable = await createInvoiceLiability(
+      expenseInvoiceOrder,
+      80,
+      accounts.GENERAL_EXPENSE.id,
+    );
+    const expenseInvoiceGrn = await createGrn(expenseInvoiceOrder, 1);
+    const invoiceMismatchSnapshot = () =>
+      Promise.all([
+        db.payable.count(),
+        db.journalEntry.count(),
+        db.inventoryMovement.count(),
+        db.auditLog.count(),
+        stockQuantity(),
+        stockValue(),
+        db.payable.findUniqueOrThrow({ where: { id: expenseInvoicePayable.id } }),
+        db.goodsReceivedNote.findUniqueOrThrow({ where: { id: expenseInvoiceGrn.id } }),
+        db.purchaseOrder.findUniqueOrThrow({ where: { id: expenseInvoiceOrder.id } }),
+        db.goodsReceivedNoteLine.findMany({ where: { goodsReceivedNoteId: expenseInvoiceGrn.id } }),
+      ]);
+    const beforeInvoiceMismatch = await invoiceMismatchSnapshot();
+    await assert.rejects(
+      () => grns.post(expenseInvoiceGrn.id, auth),
+      (error) => error.getStatus?.() === 409 && /allocation/i.test(error.message),
+    );
+    assert.deepEqual(await invoiceMismatchSnapshot(), beforeInvoiceMismatch);
 
     console.log(
       'Checking approved purchase variance rejection and mixed stock/service allocation.',
@@ -590,6 +630,8 @@ async function main() {
           'concurrent distinct GRNs share one payable',
           'concurrent repeated ensures post no delta',
           'existing invoice liability reused without journal duplication',
+          'full invoice liability covers consecutive partial receipts without duplicate journals',
+          'misclassified invoice receipt rolls back stock, status, costs, liability, ledger and audits',
           'linked GRN value variance rejects and rolls back pending approved purchase review',
           'mixed stock/service liability splits inventory and expense without stock inflation',
           'receipt audit failure rolls back stock, costs, status, payable, ledger and audits',

@@ -316,6 +316,181 @@ describe('ReceiptPayablesService', () => {
     expect(tx.payable.create).not.toHaveBeenCalled();
   });
 
+  it('rejects expense-only invoice coverage before received stock can commit without an inventory debit', async () => {
+    const { service, tx, state, input, postingEngine } = makeService();
+    state.invoices.push({ id: 'invoice-1', payableId: 'payable-existing' });
+    state.payables.push(existingPayable({ sourceType: 'SupplierInvoice', sourceId: 'invoice-1' }));
+    state.journals.push(
+      liabilityJournal({
+        referenceType: 'SupplierInvoice',
+        referenceId: 'invoice-1',
+        lines: [
+          { accountId: 'expense-account', debit: dec(100), credit: dec(0) },
+          { accountId: 'ap-account', debit: dec(0), credit: dec(100) },
+        ],
+      }),
+    );
+
+    await expect(service.ensureForPurchaseOrder(input)).rejects.toThrow(
+      'Invoice accounting does not cover',
+    );
+
+    expect(tx.purchaseOrder.update).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(state.payables[0].amount.toFixed(2)).toBe('100.00');
+    expect(state.journals).toHaveLength(1);
+  });
+
+  it.each([0, 2])(
+    'allows full mixed invoice coverage with partial stock and %i service units received',
+    async (acceptedServices) => {
+      const { service, tx, order, state, input, postingEngine, accountResolver } = makeService();
+      const roleAccounts = {
+        AP_CONTROL: { id: 'ap-account' },
+        INVENTORY_ASSET: { id: 'inventory-account' },
+        GENERAL_EXPENSE: { id: 'expense-account' },
+      };
+      accountResolver.resolveMany.mockImplementation(
+        async (_companyId: string, roles: Array<keyof typeof roleAccounts>) =>
+          Object.fromEntries(
+            roles.map((role) => [role, roleAccounts[role]]),
+          ) as typeof roleAccounts,
+      );
+      order.totalAmount = dec(140);
+      order.status = 'PARTIALLY_RECEIVED';
+      order.lines.push({
+        productId: 'service-1',
+        unitId: 'unit-1',
+        quantity: dec(8),
+        unitCost: dec(5),
+        lineTotal: dec(40),
+      });
+      state.grns.push(receipt('stock-grn', 1));
+      if (acceptedServices)
+        state.grns.push({
+          id: 'service-grn',
+          lines: [
+            {
+              productId: 'service-1',
+              unitId: 'unit-1',
+              acceptedQuantity: dec(acceptedServices),
+              unitCost: dec(5),
+            },
+          ],
+        });
+      tx.product.findMany.mockImplementation(async ({ where }: any) =>
+        where.id.in.map((id: string) => ({
+          id,
+          productType: id === 'service-1' ? 'SERVICE' : 'STOCK_ITEM',
+          trackInventory: id !== 'service-1',
+        })),
+      );
+      state.invoices.push({ id: 'invoice-1', payableId: 'payable-existing' });
+      state.payables.push(
+        existingPayable({
+          sourceType: 'SupplierInvoice',
+          sourceId: 'invoice-1',
+          amount: dec(140),
+          outstandingAmount: dec(140),
+        }),
+      );
+      state.journals.push(
+        liabilityJournal({
+          referenceType: 'SupplierInvoice',
+          referenceId: 'invoice-1',
+          lines: [
+            { accountId: 'inventory-account', debit: dec(100), credit: dec(0) },
+            { accountId: 'expense-account', debit: dec(40), credit: dec(0) },
+            { accountId: 'ap-account', debit: dec(0), credit: dec(140) },
+          ],
+        }),
+      );
+
+      expect((await service.ensureForPurchaseOrder(input))?.postedAmount).toBe('0.00');
+
+      expect(postingEngine.postLines).not.toHaveBeenCalled();
+      expect(state.payables[0].amount.toFixed(2)).toBe('140.00');
+      if (!acceptedServices)
+        expect(accountResolver.resolveMany).toHaveBeenCalledWith(
+          order.companyId,
+          ['GENERAL_EXPENSE'],
+          tx,
+        );
+    },
+  );
+
+  it('requires exact stock/expense allocation when the full invoice amount is received', async () => {
+    const { service, tx, order, state, input, postingEngine } = makeService();
+    order.lines = [
+      {
+        productId: 'product-1',
+        unitId: 'unit-1',
+        quantity: dec(1),
+        unitCost: dec(80),
+        lineTotal: dec(80),
+      },
+      {
+        productId: 'service-1',
+        unitId: 'unit-1',
+        quantity: dec(1),
+        unitCost: dec(20),
+        lineTotal: dec(20),
+      },
+    ];
+    state.grns.push({
+      id: 'mixed-grn',
+      lines: [
+        { productId: 'product-1', unitId: 'unit-1', acceptedQuantity: dec(1), unitCost: dec(80) },
+        { productId: 'service-1', unitId: 'unit-1', acceptedQuantity: dec(1), unitCost: dec(20) },
+      ],
+    });
+    tx.product.findMany.mockImplementation(async ({ where }: any) =>
+      where.id.in.map((id: string) => ({
+        id,
+        productType: id === 'service-1' ? 'SERVICE' : 'STOCK_ITEM',
+        trackInventory: id !== 'service-1',
+      })),
+    );
+    state.invoices.push({ id: 'invoice-1', payableId: 'payable-existing' });
+    state.payables.push(existingPayable({ sourceType: 'SupplierInvoice', sourceId: 'invoice-1' }));
+    state.journals.push(
+      liabilityJournal({ referenceType: 'SupplierInvoice', referenceId: 'invoice-1' }),
+    );
+
+    await expect(service.ensureForPurchaseOrder(input)).rejects.toThrow(
+      'Invoice accounting does not cover',
+    );
+
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(tx.purchaseOrder.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['unrelated-debit-account', 'previous-inventory-control'])(
+    'rejects ambiguous invoice cost account %s',
+    async (accountId) => {
+      const { service, state, input, postingEngine } = makeService();
+      state.invoices.push({ id: 'invoice-1', payableId: 'payable-existing' });
+      state.payables.push(
+        existingPayable({ sourceType: 'SupplierInvoice', sourceId: 'invoice-1' }),
+      );
+      state.journals.push(
+        liabilityJournal({
+          referenceType: 'SupplierInvoice',
+          referenceId: 'invoice-1',
+          lines: [
+            { accountId, debit: dec(100), credit: dec(0) },
+            { accountId: 'ap-account', debit: dec(0), credit: dec(100) },
+          ],
+        }),
+      );
+
+      await expect(service.ensureForPurchaseOrder(input)).rejects.toThrow(
+        'Invoice accounting does not cover',
+      );
+      expect(postingEngine.postLines).not.toHaveBeenCalled();
+    },
+  );
+
   it('allows explicitly free extra goods without adding a liability for them', async () => {
     const { service, state, input } = makeService();
     const grn = receipt('grn-1', 3);

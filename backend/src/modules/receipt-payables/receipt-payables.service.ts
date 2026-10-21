@@ -498,6 +498,57 @@ export class ReceiptPayablesService {
           throw new ConflictException(
             'Invoice liability does not cover the received value; review invoice variance',
           );
+        // AP coverage alone does not prove that this invoice booked the goods
+        // being received: an expense-only invoice can precede a stock receipt.
+        // Require its canonical cost debits to cover each received role, with
+        // exact allocation once the whole invoice value has been received.
+        const postedCosts = new Map<string, Prisma.Decimal>();
+        for (const journal of ownJournals.filter((entry) => apCredit(entry).gt(0))) {
+          for (const line of journal.lines) {
+            if (line.accountId === accounts.AP_CONTROL.id) continue;
+            postedCosts.set(
+              line.accountId,
+              (postedCosts.get(line.accountId) ?? new Prisma.Decimal(0))
+                .plus(line.debit)
+                .minus(line.credit),
+            );
+          }
+        }
+        let invoiceAccounts = accounts;
+        const costRoles = ['INVENTORY_ASSET', 'GENERAL_EXPENSE'] as const;
+        const knownCostIds = new Set(
+          costRoles.map((role) => accounts[role]?.id).filter((id): id is string => !!id),
+        );
+        if ([...postedCosts].some(([id, amount]) => !amount.isZero() && !knownCostIds.has(id))) {
+          const missingRoles = costRoles.filter((role) => !accounts[role]);
+          if (missingRoles.length) {
+            invoiceAccounts = {
+              ...accounts,
+              ...(await this.accountResolver.resolveMany(source.companyId, missingRoles, tx)),
+            };
+          }
+        }
+        const invoiceCostIds = new Set(
+          costRoles.map((role) => invoiceAccounts[role]?.id).filter((id): id is string => !!id),
+        );
+        const costAccountsMatch = [...postedCosts].every(
+          ([id, amount]) => amount.isZero() || (invoiceCostIds.has(id) && amount.gte(0)),
+        );
+        const totalPostedCosts = [...postedCosts.values()].reduce(
+          (sum, amount) => sum.plus(amount),
+          new Prisma.Decimal(0),
+        );
+        const allocationCoversReceipt = debitTargets.every((target) => {
+          const posted = (
+            postedCosts.get(invoiceAccounts[target.role].id) ?? new Prisma.Decimal(0)
+          ).toDecimalPlaces(2);
+          return coverage.eq(source.amount) ? posted.eq(target.amount) : posted.gte(target.amount);
+        });
+        if (!costAccountsMatch || !totalPostedCosts.eq(coverage) || !allocationCoversReceipt) {
+          throw new ConflictException(
+            'Invoice accounting does not cover the received inventory and expense allocation; review its posted cost accounts before receiving',
+          );
+        }
         return this.link(input, source, payable.id, backing.id, '0.00');
       }
       if (coverage.gt(source.amount))
