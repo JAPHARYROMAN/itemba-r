@@ -710,6 +710,21 @@ export class SupplierInvoicesService {
 
       let reusedReceiptPayable = false;
       if (payable) {
+        // Adjustments retain this invoice/source as their immutable audit anchor.
+        // Check after the source and payable locks so a concurrent adjustment
+        // cannot be posted between this guard and the cancellation/restore.
+        const activeAdjustments = await tx.accountAdjustment.count({
+          where: {
+            companyId: existing.companyId,
+            targetPayableId: payable.id,
+            status: 'POSTED',
+          },
+        });
+        if (activeAdjustments) {
+          throw new ConflictException(
+            'Reverse the posted account adjustments on this payable before voiding its supplier invoice.',
+          );
+        }
         if (
           payable.companyId !== existing.companyId ||
           payable.supplierId !== existing.supplierId

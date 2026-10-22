@@ -129,6 +129,7 @@ function makeService() {
     creditNote: {
       findFirst: jest.fn(async () => null),
     },
+    accountAdjustment: { count: jest.fn(async () => 0) },
     inventoryMovement: {
       // Default: no prior movements recorded for the order under test. Cancel
       // tests that assert stock reversal override the SALE_ISSUE lookup.
@@ -181,7 +182,7 @@ function makeService() {
     profit,
   );
 
-  return { service, prisma, auditLogs, companyScope, inventoryMovements };
+  return { service, prisma, auditLogs, companyScope, inventoryMovements, postingEngine };
 }
 
 const user = { id: 'user-1', permissions: ['sales.create'] } as any;
@@ -1600,6 +1601,65 @@ describe('SalesOrdersService quick-sale idempotency', () => {
 });
 
 describe('SalesOrdersService cancel money guard', () => {
+  it('locks the source and AR before rejecting a posted adjustment on an unpaid original', async () => {
+    const { service, prisma, postingEngine, auditLogs } = makeService();
+    prisma.salesOrder.findFirst.mockResolvedValue(
+      persistedOrder({
+        status: 'CONFIRMED',
+        paidAmount: 0,
+        paymentStatus: 'UNPAID',
+        outstandingAmount: 200,
+        receivableId: 'receivable-1',
+      }),
+    );
+    prisma.$queryRaw.mockResolvedValue([{ id: 'receivable-1' }]);
+    prisma.accountAdjustment.count.mockResolvedValue(1);
+
+    await expect(service.cancel('so-1', user)).rejects.toThrow(
+      'Reverse the posted account adjustments',
+    );
+    expect(prisma.accountAdjustment.count).toHaveBeenCalledWith({
+      where: {
+        companyId: 'company-1',
+        targetReceivableId: { in: ['receivable-1'] },
+        status: 'POSTED',
+      },
+    });
+    const locks = prisma.$queryRaw.mock.calls.map(([query]: any[]) =>
+      Array.from(query.strings ?? query).join('?'),
+    );
+    expect(locks[0]).toContain('sales_orders');
+    expect(locks[1]).toContain('receivables');
+    expect(locks.every((sql: string) => sql.includes('FOR UPDATE'))).toBe(true);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      prisma.accountAdjustment.count.mock.invocationCallOrder[0],
+    );
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
+    expect(prisma.receivable.update).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+
+  it('rechecks payment and status after waiting for its cancellation locks', async () => {
+    const { service, prisma, postingEngine } = makeService();
+    prisma.salesOrder.findFirst
+      .mockResolvedValueOnce(
+        persistedOrder({
+          status: 'CONFIRMED',
+          paidAmount: 0,
+          paymentStatus: 'UNPAID',
+          outstandingAmount: 200,
+        }),
+      )
+      .mockResolvedValue(
+        persistedOrder({ status: 'CONFIRMED', paidAmount: 10, paymentStatus: 'PARTIALLY_PAID' }),
+      );
+    await expect(service.cancel('so-1', user)).rejects.toThrow('received payment');
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+    expect(prisma.salesOrder.update).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
   it('blocks cancelling an order that has received payment', async () => {
     const { service, prisma } = makeService();
     prisma.salesOrder.findFirst.mockResolvedValue(

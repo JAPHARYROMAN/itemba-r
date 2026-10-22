@@ -16,6 +16,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService, assertCashAccountForScope } from '../../common/services';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import {
   AccountResolverService,
   AccountRole,
@@ -29,6 +30,7 @@ import {
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
 import { sourceSettlement } from '../../common/utils/source-settlement';
+import { assertNoLegacyPaymentClaim } from '../../common/utils/document-payment-request';
 import { pagination } from '../../common/utils/pagination';
 import { dateRangeEnd, dateRangeStart } from '../../common/utils/date-range';
 import { CreateCustomerPaymentDto } from './dto/create-customer-payment.dto';
@@ -38,6 +40,7 @@ import { CustomerPaymentStatus } from './dto/customer-payment-status.enum';
 
 /** Everything a caller supplies to record one customer payment inside its own transaction. */
 export interface CustomerPaymentInput {
+  requestId?: string | null;
   originUserId?: string;
   companyId: string;
   divisionId?: string | null;
@@ -68,6 +71,8 @@ const OPEN_RECEIVABLE_STATUSES = ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as const;
 interface LockedReceivable {
   id: string;
   companyId: string;
+  divisionId: string | null;
+  branchId: string | null;
   customerId: string | null;
   currency: CurrencyCode;
   outstandingAmount: Prisma.Decimal;
@@ -87,6 +92,7 @@ export class CustomerPaymentsService {
     private readonly postingEngine: PostingEngineService,
     private readonly codes: EntityCodeGeneratorService,
     private readonly cashBook?: CashBookService,
+    private readonly org: OrganizationScopeService = new OrganizationScopeService(prisma),
   ) {}
 
   // ── queries ─────────────────────────────────────────────────────────────────
@@ -187,6 +193,7 @@ export class CustomerPaymentsService {
     });
     const { payment } = await this.runWithTransaction(transaction, (tx) =>
       this.createInTransaction(tx, user, {
+        requestId: dto.requestId,
         originUserId: context?.originUserId,
         companyId: dto.companyId,
         divisionId: dto.divisionId ?? null,
@@ -266,6 +273,49 @@ export class CustomerPaymentsService {
       );
     }
     const unapplied = amount.minus(allocatedTotal).toDecimalPlaces(2);
+
+    if (input.requestId) {
+      await this.companyScope.assertCanAccessCompany(user, input.companyId, AccessLevel.WRITE);
+      const requestId = input.requestId.toLowerCase();
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`CustomerPaymentRequest:${requestId}`}, 0))`;
+      await assertNoLegacyPaymentClaim(tx, input.companyId, 'Receivable', requestId);
+      const existing = await tx.customerPayment.findFirst({
+        where: { companyId: input.companyId, requestId },
+        include: this.includeScope(),
+      });
+      if (existing) {
+        const sameAllocations =
+          existing.allocations.length === allocations.length &&
+          allocations.every((allocation) =>
+            existing.allocations.some(
+              (prior) =>
+                prior.receivableId === allocation.receivableId &&
+                new Prisma.Decimal(prior.amount).eq(allocation.amount),
+            ),
+          );
+        if (
+          existing.deletedAt ||
+          existing.status !== 'COMPLETED' ||
+          existing.companyId !== input.companyId ||
+          existing.customerId !== input.customerId ||
+          !new Prisma.Decimal(existing.amount).eq(amount) ||
+          existing.currency !== (input.currency ?? 'TZS') ||
+          existing.cashAccountId !== (input.cashAccountId ?? null) ||
+          existing.paymentDate.getTime() !== input.paymentDate.getTime() ||
+          existing.method !== (input.method ?? 'CASH') ||
+          existing.reference !== (input.reference ?? null) ||
+          existing.notes !== (input.notes ?? null) ||
+          (input.divisionId != null && existing.divisionId !== input.divisionId) ||
+          (input.branchId != null && existing.branchId !== input.branchId) ||
+          !sameAllocations
+        ) {
+          throw new ConflictException(
+            'This payment request was already used with different details or has been reversed. Start a new payment.',
+          );
+        }
+        return { payment: existing, receivables: [] as UpdatedReceivable[] };
+      }
+    }
 
     // Validate customer belongs to the company (scope defaults for division/branch).
     const customer = await tx.customer.findFirst({
@@ -361,6 +411,7 @@ export class CustomerPaymentsService {
 
     const created = await tx.customerPayment.create({
       data: {
+        requestId: input.requestId?.toLowerCase() ?? null,
         paymentNumber: await this.codes.next({
           entityType: 'CustomerPayment',
           companyId: input.companyId,
@@ -486,8 +537,12 @@ export class CustomerPaymentsService {
 
   async reverse(id: string, dto: ReverseCustomerPaymentDto, user: AuthUser) {
     const userId = user.id;
+    const reason = dto.reason?.trim();
+    if (!reason || reason.length < 3 || reason.length > 500 || !/[\p{L}\p{N}]/u.test(reason)) {
+      throw new BadRequestException('Enter a reversal reason between 3 and 500 characters');
+    }
 
-    const { before, record, reversal } = await this.prisma.$transaction(async (tx) => {
+    const record = await this.prisma.$transaction(async (tx) => {
       // Atomic claim: flip COMPLETED -> REVERSED guarded on the current status so
       // two concurrent reversals race here and exactly one wins (the loser sees
       // count 0). This is the guard against reversing twice.
@@ -514,6 +569,45 @@ export class CustomerPaymentsService {
         );
       }
 
+      await this.org.assertCanAccessScope(
+        user,
+        current.divisionId,
+        current.branchId,
+        AccessLevel.MANAGE,
+      );
+      let authorizedCash: {
+        divisionId: string | null;
+        branchId: string | null;
+        currency: CurrencyCode;
+      } | null = null;
+      if (current.cashAccountId) {
+        const cash = await tx.cashAccount.findFirst({
+          where: { id: current.cashAccountId, companyId: current.companyId, deletedAt: null },
+          select: { companyId: true, divisionId: true, branchId: true, currency: true },
+        });
+        if (!cash || cash.companyId !== current.companyId || cash.currency !== current.currency) {
+          throw new ConflictException(
+            'The payment cash account is unavailable or has different accounting scope',
+          );
+        }
+        await this.org.assertCanAccessScope(
+          user,
+          cash.divisionId,
+          cash.branchId,
+          AccessLevel.MANAGE,
+        );
+        authorizedCash = cash;
+      }
+      const carried = await tx.cashDeskMovement.findUnique({
+        where: { customerPaymentId: current.id },
+        select: { id: true, journalEntryId: true },
+      });
+      if (carried && (!carried.journalEntryId || !this.cashBook)) {
+        throw new ConflictException(
+          'Reverse this receipt in Cash Desk so its cash movement is restored with it.',
+        );
+      }
+
       // Restore each allocated receivable's outstanding balance. Lock FOR UPDATE
       // and guard against CANCELLED / WRITTEN_OFF receivables (their outstanding
       // must NOT be resurrected).
@@ -521,6 +615,15 @@ export class CustomerPaymentsService {
       const ordered = [...current.allocations].sort((a, b) =>
         a.receivableId < b.receivableId ? -1 : a.receivableId > b.receivableId ? 1 : 0,
       );
+      if (
+        ordered
+          .reduce((total, allocation) => total.plus(allocation.amount), new Prisma.Decimal(0))
+          .gt(current.amount)
+      ) {
+        throw new ConflictException(
+          'Payment allocations exceed the original payment amount; review the allocation history before reversal.',
+        );
+      }
       for (const alloc of ordered) {
         const locked = await this.lockReceivable(tx, alloc.receivableId);
         if (
@@ -541,14 +644,31 @@ export class CustomerPaymentsService {
           );
         }
 
+        await this.org.assertCanAccessScope(
+          user,
+          locked.divisionId,
+          locked.branchId,
+          AccessLevel.MANAGE,
+        );
         const allocAmount = new Prisma.Decimal(alloc.amount).toDecimalPlaces(2);
+        if (
+          !allocAmount.isFinite() ||
+          allocAmount.lte(0) ||
+          !new Prisma.Decimal(locked.paidAmount).isFinite() ||
+          new Prisma.Decimal(locked.paidAmount).lt(allocAmount) ||
+          !new Prisma.Decimal(locked.outstandingAmount).isFinite() ||
+          new Prisma.Decimal(locked.outstandingAmount).lt(0)
+        ) {
+          throw new ConflictException(
+            'An allocated receivable has inconsistent settlement amounts; reversal was aborted.',
+          );
+        }
         const restoredOutstanding = new Prisma.Decimal(locked.outstandingAmount)
           .plus(allocAmount)
           .toDecimalPlaces(2);
-        const restoredPaid = Prisma.Decimal.max(
-          new Prisma.Decimal(locked.paidAmount).minus(allocAmount),
-          new Prisma.Decimal(0),
-        ).toDecimalPlaces(2);
+        const restoredPaid = new Prisma.Decimal(locked.paidAmount)
+          .minus(allocAmount)
+          .toDecimalPlaces(2);
         const restoredStatus = restoredPaid.isZero() ? 'OPEN' : 'PARTIALLY_PAID';
 
         const updated = await tx.receivable.update({
@@ -565,7 +685,7 @@ export class CustomerPaymentsService {
 
       // Post the mirror JE (swap debit/credit on every original line). Claims the
       // original JE as REVERSED first so a concurrent reverse posts at most once.
-      const reversalJe = await this.reversePaymentJournal(tx, current, userId);
+      const reversalJe = await this.reversePaymentJournal(tx, current, userId, reason);
 
       // [GL guard — LOW missing swing] This payment was created with a
       // journalEntryId, so a mirror reversal MUST post. A null result means the
@@ -573,10 +693,9 @@ export class CustomerPaymentsService {
       // or a lost claim race). We have ALREADY restored the receivables above and
       // flipped the payment to REVERSED, so proceeding would leave the original
       // Dr Cash / Cr AR live with no counter-entry — an unbalanced ledger against
-      // the customer subledger. Throw to roll back the whole reversal. A payment
-      // that never posted a JE (journalEntryId null) can legitimately return null
-      // and proceed. Mirrors credit-notes.service void().
-      if (!reversalJe && current.journalEntryId) {
+      // the customer subledger. Public reversal always requires posted evidence,
+      // including a recoverable payment-reference journal for older null pointers.
+      if (!reversalJe) {
         throw new ConflictException(
           'Customer payment reversal could not be posted; reversal aborted to avoid an unbalanced ledger',
         );
@@ -589,36 +708,34 @@ export class CustomerPaymentsService {
       // incremented the balance, so there is nothing to unwind. Scoped by
       // companyId; matches the create-time increment above.
       if (reversalJe && current.cashAccountId) {
-        await tx.cashAccount.updateMany({
+        const cashRestored = await tx.cashAccount.updateMany({
           where: {
             id: current.cashAccountId,
             companyId: current.companyId,
             deletedAt: null,
+            ...(authorizedCash
+              ? {
+                  divisionId: authorizedCash.divisionId,
+                  branchId: authorizedCash.branchId,
+                  currency: authorizedCash.currency,
+                }
+              : {}),
           },
           data: { currentBalance: { decrement: new Prisma.Decimal(current.amount) } },
         });
+        if (cashRestored.count !== 1)
+          throw new ConflictException('The payment cash account changed; reversal aborted.');
       }
       // Reverse the cash-book movement written for this payment (W4), if any.
       if (reversalJe && this.cashBook) {
-        const carried = await tx.cashDeskMovement.findUnique({
-          where: { customerPaymentId: current.id },
-          select: { id: true, journalEntryId: true },
-        });
         if (carried?.journalEntryId)
-          await this.cashBook.reverseInTransaction(
-            tx,
-            user,
-            carried.id,
-            dto.reason ?? null,
-            reversalJe.id,
-          );
+          await this.cashBook.reverseInTransaction(tx, user, carried.id, reason, reversalJe.id);
       }
 
       const updated = await tx.customerPayment.update({
         where: { id: current.id },
         data: {
           reversalJournalEntryId: reversalJe?.id ?? null,
-          ...(dto.reason ? { notes: dto.reason } : {}),
         },
         include: this.includeScope(),
       });
@@ -630,21 +747,20 @@ export class CustomerPaymentsService {
         await this.syncCustomerBalance(tx, current.companyId, cid);
       }
 
-      return { before: current, record: updated, reversal: reversalJe };
-    });
-
-    await this.auditLogs.log({
-      action: 'CUSTOMER_PAYMENT_REVERSE',
-      entityType: 'CustomerPayment',
-      entityId: id,
-      userId,
-      companyId: record.companyId,
-      oldValue: { status: before.status } as Record<string, unknown>,
-      newValue: {
-        status: CustomerPaymentStatus.REVERSED,
-        reason: dto.reason ?? null,
-        reversalJournalEntryId: reversal?.id ?? null,
-      } as Record<string, unknown>,
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'CUSTOMER_PAYMENT_REVERSE',
+        entityType: 'CustomerPayment',
+        entityId: id,
+        userId,
+        companyId: updated.companyId,
+        oldValue: { status: 'COMPLETED', notes: current.notes },
+        newValue: {
+          status: CustomerPaymentStatus.REVERSED,
+          reason,
+          reversalJournalEntryId: reversalJe?.id ?? null,
+        },
+      });
+      return updated;
     });
 
     return record;
@@ -814,10 +930,18 @@ export class CustomerPaymentsService {
       journalEntryId: string | null;
     },
     userId: string,
+    reason?: string,
   ): Promise<{ id: string; journalNumber: string } | null> {
     const original = payment.journalEntryId
       ? await tx.journalEntry.findFirst({
-          where: { id: payment.journalEntryId, companyId: payment.companyId, deletedAt: null },
+          where: {
+            id: payment.journalEntryId,
+            companyId: payment.companyId,
+            referenceType: 'CustomerPayment',
+            referenceId: payment.id,
+            status: 'POSTED',
+            deletedAt: null,
+          },
           include: { lines: true },
         })
       : await tx.journalEntry.findFirst({
@@ -825,17 +949,31 @@ export class CustomerPaymentsService {
             companyId: payment.companyId,
             referenceType: 'CustomerPayment',
             referenceId: payment.id,
+            status: 'POSTED',
             deletedAt: null,
           },
           include: { lines: true },
           orderBy: { createdAt: 'desc' },
         });
 
-    if (!original || original.lines.length === 0) return null;
+    if (
+      !original ||
+      original.status !== 'POSTED' ||
+      original.deletedAt ||
+      original.referenceType !== 'CustomerPayment' ||
+      original.referenceId !== payment.id ||
+      original.lines.length === 0
+    )
+      return null;
 
     const claim = await tx.journalEntry.updateMany({
-      where: { id: original.id, status: { not: 'REVERSED' }, deletedAt: null },
-      data: { status: 'REVERSED', reversedAt: new Date(), reversedById: userId },
+      where: { id: original.id, status: 'POSTED', deletedAt: null },
+      data: {
+        status: 'REVERSED',
+        reversedAt: new Date(),
+        reversedById: userId,
+        reversalReason: reason ?? null,
+      },
     });
     if (claim.count !== 1) return null;
 
@@ -872,7 +1010,7 @@ export class CustomerPaymentsService {
     id: string,
   ): Promise<LockedReceivable | undefined> {
     const [locked] = await tx.$queryRaw<LockedReceivable[]>`
-      SELECT "id", "companyId", "customerId", "currency", "outstandingAmount", "paidAmount",
+      SELECT "id", "companyId", "divisionId", "branchId", "customerId", "currency", "outstandingAmount", "paidAmount",
              "status", "sourceType", "sourceId"
       FROM "receivables"
       WHERE "id" = ${id} AND "deletedAt" IS NULL

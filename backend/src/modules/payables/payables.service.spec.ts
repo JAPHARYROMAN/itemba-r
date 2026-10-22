@@ -22,6 +22,8 @@ function lockedPayable(overrides: Record<string, unknown> = {}) {
     currency: 'TZS',
     journalEntryId: 'je-original',
     issueDate: new Date('2026-01-15'),
+    generatedByAdjustment: null,
+    _count: { targetedAdjustments: 0 },
     ...overrides,
   };
 }
@@ -465,6 +467,28 @@ describe('PayablesService Expense-sourced settlement guards (single settlement p
     });
   });
 
+  it.each([
+    { _count: { targetedAdjustments: 1 } },
+    { generatedByAdjustment: { id: 'adjustment-1' } },
+  ])(
+    'preserves an unposted manual payable used as an adjustment audit anchor: %p',
+    async (overrides) => {
+      const { service, tx } = makeService(lockedPayable({ journalEntryId: null, ...overrides }));
+      await expect(service.remove('pay-1', user)).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.payable.findUniqueOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            generatedByAdjustment: { select: { id: true } },
+            _count: expect.objectContaining({
+              select: expect.objectContaining({ targetedAdjustments: true }),
+            }),
+          }),
+        }),
+      );
+      expect(tx.payable.update).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects a manually created payable with the reserved sourceType 'Expense' before posting anything", async () => {
     // The Expense guards key on sourceType, so a caller-supplied 'Expense'
     // payable would post a real DR expense / CR AP journal at create yet be
@@ -490,6 +514,81 @@ describe('PayablesService Expense-sourced settlement guards (single settlement p
 });
 
 describe('PayablesService.update supplier balance projection', () => {
+  it.each([
+    { supplierId: 'supplier-2' },
+    { divisionId: 'other-division' },
+    { branchId: 'other-branch' },
+    { issueDate: '2026-01-16' },
+  ])('keeps ownership and accrual date immutable after any adjustment: %j', async (dto) => {
+    const { service, tx } = makeService(
+      lockedPayable({ journalEntryId: null, _count: { targetedAdjustments: 1 } }),
+    );
+    const resolve = jest.spyOn(service as any, 'resolvePayableScope');
+    await expect(service.update('pay-1', dto as any, user)).rejects.toThrow(
+      'account adjustment history',
+    );
+    expect(resolve).not.toHaveBeenCalled();
+    expect(tx.payable.update).not.toHaveBeenCalled();
+    const sql = tx.$queryRaw.mock.calls.map(([query]: any[]) =>
+      Array.from(query.strings ?? query).join('?'),
+    );
+    expect(sql[0]).toContain('purchase_orders');
+    expect(sql[1]).toContain('goods_received_notes');
+    expect(sql[2]).toContain('payables');
+  });
+
+  it('protects the generated increase item even when no adjustment targets it', async () => {
+    const { service } = makeService(lockedPayable({ generatedByAdjustment: { id: 'increase' } }));
+    await expect(service.update('pay-1', { branchId: 'other' } as any, user)).rejects.toThrow(
+      'account adjustment history',
+    );
+  });
+
+  it('permits notes, due-date changes and unchanged ownership on adjusted payables', async () => {
+    const { service, tx } = makeService(lockedPayable({ _count: { targetedAdjustments: 2 } }));
+    const resolve = jest
+      .spyOn(service as any, 'resolvePayableScope')
+      .mockResolvedValue({ divisionId: null, branchId: null, supplierName: 'Acme' });
+    await service.update(
+      'pay-1',
+      {
+        notes: 'Clarification',
+        dueDate: '2026-03-01',
+        supplierId: 'supplier-1',
+        issueDate: '2026-01-15',
+      } as any,
+      user,
+    );
+    expect(resolve).toHaveBeenCalledWith(expect.anything(), tx);
+    expect(tx.payable.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ notes: 'Clarification', dueDate: new Date('2026-03-01') }),
+      }),
+    );
+  });
+
+  it('does not let newly derived party defaults move adjusted accounting scope', async () => {
+    const { service, tx } = makeService(lockedPayable({ _count: { targetedAdjustments: 1 } }));
+    jest
+      .spyOn(service as any, 'resolvePayableScope')
+      .mockResolvedValue({ divisionId: 'default-division', branchId: 'default-branch' });
+    await expect(service.update('pay-1', { notes: 'Clarification' } as any, user)).rejects.toThrow(
+      'defaults cannot change',
+    );
+    expect(tx.payable.update).not.toHaveBeenCalled();
+  });
+
+  it('checks fresh adjustment history after acquiring the source and payable locks', async () => {
+    const { service, tx } = makeService(lockedPayable());
+    tx.payable.findUniqueOrThrow.mockResolvedValue(
+      lockedPayable({ _count: { targetedAdjustments: 1 } }),
+    );
+    await expect(
+      service.update('pay-1', { supplierId: 'supplier-2' } as any, user),
+    ).rejects.toThrow('account adjustment history');
+    expect(tx.payable.update).not.toHaveBeenCalled();
+  });
+
   it('does not recalculate or rewrite a supplier for a notes-only update', async () => {
     const existing = lockedPayable();
     const { service, tx } = makeService(existing);

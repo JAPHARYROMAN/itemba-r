@@ -5,6 +5,7 @@ import { CashBookModule } from '../cash-book/cash-book.module';
 import { CustomerPaymentsController } from './customer-payments.controller';
 import { CustomerPaymentsService } from './customer-payments.service';
 import { CompanyScopeService } from '../../common/services';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 
 /**
  * PostingEngineService, AccountResolverService (AccountingEngineModule) and
@@ -15,7 +16,7 @@ import { CompanyScopeService } from '../../common/services';
 @Module({
   imports: [PrismaModule, AuditLogsModule, CashBookModule],
   controllers: [CustomerPaymentsController],
-  providers: [CustomerPaymentsService, CompanyScopeService],
+  providers: [CustomerPaymentsService, CompanyScopeService, OrganizationScopeService],
   exports: [CustomerPaymentsService],
 })
 export class CustomerPaymentsModule {}

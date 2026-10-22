@@ -809,6 +809,7 @@ describe('Projection query isolation', () => {
       ['customerPayment', []],
       ['creditNote', []],
       ['refund', []],
+      ['accountAdjustment', []],
       ['journalEntry', fixture.journals],
     ] as const)
       tx[model] = { findMany: jest.fn().mockResolvedValue(rows) };
@@ -829,7 +830,7 @@ describe('Projection query isolation', () => {
       expect.any(Function),
       expect.objectContaining({ isolationLevel: 'RepeatableRead' }),
     );
-    for (const model of ['salesOrder', 'receivable', 'creditNote', 'refund'])
+    for (const model of ['salesOrder', 'receivable', 'creditNote', 'refund', 'accountAdjustment'])
       expect(tx[model].findMany.mock.calls[0][0].where).toEqual(
         expect.objectContaining({
           currency: 'TZS',

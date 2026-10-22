@@ -32,6 +32,11 @@ import { pagination } from '../../common/utils/pagination';
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import { assertCashAccountForScope } from '../../common/services/cash-account-scope.helper';
+import {
+  legacyPaymentRequest,
+  lockDocumentPaymentRequest,
+  replayLegacyPayment,
+} from '../../common/utils/document-payment-request';
 
 type ReceivableSalesOrderSnapshot = {
   id: string;
@@ -254,28 +259,76 @@ export class ReceivablesService {
   }
 
   async update(id: string, dto: UpdateReceivableDto, user: AuthUser) {
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
-    // Party linkage (Phase 3): once the ledger knows the party, the party is not re-pointed
-    // without re-posting. Void and re-create the document to change it.
-    if (
-      dto.customerId !== undefined &&
-      (dto.customerId || null) !== (existing.customerId || null) &&
-      (existing.journalEntryId || new Prisma.Decimal(existing.paidAmount ?? 0).gt(0))
-    )
-      throw new BadRequestException(
-        'This receivable is posted or partly paid; its customer cannot be changed. Void and re-create it to re-point the party.',
-      );
+    const visible = await this.findOne(id);
+    await this.companyScope.assertCanAccessCompany(user, visible.companyId, AccessLevel.WRITE);
     const userId = user.id;
-    const scope = await this.resolveReceivableScope({
-      companyId: existing.companyId,
-      divisionId:
-        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
-      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
-      customerId:
-        dto.customerId !== undefined ? dto.customerId || null : existing.customerId || null,
-    });
-    const record = await this.prisma.$transaction(async (tx) => {
+    const { existing, record } = await this.prisma.$transaction(async (tx) => {
+      // Use the adjustment lock order and read again after waiting: defaults or
+      // adjustment ownership may have changed since the edit form was opened.
+      await tx.$queryRaw`SELECT id FROM sales_orders WHERE "receivableId" = ${id} OR id IN
+        (SELECT "sourceId" FROM receivables WHERE id = ${id} AND "sourceType" = 'SalesOrder') ORDER BY id FOR UPDATE`;
+      const [locked] = await tx.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT id FROM receivables WHERE id = ${id} AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Receivable not found');
+      const existing = await tx.receivable.findUniqueOrThrow({
+        where: { id },
+        include: {
+          generatedByAdjustment: { select: { id: true } },
+          _count: { select: { targetedAdjustments: true } },
+        },
+      });
+      await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+      await this.org.assertCanAccessScope(
+        user,
+        existing.divisionId,
+        existing.branchId,
+        AccessLevel.WRITE,
+      );
+      const adjusted =
+        Boolean(existing.generatedByAdjustment) || existing._count.targetedAdjustments > 0;
+      const partyChanged =
+        dto.customerId !== undefined && (dto.customerId || null) !== existing.customerId;
+      if (
+        adjusted &&
+        (partyChanged ||
+          (dto.divisionId !== undefined && (dto.divisionId || null) !== existing.divisionId) ||
+          (dto.branchId !== undefined && (dto.branchId || null) !== existing.branchId) ||
+          (dto.issueDate !== undefined &&
+            new Date(dto.issueDate).getTime() !== existing.issueDate.getTime()))
+      )
+        throw new BadRequestException(
+          'This receivable has account adjustment history; its customer, division, branch and issue date cannot be changed. Notes and due dates remain editable.',
+        );
+      if (
+        partyChanged &&
+        (existing.journalEntryId || new Prisma.Decimal(existing.paidAmount).gt(0))
+      )
+        throw new BadRequestException(
+          'This receivable is posted or partly paid; its customer cannot be changed. Void and re-create it to re-point the party.',
+        );
+      const scope = await this.resolveReceivableScope(
+        {
+          companyId: existing.companyId,
+          divisionId: dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId,
+          branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId,
+          customerId: dto.customerId !== undefined ? dto.customerId || null : existing.customerId,
+        },
+        tx,
+      );
+      if (
+        adjusted &&
+        (scope.divisionId !== existing.divisionId || scope.branchId !== existing.branchId)
+      )
+        throw new BadRequestException(
+          'This receivable has account adjustment history; updated customer defaults cannot change its accounting scope.',
+        );
+      await this.org.assertCanAccessScope(
+        user,
+        scope.divisionId,
+        scope.branchId,
+        AccessLevel.WRITE,
+      );
       const updated = await tx.receivable.update({
         where: { id },
         data: {
@@ -284,7 +337,7 @@ export class ReceivablesService {
           customerName: scope.customerName ?? dto.customerName ?? existing.customerName,
           ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
           ...(dto.notes !== undefined && { notes: dto.notes }),
-          ...(dto.dueDate && { dueDate: new Date(dto.dueDate) }),
+          ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
           ...(dto.issueDate && { issueDate: new Date(dto.issueDate) }),
         },
       });
@@ -295,7 +348,7 @@ export class ReceivablesService {
         await this.syncCustomerBalance(tx, existing.companyId, existing.customerId);
         await this.syncCustomerBalance(tx, updated.companyId, updated.customerId);
       }
-      return updated;
+      return { existing, record: updated };
     });
 
     await this.auditLogs.log({
@@ -322,6 +375,7 @@ export class ReceivablesService {
     // reduces it, posts DR cash / CR AR control and keeps CashAccount.currentBalance and
     // the customer's cached balance in step, all in this transaction.
     const { existing, record } = await this.prisma.$transaction(async (tx) => {
+      await lockDocumentPaymentRequest(tx, 'Receivable', dto);
       const [locked] = await tx.$queryRaw<
         Array<{
           id: string;
@@ -350,12 +404,27 @@ export class ReceivablesService {
         locked.branchId,
         AccessLevel.WRITE,
       );
-      if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
-        throw new BadRequestException(
-          `Cannot record a payment against a ${locked.status} receivable`,
-        );
+      if (
+        await replayLegacyPayment(
+          tx,
+          locked.companyId,
+          'Receivable',
+          id,
+          dto,
+          Boolean(locked.customerId),
+        )
+      ) {
+        return {
+          existing: locked,
+          record: await tx.receivable.findFirstOrThrow({ where: { id, deletedAt: null } }),
+        };
       }
       if (!locked.customerId) {
+        if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
+          throw new BadRequestException(
+            `Cannot record a payment against a ${locked.status} receivable`,
+          );
+        }
         // No shared customer to attach a payment to (free-text customerName only): settle
         // directly, exactly as before, with the journal referenced to the receivable. The
         // Unmatched parties queue (W7) surfaces these for matching; once matched (see
@@ -366,6 +435,7 @@ export class ReceivablesService {
       }
 
       const { receivables } = await this.customerPayments.createInTransaction(tx, user, {
+        requestId: dto.requestId?.toLowerCase(),
         companyId: locked.companyId,
         divisionId: locked.divisionId,
         branchId: locked.branchId,
@@ -460,7 +530,8 @@ export class ReceivablesService {
         divisionId: locked.divisionId,
         branchId: locked.branchId,
         transactionDate: settlementDate,
-        description: `Receivable settlement ${locked.receivableNumber}`,
+        journalNumber: legacyPaymentRequest('Receivable', locked.id, dto)?.journalNumber,
+        description: `Receivable settlement ${locked.receivableNumber}${legacyPaymentRequest('Receivable', locked.id, dto)?.suffix ?? ''}`,
         referenceType: 'Receivable',
         referenceId: locked.id,
         moduleName: 'receivables',
@@ -695,8 +766,10 @@ export class ReceivablesService {
       const live = await tx.receivable.findUniqueOrThrow({
         where: { id },
         include: {
+          generatedByAdjustment: { select: { id: true } },
           _count: {
             select: {
+              targetedAdjustments: true,
               salesOrders: true,
               fuelCreditSales: true,
               projectBillings: true,
@@ -711,6 +784,7 @@ export class ReceivablesService {
       });
       await this.companyScope.assertCanAccessCompany(user, live.companyId, AccessLevel.MANAGE);
       if (
+        Boolean(live.generatedByAdjustment) ||
         !withSettlementLifecycle(live).canDelete ||
         Object.values(live._count ?? {}).some((count) => count > 0)
       ) {
@@ -787,6 +861,7 @@ export class ReceivablesService {
     return {
       _count: {
         select: {
+          targetedAdjustments: true,
           salesOrders: true,
           fuelCreditSales: true,
           projectBillings: true,
@@ -997,17 +1072,20 @@ export class ReceivablesService {
     return { ...receivable, customerName };
   }
 
-  private async resolveReceivableScope(input: {
-    companyId: string;
-    divisionId?: string | null;
-    branchId?: string | null;
-    customerId?: string | null;
-  }) {
+  private async resolveReceivableScope(
+    input: {
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      customerId?: string | null;
+    },
+    db: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
     let divisionId = input.divisionId || null;
     let branchId = input.branchId || null;
 
     if (input.customerId) {
-      const customer = await this.prisma.customer.findFirst({
+      const customer = await db.customer.findFirst({
         where: { id: input.customerId, deletedAt: null },
         select: { companyId: true, divisionId: true, branchId: true, name: true },
       });
@@ -1025,7 +1103,7 @@ export class ReceivablesService {
     }
 
     if (branchId) {
-      const branch = await this.prisma.branch.findFirst({
+      const branch = await db.branch.findFirst({
         where: { id: branchId, deletedAt: null },
         select: { divisionId: true, division: { select: { companyId: true } } },
       });
@@ -1039,7 +1117,7 @@ export class ReceivablesService {
     }
 
     if (divisionId) {
-      const division = await this.prisma.division.findFirst({
+      const division = await db.division.findFirst({
         where: { id: divisionId, deletedAt: null },
         select: { companyId: true },
       });
@@ -1050,7 +1128,7 @@ export class ReceivablesService {
 
     const customerName = input.customerId
       ? (
-          await this.prisma.customer.findFirst({
+          await db.customer.findFirst({
             where: { id: input.customerId, deletedAt: null },
             select: { name: true },
           })

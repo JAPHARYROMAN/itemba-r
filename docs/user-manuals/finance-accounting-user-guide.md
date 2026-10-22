@@ -131,6 +131,18 @@ Use the aging report for credit control and collection follow-up.
 ### AP Aging Report
 Navigate to **Finance → Reports → AP Aging** to view what is owed to suppliers, aged by due date. Use this to plan cash outflows and avoid late payment penalties.
 
+### Balance Adjustments and Payment Corrections in AR and AP
+
+Open **Transactions** on a receivable or payable to see its payments and account adjustments, including reversed records and their reasons.
+
+- **New balance adjustment** records a noncash increase or decrease with an amount, posting date, offset GL account, and reason. A decrease reduces this document's outstanding amount without changing its original total or cash paid. An increase creates a separate item on the same customer or supplier account.
+- **Reverse** restores the exact original transaction through a reversing journal. Enter a reason. To reverse an increase adjustment, first reverse any payments or other settlements applied to its separate item.
+- **Correct** reverses an eligible payment and opens a replacement form. Review the amount, date, and cash account, then submit the replacement explicitly. Closing the replacement form leaves the original payment reversed.
+
+A payment allocated across several documents is reversed as a whole. Payments owned by Expenses, Cash Desk, Invoice Desk, or a purchase advance must be corrected through the indicated source workflow. Older payments need traceable journal and cash records before they can be reversed here.
+
+Account adjustments require the receivable/payable manage permission. Canonical payment reversals require the customer/supplier payment manage permission and access to every affected document and cash account. Closed accounting periods remain protected. Customer and supplier statements reflect adjustments and reversals on their posting dates.
+
 ---
 
 ## 7. Cash Accounts

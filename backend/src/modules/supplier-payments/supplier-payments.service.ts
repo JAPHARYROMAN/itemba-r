@@ -15,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { refreshCachedPartyBalance } from '../party-balance/party-balance.helper';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CompanyScopeService, assertCashAccountForScope } from '../../common/services';
+import { OrganizationScopeService } from '../../common/services/organization-scope.service';
 import {
   AccountResolverService,
   AccountRole,
@@ -28,6 +29,7 @@ import {
 import { EntityCodeGeneratorService } from '../entity-code-generator/entity-code-generator.service';
 import { CashBookService } from '../cash-book/cash-book.service';
 import { sourceSettlement } from '../../common/utils/source-settlement';
+import { assertNoLegacyPaymentClaim } from '../../common/utils/document-payment-request';
 import { GeneratedDocumentsService } from '../generated-documents/generated-documents.service';
 import { remittancePdf } from './remittance-advice';
 import { pagination } from '../../common/utils/pagination';
@@ -131,6 +133,7 @@ export class SupplierPaymentsService {
     private readonly cashBook?: CashBookService,
     // Party linkage (Phase 3): the shared letterhead renderer for the remittance advice.
     private readonly documents?: GeneratedDocumentsService,
+    private readonly org: OrganizationScopeService = new OrganizationScopeService(prisma),
   ) {}
 
   // ── queries ─────────────────────────────────────────────────────────────────
@@ -288,13 +291,11 @@ export class SupplierPaymentsService {
     input: SupplierPaymentInput,
     opts: { cashDeskOwnsMovement?: boolean } = {},
   ) {
+    input = { ...input, requestId: this.normaliseRequestId(input.requestId) };
     const amount = new Prisma.Decimal(input.amount).toDecimalPlaces(2);
     if (amount.lte(0)) throw new BadRequestException('Payment amount must be greater than zero');
     if (!input.allocations?.length)
       throw new BadRequestException('At least one allocation is required');
-
-    const existing = await this.existingByRequest(tx, input.requestId);
-    if (existing) return { payment: existing, payables: [] as PayableSnapshot[] };
 
     const seen = new Set<string>();
     const allocations = input.allocations.map((a) => {
@@ -315,6 +316,47 @@ export class SupplierPaymentsService {
         `Allocated total (${allocatedTotal.toString()}) must equal the payment amount ` +
           `(${amount.toString()}). Supplier prepayments are not supported yet.`,
       );
+    const ordered = [...allocations].sort((a, b) => (a.payableId < b.payableId ? -1 : 1));
+
+    if (input.requestId) {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`SupplierPaymentRequest:${input.requestId}`}, 0))`;
+      await assertNoLegacyPaymentClaim(tx, input.companyId, 'Payable', input.requestId);
+    }
+    const existing = await this.existingByRequest(tx, input.requestId);
+    if (existing) {
+      const sameAllocations =
+        existing.allocations.length === allocations.length &&
+        allocations.every((allocation) =>
+          existing.allocations.some(
+            (prior) =>
+              prior.payableId === allocation.payableId &&
+              new Prisma.Decimal(prior.amount).eq(allocation.amount),
+          ),
+        );
+      if (
+        existing.deletedAt ||
+        existing.status !== 'COMPLETED' ||
+        existing.companyId !== input.companyId ||
+        existing.supplierId !== input.supplierId ||
+        !new Prisma.Decimal(existing.amount).eq(amount) ||
+        existing.currency !== (input.currency ?? 'TZS') ||
+        existing.cashAccountId !== (input.cashAccountId ?? null) ||
+        existing.paymentDate.getTime() !== input.paymentDate.getTime() ||
+        existing.method !== (input.method ?? 'CASH') ||
+        existing.reference !== (input.reference ?? null) ||
+        existing.notes !== (input.notes ?? null) ||
+        existing.sourceType !== (input.source?.type ?? 'Payable') ||
+        existing.sourceId !== (input.source?.id ?? ordered[0].payableId) ||
+        (input.divisionId != null && existing.divisionId !== input.divisionId) ||
+        (input.branchId != null && existing.branchId !== input.branchId) ||
+        !sameAllocations
+      ) {
+        throw new ConflictException(
+          'This payment request was already used with different details or has been reversed. Start a new payment.',
+        );
+      }
+      return { payment: existing, payables: [] as PayableSnapshot[] };
+    }
 
     const supplier = await this.requireSupplier(tx, input.companyId, input.supplierId);
     const currency = (input.currency as CurrencyCode | null) ?? CurrencyCode.TZS;
@@ -326,7 +368,6 @@ export class SupplierPaymentsService {
 
     // Lock + validate + reduce each payable, ordered by id so concurrent multi-payable
     // payments cannot deadlock.
-    const ordered = [...allocations].sort((a, b) => (a.payableId < b.payableId ? -1 : 1));
     const payables: PayableSnapshot[] = [];
     for (const alloc of ordered) {
       const locked = await this.lockPayable(tx, alloc.payableId);
@@ -505,22 +546,69 @@ export class SupplierPaymentsService {
    * no journal, no cash movement.
    */
   async recordInTransaction(tx: Tx, user: AuthUser, input: SupplierPaymentRecordInput) {
+    input = { ...input, requestId: this.normaliseRequestId(input.requestId) };
     const amount = new Prisma.Decimal(input.amount).toDecimalPlaces(2);
     if (amount.lte(0)) throw new BadRequestException('Payment amount must be greater than zero');
-    const existing = await this.existingByRequest(tx, input.requestId);
-    if (existing) return existing;
-
-    const supplier = await this.requireSupplier(tx, input.companyId, input.supplierId);
     const currency = (input.currency as CurrencyCode | null) ?? CurrencyCode.TZS;
-    const allocations = (input.allocations ?? []).map((a) => ({
-      payableId: a.payableId,
-      amount: new Prisma.Decimal(a.amount).toDecimalPlaces(2),
-    }));
+    const seen = new Set<string>();
+    const allocations = (input.allocations ?? []).map((a) => {
+      const allocation = {
+        payableId: a.payableId,
+        amount: new Prisma.Decimal(a.amount).toDecimalPlaces(2),
+      };
+      if (allocation.amount.lte(0) || seen.has(a.payableId))
+        throw new BadRequestException(
+          'Payment allocations must be positive and refer to distinct payables',
+        );
+      seen.add(a.payableId);
+      return allocation;
+    });
     const applied = allocations.reduce((s, a) => s.plus(a.amount), new Prisma.Decimal(0));
     if (applied.gt(amount))
       throw new BadRequestException('Allocated total exceeds the payment amount');
     // A payment with no payable allocation is applied to its source document (desk invoice).
     const appliedAmount = allocations.length ? applied : amount;
+    if (input.requestId) {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`SupplierPaymentRequest:${input.requestId}`}, 0))`;
+      await assertNoLegacyPaymentClaim(tx, input.companyId, 'Payable', input.requestId);
+    }
+    const existing = await this.existingByRequest(tx, input.requestId);
+    if (existing) {
+      const sameAllocations =
+        existing.allocations.length === allocations.length &&
+        allocations.every((allocation) =>
+          existing.allocations.some(
+            (prior) =>
+              prior.payableId === allocation.payableId &&
+              new Prisma.Decimal(prior.amount).eq(allocation.amount),
+          ),
+        );
+      if (
+        existing.deletedAt ||
+        existing.status !== 'COMPLETED' ||
+        existing.companyId !== input.companyId ||
+        existing.supplierId !== input.supplierId ||
+        !new Prisma.Decimal(existing.amount).eq(amount) ||
+        existing.currency !== currency ||
+        existing.paymentDate.getTime() !== input.paymentDate.getTime() ||
+        existing.method !== (input.method ?? 'CASH') ||
+        existing.reference !== (input.reference ?? null) ||
+        existing.notes !== (input.notes ?? null) ||
+        existing.sourceType !== (input.source?.type ?? null) ||
+        existing.sourceId !== (input.source?.id ?? null) ||
+        existing.divisionId !== (input.divisionId ?? null) ||
+        existing.branchId !== (input.branchId ?? null) ||
+        existing.cashAccountId !== (input.cashAccountId ?? null) ||
+        existing.cashDeskMovementId !== (input.cashDeskMovementId ?? null) ||
+        existing.journalEntryId !== (input.journalEntryId ?? null) ||
+        !sameAllocations
+      )
+        throw new ConflictException(
+          'This payment request already belongs to a different source or payment. Start a new payment.',
+        );
+      return existing;
+    }
+    const supplier = await this.requireSupplier(tx, input.companyId, input.supplierId);
 
     const payment = await tx.supplierPayment.create({
       data: {
@@ -568,23 +656,29 @@ export class SupplierPaymentsService {
   // ── reverse ─────────────────────────────────────────────────────────────────
 
   async reverse(id: string, dto: ReverseSupplierPaymentDto, user: AuthUser) {
-    const { before, record, reversal } = await this.prisma.$transaction((tx) =>
-      this.reverseInTransaction(tx, user, id, dto.reason ?? null, {}),
-    );
-    await this.auditLogs.log({
-      action: 'SUPPLIER_PAYMENT_REVERSE',
-      entityType: 'SupplierPayment',
-      entityId: id,
-      userId: user.id,
-      companyId: record.companyId,
-      oldValue: { status: before.status } as Record<string, unknown>,
-      newValue: {
-        status: SupplierPaymentStatus.REVERSED,
-        reason: dto.reason ?? null,
-        reversalJournalEntryId: reversal?.id ?? null,
-      } as Record<string, unknown>,
+    const reason = dto.reason?.trim();
+    if (!reason || reason.length < 3 || reason.length > 500 || !/[\p{L}\p{N}]/u.test(reason)) {
+      throw new BadRequestException('Enter a reversal reason between 3 and 500 characters');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const { record, reversal } = await this.reverseInTransaction(tx, user, id, reason, {
+        publicReversal: true,
+      });
+      await this.auditLogs.logStrictInTransaction(tx, {
+        action: 'SUPPLIER_PAYMENT_REVERSE',
+        entityType: 'SupplierPayment',
+        entityId: id,
+        userId: user.id,
+        companyId: record.companyId,
+        oldValue: { status: SupplierPaymentStatus.COMPLETED } as Record<string, unknown>,
+        newValue: {
+          status: SupplierPaymentStatus.REVERSED,
+          reason,
+          reversalJournalEntryId: reversal?.id ?? null,
+        } as Record<string, unknown>,
+      });
+      return record;
     });
-    return record;
   }
 
   /**
@@ -603,6 +697,8 @@ export class SupplierPaymentsService {
       fromCashDesk?: boolean;
       cashDeskOwnsMovement?: boolean;
       businessDate?: Date;
+      /** Only the canonical public endpoint sets this; owner apps keep their own transaction. */
+      publicReversal?: boolean;
     },
   ) {
     const claim = await tx.supplierPayment.updateMany({
@@ -623,11 +719,51 @@ export class SupplierPaymentsService {
       throw new ConflictException(
         `Supplier payment cannot be reversed from status ${current.status}; only COMPLETED payments can be reversed`,
       );
+    let authorizedCash: {
+      divisionId: string | null;
+      branchId: string | null;
+      currency: CurrencyCode;
+    } | null = null;
+    if (opts.publicReversal) {
+      if (current.sourceType === 'Expense') {
+        throw new ConflictException(
+          'Reverse this payment in Expenses so its expense and payable stay in step.',
+        );
+      }
+      await this.org.assertCanAccessScope(
+        user,
+        current.divisionId,
+        current.branchId,
+        AccessLevel.MANAGE,
+      );
+      if (current.cashAccountId) {
+        const cash = await tx.cashAccount.findFirst({
+          where: { id: current.cashAccountId, companyId: current.companyId, deletedAt: null },
+          select: { companyId: true, divisionId: true, branchId: true, currency: true },
+        });
+        if (!cash || cash.companyId !== current.companyId || cash.currency !== current.currency) {
+          throw new ConflictException(
+            'The payment cash account is unavailable or has different accounting scope',
+          );
+        }
+        await this.org.assertCanAccessScope(
+          user,
+          cash.divisionId,
+          cash.branchId,
+          AccessLevel.MANAGE,
+        );
+        authorizedCash = cash;
+      }
+    }
     if (current.sourceType === 'CashDesk' && !opts.fromCashDesk)
       throw new ConflictException(
         'Reverse this purchase payment in Cash Desk so its cash balance is restored with the payable and journal.',
       );
-    if (current.deskPayment && !opts.fromDesk && !opts.fromCashDesk)
+    if (
+      (current.deskPayment || current.sourceType === 'InvoiceDeskInvoice') &&
+      !opts.fromDesk &&
+      !opts.fromCashDesk
+    )
       throw new ConflictException(
         'Reverse this payment in Invoice Desk (or Cash Desk when it was recorded there) to keep the invoice and cash balances together.',
       );
@@ -645,6 +781,15 @@ export class SupplierPaymentsService {
       );
 
     const ordered = [...current.allocations].sort((a, b) => (a.payableId < b.payableId ? -1 : 1));
+    if (
+      ordered
+        .reduce((total, allocation) => total.plus(allocation.amount), new Prisma.Decimal(0))
+        .gt(current.amount)
+    ) {
+      throw new ConflictException(
+        'Payment allocations exceed the original payment amount; review the allocation history before reversal.',
+      );
+    }
     for (const alloc of ordered) {
       const locked = await this.lockPayable(tx, alloc.payableId);
       if (
@@ -662,14 +807,37 @@ export class SupplierPaymentsService {
           'Reverse the write-off or source cancellation before reversing this allocated supplier payment.',
         );
       }
+      if (opts.publicReversal) {
+        if (locked.sourceType === 'Expense')
+          throw new ConflictException(
+            'Reverse this payment in Expenses so its expense and payable stay in step.',
+          );
+        await this.org.assertCanAccessScope(
+          user,
+          locked.divisionId,
+          locked.branchId,
+          AccessLevel.MANAGE,
+        );
+      }
       const allocAmount = new Prisma.Decimal(alloc.amount).toDecimalPlaces(2);
+      if (
+        !allocAmount.isFinite() ||
+        allocAmount.lte(0) ||
+        !new Prisma.Decimal(locked.paidAmount).isFinite() ||
+        new Prisma.Decimal(locked.paidAmount).lt(allocAmount) ||
+        !new Prisma.Decimal(locked.outstandingAmount).isFinite() ||
+        new Prisma.Decimal(locked.outstandingAmount).lt(0)
+      ) {
+        throw new ConflictException(
+          'An allocated payable has inconsistent settlement amounts; reversal was aborted.',
+        );
+      }
       const restoredOutstanding = new Prisma.Decimal(locked.outstandingAmount)
         .plus(allocAmount)
         .toDecimalPlaces(2);
-      const restoredPaid = Prisma.Decimal.max(
-        new Prisma.Decimal(locked.paidAmount).minus(allocAmount),
-        new Prisma.Decimal(0),
-      ).toDecimalPlaces(2);
+      const restoredPaid = new Prisma.Decimal(locked.paidAmount)
+        .minus(allocAmount)
+        .toDecimalPlaces(2);
       const updated = await tx.payable.update({
         where: { id: alloc.payableId },
         data: {
@@ -682,17 +850,35 @@ export class SupplierPaymentsService {
       await this.syncPurchaseOrders(tx, updated);
     }
 
-    const reversalJe = await this.reversePaymentJournal(tx, current, user.id, opts.businessDate);
-    if (!reversalJe && current.journalEntryId)
+    const reversalJe = await this.reversePaymentJournal(
+      tx,
+      current,
+      user.id,
+      opts.businessDate,
+      reason,
+      opts.publicReversal,
+    );
+    if (!reversalJe && (current.journalEntryId || opts.publicReversal))
       throw new ConflictException(
         'Supplier payment reversal could not be posted; reversal aborted to avoid an unbalanced ledger',
       );
     if (reversalJe && current.cashAccountId) {
       const cashRestored = await tx.cashAccount.updateMany({
-        where: { id: current.cashAccountId, companyId: current.companyId, deletedAt: null },
+        where: {
+          id: current.cashAccountId,
+          companyId: current.companyId,
+          deletedAt: null,
+          ...(authorizedCash
+            ? {
+                divisionId: authorizedCash.divisionId,
+                branchId: authorizedCash.branchId,
+                currency: authorizedCash.currency,
+              }
+            : {}),
+        },
         data: { currentBalance: { increment: new Prisma.Decimal(current.amount) } },
       });
-      if (opts.cashDeskOwnsMovement && cashRestored.count !== 1)
+      if ((opts.cashDeskOwnsMovement || opts.publicReversal) && cashRestored.count !== 1)
         throw new ConflictException(
           'The linked ERP cash account is unavailable; purchase reversal was aborted.',
         );
@@ -710,7 +896,6 @@ export class SupplierPaymentsService {
       where: { id: current.id },
       data: {
         reversalJournalEntryId: reversalJe?.id ?? null,
-        ...(reason ? { notes: reason } : {}),
       },
       include: this.includeScope(),
     });
@@ -722,10 +907,30 @@ export class SupplierPaymentsService {
 
   private async existingByRequest(tx: Tx, requestId: string | null | undefined) {
     if (!requestId) return null;
+    if (this.isUuidRequestId(requestId)) {
+      const matches = await tx.supplierPayment.findMany({
+        where: { requestId: { equals: requestId, mode: 'insensitive' } },
+        include: this.includeScope(),
+        take: 2,
+      });
+      if (matches.length > 1)
+        throw new ConflictException(
+          'This payment request has conflicting historical records. Reconcile them before retrying.',
+        );
+      return matches[0] ?? null;
+    }
     return tx.supplierPayment.findUnique({
       where: { requestId },
       include: this.includeScope(),
     });
+  }
+
+  private isUuidRequestId(value: string) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private normaliseRequestId(value: string | null | undefined) {
+    return value && this.isUuidRequestId(value) ? value.toLowerCase() : value;
   }
 
   private async requireSupplier(tx: Tx, companyId: string, supplierId: string) {
@@ -905,17 +1110,40 @@ export class SupplierPaymentsService {
     },
     userId: string,
     businessDate?: Date,
+    reason?: string | null,
+    requirePaymentOwnership = false,
   ): Promise<{ id: string; journalNumber: string } | null> {
     const original = payment.journalEntryId
       ? await tx.journalEntry.findFirst({
-          where: { id: payment.journalEntryId, companyId: payment.companyId, deletedAt: null },
+          where: {
+            id: payment.journalEntryId,
+            companyId: payment.companyId,
+            status: 'POSTED',
+            deletedAt: null,
+            ...(requirePaymentOwnership
+              ? { referenceType: 'SupplierPayment', referenceId: payment.id }
+              : {}),
+          },
           include: { lines: true },
         })
       : null;
-    if (!original || original.lines.length === 0) return null;
+    if (
+      !original ||
+      original.status !== 'POSTED' ||
+      original.deletedAt ||
+      original.lines.length === 0 ||
+      (requirePaymentOwnership &&
+        (original.referenceType !== 'SupplierPayment' || original.referenceId !== payment.id))
+    )
+      return null;
     const claim = await tx.journalEntry.updateMany({
-      where: { id: original.id, status: { not: 'REVERSED' }, deletedAt: null },
-      data: { status: 'REVERSED', reversedAt: new Date(), reversedById: userId },
+      where: { id: original.id, status: 'POSTED', deletedAt: null },
+      data: {
+        status: 'REVERSED',
+        reversedAt: new Date(),
+        reversedById: userId,
+        reversalReason: reason ?? null,
+      },
     });
     if (claim.count !== 1) return null;
     return this.postingEngine.postLines(

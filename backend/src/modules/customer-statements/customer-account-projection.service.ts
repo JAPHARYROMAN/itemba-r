@@ -29,12 +29,15 @@ type SourceRows = {
   creditNotes: any[];
   refunds: any[];
   journals: any[];
+  adjustments?: any[];
   roleAccounts?: Record<string, Partial<Record<'AR_CONTROL' | 'CASH_ON_HAND' | 'BANK', string>>>;
   sourceEdits?: any[];
 };
 const date = (value: Date | string) => new Date(value);
 const eligibleJournal = (journal: any) =>
   journal && ['POSTED', 'REVERSED'].includes(journal.status);
+const postedReversal = (journal: { status: string } | null | undefined) =>
+  journal?.status === 'POSTED';
 const roleLine = (
   line: any,
   role: 'AR_CONTROL' | 'CASH_ON_HAND' | 'BANK',
@@ -48,9 +51,9 @@ const roleLine = (
       CONVENTIONAL_CODES[role].includes(line.account?.accountCode);
 const reversalDate = (row: any): Date | null => {
   const dates = [
-    eligibleJournal(row.reversalJournalEntry) ? row.reversalJournalEntry.transactionDate : null,
+    postedReversal(row.reversalJournalEntry) ? row.reversalJournalEntry.transactionDate : null,
     ...(row.journalEntry?.reversedBy_ ?? [])
-      .filter(eligibleJournal)
+      .filter(postedReversal)
       .map((j: any) => j.transactionDate),
   ]
     .filter(Boolean)
@@ -108,55 +111,77 @@ export class CustomerAccountProjectionService {
         this.checkRows(customers);
         const customerId = { in: customers.map((c) => c.id) };
         const sourceScope = { AND: [...businessScope.AND, historical], currency, customerId };
-        const [sales, receivables, payments, creditNotes, refunds] = await Promise.all([
-          tx.salesOrder.findMany({
-            where: { ...sourceScope, status: { not: 'DRAFT' } },
-            take: MAX_ROWS + 1,
-          }),
-          tx.receivable.findMany({
-            where: sourceScope,
-            include: { journalEntry: journalHistory },
-            take: MAX_ROWS + 1,
-          }),
-          tx.customerPayment.findMany({
-            where: {
-              AND: [
-                companyScope,
-                historical,
-                {
-                  OR: [
-                    { AND: businessScope.AND },
-                    { allocations: { some: { receivable: { is: sourceScope } } } },
-                  ],
-                },
-              ],
-              currency,
-              customerId,
-              status: { in: ['COMPLETED', 'REVERSED'] },
-            },
-            include: {
-              journalEntry: journalHistory,
-              reversalJournalEntry: true,
-              _count: { select: { allocations: true } },
-              allocations: {
-                where: { receivable: { is: sourceScope } },
-                include: { receivable: true },
+        const [sales, receivables, payments, creditNotes, refunds, adjustments] = await Promise.all(
+          [
+            tx.salesOrder.findMany({
+              where: { ...sourceScope, status: { not: 'DRAFT' } },
+              take: MAX_ROWS + 1,
+            }),
+            tx.receivable.findMany({
+              where: sourceScope,
+              include: { journalEntry: journalHistory },
+              take: MAX_ROWS + 1,
+            }),
+            tx.customerPayment.findMany({
+              where: {
+                AND: [
+                  companyScope,
+                  historical,
+                  {
+                    OR: [
+                      { AND: businessScope.AND },
+                      { allocations: { some: { receivable: { is: sourceScope } } } },
+                    ],
+                  },
+                ],
+                currency,
+                customerId,
+                status: { in: ['COMPLETED', 'REVERSED'] },
               },
-            },
-            take: MAX_ROWS + 1,
-          }),
-          tx.creditNote.findMany({
-            where: { ...sourceScope, issueDate: { lte: asOf }, status: { in: ['ISSUED', 'VOID'] } },
-            include: { journalEntry: journalHistory },
-            take: MAX_ROWS + 1,
-          }),
-          tx.refund.findMany({
-            where: { ...sourceScope, refundDate: { lte: asOf }, status: { in: ['PAID', 'VOID'] } },
-            include: { journalEntry: journalHistory },
-            take: MAX_ROWS + 1,
-          }),
-        ]);
-        [sales, receivables, payments, creditNotes, refunds].forEach((rows) =>
+              include: {
+                journalEntry: journalHistory,
+                reversalJournalEntry: true,
+                _count: { select: { allocations: true } },
+                allocations: {
+                  where: { receivable: { is: sourceScope } },
+                  include: { receivable: true },
+                },
+              },
+              take: MAX_ROWS + 1,
+            }),
+            tx.creditNote.findMany({
+              where: {
+                ...sourceScope,
+                issueDate: { lte: asOf },
+                status: { in: ['ISSUED', 'VOID'] },
+              },
+              include: { journalEntry: journalHistory },
+              take: MAX_ROWS + 1,
+            }),
+            tx.refund.findMany({
+              where: {
+                ...sourceScope,
+                refundDate: { lte: asOf },
+                status: { in: ['PAID', 'VOID'] },
+              },
+              include: { journalEntry: journalHistory },
+              take: MAX_ROWS + 1,
+            }),
+            tx.accountAdjustment.findMany({
+              where: {
+                AND: businessScope.AND,
+                currency,
+                customerId,
+                targetReceivableId: { not: null },
+                transactionDate: { lte: asOf },
+                status: { in: ['POSTED', 'REVERSED'] },
+              },
+              include: { journalEntry: journalHistory, reversalJournalEntry: true },
+              take: MAX_ROWS + 1,
+            }),
+          ],
+        );
+        [sales, receivables, payments, creditNotes, refunds, adjustments].forEach((rows) =>
           this.checkRows(rows),
         );
         const journals = await tx.journalEntry.findMany({
@@ -299,6 +324,7 @@ export class CustomerAccountProjectionService {
               creditNotes,
               refunds: postedRefunds,
               journals,
+              adjustments,
               roleAccounts,
               sourceEdits: sourceEdits.filter((edit) =>
                 matchesScope((edit.oldValue ?? edit.newValue ?? {}) as any),
@@ -373,9 +399,13 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
     };
     const belongs = (row: any) =>
       row.customerId === customer.id && row.companyId === customer.companyId;
-    const receivables = rows.receivables.filter(
+    const allReceivables = rows.receivables.filter(belongs);
+    const allReceivableMap = new Map(allReceivables.map((r) => [r.id, r]));
+    const adjustments = (rows.adjustments ?? []).filter(belongs);
+    const adjustmentMap = new Map(adjustments.map((adjustment) => [adjustment.id, adjustment]));
+    const accrualMovements = new Set<CustomerAccountMovement>();
+    const receivables = allReceivables.filter(
       (r) =>
-        belongs(r) &&
         (eligibleJournal(r.journalEntry)
           ? date(r.journalEntry.transactionDate)
           : date(r.issueDate)) <= asOf,
@@ -428,6 +458,17 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
     };
     for (const r of receivables) {
       const sale = salesByReceivable.get(r.id);
+      const isIncrease = r.sourceType === 'AccountAdjustment';
+      const increase = isIncrease ? adjustmentMap.get(r.sourceId) : null;
+      if (
+        isIncrease &&
+        (!increase || increase.direction !== 'INCREASE' || increase.generatedReceivableId !== r.id)
+      ) {
+        account.integrityIssues!.push('missing-adjustment-source');
+        account.warnings.push(
+          `Account increase ${r.receivableNumber} has no matching adjustment event.`,
+        );
+      }
       const accrualDate = eligibleJournal(r.journalEntry)
         ? date(r.journalEntry.transactionDate)
         : date(r.issueDate);
@@ -449,11 +490,15 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
       }
       const movement: CustomerAccountMovement = {
         date: accrualDate,
-        type: 'INVOICE',
-        reference: r.receivableNumber,
-        description: `Invoice ${r.receivableNumber}`,
-        sourceId: r.id,
-        sourceType: 'Receivable',
+        type: isIncrease ? 'ADJUSTMENT' : 'INVOICE',
+        reference: isIncrease
+          ? (increase?.journalEntry?.journalNumber ?? r.receivableNumber)
+          : r.receivableNumber,
+        description: isIncrease
+          ? `Non-cash balance increase ${r.receivableNumber}${increase?.reason ? ` / ${increase.reason}` : ''}`
+          : `Invoice ${r.receivableNumber}`,
+        sourceId: isIncrease ? (r.sourceId ?? r.id) : r.id,
+        sourceType: isIncrease ? 'AccountAdjustment' : 'Receivable',
         sourceUrl: '/finance/receivables',
         debit: D(r.amount),
         credit: D(),
@@ -461,6 +506,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
         salesOrderId: sale?.id,
       };
       add(movement);
+      accrualMovements.add(movement);
       account.obligations.push({
         id: r.id,
         issueDate: accrualDate,
@@ -476,13 +522,84 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
         );
       if (r.status === 'CANCELLED') {
         const cancelled = reversalDate(r) ?? (sale ? reversalDate(sale) : null);
-        if (cancelled) reverse(movement, cancelled, `Cancellation of ${r.receivableNumber}`);
+        if (cancelled)
+          reverse(
+            movement,
+            cancelled,
+            isIncrease
+              ? `Reversal of non-cash balance increase ${r.receivableNumber}`
+              : `Cancellation of ${r.receivableNumber}`,
+          );
         else {
           account.integrityIssues!.push('missing-cancellation');
           account.warnings.push(
             `Invoice ${r.receivableNumber} has no dated cancellation evidence. Its historical balance cannot be verified.`,
           );
         }
+      }
+    }
+    for (const adjustment of adjustments) {
+      const journal = adjustment.journalEntry;
+      if (!eligibleJournal(journal)) {
+        account.integrityIssues!.push('missing-posting');
+        account.warnings.push('An account adjustment has no posted accounting evidence.');
+        continue;
+      }
+      if (date(journal.transactionDate) > asOf) continue;
+      const target = allReceivableMap.get(adjustment.targetReceivableId);
+      if (
+        !target ||
+        adjustment.currency !== target.currency ||
+        (adjustment.divisionId ?? null) !== (target.divisionId ?? null) ||
+        (adjustment.branchId ?? null) !== (target.branchId ?? null) ||
+        journal.companyId !== adjustment.companyId ||
+        (journal.divisionId ?? null) !== (adjustment.divisionId ?? null) ||
+        (journal.branchId ?? null) !== (adjustment.branchId ?? null)
+      ) {
+        account.integrityIssues!.push('changed-adjustment-scope');
+        account.warnings.push(
+          'An account adjustment does not match its original customer document and accounting scope.',
+        );
+        continue;
+      }
+      if (adjustment.direction === 'INCREASE') {
+        const generated = allReceivableMap.get(adjustment.generatedReceivableId);
+        if (
+          !generated ||
+          generated.sourceType !== 'AccountAdjustment' ||
+          generated.sourceId !== adjustment.id ||
+          generated.journalEntryId !== adjustment.journalEntryId ||
+          !D(generated.amount).equals(adjustment.amount)
+        ) {
+          account.integrityIssues!.push('missing-adjustment-source');
+          account.warnings.push('A posted account increase has no matching generated receivable.');
+        }
+        // Its generated receivable supplies both the accrual and dated cancellation.
+        continue;
+      }
+      const movement: CustomerAccountMovement = {
+        date: date(journal.transactionDate),
+        type: 'ADJUSTMENT',
+        reference: journal.journalNumber,
+        description: `Non-cash balance decrease ${target.receivableNumber} / ${adjustment.reason}`,
+        sourceId: adjustment.id,
+        sourceType: 'AccountAdjustment',
+        sourceUrl: '/finance/receivables',
+        debit: D(),
+        credit: D(adjustment.amount),
+        receivableId: target.id,
+        salesOrderId: salesByReceivable.get(target.id)?.id,
+      };
+      add(movement);
+      const reversed = reversalDate(adjustment);
+      reverse(
+        movement,
+        reversed,
+        `Reversal of non-cash balance decrease ${target.receivableNumber}${adjustment.reversalReason ? ` / ${adjustment.reversalReason}` : ''}`,
+      );
+      if ((adjustment.status === 'REVERSED' || journal.status === 'REVERSED') && !reversed) {
+        account.integrityIssues!.push('missing-reversal');
+        account.warnings.push('An account adjustment has no posted dated reversal evidence.');
       }
     }
     for (const sale of sales) {
@@ -705,7 +822,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
       }
       const reversed =
         (j.reversedBy_ ?? [])
-          .filter((rj: any) => eligibleJournal(rj))
+          .filter(postedReversal)
           .map((rj: any) => date(rj.transactionDate))[0] ?? null;
       if (j.status === 'REVERSED' && !reversed) {
         account.integrityIssues!.push('missing-reversal');
@@ -780,7 +897,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
         .map((j) => ({
           ...j,
           lines: settlementLines(j.lines),
-          reversedBy_: (j.reversedBy_ ?? []).map((reversal: any) => ({
+          reversedBy_: (j.reversedBy_ ?? []).filter(postedReversal).map((reversal: any) => ({
             ...reversal,
             lines: settlementLines(reversal.lines),
           })),
@@ -807,6 +924,10 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
         (receivableMap.get(journal.referenceId) ??
           receivables.find((invoice) => invoice.journalEntryId === journal.id));
       if (!journal || !r || unverifiedJournals.has(journal.id)) continue;
+      const accrualSource =
+        r.sourceType === 'AccountAdjustment' && r.sourceId
+          ? `AccountAdjustment:${r.sourceId}`
+          : `Receivable:${r.id}`;
       const initialReceipt = recoveredMovement.description.startsWith('Initial sale receipt');
       // Existing verified settlement/write-off/cancellation legs are retained
       // once, including reversals which use the original source identity.
@@ -817,7 +938,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
             movement.debit.equals(recoveredMovement.debit) &&
             movement.credit.equals(recoveredMovement.credit) &&
             ((movement.sourceType === 'JournalEntry' && movement.sourceId === journal.id) ||
-              movement.reversalOfId === `Receivable:${r.id}`),
+              movement.reversalOfId === accrualSource),
         )
       )
         continue;
@@ -827,7 +948,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
         creationReversal &&
         account.movements.some(
           (movement) =>
-            movement.reversalOfId === `Receivable:${r.id}` &&
+            movement.reversalOfId === accrualSource &&
             movement.date.getTime() === recoveredMovement.date.getTime(),
         )
       )
@@ -838,7 +959,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
           ? {
               debit: D(),
               credit: D(r.amount),
-              reversalOfId: `Receivable:${r.id}`,
+              reversalOfId: accrualSource,
             }
           : {}),
         type: initialReceipt ? 'PAYMENT' : 'ADJUSTMENT',
@@ -851,7 +972,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
       if (initialReceipt && movement.date <= asOf) {
         const reversed =
           (journal.reversedBy_ ?? [])
-            .filter(eligibleJournal)
+            .filter(postedReversal)
             .map((reversal: any) => date(reversal.transactionDate))
             .sort((a: Date, b: Date) => a.getTime() - b.getTime())[0] ?? null;
         const amount = movement.credit;
@@ -966,6 +1087,7 @@ export function assembleCustomerAccounts(rows: SourceRows, asOf: Date): Customer
       for (const m of account.movements)
         if (
           m.receivableId === obligation.id &&
+          !accrualMovements.has(m) &&
           m.type !== 'INVOICE' &&
           m.type !== 'PAYMENT' &&
           !(

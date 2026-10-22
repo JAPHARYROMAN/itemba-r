@@ -1,12 +1,25 @@
-import { IsDateString, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 export class RecordPayablePaymentDto {
+  @IsOptional()
+  @IsUUID()
+  requestId?: string;
+
   @IsNotEmpty()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount!: number;
 
-  @IsOptional()
+  @ValidateIf((dto: RecordPayablePaymentDto) => !!dto.requestId || dto.paymentDate !== undefined)
   @IsDateString()
   paymentDate?: string;
 

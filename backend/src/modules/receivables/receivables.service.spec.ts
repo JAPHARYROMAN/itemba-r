@@ -18,6 +18,9 @@ function lockedReceivable(overrides: Record<string, unknown> = {}) {
     paidAmount: '0',
     status: 'OPEN',
     currency: 'TZS',
+    issueDate: new Date('2026-01-15'),
+    generatedByAdjustment: null,
+    _count: { targetedAdjustments: 0 },
     ...overrides,
   };
 }
@@ -273,6 +276,87 @@ describe('ReceivablesService.recordPayment GL settlement', () => {
 });
 
 describe('ReceivablesService.update customer balance projection', () => {
+  it.each([
+    { customerId: 'cust-2' },
+    { divisionId: 'other-division' },
+    { branchId: 'other-branch' },
+    { issueDate: '2026-01-16' },
+  ])('keeps ownership and accrual date immutable after any adjustment: %j', async (dto) => {
+    const { service, tx } = makeService(
+      lockedReceivable({ journalEntryId: null, _count: { targetedAdjustments: 1 } }),
+    );
+    const resolve = jest.spyOn(service as any, 'resolveReceivableScope');
+    await expect(service.update('rec-1', dto as any, user)).rejects.toThrow(
+      'account adjustment history',
+    );
+    expect(resolve).not.toHaveBeenCalled();
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+    expect(tx.receivable.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ _count: { select: { targetedAdjustments: true } } }),
+      }),
+    );
+    const sql = tx.$queryRaw.mock.calls.map(([query]: any[]) =>
+      Array.from(query.strings ?? query).join('?'),
+    );
+    expect(sql[0]).toContain('sales_orders');
+    expect(sql[1]).toContain('receivables');
+  });
+
+  it('protects the generated increase item even when no adjustment targets it', async () => {
+    const { service } = makeService(
+      lockedReceivable({ generatedByAdjustment: { id: 'increase' } }),
+    );
+    await expect(service.update('rec-1', { branchId: 'other' } as any, user)).rejects.toThrow(
+      'account adjustment history',
+    );
+  });
+
+  it('permits notes, due-date changes and unchanged ownership on adjusted receivables', async () => {
+    const { service, tx } = makeService(lockedReceivable({ _count: { targetedAdjustments: 2 } }));
+    const resolve = jest
+      .spyOn(service as any, 'resolveReceivableScope')
+      .mockResolvedValue({ divisionId: null, branchId: null, customerName: 'Acme Ltd' });
+    await service.update(
+      'rec-1',
+      {
+        notes: 'Clarification',
+        dueDate: '2026-03-01',
+        customerId: 'cust-1',
+        issueDate: '2026-01-15',
+      } as any,
+      user,
+    );
+    expect(resolve).toHaveBeenCalledWith(expect.anything(), tx);
+    expect(tx.receivable.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ notes: 'Clarification', dueDate: new Date('2026-03-01') }),
+      }),
+    );
+  });
+
+  it('does not let newly derived party defaults move adjusted accounting scope', async () => {
+    const { service, tx } = makeService(lockedReceivable({ _count: { targetedAdjustments: 1 } }));
+    jest
+      .spyOn(service as any, 'resolveReceivableScope')
+      .mockResolvedValue({ divisionId: 'default-division', branchId: 'default-branch' });
+    await expect(service.update('rec-1', { notes: 'Clarification' } as any, user)).rejects.toThrow(
+      'defaults cannot change',
+    );
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+  });
+
+  it('checks fresh adjustment history after acquiring the row lock rather than trusting the initial read', async () => {
+    const { service, tx } = makeService(lockedReceivable());
+    tx.receivable.findUniqueOrThrow.mockResolvedValue(
+      lockedReceivable({ _count: { targetedAdjustments: 1 } }),
+    );
+    await expect(service.update('rec-1', { customerId: 'cust-2' } as any, user)).rejects.toThrow(
+      'account adjustment history',
+    );
+    expect(tx.receivable.update).not.toHaveBeenCalled();
+  });
+
   it('does not recalculate or rewrite a customer for a notes-only update', async () => {
     const existing = lockedReceivable();
     const { service, tx } = makeService(existing);
@@ -452,6 +536,28 @@ describe('ReceivablesService.writeOff bad-debt journal', () => {
 });
 
 describe('ReceivablesService governed deletion', () => {
+  it.each([
+    { _count: { targetedAdjustments: 1 } },
+    { generatedByAdjustment: { id: 'adjustment-1' } },
+  ])(
+    'preserves an unposted manual document used as an adjustment audit anchor: %p',
+    async (overrides) => {
+      const { service, tx } = makeService(lockedReceivable(overrides));
+      await expect(service.remove('rec-1', user)).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.receivable.findUniqueOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            generatedByAdjustment: { select: { id: true } },
+            _count: expect.objectContaining({
+              select: expect.objectContaining({ targetedAdjustments: true }),
+            }),
+          }),
+        }),
+      );
+      expect(tx.receivable.update).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     { journalEntryId: 'je-1' },
     { paidAmount: '10' },

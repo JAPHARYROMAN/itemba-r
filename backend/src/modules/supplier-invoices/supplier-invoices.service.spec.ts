@@ -1402,6 +1402,7 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
 
     const captured: any = { payableUpdates: [] as any[] };
     const prisma: any = {
+      accountAdjustment: { count: jest.fn(async () => 0) },
       supplierInvoice: {
         updateMany: jest.fn(async () => ({ count: 1 })),
         findUnique: jest.fn(async () => ({ status: 'CANCELLED' })),
@@ -1481,6 +1482,27 @@ describe('SupplierInvoicesService void (payable-at-receipt aware)', () => {
     const { service, postingEngine } = makeVoidService({ invoice: { status: 'DRAFT' } });
     await expect(service.void('si-1', undefined, user)).rejects.toBeInstanceOf(BadRequestException);
     expect(postingEngine.postLines).not.toHaveBeenCalled();
+  });
+
+  it('checks posted adjustments after source/payable locks and aborts void before changing accounting', async () => {
+    const { service, prisma, postingEngine, auditLogs, captured } = makeVoidService();
+    prisma.accountAdjustment.count.mockResolvedValue(1);
+    await expect(service.void('si-1', undefined, user)).rejects.toThrow(
+      'Reverse the posted account adjustments',
+    );
+    expect(prisma.accountAdjustment.count).toHaveBeenCalledWith({
+      where: {
+        companyId: 'company-1',
+        targetPayableId: 'pay-1',
+        status: 'POSTED',
+      },
+    });
+    const lastLock = prisma.$queryRaw.mock.invocationCallOrder.at(-1);
+    expect(lastLock).toBeLessThan(prisma.accountAdjustment.count.mock.invocationCallOrder[0]);
+    expect(prisma.journalEntry.updateMany).not.toHaveBeenCalled();
+    expect(postingEngine.postLines).not.toHaveBeenCalled();
+    expect(captured.payableUpdates).toEqual([]);
+    expect(auditLogs.logStrictInTransaction).not.toHaveBeenCalled();
   });
 
   it('is an idempotent no-op when the invoice is already CANCELLED', async () => {

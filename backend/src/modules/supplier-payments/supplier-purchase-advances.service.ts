@@ -9,6 +9,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AccountResolverService } from '../../common/services/account-resolver.service';
 import { assertCashAccountScopeCompatible } from '../../common/services/cash-account-scope.helper';
 import { OrganizationScopeService } from '../../common/services/organization-scope.service';
+import { assertNoLegacyPaymentClaim } from '../../common/utils/document-payment-request';
 import {
   PostingEngineService,
   partyOf,
@@ -45,6 +46,81 @@ export class SupplierPurchaseAdvancesService {
   ) {
     if (!user.permissions.includes('purchases.view'))
       throw new ForbiddenException('Purchase view permission is required for an advance.');
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      input.requestId,
+    );
+    const requestId = isUuid ? input.requestId.toLowerCase() : input.requestId;
+    const method = toPaymentMethodGeneral(
+      drawer.kind === 'CASH' ? 'Cash' : drawer.kind === 'BANK' ? 'Bank transfer' : 'Mobile money',
+    );
+    // Claim the same intent before any purchase source or cash-account lock.
+    // The record-only and canonical payment writers use this mutex too.
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`SupplierPaymentRequest:${requestId}`}, 0))`;
+    await assertNoLegacyPaymentClaim(tx, drawer.companyId, 'Payable', requestId);
+    const include = {
+      purchaseAdvance: true,
+      journalEntry: true,
+      cashDeskMovement: true,
+      carriedMovement: true,
+    } satisfies Prisma.SupplierPaymentInclude;
+    const matches = isUuid
+      ? await tx.supplierPayment.findMany({
+          where: { requestId: { equals: requestId, mode: 'insensitive' } },
+          include,
+          take: 2,
+        })
+      : [await tx.supplierPayment.findUnique({ where: { requestId }, include })].filter(
+          (payment): payment is NonNullable<typeof payment> => Boolean(payment),
+        );
+    if (matches.length > 1)
+      throw new ConflictException(
+        'This advance request has conflicting historical payment records. Reconcile them before retrying.',
+      );
+    const existing = matches[0];
+    if (existing) {
+      const sameKey = (value: string | null) =>
+        value !== null && (isUuid ? value.toLowerCase() === requestId : value === requestId);
+      const movement = existing.cashDeskMovement ?? existing.carriedMovement;
+      const ownsSource = !movement
+        ? sameKey(existing.sourceId)
+        : existing.sourceId === movement.id &&
+          sameKey(movement.requestId) &&
+          movement.supplierPaymentId === existing.id &&
+          movement.kind === 'SUPPLIER_PAYMENT' &&
+          !movement.reversedAt;
+      if (
+        existing.deletedAt ||
+        existing.status !== 'COMPLETED' ||
+        existing.reversedAt ||
+        existing.companyId !== drawer.companyId ||
+        existing.supplierId !== input.supplierId ||
+        existing.currency !== drawer.currency ||
+        !existing.amount.eq(amount) ||
+        existing.paymentDate.getTime() !== date.getTime() ||
+        existing.cashAccountId !== drawer.erpCashAccountId ||
+        existing.method !== method ||
+        existing.reference !== input.reference ||
+        existing.notes !== input.description ||
+        existing.sourceType !== 'CashDesk' ||
+        !ownsSource ||
+        existing.purchaseAdvance?.purchaseOrderId !== input.purchaseOrderId ||
+        !existing.journalEntry ||
+        existing.journalEntry.status !== 'POSTED' ||
+        existing.journalEntry.deletedAt ||
+        existing.journalEntry.referenceType !== 'SupplierPayment' ||
+        existing.journalEntry.referenceId !== existing.id
+      )
+        throw new ConflictException(
+          'This payment request already belongs to a different or reversed payment. Start a new advance payment.',
+        );
+      await this.org.assertCanAccessScope(
+        user,
+        existing.divisionId,
+        existing.branchId,
+        AccessLevel.WRITE,
+      );
+      return { payment: existing, payableId: undefined, invoiceId: undefined };
+    }
     await tx.$queryRaw`SELECT id FROM purchase_orders WHERE id = ${input.purchaseOrderId!} FOR UPDATE`;
     const order = await tx.purchaseOrder.findFirst({
       where: {
@@ -137,7 +213,7 @@ export class SupplierPurchaseAdvancesService {
           companyId: order.companyId,
           tx,
         }),
-        requestId: input.requestId,
+        requestId,
         companyId: order.companyId,
         divisionId: order.divisionId,
         branchId: order.branchId,
@@ -147,15 +223,9 @@ export class SupplierPurchaseAdvancesService {
         unappliedAmount: amount,
         paymentDate: date,
         currency: order.currency,
-        method: toPaymentMethodGeneral(
-          drawer.kind === 'CASH'
-            ? 'Cash'
-            : drawer.kind === 'BANK'
-              ? 'Bank transfer'
-              : 'Mobile money',
-        ),
+        method,
         sourceType: 'CashDesk',
-        sourceId: input.requestId,
+        sourceId: requestId,
         cashAccountId: cash.id,
         reference: input.reference,
         notes: input.description,

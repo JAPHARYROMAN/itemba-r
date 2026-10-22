@@ -10,7 +10,12 @@ import { useWorkspaceLayout } from '@/hooks/use-workspace-preferences';
 import { RecordBrowser } from '@/components/workspace/record-browser';
 import { WorkspaceViewSwitch } from '@/components/workspace/workspace-view-switch';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AccountTransactions,
+  adjustmentUnavailableReason,
+  type PaymentReplacement,
+} from '@/features/finance/account-transactions';
 import {
   Btn,
   Card,
@@ -29,6 +34,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { usePartyCredit } from '@/hooks/use-party-credit';
 import { DocumentArtifactButton } from '@/components/documents';
 import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
+import { localToday } from '@/features/invoice-desk/types';
 import {
   canDeleteFinancialDocument,
   canSettleFinancialDocument,
@@ -718,27 +724,34 @@ function ReceivableDetailModal({
 
 export function RecordPaymentModal({
   receivable,
+  replacement,
   onClose: closeWithoutGuard,
   onDone,
 }: {
   receivable: Receivable;
+  replacement?: PaymentReplacement;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [amount, setAmount] = useState('');
-  const [paymentDate, setPaymentDate] = useState('');
-  const [cashAccountId, setCashAccountId] = useState('');
+  const [amount, setAmount] = useState(replacement?.amount ?? '');
+  const [paymentDate, setPaymentDate] = useState(() => replacement?.paymentDate ?? localToday());
+  const [cashAccountId, setCashAccountId] = useState(replacement?.cashAccountId ?? '');
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [cashAccountsFailed, setCashAccountsFailed] = useState(false);
   const [cashAccountsRetry, setCashAccountsRetry] = useState(0);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(replacement?.notes ?? '');
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const inFlight = useRef(false);
+  const intent = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const draft = useFormGuard({ amount, paymentDate, cashAccountId, notes }, (baseline) => {
     setAmount(baseline.amount);
     setPaymentDate(baseline.paymentDate);
     setCashAccountId(baseline.cashAccountId);
     setNotes(baseline.notes);
   });
-  const onClose = () => draft.requestClose(closeWithoutGuard);
+  const onClose = () => {
+    if (!inFlight.current) draft.requestClose(closeWithoutGuard);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -785,8 +798,13 @@ export function RecordPaymentModal({
   );
 
   const handleSubmit = async () => {
+    if (inFlight.current) return;
+    if (!paymentDate) {
+      setError('Payment date is required');
+      return;
+    }
     const amt = Number(amount);
-    if (!amt || amt <= 0) {
+    if (!Number.isFinite(amt) || amt <= 0) {
       setError('Valid amount is required');
       return;
     }
@@ -805,47 +823,71 @@ export function RecordPaymentModal({
       setError('Select the cash / bank account the money landed in');
       return;
     }
+    if (
+      replacement &&
+      (!paymentDate || !matchingCashAccounts.some((account) => account.id === cashAccountId))
+    ) {
+      setError(
+        'Confirm the replacement date and select an active cash / bank account in the document currency.',
+      );
+      return;
+    }
+    if (replacement && !replacementConfirmed) {
+      setError('Confirm the replacement amount, date and cash / bank account before submitting.');
+      return;
+    }
+    const payload = {
+      amount: amt,
+      paymentDate: paymentDate || undefined,
+      cashAccountId: cashAccountId || undefined,
+      notes: notes || undefined,
+    };
+    const fingerprint = JSON.stringify(payload);
+    if (!intent.current) intent.current = { fingerprint, requestId: crypto.randomUUID() };
+    inFlight.current = true;
     setSaving(true);
     setError('');
     try {
       const res = await fetch(`/api/backend/receivables/${receivable.id}/record-payment`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: amt,
-          paymentDate: paymentDate || undefined,
-          cashAccountId: cashAccountId || undefined,
-          notes: notes || undefined,
-        }),
+        body: JSON.stringify({ ...payload, requestId: intent.current.requestId }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message ?? 'Payment failed');
       }
       draft.markSaved();
+      intent.current = null;
+      notifyDeskSaved('cash-desk');
       onDone();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
 
   return (
     <Modal
-      onChangeCapture={draft.touch}
+      onChangeCapture={(event) => {
+        draft.touch();
+        if (!(event.target instanceof HTMLInputElement && event.target.type === 'checkbox'))
+          setReplacementConfirmed(false);
+      }}
       open
       onClose={onClose}
-      title="Record Payment"
+      title={replacement ? 'Record Replacement Payment' : 'Record Payment'}
       subtitle={`Outstanding: ${formatMoney(receivableOutstandingAmount(receivable), receivable.currency)}`}
       size="md"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>
+          <Btn variant="secondary" disabled={saving} onClick={onClose}>
             Cancel
           </Btn>
           <Btn variant="success" onClick={handleSubmit} loading={saving}>
-            Record Payment
+            {replacement ? 'Record Replacement Payment' : 'Record Payment'}
           </Btn>
         </>
       }
@@ -858,7 +900,13 @@ export function RecordPaymentModal({
           {error}
         </div>
       )}
-      <div className="space-y-3">
+      <fieldset disabled={saving} className="space-y-3">
+        {replacement && (
+          <p role="status">
+            The original payment {replacement.originalPaymentNumber} has been reversed. Review and
+            explicitly submit this new payment. Closing leaves the reversal in place.
+          </p>
+        )}
         <FormInput
           label="Amount"
           required
@@ -881,18 +929,26 @@ export function RecordPaymentModal({
             label: `${a.accountName}${a.accountType ? ` · ${a.accountType}` : ''} · ${a.currency || 'TZS'}`,
           }))}
           hint={
-            cashAccountsFailed
-              ? undefined
-              : matchingCashAccounts.length === 0
-                ? `No active ${documentCurrency} cash / bank accounts found for this company. The payment will be recorded against the default cash on hand account.`
-                : `Only ${documentCurrency} accounts are listed — the account currency must match the receivable.`
+            replacement && matchingCashAccounts.length === 0
+              ? 'An active cash / bank account in the document currency is required for a replacement payment.'
+              : cashAccountsFailed
+                ? undefined
+                : matchingCashAccounts.length === 0
+                  ? `No active ${documentCurrency} cash / bank accounts found for this company. The payment will be recorded against the default cash on hand account.`
+                  : `Only ${documentCurrency} accounts are listed — the account currency must match the receivable.`
           }
         />
         {cashAccountsFailed && (
           <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <span>
-              Couldn&apos;t load the cash / bank accounts. You can retry, or record the payment
-              against the default cash on hand account.
+              {replacement ? (
+                'Could not load accounts. Retry before recording the replacement payment.'
+              ) : (
+                <>
+                  Couldn&apos;t load the cash / bank accounts. You can retry, or record the payment
+                  against the default cash on hand account.
+                </>
+              )}
             </span>
             <button
               type="button"
@@ -905,6 +961,7 @@ export function RecordPaymentModal({
         )}
         <FormDateField
           label="Payment Date"
+          required
           value={paymentDate}
           onChange={(value) => setPaymentDate(value)}
         />
@@ -915,7 +972,17 @@ export function RecordPaymentModal({
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Optional notes…"
         />
-      </div>
+        {replacement && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={replacementConfirmed}
+              onChange={(event) => setReplacementConfirmed(event.target.checked)}
+            />
+            I confirm the replacement amount, payment date and cash / bank account.
+          </label>
+        )}
+      </fieldset>
     </Modal>
   );
 }
@@ -1319,6 +1386,11 @@ export default function ReceivablesPage() {
   const [editing, setEditing] = useState<Receivable | null>(null);
   const [deleting, setDeleting] = useState<Receivable | null>(null);
   const [recordingPayment, setRecordingPayment] = useState<Receivable | null>(null);
+  const [replacement, setReplacement] = useState<PaymentReplacement | undefined>();
+  const [transactions, setTransactions] = useState<{
+    record: Receivable;
+    mode: 'history' | 'adjust';
+  } | null>(null);
   const [writingOff, setWritingOff] = useState<Receivable | null>(null);
 
   const [scopeReady, setScopeReady] = useState(false);
@@ -1460,10 +1532,33 @@ export default function ReceivablesPage() {
       <Btn variant="secondary" size="xs" onClick={() => setViewing(r)}>
         View
       </Btn>
+      <Btn
+        variant="secondary"
+        size="xs"
+        onClick={() => setTransactions({ record: r, mode: 'history' })}
+      >
+        Transactions
+      </Btn>
       {canManage && (
         <>
+          <Btn
+            variant="secondary"
+            size="xs"
+            disabled={!!adjustmentUnavailableReason(r)}
+            title={adjustmentUnavailableReason(r) ?? undefined}
+            onClick={() => setTransactions({ record: r, mode: 'adjust' })}
+          >
+            Adjust balance
+          </Btn>
           {canSettleFinancialDocument(r) && (
-            <Btn variant="success" size="xs" onClick={() => setRecordingPayment(r)}>
+            <Btn
+              variant="success"
+              size="xs"
+              onClick={() => {
+                setReplacement(undefined);
+                setRecordingPayment(r);
+              }}
+            >
               Pay
             </Btn>
           )}
@@ -1534,10 +1629,28 @@ export default function ReceivablesPage() {
           }}
         />
       )}
+      {transactions && (
+        <AccountTransactions
+          kind="receivables"
+          document={transactions.record}
+          initialMode={transactions.mode}
+          onClose={() => setTransactions(null)}
+          onChanged={() => void load()}
+          onReplace={(next, restored) => {
+            setReplacement(next);
+            setRecordingPayment({ ...transactions.record, ...restored } as Receivable);
+            setTransactions(null);
+          }}
+        />
+      )}
       {recordingPayment && (
         <RecordPaymentModal
           receivable={recordingPayment}
-          onClose={() => setRecordingPayment(null)}
+          replacement={replacement}
+          onClose={() => {
+            setRecordingPayment(null);
+            setReplacement(undefined);
+          }}
           onDone={() => {
             setRecordingPayment(null);
             load();
@@ -1878,54 +1991,8 @@ export default function ReceivablesPage() {
                                           <StatusBadge status={financialDocumentStatus(r)} />
                                         </td>
                                         <td className="px-3 py-2">
-                                          <div className="flex items-center justify-end gap-1.5">
-                                            <Btn
-                                              variant="secondary"
-                                              size="xs"
-                                              onClick={() => setViewing(r)}
-                                            >
-                                              View
-                                            </Btn>
-                                            {canManage && (
-                                              <>
-                                                {canSettleFinancialDocument(r) && (
-                                                  <Btn
-                                                    variant="success"
-                                                    size="xs"
-                                                    onClick={() => setRecordingPayment(r)}
-                                                  >
-                                                    Pay
-                                                  </Btn>
-                                                )}
-                                                {canSettleFinancialDocument(r) && (
-                                                  <Btn
-                                                    variant="warning"
-                                                    size="xs"
-                                                    onClick={() => setWritingOff(r)}
-                                                  >
-                                                    Write Off
-                                                  </Btn>
-                                                )}
-                                                {financialLifecycleStatus(r) === 'OPEN' && (
-                                                  <Btn
-                                                    variant="ghost"
-                                                    size="xs"
-                                                    onClick={() => setEditing(r)}
-                                                  >
-                                                    Edit
-                                                  </Btn>
-                                                )}
-                                                {canDeleteFinancialDocument(r) && (
-                                                  <Btn
-                                                    variant="danger"
-                                                    size="xs"
-                                                    onClick={() => setDeleting(r)}
-                                                  >
-                                                    Delete
-                                                  </Btn>
-                                                )}
-                                              </>
-                                            )}
+                                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                            {renderRecordActions(r)}
                                           </div>
                                         </td>
                                       </tr>

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { CustomerPaymentsService } from './customer-payments.service';
 import { CustomerPaymentStatus } from './dto/customer-payment-status.enum';
 
-const user = { id: 'user-1' } as any;
+const user = { id: 'user-1', roleScopes: ['COMPANY'] } as any;
 
 function receivable(overrides: Record<string, any> = {}) {
   return {
@@ -174,6 +174,10 @@ function makeService(
           : {
               id: 'je-1',
               companyId: 'company-1',
+              status: 'POSTED',
+              deletedAt: null,
+              referenceType: 'CustomerPayment',
+              referenceId: 'pay-1',
               divisionId: null,
               branchId: null,
               lines: originalJournalLines,
@@ -181,6 +185,7 @@ function makeService(
       ),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
+    cashDeskMovement: { findUnique: jest.fn(async () => null) },
   };
 
   const prisma: any = {
@@ -200,7 +205,10 @@ function makeService(
     $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
 
-  const auditLogs = { log: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = {
+    log: jest.fn().mockResolvedValue(undefined),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn().mockResolvedValue(undefined),
     accessibleCompanyIds: jest.fn().mockResolvedValue(['company-1']),
@@ -240,6 +248,58 @@ function makeService(
     codes,
   };
 }
+
+describe('CustomerPaymentsService reversal audit transaction', () => {
+  it('records the entered reason atomically and preserves original payment notes', async () => {
+    const { service, tx, auditLogs } = makeService({
+      paymentOverrides: { notes: 'Original bank reference' },
+      receivablesById: {
+        'rec-1': receivable({
+          paidAmount: new Prisma.Decimal(150),
+          outstandingAmount: new Prisma.Decimal(0),
+          status: 'PAID',
+        }),
+      },
+    });
+    await service.reverse('pay-1', { reason: '  Bank rejected payment  ' }, user);
+    expect(tx.customerPayment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { reversalJournalEntryId: 'je-1' },
+      }),
+    );
+    expect(tx.journalEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ reversalReason: 'Bank rejected payment' }),
+      }),
+    );
+    expect(auditLogs.logStrictInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        action: 'CUSTOMER_PAYMENT_REVERSE',
+        oldValue: { status: 'COMPLETED', notes: 'Original bank reference' },
+        newValue: expect.objectContaining({ reason: 'Bank rejected payment' }),
+      }),
+    );
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+
+  it('fails the transaction if the required reversal audit cannot be appended', async () => {
+    const { service, auditLogs } = makeService({
+      receivablesById: {
+        'rec-1': receivable({
+          paidAmount: new Prisma.Decimal(150),
+          outstandingAmount: new Prisma.Decimal(0),
+          status: 'PAID',
+        }),
+      },
+    });
+    auditLogs.logStrictInTransaction.mockRejectedValueOnce(new Error('audit unavailable'));
+    await expect(
+      service.reverse('pay-1', { reason: 'Correction requested' }, user),
+    ).rejects.toThrow('audit unavailable');
+    expect(auditLogs.log).not.toHaveBeenCalled();
+  });
+});
 
 describe('CustomerPaymentsService.create — allocation across multiple receivables', () => {
   it('allocates one payment across multiple receivables and decrements each outstanding', async () => {
@@ -708,9 +768,9 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
         },
       });
 
-      await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        service.reverse('pay-1', { reason: 'Correction requested' } as any, user),
+      ).rejects.toBeInstanceOf(ConflictException);
       expect(receivableUpdates['rec-1']).toBeUndefined();
       expect(postLines).not.toHaveBeenCalled();
       expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
@@ -728,9 +788,9 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(100) }],
       receivablesById: { 'rec-1': record },
     });
-    await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.reverse('pay-1', { reason: 'Correction requested' } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(postLines).not.toHaveBeenCalled();
     expect(receivableUpdates).toEqual({});
     expect(cashAccountUpdates).toEqual([]);
@@ -742,17 +802,24 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
       paymentStatus: CustomerPaymentStatus.REVERSED,
     });
 
-    await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.reverse('pay-1', { reason: 'Correction requested' } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(postLines).not.toHaveBeenCalled();
   });
 
   it('claims COMPLETED -> REVERSED via a guarded updateMany', async () => {
     const { service, tx } = makeService({
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
+      receivablesById: {
+        'rec-1': receivable({
+          paidAmount: new Prisma.Decimal(150),
+          outstandingAmount: new Prisma.Decimal(0),
+          status: 'PAID',
+        }),
+      },
     });
-    await service.reverse('pay-1', {} as any, user);
+    await service.reverse('pay-1', { reason: 'Correction requested' } as any, user);
     expect(tx.customerPayment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -783,14 +850,12 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
       originalJournalMissing: true,
     });
 
-    await expect(service.reverse('pay-1', {} as any, user)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.reverse('pay-1', { reason: 'Correction requested' } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('does NOT throw when a payment that never posted a JE (journalEntryId null) is reversed', async () => {
-    // A never-posted payment (journalEntryId null) legitimately has no mirror to
-    // post; reversePaymentJournal returns null and the reversal proceeds.
+  it('rejects public reversal of a payment with no posted original journal', async () => {
     const { service, postLines } = makeService({
       paymentAllocations: [{ receivableId: 'rec-1', amount: new Prisma.Decimal(150) }],
       paymentOverrides: { journalEntryId: null },
@@ -805,8 +870,9 @@ describe('CustomerPaymentsService.reverse — restores receivables + mirror JE',
       originalJournalMissing: true,
     });
 
-    await expect(service.reverse('pay-1', {} as any, user)).resolves.toBeDefined();
-    // No mirror JE posted (nothing to reverse), and no throw.
+    await expect(
+      service.reverse('pay-1', { reason: 'Correction requested' } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(postLines).not.toHaveBeenCalled();
   });
 });
@@ -926,8 +992,10 @@ describe('CustomerPaymentsService — CashAccount.currentBalance maintenance', (
       originalJournalMissing: true,
     });
 
-    await service.reverse('pay-1', {} as any, user);
-    // No cash leg was ever posted -> nothing to unwind.
+    await expect(
+      service.reverse('pay-1', { reason: 'Correction requested' } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
+    // No posted original exists, so the public reversal is rejected before cash changes.
     expect(tx.cashAccount.updateMany).not.toHaveBeenCalled();
   });
 });
