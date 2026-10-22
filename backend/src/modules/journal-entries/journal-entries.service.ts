@@ -498,6 +498,26 @@ export class JournalEntriesService {
 
   async reverse(id: string, dto: ReverseJournalEntryDto, user: AuthUser) {
     const original = await this.findOne(id, user, AccessLevel.WRITE);
+    const paymentSettlement =
+      (original.referenceType === 'Receivable' &&
+        /^Receivable settlement /i.test(original.description)) ||
+      (original.referenceType === 'Payable' && /^Payable settlement /i.test(original.description));
+    if (
+      [
+        'AccountAdjustment',
+        'CustomerPayment',
+        'CustomerPaymentReversal',
+        'SupplierPayment',
+        'SupplierPaymentReversal',
+        'ReceivablePaymentReversal',
+        'PayablePaymentReversal',
+      ].includes(original.referenceType ?? '') ||
+      paymentSettlement
+    ) {
+      throw new BadRequestException(
+        'Reverse this adjustment or payment from its originating receivable/payable Transactions history or its owning Cash Desk, Invoice Desk or Expenses workflow so account and cash balances stay together.',
+      );
+    }
     if (['PetroDollar', 'PetroDollarReversal'].includes(original.referenceType || ''))
       throw new BadRequestException(
         'Reverse the entire shift posting in PetroDollar so inventory, cash and journals stay together.',
