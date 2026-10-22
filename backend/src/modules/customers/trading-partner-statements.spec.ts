@@ -85,6 +85,7 @@ describe.each(['customer', 'supplier'] as const)('%s 360 saved statements', (kin
       [`${kind}Payment`]: { findMany: payments },
       [`${kind}StatementRun`]: { findMany: runQuery },
       journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
+      accountAdjustment: { findMany: jest.fn().mockResolvedValue([]) },
       creditNote: { findMany: jest.fn().mockResolvedValue([]) },
       refund: { findMany: jest.fn().mockResolvedValue([]) },
       customerPriceAgreement: { findMany: jest.fn().mockResolvedValue([]) },

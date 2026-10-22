@@ -6,7 +6,6 @@ import {
   IsString,
   IsUUID,
   Min,
-  ValidateIf,
 } from 'class-validator';
 
 export class RecordPayablePaymentDto {
@@ -19,7 +18,8 @@ export class RecordPayablePaymentDto {
   @Min(0.01)
   amount!: number;
 
-  @ValidateIf((dto: RecordPayablePaymentDto) => !!dto.requestId || dto.paymentDate !== undefined)
+  // The service requires a date for retryable requests; older callers may omit both.
+  @IsOptional()
   @IsDateString()
   paymentDate?: string;
 

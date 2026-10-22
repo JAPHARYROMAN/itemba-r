@@ -167,6 +167,70 @@ describe('standalone finance/operations positive mutation evidence tranche', () 
     }
   });
 
+  it('pins nullable customer-payment request IDs when these fixtures do not submit an idempotency token', () => {
+    const create = fixture('CustomerPaymentsController.create');
+    expect(create.request.body).not.toHaveProperty('requestId');
+    expect(create.effect.kind).toBe('compound');
+    if (create.effect.kind !== 'compound')
+      throw new Error('Customer payment requires compound evidence');
+    const payment = create.effect.effects.find((effect) => effect.model === 'CustomerPayment');
+    expect(payment).toMatchObject({
+      kind: 'scoped-row-create',
+      expectedFields: { requestId: { literal: null } },
+    });
+    const reverse = fixture('CustomerPaymentsController.reverse');
+    expect(reverse.preStates?.find((state) => state.model === 'CustomerPayment')).toMatchObject({
+      fields: { requestId: { literal: null } },
+    });
+  });
+
+  it('preserves original payment notes and records the reversal reason on its owned journal', () => {
+    const reverse = fixture('CustomerPaymentsController.reverse');
+    const notes = { literal: 'fixture original payment reference' };
+    expect(reverse.preStates?.find((state) => state.model === 'CustomerPayment')).toMatchObject({
+      fields: { notes },
+    });
+    expect(reverse.preStates?.find((state) => state.model === 'JournalEntry')).toMatchObject({
+      fields: {
+        referenceType: { literal: 'CustomerPayment' },
+        referenceId: {
+          binding: 'financialPositiveCustomerPaymentReverse',
+          path: ['payment', 'id'],
+        },
+        reversalReason: { literal: null },
+      },
+    });
+    expect(reverse.effect.kind).toBe('compound');
+    if (reverse.effect.kind !== 'compound')
+      throw new Error('Customer reversal requires compound evidence');
+    expect(reverse.effect.effects.find((effect) => effect.effectId === 'payment')).toMatchObject({
+      expectedFields: { notes },
+    });
+    expect(
+      reverse.effect.effects.find((effect) => effect.effectId === 'originalJournal'),
+    ).toMatchObject({
+      expectedFields: { reversalReason: reverse.request.body?.reason },
+    });
+    expect(reverse.preStates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'JournalEntryLine',
+          id: {
+            binding: 'financialPositiveCustomerPaymentReverse',
+            path: ['creditLine', 'id'],
+          },
+          fields: expect.objectContaining({
+            partyType: { literal: 'CUSTOMER' },
+            customerId: {
+              binding: 'financialPositiveCustomerPaymentReverse',
+              path: ['customer', 'id'],
+            },
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('requires exact explicit audit attribution and deterministic recovery for every control', () => {
     for (const fixture of fixtures) {
       expect(fixture.audit.required).toBe(true);
