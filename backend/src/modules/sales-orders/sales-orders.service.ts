@@ -3163,10 +3163,10 @@ export class SalesOrdersService {
 
   async cancel(id: string, user: AuthUser) {
     const userId = user.id;
-    const existing = await this.findOne(id, user, AccessLevel.WRITE);
-    if (existing.posTenders && existing.status !== 'DRAFT')
+    const visible = await this.findOne(id, user, AccessLevel.WRITE);
+    if (visible.posTenders && visible.status !== 'DRAFT')
       throw new BadRequestException('Use linked POS returns for an allocated payment sale');
-    if (!['DRAFT', 'CONFIRMED'].includes(existing.status as string)) {
+    if (!['DRAFT', 'CONFIRMED'].includes(visible.status as string)) {
       throw new BadRequestException('Only DRAFT or CONFIRMED sales orders can be cancelled');
     }
     // Double-reversal guard (fail-closed): if an ISSUED credit note already
@@ -3179,7 +3179,7 @@ export class SalesOrdersService {
     const issuedCreditNote = await this.prisma.creditNote.findFirst({
       where: {
         salesOrderId: id,
-        companyId: existing.companyId,
+        companyId: visible.companyId,
         status: 'ISSUED',
         deletedAt: null,
       },
@@ -3195,7 +3195,7 @@ export class SalesOrdersService {
     // zeroes the receivable's outstanding — it posts NO reversing cash/journal
     // entry and leaves paidAmount orphaned, drifting the ledger. Block it and
     // require an explicit refund / credit note to reverse the payment first.
-    if (Number(existing.paidAmount ?? 0) > 0 || existing.paymentStatus !== 'UNPAID') {
+    if (Number(visible.paidAmount ?? 0) > 0 || visible.paymentStatus !== 'UNPAID') {
       throw new BadRequestException(
         'This sales order has received payment and cannot be cancelled directly. ' +
           'Record a refund or credit note to reverse the payment first.',
@@ -3203,6 +3203,61 @@ export class SalesOrdersService {
     }
 
     const record = await this.prisma.$transaction(async (tx) => {
+      // Match adjustment posting: source first, then its canonical AR rows.
+      // A cancellation must not strand a concurrently posted increase or
+      // relieve AR a second time after a noncash decrease.
+      await tx.$queryRaw`SELECT id FROM sales_orders
+        WHERE id = ${id} AND "companyId" = ${visible.companyId}
+          AND "deletedAt" IS NULL FOR UPDATE`;
+      const receivables = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM receivables WHERE "companyId" = ${visible.companyId}
+          AND "deletedAt" IS NULL AND
+            (id IN (SELECT "receivableId" FROM sales_orders WHERE id = ${id})
+             OR ("sourceType" = 'SalesOrder' AND "sourceId" = ${id}))
+        ORDER BY id FOR UPDATE`;
+      const activeAdjustments = receivables.length
+        ? await tx.accountAdjustment.count({
+            where: {
+              companyId: visible.companyId,
+              targetReceivableId: { in: receivables.map((row) => row.id) },
+              status: 'POSTED',
+            },
+          })
+        : 0;
+      if (activeAdjustments) {
+        throw new ConflictException(
+          'Reverse the posted account adjustments on this receivable before cancelling its sales order.',
+        );
+      }
+      const existing = await this.findOne(id, user, AccessLevel.WRITE, tx);
+      if (!['DRAFT', 'CONFIRMED'].includes(existing.status as string)) {
+        throw new ConflictException(
+          'The sales order changed before cancellation; review its current status',
+        );
+      }
+      if (existing.posTenders && existing.status !== 'DRAFT') {
+        throw new BadRequestException('Use linked POS returns for an allocated payment sale');
+      }
+      if (Number(existing.paidAmount ?? 0) > 0 || existing.paymentStatus !== 'UNPAID') {
+        throw new BadRequestException(
+          'This sales order has received payment; reverse its payment before cancellation.',
+        );
+      }
+      if (
+        await tx.creditNote.findFirst({
+          where: {
+            salesOrderId: id,
+            companyId: existing.companyId,
+            status: 'ISSUED',
+            deletedAt: null,
+          },
+          select: { id: true },
+        })
+      ) {
+        throw new ConflictException(
+          'Void the issued credit note before cancelling this sales order.',
+        );
+      }
       if (existing.status === 'CONFIRMED') {
         // GL reversal (DECISION 2): a CONFIRMED order posted a balanced
         // confirmation journal (DR AR/Cash, CR Revenue/VAT, plus DR COGS / CR
@@ -3349,7 +3404,7 @@ export class SalesOrdersService {
       entityId: id,
       userId,
       companyId: record.companyId,
-      oldValue: { status: existing.status } as any,
+      oldValue: { status: visible.status } as any,
       newValue: { status: 'CANCELLED' } as any,
       severity: AuditSeverity.MEDIUM,
     });

@@ -46,6 +46,8 @@ import { ExpenseCategoriesModule } from './modules/expense-categories/expense-ca
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
 import { PayablesModule } from './modules/payables/payables.module';
+import { AccountAdjustmentsModule } from './modules/account-adjustments/account-adjustments.module';
+import { DocumentPaymentsModule } from './modules/document-payments/document-payments.module';
 import { IntercompanyTransactionsModule } from './modules/intercompany-transactions/intercompany-transactions.module';
 import { FinancialReportsModule } from './modules/financial-reports/financial-reports.module';
 import { ReportsCatalogModule } from './modules/reports-catalog/reports-catalog.module';
@@ -297,6 +299,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     ExpensesModule,
     ReceivablesModule,
     PayablesModule,
+    AccountAdjustmentsModule,
+    DocumentPaymentsModule,
     IntercompanyTransactionsModule,
     FinancialReportsModule,
     ReportsCatalogModule,

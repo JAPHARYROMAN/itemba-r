@@ -85,7 +85,10 @@ function setup(
     journalEntry: { findFirst: jest.fn(), updateMany: jest.fn(async () => ({ count: 1 })) },
   };
   const prisma: any = { $transaction: jest.fn(async (fn: any) => fn(tx)) };
-  const auditLogs = { log: jest.fn() } as any;
+  const auditLogs = {
+    log: jest.fn(),
+    logStrictInTransaction: jest.fn().mockResolvedValue(undefined),
+  } as any;
   const companyScope = {
     assertCanAccessCompany: jest.fn(),
     accessibleCompanyIds: jest.fn(async () => ['company-1']),
@@ -101,7 +104,15 @@ function setup(
     { postLines } as any,
     codes,
   );
-  return { service, tx, prisma, postLines, resolve, readPayable: () => ({ ...payable }) };
+  return {
+    service,
+    tx,
+    prisma,
+    auditLogs,
+    postLines,
+    resolve,
+    readPayable: () => ({ ...payable }),
+  };
 }
 
 const baseInput = () => ({
@@ -308,7 +319,18 @@ describe('SupplierPaymentsService.createInTransaction', () => {
   });
 
   it('returns the original payment on a replayed requestId without touching anything', async () => {
-    const existing = { id: 'spay-old', requestId: 'req-1' };
+    const existing = {
+      ...baseInput(),
+      id: 'spay-old',
+      requestId: 'req-1',
+      deletedAt: null,
+      method: 'CASH',
+      reference: null,
+      notes: null,
+      status: 'COMPLETED',
+      sourceType: 'Payable',
+      sourceId: 'pay-1',
+    };
     const { service, tx, postLines } = setup({ existing });
     const result = await service.createInTransaction(tx, user, {
       ...baseInput(),
@@ -387,6 +409,8 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
     tx.journalEntry.findFirst.mockResolvedValue({
       id: 'je-1',
       companyId: 'company-1',
+      status: 'POSTED',
+      deletedAt: null,
       lines: [
         { accountId: 'AP_CONTROL-acc', debit: d(200), credit: d(0) },
         { accountId: 'ledger-bank', debit: d(0), credit: d(200) },
@@ -420,6 +444,8 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
     tx.journalEntry.findFirst.mockResolvedValue({
       id: 'je-1',
       companyId: 'company-1',
+      status: 'POSTED',
+      deletedAt: null,
       divisionId: null,
       branchId: null,
       lines: [
@@ -449,7 +475,9 @@ describe('SupplierPaymentsService.reverseInTransaction', () => {
   });
 
   it('refuses to reverse a desk-carried payment from outside the desk, and a second reversal', async () => {
-    const desk = setup();
+    const desk = setup({
+      locked: { paidAmount: d(200), outstandingAmount: d(300), status: 'PARTIALLY_PAID' },
+    });
     desk.tx.supplierPayment.findFirst.mockResolvedValue(
       reversible({ deskPayment: { id: 'dp-1' }, journalEntryId: null, cashAccountId: null }),
     );

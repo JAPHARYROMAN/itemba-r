@@ -107,6 +107,65 @@ function makePostedOriginal() {
 describe('JournalEntriesService GL controls', () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it.each([
+    ['AccountAdjustment', 'Account increase adjustment'],
+    ['CustomerPayment', 'Customer payment'],
+    ['CustomerPaymentReversal', 'Reversal of customer payment'],
+    ['SupplierPayment', 'Supplier payment'],
+    ['SupplierPaymentReversal', 'Reversal of supplier payment'],
+    ['ReceivablePaymentReversal', 'Legacy collection reversal'],
+    ['PayablePaymentReversal', 'Legacy supplier payment reversal'],
+    ['Receivable', 'Receivable settlement AR-1'],
+    ['Payable', 'Payable settlement AP-1'],
+    ['Receivable', 'receivable settlement AR-1'],
+    ['Payable', 'payable settlement AP-1'],
+  ])(
+    'routes %s journals to their accounting owner before any reversal work',
+    async (referenceType, description) => {
+      const prisma = makePrisma();
+      prisma.journalEntry.findFirst.mockResolvedValue({
+        ...makePostedOriginal(),
+        referenceType,
+        description,
+      });
+      const { service, accountingControl, auditLogs, codes } = makeService(prisma);
+
+      await expect(
+        service.reverse('je-original', { reversalReason: 'Incorrect amount' }, authUser()),
+      ).rejects.toThrow('originating receivable/payable Transactions history');
+      expect(accountingControl.assertPostingAllowed).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.journalEntry.updateMany).not.toHaveBeenCalled();
+      expect(prisma.journalEntry.create).not.toHaveBeenCalled();
+      expect(prisma.journalEntryLine.createMany).not.toHaveBeenCalled();
+      expect(codes.next).not.toHaveBeenCalled();
+      expect(auditLogs.log).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [null, 'Manual accrual correction'],
+    ['Receivable', 'Receivable creation AR-1'],
+    ['Payable', 'Payable creation AP-1'],
+    ['Receivable', 'Payable settlement text on an unrelated journal'],
+    ['Manual', 'Receivable settlement reference in a manual journal'],
+  ])(
+    'preserves generic reversal for unrelated %s journals: %s',
+    async (referenceType, description) => {
+      const prisma = makePrisma();
+      prisma.journalEntry.findFirst.mockResolvedValue({
+        ...makePostedOriginal(),
+        referenceType,
+        description,
+      });
+      const { service } = makeService(prisma);
+
+      await service.reverse('je-original', { reversalReason: 'Manual correction' }, authUser());
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.journalEntry.create).toHaveBeenCalled();
+    },
+  );
+
   it('stores the resolved accounting period when creating a manual journal', async () => {
     const prisma = makePrisma();
     const { service, accountingControl } = makeService(prisma);

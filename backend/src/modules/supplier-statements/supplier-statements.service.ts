@@ -9,6 +9,7 @@ import {
   loadSettlementJournals,
   recoverSettlementHistory,
   reversalJournalSelection,
+  SettlementHistoryGap,
   summarizeDatedMovements,
 } from '../../common/utils/settlement-history';
 import { GenerateSupplierStatementDto } from './dto/generate-supplier-statement.dto';
@@ -22,6 +23,33 @@ import {
 } from './supplier-statement-export';
 
 const ZERO = new Prisma.Decimal(0);
+const adjustmentJournalSelect = {
+  id: true,
+  companyId: true,
+  divisionId: true,
+  branchId: true,
+  status: true,
+  transactionDate: true,
+  journalNumber: true,
+  referenceType: true,
+  referenceId: true,
+  reversalOfId: true,
+} satisfies Prisma.JournalEntrySelect;
+const adjustmentInclude = {
+  journalEntry: {
+    select: { ...adjustmentJournalSelect, reversedBy_: { select: adjustmentJournalSelect } },
+  },
+  reversalJournalEntry: { select: adjustmentJournalSelect },
+} satisfies Prisma.AccountAdjustmentInclude;
+const postedJournal = (journal: { status: string } | null | undefined) =>
+  !!journal && ['POSTED', 'REVERSED'].includes(journal.status);
+const sameScope = (
+  left: { companyId: string; divisionId: string | null; branchId: string | null },
+  right: { companyId: string; divisionId: string | null; branchId: string | null },
+) =>
+  left.companyId === right.companyId &&
+  left.divisionId === right.divisionId &&
+  left.branchId === right.branchId;
 
 @Injectable()
 export class SupplierStatementsService {
@@ -229,7 +257,7 @@ export class SupplierStatementsService {
     currency: CurrencyCode,
   ) {
     const scope = { companyId, currency, deletedAt: null, ...(supplierId ? { supplierId } : {}) };
-    const [payables, payments] = await Promise.all([
+    const [payables, payments, adjustments] = await Promise.all([
       this.prisma.payable.findMany({
         where: {
           ...scope,
@@ -237,6 +265,13 @@ export class SupplierStatementsService {
         },
         select: {
           id: true,
+          companyId: true,
+          divisionId: true,
+          branchId: true,
+          supplierId: true,
+          currency: true,
+          sourceType: true,
+          sourceId: true,
           payableNumber: true,
           issueDate: true,
           amount: true,
@@ -276,13 +311,97 @@ export class SupplierStatementsService {
         },
         orderBy: { paymentDate: 'asc' },
       }),
+      this.prisma.accountAdjustment.findMany({
+        where: {
+          companyId,
+          currency,
+          ...(supplierId ? { supplierId } : {}),
+          targetPayableId: { not: null },
+          status: { in: ['POSTED', 'REVERSED'] },
+        },
+        include: adjustmentInclude,
+      }),
     ]);
     const documents = payables.map((p) => ({ ...p, reference: p.payableNumber }));
+    const payableMap = new Map(payables.map((payable) => [payable.id, payable]));
+    const validAdjustments = new Map<string, (typeof adjustments)[number]>();
+    const reversals = new Map<string, Date>();
+    const adjustmentGaps: SettlementHistoryGap[] = [];
+    const gap = (documentId: string, reference: string, amount: Prisma.Decimal, reason: string) =>
+      adjustmentGaps.push({ documentId, reference, amount: amount.toFixed(2), reason });
+    for (const adjustment of adjustments) {
+      const target = payableMap.get(adjustment.targetPayableId ?? '');
+      const journal = adjustment.journalEntry;
+      if (
+        !target ||
+        !sameScope(target, adjustment) ||
+        target.supplierId !== adjustment.supplierId ||
+        target.currency !== adjustment.currency ||
+        adjustment.currency !== currency ||
+        !journal ||
+        !postedJournal(journal) ||
+        !sameScope(journal, adjustment) ||
+        journal.id !== adjustment.journalEntryId ||
+        journal.referenceType !== 'AccountAdjustment' ||
+        journal.referenceId !== adjustment.id ||
+        journal.reversalOfId ||
+        journal.transactionDate.getTime() !== adjustment.transactionDate.getTime()
+      ) {
+        gap(
+          adjustment.targetPayableId ?? adjustment.id,
+          journal?.journalNumber ?? adjustment.id,
+          adjustment.amount,
+          'Account adjustment has no matching payable scope and posted accounting evidence',
+        );
+        continue;
+      }
+      validAdjustments.set(adjustment.id, adjustment);
+      const mirrors = [adjustment.reversalJournalEntry, ...journal.reversedBy_]
+        .filter(
+          (mirror) =>
+            mirror &&
+            mirror.status === 'POSTED' &&
+            sameScope(mirror, adjustment) &&
+            mirror.reversalOfId === journal.id &&
+            mirror.transactionDate >= journal.transactionDate,
+        )
+        .map((mirror) => mirror!.transactionDate)
+        .sort((left, right) => left.getTime() - right.getTime());
+      if (mirrors.length) reversals.set(adjustment.id, mirrors[0]);
+      else if (adjustment.status === 'REVERSED' || journal.status === 'REVERSED')
+        gap(
+          target.id,
+          journal.journalNumber,
+          adjustment.amount,
+          'Reversed account adjustment has no posted dated mirror',
+        );
+    }
+    const adjustmentJournalIds = adjustments.flatMap((adjustment) => [
+      adjustment.journalEntryId,
+      adjustment.reversalJournalEntryId,
+      ...(adjustment.journalEntry?.reversedBy_.map((mirror) => mirror.id) ?? []),
+    ]);
+    const journals = await loadSettlementJournals(this.prisma, 'supplier', companyId, documents);
     const recovered = recoverSettlementHistory({
       kind: 'supplier',
-      documents,
-      journals: await loadSettlementJournals(this.prisma, 'supplier', companyId, documents),
-      modernJournalIds: payments.flatMap((p) => [p.journalEntryId, p.reversalJournalEntryId]),
+      // Generated adjustment accruals/cancellations are reconstructed below.
+      // Their cash allocations still participate in paid-amount reconciliation.
+      documents: documents.map((document) =>
+        document.sourceType === 'AccountAdjustment'
+          ? { ...document, journalEntryId: null }
+          : document,
+      ),
+      journals: journals.map((journal) => ({
+        ...journal,
+        reversedBy_: (journal.reversedBy_ ?? []).filter((mirror) => mirror.status === 'POSTED'),
+      })),
+      modernJournalIds: [
+        ...payments.flatMap((p) => [p.journalEntryId, p.reversalJournalEntryId]),
+        ...adjustmentJournalIds,
+        ...payables
+          .filter((payable) => payable.sourceType === 'AccountAdjustment')
+          .map((payable) => payable.journalEntryId),
+      ],
       completedAllocations: payments
         .filter((p) => p.status !== 'REVERSED')
         .flatMap((p) =>
@@ -290,17 +409,94 @@ export class SupplierStatementsService {
         ),
     });
     const movements: SupplierStatementMovement[] = [...recovered.movements];
-    for (const p of payables)
+    for (const p of payables) {
+      const isIncrease = p.sourceType === 'AccountAdjustment';
+      const adjustment = isIncrease ? validAdjustments.get(p.sourceId ?? '') : undefined;
+      if (
+        isIncrease &&
+        (!adjustment ||
+          adjustment.direction !== 'INCREASE' ||
+          adjustment.generatedPayableId !== p.id ||
+          adjustment.journalEntryId !== p.journalEntryId ||
+          !adjustment.amount.eq(p.amount) ||
+          !sameScope(p, adjustment) ||
+          p.supplierId !== adjustment.supplierId ||
+          p.currency !== adjustment.currency)
+      ) {
+        gap(
+          p.id,
+          p.payableNumber,
+          p.amount,
+          'Generated account increase has no matching adjustment event',
+        );
+      }
       movements.push({
-        date: p.issueDate,
-        type: 'PAYABLE',
-        reference: p.payableNumber,
-        description: supplierId
-          ? 'Payable raised'
-          : `Payable raised · ${p.supplierName ?? 'Supplier'}`,
+        date: adjustment?.journalEntry?.transactionDate ?? p.issueDate,
+        type: isIncrease ? 'ADJUSTMENT' : 'PAYABLE',
+        reference: adjustment?.journalEntry?.journalNumber ?? p.payableNumber,
+        description: isIncrease
+          ? `Non-cash balance increase ${p.payableNumber}${adjustment?.reason ? ` / ${adjustment.reason}` : ''}`
+          : supplierId
+            ? 'Payable raised'
+            : `Payable raised · ${p.supplierName ?? 'Supplier'}`,
         debit: p.amount,
         credit: ZERO,
       });
+      if (isIncrease && adjustment) {
+        const reversed = reversals.get(adjustment.id);
+        if (reversed)
+          movements.push({
+            date: reversed,
+            type: 'ADJUSTMENT',
+            reference: `${adjustment.journalEntry!.journalNumber}-REV`,
+            description: `Reversal of non-cash balance increase ${p.payableNumber}${adjustment.reversalReason ? ` / ${adjustment.reversalReason}` : ''}`,
+            debit: ZERO,
+            credit: p.amount,
+          });
+        else if (
+          p.status === 'CANCELLED' &&
+          adjustment.status !== 'REVERSED' &&
+          adjustment.journalEntry?.status !== 'REVERSED'
+        )
+          gap(
+            p.id,
+            p.payableNumber,
+            p.amount,
+            'Cancelled account increase has no posted dated mirror',
+          );
+      }
+    }
+    for (const adjustment of validAdjustments.values()) {
+      const target = payableMap.get(adjustment.targetPayableId!)!;
+      if (adjustment.direction === 'INCREASE') {
+        if (!payableMap.has(adjustment.generatedPayableId ?? ''))
+          gap(
+            target.id,
+            adjustment.journalEntry!.journalNumber,
+            adjustment.amount,
+            'Account increase has no generated payable',
+          );
+        continue;
+      }
+      movements.push({
+        date: adjustment.transactionDate,
+        type: 'ADJUSTMENT',
+        reference: adjustment.journalEntry!.journalNumber,
+        description: `Non-cash balance decrease ${target.payableNumber} / ${adjustment.reason}`,
+        debit: ZERO,
+        credit: adjustment.amount,
+      });
+      const reversed = reversals.get(adjustment.id);
+      if (reversed)
+        movements.push({
+          date: reversed,
+          type: 'ADJUSTMENT',
+          reference: `${adjustment.journalEntry!.journalNumber}-REV`,
+          description: `Reversal of non-cash balance decrease ${target.payableNumber}${adjustment.reversalReason ? ` / ${adjustment.reversalReason}` : ''}`,
+          debit: adjustment.amount,
+          credit: ZERO,
+        });
+    }
     for (const p of payments) {
       movements.push({
         date: p.paymentDate,
@@ -340,6 +536,8 @@ export class SupplierStatementsService {
           });
       }
     }
+    // Include generated-item gaps discovered after legacy reconstruction too.
+    recovered.history.gaps.push(...adjustmentGaps);
     recovered.history.status = recovered.history.gaps.length ? 'INCOMPLETE' : 'COMPLETE';
     recovered.history.unresolvedAmount = recovered.history.gaps
       .reduce((sum, gap) => sum.plus(new Prisma.Decimal(gap.amount).abs()), ZERO)

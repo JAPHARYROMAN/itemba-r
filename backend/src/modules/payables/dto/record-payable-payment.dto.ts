@@ -1,11 +1,24 @@
-import { IsDateString, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 export class RecordPayablePaymentDto {
+  @IsOptional()
+  @IsUUID()
+  requestId?: string;
+
   @IsNotEmpty()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount!: number;
 
+  // The service requires a date for retryable requests; older callers may omit both.
   @IsOptional()
   @IsDateString()
   paymentDate?: string;

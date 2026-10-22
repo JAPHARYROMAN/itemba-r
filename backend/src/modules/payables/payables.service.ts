@@ -25,6 +25,11 @@ import {
   SupplierPaymentsService,
 } from '../supplier-payments/supplier-payments.service';
 import { CashBookService } from '../cash-book/cash-book.service';
+import {
+  legacyPaymentRequest,
+  lockDocumentPaymentRequest,
+  replayLegacyPayment,
+} from '../../common/utils/document-payment-request';
 
 @Injectable()
 export class PayablesService {
@@ -249,28 +254,58 @@ export class PayablesService {
   }
 
   async update(id: string, dto: UpdatePayableDto, user: AuthUser) {
-    const existing = await this.findOne(id);
-    await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
-    // Party linkage (Phase 3): once the ledger knows the party, the party is not re-pointed
-    // without re-posting. Void and re-create the document to change it.
-    if (
-      dto.supplierId !== undefined &&
-      (dto.supplierId || null) !== (existing.supplierId || null) &&
-      (existing.journalEntryId || new Prisma.Decimal(existing.paidAmount ?? 0).gt(0))
-    )
-      throw new BadRequestException(
-        'This payable is posted or partly paid; its supplier cannot be changed. Void and re-create it to re-point the party.',
-      );
+    const visible = await this.findOne(id);
+    await this.companyScope.assertCanAccessCompany(user, visible.companyId, AccessLevel.WRITE);
     const userId = user.id;
-    const scope = await this.resolvePayableScope({
-      companyId: existing.companyId,
-      divisionId:
-        dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId || null,
-      branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId || null,
-      supplierId:
-        dto.supplierId !== undefined ? dto.supplierId || null : existing.supplierId || null,
-    });
-    const record = await this.prisma.$transaction(async (tx) => {
+    const { existing, record } = await this.prisma.$transaction(async (tx) => {
+      if (!(await this.supplierPayments.lockPayable(tx, id)))
+        throw new NotFoundException('Payable not found');
+      const existing = await tx.payable.findUniqueOrThrow({
+        where: { id },
+        include: {
+          generatedByAdjustment: { select: { id: true } },
+          _count: { select: { targetedAdjustments: true } },
+        },
+      });
+      await this.companyScope.assertCanAccessCompany(user, existing.companyId, AccessLevel.WRITE);
+      const adjusted =
+        Boolean(existing.generatedByAdjustment) || existing._count.targetedAdjustments > 0;
+      const partyChanged =
+        dto.supplierId !== undefined && (dto.supplierId || null) !== existing.supplierId;
+      if (
+        adjusted &&
+        (partyChanged ||
+          (dto.divisionId !== undefined && (dto.divisionId || null) !== existing.divisionId) ||
+          (dto.branchId !== undefined && (dto.branchId || null) !== existing.branchId) ||
+          (dto.issueDate !== undefined &&
+            new Date(dto.issueDate).getTime() !== existing.issueDate.getTime()))
+      )
+        throw new BadRequestException(
+          'This payable has account adjustment history; its supplier, division, branch and issue date cannot be changed. Notes and due dates remain editable.',
+        );
+      if (
+        partyChanged &&
+        (existing.journalEntryId || new Prisma.Decimal(existing.paidAmount).gt(0))
+      )
+        throw new BadRequestException(
+          'This payable is posted or partly paid; its supplier cannot be changed. Void and re-create it to re-point the party.',
+        );
+      const scope = await this.resolvePayableScope(
+        {
+          companyId: existing.companyId,
+          divisionId: dto.divisionId !== undefined ? dto.divisionId || null : existing.divisionId,
+          branchId: dto.branchId !== undefined ? dto.branchId || null : existing.branchId,
+          supplierId: dto.supplierId !== undefined ? dto.supplierId || null : existing.supplierId,
+        },
+        tx,
+      );
+      if (
+        adjusted &&
+        (scope.divisionId !== existing.divisionId || scope.branchId !== existing.branchId)
+      )
+        throw new BadRequestException(
+          'This payable has account adjustment history; updated supplier defaults cannot change its accounting scope.',
+        );
       const updated = await tx.payable.update({
         where: { id },
         data: {
@@ -291,7 +326,7 @@ export class PayablesService {
         await this.syncSupplierBalance(tx, existing.companyId, existing.supplierId);
         await this.syncSupplierBalance(tx, updated.companyId, updated.supplierId);
       }
-      return updated;
+      return { existing, record: updated };
     });
 
     await this.auditLogs.log({
@@ -318,6 +353,7 @@ export class PayablesService {
     // in step, posts DR AP control / CR cash (the chosen account's mapped ledger account
     // when it has one) and relieves CashAccount.currentBalance, all in this transaction.
     const { existing, record } = await this.prisma.$transaction(async (tx) => {
+      await lockDocumentPaymentRequest(tx, 'Payable', dto);
       const locked = await this.supplierPayments.lockPayable(tx, id);
       if (!locked) throw new NotFoundException('Payable not found');
       await this.companyScope.assertCanAccessCompany(user, locked.companyId, AccessLevel.WRITE);
@@ -328,10 +364,27 @@ export class PayablesService {
             'module (pay the expense). Paying it here would double-relieve AP and double-pay cash.',
         );
       }
-      if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
-        throw new BadRequestException(`Cannot record a payment against a ${locked.status} payable`);
+      if (
+        await replayLegacyPayment(
+          tx,
+          locked.companyId,
+          'Payable',
+          id,
+          dto,
+          Boolean(locked.supplierId),
+        )
+      ) {
+        return {
+          existing: locked,
+          record: await tx.payable.findFirstOrThrow({ where: { id, deletedAt: null } }),
+        };
       }
       if (!locked.supplierId) {
+        if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(locked.status)) {
+          throw new BadRequestException(
+            `Cannot record a payment against a ${locked.status} payable`,
+          );
+        }
         // No shared supplier to attach a payment to (free-text supplierName only): settle
         // directly, exactly as before, with the journal referenced to the payable. The
         // Unmatched parties queue (W7) surfaces these for matching; once matched, payments
@@ -341,6 +394,7 @@ export class PayablesService {
       }
 
       const { payables } = await this.supplierPayments.createInTransaction(tx, user, {
+        requestId: dto.requestId?.toLowerCase(),
         companyId: locked.companyId,
         divisionId: locked.divisionId,
         branchId: locked.branchId,
@@ -419,7 +473,8 @@ export class PayablesService {
         divisionId: locked.divisionId,
         branchId: locked.branchId,
         transactionDate: settlementDate,
-        description: `Payable settlement ${locked.payableNumber}`,
+        journalNumber: legacyPaymentRequest('Payable', locked.id, dto)?.journalNumber,
+        description: `Payable settlement ${locked.payableNumber}${legacyPaymentRequest('Payable', locked.id, dto)?.suffix ?? ''}`,
         referenceType: 'Payable',
         referenceId: locked.id,
         moduleName: 'payables',
@@ -727,8 +782,10 @@ export class PayablesService {
       const live = await tx.payable.findUniqueOrThrow({
         where: { id },
         include: {
+          generatedByAdjustment: { select: { id: true } },
           _count: {
             select: {
+              targetedAdjustments: true,
               purchaseOrders: true,
               supplierInvoices: true,
               fuelDeliveries: true,
@@ -741,6 +798,7 @@ export class PayablesService {
       });
       await this.companyScope.assertCanAccessCompany(user, live.companyId, AccessLevel.MANAGE);
       if (
+        Boolean(live.generatedByAdjustment) ||
         !withSettlementLifecycle(live).canDelete ||
         Object.values(live._count ?? {}).some((count) => count > 0)
       ) {
@@ -817,6 +875,7 @@ export class PayablesService {
     return {
       _count: {
         select: {
+          targetedAdjustments: true,
           purchaseOrders: true,
           supplierInvoices: true,
           fuelDeliveries: true,
@@ -968,17 +1027,20 @@ export class PayablesService {
     return supplierName === record.supplierName ? record : { ...record, supplierName };
   }
 
-  private async resolvePayableScope(input: {
-    companyId: string;
-    divisionId?: string | null;
-    branchId?: string | null;
-    supplierId?: string | null;
-  }) {
+  private async resolvePayableScope(
+    input: {
+      companyId: string;
+      divisionId?: string | null;
+      branchId?: string | null;
+      supplierId?: string | null;
+    },
+    db: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
     let divisionId = input.divisionId || null;
     let branchId = input.branchId || null;
 
     if (input.supplierId) {
-      const supplier = await this.prisma.supplier.findFirst({
+      const supplier = await db.supplier.findFirst({
         where: { id: input.supplierId, deletedAt: null },
         select: { companyId: true, divisionId: true, branchId: true, name: true },
       });
@@ -996,7 +1058,7 @@ export class PayablesService {
     }
 
     if (branchId) {
-      const branch = await this.prisma.branch.findFirst({
+      const branch = await db.branch.findFirst({
         where: { id: branchId, deletedAt: null },
         select: { divisionId: true, division: { select: { companyId: true } } },
       });
@@ -1010,7 +1072,7 @@ export class PayablesService {
     }
 
     if (divisionId) {
-      const division = await this.prisma.division.findFirst({
+      const division = await db.division.findFirst({
         where: { id: divisionId, deletedAt: null },
         select: { companyId: true },
       });
@@ -1021,7 +1083,7 @@ export class PayablesService {
 
     const supplierName = input.supplierId
       ? (
-          await this.prisma.supplier.findFirst({
+          await db.supplier.findFirst({
             where: { id: input.supplierId, deletedAt: null },
             select: { name: true },
           })

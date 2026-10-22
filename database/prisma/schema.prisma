@@ -2092,6 +2092,7 @@ model InvoiceDeskEvent {
 }
 
 model Company {
+  accountAdjustments AccountAdjustment[]
   records           RecordEntry[]
   deskCustomers      SalesDeskCustomer[]
   deskSales          SalesDeskSale[]
@@ -2411,6 +2412,7 @@ model CompanyProfile {
 
 /// Business unit / product line within a Company.
 model Division {
+  accountAdjustments AccountAdjustment[]
   records          RecordEntry[]
   deskSales        SalesDeskSale[]
   deskCashAccounts CashDeskAccount[]
@@ -2530,6 +2532,7 @@ model Division {
 /// Operational unit within a Division.
 /// Can be a physical branch, project site, farm, warehouse, fuel station, etc.
 model Branch {
+  accountAdjustments AccountAdjustment[]
   records          RecordEntry[]
   deskSales        SalesDeskSale[]
   deskCashAccounts CashDeskAccount[]
@@ -2645,6 +2648,8 @@ model Branch {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model User {
+  accountAdjustmentsCreated AccountAdjustment[] @relation("AccountAdjustmentCreatedBy")
+  accountAdjustmentsReversed AccountAdjustment[] @relation("AccountAdjustmentReversedBy")
   records                 RecordEntry[]
   fuelReportRevisions FuelReportRevision[]
   id                  String               @id @default(uuid())
@@ -3814,6 +3819,7 @@ enum InterCompanyTxStatus {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model ChartOfAccount {
+  accountAdjustmentsOffset AccountAdjustment[] @relation("AccountAdjustmentOffsetAccount")
   supplierAdvances SupplierPurchaseAdvance[]
   loanPrincipals    Loan[]       @relation("LoanPrincipalLedger")
   mappedCashAccount CashAccount?
@@ -3906,6 +3912,8 @@ model AccountingPeriod {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model JournalEntry {
+  accountAdjustmentsPosted AccountAdjustment[] @relation("AccountAdjustmentJournal")
+  accountAdjustmentsReversed AccountAdjustment[] @relation("AccountAdjustmentReversalJournal")
   advanceApplications SupplierPurchaseAdvanceApplication[] @relation("AdvanceApplicationJournal")
   advanceApplicationsReversed SupplierPurchaseAdvanceApplication[] @relation("AdvanceApplicationReversal")
   payrollCashMovement CashDeskMovement?   @relation("PayrollCashJournal")
@@ -4272,6 +4280,8 @@ model RecordBookExpense {
 // ───────────────────────────────────────────────────────────────────────────────
 
 model Receivable {
+  targetedAdjustments AccountAdjustment[] @relation("AccountAdjustmentTargetReceivable")
+  generatedByAdjustment AccountAdjustment? @relation("AccountAdjustmentGeneratedReceivable")
   id                String           @id @default(uuid())
   receivableNumber  String
   companyId         String
@@ -4324,6 +4334,8 @@ model Receivable {
 }
 
 model Payable {
+  targetedAdjustments AccountAdjustment[] @relation("AccountAdjustmentTargetPayable")
+  generatedByAdjustment AccountAdjustment? @relation("AccountAdjustmentGeneratedPayable")
   advanceApplications SupplierPurchaseAdvanceApplication[]
   id                String        @id @default(uuid())
   payableNumber     String
@@ -4368,6 +4380,74 @@ model Payable {
   @@index([companyId, supplierId, dueDate, status])
   @@index([companyId, outstandingAmount, status])
   @@map("payables")
+}
+
+enum AccountAdjustmentDirection {
+  INCREASE
+  DECREASE
+}
+
+enum AccountAdjustmentStatus {
+  POSTED
+  REVERSED
+}
+
+/// A noncash correction to one AR/AP document. Original documents and actual
+/// payment amounts remain intact; increases may create a separate open document.
+/// Financial event fields are immutable after posting. Reversal appends an
+/// offsetting journal and records its actor, date, and reason on this event.
+model AccountAdjustment {
+  id                     String                     @id @default(uuid())
+  companyId              String
+  requestId              String                     @db.Uuid
+  divisionId             String?
+  branchId               String?
+  customerId             String?
+  supplierId             String?
+  targetReceivableId     String?
+  targetPayableId        String?
+  generatedReceivableId  String?                    @unique
+  generatedPayableId     String?                    @unique
+  direction              AccountAdjustmentDirection
+  status                 AccountAdjustmentStatus    @default(POSTED)
+  amount                 Decimal                    @db.Decimal(18, 2)
+  currency               CurrencyCode
+  offsetAccountId        String
+  transactionDate        DateTime
+  reason                 String                     @db.VarChar(1000)
+  journalEntryId         String?                    @unique
+  reversalJournalEntryId String?                    @unique
+  createdById            String
+  reversedById           String?
+  reversedAt             DateTime?
+  reversedTransactionDate DateTime?
+  reversalReason         String?                    @db.VarChar(1000)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  company             Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  division            Division?       @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  branch              Branch?         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer            Customer?       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier            Supplier?       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  targetReceivable    Receivable?     @relation("AccountAdjustmentTargetReceivable", fields: [targetReceivableId], references: [id], onDelete: Restrict)
+  targetPayable       Payable?        @relation("AccountAdjustmentTargetPayable", fields: [targetPayableId], references: [id], onDelete: Restrict)
+  generatedReceivable Receivable?     @relation("AccountAdjustmentGeneratedReceivable", fields: [generatedReceivableId], references: [id], onDelete: Restrict)
+  generatedPayable    Payable?        @relation("AccountAdjustmentGeneratedPayable", fields: [generatedPayableId], references: [id], onDelete: Restrict)
+  offsetAccount       ChartOfAccount  @relation("AccountAdjustmentOffsetAccount", fields: [offsetAccountId], references: [id], onDelete: Restrict)
+  journalEntry        JournalEntry?   @relation("AccountAdjustmentJournal", fields: [journalEntryId], references: [id], onDelete: Restrict)
+  reversalJournalEntry JournalEntry?  @relation("AccountAdjustmentReversalJournal", fields: [reversalJournalEntryId], references: [id], onDelete: Restrict)
+  createdBy           User            @relation("AccountAdjustmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reversedBy          User?           @relation("AccountAdjustmentReversedBy", fields: [reversedById], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, requestId])
+  @@index([companyId, targetReceivableId, createdAt])
+  @@index([companyId, targetPayableId, createdAt])
+  @@index([companyId, status, transactionDate])
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([offsetAccountId])
+  @@map("account_adjustments")
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -4554,6 +4634,8 @@ model Refund {
 model CustomerPayment {
   id                     String                @id @default(uuid())
   paymentNumber          String
+  /// Company-scoped client key; retries reuse the original payment.
+  requestId              String?
   companyId              String
   divisionId             String?
   branchId               String?
@@ -4590,6 +4672,7 @@ model CustomerPayment {
   allocations PaymentAllocation[]
   cashDeskMovement CashDeskMovement?
 
+  @@unique([companyId, requestId])
   @@unique([companyId, paymentNumber])
   @@index([companyId])
   @@index([divisionId])
@@ -4950,6 +5033,7 @@ enum SupplierOrderDraftStatus {
 // ── Models ───────────────────────────────────────────────────────────────────
 
 model Customer {
+  accountAdjustments AccountAdjustment[]
   salesDeskLinks SalesDeskCustomer[]
   id             String         @id @default(uuid())
   customerCode   String
@@ -5029,6 +5113,7 @@ model Customer {
 }
 
 model Supplier {
+  accountAdjustments AccountAdjustment[]
   id             String         @id @default(uuid())
   supplierCode   String
   companyId      String

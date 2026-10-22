@@ -83,6 +83,7 @@ function makeService(
   const assertCanAccessCompany = jest.fn().mockResolvedValue(undefined);
   const created: any[] = [];
   const prisma: any = {
+    accountAdjustment: { findMany: jest.fn().mockResolvedValue([]) },
     journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
     supplierPayment: { findMany: jest.fn().mockResolvedValue(payments) },
     supplier: {
@@ -332,6 +333,7 @@ describe('SupplierStatementsService.export', () => {
   };
   function exportService(documents?: any) {
     const prisma: any = {
+      accountAdjustment: { findMany: jest.fn().mockResolvedValue([]) },
       journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       supplierStatementRun: { findFirst: jest.fn().mockResolvedValue(run) },
       supplier: {

@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
   ValidateNested,
 } from 'class-validator';
 import { CurrencyCode, PaymentMethodGeneral } from '@prisma/client';
@@ -39,6 +40,10 @@ export class PaymentAllocationInputDto {
  * account is configured).
  */
 export class CreateCustomerPaymentDto {
+  @IsOptional()
+  @IsUUID()
+  requestId?: string;
+
   @IsNotEmpty()
   @IsString()
   companyId!: string;
