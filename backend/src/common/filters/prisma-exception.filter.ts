@@ -50,6 +50,14 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
       status = HttpStatus.BAD_REQUEST;
       message = 'Invalid data provided to the database layer';
+      // Validation failures are 400s, so the 5xx logger below never sees them.
+      // Keep the invocation and validation hint available for diagnosis while
+      // scrubbing credentials from both request context and Prisma's payload.
+      this.logger.error(
+        this.persistenceSecrets.sanitizeText(
+          `[${request.method}] ${request.url} → Prisma validation error: ${exception.message}`,
+        ).value,
+      );
     }
 
     if (status >= 500) {

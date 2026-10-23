@@ -44,8 +44,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
       params.args ??= {};
       if (params.action === 'findUnique') {
-        params.action = 'findFirst';
-        params.args.where = withLiveRecordFilter(params.args.where);
+        // Prisma 5 accepts non-unique filters alongside a top-level unique key.
+        // Keep findUnique: compound keys (e.g. companyId_journalNumber in payment
+        // replay checks) are invalid in findFirst or nested inside an AND filter.
+        if (!hasDeletedAtFilter(params.args.where)) {
+          params.args.where = { ...params.args.where, deletedAt: null };
+        }
       } else if (READ_ACTIONS.has(params.action)) {
         params.args.where = withLiveRecordFilter(params.args.where);
       } else if (params.action === 'delete') {
