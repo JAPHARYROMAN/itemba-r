@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { setDateField } from '@/test/date-field';
 import { RecordPaymentModal, Receivable } from '@/features/finance/screens/receivables';
-import { getSelectField, selectFieldOptions } from '@/test/select-field';
+import { chooseSelectOption, getSelectField, selectFieldOptions } from '@/test/select-field';
 
 /**
  * Receivables record-payment modal regressions (mirror of the payables modal).
@@ -66,6 +69,77 @@ afterEach(() => {
 });
 
 describe('Receivables RecordPaymentModal — cash-account handling', () => {
+  it('records a TZS payment with the selected cash account and an ISO date, then completes the modal', async () => {
+    const user = userEvent.setup();
+    const receivable: Receivable = {
+      ...RECEIVABLE_USD,
+      receivableNumber: 'REC-2026-000228',
+      amount: 280000,
+      paidAmount: 29000,
+      outstandingAmount: 251000,
+      currency: 'TZS',
+    };
+    mockFetch((url) => {
+      if (url.includes('/cash-accounts/company/')) {
+        return {
+          success: true,
+          data: [
+            {
+              id: 'ca-tzs',
+              accountName: 'TDM-01 Cash Account',
+              accountType: 'CASH_ON_HAND',
+              currency: 'TZS',
+              isActive: true,
+            },
+          ],
+        };
+      }
+      return { success: true, data: {} };
+    });
+    const refreshReceivables = vi.fn();
+    function PaymentFlow() {
+      const [open, setOpen] = useState(true);
+      return open ? (
+        <RecordPaymentModal
+          receivable={receivable}
+          onClose={() => setOpen(false)}
+          onDone={() => {
+            setOpen(false);
+            refreshReceivables();
+          }}
+        />
+      ) : null;
+    }
+    render(<PaymentFlow />);
+
+    await waitFor(() =>
+      expect(selectFieldOptions(getSelectField('Cash / Bank Account'))).toContain(
+        'TDM-01 Cash Account · CASH_ON_HAND · TZS',
+      ),
+    );
+    await user.type(screen.getByPlaceholderText('0.00'), '251000');
+    await chooseSelectOption('Cash / Bank Account', 'ca-tzs', user);
+    await setDateField('Payment Date', '2026-10-23', user);
+    await user.click(screen.getByRole('button', { name: 'Record Payment' }));
+
+    await waitFor(() => expect(refreshReceivables).toHaveBeenCalledOnce());
+    const paymentCalls = fetchMock.mock.calls.filter(
+      (call) => String(call[0]) === '/api/backend/receivables/rec-1/record-payment',
+    );
+    expect(paymentCalls).toHaveLength(1);
+    const request = paymentCalls[0][1] as RequestInit;
+    expect(request.method).toBe('PATCH');
+    expect(JSON.parse(request.body as string)).toEqual({
+      amount: 251000,
+      paymentDate: '2026-10-23',
+      cashAccountId: 'ca-tzs',
+      requestId: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('filters the options to the receivable currency and shows the currency in the label', async () => {
     mockFetch((url) => {
       if (url.includes('/cash-accounts/company/')) return CASH_ACCOUNTS;
